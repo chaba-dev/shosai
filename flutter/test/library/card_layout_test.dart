@@ -34,6 +34,21 @@ Finder cardTitle(String title) => find.byWidgetPredicate(
 Finder cardFor(String title) =>
     find.ancestor(of: cardTitle(title), matching: find.byType(LibraryBookCard));
 
+/// The grid card's cover box for [title].
+///
+/// The continue-reading section paints the same book's cover in its own 72x100
+/// box, so a bare [LibraryBookCover] finder would measure that one instead.
+Finder cardCover(String title) => find.descendant(
+  of: cardFor(title),
+  matching: find.byType(LibraryBookCover),
+);
+
+/// The grid card's action trigger for [title].
+Finder cardTrigger(String title) => find.descendant(
+  of: cardFor(title),
+  matching: find.byTooltip('Book actions'),
+);
+
 /// The card trigger's painted scrim: the descendant decoration that paints the
 /// refinement's ink. Measuring this widget (rather than inflating the glyph by
 /// the padding tokens) is what makes the geometry assertion independent of the
@@ -290,7 +305,7 @@ void main() {
         reason: 'the painted card is exactly one tile',
       );
       expect(
-        tester.getSize(find.byType(LibraryBookCover).first).height,
+        tester.getSize(cardCover('The Quiet Cartographer')).height,
         ShosaiTokens.layoutLibraryCardCoverHeight,
         reason: 'LB-12: the cover box keeps the reference height',
       );
@@ -309,7 +324,7 @@ void main() {
         reason: 'the scaled text block needs the room',
       );
       expect(
-        tester.getSize(find.byType(LibraryBookCover).first).height,
+        tester.getSize(cardCover('The Quiet Cartographer')).height,
         ShosaiTokens.layoutLibraryCardCoverHeight,
         reason: 'the cover keeps its reference height at 200% text',
       );
@@ -320,9 +335,14 @@ void main() {
     ) async {
       await pumpLibrary(tester);
       final card = tester.getRect(find.byType(LibraryBookCard).first);
-      final cover = tester.getRect(find.byType(LibraryBookCover).first);
+      final cover = tester.getRect(cardCover('The Quiet Cartographer'));
       final title = tester.getRect(cardTitle('The Quiet Cartographer'));
-      final author = tester.getRect(find.text('Ada Lovelace'));
+      final author = tester.getRect(
+        find.descendant(
+          of: cardFor('The Quiet Cartographer'),
+          matching: find.text('Ada Lovelace'),
+        ),
+      );
       final status = tester.getRect(find.text('42%'));
       final progress = tester.getRect(
         find.descendant(
@@ -485,9 +505,18 @@ void main() {
       tester,
     ) async {
       await pumpLibrary(tester, covers: {1: harnessCovers()[1]!});
-      expect(find.byType(Image), findsOneWidget);
       expect(
-        find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        find.descendant(
+          of: find.byType(LibraryBookCard),
+          matching: find.byType(Image),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: cardFor('The Quiet Cartographer'),
+          matching: find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        ),
         findsOneWidget,
       );
     });
@@ -644,7 +673,11 @@ void main() {
 
       // Book 1 is managed, so the removal goes through the confirmation the
       // application renders; the confirmation is what starts the pending state.
-      await tester.tap(find.byTooltip('Book actions').first);
+      // The continue section can push the first row below a compact fold, so
+      // the card is scrolled into view before its trigger is used.
+      await tester.ensureVisible(cardTrigger('The Quiet Cartographer'));
+      await tester.pumpAndSettle();
+      await tester.tap(cardTrigger('The Quiet Cartographer'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Remove and delete copy'));
       await tester.pump();
@@ -901,7 +934,7 @@ void main() {
       // reference insets its own box 8 px inside that corner; the owner asked
       // for weight, not placement, so this refinement keeps the retained
       // position and pins it here rather than moving the control.
-      final cover = tester.getRect(find.byType(LibraryBookCover).first);
+      final cover = tester.getRect(cardCover('The Quiet Cartographer'));
       expect(
         (surface.topRight - target.topRight).distance,
         lessThan(0.6),
@@ -932,10 +965,10 @@ void main() {
         books: harnessLibraryBooks(),
         covers: harnessCovers(count: 4),
       );
-      final trigger = find.byTooltip('Book actions').at(4);
+      final trigger = cardTrigger('A Book With No Cover At All');
       final target = tester.getRect(trigger);
       final surface = triggerSurface(tester, trigger);
-      final cover = tester.getRect(find.byType(LibraryBookCover).at(4));
+      final cover = tester.getRect(cardCover('A Book With No Cover At All'));
       // Inside the placeholder, below its centred title: the surface the
       // trigger covers.
       final background = await paintedColorAt(
@@ -974,10 +1007,10 @@ void main() {
         books: harnessLibraryBooks(),
         covers: harnessCovers(count: 4),
       );
-      final trigger = find.byTooltip('Book actions').at(4);
+      final trigger = cardTrigger('A Book With No Cover At All');
       final target = tester.getRect(trigger);
       final surface = triggerSurface(tester, trigger);
-      final cover = tester.getRect(find.byType(LibraryBookCover).at(4));
+      final cover = tester.getRect(cardCover('A Book With No Cover At All'));
       final background = await paintedColorAt(
         tester,
         Offset(cover.left + 12, cover.bottom - 12),
@@ -1122,7 +1155,10 @@ void main() {
         reason: 'the title is inside the card button, not beside it',
       );
       expect(
-        find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        find.descendant(
+          of: cardFor('The Quiet Cartographer'),
+          matching: find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        ),
         findsOneWidget,
       );
     });

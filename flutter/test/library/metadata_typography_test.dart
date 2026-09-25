@@ -44,6 +44,9 @@ LibraryCollection _collection(LibraryModel model) => LibraryCollection(
   removeBook: (_) {},
   loadMore: () {},
   loadCover: (_) => false,
+  retry: () {},
+  addFirstBooks: () {},
+  cancelImport: () {},
 );
 
 RenderParagraph _paragraph(WidgetTester tester, String text, {double? size}) =>

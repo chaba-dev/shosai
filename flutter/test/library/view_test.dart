@@ -26,42 +26,150 @@ LibraryCollection _collection(
   ValueChanged<FlutterLibraryBook>? openBook,
   ValueChanged<FlutterLibraryBook>? removeBook,
   VoidCallback? loadMore,
+  VoidCallback? retry,
+  VoidCallback? addFirstBooks,
+  VoidCallback? cancelImport,
 }) => LibraryCollection(
   model: model,
   openBook: openBook ?? (_) {},
   removeBook: removeBook ?? (_) {},
   loadMore: loadMore ?? () {},
   loadCover: (_) => false,
+  retry: retry ?? () {},
+  addFirstBooks: addFirstBooks ?? () {},
+  cancelImport: cancelImport ?? () {},
 );
 
 void main() {
   setUpAll(loadHarnessFonts);
 
-  testWidgets('shows progress while the first page loads', (tester) async {
-    await tester.pumpWidget(_app(_collection(const LibraryModel(busy: true))));
-
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-  });
-
-  testWidgets('explains an unloaded library failure', (tester) async {
+  testWidgets('shows the reference skeleton grid while page one loads', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-      _app(_collection(const LibraryModel(loadError: 'failed'))),
+      _app(
+        _collection(
+          const LibraryModel(loading: true, busy: true, loaded: true),
+        ),
+      ),
     );
 
-    expect(find.text('The library could not be loaded.'), findsOneWidget);
+    // The skeleton is the reference's grid of placeholder cards under the
+    // section title, not a spinner: an empty library shows its eight
+    // placeholders.
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('All books'), findsOneWidget);
+    expect(find.byType(LibraryBookCard), findsNothing);
+    expect(find.byType(LibrarySkeletonCard), findsNWidgets(8));
   });
 
-  testWidgets('distinguishes empty and filtered libraries', (tester) async {
-    await tester.pumpWidget(_app(_collection(const LibraryModel())));
+  testWidgets('explains an empty library with its add-first-books action', (
+    tester,
+  ) async {
+    var added = 0;
+    await tester.pumpWidget(
+      _app(
+        _collection(
+          const LibraryModel(loaded: true),
+          addFirstBooks: () => added += 1,
+        ),
+      ),
+    );
+
+    expect(find.text('A quiet place for every book'), findsOneWidget);
     expect(
-      find.text('Your library is empty. Add a PDF, EPUB, or CBZ to begin.'),
+      find.text('No books in library. Import files to get started.'),
       findsOneWidget,
     );
+    await tester.tap(find.text('Add your first books'));
+    expect(added, 1);
+  });
 
+  testWidgets('an empty library loading its import offers cancel', (
+    tester,
+  ) async {
+    var cancelled = 0;
+    await tester.pumpWidget(
+      _app(
+        _collection(
+          const LibraryModel(loaded: true, importing: true, busy: true),
+          cancelImport: () => cancelled += 1,
+        ),
+      ),
+    );
+
+    expect(find.text('Add your first books'), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    expect(cancelled, 1);
+  });
+
+  testWidgets('distinguishes the no-matches composition from the empty one', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       _app(_collection(const LibraryModel(query: 'missing', loaded: true))),
     );
-    expect(find.text('No books match these filters.'), findsOneWidget);
+
+    expect(find.text('No matching books'), findsOneWidget);
+    expect(find.text('No books match your search or filter.'), findsOneWidget);
+    // The no-matches composition has no action.
+    expect(find.text('Add your first books'), findsNothing);
+
+    await tester.pumpWidget(
+      _app(
+        _collection(
+          const LibraryModel(
+            query: 'missing',
+            format: FlutterBookFormat.pdf,
+            loaded: true,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('No matching books'), findsOneWidget);
+  });
+
+  testWidgets('a failure replaces the empty body and keeps recovery', (
+    tester,
+  ) async {
+    var retries = 0;
+    await tester.pumpWidget(
+      _app(
+        _collection(
+          const LibraryModel(loadError: 'Library query failed', loaded: true),
+          retry: () => retries += 1,
+        ),
+      ),
+    );
+
+    expect(find.text('A quiet place for every book'), findsOneWidget);
+    expect(find.text('Library query failed'), findsOneWidget);
+    // Adding books would misstate a library that failed to load; the failure's
+    // own recovery action is the path instead.
+    expect(find.text('Add your first books'), findsNothing);
+  });
+
+  testWidgets('a failure above loaded books is the collection alert', (
+    tester,
+  ) async {
+    var retries = 0;
+    await tester.pumpWidget(
+      _app(
+        _collection(
+          LibraryModel(
+            books: [_book],
+            loaded: true,
+            loadError: 'Library query failed',
+          ),
+          retry: () => retries += 1,
+        ),
+      ),
+    );
+
+    expect(find.text('Library query failed'), findsOneWidget);
+    expect(find.byType(LibraryBookCard), findsOneWidget);
+    await tester.tap(find.text('Retry'));
+    expect(retries, 1);
   });
 
   testWidgets('renders book metadata and opens the selected book', (

@@ -606,6 +606,114 @@ abstract final class ShosaiTokens {
   /// 3.5)
   static const layoutReaderProgressWidth = 280.0;
 
+  /// `layout.readerChrome.headerPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeHeaderPaddingVertical = 8.0;
+
+  /// `layout.readerChrome.headerPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeHeaderPaddingHorizontal = 14.0;
+
+  /// `layout.readerChrome.headerSpacingCompact` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeHeaderSpacingCompact = 6.0;
+
+  /// `layout.readerChrome.headerSpacingWide` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeHeaderSpacingWide = 14.0;
+
+  /// `layout.readerChrome.controlPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeControlPaddingVertical = 7.0;
+
+  /// `layout.readerChrome.controlPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeControlPaddingHorizontal = 10.0;
+
+  /// `layout.readerChrome.tabStripPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabStripPaddingVertical = 5.0;
+
+  /// `layout.readerChrome.tabStripPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabStripPaddingHorizontal = 10.0;
+
+  /// `layout.readerChrome.tabStripSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabStripSpacing = 3.0;
+
+  /// `layout.readerChrome.tabPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabPaddingVertical = 6.0;
+
+  /// `layout.readerChrome.tabLabelPaddingLeft` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabLabelPaddingLeft = 10.0;
+
+  /// `layout.readerChrome.tabLabelPaddingRight` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabLabelPaddingRight = 4.0;
+
+  /// `layout.readerChrome.tabClosePaddingLeft` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabClosePaddingLeft = 4.0;
+
+  /// `layout.readerChrome.tabClosePaddingRight` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeTabClosePaddingRight = 8.0;
+
+  /// `layout.readerChrome.statusPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeStatusPaddingVertical = 7.0;
+
+  /// `layout.readerChrome.statusPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeStatusPaddingHorizontal = 12.0;
+
+  /// `layout.readerChrome.statusSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeStatusSpacing = 5.0;
+
+  /// `layout.readerChrome.edgePaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeEdgePaddingVertical = 12.0;
+
+  /// `layout.readerChrome.edgePaddingHorizontalCompact` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeEdgePaddingHorizontalCompact = 8.0;
+
+  /// `layout.readerChrome.edgePaddingHorizontalWide` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeEdgePaddingHorizontalWide = 16.0;
+
+  /// `layout.readerChrome.openingCoverWidth` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeOpeningCoverWidth = 140.0;
+
+  /// `layout.readerChrome.openingCoverHeight` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeOpeningCoverHeight = 200.0;
+
+  /// `layout.readerChrome.openingSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeOpeningSpacing = 14.0;
+
+  /// `layout.readerChrome.openingMaxWidth` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeOpeningMaxWidth = 320.0;
+
+  /// `layout.readerChrome.alertPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeAlertPaddingVertical = 7.0;
+
+  /// `layout.readerChrome.alertPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
+  static const layoutReaderChromeAlertPaddingHorizontal = 14.0;
+
+  /// `layout.readerChrome.alertSpacing` — Iced (crates/shosai-app/src/app.rs
+  /// reader chrome, the pinned reference)
+  static const layoutReaderChromeAlertSpacing = 8.0;
+
   /// `layout.library.compactBreakpoint` — Iced
   /// (docs/flutter-ui-reference-spec.md 3.5)
   static const layoutLibraryCompactBreakpoint = 760.0;
@@ -761,6 +869,53 @@ abstract final class ShosaiTokens {
   /// crates/shosai-app/src/widgets.rs book_button, the pinned reference)
   static const layoutLibraryCardRemovePaddingHorizontal = 6.0;
 
+  /// `layout.library.skeleton.titleBarWidth` — Iced
+  /// (crates/shosai-app/src/app.rs library_refresh_placeholder and
+  /// render_loading_book_card, the pinned reference)
+  static const layoutLibrarySkeletonTitleBarWidth = 126.0;
+
+  /// `layout.library.skeleton.titleBarHeight` — Iced
+  /// (crates/shosai-app/src/app.rs library_refresh_placeholder and
+  /// render_loading_book_card, the pinned reference)
+  static const layoutLibrarySkeletonTitleBarHeight = 12.0;
+
+  /// `layout.library.skeleton.authorBarWidth` — Iced
+  /// (crates/shosai-app/src/app.rs library_refresh_placeholder and
+  /// render_loading_book_card, the pinned reference)
+  static const layoutLibrarySkeletonAuthorBarWidth = 82.0;
+
+  /// `layout.library.skeleton.authorBarHeight` — Iced
+  /// (crates/shosai-app/src/app.rs library_refresh_placeholder and
+  /// render_loading_book_card, the pinned reference)
+  static const layoutLibrarySkeletonAuthorBarHeight = 9.0;
+
+  /// `layout.library.skeleton.spacing` — Iced (crates/shosai-app/src/app.rs
+  /// library_refresh_placeholder and render_loading_book_card, the pinned
+  /// reference)
+  static const layoutLibrarySkeletonSpacing = 7.0;
+
+  /// `layout.library.emptyState.spacing` — Iced
+  /// (crates/shosai-app/src/app.rs library_collection's empty composition,
+  /// the pinned reference)
+  static const layoutLibraryEmptyStateSpacing = 14.0;
+
+  /// `layout.library.alertPaddingVertical` — Iced
+  /// (docs/flutter-ui-reference-spec.md 3.5)
+  static const layoutLibraryAlertPaddingVertical = 7.0;
+
+  /// `layout.library.alertPaddingHorizontal` — Iced
+  /// (docs/flutter-ui-reference-spec.md 3.5)
+  static const layoutLibraryAlertPaddingHorizontal = 14.0;
+
+  /// `layout.library.continueSectionTrailingSpace` — Iced
+  /// (crates/shosai-app/src/app.rs library_collection's Space between the
+  /// continue card and the next section, the pinned reference)
+  static const layoutLibraryContinueSectionTrailingSpace = 4.0;
+
+  /// `layout.library.sectionSpacing` — Iced
+  /// (docs/flutter-ui-reference-spec.md 3.5)
+  static const layoutLibrarySectionSpacing = 16.0;
+
   /// `layout.import.modalMaxWidth` — Iced (docs/flutter-ui-reference-spec.md
   /// 3.5)
   static const layoutImportModalMaxWidth = 680.0;
@@ -805,9 +960,31 @@ abstract final class ShosaiTokens {
   /// (docs/flutter-ui-reference-spec.md 3.5)
   static const layoutModalMoveLibraryMaxWidth = 520.0;
 
-  /// `layout.continueCard.maxWidth` — Iced
-  /// (docs/flutter-ui-reference-spec.md 3.5)
+  /// `layout.continueCard.maxWidth` — Iced (crates/shosai-app/src/app.rs
+  /// render_continue_card, the pinned reference)
   static const layoutContinueCardMaxWidth = 620.0;
+
+  /// `layout.continueCard.coverWidth` — Iced (crates/shosai-app/src/app.rs
+  /// render_continue_card, the pinned reference)
+  static const layoutContinueCardCoverWidth = 72.0;
+
+  /// `layout.continueCard.coverHeight` — Iced (crates/shosai-app/src/app.rs
+  /// render_continue_card, the pinned reference)
+  static const layoutContinueCardCoverHeight = 100.0;
+
+  /// `layout.continueCard.detailsHeight` — Iced
+  /// (crates/shosai-app/src/app.rs render_continue_card, the pinned
+  /// reference)
+  static const layoutContinueCardDetailsHeight = 100.0;
+
+  /// `layout.continueCard.detailsSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs render_continue_card, the pinned
+  /// reference)
+  static const layoutContinueCardDetailsSpacing = 6.0;
+
+  /// `layout.continueCard.rowSpacing` — Iced (crates/shosai-app/src/app.rs
+  /// render_continue_card, the pinned reference)
+  static const layoutContinueCardRowSpacing = 14.0;
 
   /// `layout.cover.maxWidth` — Iced (docs/flutter-ui-reference-spec.md 3.5)
   static const layoutCoverMaxWidth = 440;

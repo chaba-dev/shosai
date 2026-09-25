@@ -111,6 +111,17 @@ void main() {
     matching: find.widgetWithText(ShadButton, label),
   );
 
+  /// A grid card's own 13 px title line.
+  ///
+  /// The continue-reading section paints the same book's title in its own 16 px
+  /// line, so a bare text finder would match both.
+  Finder cardTitle(String title) => find.byWidgetPredicate(
+    (widget) =>
+        widget is Text &&
+        widget.data == title &&
+        widget.style?.fontSize == ShosaiTokens.typeSize13,
+  );
+
   /// The label paragraph inside the chrome control labelled [label].
   Finder chromeLabel(String label) =>
       find.descendant(of: chrome, matching: find.text(label));
@@ -178,17 +189,25 @@ void main() {
           // Tooltips and accessibility text are translated too.
           expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
           expect(find.bySemanticsLabel('本を追加'), findsOneWidget);
-          expect(find.bySemanticsLabel('すべての本'), findsOneWidget);
+          expect(
+            find.descendant(
+              of: find.byType(LibrarySidebar),
+              matching: find.bySemanticsLabel('すべての本'),
+            ),
+            findsOneWidget,
+          );
           expect(find.bySemanticsLabel('設定'), findsOneWidget);
           // The English chrome must not survive a Japanese interface.
           expect(find.text('Library'), findsNothing);
           expect(find.text('All books'), findsNothing);
           expect(find.text('Settings'), findsNothing);
           expect(find.byTooltip('Refresh library'), findsNothing);
-          // Japanese metadata still renders in the same state.
-          expect(find.text('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsOneWidget);
+          // Japanese metadata still renders in the same state. The
+          // continue-reading section paints the first page's Japanese title in
+          // its own 16 px line, so the card's 13 px line is the one asserted.
+          expect(cardTitle('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsOneWidget);
           expect(
-            find.text('Mixed Script Atlas: 東京・Wien・São Paulo'),
+            cardTitle('Mixed Script Atlas: 東京・Wien・São Paulo'),
             findsOneWidget,
           );
         },
@@ -214,7 +233,7 @@ void main() {
         metadata: const <String, Object?>{'state': 'wide-japanese-metadata'},
       );
 
-      expect(find.text('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsOneWidget);
+      expect(cardTitle('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsOneWidget);
       expect(find.text('Library'), findsOneWidget);
       expect(entry('Settings'), findsOneWidget);
     });
@@ -531,7 +550,7 @@ void main() {
       books: const [],
       locale: const Locale('en'),
       ready: () =>
-          find.textContaining('library is empty').evaluate().isNotEmpty,
+          find.text('A quiet place for every book').evaluate().isNotEmpty,
       metadata: const <String, Object?>{'state': 'empty'},
     );
 

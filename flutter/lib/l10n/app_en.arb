@@ -101,5 +101,226 @@
   "collectionLoadMore": "Load more books",
   "@collectionLoadMore": {
     "description": "Retained Flutter paging control; Iced's library paging row (previous/next-library-page) is package 3D's. The label is the pre-3B wording, translated."
+  },
+  "libraryContinueReading": "Continue reading",
+  "@libraryContinueReading": {
+    "description": "Iced reference key: continue-reading. The collection section heading above the continue card."
+  },
+  "libraryContinue": "Continue  ›",
+  "@libraryContinue": {
+    "description": "Iced reference key: continue. The continue card's right-hand link label; the two spaces before the chevron are the reference's own spacing."
+  },
+  "libraryPercentComplete": "{percentage}% complete",
+  "@libraryPercentComplete": {
+    "description": "Iced reference key: percent-complete. The continue card's progress label; the placeholder is the rounded percentage, never concatenated in Dart.",
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
+  "librarySearchResults": "Search results",
+  "@librarySearchResults": {
+    "description": "Iced reference key: search-results. The collection section title while a search is active; the unfiltered title reuses filterAllBooks (Iced all-books)."
+  },
+  "libraryEmptyHeading": "A quiet place for every book",
+  "@libraryEmptyHeading": {
+    "description": "Iced reference key: empty-library-heading. The empty-library composition's 24 px heading."
+  },
+  "libraryEmptyBody": "No books in library. Import files to get started.",
+  "@libraryEmptyBody": {
+    "description": "Iced reference key: empty-library. The empty-library composition's body; a library failure replaces it with the failure's own text."
+  },
+  "libraryNoMatchesHeading": "No matching books",
+  "@libraryNoMatchesHeading": {
+    "description": "Iced reference key: no-matching-books. The no-matches composition's 24 px heading."
+  },
+  "libraryNoMatchesBody": "No books match your search or filter.",
+  "@libraryNoMatchesBody": {
+    "description": "Iced reference key: empty-search. The no-matches composition's body; a library failure replaces it with the failure's own text."
+  },
+  "libraryAddFirstBooks": "Add your first books",
+  "@libraryAddFirstBooks": {
+    "description": "Iced reference key: add-first-books. The empty-library action; the Flutter action draws the plus as an icon, so the label carries no plus sign."
+  },
+  "libraryRetry": "Retry",
+  "@libraryRetry": {
+    "description": "Retained Flutter recovery action on the collection's failure alert; Iced's alert bar carries no action."
+  },
+  "libraryCleanupPending": "Temporary import data could not be removed yet.",
+  "@libraryCleanupPending": {
+    "description": "Retained Flutter debt state (provider cleanup pending); Iced has no counterpart. The wording is the pre-3C surface, now translated."
+  },
+  "libraryCleanupRetry": "Retry cleanup",
+  "@libraryCleanupRetry": {
+    "description": "Retained Flutter recovery action for the provider-cleanup debt state."
+  },
+  "libraryDeletionPending": "Book removed. Its private copy will be deleted later.",
+  "@libraryDeletionPending": {
+    "description": "Retained Flutter debt state (managed file deletion pending); Iced has no counterpart. The wording is the pre-3C surface, now translated."
+  },
+  "libraryDeletionDismiss": "Dismiss",
+  "@libraryDeletionDismiss": {
+    "description": "Retained Flutter acknowledgement action for the managed-deletion debt state."
+  },
+  "noticeImportSucceeded": "{count, plural, =1{Imported 1 book.} other{Imported {count} books.}}",
+  "@noticeImportSucceeded": {
+    "description": "Package 2D notice copy: brief success after a clean import. Owned by 2D; the catalog entry is added by 3C so the notice module compiles.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noticeImportPartialTitle": "Some books could not be imported.",
+  "@noticeImportPartialTitle": {
+    "description": "Package 2D notice copy: persistent failure title after a partial import."
+  },
+  "noticeImportFailedTitle": "The import could not be completed.",
+  "@noticeImportFailedTitle": {
+    "description": "Package 2D notice copy: persistent failure title after a failed import."
+  },
+  "noticeSettingsSaved": "Reader settings saved.",
+  "@noticeSettingsSaved": {
+    "description": "Package 2D notice copy: brief success after saving reader settings."
+  },
+  "noticeSettingsSaveFailed": "Reader settings could not be saved.",
+  "@noticeSettingsSaveFailed": {
+    "description": "Package 2D notice copy: persistent failure after a failed settings save."
+  },
+  "noticeBookRemoved": "Book removed.",
+  "@noticeBookRemoved": {
+    "description": "Package 2D notice copy: brief success after a removal."
+  },
+  "noticeBookRemovalFailed": "The book could not be removed.",
+  "@noticeBookRemovalFailed": {
+    "description": "Package 2D notice copy: persistent failure after a failed removal."
+  },
+  "noticeRetry": "Retry",
+  "@noticeRetry": {
+    "description": "Package 2D notice copy: recovery action label."
+  },
+  "noticeDismiss": "Dismiss",
+  "@noticeDismiss": {
+    "description": "Package 2D notice copy: acknowledgement action label."
+  },
+  "readerBackToLibrary": "‹ Library",
+  "@readerBackToLibrary": {
+    "description": "Iced reference key: back-library."
+  },
+  "readerFallbackTitle": "Reader",
+  "@readerFallbackTitle": {
+    "description": "Iced reference key: reader. The reader chrome title when no document title is available."
+  },
+  "readerContentsAction": "Contents",
+  "@readerContentsAction": {
+    "description": "Iced reference key: contents."
+  },
+  "readerAppearanceAction": "Reading appearance",
+  "@readerAppearanceAction": {
+    "description": "Iced reference key: reading-appearance."
+  },
+  "readerMoreAction": "More",
+  "@readerMoreAction": {
+    "description": "NEW: no Iced string. Accessible name for the reader overflow control."
+  },
+  "readerOpeningDocument": "Opening document…",
+  "@readerOpeningDocument": {
+    "description": "Iced reference key: opening-document."
+  },
+  "readerNoBookOpen": "No book open",
+  "@readerNoBookOpen": {
+    "description": "Iced reference key: no-book-open."
+  },
+  "readerPageStatus": "Page {page} · {percentage}%",
+  "@readerPageStatus": {
+    "description": "Iced reference key: single-page-status.",
+    "placeholders": {
+      "page": {
+        "type": "int"
+      },
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
+  "readerPageRangeStatus": "Pages {first}–{last} · {percentage}%",
+  "@readerPageRangeStatus": {
+    "description": "Iced reference key: page-range-status.",
+    "placeholders": {
+      "first": {
+        "type": "int"
+      },
+      "last": {
+        "type": "int"
+      },
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
+  "readerChapterStatus": "Chapter {chapter} · {percentage}%",
+  "@readerChapterStatus": {
+    "description": "NEW: no Iced string; names the logical-unit display kind, composed from Iced chapter-number.",
+    "placeholders": {
+      "chapter": {
+        "type": "int"
+      },
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
+  "readerChapterRangeStatus": "Chapters {first}–{last} · {percentage}%",
+  "@readerChapterRangeStatus": {
+    "description": "NEW: no Iced string, same reason as readerChapterStatus.",
+    "placeholders": {
+      "first": {
+        "type": "int"
+      },
+      "last": {
+        "type": "int"
+      },
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
+  "readerCloseTab": "Close {title}",
+  "@readerCloseTab": {
+    "description": "NEW: no Iced string. The reader tab close control; Iced paints a × glyph (app.rs tabs_view), this is its accessible label.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "readerTabsLabel": "Open books",
+  "@readerTabsLabel": {
+    "description": "NEW: no Iced string. The reader tab strip label; Iced renders the strip without an accessible label."
+  },
+  "readerPreviousPage": "Previous page",
+  "@readerPreviousPage": {
+    "description": "NEW: no Iced string. The reader edge navigation; Iced paints ‹/› glyphs (app.rs reader_edge_button), these are their accessible labels."
+  },
+  "readerNextPage": "Next page",
+  "@readerNextPage": {
+    "description": "NEW: no Iced string, the same accessible labels as readerPreviousPage."
+  },
+  "readerRetryOpen": "Retry",
+  "@readerRetryOpen": {
+    "description": "NEW: no Iced string. The reader open-failure retry action."
+  },
+  "readerMissingBook": "This book could not be found at its previous location.",
+  "@readerMissingBook": {
+    "description": "Iced reference key: missing-book."
+  },
+  "readerLocateFile": "Locate File…",
+  "@readerLocateFile": {
+    "description": "Iced reference key: locate-file."
+  },
+  "readerRemoveFromLibrary": "Remove from Library",
+  "@readerRemoveFromLibrary": {
+    "description": "Iced reference key: remove-from-library."
   }
 }

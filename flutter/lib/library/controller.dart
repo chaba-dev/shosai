@@ -171,6 +171,8 @@ class LibraryController implements Listenable {
               ),
               settings: message.settings ?? _model.settings,
               loaded: true,
+              loading: false,
+              loadingMore: false,
               loadError: null,
               hasMore: message.page.hasMore,
             ),
@@ -179,7 +181,14 @@ class LibraryController implements Listenable {
       case _LibraryFailed():
         _releaseCancellation(message.cancellation);
         if (message.revision == _loadRevision) {
-          _emit(_model.copyWith(loadError: message.error, hasMore: false));
+          _emit(
+            _model.copyWith(
+              loading: false,
+              loadingMore: false,
+              loadError: message.error,
+              hasMore: false,
+            ),
+          );
         }
       case _LibraryMutationCompleted():
         if (message.cancellation case final cancellation?) {
@@ -352,19 +361,32 @@ class LibraryController implements Listenable {
     try {
       cancellation = _bridge.createCancellation();
     } catch (error) {
-      _emit(_model.copyWith(loadError: safeError(error), hasMore: false));
+      // A load that cannot even start still ends the skeleton: this is the
+      // newest load, so nothing else owns the flags.
+      _emit(
+        _model.copyWith(
+          loading: false,
+          loadingMore: false,
+          loadError: safeError(error),
+          hasMore: false,
+        ),
+      );
       return;
     }
     _cancellations.add(cancellation);
     _foregroundCancellations.add(cancellation);
     _loadCancellations.add(cancellation);
     _beginEffect();
+    // The load effect owns the collection's loading state: the skeleton shows
+    // for a first-page load and the grid stays for an appended page, exactly as
+    // the reference's `library_loading && library_offset == 0` branch does.
+    _emit(_model.copyWith(loading: true, loadingMore: append));
     unawaited(() async {
       try {
         final page = await _bridge.libraryPage(
           query: query,
           format: format,
-          limit: 50,
+          limit: libraryPageSize,
           offset: offset,
           cancellationId: cancellation,
         );
@@ -605,14 +627,15 @@ class LibraryController implements Listenable {
         .map((item) => item.warning)
         .whereType<String>()
         .toList(growable: false);
-    if (!report.cancelled &&
-        report.failed == BigInt.zero &&
-        failure == null &&
-        warnings.isEmpty) {
+    if (report.failed == BigInt.zero && failure == null && warnings.isEmpty) {
+      // A clean import needs no failure surface (its success feedback belongs
+      // to the notice policy), and a cancellation on its own is neutral rather
+      // than an error (plan decision 13): the books a cancelled import did land
+      // are in the grid after the reload. A cancelled import that also failed
+      // or warned keeps the summary below.
       return null;
     }
     final parts = <String>[];
-    if (report.cancelled) parts.add('Import cancelled.');
     if (report.imported > BigInt.zero) {
       parts.add('Imported ${_bookCount(report.imported)}.');
     }
@@ -623,7 +646,7 @@ class LibraryController implements Listenable {
     if (warnings.isNotEmpty) {
       parts.add('Some imported book details could not be loaded.');
     }
-    return parts.join(' ');
+    return parts.isEmpty ? null : parts.join(' ');
   }
 
   void _releaseCancellation(BigInt cancellation) {

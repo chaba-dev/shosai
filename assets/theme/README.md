@@ -73,9 +73,13 @@ Inter face as the fallback when Noto Sans JP is the primary face.
 
 The Flutter themes consume the color, radius and type tokens. The `layout.*`
 metrics are in the source for the composition packages that consume them
-(3A-3D, 4B-4C, 6A-6B); 3A consumes the library navigation metrics and 3B the
+(3A-3D, 4B-4C, 6A-6B); 3A consumes the library navigation metrics, 3B the
 grid and card metrics (`layout.library.grid*`, `layout.library.card.*`,
-`layout.library.collectionPadding*`).
+`layout.library.collectionPadding*`) and 3C the collection's remaining metrics
+(`layout.continueCard.*`, `layout.library.skeleton.*`,
+`layout.library.emptyState.*`, `layout.library.sectionSpacing`,
+`layout.library.alertPadding*`,
+`layout.library.continueSectionTrailingSpace`).
 
 ## Rust mapping
 
@@ -87,8 +91,9 @@ constants. `crate::typography` takes the interface family names from the tokens,
 and `crate::app` / `crate::widgets` take the reader chrome, spread threshold,
 library breakpoint, page size, cover decode bounds and button geometry they
 already used from `layout.*`. The remaining `layout.*` values (import review
-rows, modal widths, settings content width, continue-card width) are catalogued
-for the packages that own those surfaces and are not migrated here.
+rows, modal widths, settings content width, the collection's section, alert,
+continue-card, skeleton and empty-state metrics) are catalogued for the packages
+that own those surfaces and are not migrated here.
 
 `crates/shosai-core` cannot depend on the application crate, so
 `math_layout::MATH_FONT_FAMILY` keeps its own literal; the app-side token test

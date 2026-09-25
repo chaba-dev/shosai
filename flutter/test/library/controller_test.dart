@@ -25,6 +25,7 @@ class _StubLibraryBridge implements FlutterBridge {
   final formats = <FlutterBookFormat?>[];
   var disposeCount = 0;
   var removeCalls = 0;
+  bool failCancellationCreation = false;
   var _nextCancellation = BigInt.one;
 
   @override
@@ -35,6 +36,9 @@ class _StubLibraryBridge implements FlutterBridge {
 
   @override
   BigInt createCancellation() {
+    if (failCancellationCreation) {
+      throw StateError('the bridge cannot create a cancellation');
+    }
     _nextCancellation += BigInt.one;
     return _nextCancellation;
   }
@@ -241,6 +245,309 @@ void main() {
     controller.dispose();
     await _settle();
   });
+
+  test('a first-page load publishes the collection loading state', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+
+    // The skeleton owns page one: the model says so before the page lands, and
+    // the collection can pick its shape from the immutable state.
+    expect(controller.model.loading, isTrue);
+    expect(controller.model.loadingMore, isFalse);
+    expect(controller.model.collectionState, LibraryCollectionState.loading);
+
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    expect(controller.model.loading, isFalse);
+    expect(controller.model.loadingMore, isFalse);
+    expect(controller.model.collectionState, LibraryCollectionState.ready);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('an appended page keeps the grid instead of the skeleton', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+
+    expect(controller.model.loading, isTrue);
+    expect(controller.model.loadingMore, isTrue);
+    expect(
+      controller.model.collectionState,
+      LibraryCollectionState.ready,
+      reason: 'a later page keeps the loaded grid, as the reference does',
+    );
+
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Another Book')], hasMore: false),
+    );
+    await _settle();
+
+    expect(controller.model.loading, isFalse);
+    expect(controller.model.loadingMore, isFalse);
+    expect(controller.model.books.map((book) => book.bookId), [1, 2]);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a load that cannot start still ends the skeleton', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    expect(bridge.pages, hasLength(1));
+    expect(controller.model.loading, isTrue);
+
+    // The replacement load cannot even create its cancellation, so nothing is
+    // left in flight to end the skeleton it replaced.
+    bridge.failCancellationCreation = true;
+    controller.dispatch(const LibraryFormatChanged(FlutterBookFormat.epub));
+    await _settle();
+
+    expect(controller.model.loading, isFalse);
+    expect(controller.model.loadingMore, isFalse);
+    expect(controller.model.loadError, isNotNull);
+
+    // The superseded page is stale: it cannot replace the collection or revive
+    // the skeleton.
+    bridge.pages.first.complete(
+      FlutterLibraryPage(books: [_book(1, 'Stale')], hasMore: false),
+    );
+    await _settle();
+    expect(controller.model.books, isEmpty);
+    expect(controller.model.loading, isFalse);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a stale completion cannot end a newer load skeleton', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+
+    // A format change starts a newer load; the older page's completion must not
+    // clear the loading state the newer load owns.
+    controller.dispatch(const LibraryFormatChanged(FlutterBookFormat.epub));
+    await _settle();
+    expect(bridge.pages, hasLength(2));
+
+    bridge.pages.first.complete(
+      FlutterLibraryPage(books: [_book(1, 'Stale')], hasMore: false),
+    );
+    await _settle();
+
+    expect(controller.model.loading, isTrue);
+    expect(controller.model.books, isEmpty);
+
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Current')], hasMore: false),
+    );
+    await _settle();
+
+    expect(controller.model.loading, isFalse);
+    expect(controller.model.books.single.title, 'Current');
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a cancelled import is neutral, not an error surface', () async {
+    final bridge = _CancelledImportBridge();
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async =>
+          const LibraryImportSelection(paths: ['/books/a.pdf'], managed: false),
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+    );
+
+    controller.dispatch(const LibraryImportRequested());
+    await _settle();
+    await _settle();
+    await _settle();
+
+    // Plan decision 13: cancellation is neutral. The books it did land are
+    // reloaded into the grid instead of being reported as a failure.
+    expect(controller.model.error, isNull);
+    expect(controller.model.failure, LibraryFailure.none);
+    expect(bridge.importCalls, 1);
+    expect(bridge.pages, hasLength(1));
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test(
+    'a cancelled partial import keeps its failure summary visible',
+    () async {
+      final bridge = _PartialImportBridge();
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => const LibraryImportSelection(
+          paths: ['/books/a.pdf'],
+          managed: false,
+        ),
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+        editSettings: (_) async => null,
+      );
+
+      controller.dispatch(const LibraryImportRequested());
+      await _settle();
+      await _settle();
+      await _settle();
+
+      expect(controller.model.failure, LibraryFailure.import);
+      expect(controller.model.error, contains('Imported 2 books.'));
+      expect(controller.model.error, contains('1 failed.'));
+      expect(
+        controller.model.error,
+        isNot(contains('cancelled')),
+        reason: 'cancellation is not the failure being reported',
+      );
+
+      controller.dispose();
+      await _settle();
+    },
+  );
+
+  test('an open effect keeps the book it was dispatched with', () async {
+    final bridge = _StubLibraryBridge();
+    final opened = <FlutterLibraryBook>[];
+    final drained = <int>[];
+    final openGate = Completer<void>();
+    final drainGate = Completer<void>();
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (book) async {
+        opened.add(book);
+        await openGate.future;
+      },
+      drainReaderSaves: (bookId) async {
+        drained.add(bookId);
+        await drainGate.future;
+      },
+      editSettings: (_) async => null,
+    );
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(
+        books: [
+          FlutterLibraryBook(
+            bookId: 1,
+            title: 'Resumable',
+            format: FlutterBookFormat.pdf,
+            pathKey: '/books/1.pdf',
+            managed: true,
+            progress: 0.42,
+            dateAdded: '2026-09-10',
+            lastRead: '2026-09-19T08:12:00Z',
+          ),
+          FlutterLibraryBook(
+            bookId: 2,
+            title: 'Second resumable',
+            format: FlutterBookFormat.pdf,
+            pathKey: '/books/2.pdf',
+            managed: true,
+            progress: 0.07,
+            dateAdded: '2026-09-10',
+            lastRead: '2026-09-18T08:12:00Z',
+          ),
+        ],
+        hasMore: false,
+      ),
+    );
+    await _settle();
+    expect(controller.model.continueBook?.bookId, 1);
+
+    controller.dispatch(LibraryBookOpened(controller.model.continueBook!));
+    await _settle();
+
+    // The open effect is in flight while a reload changes what the section
+    // would select.
+    controller.dispatch(const LibraryRefreshed());
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(
+        books: [
+          FlutterLibraryBook(
+            bookId: 2,
+            title: 'Second resumable',
+            format: FlutterBookFormat.pdf,
+            pathKey: '/books/2.pdf',
+            managed: true,
+            progress: 0.07,
+            dateAdded: '2026-09-10',
+            lastRead: '2026-09-18T08:12:00Z',
+          ),
+        ],
+        hasMore: false,
+      ),
+    );
+    await _settle();
+    expect(controller.model.continueBook?.bookId, 2);
+
+    openGate.complete();
+    await _settle();
+    await _settle();
+
+    expect(
+      opened.map((book) => book.bookId),
+      [1],
+      reason:
+          'the open effect carries the book the card dispatched, so a reload '
+          'cannot change which book and durable position open',
+    );
+
+    // The drain that follows the reader is the dispatched book's too, and the
+    // reader close only reports back once it has finished.
+    expect(drained, [1]);
+    expect(
+      bridge.pages,
+      hasLength(2),
+      reason: 'no reader-close reload runs while the drain is still in flight',
+    );
+
+    drainGate.complete();
+    await _settle();
+    await _settle();
+    expect(
+      bridge.pages,
+      hasLength(3),
+      reason: 'the reader close reports back after the drain and reloads',
+    );
+
+    controller.dispose();
+    await _settle();
+  });
 }
 
 /// A stub bridge whose removal stays in flight.
@@ -252,4 +559,44 @@ class _HeldRemovalBridge extends _StubLibraryBridge {
     removeCalls += 1;
     return removal.future;
   }
+}
+
+/// A stub bridge whose import is cancelled after landing two books.
+class _CancelledImportBridge extends _StubLibraryBridge {
+  int importCalls = 0;
+
+  @override
+  Future<FlutterImportReport> importPaths({
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  }) async {
+    importCalls += 1;
+    return FlutterImportReport(
+      imported: BigInt.from(2),
+      failed: BigInt.zero,
+      cancelled: true,
+      items: const [],
+    );
+  }
+}
+
+/// A stub bridge whose import lands two books and fails one.
+class _PartialImportBridge extends _StubLibraryBridge {
+  @override
+  Future<FlutterImportReport> importPaths({
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  }) async => FlutterImportReport(
+    imported: BigInt.from(2),
+    failed: BigInt.one,
+    cancelled: true,
+    items: const [
+      FlutterImportItem(
+        pathKey: '/books/broken.pdf',
+        error: 'provider_error:readFailed',
+      ),
+    ],
+  );
 }

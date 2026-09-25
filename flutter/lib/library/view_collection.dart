@@ -32,13 +32,14 @@ part of 'view.dart';
 /// The number of columns the pinned Iced grid lays out for [availableWidth].
 ///
 /// `iced_widget::grid::Grid::layout` computes
-/// `cells_per_row = ceil((available + spacing) / (min_column + spacing))` for
-/// its `fluid(min_column)` strategy and then divides the width equally, so the
-/// columns are wider than the minimum whenever the width does not divide
-/// evenly. The reference renders 5 columns of 195.2 px in the wide window
-/// (1280 - 184 sidebar - 48 collection padding = 1048 px available), 3 columns
-/// of 210.7 px at 900 px and 2 columns of 162 px at 390 px, which is what the
-/// approved 1B captures show.
+/// `cells_per_row = ceil((available + spacing) / (max_width + spacing))` for
+/// its `fluid(max_width)` strategy and then divides the width equally, so the
+/// parameter is a **maximum** cell width and the columns are never wider than
+/// it (they are narrower whenever the width does not divide evenly). The
+/// reference renders 5 columns of 195.2 px in the wide window (1280 - 184
+/// sidebar - 48 collection padding = 1048 px available), 3 columns of 210.7 px
+/// at 900 px and 2 columns of 162 px at 390 px, which is what the approved 1B
+/// captures show.
 int libraryGridColumns(double availableWidth) {
   if (availableWidth <= 0) return 1;
   final columns =
@@ -140,27 +141,53 @@ double _cardLineHeight(BuildContext context, TextStyle style) {
 
 /// The card title style: the reference's 13 px title in the card's foreground.
 TextStyle _cardTitleStyle(BuildContext context) =>
-    (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(
-      fontSize: ShosaiTokens.typeSize13,
-      color: ShadTheme.of(context).colorScheme.foreground,
-    );
+    _libraryForegroundStyle(context, ShosaiTokens.typeSize13);
 
 /// The card author style: the reference's 11 px muted author line.
 TextStyle _cardAuthorStyle(BuildContext context) =>
-    (Theme.of(context).textTheme.bodySmall ?? const TextStyle()).copyWith(
-      fontSize: ShosaiTokens.typeSize11,
-      color: ShadTheme.of(context).colorScheme.mutedForeground,
-    );
+    _libraryMutedStyle(context, ShosaiTokens.typeSize11);
 
 /// The card's format and progress label style: the reference's 10 px muted line.
 TextStyle _cardLabelStyle(BuildContext context) =>
+    _libraryMutedStyle(context, ShosaiTokens.typeSize10);
+
+/// A reference section heading: [style]'s size at the pinned Iced weight.
+///
+/// The Iced headings are regular weight, while the Shad theme's heading roles
+/// carry a heavier weight, so the weight is stated rather than inherited.
+TextStyle _libraryHeadingStyle(BuildContext context, TextStyle style) =>
+    style.copyWith(
+      fontWeight: FontWeight.w400,
+      color: ShadTheme.of(context).colorScheme.foreground,
+    );
+
+/// An interface label at [size] in the theme's foreground color.
+TextStyle _libraryForegroundStyle(BuildContext context, double size) =>
+    (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(
+      fontSize: size,
+      color: ShadTheme.of(context).colorScheme.foreground,
+    );
+
+/// An interface label at [size] in the theme's muted foreground color.
+TextStyle _libraryMutedStyle(BuildContext context, double size) =>
     (Theme.of(context).textTheme.bodySmall ?? const TextStyle()).copyWith(
-      fontSize: ShosaiTokens.typeSize10,
+      fontSize: size,
       color: ShadTheme.of(context).colorScheme.mutedForeground,
     );
 
-/// The library collection: the responsive card grid and its retained paging
-/// control.
+/// The placeholder cards the reference shows while an empty library loads
+/// (`crates/shosai-app/src/app.rs:7872-7877`).
+const int _libraryFirstLoadSkeletonCount = 8;
+
+/// The library collection: the reference's collection column.
+///
+/// The composition is the pinned Iced `library_collection`
+/// (`crates/shosai-app/src/app.rs:7124`): an optional failure alert, the
+/// continue-reading section, the section title, the responsive card grid and
+/// the retained paging control, in the reference's order and 16 px spacing
+/// inside the collection's [22, 24] padding. Page-one loading shows the
+/// reference's skeleton grid, and an empty result shows its empty-library or
+/// no-matches composition; each is a distinct state, never a restyled grid.
 class LibraryCollection extends StatelessWidget {
   const LibraryCollection({
     super.key,
@@ -169,6 +196,9 @@ class LibraryCollection extends StatelessWidget {
     required this.removeBook,
     required this.loadMore,
     required this.loadCover,
+    required this.retry,
+    required this.addFirstBooks,
+    required this.cancelImport,
   });
 
   final LibraryModel model;
@@ -177,81 +207,785 @@ class LibraryCollection extends StatelessWidget {
   final VoidCallback loadMore;
   final bool Function(int) loadCover;
 
+  /// The failure alert's retained recovery action; the reference's alert bar
+  /// carries no action.
+  final VoidCallback retry;
+
+  /// The empty-library composition's action (Iced `add-first-books`).
+  final VoidCallback addFirstBooks;
+
+  /// The empty-library composition's action while the add-books import is the
+  /// foreground operation (Iced renders its `cancel` label in that state).
+  final VoidCallback cancelImport;
+
+  @override
+  Widget build(BuildContext context) => switch (model.collectionState) {
+    LibraryCollectionState.loading => LibrarySkeletonGrid(
+      model: model,
+      retry: retry,
+    ),
+    LibraryCollectionState.empty ||
+    LibraryCollectionState.noMatches => _LibraryEmptyCollection(
+      model: model,
+      retry: retry,
+      addFirstBooks: addFirstBooks,
+      cancelImport: cancelImport,
+    ),
+    LibraryCollectionState.ready => _LibraryGrid(
+      model: model,
+      openBook: openBook,
+      removeBook: removeBook,
+      loadMore: loadMore,
+      loadCover: loadCover,
+      retry: retry,
+    ),
+  };
+}
+
+/// The reference's collection padding: [22, 24] around the whole column.
+const EdgeInsets _collectionPadding = EdgeInsets.symmetric(
+  vertical: ShosaiTokens.layoutLibraryCollectionPaddingVertical,
+  horizontal: ShosaiTokens.layoutLibraryCollectionPaddingHorizontal,
+);
+
+/// The section title above the grid: `all-books`, or `search-results` while a
+/// search is active.
+///
+/// A filter alone keeps `all-books`, because the reference switches on the
+/// search query only.
+class _CollectionSectionTitle extends StatelessWidget {
+  const _CollectionSectionTitle({required this.model});
+
+  final LibraryModel model;
+
   @override
   Widget build(BuildContext context) {
-    if (!model.loaded && model.busy) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (!model.loaded && model.loadError != null) {
-      return const Center(child: Text('The library could not be loaded.'));
-    }
-    if (model.books.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            model.query.isEmpty && model.format == null
-                ? 'Your library is empty. Add a PDF, EPUB, or CBZ to begin.'
-                : 'No books match these filters.',
-            textAlign: TextAlign.center,
+    final l10n = AppLocalizations.of(context);
+    final label = model.query.isEmpty
+        ? l10n.filterAllBooks
+        : l10n.librarySearchResults;
+    return Text(
+      label,
+      style: shosaiInterfaceStyleForText(
+        _libraryHeadingStyle(context, ShadTheme.of(context).textTheme.large),
+        label,
+      ),
+    );
+  }
+}
+
+/// The reference's failure alert: the 13 px danger text on the alert
+/// background, with the retained Flutter retry action.
+///
+/// The reference draws the alert bar without an action; the retry is the
+/// retained recovery path for the same failure, so it keeps the shared control
+/// height instead of shrinking to the bar.
+class _CollectionAlert extends StatelessWidget {
+  const _CollectionAlert({required this.message, required this.retry});
+
+  final String message;
+  final VoidCallback retry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    // The reference's alert is a pinned light-theme surface; the dark theme
+    // keeps its own raised surface and light danger foreground instead, so the
+    // bar cannot paint a light band under the dark foreground.
+    final background = dark
+        ? theme.colorScheme.muted
+        : ShosaiTokens.appAlertBackground;
+    final foreground = dark
+        ? theme.colorScheme.destructive
+        : ShosaiTokens.appDanger;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        vertical: ShosaiTokens.layoutLibraryAlertPaddingVertical,
+        horizontal: ShosaiTokens.layoutLibraryAlertPaddingHorizontal,
+      ),
+      color: background,
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                message,
+                style:
+                    (Theme.of(context).textTheme.bodyMedium ??
+                            const TextStyle())
+                        .copyWith(
+                          fontSize: ShosaiTokens.typeSize13,
+                          color: foreground,
+                        ),
+              ),
+            ),
           ),
-        ),
-      );
-    }
+          ShadButton.ghost(
+            height: shosaiShadButtonHeight(context),
+            onPressed: retry,
+            child: Text(AppLocalizations.of(context).libraryRetry),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The populated collection column: alert, continue section, section title,
+/// grid and paging, in the reference's order.
+class _LibraryGrid extends StatelessWidget {
+  const _LibraryGrid({
+    required this.model,
+    required this.openBook,
+    required this.removeBook,
+    required this.loadMore,
+    required this.loadCover,
+    required this.retry,
+  });
+
+  final LibraryModel model;
+  final ValueChanged<FlutterLibraryBook> openBook;
+  final ValueChanged<FlutterLibraryBook> removeBook;
+  final VoidCallback loadMore;
+  final bool Function(int) loadCover;
+  final VoidCallback retry;
+
+  @override
+  Widget build(BuildContext context) {
+    final continueBook = model.continueBook;
+    final error = model.displayError;
     return LayoutBuilder(
       builder: (context, constraints) {
-        const spacing = ShosaiTokens.layoutLibraryGridSpacing;
-        const padding = EdgeInsets.symmetric(
-          vertical: ShosaiTokens.layoutLibraryCollectionPaddingVertical,
-          horizontal: ShosaiTokens.layoutLibraryCollectionPaddingHorizontal,
-        );
-        final available = constraints.maxWidth - padding.horizontal;
+        final available = constraints.maxWidth - _collectionPadding.horizontal;
         final columns = libraryGridColumns(available);
         return CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: padding,
-              sliver: SliverGrid.builder(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: columns,
-                  crossAxisSpacing: spacing,
-                  mainAxisSpacing: spacing,
-                  mainAxisExtent: libraryCardTileExtent(context),
-                ),
-                itemCount: model.books.length,
-                itemBuilder: (context, index) {
-                  final book = model.books[index];
-                  return LibraryBookCard(
-                    book: book,
-                    cover: model.covers[book.bookId],
-                    demandRevision: model.coverRevision,
-                    removing: model.removingBookId == book.bookId,
-                    loadCover: loadCover,
-                    openBook: openBook,
-                    removeBook: removeBook,
-                  );
-                },
+              padding: _collectionPadding,
+              sliver: SliverMainAxisGroup(
+                slivers: [
+                  if (error != null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: ShosaiTokens.layoutLibrarySectionSpacing,
+                        ),
+                        child: _CollectionAlert(message: error, retry: retry),
+                      ),
+                    ),
+                  if (continueBook != null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: ShosaiTokens.layoutLibrarySectionSpacing,
+                        ),
+                        child: LibraryContinueSection(
+                          book: continueBook,
+                          cover: model.covers[continueBook.bookId],
+                          demandRevision: model.coverRevision,
+                          loadCover: loadCover,
+                          openBook: openBook,
+                        ),
+                      ),
+                    ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                        bottom: ShosaiTokens.layoutLibrarySectionSpacing,
+                      ),
+                      child: _CollectionSectionTitle(model: model),
+                    ),
+                  ),
+                  SliverGrid.builder(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      crossAxisSpacing: ShosaiTokens.layoutLibraryGridSpacing,
+                      mainAxisSpacing: ShosaiTokens.layoutLibraryGridSpacing,
+                      mainAxisExtent: libraryCardTileExtent(context),
+                    ),
+                    itemCount: model.books.length,
+                    itemBuilder: (context, index) {
+                      final book = model.books[index];
+                      return LibraryBookCard(
+                        book: book,
+                        cover: model.covers[book.bookId],
+                        demandRevision: model.coverRevision,
+                        removing: model.removingBookId == book.bookId,
+                        loadCover: loadCover,
+                        openBook: openBook,
+                        removeBook: removeBook,
+                      );
+                    },
+                  ),
+                  if (model.hasMore)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          top: ShosaiTokens.layoutLibraryGridSpacing,
+                        ),
+                        child: _LoadMore(model: model, loadMore: loadMore),
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (model.hasMore)
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(
-                  padding.horizontal,
-                  spacing,
-                  padding.horizontal,
-                  0,
-                ),
-                sliver: SliverToBoxAdapter(
-                  child: _LoadMore(model: model, loadMore: loadMore),
-                ),
-              ),
-            SliverToBoxAdapter(child: SizedBox(height: padding.bottom)),
           ],
         );
       },
     );
   }
 }
+
+/// The reference's page-one loading composition: the section title above a grid
+/// of placeholder cards in the same grid geometry as the loaded cards, so the
+/// swap to content cannot move the grid.
+///
+/// An unresolved failure keeps the collection's alert above the placeholders:
+/// the reference replaces the whole column while it loads, but decision 13
+/// requires a failure to stay visible until it is resolved, and a reload is
+/// not a resolution.
+class LibrarySkeletonGrid extends StatelessWidget {
+  const LibrarySkeletonGrid({
+    super.key,
+    required this.model,
+    required this.retry,
+  });
+
+  final LibraryModel model;
+
+  /// The failure alert's retained recovery action.
+  final VoidCallback retry;
+
+  /// The reference shows eight placeholders for an empty library and otherwise
+  /// as many as the page it is replacing held (`app.rs:7872-7877`).
+  int get _placeholderCount => model.books.isEmpty
+      ? _libraryFirstLoadSkeletonCount
+      : math.min(model.books.length, libraryPageSize);
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final available = constraints.maxWidth - _collectionPadding.horizontal;
+      final columns = libraryGridColumns(available);
+      return CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: _collectionPadding,
+            sliver: SliverMainAxisGroup(
+              slivers: [
+                if (model.displayError case final error?)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                        bottom: ShosaiTokens.layoutLibrarySectionSpacing,
+                      ),
+                      child: _CollectionAlert(message: error, retry: retry),
+                    ),
+                  ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      bottom: ShosaiTokens.layoutLibrarySectionSpacing,
+                    ),
+                    child: _CollectionSectionTitle(model: model),
+                  ),
+                ),
+                SliverGrid.builder(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: columns,
+                    crossAxisSpacing: ShosaiTokens.layoutLibraryGridSpacing,
+                    mainAxisSpacing: ShosaiTokens.layoutLibraryGridSpacing,
+                    mainAxisExtent: libraryCardTileExtent(context),
+                  ),
+                  itemCount: _placeholderCount,
+                  itemBuilder: (context, index) => const LibrarySkeletonCard(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// The reference's placeholder card: the cover block and the two metadata bars
+/// above the progress bar, in the loaded card's padding and spacing.
+class LibrarySkeletonCard extends StatelessWidget {
+  const LibrarySkeletonCard({super.key});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(ShosaiTokens.layoutButtonBookPadding),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: ShosaiTokens.layoutLibrarySkeletonSpacing,
+      children: [
+        _skeletonBlock(
+          width: double.infinity,
+          height: ShosaiTokens.layoutLibraryCardCoverHeight,
+          color: ShosaiTokens.appSurfaceMuted,
+          radius: ShosaiTokens.radiusSmall,
+        ),
+        _skeletonBlock(
+          width: ShosaiTokens.layoutLibrarySkeletonTitleBarWidth,
+          height: ShosaiTokens.layoutLibrarySkeletonTitleBarHeight,
+        ),
+        _skeletonBlock(
+          width: ShosaiTokens.layoutLibrarySkeletonAuthorBarWidth,
+          height: ShosaiTokens.layoutLibrarySkeletonAuthorBarHeight,
+        ),
+        const Spacer(),
+        _skeletonBlock(
+          width: double.infinity,
+          height: ShosaiTokens.layoutProgressGirth,
+        ),
+      ],
+    ),
+  );
+}
+
+/// One skeleton block: the reference's `app.skeleton` or `app.skeletonSubtle`
+/// box.
+Widget _skeletonBlock({
+  required double width,
+  required double height,
+  Color color = ShosaiTokens.appSkeletonBackground,
+  double radius = ShosaiTokens.appSkeletonRadius,
+}) => Container(
+  width: width,
+  height: height,
+  decoration: BoxDecoration(
+    color: color,
+    borderRadius: BorderRadius.circular(radius),
+  ),
+);
+
+/// The reference's empty-library and no-matches compositions.
+///
+/// Both are a centred column: a 24 px heading, a 14 px muted body, and the
+/// empty-library action. A failure replaces the body with its own text,
+/// suppresses the add action — offering to add books while the library failed
+/// to load would misstate the state — and shows the retained Retry instead, so
+/// every collection shape keeps a recovery path.
+class _LibraryEmptyCollection extends StatelessWidget {
+  const _LibraryEmptyCollection({
+    required this.model,
+    required this.retry,
+    required this.addFirstBooks,
+    required this.cancelImport,
+  });
+
+  final LibraryModel model;
+
+  /// The failure's retained recovery action: an empty composition is still a
+  /// failure surface, so it keeps the same retry the alert offers.
+  final VoidCallback retry;
+
+  final VoidCallback addFirstBooks;
+  final VoidCallback cancelImport;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final dark = theme.brightness == Brightness.dark;
+    final empty = model.collectionState == LibraryCollectionState.empty;
+    final heading = empty
+        ? l10n.libraryEmptyHeading
+        : l10n.libraryNoMatchesHeading;
+    final body =
+        model.displayError ??
+        (empty ? l10n.libraryEmptyBody : l10n.libraryNoMatchesBody);
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          // The composition is centred while it fits and scrolls once a scaled
+          // heading, body and action no longer do, instead of overflowing the
+          // collection area.
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: _collectionPadding,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                spacing: ShosaiTokens.layoutLibraryEmptyStateSpacing,
+                children: [
+                  Text(
+                    heading,
+                    textAlign: TextAlign.center,
+                    style: shosaiInterfaceStyleForText(
+                      _libraryHeadingStyle(context, theme.textTheme.h3),
+                      heading,
+                    ),
+                  ),
+                  Text(
+                    body,
+                    textAlign: TextAlign.center,
+                    style: shosaiInterfaceStyleForText(
+                      // The reference's muted body colour, not the package's
+                      // own muted role.
+                      theme.textTheme.muted.copyWith(
+                        color: scheme.mutedForeground,
+                      ),
+                      body,
+                    ),
+                  ),
+                  if (model.displayError != null)
+                    ShadButton.ghost(
+                      height: shosaiShadButtonHeight(context),
+                      onPressed: retry,
+                      child: Text(l10n.libraryRetry),
+                    ),
+                  if (empty && model.displayError == null)
+                    ShadButton(
+                      // The shared single-line control height would cut a
+                      // scaled label, so the action is content-sized with a
+                      // flexible label that wraps: the reference's own button
+                      // grows with its text.
+                      height: 0,
+                      padding: const EdgeInsets.symmetric(
+                        vertical:
+                            ShosaiTokens.layoutButtonPrimaryPaddingVertical,
+                        horizontal:
+                            ShosaiTokens.layoutButtonPrimaryPaddingHorizontal,
+                      ),
+                      // The reference's primary button has an opaque hovered
+                      // fill; the Shad primary variant's is translucent, so the
+                      // light theme keeps the reference value and the dark theme
+                      // keeps its own variant behavior (the header's add-books
+                      // action does the same).
+                      hoverBackgroundColor: dark
+                          ? null
+                          : ShosaiTokens.appAccentHovered,
+                      pressedBackgroundColor: dark
+                          ? null
+                          : ShosaiTokens.appAccentHovered,
+                      onPressed: model.importing ? cancelImport : addFirstBooks,
+                      leading: model.importing
+                          ? null
+                          : const Icon(LucideIcons.plus),
+                      child: Flexible(
+                        child: Text(
+                          model.importing
+                              ? l10n.cancelImportAction
+                              : l10n.libraryAddFirstBooks,
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The reference's continue-reading section: the section heading, the card and
+/// the reference's trailing 4 px space before the next section.
+class LibraryContinueSection extends StatelessWidget {
+  const LibraryContinueSection({
+    super.key,
+    required this.book,
+    required this.cover,
+    required this.demandRevision,
+    required this.loadCover,
+    required this.openBook,
+  });
+
+  final FlutterLibraryBook book;
+  final Uint8List? cover;
+  final int demandRevision;
+  final bool Function(int) loadCover;
+  final ValueChanged<FlutterLibraryBook> openBook;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final heading = l10n.libraryContinueReading;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: ShosaiTokens.layoutLibrarySectionSpacing,
+      children: [
+        Text(
+          heading,
+          style: shosaiInterfaceStyleForText(
+            _libraryHeadingStyle(
+              context,
+              ShadTheme.of(context).textTheme.large,
+            ),
+            heading,
+          ),
+        ),
+        LibraryContinueCard(
+          book: book,
+          cover: cover,
+          demandRevision: demandRevision,
+          loadCover: loadCover,
+          openBook: openBook,
+        ),
+        const SizedBox(
+          height: ShosaiTokens.layoutLibraryContinueSectionTrailingSpace,
+        ),
+      ],
+    );
+  }
+}
+
+/// The reference's continue-reading card: a surface-framed book button whose
+/// left-to-right order is the cover, the reading details and the continue link.
+///
+/// The card dispatches [LibraryBookOpened] with the book it was built with, so
+/// the book and its durable saved position are the ones the card showed even if
+/// a reload lands while the open effect runs.
+class LibraryContinueCard extends StatelessWidget {
+  const LibraryContinueCard({
+    super.key,
+    required this.book,
+    required this.cover,
+    required this.demandRevision,
+    required this.loadCover,
+    required this.openBook,
+  });
+
+  final FlutterLibraryBook book;
+  final Uint8List? cover;
+  final int demandRevision;
+  final bool Function(int) loadCover;
+  final ValueChanged<FlutterLibraryBook> openBook;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final l10n = AppLocalizations.of(context);
+    final radius = BorderRadius.circular(ShosaiTokens.radiusMedium);
+    final title = book.title;
+    final author = book.author ?? l10n.cardUnknownAuthor;
+    final percentage = (book.progress.clamp(0.0, 1.0) * 100).round();
+    final progressLabel = l10n.libraryPercentComplete(percentage);
+    final link = l10n.libraryContinue;
+    final titleStyle = _continueTitleStyle(context);
+    final authorStyle = _continueAuthorStyle(context);
+    final percentStyle = _continuePercentStyle(context);
+    final linkStyle = _continueLinkStyle(context);
+    // The reference's `width(Fill).max_width(620)`: the card fills what the
+    // section gives it up to the reference's cap, and the section column's
+    // start alignment keeps it flush left.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        maxWidth: ShosaiTokens.layoutContinueCardMaxWidth,
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // The reference's 100 px details box is a floor, not a cap: Iced
+          // never scales interface text, so Flutter reserves the height the
+          // text actually paints at the width the row gives it (the same rule
+          // the cards follow) instead of cutting a scaled or wrapped line.
+          final contentWidth =
+              constraints.maxWidth - ShosaiTokens.layoutButtonBookPadding * 2;
+          final detailsWidth = math.max(
+            0.0,
+            contentWidth -
+                ShosaiTokens.layoutContinueCardCoverWidth -
+                ShosaiTokens.layoutContinueCardRowSpacing * 2 -
+                _measuredTextWidth(context, linkStyle, link),
+          );
+          final detailsHeight = math.max(
+            ShosaiTokens.layoutContinueCardDetailsHeight,
+            _measuredTextHeight(
+                  context,
+                  titleStyle,
+                  title,
+                  detailsWidth,
+                  maxLines: 2,
+                ) +
+                _measuredTextHeight(
+                  context,
+                  authorStyle,
+                  author,
+                  detailsWidth,
+                  maxLines: 1,
+                ) +
+                _measuredTextHeight(
+                  context,
+                  percentStyle,
+                  progressLabel,
+                  detailsWidth,
+                ) +
+                ShosaiTokens.layoutProgressGirth +
+                ShosaiTokens.layoutContinueCardDetailsSpacing * 4,
+          );
+          final details = SizedBox(
+            height: detailsHeight,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: ShosaiTokens.layoutContinueCardDetailsSpacing,
+              children: [
+                // The button's default text style centres its label, and the
+                // reference's details column is left-aligned beside the cover,
+                // so each line states its own alignment.
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.start,
+                  style: shosaiInterfaceStyleForText(titleStyle, title),
+                ),
+                Text(
+                  author,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.start,
+                  style: shosaiInterfaceStyleForText(authorStyle, author),
+                ),
+                const Spacer(),
+                Text(
+                  progressLabel,
+                  textAlign: TextAlign.start,
+                  style: shosaiInterfaceStyleForText(
+                    percentStyle,
+                    progressLabel,
+                  ),
+                ),
+                ShadProgress(
+                  value: book.progress.clamp(0.0, 1.0),
+                  minHeight: ShosaiTokens.layoutProgressGirth,
+                  backgroundColor: scheme.muted,
+                  color: scheme.primary,
+                  borderRadius: BorderRadius.circular(
+                    ShosaiTokens.radiusProgress,
+                  ),
+                  innerBorderRadius: BorderRadius.circular(
+                    ShosaiTokens.radiusProgress,
+                  ),
+                ),
+              ],
+            ),
+          );
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.card,
+              border: Border.all(
+                color: scheme.border,
+                width: ShosaiTokens.layoutLibraryCardBorderWidth,
+              ),
+              borderRadius: radius,
+            ),
+            child: ShadButton.raw(
+              variant: ShadButtonVariant.ghost,
+              // The card fills its frame: the button's own size theme would
+              // pin the content inside a single-line control box, so the
+              // content sizes the card instead.
+              width: double.infinity,
+              height: 0,
+              padding: const EdgeInsets.all(
+                ShosaiTokens.layoutButtonBookPadding,
+              ),
+              hoverBackgroundColor: theme.brightness == Brightness.dark
+                  ? scheme.muted
+                  : ShosaiTokens.appBookHover,
+              pressedBackgroundColor: theme.brightness == Brightness.dark
+                  ? scheme.muted
+                  : ShosaiTokens.appBookHover,
+              foregroundColor: scheme.foreground,
+              decoration: ShadDecoration(
+                border: ShadBorder.all(radius: radius, width: 0),
+                focusedBorder:
+                    (theme.decoration.focusedBorder ?? ShadBorder.none)
+                        .copyWith(radius: radius),
+              ),
+              onPressed: () => openBook(book),
+              // The button's own row shrink-wraps its children, so the
+              // content takes the flexible slot the way the card's does;
+              // without it the row's `Expanded` details would see an
+              // unbounded width.
+              child: Flexible(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  spacing: ShosaiTokens.layoutContinueCardRowSpacing,
+                  children: [
+                    LibraryBookCover(
+                      book: book,
+                      cover: cover,
+                      demandRevision: demandRevision,
+                      loadCover: loadCover,
+                      width: ShosaiTokens.layoutContinueCardCoverWidth,
+                      height: ShosaiTokens.layoutContinueCardCoverHeight,
+                      radius: ShosaiTokens.layoutLibraryCardCoverRadius,
+                      shadow: false,
+                    ),
+                    Expanded(child: details),
+                    Text(link, style: linkStyle),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// The height [text] paints in [style] within [width], with the same line cap
+/// and ellipsis the caller renders it with.
+///
+/// Measured from the styles the widget renders with, so the Japanese face's
+/// taller line boxes and a 200% text scale are both accounted for instead of
+/// assumed.
+double _measuredTextHeight(
+  BuildContext context,
+  TextStyle style,
+  String text,
+  double width, {
+  int? maxLines,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: shosaiInterfaceStyleForText(style, text)),
+    textScaler: MediaQuery.textScalerOf(context),
+    textDirection: TextDirection.ltr,
+    maxLines: maxLines,
+    ellipsis: maxLines == null ? null : '…',
+  )..layout(maxWidth: math.max(0.0, width));
+  return painter.height;
+}
+
+/// The width [text] paints in [style] on a single line.
+double _measuredTextWidth(BuildContext context, TextStyle style, String text) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: shosaiInterfaceStyleForText(style, text)),
+    textScaler: MediaQuery.textScalerOf(context),
+    textDirection: TextDirection.ltr,
+    maxLines: 1,
+  )..layout();
+  return painter.width;
+}
+
+/// The continue card's title style: the reference's 16 px title.
+TextStyle _continueTitleStyle(BuildContext context) =>
+    _libraryForegroundStyle(context, ShosaiTokens.typeSize16);
+
+/// The continue card's author style: the reference's 12 px muted line.
+TextStyle _continueAuthorStyle(BuildContext context) =>
+    _libraryMutedStyle(context, ShosaiTokens.typeSize12);
+
+/// The continue card's progress label: the reference's 11 px muted line.
+TextStyle _continuePercentStyle(BuildContext context) =>
+    _libraryMutedStyle(context, ShosaiTokens.typeSize11);
+
+/// The continue card's link: the reference's 13 px accent label.
+TextStyle _continueLinkStyle(BuildContext context) =>
+    (Theme.of(context).textTheme.bodyMedium ?? const TextStyle()).copyWith(
+      fontSize: ShosaiTokens.typeSize13,
+      color: ShosaiTokens.appAccent,
+    );
 
 /// The retained Flutter paging control below the grid.
 ///
@@ -486,13 +1220,15 @@ String _readingStatus(AppLocalizations l10n, double progress) {
       : l10n.cardPercentRead(percentage);
 }
 
-/// The card's cover: the decoded cover, or the reference's title placeholder
-/// while it is missing, pending or failed.
+/// The cover's box for one card: the decoded cover, or the reference's title
+/// placeholder while it is missing, pending or failed.
 ///
-/// The box keeps the reference's 210 px height either way (LB-12) and casts the
-/// reference's cover shadow. The cover is requested once the box is built,
-/// which is what makes loading lazy and bounded: the grid only builds visible
-/// cards, and the controller refuses a request it cannot admit.
+/// The box keeps the reference's size either way (LB-12): the card's 210 px
+/// height with its cover shadow, or the continue card's 72x100 box, which the
+/// reference paints without a shadow because only the card's own cover style
+/// casts one. The cover is requested once the box is built, which is what makes
+/// loading lazy and bounded: the grid only builds visible cards, and the
+/// controller refuses a request it cannot admit.
 class LibraryBookCover extends StatefulWidget {
   const LibraryBookCover({
     super.key,
@@ -500,12 +1236,29 @@ class LibraryBookCover extends StatefulWidget {
     required this.cover,
     required this.demandRevision,
     required this.loadCover,
+    this.width,
+    this.height = ShosaiTokens.layoutLibraryCardCoverHeight,
+    this.radius = ShosaiTokens.layoutLibraryCardCoverRadius,
+    this.shadow = true,
   });
 
   final FlutterLibraryBook book;
   final Uint8List? cover;
   final int demandRevision;
   final bool Function(int) loadCover;
+
+  /// The box width; null fills the available width, as the card's box does.
+  final double? width;
+
+  /// The box height: the reference's 210 px card cover or its 100 px continue
+  /// card cover.
+  final double height;
+
+  /// The placeholder's corner radius.
+  final double radius;
+
+  /// Whether the box casts the reference's cover shadow.
+  final bool shadow;
 
   @override
   State<LibraryBookCover> createState() => _LibraryBookCoverState();
@@ -542,33 +1295,41 @@ class _LibraryBookCoverState extends State<LibraryBookCover> {
       });
     }
     final l10n = AppLocalizations.of(context);
+    final placeholder = _CoverPlaceholder(
+      title: widget.book.title,
+      radius: widget.radius,
+      shadow: widget.shadow,
+    );
     return SizedBox(
-      height: ShosaiTokens.layoutLibraryCardCoverHeight,
+      width: widget.width,
+      height: widget.height,
       child: bytes == null || bytes.isEmpty
-          ? _CoverPlaceholder(title: widget.book.title)
+          ? placeholder
           : Semantics(
               container: true,
               image: true,
               label: l10n.cardCoverSemantics(widget.book.title),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  boxShadow: [
-                    BoxShadow(
-                      color: ShosaiTokens.appShadowCover,
-                      offset: const Offset(
-                        0,
-                        ShosaiTokens.layoutLibraryCardCoverShadowOffset,
-                      ),
-                      blurRadius: ShosaiTokens.layoutLibraryCardCoverShadowBlur,
-                    ),
-                  ],
+                  boxShadow: widget.shadow
+                      ? [
+                          BoxShadow(
+                            color: ShosaiTokens.appShadowCover,
+                            offset: const Offset(
+                              0,
+                              ShosaiTokens.layoutLibraryCardCoverShadowOffset,
+                            ),
+                            blurRadius:
+                                ShosaiTokens.layoutLibraryCardCoverShadowBlur,
+                          ),
+                        ]
+                      : const <BoxShadow>[],
                 ),
                 child: Image.memory(
                   bytes,
                   fit: BoxFit.contain,
                   gaplessPlayback: true,
-                  errorBuilder: (_, _, _) =>
-                      _CoverPlaceholder(title: widget.book.title),
+                  errorBuilder: (_, _, _) => placeholder,
                 ),
               ),
             ),
@@ -582,27 +1343,33 @@ class _LibraryBookCoverState extends State<LibraryBookCover> {
 /// Iced truncates the label to twenty characters, which is the clipping finding
 /// F8 records; the placeholder wraps and ellipsizes a real title instead.
 class _CoverPlaceholder extends StatelessWidget {
-  const _CoverPlaceholder({required this.title});
+  const _CoverPlaceholder({
+    required this.title,
+    this.radius = ShosaiTokens.layoutLibraryCardCoverRadius,
+    this.shadow = true,
+  });
 
   final String title;
+  final double radius;
+  final bool shadow;
 
   @override
   Widget build(BuildContext context) => Container(
     decoration: BoxDecoration(
       color: ShosaiTokens.appCoverPlaceholderBackground,
-      borderRadius: BorderRadius.circular(
-        ShosaiTokens.layoutLibraryCardCoverRadius,
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: ShosaiTokens.appShadowCover,
-          offset: const Offset(
-            0,
-            ShosaiTokens.layoutLibraryCardCoverShadowOffset,
-          ),
-          blurRadius: ShosaiTokens.layoutLibraryCardCoverShadowBlur,
-        ),
-      ],
+      borderRadius: BorderRadius.circular(radius),
+      boxShadow: shadow
+          ? [
+              BoxShadow(
+                color: ShosaiTokens.appShadowCover,
+                offset: const Offset(
+                  0,
+                  ShosaiTokens.layoutLibraryCardCoverShadowOffset,
+                ),
+                blurRadius: ShosaiTokens.layoutLibraryCardCoverShadowBlur,
+              ),
+            ]
+          : const <BoxShadow>[],
     ),
     padding: const EdgeInsets.all(
       ShosaiTokens.layoutLibraryCardPlaceholderPadding,
