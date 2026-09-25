@@ -59,6 +59,7 @@ class LibraryController implements Listenable {
   int _cleanupRevision = 0;
   String? _displayedQuery;
   FlutterBookFormat? _displayedFormat;
+  int? _stalledAppendOffset;
   bool _closing = false;
   bool _bridgeDisposed = false;
   bool _pendingImportAdapter = false;
@@ -95,7 +96,28 @@ class LibraryController implements Listenable {
         _emit(_model.copyWith(coverRevision: _model.coverRevision + 1));
         _load();
       case LibraryMoreRequested():
+        // The scroll trigger can fire again before the model it was built with
+        // is replaced, so the request is refused while a load is in flight:
+        // one page is fetched per completed page, never two for one trigger.
+        // A paging failure keeps its own recovery — its alert's Retry is the
+        // way back — so the trigger cannot retry the failed page by itself,
+        // and an append that added no books while still advertising another
+        // page cannot make progress, so its offset is not asked for again.
         if (_model.hasMore &&
+            !_model.loading &&
+            _model.loadError == null &&
+            _stalledAppendOffset != _model.books.length &&
+            _displayedQuery == _model.query &&
+            _displayedFormat == _model.format) {
+          _load(append: true);
+        }
+      case LibraryMoreRetryRequested():
+        // The paging row's Retry retries the page that failed, and only while
+        // that failure still belongs to the displayed collection: a retry is
+        // not a new trigger, so it obeys the same admission as the trigger.
+        if (_model.pagingFailed &&
+            _model.loadError != null &&
+            !_model.loading &&
             _displayedQuery == _model.query &&
             _displayedFormat == _model.format) {
           _load(append: true);
@@ -154,10 +176,22 @@ class LibraryController implements Listenable {
         if (message.revision == _queryRevision) _load();
       case _LibraryLoaded():
         _releaseCancellation(message.cancellation);
-        if (message.revision == _loadRevision) {
+        // A closed controller drains its effects but owns no model state: a
+        // completion that arrives after disposal cannot write it.
+        if (!_closing && message.revision == _loadRevision) {
           if (!message.append) {
             _displayedQuery = _model.query;
             _displayedFormat = _model.format;
+            // A replacement load is a new collection: whatever offset stalled
+            // before it is not this collection's.
+            _stalledAppendOffset = null;
+          } else if (message.page.books.isEmpty && message.page.hasMore) {
+            // The page claimed another page but added nothing, so the next
+            // request would repeat this offset and return the same empty page.
+            // The Rust producer derives `has_more` from a `limit + 1` fetch and
+            // cannot report this shape; refusing the repeat bounds a malformed
+            // response instead of looping on it.
+            _stalledAppendOffset = _model.books.length;
           }
           _emit(
             _model.copyWith(
@@ -171,15 +205,29 @@ class LibraryController implements Listenable {
               ),
               settings: message.settings ?? _model.settings,
               loaded: true,
+              loading: false,
+              loadingMore: false,
               loadError: null,
+              pagingFailed: false,
               hasMore: message.page.hasMore,
             ),
           );
         }
       case _LibraryFailed():
         _releaseCancellation(message.cancellation);
-        if (message.revision == _loadRevision) {
-          _emit(_model.copyWith(loadError: message.error, hasMore: false));
+        if (!_closing && message.revision == _loadRevision) {
+          _emit(
+            _model.copyWith(
+              loading: false,
+              loadingMore: false,
+              loadError: message.error,
+              // A failed first page leaves the page state unknown; a failed
+              // append does not, so its next page stays advertised until the
+              // failure is retried — by the paging row's alert, in place.
+              pagingFailed: message.append,
+              hasMore: message.append ? _model.hasMore : false,
+            ),
+          );
         }
       case _LibraryMutationCompleted():
         if (message.cancellation case final cancellation?) {
@@ -352,19 +400,35 @@ class LibraryController implements Listenable {
     try {
       cancellation = _bridge.createCancellation();
     } catch (error) {
-      _emit(_model.copyWith(loadError: safeError(error), hasMore: false));
+      // A load that cannot even start still ends the skeleton: this is the
+      // newest load, so nothing else owns the flags.
+      _emit(
+        _model.copyWith(
+          loading: false,
+          loadingMore: false,
+          loadError: safeError(error),
+          // A first page that cannot start leaves the collection's length
+          // unknown; an append keeps the next page it was advertising.
+          pagingFailed: append,
+          hasMore: append ? _model.hasMore : false,
+        ),
+      );
       return;
     }
     _cancellations.add(cancellation);
     _foregroundCancellations.add(cancellation);
     _loadCancellations.add(cancellation);
     _beginEffect();
+    // The load effect owns the collection's loading state: the skeleton shows
+    // for a first-page load and the grid stays for an appended page, exactly as
+    // the reference's `library_loading && library_offset == 0` branch does.
+    _emit(_model.copyWith(loading: true, loadingMore: append));
     unawaited(() async {
       try {
         final page = await _bridge.libraryPage(
           query: query,
           format: format,
-          limit: 50,
+          limit: libraryPageSize,
           offset: offset,
           cancellationId: cancellation,
         );
@@ -381,6 +445,7 @@ class LibraryController implements Listenable {
             safeError(error),
             LibraryFailure.load,
             cancellation,
+            append: append,
           ),
         );
       } finally {
@@ -605,14 +670,15 @@ class LibraryController implements Listenable {
         .map((item) => item.warning)
         .whereType<String>()
         .toList(growable: false);
-    if (!report.cancelled &&
-        report.failed == BigInt.zero &&
-        failure == null &&
-        warnings.isEmpty) {
+    if (report.failed == BigInt.zero && failure == null && warnings.isEmpty) {
+      // A clean import needs no failure surface (its success feedback belongs
+      // to the notice policy), and a cancellation on its own is neutral rather
+      // than an error (plan decision 13): the books a cancelled import did land
+      // are in the grid after the reload. A cancelled import that also failed
+      // or warned keeps the summary below.
       return null;
     }
     final parts = <String>[];
-    if (report.cancelled) parts.add('Import cancelled.');
     if (report.imported > BigInt.zero) {
       parts.add('Imported ${_bookCount(report.imported)}.');
     }
@@ -623,7 +689,7 @@ class LibraryController implements Listenable {
     if (warnings.isNotEmpty) {
       parts.add('Some imported book details could not be loaded.');
     }
-    return parts.join(' ');
+    return parts.isEmpty ? null : parts.join(' ');
   }
 
   void _releaseCancellation(BigInt cancellation) {

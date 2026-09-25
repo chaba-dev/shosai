@@ -230,11 +230,263 @@ abstract class AppLocalizations {
   /// **'Removing…'**
   String get cardRemoving;
 
-  /// Retained Flutter paging control; Iced's library paging row (previous/next-library-page) is package 3D's. The label is the pre-3B wording, translated.
+  /// Iced reference key: loading-more. The collection's paging feedback; the owner replaced the retained Load more button with automatic next-page loading (2026-09-25).
   ///
   /// In en, this message translates to:
-  /// **'Load more books'**
-  String get collectionLoadMore;
+  /// **'Loading more…'**
+  String get libraryLoadingMore;
+
+  /// Iced reference key: continue-reading. The collection section heading above the continue card.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue reading'**
+  String get libraryContinueReading;
+
+  /// Iced reference key: continue. The continue card's right-hand link label; the two spaces before the chevron are the reference's own spacing.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue  ›'**
+  String get libraryContinue;
+
+  /// Iced reference key: percent-complete. The continue card's progress label; the placeholder is the rounded percentage, never concatenated in Dart.
+  ///
+  /// In en, this message translates to:
+  /// **'{percentage}% complete'**
+  String libraryPercentComplete(int percentage);
+
+  /// Iced reference key: search-results. The collection section title while a search is active; the unfiltered title reuses filterAllBooks (Iced all-books).
+  ///
+  /// In en, this message translates to:
+  /// **'Search results'**
+  String get librarySearchResults;
+
+  /// Iced reference key: empty-library-heading. The empty-library composition's 24 px heading.
+  ///
+  /// In en, this message translates to:
+  /// **'A quiet place for every book'**
+  String get libraryEmptyHeading;
+
+  /// Iced reference key: empty-library. The empty-library composition's body; a library failure replaces it with the failure's own text.
+  ///
+  /// In en, this message translates to:
+  /// **'No books in library. Import files to get started.'**
+  String get libraryEmptyBody;
+
+  /// Iced reference key: no-matching-books. The no-matches composition's 24 px heading.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching books'**
+  String get libraryNoMatchesHeading;
+
+  /// Iced reference key: empty-search. The no-matches composition's body; a library failure replaces it with the failure's own text.
+  ///
+  /// In en, this message translates to:
+  /// **'No books match your search or filter.'**
+  String get libraryNoMatchesBody;
+
+  /// Iced reference key: add-first-books. The empty-library action; the Flutter action draws the plus as an icon, so the label carries no plus sign.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your first books'**
+  String get libraryAddFirstBooks;
+
+  /// Retained Flutter recovery action on the collection's failure alert; Iced's alert bar carries no action.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get libraryRetry;
+
+  /// Retained Flutter debt state (provider cleanup pending); Iced has no counterpart. The wording is the pre-3C surface, now translated.
+  ///
+  /// In en, this message translates to:
+  /// **'Temporary import data could not be removed yet.'**
+  String get libraryCleanupPending;
+
+  /// Retained Flutter recovery action for the provider-cleanup debt state.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry cleanup'**
+  String get libraryCleanupRetry;
+
+  /// Retained Flutter debt state (managed file deletion pending); Iced has no counterpart. The wording is the pre-3C surface, now translated.
+  ///
+  /// In en, this message translates to:
+  /// **'Book removed. Its private copy will be deleted later.'**
+  String get libraryDeletionPending;
+
+  /// Retained Flutter acknowledgement action for the managed-deletion debt state.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get libraryDeletionDismiss;
+
+  /// Package 2D notice copy: brief success after a clean import. Owned by 2D; the catalog entry is added by 3C so the notice module compiles.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Imported 1 book.} other{Imported {count} books.}}'**
+  String noticeImportSucceeded(int count);
+
+  /// Package 2D notice copy: persistent failure title after a partial import.
+  ///
+  /// In en, this message translates to:
+  /// **'Some books could not be imported.'**
+  String get noticeImportPartialTitle;
+
+  /// Package 2D notice copy: persistent failure title after a failed import.
+  ///
+  /// In en, this message translates to:
+  /// **'The import could not be completed.'**
+  String get noticeImportFailedTitle;
+
+  /// Package 2D notice copy: brief success after saving reader settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Reader settings saved.'**
+  String get noticeSettingsSaved;
+
+  /// Package 2D notice copy: persistent failure after a failed settings save.
+  ///
+  /// In en, this message translates to:
+  /// **'Reader settings could not be saved.'**
+  String get noticeSettingsSaveFailed;
+
+  /// Package 2D notice copy: brief success after a removal.
+  ///
+  /// In en, this message translates to:
+  /// **'Book removed.'**
+  String get noticeBookRemoved;
+
+  /// Package 2D notice copy: persistent failure after a failed removal.
+  ///
+  /// In en, this message translates to:
+  /// **'The book could not be removed.'**
+  String get noticeBookRemovalFailed;
+
+  /// Package 2D notice copy: recovery action label.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get noticeRetry;
+
+  /// Package 2D notice copy: acknowledgement action label.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get noticeDismiss;
+
+  /// Iced reference key: back-library.
+  ///
+  /// In en, this message translates to:
+  /// **'‹ Library'**
+  String get readerBackToLibrary;
+
+  /// Iced reference key: reader. The reader chrome title when no document title is available.
+  ///
+  /// In en, this message translates to:
+  /// **'Reader'**
+  String get readerFallbackTitle;
+
+  /// Iced reference key: contents.
+  ///
+  /// In en, this message translates to:
+  /// **'Contents'**
+  String get readerContentsAction;
+
+  /// Iced reference key: reading-appearance.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading appearance'**
+  String get readerAppearanceAction;
+
+  /// NEW: no Iced string. Accessible name for the reader overflow control.
+  ///
+  /// In en, this message translates to:
+  /// **'More'**
+  String get readerMoreAction;
+
+  /// Iced reference key: opening-document.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening document…'**
+  String get readerOpeningDocument;
+
+  /// Iced reference key: no-book-open.
+  ///
+  /// In en, this message translates to:
+  /// **'No book open'**
+  String get readerNoBookOpen;
+
+  /// Iced reference key: single-page-status.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {page} · {percentage}%'**
+  String readerPageStatus(int page, int percentage);
+
+  /// Iced reference key: page-range-status.
+  ///
+  /// In en, this message translates to:
+  /// **'Pages {first}–{last} · {percentage}%'**
+  String readerPageRangeStatus(int first, int last, int percentage);
+
+  /// NEW: no Iced string; names the logical-unit display kind, composed from Iced chapter-number.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapter {chapter} · {percentage}%'**
+  String readerChapterStatus(int chapter, int percentage);
+
+  /// NEW: no Iced string, same reason as readerChapterStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapters {first}–{last} · {percentage}%'**
+  String readerChapterRangeStatus(int first, int last, int percentage);
+
+  /// NEW: no Iced string. The reader tab close control; Iced paints a × glyph (app.rs tabs_view), this is its accessible label.
+  ///
+  /// In en, this message translates to:
+  /// **'Close {title}'**
+  String readerCloseTab(String title);
+
+  /// NEW: no Iced string. The reader tab strip label; Iced renders the strip without an accessible label.
+  ///
+  /// In en, this message translates to:
+  /// **'Open books'**
+  String get readerTabsLabel;
+
+  /// NEW: no Iced string. The reader edge navigation; Iced paints ‹/› glyphs (app.rs reader_edge_button), these are their accessible labels.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous page'**
+  String get readerPreviousPage;
+
+  /// NEW: no Iced string, the same accessible labels as readerPreviousPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Next page'**
+  String get readerNextPage;
+
+  /// NEW: no Iced string. The reader open-failure retry action.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get readerRetryOpen;
+
+  /// Iced reference key: missing-book.
+  ///
+  /// In en, this message translates to:
+  /// **'This book could not be found at its previous location.'**
+  String get readerMissingBook;
+
+  /// Iced reference key: locate-file.
+  ///
+  /// In en, this message translates to:
+  /// **'Locate File…'**
+  String get readerLocateFile;
+
+  /// Iced reference key: remove-from-library.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from Library'**
+  String get readerRemoveFromLibrary;
 }
 
 class _AppLocalizationsDelegate

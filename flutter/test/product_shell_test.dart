@@ -261,14 +261,32 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.bySemanticsLabel('Cover of Recently Read'), findsOneWidget);
-    expect(find.byType(Image), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(LibraryBookCard).first,
+        matching: find.bySemanticsLabel('Cover of Recently Read'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(LibraryBookCard).first,
+        matching: find.byType(Image),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Book 59'), findsNothing);
     expect(bridge.coverRequests, contains(7));
 
     await tester.tap(find.byTooltip('Refresh library'));
     await tester.pumpAndSettle();
-    expect(find.bySemanticsLabel('Cover of Recently Read'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(LibraryBookCard).first,
+        matching: find.bySemanticsLabel('Cover of Recently Read'),
+      ),
+      findsOneWidget,
+    );
     expect(bridge.coverRequests.where((bookId) => bookId == 7), hasLength(1));
   });
 
@@ -593,12 +611,17 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('library is empty'), findsOneWidget);
+    expect(find.text('A quiet place for every book'), findsOneWidget);
+    expect(
+      find.text('No books in library. Import files to get started.'),
+      findsOneWidget,
+    );
 
     await tester.enterText(find.byType(ShadInput), 'missing');
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpAndSettle();
-    expect(find.text('No books match these filters.'), findsOneWidget);
+    expect(find.text('No matching books'), findsOneWidget);
+    expect(find.text('No books match your search or filter.'), findsOneWidget);
   });
 
   testWidgets('reader settings expose and persist complete product controls', (
@@ -902,7 +925,7 @@ void main() {
   });
 
   test(
-    'cancelled folder import reports and refreshes committed books',
+    'cancelled folder import stays neutral and refreshes committed books',
     () async {
       final bridge = _ControlledLibraryBridge();
       bridge.directoryImportCompleter = Completer<FlutterImportReport>();
@@ -931,14 +954,17 @@ void main() {
       );
       await _waitUntil(() => bridge.queries.isNotEmpty);
 
-      expect(controller.model.error, 'Import cancelled. Imported 2 books.');
-      expect(controller.model.failure, LibraryFailure.import);
+      // Plan decision 13: cancellation is neutral, not an error surface. The
+      // books it did land are still reloaded into the grid.
+      expect(controller.model.error, isNull);
+      expect(controller.model.failure, LibraryFailure.none);
+      expect(bridge.queries, isNotEmpty);
       controller.dispose();
       await bridge.disposed.future;
     },
   );
 
-  test('custom import runner preserves partial cancellation outcome', () async {
+  test('custom import runner keeps a cancelled outcome neutral', () async {
     final bridge = _ControlledLibraryBridge();
     var runnerCalls = 0;
     final controller = LibraryController(
@@ -970,13 +996,13 @@ void main() {
 
     expect(runnerCalls, 1);
     expect(bridge.importCalls, 0);
-    expect(controller.model.error, 'Import cancelled. Imported 1 book.');
+    expect(controller.model.error, isNull);
     controller.dispose();
     await bridge.disposed.future;
   });
 
   test(
-    'selected-file import reports committed work before cancellation',
+    'selected-file import reports its failure without blaming cancellation',
     () async {
       final bridge = _ControlledLibraryBridge()
         ..importReport = FlutterImportReport(
@@ -1008,8 +1034,8 @@ void main() {
 
       expect(
         controller.model.error,
-        'Import cancelled. Imported 1 book. 1 failed. '
-        'This file type is not supported.',
+        'Imported 1 book. 1 failed. This file type is not supported.',
+        reason: 'the failure summary stays visible without a cancellation line',
       );
       expect(bridge.importedPaths, ['/first.pdf', '/second.pdf']);
       controller.dispose();
