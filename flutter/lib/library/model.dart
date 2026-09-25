@@ -52,6 +52,7 @@ final class LibraryModel {
     this.failure = LibraryFailure.none,
     this.providerCleanupPending = false,
     this.managedFileDeletionPending = false,
+    this.removingBookId,
   });
 
   final List<FlutterLibraryBook> books;
@@ -78,6 +79,14 @@ final class LibraryModel {
   final bool providerCleanupPending;
   final bool managedFileDeletionPending;
 
+  /// The book whose confirmed removal is in flight, or null.
+  ///
+  /// The card shows the reference's removal-pending state for this book while
+  /// the controller-owned removal effect runs; only the controller sets it, and
+  /// only after the confirmation, so a cancelled confirmation leaves no card
+  /// pending.
+  final int? removingBookId;
+
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
     Map<int, Uint8List>? covers,
@@ -94,6 +103,7 @@ final class LibraryModel {
     LibraryFailure? failure,
     bool? providerCleanupPending,
     bool? managedFileDeletionPending,
+    Object? removingBookId = _same,
   }) => LibraryModel(
     books: books ?? this.books,
     covers: covers ?? this.covers,
@@ -118,6 +128,9 @@ final class LibraryModel {
         providerCleanupPending ?? this.providerCleanupPending,
     managedFileDeletionPending:
         managedFileDeletionPending ?? this.managedFileDeletionPending,
+    removingBookId: identical(removingBookId, _same)
+        ? this.removingBookId
+        : removingBookId as int?,
   );
 }
 

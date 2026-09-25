@@ -168,6 +168,50 @@ void main() {
       expect(ShosaiTokens.radiusMedium, 10.0);
     });
 
+    test('the library grid and card metrics are the pinned Iced values', () {
+      // Transcribed from `render_book_card`, `widgets::book_button` and
+      // `grid(...).fluid(220)` at the pinned reference, not read back from the
+      // generated file.
+      expect(ShosaiTokens.layoutLibraryGridMinColumn, 220.0);
+      expect(ShosaiTokens.layoutLibraryGridSpacing, 18.0);
+      expect(ShosaiTokens.layoutLibraryCollectionPaddingVertical, 22.0);
+      expect(ShosaiTokens.layoutLibraryCollectionPaddingHorizontal, 24.0);
+      expect(ShosaiTokens.layoutButtonBookPadding, 8.0);
+      expect(ShosaiTokens.layoutLibraryCardHeight, 330.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverHeight, 210.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverRadius, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverShadowOffset, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverShadowBlur, 12.0);
+      expect(ShosaiTokens.layoutLibraryCardTitleHeight, 32.0);
+      expect(ShosaiTokens.layoutLibraryCardAuthorHeight, 28.0);
+      expect(ShosaiTokens.layoutLibraryCardSpacing, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuWidth, 164.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuPadding, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuActionPaddingVertical, 7.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuActionPaddingHorizontal, 10.0);
+      expect(ShosaiTokens.layoutLibraryCardTriggerPaddingVertical, 5.0);
+      expect(ShosaiTokens.layoutLibraryCardTriggerPaddingHorizontal, 8.0);
+      expect(ShosaiTokens.layoutLibraryCardTriggerOffset, 8.0);
+      expect(ShosaiTokens.layoutLibraryCardRemovePaddingVertical, 3.0);
+      expect(ShosaiTokens.layoutLibraryCardRemovePaddingHorizontal, 6.0);
+      expect(ShosaiTokens.layoutLibraryCardMetadataGap, 6.0);
+      expect(ShosaiTokens.layoutLibraryCardBorderWidth, 1.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha, 0.1);
+      // Retained Flutter: the reference placeholder centres its label with no
+      // inset, so this one is not an Iced value.
+      expect(ShosaiTokens.layoutLibraryCardPlaceholderPadding, 8.0);
+    });
+
+    test('the card trigger refinement values are pinned', () {
+      // The owner-directed refinement of 2026-09-25 (a subtler trigger than the
+      // reference's opaque SURFACE square with its BORDER): the reference's
+      // painted geometry keeps its 13 px glyph, [5, 8] padding and radiusSmall,
+      // and only the fill becomes a translucent ink scrim. These two weights are
+      // Retained Flutter values, not Iced ones.
+      expect(ShosaiTokens.layoutLibraryCardTriggerScrimAlpha, 0.5);
+      expect(ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha, 0.68);
+    });
+
     test('the Shad type scale is the Iced UI scale', () {
       final text = shosaiShadTheme(Brightness.light).textTheme;
       expect(text.h1.fontSize, 32);
@@ -518,6 +562,32 @@ void main() {
       expect(
         ShosaiTokens.layoutReaderSpreadMinWidth,
         (layout['reader'] as Map<String, dynamic>)['spreadMinWidth'],
+      );
+      final library = layout['library'] as Map<String, dynamic>;
+      final card = library['card'] as Map<String, dynamic>;
+      expect(ShosaiTokens.layoutLibraryCardHeight, card['height']);
+      expect(ShosaiTokens.layoutLibraryCardCoverHeight, card['coverHeight']);
+      expect(
+        ShosaiTokens.layoutLibraryCollectionPaddingHorizontal,
+        library['collectionPaddingHorizontal'],
+      );
+      expect(ShosaiTokens.layoutLibraryCardMetadataGap, card['metadataGap']);
+      expect(ShosaiTokens.layoutLibraryCardBorderWidth, card['borderWidth']);
+      expect(
+        ShosaiTokens.layoutLibraryCardPlaceholderPadding,
+        card['placeholderPadding'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha,
+        card['menuActionHoverAlpha'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardTriggerScrimAlpha,
+        card['triggerScrimAlpha'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha,
+        card['triggerScrimActiveAlpha'],
       );
       expect(document['meta']['reference_revision'], isNotEmpty);
     });

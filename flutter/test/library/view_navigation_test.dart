@@ -211,8 +211,27 @@ void main() {
     return effective;
   }
 
-  Finder navigationEntry(String label) =>
-      find.widgetWithText(ShadButton, label);
+  /// The library chrome above the collection: the header, the wide sidebar and
+  /// the compact filter row.
+  final navigationChrome = find.byWidgetPredicate(
+    (widget) =>
+        widget is LibraryHeader ||
+        widget is LibrarySidebar ||
+        widget is LibraryFilterRow,
+  );
+
+  /// The chrome control labelled [label].
+  ///
+  /// Scoped to the chrome above the collection: a card is a button too, and its
+  /// format label carries the same text as a filter entry.
+  Finder navigationEntry(String label) => find.descendant(
+    of: navigationChrome,
+    matching: find.widgetWithText(ShadButton, label),
+  );
+
+  /// The label paragraph inside the chrome control labelled [label].
+  Finder navigationLabel(String label) =>
+      find.descendant(of: navigationChrome, matching: find.text(label));
 
   ShadButton navigationButton(WidgetTester tester, String label) =>
       tester.widget<ShadButton>(navigationEntry(label));
@@ -236,7 +255,7 @@ void main() {
   /// True when [label]'s entry is the focused element.
   bool isFocused(WidgetTester tester, String label) =>
       tester
-          .getSemantics(find.text(label))
+          .getSemantics(navigationLabel(label))
           .getSemanticsData()
           .flagsCollection
           .isFocused ==
@@ -386,7 +405,7 @@ void main() {
       await pumpLibrary(tester, const Size(900, 700), textScale: 2);
 
       final header = tester.getRect(find.byType(LibraryHeader));
-      final grid = tester.getRect(find.byType(GridView));
+      final grid = tester.getRect(find.byType(LibraryCollection));
       expect(
         header.bottom,
         lessThanOrEqualTo(grid.top),
@@ -799,7 +818,9 @@ void main() {
         expect(button.enabled, isTrue, reason: '$label stays enabled');
         expect(button.onPressed, isNotNull, reason: '$label stays activatable');
 
-        final text = tester.renderObject<RenderParagraph>(find.text(label));
+        final text = tester.renderObject<RenderParagraph>(
+          navigationLabel(label),
+        );
         expect(
           text.size.height,
           greaterThanOrEqualTo(text.textSize.height),
@@ -821,7 +842,7 @@ void main() {
         expect(ink!.unmeasured, isFalse);
         final visible = ink.visible;
         expect(visible, isNotNull);
-        final origin = tester.getTopLeft(find.text(label));
+        final origin = tester.getTopLeft(navigationLabel(label));
         final buttonRect = tester.getRect(entry);
         expect(
           buttonRect.contains(origin + visible!.center),
