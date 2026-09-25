@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/library/errors.dart';
+import 'package:shosai_flutter/notices/library_notice_text.dart';
+import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 part 'message.dart';
@@ -22,6 +24,7 @@ class LibraryController implements Listenable {
     LibraryImportAdapterCanceller cancelImportAdapter =
         _ignoreImportAdapterCancellation,
     LibraryCoverEvicter evictCover = _ignoreCoverEviction,
+    NoticeReporter noticeReporter = ignoreNotice,
   }) : _bridge = bridge,
        _confirmRemoval = confirmRemoval,
        _pickImport = pickImport,
@@ -30,7 +33,8 @@ class LibraryController implements Listenable {
        _editSettings = editSettings,
        _retryProviderCleanup = retryProviderCleanup,
        _cancelImportAdapter = cancelImportAdapter,
-       _evictCover = evictCover;
+       _evictCover = evictCover,
+       _reportNotice = noticeReporter;
 
   final FlutterBridge _bridge;
   final LibraryRemovalConfirmer _confirmRemoval;
@@ -41,6 +45,12 @@ class LibraryController implements Listenable {
   final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
   final LibraryCoverEvicter _evictCover;
+
+  /// Reports brief success feedback to the application notice center.
+  ///
+  /// The composition root injects the center's reporter; a controller built
+  /// without one reports nothing.
+  final NoticeReporter _reportNotice;
   LibraryModel _model = const LibraryModel();
   final Set<VoidCallback> _listeners = {};
   final Set<BigInt> _cancellations = {};
@@ -234,6 +244,7 @@ class LibraryController implements Listenable {
           _releaseCancellation(cancellation);
         }
         if (_closing) break;
+        if (message.notice case final notice?) _reportNotice(notice);
         if (message.error case final error?) {
           _emit(
             _model.copyWith(
@@ -474,11 +485,13 @@ class LibraryController implements Listenable {
         late final List<FlutterImportItem> items;
         var refresh = false;
         String? terminalStatus;
+        NoticeRequest? successNotice;
         if (selection.runner case final runner?) {
           final report = await runner(_bridge, cancellation);
           items = report.items;
           refresh = report.imported > BigInt.zero;
           terminalStatus = _importReportStatus(report);
+          successNotice = _importSuccessNotice(report);
         } else if (selection.directory) {
           final report = await _bridge.importDirectory(
             pathKey: selection.paths.single,
@@ -488,6 +501,7 @@ class LibraryController implements Listenable {
           items = report.items;
           refresh = report.imported > BigInt.zero;
           terminalStatus = _importReportStatus(report);
+          successNotice = _importSuccessNotice(report);
         } else {
           final report = await _bridge.importPaths(
             pathKeys: selection.paths,
@@ -497,6 +511,7 @@ class LibraryController implements Listenable {
           items = report.items;
           refresh = report.imported > BigInt.zero;
           terminalStatus = _importReportStatus(report);
+          successNotice = _importSuccessNotice(report);
         }
         final failure = items.where((item) => item.error != null).firstOrNull;
         dispatch(
@@ -507,6 +522,7 @@ class LibraryController implements Listenable {
                 (failure == null ? null : _safeImportError(failure.error!)),
             cancellation: cancellation,
             refresh: refresh,
+            notice: successNotice,
           ),
         );
         cancellation = null;
@@ -624,6 +640,13 @@ class LibraryController implements Listenable {
           _LibraryMutationCompleted(
             failure: LibraryFailure.settings,
             settings: settings,
+            // The write is authoritative: it has already persisted, and a
+            // concurrent load's cancellation does not supersede it, so its
+            // success feedback stands.
+            notice: const NoticeRequest(
+              text: LibrarySettingsSavedNotice(),
+              kind: NoticeKind.success,
+            ),
           ),
         );
       } catch (error) {
@@ -660,6 +683,29 @@ class LibraryController implements Listenable {
       return 'The selected book exceeds the supported size limits.';
     }
     return 'The selected book could not be imported.';
+  }
+
+  /// The brief success notice for an import that landed books without failures
+  /// or warnings, or null.
+  ///
+  /// A clean, completed import is decision 13's brief success feedback. A
+  /// cancellation reports nothing: cancellation is neutral, and the books a
+  /// cancelled import did land are reloaded into the grid by the completion.
+  /// A cancelled import that also failed or warned keeps its inline failure
+  /// summary.
+  NoticeRequest? _importSuccessNotice(FlutterImportReport report) {
+    if (report.cancelled) return null;
+    if (report.imported <= BigInt.zero) return null;
+    if (report.failed > BigInt.zero) return null;
+    if (report.items.any(
+      (item) => item.error != null || item.warning != null,
+    )) {
+      return null;
+    }
+    return NoticeRequest(
+      text: LibraryImportSucceededNotice(count: report.imported.toInt()),
+      kind: NoticeKind.success,
+    );
   }
 
   String? _importReportStatus(FlutterImportReport report) {
