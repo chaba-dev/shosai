@@ -432,7 +432,9 @@ void main() {
           reason: '$label is directly accessible in the filter row',
         );
       }
-      expect(find.text('All books'), findsNothing);
+      // The collection's section title carries the same copy as the wide
+      // sidebar entry, so the compact assertion is scoped to the chrome.
+      expect(navigationEntry('All books'), findsNothing);
     });
 
     testWidgets('every entry activates without a drawer', (tester) async {
@@ -475,7 +477,7 @@ void main() {
           find.byType(LibraryFilterRow),
           wide ? findsNothing : findsOneWidget,
         );
-        expect(find.text(wide ? 'All books' : 'All'), findsOneWidget);
+        expect(navigationEntry(wide ? 'All books' : 'All'), findsOneWidget);
         expect(navigationEntry('Settings'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
@@ -1292,7 +1294,13 @@ void main() {
         }
         // Controls announce themselves in the selected language.
         expect(find.bySemanticsLabel('本を追加'), findsOneWidget);
-        expect(find.bySemanticsLabel('すべての本'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: navigationChrome,
+            matching: find.bySemanticsLabel('すべての本'),
+          ),
+          findsOneWidget,
+        );
         expect(find.bySemanticsLabel('設定'), findsOneWidget);
       },
     );

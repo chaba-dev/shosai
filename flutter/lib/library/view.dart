@@ -599,45 +599,53 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  /// The collection column: retained debt and failure surfaces above the
-  /// collection, so the sidebar keeps the full height it has in the reference.
-  Widget _libraryContent(LibraryModel model) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (model.providerCleanupPending)
-        LibraryBanner(
-          message: 'Temporary import data could not be removed yet.',
-          actionLabel: 'Retry cleanup',
-          onAction: () =>
-              controller.dispatch(const LibraryCleanupRetryRequested()),
-        ),
-      if (model.managedFileDeletionPending)
-        LibraryBanner(
-          message: 'Book removed. Its private copy will be deleted later.',
-          actionLabel: 'Dismiss',
-          onAction: () => controller.dispatch(
-            const LibraryManagedDeletionNoticeDismissed(),
+  /// The collection column: retained debt surfaces above the collection, so the
+  /// sidebar keeps the full height it has in the reference.
+  ///
+  /// The failure alert itself belongs to the collection (the reference draws it
+  /// inside the scroll column above the grid), and the two debt states are
+  /// retained Flutter surfaces with no Iced counterpart, so they stay above the
+  /// collection with their own recovery actions.
+  Widget _libraryContent(LibraryModel model) {
+    final l10n = AppLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (model.providerCleanupPending)
+          LibraryBanner(
+            message: l10n.libraryCleanupPending,
+            actionLabel: l10n.libraryCleanupRetry,
+            onAction: () =>
+                controller.dispatch(const LibraryCleanupRetryRequested()),
+          ),
+        if (model.managedFileDeletionPending)
+          LibraryBanner(
+            message: l10n.libraryDeletionPending,
+            actionLabel: l10n.libraryDeletionDismiss,
+            onAction: () => controller.dispatch(
+              const LibraryManagedDeletionNoticeDismissed(),
+            ),
+          ),
+        Expanded(
+          child: LibraryCollection(
+            model: model,
+            openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
+            removeBook: (book) =>
+                controller.dispatch(LibraryBookRemovalRequested(book)),
+            loadMore: () => controller.dispatch(const LibraryMoreRequested()),
+            retryPaging: () =>
+                controller.dispatch(const LibraryMoreRetryRequested()),
+            loadCover: controller.requestCover,
+            retry: () => controller.dispatch(const LibraryRetryRequested()),
+            addFirstBooks: () =>
+                controller.dispatch(const LibraryImportRequested()),
+            cancelImport: () =>
+                controller.dispatch(const LibraryOperationCancelled()),
           ),
         ),
-      if (model.displayError case final error?)
-        LibraryBanner(
-          message: error,
-          actionLabel: 'Retry',
-          destructive: true,
-          onAction: () => controller.dispatch(const LibraryRetryRequested()),
-        ),
-      Expanded(
-        child: LibraryCollection(
-          model: model,
-          openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
-          removeBook: (book) =>
-              controller.dispatch(LibraryBookRemovalRequested(book)),
-          loadMore: () => controller.dispatch(const LibraryMoreRequested()),
-          loadCover: controller.requestCover,
-        ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class LibraryBanner extends StatelessWidget {

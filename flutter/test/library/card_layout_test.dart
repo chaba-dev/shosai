@@ -34,6 +34,21 @@ Finder cardTitle(String title) => find.byWidgetPredicate(
 Finder cardFor(String title) =>
     find.ancestor(of: cardTitle(title), matching: find.byType(LibraryBookCard));
 
+/// The grid card's cover box for [title].
+///
+/// The continue-reading section paints the same book's cover in its own 72x100
+/// box, so a bare [LibraryBookCover] finder would measure that one instead.
+Finder cardCover(String title) => find.descendant(
+  of: cardFor(title),
+  matching: find.byType(LibraryBookCover),
+);
+
+/// The grid card's action trigger for [title].
+Finder cardTrigger(String title) => find.descendant(
+  of: cardFor(title),
+  matching: find.byTooltip('Book actions'),
+);
+
 /// The card trigger's painted scrim: the descendant decoration that paints the
 /// refinement's ink. Measuring this widget (rather than inflating the glyph by
 /// the padding tokens) is what makes the geometry assertion independent of the
@@ -130,8 +145,8 @@ class _RecordingBridge extends HarnessBridge {
   final List<int> removedBookIds = <int>[];
   int libraryPageCalls = 0;
 
-  /// Whether the bridge reports another page, so the collection shows its
-  /// load-more control.
+  /// Whether the first page reports another page, so the collection asks for
+  /// the next page; the appended page is the last one.
   final bool hasMore;
 
   @override
@@ -165,7 +180,10 @@ class _RecordingBridge extends HarnessBridge {
       offset: offset,
       cancellationId: cancellationId,
     );
-    return FlutterLibraryPage(books: page.books, hasMore: hasMore);
+    return FlutterLibraryPage(
+      books: page.books,
+      hasMore: offset == 0 && hasMore,
+    );
   }
 }
 
@@ -290,7 +308,7 @@ void main() {
         reason: 'the painted card is exactly one tile',
       );
       expect(
-        tester.getSize(find.byType(LibraryBookCover).first).height,
+        tester.getSize(cardCover('The Quiet Cartographer')).height,
         ShosaiTokens.layoutLibraryCardCoverHeight,
         reason: 'LB-12: the cover box keeps the reference height',
       );
@@ -309,7 +327,7 @@ void main() {
         reason: 'the scaled text block needs the room',
       );
       expect(
-        tester.getSize(find.byType(LibraryBookCover).first).height,
+        tester.getSize(cardCover('The Quiet Cartographer')).height,
         ShosaiTokens.layoutLibraryCardCoverHeight,
         reason: 'the cover keeps its reference height at 200% text',
       );
@@ -320,9 +338,14 @@ void main() {
     ) async {
       await pumpLibrary(tester);
       final card = tester.getRect(find.byType(LibraryBookCard).first);
-      final cover = tester.getRect(find.byType(LibraryBookCover).first);
+      final cover = tester.getRect(cardCover('The Quiet Cartographer'));
       final title = tester.getRect(cardTitle('The Quiet Cartographer'));
-      final author = tester.getRect(find.text('Ada Lovelace'));
+      final author = tester.getRect(
+        find.descendant(
+          of: cardFor('The Quiet Cartographer'),
+          matching: find.text('Ada Lovelace'),
+        ),
+      );
       final status = tester.getRect(find.text('42%'));
       final progress = tester.getRect(
         find.descendant(
@@ -485,9 +508,18 @@ void main() {
       tester,
     ) async {
       await pumpLibrary(tester, covers: {1: harnessCovers()[1]!});
-      expect(find.byType(Image), findsOneWidget);
       expect(
-        find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        find.descendant(
+          of: find.byType(LibraryBookCard),
+          matching: find.byType(Image),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: cardFor('The Quiet Cartographer'),
+          matching: find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        ),
         findsOneWidget,
       );
     });
@@ -644,7 +676,11 @@ void main() {
 
       // Book 1 is managed, so the removal goes through the confirmation the
       // application renders; the confirmation is what starts the pending state.
-      await tester.tap(find.byTooltip('Book actions').first);
+      // The continue section can push the first row below a compact fold, so
+      // the card is scrolled into view before its trigger is used.
+      await tester.ensureVisible(cardTrigger('The Quiet Cartographer'));
+      await tester.pumpAndSettle();
+      await tester.tap(cardTrigger('The Quiet Cartographer'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Remove and delete copy'));
       await tester.pump();
@@ -830,31 +866,45 @@ void main() {
       expect(find.text('Removing…'), findsNothing);
     });
 
-    testWidgets('load more stays reachable below the grid', (tester) async {
+    testWidgets('reaching the end of the collection asks for the next page', (
+      tester,
+    ) async {
+      // The owner review (2026-09-25) replaced the ordinary control with
+      // automatic paging, so a page taller than the viewport is what proves the
+      // trigger: nothing is requested until the scroll reaches the end.
+      final many = List.generate(
+        60,
+        (index) => FlutterLibraryBook(
+          bookId: index + 1,
+          title: 'Book ${index + 1}',
+          author: 'Ada Lovelace',
+          format: FlutterBookFormat.pdf,
+          pathKey: '/books/${index + 1}.pdf',
+          managed: false,
+          progress: 0.42,
+          dateAdded: '2026-09-10',
+        ),
+      );
       final bridge =
           await pumpLibrary(
                 tester,
                 bridge: _RecordingBridge(
-                  books: harnessLibraryBooks(),
-                  covers: harnessCovers(),
+                  books: many,
+                  covers: harnessCovers(count: many.length),
                   hasMore: true,
                 ),
               )
               as _RecordingBridge;
-      // The control sits below the grid, so it is reached by scrolling.
+      expect(bridge.libraryPageCalls, 1);
+      expect(find.text('Load more books'), findsNothing);
+
       final scrollable = find.descendant(
         of: find.byType(LibraryCollection),
         matching: find.byType(Scrollable),
       );
-      await tester.scrollUntilVisible(
-        find.text('Load more books'),
-        120,
-        scrollable: scrollable,
-      );
+      await tester.drag(scrollable, const Offset(0, -5000));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Load more books'));
-      await tester.pumpAndSettle();
-      expect(bridge.libraryPageCalls, greaterThan(1));
+      expect(bridge.libraryPageCalls, 2);
     });
   });
 
@@ -901,7 +951,7 @@ void main() {
       // reference insets its own box 8 px inside that corner; the owner asked
       // for weight, not placement, so this refinement keeps the retained
       // position and pins it here rather than moving the control.
-      final cover = tester.getRect(find.byType(LibraryBookCover).first);
+      final cover = tester.getRect(cardCover('The Quiet Cartographer'));
       expect(
         (surface.topRight - target.topRight).distance,
         lessThan(0.6),
@@ -932,10 +982,10 @@ void main() {
         books: harnessLibraryBooks(),
         covers: harnessCovers(count: 4),
       );
-      final trigger = find.byTooltip('Book actions').at(4);
+      final trigger = cardTrigger('A Book With No Cover At All');
       final target = tester.getRect(trigger);
       final surface = triggerSurface(tester, trigger);
-      final cover = tester.getRect(find.byType(LibraryBookCover).at(4));
+      final cover = tester.getRect(cardCover('A Book With No Cover At All'));
       // Inside the placeholder, below its centred title: the surface the
       // trigger covers.
       final background = await paintedColorAt(
@@ -974,10 +1024,10 @@ void main() {
         books: harnessLibraryBooks(),
         covers: harnessCovers(count: 4),
       );
-      final trigger = find.byTooltip('Book actions').at(4);
+      final trigger = cardTrigger('A Book With No Cover At All');
       final target = tester.getRect(trigger);
       final surface = triggerSurface(tester, trigger);
-      final cover = tester.getRect(find.byType(LibraryBookCover).at(4));
+      final cover = tester.getRect(cardCover('A Book With No Cover At All'));
       final background = await paintedColorAt(
         tester,
         Offset(cover.left + 12, cover.bottom - 12),
@@ -1122,7 +1172,10 @@ void main() {
         reason: 'the title is inside the card button, not beside it',
       );
       expect(
-        find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        find.descendant(
+          of: cardFor('The Quiet Cartographer'),
+          matching: find.bySemanticsLabel('Cover of The Quiet Cartographer'),
+        ),
         findsOneWidget,
       );
     });

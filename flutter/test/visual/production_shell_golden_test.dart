@@ -213,7 +213,7 @@ void main() {
         ),
         metadata: const <String, Object?>{'state': 'empty'},
         ready: () =>
-            find.textContaining('library is empty').evaluate().isNotEmpty,
+            find.text('A quiet place for every book').evaluate().isNotEmpty,
       );
     });
   });

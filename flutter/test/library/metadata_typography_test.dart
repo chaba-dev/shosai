@@ -43,7 +43,11 @@ LibraryCollection _collection(LibraryModel model) => LibraryCollection(
   openBook: (_) {},
   removeBook: (_) {},
   loadMore: () {},
+  retryPaging: () {},
   loadCover: (_) => false,
+  retry: () {},
+  addFirstBooks: () {},
+  cancelImport: () {},
 );
 
 RenderParagraph _paragraph(WidgetTester tester, String text, {double? size}) =>

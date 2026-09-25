@@ -175,11 +175,17 @@ void main() {
       await render(
         tester,
         '3b-library-wide-900-ja-t200',
-        const HarnessView(size: Size(900, 700), textScale: 2),
+        // `W900_TALL`: at 200% text the continue-reading section pushes the
+        // second grid row below the usual 700 px fold, and this renderer has no
+        // scroll interaction, so a taller window is the only way to show every
+        // card's scaled status without inventing a scroll position (the same
+        // exception the 1B reference records for its tall states).
+        const HarnessView(size: Size(900, 1200), textScale: 2),
         locale: const Locale('ja'),
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{
           'config': 'W900 T200',
+          'viewport': 'W900_TALL',
           'state': 'wide-large-text',
         },
         verify: (tester) async {
@@ -351,8 +357,16 @@ void main() {
         metadata: const <String, Object?>{'state': 'missing-covers'},
         verify: (tester) async {
           // LB-12: a missing cover shows the title placeholder and keeps the
-          // 210 px box, while the covered books keep their image.
-          expect(find.byType(Image), findsNWidgets(2));
+          // 210 px box, while the covered books keep their image. The
+          // continue-reading section paints the first book's cover in its own
+          // box, so the grid's images are counted.
+          expect(
+            find.descendant(
+              of: find.byType(LibraryBookCard),
+              matching: find.byType(Image),
+            ),
+            findsNWidgets(2),
+          );
           final noCoverCard = find.ancestor(
             of: cardTitle('A Book With No Cover At All'),
             matching: find.byType(LibraryBookCard),
