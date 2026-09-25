@@ -474,6 +474,12 @@ pub const LAYOUT_LIBRARY_CARD_TRIGGER_PADDING_HORIZONTAL: f32 = 8.0;
 /// `layout.library.card.triggerOffset` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
 pub const LAYOUT_LIBRARY_CARD_TRIGGER_OFFSET: f32 = 8.0;
 
+/// `layout.library.card.triggerScrimAlpha` — Retained Flutter: owner-directed refinement of the pinned card trigger (2026-09-25). Iced paints the trigger as an opaque SURFACE square with a 1 px BORDER (theme.rs book_card_action); the owner asked for a subtler trigger, so the reference's painted geometry keeps its 13 px glyph, [5, 8] padding and radiusSmall but is filled with this translucent ink scrim (app.shadow.base) under a light glyph (app.textOnAccent) instead.
+pub const LAYOUT_LIBRARY_CARD_TRIGGER_SCRIM_ALPHA: f32 = 0.5;
+
+/// `layout.library.card.triggerScrimActiveAlpha` — Retained Flutter: the same refinement's hovered, pressed and open-menu weight of the trigger scrim; the reference's own hover only swaps SURFACE for SURFACE_MUTED.
+pub const LAYOUT_LIBRARY_CARD_TRIGGER_SCRIM_ACTIVE_ALPHA: f32 = 0.68;
+
 /// `layout.library.card.removePaddingVertical` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
 pub const LAYOUT_LIBRARY_CARD_REMOVE_PADDING_VERTICAL: f32 = 3.0;
 

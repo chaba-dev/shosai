@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -253,6 +254,50 @@ void main() {
                 .isFocused,
             ui.Tristate.isTrue,
             reason: 'the captured frame shows a card focused',
+          );
+        },
+      );
+    });
+    testWidgets('W1280 with the card action hovered', (tester) async {
+      await render(
+        tester,
+        '3b-library-trigger-hover-1280',
+        const HarnessView(size: Size(1280, 800)),
+        locale: const Locale('en'),
+        ready: () => harnessImagesReady(tester),
+        metadata: const <String, Object?>{'state': 'trigger-hover'},
+        verify: (tester) async {
+          // The captured frame shows the trigger's hover weight: the refinement
+          // deepens the scrim instead of growing the paint.
+          final trigger = find.byTooltip('Book actions').first;
+          final rect = tester.getRect(trigger);
+          final gesture = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          await gesture.addPointer(location: rect.center);
+          addTearDown(gesture.removePointer);
+          await tester.pump();
+          await gesture.moveTo(rect.center);
+          await tester.pump();
+          expect(tester.getSize(trigger), const Size(40, 40));
+          final scrim = tester
+              .widgetList<DecoratedBox>(
+                find.descendant(
+                  of: trigger,
+                  matching: find.byType(DecoratedBox),
+                ),
+              )
+              .map((box) => box.decoration)
+              .whereType<BoxDecoration>()
+              .map((decoration) => decoration.color)
+              .whereType<Color>()
+              .firstWhere((color) => color.a > 0);
+          expect(
+            scrim,
+            ShosaiTokens.appShadowBase.withValues(
+              alpha: ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha,
+            ),
+            reason: 'the captured frame shows the hovered trigger',
           );
         },
       );

@@ -641,11 +641,73 @@ class _BookActionsMenu extends StatefulWidget {
 
 class _BookActionsMenuState extends State<_BookActionsMenu> {
   final ShadPopoverController _controller = ShadPopoverController();
+  final ShadStatesController _triggerStates = ShadStatesController();
 
   @override
   void dispose() {
+    _triggerStates.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// The card's quiet `•••` trigger.
+  ///
+  /// The painted box is the reference's trigger — its 13 px glyph in the
+  /// reference's `[5, 8]` padding at `radiusSmall` — at the retained Flutter
+  /// cover-corner placement (the reference insets its own box 8 px inside that
+  /// corner), inside the unchanged 40 px icon-button target, so the touch,
+  /// keyboard and focus affordances do not shrink with the paint.
+  ///
+  /// The owner asked for a subtler trigger than the reference's opaque `SURFACE`
+  /// square with its `BORDER`: the fill is a translucent ink scrim that deepens
+  /// while the trigger is hovered, pressed or holding an open menu, so the
+  /// persistent control reads as an overlay on the cover instead of a white
+  /// block. The action, the hit target, the tooltip, the keyboard path and the
+  /// shared focus ring are unchanged.
+  Widget _trigger() {
+    final l10n = AppLocalizations.of(context);
+    // The shared icon-button control size: the hit target this refinement keeps.
+    final target = ShadTheme.of(context).buttonSizesTheme.icon!;
+    return Tooltip(
+      message: l10n.cardActionsTooltip,
+      child: ShadIconButton.ghost(
+        onPressed: _controller.toggle,
+        statesController: _triggerStates,
+        iconSize: ShosaiTokens.typeSize13,
+        width: target.width,
+        height: target.height,
+        padding: EdgeInsets.zero,
+        // The button paints nothing in any state: the surface child owns the
+        // paint, so the hit target can stay the full control size without a
+        // visible fill. `app_*` colours are token-derived; the scanner rejects
+        // `Colors.*` in `lib/`, and a zero alpha is the absence of paint rather
+        // than a design value.
+        backgroundColor: _triggerNoFill,
+        hoverBackgroundColor: _triggerNoFill,
+        pressedBackgroundColor: _triggerNoFill,
+        // The paint is the reference's box at the retained cover-corner
+        // placement: the target's top-right corner, not centred in it.
+        icon: SizedBox(
+          width: target.width,
+          height: target.height,
+          child: Align(
+            alignment: Alignment.topRight,
+            child: ListenableBuilder(
+              listenable: Listenable.merge(<Listenable>[
+                _triggerStates,
+                _controller,
+              ]),
+              builder: (context, _) => _CardTriggerSurface(
+                active:
+                    _controller.isOpen ||
+                    _triggerStates.value.contains(ShadState.hovered) ||
+                    _triggerStates.value.contains(ShadState.pressed),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -702,27 +764,44 @@ class _BookActionsMenuState extends State<_BookActionsMenu> {
           ),
         ),
       ),
-      child: ShadIconAction(
-        tooltip: l10n.cardActionsTooltip,
-        onPressed: _controller.toggle,
-        icon: const Icon(LucideIcons.ellipsis),
-        backgroundColor: scheme.card,
-        hoverBackgroundColor: scheme.muted,
-        pressedBackgroundColor: scheme.muted,
-        foregroundColor: scheme.mutedForeground,
-        hoverForegroundColor: scheme.mutedForeground,
-        padding: const EdgeInsets.symmetric(
-          vertical: ShosaiTokens.layoutLibraryCardTriggerPaddingVertical,
-          horizontal: ShosaiTokens.layoutLibraryCardTriggerPaddingHorizontal,
-        ),
-        decoration: ShadDecoration(
-          border: ShadBorder.all(
-            color: scheme.border,
-            width: ShosaiTokens.layoutLibraryCardBorderWidth,
-            radius: BorderRadius.circular(ShosaiTokens.radiusSmall),
-          ),
-        ),
-      ),
+      child: _trigger(),
     );
   }
+}
+
+/// No paint: the trigger button's own surface is transparent in every state, so
+/// only [_CardTriggerSurface] paints. Derived from the token source because the
+/// literal scan rejects `Colors.*` in `lib/`.
+Color get _triggerNoFill => ShosaiTokens.appShadowBase.withValues(alpha: 0);
+
+/// The card trigger's painted box.
+///
+/// The geometry is the reference's: a [ShosaiTokens.typeSize13] glyph in the
+/// reference's trigger padding at the shared small radius. The fill is the
+/// refinement's translucent ink scrim rather than the reference's opaque
+/// surface; [active] deepens it for hover, press and the open menu.
+class _CardTriggerSurface extends StatelessWidget {
+  const _CardTriggerSurface({required this.active});
+
+  /// Whether the trigger is hovered, pressed or holding an open menu.
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: ShosaiTokens.appShadowBase.withValues(
+        alpha: active
+            ? ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha
+            : ShosaiTokens.layoutLibraryCardTriggerScrimAlpha,
+      ),
+      borderRadius: BorderRadius.circular(ShosaiTokens.radiusSmall),
+    ),
+    child: const Padding(
+      padding: EdgeInsets.symmetric(
+        vertical: ShosaiTokens.layoutLibraryCardTriggerPaddingVertical,
+        horizontal: ShosaiTokens.layoutLibraryCardTriggerPaddingHorizontal,
+      ),
+      child: Icon(LucideIcons.ellipsis, color: ShosaiTokens.appTextOnAccent),
+    ),
+  );
 }

@@ -37,6 +37,15 @@ generated files repeat it as a doc comment on every constant.
 | `radius.*`, `type.*`, `layout.*` | `Iced` — specification §3.4 and §3.5. |
 | `layout.library.card.*` | `Iced` — the pinned card composition (`crates/shosai-app/src/app.rs` `render_book_card`, `crates/shosai-app/src/widgets.rs` `book_button`). The specification's §3.5 table names the grid metrics and its prose names the collection padding; the card's internal metrics are recorded in the source so the Flutter card and the Iced card cannot drift. The pinned Iced card still writes these values literally; the Rust migration is not part of package 3B. |
 
+Per-key exceptions to a group are recorded under their own `meta.authority` key.
+The card trigger's two scrim weights (`layout.library.card.triggerScrimAlpha`,
+`layout.library.card.triggerScrimActiveAlpha`) are `Retained Flutter`: the owner
+asked for a subtler trigger than the pinned Iced `book_card_action` surface
+(2026-09-25), so the reference's painted geometry — its 13 px glyph, `[5, 8]`
+padding and `radiusSmall` — is filled with a translucent ink scrim instead of the
+opaque `SURFACE` square with its `BORDER`. `layout.library.card.placeholderPadding`
+is the same kind of exception.
+
 Plan decision 2 also rejects the historical #109 brown accent. `app.accent` must
 stay `#4D5E86` and no token value may be `#8A6338`; the generator and both sides'
 tests enforce that.

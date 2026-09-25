@@ -202,6 +202,16 @@ void main() {
       expect(ShosaiTokens.layoutLibraryCardPlaceholderPadding, 8.0);
     });
 
+    test('the card trigger refinement values are pinned', () {
+      // The owner-directed refinement of 2026-09-25 (a subtler trigger than the
+      // reference's opaque SURFACE square with its BORDER): the reference's
+      // painted geometry keeps its 13 px glyph, [5, 8] padding and radiusSmall,
+      // and only the fill becomes a translucent ink scrim. These two weights are
+      // Retained Flutter values, not Iced ones.
+      expect(ShosaiTokens.layoutLibraryCardTriggerScrimAlpha, 0.5);
+      expect(ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha, 0.68);
+    });
+
     test('the Shad type scale is the Iced UI scale', () {
       final text = shosaiShadTheme(Brightness.light).textTheme;
       expect(text.h1.fontSize, 32);
@@ -570,6 +580,14 @@ void main() {
       expect(
         ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha,
         card['menuActionHoverAlpha'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardTriggerScrimAlpha,
+        card['triggerScrimAlpha'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha,
+        card['triggerScrimActiveAlpha'],
       );
       expect(document['meta']['reference_revision'], isNotEmpty);
     });
