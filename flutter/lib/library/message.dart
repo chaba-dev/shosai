@@ -121,6 +121,7 @@ final class _LibraryMutationCompleted extends LibraryMessage {
     this.cancellation,
     this.refresh = false,
     this.managedFileDeletionPending = false,
+    this.notice,
   });
   final LibraryFailure failure;
   final String? error;
@@ -128,6 +129,13 @@ final class _LibraryMutationCompleted extends LibraryMessage {
   final BigInt? cancellation;
   final bool refresh;
   final bool managedFileDeletionPending;
+
+  /// The brief success feedback for this mutation, or null.
+  ///
+  /// The notice travels on the completion message so the handler owns raising
+  /// it: a completion that arrives after disposal never reports feedback for an
+  /// operation whose controller is gone.
+  final NoticeRequest? notice;
 }
 
 /// The add-books import effect has unwound.

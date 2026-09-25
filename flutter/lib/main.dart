@@ -9,6 +9,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
@@ -126,20 +127,56 @@ ExternalLibrary? nativeLibrary() {
 }
 
 /// The production application composition: Shad and Material themes, the
-/// localization delegates and the [ShadAppBuilder] layer that installs the
-/// toaster and sonner hosts. [home] is the shell content, so widget tests can
-/// render the real composition while substituting only the platform boundary
-/// beneath it.
+/// localization delegates, the [NoticeHost] that presents controller notices
+/// and the [ShadAppBuilder] layer that installs the toaster and sonner hosts.
+/// [home] is the shell content, so widget tests can render the real composition
+/// while substituting only the platform boundary beneath it.
 ///
 /// [locale] is the test injection point for the application language. The
 /// production app leaves it null, so the supported system locale is used and an
 /// unsupported system language falls back to the first supported locale
 /// (English).
-class ShosaiShell extends StatelessWidget {
-  const ShosaiShell({super.key, required this.home, this.locale});
+///
+/// [noticeCenter] is the center [ShosaiApp] creates so the same reporter can be
+/// injected into the feature controllers it builds. A test may pass its own
+/// center to drive notices through the real host; when omitted, the shell owns
+/// one for the lifetime of the render.
+class ShosaiShell extends StatefulWidget {
+  const ShosaiShell({
+    super.key,
+    required this.home,
+    this.locale,
+    this.noticeCenter,
+  });
 
   final Widget home;
   final Locale? locale;
+  final NoticeCenter? noticeCenter;
+
+  @override
+  State<ShosaiShell> createState() => _ShosaiShellState();
+}
+
+class _ShosaiShellState extends State<ShosaiShell> {
+  NoticeCenter? _ownedCenter;
+
+  NoticeCenter get _center =>
+      widget.noticeCenter ?? (_ownedCenter ??= NoticeCenter());
+
+  @override
+  void didUpdateWidget(ShosaiShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.noticeCenter != widget.noticeCenter) {
+      _ownedCenter?.dispose();
+      _ownedCenter = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ownedCenter?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +185,7 @@ class ShosaiShell extends StatelessWidget {
       darkTheme: shosaiShadTheme(Brightness.dark),
       appBuilder: (context) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        locale: locale,
+        locale: widget.locale,
         theme: shosaiMaterialTheme(context),
         darkTheme: shosaiMaterialTheme(context, Brightness.dark),
         localizationsDelegates: const [
@@ -161,13 +198,17 @@ class ShosaiShell extends StatelessWidget {
         supportedLocales: AppLocalizations.supportedLocales,
         builder: (context, child) => ShadAppBuilder(child: child!),
         restorationScopeId: 'shosai',
-        home: home,
+        // The notice host sits inside the navigator's route content so its
+        // surfaces have an Overlay (tooltips, focus) and are covered by a modal
+        // route the way the rest of the home surface is; the Sonner toasts it
+        // presents live in the host ShadAppBuilder installs above the navigator.
+        home: NoticeHost(center: _center, child: widget.home),
       ),
     );
   }
 }
 
-class ShosaiApp extends StatelessWidget {
+class ShosaiApp extends StatefulWidget {
   const ShosaiApp({
     super.key,
     this.bridge,
@@ -183,13 +224,32 @@ class ShosaiApp extends StatelessWidget {
   final Locale? locale;
 
   @override
+  State<ShosaiApp> createState() => _ShosaiAppState();
+}
+
+class _ShosaiAppState extends State<ShosaiApp> {
+  /// The application's single notice center.
+  ///
+  /// It outlives every feature controller, so a notice reported by one surface
+  /// survives navigation and is presented by the one host the shell installs.
+  final NoticeCenter _noticeCenter = NoticeCenter();
+
+  @override
+  void dispose() {
+    _noticeCenter.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ShosaiShell(
-      locale: locale,
-      home: productBridgeFactory == null
-          ? ReaderScreen(bridge: bridge)
+      locale: widget.locale,
+      noticeCenter: _noticeCenter,
+      home: widget.productBridgeFactory == null
+          ? ReaderScreen(bridge: widget.bridge)
           : ProductShell(
-              bridgeFactory: productBridgeFactory!,
+              bridgeFactory: widget.productBridgeFactory!,
+              noticeReporter: _noticeCenter.reporter,
               readerBuilder:
                   (bridge, book, settings, path, bookId, locatorChanged) =>
                       ReaderScreen(
