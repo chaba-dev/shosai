@@ -290,6 +290,34 @@ void main() {
         ],
       ),
       (
+        '3c-compare-paging-loading-1280',
+        'W1280 EN — next page pending: the reference loading-more row',
+        [
+          (
+            'reference — Iced 1B lib-state-loading-more-w1280',
+            File('${reference.path}/lib-state-loading-more-w1280.png'),
+          ),
+          (
+            'after — 3C candidate 3c-library-loading-more-1280',
+            File('${artifacts.path}/3c-library-loading-more-1280.png'),
+          ),
+        ],
+      ),
+      (
+        '3c-compare-paging-failure-1280',
+        'W1280 EN — paging failure: the alert and Retry at the paging row',
+        [
+          (
+            'reference — Iced 1B lib-state-load-error-w1280 (its alert above the grid; the reference has no automatic paging)',
+            File('${reference.path}/lib-state-load-error-w1280.png'),
+          ),
+          (
+            'after — 3C candidate 3c-library-paging-failure-1280',
+            File('${artifacts.path}/3c-library-paging-failure-1280.png'),
+          ),
+        ],
+      ),
+      (
         '3c-compare-empty-error-1280',
         'W1280 EN — empty library with a load failure',
         [

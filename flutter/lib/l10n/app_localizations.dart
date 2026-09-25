@@ -230,11 +230,11 @@ abstract class AppLocalizations {
   /// **'Removing…'**
   String get cardRemoving;
 
-  /// Retained Flutter paging control; Iced's library paging row (previous/next-library-page) is package 3D's. The label is the pre-3B wording, translated.
+  /// Iced reference key: loading-more. The collection's paging feedback; the owner replaced the retained Load more button with automatic next-page loading (2026-09-25).
   ///
   /// In en, this message translates to:
-  /// **'Load more books'**
-  String get collectionLoadMore;
+  /// **'Loading more…'**
+  String get libraryLoadingMore;
 
   /// Iced reference key: continue-reading. The collection section heading above the continue card.
   ///

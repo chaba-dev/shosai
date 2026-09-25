@@ -145,8 +145,8 @@ class _RecordingBridge extends HarnessBridge {
   final List<int> removedBookIds = <int>[];
   int libraryPageCalls = 0;
 
-  /// Whether the bridge reports another page, so the collection shows its
-  /// load-more control.
+  /// Whether the first page reports another page, so the collection asks for
+  /// the next page; the appended page is the last one.
   final bool hasMore;
 
   @override
@@ -180,7 +180,10 @@ class _RecordingBridge extends HarnessBridge {
       offset: offset,
       cancellationId: cancellationId,
     );
-    return FlutterLibraryPage(books: page.books, hasMore: hasMore);
+    return FlutterLibraryPage(
+      books: page.books,
+      hasMore: offset == 0 && hasMore,
+    );
   }
 }
 
@@ -863,31 +866,45 @@ void main() {
       expect(find.text('Removing…'), findsNothing);
     });
 
-    testWidgets('load more stays reachable below the grid', (tester) async {
+    testWidgets('reaching the end of the collection asks for the next page', (
+      tester,
+    ) async {
+      // The owner review (2026-09-25) replaced the ordinary control with
+      // automatic paging, so a page taller than the viewport is what proves the
+      // trigger: nothing is requested until the scroll reaches the end.
+      final many = List.generate(
+        60,
+        (index) => FlutterLibraryBook(
+          bookId: index + 1,
+          title: 'Book ${index + 1}',
+          author: 'Ada Lovelace',
+          format: FlutterBookFormat.pdf,
+          pathKey: '/books/${index + 1}.pdf',
+          managed: false,
+          progress: 0.42,
+          dateAdded: '2026-09-10',
+        ),
+      );
       final bridge =
           await pumpLibrary(
                 tester,
                 bridge: _RecordingBridge(
-                  books: harnessLibraryBooks(),
-                  covers: harnessCovers(),
+                  books: many,
+                  covers: harnessCovers(count: many.length),
                   hasMore: true,
                 ),
               )
               as _RecordingBridge;
-      // The control sits below the grid, so it is reached by scrolling.
+      expect(bridge.libraryPageCalls, 1);
+      expect(find.text('Load more books'), findsNothing);
+
       final scrollable = find.descendant(
         of: find.byType(LibraryCollection),
         matching: find.byType(Scrollable),
       );
-      await tester.scrollUntilVisible(
-        find.text('Load more books'),
-        120,
-        scrollable: scrollable,
-      );
+      await tester.drag(scrollable, const Offset(0, -5000));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Load more books'));
-      await tester.pumpAndSettle();
-      expect(bridge.libraryPageCalls, greaterThan(1));
+      expect(bridge.libraryPageCalls, 2);
     });
   });
 

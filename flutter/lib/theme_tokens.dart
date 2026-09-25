@@ -912,6 +912,13 @@ abstract final class ShosaiTokens {
   /// continue card and the next section, the pinned reference)
   static const layoutLibraryContinueSectionTrailingSpace = 4.0;
 
+  /// `layout.library.pagingTriggerDistance` — Retained Flutter: the pinned
+  /// Iced library pages with an explicit previous/next row; the owner asked
+  /// for automatic next-page loading (2026-09-25), so this is the distance
+  /// from the scroll end at which the next page is requested. It has no
+  /// reference value.
+  static const layoutLibraryPagingTriggerDistance = 400.0;
+
   /// `layout.library.sectionSpacing` — Iced
   /// (docs/flutter-ui-reference-spec.md 3.5)
   static const layoutLibrarySectionSpacing = 16.0;

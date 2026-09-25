@@ -51,6 +51,20 @@ void main() {
     expect(const LibraryModel(loadError: 'load').displayError, 'load');
   });
 
+  test('pagingFailed is explicit state a copyWith keeps', () {
+    // A paging failure keeps the collection and its next page, so its recovery
+    // is the paging row's alert: the flag is what tells the two failure
+    // positions apart.
+    expect(const LibraryModel().pagingFailed, isFalse);
+    const failed = LibraryModel(
+      loadError: 'page failed',
+      pagingFailed: true,
+      hasMore: true,
+    );
+    expect(failed.copyWith(loadingMore: true).pagingFailed, isTrue);
+    expect(failed.copyWith(pagingFailed: false).pagingFailed, isFalse);
+  });
+
   test('collectionState distinguishes the four collection shapes', () {
     // Page one loading is the skeleton, even over an empty model and over the
     // books a reload is replacing.

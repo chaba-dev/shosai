@@ -417,7 +417,7 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('paging stays available below the grid', (tester) async {
+  testWidgets('paging is the scroll end and keeps the grid', (tester) async {
     final many = List.generate(
       libraryPageSize + 1,
       (index) => _book(index + 1, 'Book ${index + 1}'),
@@ -428,31 +428,34 @@ void main() {
     );
     await mount(tester, bridge);
 
-    // The paging control is the last item of the collection column, below a
-    // full page of cards, so it is reached by scrolling.
-    await tester.scrollUntilVisible(
-      find.text('Load more books'),
-      400,
-      scrollable: find.byType(Scrollable).last,
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('Load more books'), findsOneWidget);
+    // The owner review (2026-09-25) replaced the ordinary control with
+    // automatic paging: the request is the scroll reaching the collection's
+    // end, below a full page of cards.
+    expect(find.text('Load more books'), findsNothing);
     // The append is held open, so the pending presentation is asserted rather
     // than only its settled result.
     bridge.gate = true;
-    await tester.tap(find.text('Load more books'));
+    final scrollable = find.descendant(
+      of: find.byType(LibraryCollection),
+      matching: find.byType(Scrollable),
+    );
+    await tester.drag(scrollable, const Offset(0, -20000));
     await tester.pump();
+
+    expect(bridge.offsets, contains(libraryPageSize));
+    expect(find.text('Loading more…'), findsOneWidget);
     expect(find.byType(LibrarySkeletonCard), findsNothing);
     expect(find.byType(LibraryBookCard), findsWidgets);
-    bridge.release(const []);
+
+    bridge.release([_book(libraryPageSize + 1, 'Book ${libraryPageSize + 1}')]);
     await tester.pumpAndSettle();
 
     // The append asks the bridge for the next offset and keeps the grid: a
-    // later page is not the skeleton, and the paging control retires once the
+    // later page is not the skeleton, and the pending feedback retires once the
     // appended page is the last one.
     expect(bridge.offsets, contains(libraryPageSize));
     expect(find.byType(LibrarySkeletonCard), findsNothing);
     expect(find.byType(LibraryBookCard), findsWidgets);
-    expect(find.text('Load more books'), findsNothing);
+    expect(find.text('Loading more…'), findsNothing);
   });
 }

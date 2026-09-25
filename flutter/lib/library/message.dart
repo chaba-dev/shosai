@@ -20,6 +20,17 @@ final class LibraryRetryRequested extends LibraryMessage {
   const LibraryRetryRequested();
 }
 
+/// The paging row's recovery: retry the page an appended load failed to add.
+///
+/// It is a separate intent from [LibraryRetryRequested] because the collection
+/// alert above the grid recovers a mutation (an import, a removal, a settings
+/// save) or a collection-level load, while the paging row recovers only the
+/// page it asked for. Sharing one intent would let the paging row's Retry run
+/// an unrelated mutation's recovery and vice versa.
+final class LibraryMoreRetryRequested extends LibraryMessage {
+  const LibraryMoreRetryRequested();
+}
+
 final class LibraryCleanupRetryRequested extends LibraryMessage {
   const LibraryCleanupRetryRequested();
 }
@@ -85,12 +96,16 @@ final class _LibraryFailed extends LibraryMessage {
     this.revision,
     this.error,
     this.failure,
-    this.cancellation,
-  );
+    this.cancellation, {
+    this.append = false,
+  });
   final int revision;
   final String error;
   final LibraryFailure failure;
   final BigInt cancellation;
+
+  /// Whether the failed load was appending a later page rather than page one.
+  final bool append;
 }
 
 final class _LibraryDebounceElapsed extends LibraryMessage {

@@ -23,6 +23,7 @@ class _StubLibraryBridge implements FlutterBridge {
   final pages = <Completer<FlutterLibraryPage>>[];
   final queries = <String?>[];
   final formats = <FlutterBookFormat?>[];
+  final offsets = <int>[];
   var disposeCount = 0;
   var removeCalls = 0;
   bool failCancellationCreation = false;
@@ -59,6 +60,7 @@ class _StubLibraryBridge implements FlutterBridge {
   }) {
     queries.add(query);
     formats.add(format);
+    offsets.add(offset);
     final completer = Completer<FlutterLibraryPage>();
     pages.add(completer);
     return completer.future;
@@ -302,6 +304,460 @@ void main() {
     expect(controller.model.loading, isFalse);
     expect(controller.model.loadingMore, isFalse);
     expect(controller.model.books.map((book) => book.bookId), [1, 2]);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a paging request while a page is in flight is refused', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+
+    // Page one is still in flight: the scroll trigger cannot open a second
+    // request for the same page.
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.pages, hasLength(1));
+    expect(bridge.offsets, [0]);
+
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(
+      bridge.offsets,
+      [0, 1],
+      reason: 'an appended page asks for the offset after the loaded books',
+    );
+
+    // The append is in flight now. The trigger can fire again before the model
+    // it was built with is replaced; the controller refuses those requests, so
+    // one page is fetched per completed page rather than two for one trigger.
+    controller.dispatch(const LibraryMoreRequested());
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1]);
+
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Another Book')], hasMore: false),
+    );
+    await _settle();
+    expect(controller.model.books.map((book) => book.bookId), [1, 2]);
+    expect(controller.model.loadingMore, isFalse);
+
+    // Exhaustion: the completed page said there is no next page, so the trigger
+    // cannot ask again.
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1]);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a failed appended page keeps the next page advertised', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    bridge.pages.last.completeError(StateError('the next page failed'));
+    await _settle();
+
+    // A failed append keeps the loaded page and its own recovery, and it does
+    // not claim the collection is exhausted: the alert's Retry recovers, and
+    // the next page stays advertised until then.
+    expect(controller.model.books.map((book) => book.bookId), [1]);
+    expect(controller.model.loadError, isNotNull);
+    expect(controller.model.pagingFailed, isTrue);
+    expect(controller.model.hasMore, isTrue);
+    expect(controller.model.loading, isFalse);
+    expect(controller.model.loadingMore, isFalse);
+
+    // A late trigger cannot retry the failed page by itself: the alert's Retry
+    // is the explicit recovery.
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1]);
+
+    // That recovery retries the page that failed, in place, rather than
+    // reloading the collection.
+    controller.dispatch(const LibraryMoreRetryRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1, 1]);
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Another Book')], hasMore: false),
+    );
+    await _settle();
+    expect(controller.model.books.map((book) => book.bookId), [1, 2]);
+    expect(controller.model.loadError, isNull);
+    expect(controller.model.pagingFailed, isFalse);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('the paging retry cannot run an unrelated mutation recovery', () async {
+    final bridge = _PartialImportBridge();
+    var pickerCalls = 0;
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async {
+        pickerCalls += 1;
+        return const LibraryImportSelection(
+          paths: ['/books/a.pdf'],
+          managed: false,
+        );
+      },
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+    );
+
+    // A partial import leaves its own persistent failure on the alert above the
+    // grid.
+    controller.dispatch(const LibraryImportRequested());
+    await _settle();
+    await _settle();
+    await _settle();
+    expect(controller.model.failure, LibraryFailure.import);
+    expect(pickerCalls, 1);
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(9, 'Imported')], hasMore: false),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryRefreshed());
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    // The append fails while the import failure is still on screen.
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    bridge.pages.last.completeError(StateError('the next page failed'));
+    await _settle();
+    expect(controller.model.pagingFailed, isTrue);
+    expect(controller.model.failure, LibraryFailure.import);
+
+    // The paging row's Retry retries the page. It must not run the mutation's
+    // recovery: the two failures share a screen but not a surface.
+    controller.dispatch(const LibraryMoreRetryRequested());
+    await _settle();
+    // The partial import reloaded the collection and the refresh reloaded it
+    // again before the append; the retry is the second request at the failed
+    // offset and nothing else.
+    expect(bridge.offsets, [0, 0, 1, 1]);
+    expect(
+      pickerCalls,
+      1,
+      reason: 'the paging Retry cannot open the import picker',
+    );
+
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Another Book')], hasMore: false),
+    );
+    await _settle();
+    expect(controller.model.pagingFailed, isFalse);
+
+    // The alert above the grid still recovers its own failure.
+    controller.dispatch(const LibraryRetryRequested());
+    await _settle();
+    expect(pickerCalls, 2, reason: 'the mutation recovery is unchanged');
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(9, 'Imported')], hasMore: false),
+    );
+    await _settle();
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('the paging retry obeys the paging admission', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    Future<void> failAnAppend() async {
+      controller.dispatch(const LibraryMoreRequested());
+      await _settle();
+      bridge.pages.last.completeError(StateError('the next page failed'));
+      await _settle();
+      expect(controller.model.pagingFailed, isTrue);
+    }
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    await failAnAppend();
+
+    // A retry while one is already in flight is refused: it is a recovery, not
+    // a new trigger.
+    controller.dispatch(const LibraryMoreRetryRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1, 1]);
+    controller.dispatch(const LibraryMoreRetryRequested());
+    controller.dispatch(const LibraryMoreRetryRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1, 1]);
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Another Book')], hasMore: true),
+    );
+    await _settle();
+    await failAnAppend();
+
+    // A filter change owns the collection: the retained failure is stale, so
+    // its retry cannot ask for the new filter at the old collection's offset.
+    controller.dispatch(const LibraryFormatChanged(FlutterBookFormat.epub));
+    await _settle();
+    final afterFormatChange = List<int>.of(bridge.offsets);
+    controller.dispatch(const LibraryMoreRetryRequested());
+    await _settle();
+    expect(
+      bridge.offsets,
+      afterFormatChange,
+      reason: 'a stale paging retry is refused',
+    );
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    expect(controller.model.pagingFailed, isFalse);
+    await failAnAppend();
+
+    // The same holds inside the search debounce window, before the replacement
+    // load has started.
+    controller.dispatch(const LibraryQueryChanged('new'));
+    await _settle();
+    final afterQueryChange = List<int>.of(bridge.offsets);
+    controller.dispatch(const LibraryMoreRetryRequested());
+    await _settle();
+    expect(bridge.offsets, afterQueryChange);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('an append completing inside the debounce is not adopted', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+
+    // The query change invalidates the load revision at once, before its
+    // debounce starts the replacement: the page that lands inside that window
+    // belongs to the collection the user left.
+    controller.dispatch(const LibraryQueryChanged('new'));
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Stale')], hasMore: false),
+    );
+    await _settle();
+    expect(controller.model.books.map((book) => book.bookId), [1]);
+    expect(controller.model.hasMore, isFalse);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a failure inside the debounce is not adopted', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+
+    controller.dispatch(const LibraryQueryChanged('new'));
+    await _settle();
+    bridge.pages.last.completeError(StateError('stale failure'));
+    await _settle();
+    expect(controller.model.loadError, isNull);
+    expect(controller.model.pagingFailed, isFalse);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('an append that adds no books is not asked for again', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1]);
+    // The page claims another page but adds nothing, so asking for that offset
+    // again would return the same empty page: the trigger is refused until the
+    // collection changes.
+    bridge.pages.last.complete(
+      const FlutterLibraryPage(books: [], hasMore: true),
+    );
+    await _settle();
+    expect(controller.model.hasMore, isTrue);
+
+    controller.dispatch(const LibraryMoreRequested());
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1]);
+
+    // A replacement load is a new collection, and its pages are asked for
+    // normally.
+    controller.dispatch(const LibraryRefreshed());
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1, 0, 1]);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a completion after disposal cannot write the model', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 1]);
+
+    controller.dispose();
+    await _settle();
+
+    // The disposed controller drains its effect but owns no model state: the
+    // page that lands afterwards cannot append itself.
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(2, 'Late')], hasMore: false),
+    );
+    await _settle();
+    expect(controller.model.books.map((book) => book.bookId), [1]);
+    expect(controller.model.loadError, isNull);
+    expect(bridge.disposeCount, 1);
+  });
+
+  test('a failure after disposal cannot write the model', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    controller.dispose();
+    await _settle();
+
+    bridge.pages.last.completeError(StateError('too late'));
+    await _settle();
+    expect(controller.model.loadError, isNull);
+    expect(controller.model.books.map((book) => book.bookId), [1]);
+    expect(bridge.disposeCount, 1);
+  });
+
+  test('an append that cannot start keeps the next page advertised', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+
+    // The append cannot even create its cancellation: the loaded page and the
+    // next page it was advertising survive, with the failure's own recovery.
+    bridge.failCancellationCreation = true;
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+
+    expect(controller.model.books.map((book) => book.bookId), [1]);
+    expect(controller.model.loadError, isNotNull);
+    expect(controller.model.pagingFailed, isTrue);
+    expect(controller.model.hasMore, isTrue);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a failed replacement page does not advertise another page', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    expect(controller.model.hasMore, isTrue);
+
+    // A refresh that fails replaces page one, so the collection's length is
+    // unknown again: unlike a failed append, there is no next page to advertise
+    // until the load is retried, and the trigger cannot ask for one.
+    controller.dispatch(const LibraryRefreshed());
+    await _settle();
+    bridge.pages.last.completeError(StateError('refresh failed'));
+    await _settle();
+
+    expect(controller.model.loadError, isNotNull);
+    expect(controller.model.pagingFailed, isFalse);
+    expect(controller.model.hasMore, isFalse);
+
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.offsets, [0, 0]);
 
     controller.dispose();
     await _settle();

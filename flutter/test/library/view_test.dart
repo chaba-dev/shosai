@@ -34,6 +34,7 @@ LibraryCollection _collection(
   openBook: openBook ?? (_) {},
   removeBook: removeBook ?? (_) {},
   loadMore: loadMore ?? () {},
+  retryPaging: () {},
   loadCover: (_) => false,
   retry: retry ?? () {},
   addFirstBooks: addFirstBooks ?? () {},
@@ -203,19 +204,82 @@ void main() {
     expect(opened?.bookId, 7);
   });
 
-  testWidgets('loads more when the library has another page', (tester) async {
+  testWidgets('a short page asks for the next page without a scroll', (
+    tester,
+  ) async {
+    var loadMoreCalls = 0;
+    var model = LibraryModel(books: [_book], loaded: true, hasMore: true);
+    await tester.pumpWidget(
+      _app(
+        StatefulBuilder(
+          builder: (context, setState) => _collection(
+            model,
+            loadMore: () {
+              loadMoreCalls += 1;
+              // The controller owns the transition; here it is simulated so the
+              // widget is rebuilt with the page in flight, exactly as it is in
+              // the application.
+              setState(
+                () => model = model.copyWith(loading: true, loadingMore: true),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    // The owner asked for automatic paging (2026-09-25): a page shorter than
+    // the viewport has no end to scroll to, so the collection asks for the next
+    // page itself instead of waiting for an impossible scroll.
+    expect(loadMoreCalls, 1);
+    await tester.pump();
+    expect(find.text('Load more books'), findsNothing);
+    expect(find.text('Loading more…'), findsOneWidget);
+  });
+
+  testWidgets('a mutation error does not stop the paging trigger', (
+    tester,
+  ) async {
     var loadMoreCalls = 0;
     await tester.pumpWidget(
       _app(
         _collection(
-          LibraryModel(books: [_book], loaded: true, hasMore: true),
+          LibraryModel(
+            books: [_book],
+            loaded: true,
+            hasMore: true,
+            // A partial import's banner: a different failure surface, so the
+            // collection can still ask for its next page.
+            error: 'Some files were not imported.',
+          ),
           loadMore: () => loadMoreCalls += 1,
         ),
       ),
     );
 
-    await tester.tap(find.text('Load more books'));
+    expect(find.text('Some files were not imported.'), findsOneWidget);
     expect(loadMoreCalls, 1);
+  });
+
+  testWidgets('the pending page is the reference loading line', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        _collection(
+          LibraryModel(
+            books: [_book],
+            loaded: true,
+            loading: true,
+            loadingMore: true,
+            hasMore: true,
+          ),
+        ),
+      ),
+    );
+
+    // The reference's paging row names the pending page instead of a control.
+    expect(find.text('Loading more…'), findsOneWidget);
+    expect(find.text('Load more books'), findsNothing);
+    expect(find.byType(LibrarySkeletonCard), findsNothing);
   });
 
   testWidgets('book actions menu removes the book', (tester) async {

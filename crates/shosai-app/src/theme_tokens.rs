@@ -594,6 +594,9 @@ pub const LAYOUT_LIBRARY_ALERT_PADDING_HORIZONTAL: f32 = 14.0;
 /// `layout.library.continueSectionTrailingSpace` — Iced (crates/shosai-app/src/app.rs library_collection's Space between the continue card and the next section, the pinned reference)
 pub const LAYOUT_LIBRARY_CONTINUE_SECTION_TRAILING_SPACE: f32 = 4.0;
 
+/// `layout.library.pagingTriggerDistance` — Retained Flutter: the pinned Iced library pages with an explicit previous/next row; the owner asked for automatic next-page loading (2026-09-25), so this is the distance from the scroll end at which the next page is requested. It has no reference value.
+pub const LAYOUT_LIBRARY_PAGING_TRIGGER_DISTANCE: f32 = 400.0;
+
 /// `layout.library.sectionSpacing` — Iced (docs/flutter-ui-reference-spec.md 3.5)
 pub const LAYOUT_LIBRARY_SECTION_SPACING: f32 = 16.0;
 

@@ -79,7 +79,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cardRemoving => 'Removing…';
 
   @override
-  String get collectionLoadMore => 'Load more books';
+  String get libraryLoadingMore => 'Loading more…';
 
   @override
   String get libraryContinueReading => 'Continue reading';

@@ -43,6 +43,7 @@ LibraryCollection _collection(LibraryModel model) => LibraryCollection(
   openBook: (_) {},
   removeBook: (_) {},
   loadMore: () {},
+  retryPaging: () {},
   loadCover: (_) => false,
   retry: () {},
   addFirstBooks: () {},

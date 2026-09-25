@@ -365,6 +365,77 @@ void main() {
       });
     });
 
+    testWidgets('W1280 next-page feedback while it loads', (tester) async {
+      final bridge =
+          gatedBridge(
+                books: harnessLibraryBooks().take(3).toList(),
+                covers: harnessCovers(count: 3),
+              )
+              as _GatedLibraryBridge;
+      // The short first page has no scroll end, so the collection asks for the
+      // next page after the frame; the bridge holds it and the reference's
+      // loading line is the captured pending state.
+      bridge.firstPageHasMore = true;
+      bridge.gateAppends = true;
+      const view = HarnessView(size: Size(1280, 800));
+      view.apply(tester);
+      await renderHarnessState(
+        tester,
+        productionShell(
+          home: ProductShell(
+            bridgeFactory: () => bridge,
+            readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+          ),
+        ),
+        // The feedback is the state; the covers are awaited too so the capture
+        // is not taken before the grid has settled.
+        ready: () =>
+            find.text('Loading more…').evaluate().isNotEmpty &&
+            harnessImagesReady(tester),
+      );
+      expect(find.text('Load more books'), findsNothing);
+      expect(find.byType(LibraryBookCard), findsWidgets);
+      expect(find.byType(LibrarySkeletonCard), findsNothing);
+      await captureState(tester, '3c-library-loading-more-1280', view, {
+        'state': 'paging-loading',
+        'appLocale': renderedLocale(tester),
+      });
+    });
+
+    testWidgets('W1280 paging failure above the grid', (tester) async {
+      final bridge =
+          gatedBridge(
+                books: harnessLibraryBooks().take(3).toList(),
+                covers: harnessCovers(count: 3),
+              )
+              as _GatedLibraryBridge;
+      // The appended page fails, so the collection's own alert and its Retry
+      // carry the recovery; the loaded grid stays below it.
+      bridge.firstPageHasMore = true;
+      bridge.failAppends = true;
+      const view = HarnessView(size: Size(1280, 800));
+      view.apply(tester);
+      await renderHarnessState(
+        tester,
+        productionShell(
+          home: ProductShell(
+            bridgeFactory: () => bridge,
+            readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+          ),
+        ),
+        ready: () =>
+            find.text('Library query failed').evaluate().isNotEmpty &&
+            harnessImagesReady(tester),
+      );
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.byType(LibraryBookCard), findsWidgets);
+      expect(find.byType(LibrarySkeletonCard), findsNothing);
+      await captureState(tester, '3c-library-paging-failure-1280', view, {
+        'state': 'paging-failure',
+        'appLocale': renderedLocale(tester),
+      });
+    });
+
     testWidgets('W1280 empty library with a load failure', (tester) async {
       final bridge =
           gatedBridge(books: const [], covers: const {}) as _GatedLibraryBridge;
@@ -470,6 +541,20 @@ class _GatedLibraryBridge extends HarnessBridge {
   final List<Completer<FlutterLibraryPage>> pending = [];
   bool gate = false;
   bool failNextPage = false;
+
+  /// Holds an appended page (offset > 0) open, so the automatic paging's
+  /// pending state can be captured.
+  bool gateAppends = false;
+
+  /// Fails the next appended page once, so the paging failure state can be
+  /// captured without failing the first page.
+  bool failAppends = false;
+
+  /// Reports another page after a first page that is shorter than the harness
+  /// paging limit, so the automatic trigger has a page to ask for without
+  /// needing fifty cards in the capture.
+  bool firstPageHasMore = false;
+
   bool deletionPending = false;
 
   @override
@@ -479,7 +564,21 @@ class _GatedLibraryBridge extends HarnessBridge {
     required int limit,
     required int offset,
     required BigInt cancellationId,
-  }) {
+  }) async {
+    if (offset > 0 && failAppends) {
+      failAppends = false;
+      return Future<FlutterLibraryPage>.error(
+        const FlutterBridgeError(
+          kind: FlutterBridgeErrorKind.backendUnavailable,
+          message: 'Library query failed',
+        ),
+      );
+    }
+    if (offset > 0 && gateAppends) {
+      final completer = Completer<FlutterLibraryPage>();
+      pending.add(completer);
+      return completer.future;
+    }
     if (failNextPage) {
       failNextPage = false;
       return Future<FlutterLibraryPage>.error(
@@ -490,13 +589,16 @@ class _GatedLibraryBridge extends HarnessBridge {
       );
     }
     if (!gate) {
-      return super.libraryPage(
+      final page = await super.libraryPage(
         query: query,
         format: format,
         limit: limit,
         offset: offset,
         cancellationId: cancellationId,
       );
+      return firstPageHasMore && offset == 0
+          ? FlutterLibraryPage(books: page.books, hasMore: true)
+          : page;
     }
     final completer = Completer<FlutterLibraryPage>();
     pending.add(completer);

@@ -633,6 +633,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             removeBook: (book) =>
                 controller.dispatch(LibraryBookRemovalRequested(book)),
             loadMore: () => controller.dispatch(const LibraryMoreRequested()),
+            retryPaging: () =>
+                controller.dispatch(const LibraryMoreRetryRequested()),
             loadCover: controller.requestCover,
             retry: () => controller.dispatch(const LibraryRetryRequested()),
             addFirstBooks: () =>

@@ -79,7 +79,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get cardRemoving => '削除中…';
 
   @override
-  String get collectionLoadMore => 'さらに読み込む';
+  String get libraryLoadingMore => 'さらに読み込み中…';
 
   @override
   String get libraryContinueReading => '読書を続ける';

@@ -85,6 +85,7 @@ final class LibraryModel {
     this.loaded = false,
     this.error,
     this.loadError,
+    this.pagingFailed = false,
     this.hasMore = false,
     this.failure = LibraryFailure.none,
     this.providerCleanupPending = false,
@@ -123,6 +124,14 @@ final class LibraryModel {
   final bool loaded;
   final String? error;
   final String? loadError;
+
+  /// True when the last load failure was an appended page rather than page one.
+  ///
+  /// A paging failure keeps the loaded collection and its next page advertised,
+  /// so its recovery is the collection's alert at the paging row: it retries
+  /// the page that failed instead of reloading the collection.
+  final bool pagingFailed;
+
   String? get displayError => error ?? loadError;
   final bool hasMore;
   final LibraryFailure failure;
@@ -178,6 +187,7 @@ final class LibraryModel {
     bool? loaded,
     Object? error = _same,
     Object? loadError = _same,
+    bool? pagingFailed,
     bool? hasMore,
     LibraryFailure? failure,
     bool? providerCleanupPending,
@@ -203,6 +213,7 @@ final class LibraryModel {
     loadError: identical(loadError, _same)
         ? this.loadError
         : loadError as String?,
+    pagingFailed: pagingFailed ?? this.pagingFailed,
     hasMore: hasMore ?? this.hasMore,
     failure: failure ?? this.failure,
     providerCleanupPending:

@@ -22,7 +22,7 @@
   "cardRemoveFromLibrary": "ライブラリから削除",
   "cardRemoveManagedCopy": "コピーも削除",
   "cardRemoving": "削除中…",
-  "collectionLoadMore": "さらに読み込む",
+  "libraryLoadingMore": "さらに読み込み中\u2026",
   "libraryContinueReading": "読書を続ける",
   "libraryContinue": "続きを読む  ›",
   "libraryPercentComplete": "{percentage}% 完了",

@@ -195,6 +195,7 @@ class LibraryCollection extends StatelessWidget {
     required this.openBook,
     required this.removeBook,
     required this.loadMore,
+    required this.retryPaging,
     required this.loadCover,
     required this.retry,
     required this.addFirstBooks,
@@ -205,6 +206,13 @@ class LibraryCollection extends StatelessWidget {
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<FlutterLibraryBook> removeBook;
   final VoidCallback loadMore;
+
+  /// The paging row's recovery: retry the page an appended load failed to add.
+  ///
+  /// It is separate from [retry] because the alert above the grid recovers a
+  /// mutation or a collection-level load, and the paging row recovers only its
+  /// own page.
+  final VoidCallback retryPaging;
   final bool Function(int) loadCover;
 
   /// The failure alert's retained recovery action; the reference's alert bar
@@ -236,6 +244,7 @@ class LibraryCollection extends StatelessWidget {
       openBook: openBook,
       removeBook: removeBook,
       loadMore: loadMore,
+      retryPaging: retryPaging,
       loadCover: loadCover,
       retry: retry,
     ),
@@ -334,13 +343,23 @@ class _CollectionAlert extends StatelessWidget {
 }
 
 /// The populated collection column: alert, continue section, section title,
-/// grid and paging, in the reference's order.
-class _LibraryGrid extends StatelessWidget {
+/// grid, automatic paging and its feedback, in the reference's order.
+///
+/// The ordinary "Load more books" control is gone: the collection asks for the
+/// next page as the scroll approaches its end, and a page shorter than the
+/// viewport asks for one after the frame instead of requiring an impossible
+/// scroll. The trigger is presentation state this widget owns; the request it
+/// dispatches is the same typed [LibraryMoreRequested] the button dispatched,
+/// and the controller owns everything about it — admission, duplicate
+/// suppression, exhaustion and stale completions — so the widget never awaits
+/// anything and never writes model state.
+class _LibraryGrid extends StatefulWidget {
   const _LibraryGrid({
     required this.model,
     required this.openBook,
     required this.removeBook,
     required this.loadMore,
+    required this.retryPaging,
     required this.loadCover,
     required this.retry,
   });
@@ -349,18 +368,77 @@ class _LibraryGrid extends StatelessWidget {
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<FlutterLibraryBook> removeBook;
   final VoidCallback loadMore;
+  final VoidCallback retryPaging;
   final bool Function(int) loadCover;
   final VoidCallback retry;
 
   @override
+  State<_LibraryGrid> createState() => _LibraryGridState();
+}
+
+class _LibraryGridState extends State<_LibraryGrid> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_maybeRequestNextPage);
+  }
+
+  @override
+  void dispose() {
+    _scroll.removeListener(_maybeRequestNextPage);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Whether another page may be asked for.
+  ///
+  /// Exhaustion stops the trigger, a load failure keeps its own recovery
+  /// instead of looping, and a load in flight is never asked twice; the
+  /// controller repeats the same checks on its side, because this predicate
+  /// reads the model the widget was last built with. A mutation error (a
+  /// partial import, say) is a different surface and does not stop paging.
+  bool get _canRequestNextPage =>
+      widget.model.hasMore &&
+      !widget.model.loading &&
+      widget.model.loadError == null &&
+      widget.model.collectionState == LibraryCollectionState.ready;
+
+  /// Dispatches the typed paging intent when the scroll is within
+  /// [ShosaiTokens.layoutLibraryPagingTriggerDistance] of the collection's end.
+  void _maybeRequestNextPage() {
+    if (!mounted || !_canRequestNextPage || !_scroll.hasClients) return;
+    final position = _scroll.position;
+    final remaining = position.maxScrollExtent - position.pixels;
+    if (remaining > ShosaiTokens.layoutLibraryPagingTriggerDistance) return;
+    widget.loadMore();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final continueBook = model.continueBook;
-    final error = model.displayError;
+    final continueBook = widget.model.continueBook;
+    // A paging failure is recovered where it happened, at the paging row below
+    // the grid, so the alert above the grid carries only collection-level
+    // failures and mutation errors.
+    final loadError = widget.model.loadError;
+    final pagingFailure = loadError != null && widget.model.pagingFailed;
+    final error = widget.model.error ?? (pagingFailure ? null : loadError);
+    // A page shorter than the viewport has no end to scroll to, so the next
+    // page is requested after the frame. Every request is bounded by
+    // `_canRequestNextPage` and by the controller's own admission, so a short
+    // library fills without looping.
+    if (_canRequestNextPage) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _maybeRequestNextPage();
+      });
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final available = constraints.maxWidth - _collectionPadding.horizontal;
         final columns = libraryGridColumns(available);
         return CustomScrollView(
+          controller: _scroll,
           slivers: [
             SliverPadding(
               padding: _collectionPadding,
@@ -372,7 +450,10 @@ class _LibraryGrid extends StatelessWidget {
                         padding: const EdgeInsets.only(
                           bottom: ShosaiTokens.layoutLibrarySectionSpacing,
                         ),
-                        child: _CollectionAlert(message: error, retry: retry),
+                        child: _CollectionAlert(
+                          message: error,
+                          retry: widget.retry,
+                        ),
                       ),
                     ),
                   if (continueBook != null)
@@ -383,10 +464,10 @@ class _LibraryGrid extends StatelessWidget {
                         ),
                         child: LibraryContinueSection(
                           book: continueBook,
-                          cover: model.covers[continueBook.bookId],
-                          demandRevision: model.coverRevision,
-                          loadCover: loadCover,
-                          openBook: openBook,
+                          cover: widget.model.covers[continueBook.bookId],
+                          demandRevision: widget.model.coverRevision,
+                          loadCover: widget.loadCover,
+                          openBook: widget.openBook,
                         ),
                       ),
                     ),
@@ -395,7 +476,7 @@ class _LibraryGrid extends StatelessWidget {
                       padding: const EdgeInsets.only(
                         bottom: ShosaiTokens.layoutLibrarySectionSpacing,
                       ),
-                      child: _CollectionSectionTitle(model: model),
+                      child: _CollectionSectionTitle(model: widget.model),
                     ),
                   ),
                   SliverGrid.builder(
@@ -405,27 +486,50 @@ class _LibraryGrid extends StatelessWidget {
                       mainAxisSpacing: ShosaiTokens.layoutLibraryGridSpacing,
                       mainAxisExtent: libraryCardTileExtent(context),
                     ),
-                    itemCount: model.books.length,
+                    itemCount: widget.model.books.length,
                     itemBuilder: (context, index) {
-                      final book = model.books[index];
+                      final book = widget.model.books[index];
                       return LibraryBookCard(
                         book: book,
-                        cover: model.covers[book.bookId],
-                        demandRevision: model.coverRevision,
-                        removing: model.removingBookId == book.bookId,
-                        loadCover: loadCover,
-                        openBook: openBook,
-                        removeBook: removeBook,
+                        cover: widget.model.covers[book.bookId],
+                        demandRevision: widget.model.coverRevision,
+                        removing: widget.model.removingBookId == book.bookId,
+                        loadCover: widget.loadCover,
+                        openBook: widget.openBook,
+                        removeBook: widget.removeBook,
                       );
                     },
                   ),
-                  if (model.hasMore)
+                  if (pagingFailure && !widget.model.loadingMore)
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.only(
                           top: ShosaiTokens.layoutLibraryGridSpacing,
                         ),
-                        child: _LoadMore(model: model, loadMore: loadMore),
+                        child: _CollectionAlert(
+                          message: loadError,
+                          retry: widget.retryPaging,
+                        ),
+                      ),
+                    ),
+                  if (widget.model.loadingMore)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          top: ShosaiTokens.layoutLibraryGridSpacing,
+                        ),
+                        child: Center(
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              AppLocalizations.of(context).libraryLoadingMore,
+                              style: _libraryMutedStyle(
+                                context,
+                                ShosaiTokens.typeSize16,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                 ],
@@ -986,30 +1090,6 @@ TextStyle _continueLinkStyle(BuildContext context) =>
       fontSize: ShosaiTokens.typeSize13,
       color: ShosaiTokens.appAccent,
     );
-
-/// The retained Flutter paging control below the grid.
-///
-/// The reference's paging row (previous/next page) belongs to package 3D; this
-/// keeps the pre-3B control's behavior — one typed [LibraryMoreRequested]
-/// dispatch, disabled while a load is in flight — in the reference's position
-/// below the grid instead of as a grid cell, which cannot hold a fixed-height
-/// card.
-class _LoadMore extends StatelessWidget {
-  const _LoadMore({required this.model, required this.loadMore});
-
-  final LibraryModel model;
-  final VoidCallback loadMore;
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: ShadButton.outline(
-      height: shosaiShadButtonHeight(context),
-      onPressed: model.busy ? null : loadMore,
-      trailing: const Icon(LucideIcons.chevronDown),
-      child: Text(AppLocalizations.of(context).collectionLoadMore),
-    ),
-  );
-}
 
 /// One cover-first book card.
 ///
