@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -45,8 +46,16 @@ LibraryCollection _collection(LibraryModel model) => LibraryCollection(
   loadCover: (_) => false,
 );
 
-RenderParagraph _paragraph(WidgetTester tester, String text) =>
-    tester.renderObject<RenderParagraph>(find.text(text));
+RenderParagraph _paragraph(WidgetTester tester, String text, {double? size}) =>
+    tester.renderObject<RenderParagraph>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            widget.data == text &&
+            (size == null || widget.style?.fontSize == size),
+        description: 'card text "$text"${size == null ? '' : ' at $size px'}',
+      ),
+    );
 
 void main() {
   setUpAll(loadHarnessFonts);
@@ -118,10 +127,18 @@ void main() {
         _app(_collection(LibraryModel(books: [_japaneseBook], loaded: true))),
       );
 
-      final title = _paragraph(tester, _japaneseBook.title);
+      final title = _paragraph(
+        tester,
+        _japaneseBook.title,
+        size: ShosaiTokens.typeSize13,
+      );
       expect(title.text.style?.fontFamily, shosaiJapaneseInterfaceFontFamily);
       expect(title.text.style?.fontFamilyFallback, [shosaiInterfaceFontFamily]);
-      final author = _paragraph(tester, _japaneseBook.author!);
+      final author = _paragraph(
+        tester,
+        _japaneseBook.author!,
+        size: ShosaiTokens.typeSize11,
+      );
       expect(author.text.style?.fontFamily, shosaiJapaneseInterfaceFontFamily);
       expect(author.text.style?.fontFamilyFallback, [
         shosaiInterfaceFontFamily,
@@ -133,13 +150,21 @@ void main() {
         _app(_collection(LibraryModel(books: [_latinBook], loaded: true))),
       );
 
-      final title = _paragraph(tester, _latinBook.title);
+      final title = _paragraph(
+        tester,
+        _latinBook.title,
+        size: ShosaiTokens.typeSize13,
+      );
       expect(title.text.style?.fontFamily, shosaiInterfaceFontFamily);
       expect(
         title.text.style?.fontFamilyFallback,
         contains(shosaiJapaneseInterfaceFontFamily),
       );
-      final author = _paragraph(tester, _latinBook.author!);
+      final author = _paragraph(
+        tester,
+        _latinBook.author!,
+        size: ShosaiTokens.typeSize11,
+      );
       expect(author.text.style?.fontFamily, shosaiInterfaceFontFamily);
     });
   });

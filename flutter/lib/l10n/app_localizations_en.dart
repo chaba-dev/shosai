@@ -49,4 +49,35 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get refreshLibraryTooltip => 'Refresh library';
+
+  @override
+  String get cardUnknownAuthor => 'Unknown author';
+
+  @override
+  String get cardNotStarted => 'Not started';
+
+  @override
+  String cardPercentRead(int percentage) {
+    return '$percentage%';
+  }
+
+  @override
+  String cardCoverSemantics(String title) {
+    return 'Cover of $title';
+  }
+
+  @override
+  String get cardActionsTooltip => 'Book actions';
+
+  @override
+  String get cardRemoveFromLibrary => 'Remove from library';
+
+  @override
+  String get cardRemoveManagedCopy => 'Remove and delete copy';
+
+  @override
+  String get cardRemoving => 'Removing…';
+
+  @override
+  String get collectionLoadMore => 'Load more books';
 }

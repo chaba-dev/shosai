@@ -411,6 +411,81 @@ pub const LAYOUT_LIBRARY_PAGE_SIZE: u32 = 40;
 /// `layout.library.searchDebounceMs` — Iced (docs/flutter-ui-reference-spec.md 3.5)
 pub const LAYOUT_LIBRARY_SEARCH_DEBOUNCE_MS: u32 = 200;
 
+/// `layout.library.collectionPaddingVertical` — Iced (docs/flutter-ui-reference-spec.md 3.5)
+pub const LAYOUT_LIBRARY_COLLECTION_PADDING_VERTICAL: f32 = 22.0;
+
+/// `layout.library.collectionPaddingHorizontal` — Iced (docs/flutter-ui-reference-spec.md 3.5)
+pub const LAYOUT_LIBRARY_COLLECTION_PADDING_HORIZONTAL: f32 = 24.0;
+
+/// `layout.library.card.height` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_HEIGHT: f32 = 330.0;
+
+/// `layout.library.card.coverHeight` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_COVER_HEIGHT: f32 = 210.0;
+
+/// `layout.library.card.coverRadius` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_COVER_RADIUS: f32 = 4.0;
+
+/// `layout.library.card.coverShadowOffset` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_COVER_SHADOW_OFFSET: f32 = 4.0;
+
+/// `layout.library.card.coverShadowBlur` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_COVER_SHADOW_BLUR: f32 = 12.0;
+
+/// `layout.library.card.titleHeight` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_TITLE_HEIGHT: f32 = 32.0;
+
+/// `layout.library.card.authorHeight` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_AUTHOR_HEIGHT: f32 = 28.0;
+
+/// `layout.library.card.spacing` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_SPACING: f32 = 4.0;
+
+/// `layout.library.card.metadataGap` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_METADATA_GAP: f32 = 6.0;
+
+/// `layout.library.card.borderWidth` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_BORDER_WIDTH: f32 = 1.0;
+
+/// `layout.library.card.placeholderPadding` — Retained Flutter: the pinned Iced placeholder centres its label with no inset; this inset keeps a long or scaled label's ink inside the placeholder box.
+pub const LAYOUT_LIBRARY_CARD_PLACEHOLDER_PADDING: f32 = 8.0;
+
+/// `layout.library.card.menuWidth` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_MENU_WIDTH: f32 = 164.0;
+
+/// `layout.library.card.menuPadding` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_MENU_PADDING: f32 = 4.0;
+
+/// `layout.library.card.menuActionPaddingVertical` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_MENU_ACTION_PADDING_VERTICAL: f32 = 7.0;
+
+/// `layout.library.card.menuActionPaddingHorizontal` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_MENU_ACTION_PADDING_HORIZONTAL: f32 = 10.0;
+
+/// `layout.library.card.menuActionHoverAlpha` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_MENU_ACTION_HOVER_ALPHA: f32 = 0.1;
+
+/// `layout.library.card.triggerPaddingVertical` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_TRIGGER_PADDING_VERTICAL: f32 = 5.0;
+
+/// `layout.library.card.triggerPaddingHorizontal` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_TRIGGER_PADDING_HORIZONTAL: f32 = 8.0;
+
+/// `layout.library.card.triggerOffset` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_TRIGGER_OFFSET: f32 = 8.0;
+
+/// `layout.library.card.triggerScrimAlpha` — Retained Flutter: owner-directed refinement of the pinned card trigger (2026-09-25). Iced paints the trigger as an opaque SURFACE square with a 1 px BORDER (theme.rs book_card_action); the owner asked for a subtler trigger, so the reference's painted geometry keeps its 13 px glyph, [5, 8] padding and radiusSmall but is filled with this translucent ink scrim (app.shadow.base) under a light glyph (app.textOnAccent) instead.
+pub const LAYOUT_LIBRARY_CARD_TRIGGER_SCRIM_ALPHA: f32 = 0.5;
+
+/// `layout.library.card.triggerScrimActiveAlpha` — Retained Flutter: the same refinement's hovered, pressed and open-menu weight of the trigger scrim; the reference's own hover only swaps SURFACE for SURFACE_MUTED.
+pub const LAYOUT_LIBRARY_CARD_TRIGGER_SCRIM_ACTIVE_ALPHA: f32 = 0.68;
+
+/// `layout.library.card.removePaddingVertical` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_REMOVE_PADDING_VERTICAL: f32 = 3.0;
+
+/// `layout.library.card.removePaddingHorizontal` — Iced (crates/shosai-app/src/app.rs render_book_card and crates/shosai-app/src/widgets.rs book_button, the pinned reference)
+pub const LAYOUT_LIBRARY_CARD_REMOVE_PADDING_HORIZONTAL: f32 = 6.0;
+
 /// `layout.import.modalMaxWidth` — Iced (docs/flutter-ui-reference-spec.md 3.5)
 pub const LAYOUT_IMPORT_MODAL_MAX_WIDTH: f32 = 680.0;
 

@@ -13,5 +13,14 @@
   "addBooksAction": "本を追加",
   "cancelImportAction": "キャンセル",
   "cancelOperationTooltip": "操作をキャンセル",
-  "refreshLibraryTooltip": "ライブラリを更新"
+  "refreshLibraryTooltip": "ライブラリを更新",
+  "cardUnknownAuthor": "著者不明",
+  "cardNotStarted": "未読",
+  "cardPercentRead": "{percentage}%",
+  "cardCoverSemantics": "{title}の表紙",
+  "cardActionsTooltip": "本の操作",
+  "cardRemoveFromLibrary": "ライブラリから削除",
+  "cardRemoveManagedCopy": "コピーも削除",
+  "cardRemoving": "削除中…",
+  "collectionLoadMore": "さらに読み込む"
 }

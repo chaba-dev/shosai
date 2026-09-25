@@ -11,8 +11,20 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
 
 import 'support/production_shell_harness.dart';
+
+/// The card's own title line.
+///
+/// A card without a cover shows the title in its placeholder too, so a bare
+/// text finder would match twice; the card's title is the 13 px line (LB-11).
+Finder _cardTitle(String title) => find.byWidgetPredicate(
+  (widget) =>
+      widget is Text &&
+      widget.data == title &&
+      widget.style?.fontSize == ShosaiTokens.typeSize13,
+);
 
 void main() {
   setUpAll(loadHarnessFonts);
@@ -189,22 +201,34 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('A Book'), findsOneWidget);
+    expect(_cardTitle('A Book'), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
-    expect(find.text('42% read'), findsOneWidget);
-    expect(find.text('PDF'), findsOneWidget);
+    expect(find.text('42%'), findsOneWidget);
+    // The card's format label; the sidebar carries the same format name.
+    expect(
+      find.descendant(
+        of: find.byType(LibraryBookCard),
+        matching: find.text('PDF'),
+      ),
+      findsOneWidget,
+    );
 
-    await tester.tap(find.text('PDF'));
+    final pdfFilter = find.descendant(
+      of: find.byType(LibrarySidebar),
+      matching: find.text('PDF'),
+    );
+    expect(pdfFilter, findsOneWidget);
+    await tester.tap(pdfFilter);
     await tester.pumpAndSettle();
     expect(bridge.lastFormat, FlutterBookFormat.pdf);
 
-    await tester.tap(find.text('A Book'));
+    await tester.tap(find.byType(LibraryBookCard));
     await tester.pumpAndSettle();
     expect(opened?.bookId, 7);
     expect(find.text('Reading A Book'), findsOneWidget);
   });
 
-  testWidgets('library lazily renders bounded covers and recent activity', (
+  testWidgets('library lazily renders bounded covers and reading progress', (
     tester,
   ) async {
     final cover = base64Decode(
@@ -227,7 +251,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Continue reading'), findsOneWidget);
+    // The card's reading status is the reference's percent line; the
+    // continue-reading section is package 3C's. Every fixture book shares the
+    // same progress, so the first card is asserted by identity.
+    expect(
+      find.descendant(
+        of: find.byType(LibraryBookCard).first,
+        matching: find.text('50%'),
+      ),
+      findsOneWidget,
+    );
     expect(find.bySemanticsLabel('Cover of Recently Read'), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
     expect(find.text('Book 59'), findsNothing);
@@ -433,17 +466,17 @@ void main() {
     expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(1));
 
     final grid = find.descendant(
-      of: find.byType(GridView),
+      of: find.byType(LibraryCollection),
       matching: find.byType(Scrollable),
     );
     await tester.scrollUntilVisible(
-      find.text('Book 79'),
+      _cardTitle('Book 79'),
       600,
       scrollable: grid,
     );
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('Book 0'),
+      _cardTitle('Book 0'),
       -600,
       scrollable: grid,
     );
@@ -476,7 +509,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('A Book'));
+    await tester.tap(find.byType(LibraryBookCard));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Back'));
@@ -503,7 +536,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('A Book'));
+    await tester.tap(find.byType(LibraryBookCard));
     await tester.pumpAndSettle();
     expect(find.text('Open reader'), findsOneWidget);
 
@@ -535,7 +568,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('A Book'));
+    await tester.tap(find.byType(LibraryBookCard));
     await tester.pumpAndSettle();
     expect(find.text('locator:/books/a.pdf:7'), findsOneWidget);
 
@@ -1296,7 +1329,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('詳しい本'), findsOneWidget);
+    expect(_cardTitle('詳しい本'), findsOneWidget);
     // The Japanese interface is selected, not only Japanese metadata.
     expect(find.text('ライブラリ'), findsOneWidget);
     expect(find.text('Library'), findsNothing);

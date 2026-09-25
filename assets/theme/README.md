@@ -35,6 +35,16 @@ generated files repeat it as a doc comment on every constant.
 | `reader.<light,dark,sepia>.*` | `Iced` — the reader document palettes (specification §3.3). |
 | `reader.selection.*`, `reader.annotation.*` | `Retained Flutter` — RFD 6 selection/highlighting has no Iced reference (plan decision 8); these are the colors the application already painted with. |
 | `radius.*`, `type.*`, `layout.*` | `Iced` — specification §3.4 and §3.5. |
+| `layout.library.card.*` | `Iced` — the pinned card composition (`crates/shosai-app/src/app.rs` `render_book_card`, `crates/shosai-app/src/widgets.rs` `book_button`). The specification's §3.5 table names the grid metrics and its prose names the collection padding; the card's internal metrics are recorded in the source so the Flutter card and the Iced card cannot drift. The pinned Iced card still writes these values literally; the Rust migration is not part of package 3B. |
+
+Per-key exceptions to a group are recorded under their own `meta.authority` key.
+The card trigger's two scrim weights (`layout.library.card.triggerScrimAlpha`,
+`layout.library.card.triggerScrimActiveAlpha`) are `Retained Flutter`: the owner
+asked for a subtler trigger than the pinned Iced `book_card_action` surface
+(2026-09-25), so the reference's painted geometry — its 13 px glyph, `[5, 8]`
+padding and `radiusSmall` — is filled with a translucent ink scrim instead of the
+opaque `SURFACE` square with its `BORDER`. `layout.library.card.placeholderPadding`
+is the same kind of exception.
 
 Plan decision 2 also rejects the historical #109 brown accent. `app.accent` must
 stay `#4D5E86` and no token value may be `#8A6338`; the generator and both sides'
@@ -62,8 +72,10 @@ themes never override it, and `shosaiInterfaceFontForText` keeps the bundled
 Inter face as the fallback when Noto Sans JP is the primary face.
 
 The Flutter themes consume the color, radius and type tokens. The `layout.*`
-metrics are in the source for the composition packages that will consume them
-(3A-3D, 4B-4C, 6A-6B); this package does not change Flutter layout.
+metrics are in the source for the composition packages that consume them
+(3A-3D, 4B-4C, 6A-6B); 3A consumes the library navigation metrics and 3B the
+grid and card metrics (`layout.library.grid*`, `layout.library.card.*`,
+`layout.library.collectionPadding*`).
 
 ## Rust mapping
 

@@ -55,5 +55,51 @@
   "refreshLibraryTooltip": "Refresh library",
   "@refreshLibraryTooltip": {
     "description": "Retained Flutter capability; no Iced library-header counterpart."
+  },
+  "cardUnknownAuthor": "Unknown author",
+  "@cardUnknownAuthor": {
+    "description": "Iced reference key: unknown-author. Shown on the card when a book has no author."
+  },
+  "cardNotStarted": "Not started",
+  "@cardNotStarted": {
+    "description": "Iced reference key: not-started. The card's reading status at zero progress."
+  },
+  "cardPercentRead": "{percentage}%",
+  "@cardPercentRead": {
+    "description": "Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.",
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
+  "cardCoverSemantics": "Cover of {title}",
+  "@cardCoverSemantics": {
+    "description": "Retained Flutter semantics label for the card's cover image.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "cardActionsTooltip": "Book actions",
+  "@cardActionsTooltip": {
+    "description": "Retained Flutter tooltip for the card's overflow action; no Iced counterpart (Iced draws a bare glyph)."
+  },
+  "cardRemoveFromLibrary": "Remove from library",
+  "@cardRemoveFromLibrary": {
+    "description": "Iced reference key: remove-from-library. The card menu's action for a referenced book."
+  },
+  "cardRemoveManagedCopy": "Remove and delete copy",
+  "@cardRemoveManagedCopy": {
+    "description": "Retained Flutter variant of the card menu's action: a managed book also deletes the private copy. The confirmation dialog still explains the deletion."
+  },
+  "cardRemoving": "Removing…",
+  "@cardRemoving": {
+    "description": "Iced reference key: removing. The card's status while its removal is in flight."
+  },
+  "collectionLoadMore": "Load more books",
+  "@collectionLoadMore": {
+    "description": "Retained Flutter paging control; Iced's library paging row (previous/next-library-page) is package 3D's. The label is the pre-3B wording, translated."
   }
 }
