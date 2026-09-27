@@ -70,7 +70,7 @@ void main() {
           home: ProductShell(
             bridgeFactory: () => bridge,
             noticeReporter: center.reporter,
-            readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
       ),

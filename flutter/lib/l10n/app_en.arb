@@ -98,7 +98,7 @@
   "@cardRemoving": {
     "description": "Iced reference key: removing. The card's status while its removal is in flight."
   },
-  "libraryLoadingMore": "Loading more\u2026",
+  "libraryLoadingMore": "Loading more…",
   "@libraryLoadingMore": {
     "description": "Iced reference key: loading-more. The collection's paging feedback; the owner replaced the retained Load more button with automatic next-page loading (2026-09-25)."
   },
@@ -322,5 +322,258 @@
   "readerRemoveFromLibrary": "Remove from Library",
   "@readerRemoveFromLibrary": {
     "description": "Iced reference key: remove-from-library."
+  },
+  "readerContentsSubheading": "Chapters and saved places",
+  "@readerContentsSubheading": {
+    "description": "Iced reference key: chapters-saved-places. The Contents panel subheading."
+  },
+  "readerCloseContents": "Close contents",
+  "@readerCloseContents": {
+    "description": "NEW: no Iced string. The Contents panel close control; Iced paints a x glyph (app.rs bookmarks_panel)."
+  },
+  "readerChaptersHeading": "Chapters",
+  "@readerChaptersHeading": {
+    "description": "Iced reference key: chapters."
+  },
+  "readerChapterNumber": "Chapter {number}",
+  "@readerChapterNumber": {
+    "description": "Iced reference key: chapter-number. The chapter fallback for an untitled Contents entry.",
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "readerBookmarksHeading": "Bookmarks · {count}",
+  "@readerBookmarksHeading": {
+    "description": "Iced reference key: bookmark-count.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "readerNoBookmarks": "No bookmarks yet",
+  "@readerNoBookmarks": {
+    "description": "Iced reference key: no-bookmarks."
+  },
+  "readerBookmarkEmptyHint": "Save a page to keep it close at hand.",
+  "@readerBookmarkEmptyHint": {
+    "description": "Iced reference key: bookmark-empty-hint."
+  },
+  "readerPageShort": "Pg {page}",
+  "@readerPageShort": {
+    "description": "Iced reference key: page-short. The saved-place title fallback.",
+    "placeholders": {
+      "page": {
+        "type": "int"
+      }
+    }
+  },
+  "readerPageAbbreviated": "p.{page}",
+  "@readerPageAbbreviated": {
+    "description": "Iced reference key: page-abbreviated.",
+    "placeholders": {
+      "page": {
+        "type": "int"
+      }
+    }
+  },
+  "readerDeleteBookmark": "Delete {title}",
+  "@readerDeleteBookmark": {
+    "description": "NEW: no Iced string. The saved-place delete control; Iced paints a x glyph (app.rs bookmarks_panel).",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "readerEditNote": "Edit note",
+  "@readerEditNote": {
+    "description": "Iced reference key: edit-note."
+  },
+  "readerAddNote": "Add note",
+  "@readerAddNote": {
+    "description": "Iced reference key: add-note."
+  },
+  "readerBookmarkNoteTitle": "Bookmark note",
+  "readerHighlightNoteTitle": "Highlight note",
+  "readerNoteSave": "Save",
+  "readerNoteCancel": "Cancel",
+  "@readerNoteCancel": {
+    "description": "The note dialog cancel action."
+  },
+  "@readerNoteSave": {
+    "description": "The note dialog save action."
+  },
+  "@readerHighlightNoteTitle": {
+    "description": "The controller-injected note dialog title for a highlight (retained selection behavior)."
+  },
+  "@readerBookmarkNoteTitle": {
+    "description": "The controller-injected note dialog title for a saved place."
+  },
+  "readerExportMarkdown": "Export as Markdown",
+  "@readerExportMarkdown": {
+    "description": "Iced reference key: export-markdown. 4C's delivery is the clipboard plus a brief notice (contract 9.2 item 1)."
+  },
+  "readerContentsLoading": "Loading contents…",
+  "@readerContentsLoading": {
+    "description": "NEW: no Iced string. The Contents panel's loading state (RD-07)."
+  },
+  "readerContentsEmpty": "No chapters in this document",
+  "@readerContentsEmpty": {
+    "description": "NEW: no Iced string. The Contents panel's empty state (RD-07)."
+  },
+  "readerContentsUnavailable": "Contents unavailable",
+  "@readerContentsUnavailable": {
+    "description": "NEW: no Iced string. The Contents panel's failure fallback (RD-07)."
+  },
+  "readerRetry": "Retry",
+  "@readerRetry": {
+    "description": "NEW: no Iced string. The Contents panel's retry action (RD-07)."
+  },
+  "readerReading": "Reading",
+  "@readerReading": {
+    "description": "Iced reference key: reading. The compact typography row label."
+  },
+  "readerDecreaseFontSize": "Decrease font size",
+  "@readerDecreaseFontSize": {
+    "description": "NEW: no Iced string. The EPUB A- control's accessible label (RD-09)."
+  },
+  "readerIncreaseFontSize": "Increase font size",
+  "@readerIncreaseFontSize": {
+    "description": "NEW: no Iced string. The EPUB A+ control's accessible label (RD-09)."
+  },
+  "readerFontSizeValue": "{size}px",
+  "@readerFontSizeValue": {
+    "description": "Iced reference format: the pinned reader_settings_panel renders `{}px` (app.rs:5914).",
+    "placeholders": {
+      "size": {
+        "type": "int"
+      }
+    }
+  },
+  "readerLineSpacingLabel": "Line spacing",
+  "@readerLineSpacingLabel": {
+    "description": "Iced reference key: default-epub-line-spacing. The line-spacing control's accessible label (contract 4.8)."
+  },
+  "readerLineSpacingValue": "{spacing}×",
+  "@readerLineSpacingValue": {
+    "description": "NEW: no Iced string. The line-spacing control's numeric label; the pinned settings pick list shows the raw value.",
+    "placeholders": {
+      "spacing": {
+        "type": "String"
+      }
+    }
+  },
+  "readerThemeCycle": "Reading theme",
+  "@readerThemeCycle": {
+    "description": "NEW: no Iced string. The theme cycle control's accessible label; Iced shows only the theme name (RD-09)."
+  },
+  "readerThemeLight": "Light",
+  "@readerThemeLight": {
+    "description": "Iced reference key: light."
+  },
+  "readerThemeDark": "Dark",
+  "@readerThemeDark": {
+    "description": "Iced reference key: dark."
+  },
+  "readerThemeSepia": "Sepia",
+  "@readerThemeSepia": {
+    "description": "Iced reference key: sepia."
+  },
+  "readerZoomOut": "Zoom out",
+  "@readerZoomOut": {
+    "description": "NEW: no Iced string. The raster zoom-out control's accessible label (RD-09)."
+  },
+  "readerZoomIn": "Zoom in",
+  "@readerZoomIn": {
+    "description": "NEW: no Iced string. The raster zoom-in control's accessible label (RD-09)."
+  },
+  "readerFitWidth": "Fit width",
+  "@readerFitWidth": {
+    "description": "Iced reference key: fit-width."
+  },
+  "readerFitPage": "Fit page",
+  "@readerFitPage": {
+    "description": "Iced reference key: fit-page."
+  },
+  "readerPageInputLabel": "Page",
+  "@readerPageInputLabel": {
+    "description": "Iced reference key: page. The more panel's page-input placeholder."
+  },
+  "readerPageOf": "of {total}",
+  "@readerPageOf": {
+    "description": "Iced reference key: of-pages.",
+    "placeholders": {
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "readerPageInputInvalid": "Enter a page between 1 and {total}.",
+  "@readerPageInputInvalid": {
+    "description": "NEW: no Iced string; the contract requires an inline error instead of the pinned field reset (contract 4.9).",
+    "placeholders": {
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "readerSaved": "★ Saved",
+  "@readerSaved": {
+    "description": "Iced reference key: saved."
+  },
+  "readerBookmark": "☆ Bookmark",
+  "@readerBookmark": {
+    "description": "Iced reference key: bookmark."
+  },
+  "readerOpenBook": "Open book",
+  "@readerOpenBook": {
+    "description": "Iced reference key: open-book."
+  },
+  "readerSearchAction": "Search",
+  "@readerSearchAction": {
+    "description": "Iced reference key: search."
+  },
+  "readerSearchPlaceholder": "Search in document...",
+  "@readerSearchPlaceholder": {
+    "description": "Iced reference key: search-document-placeholder."
+  },
+  "readerNoResults": "No results",
+  "@readerNoResults": {
+    "description": "Iced reference key: no-results."
+  },
+  "readerSearchCount": "{current} / {total}",
+  "@readerSearchCount": {
+    "description": "Iced reference format: the pinned search_bar renders `{current} / {total}` (app.rs:6247).",
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "readerPreviousResult": "Previous result",
+  "@readerPreviousResult": {
+    "description": "NEW: no Iced string. The search previous-result control's accessible label (RD-11)."
+  },
+  "readerNextResult": "Next result",
+  "@readerNextResult": {
+    "description": "NEW: no Iced string. The search next-result control's accessible label (RD-11)."
+  },
+  "readerCloseSearch": "Close search",
+  "@readerCloseSearch": {
+    "description": "NEW: no Iced string. The search close control's accessible label (RD-11)."
+  },
+  "noticeReaderExportSucceeded": "Bookmarks copied as Markdown",
+  "@noticeReaderExportSucceeded": {
+    "description": "Package 4C notice copy: brief success after copying the Markdown bookmark export."
+  },
+  "noticeReaderExportFailed": "Bookmarks could not be exported",
+  "@noticeReaderExportFailed": {
+    "description": "Package 4C notice copy: persistent failure title after a failed Markdown bookmark export."
   }
 }

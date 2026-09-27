@@ -255,6 +255,15 @@ bool _visible(WidgetTester tester, String key, String viewportKey) {
   return rect.left >= viewport.left - 0.5 && rect.right <= viewport.right + 0.5;
 }
 
+FlutterBookmark _bookmark({int id = 1, String? note}) => FlutterBookmark(
+  id: id,
+  bookId: 1,
+  unit: BigInt.zero,
+  note: note,
+  color: 'yellow',
+  createdAt: '2026-09-20T00:00:00Z',
+);
+
 List<ReaderTabPresentation> _manyTabs({int selected = 7}) => [
   for (var index = 0; index < 8; index += 1)
     ReaderTabPresentation(
@@ -1139,15 +1148,17 @@ void main() {
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
-      final bridge = _ChromeBridge(books: harnessLibraryBooks());
+      final bridge = _ChromeBridge(books: harnessLibraryBooks())
+        ..bookmarks = [_bookmark(id: 1)];
       await _open(tester, _reader(bridge: bridge, initialBookId: 1));
       expect(_button(tester, 'reader-header-more').enabled, isTrue);
 
-      // The retained bookmark-note control opens the controller-owned modal
-      // through a rendered control (contract §3.1 `modalEffect`).
-      await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+      // The saved-place note control opens the controller-owned modal through
+      // a rendered control (contract §3.1 `modalEffect`).
+      await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
       await tester.pump();
-      await tester.tap(find.byTooltip('Bookmark with note'));
+      await tester.pump(const Duration(milliseconds: 32));
+      await tester.tap(find.byKey(const ValueKey('reader-saved-place-note-1')));
       await tester.pumpAndSettle();
       expect(find.byType(ShadDialog), findsOneWidget);
       expect(
@@ -1223,18 +1234,22 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
 
-      // No overflow: the retained saved-place row ellipsizes inside the panel.
+      // No overflow: the Iced-shaped saved-place row keeps the note inside the
+      // bounded panel (the note paragraph ellipsizes).
       expect(tester.takeException(), isNull);
       expect(
-        find.textContaining('1: A deliberately long saved note'),
+        find.textContaining('A deliberately long saved note'),
         findsOneWidget,
       );
-      expect(find.byTooltip('Bookmark actions'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reader-saved-place-1')),
+        findsOneWidget,
+      );
       final panel = tester.getRect(
         find.byKey(const ValueKey('reader-panel-contents')),
       );
       final row = tester.getRect(
-        find.textContaining('1: A deliberately long saved note'),
+        find.textContaining('A deliberately long saved note'),
       );
       expect(row.left, greaterThanOrEqualTo(panel.left - 0.5));
       expect(row.right, lessThanOrEqualTo(panel.right + 0.5));
@@ -1246,10 +1261,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 32));
       expect(tester.takeException(), isNull);
       expect(
-        find.textContaining('1: A deliberately long saved note'),
+        find.textContaining('A deliberately long saved note'),
         findsOneWidget,
       );
-      expect(find.byTooltip('Bookmark actions'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reader-saved-place-1')),
+        findsOneWidget,
+      );
       tester.platformDispatcher.clearTextScaleFactorTestValue();
     });
 

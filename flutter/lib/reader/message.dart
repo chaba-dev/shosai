@@ -99,6 +99,81 @@ final class ReaderPanelFocusRequested extends ReaderMessage {
   final ReaderPanel panel;
 }
 
+/// Loads or retries the Contents entries (RD-07).
+///
+/// The controller owns the guarded effect: the injected loader is
+/// fixture-provided in 4C, and the default loader renders the EPUB chapter
+/// fallback because the bridge exposes no TOC DTO (contract §4.6).
+final class ReaderContentsRequested extends ReaderMessage {
+  const ReaderContentsRequested();
+}
+
+/// Navigates to a Contents entry (RD-07).
+///
+/// Same handler semantics as [ReaderBookmarkNavigated] — the durable offset is
+/// replaced when the entry has none — with the neutral name that keeps TOC
+/// navigation from being modeled as a bookmark. TOC-to-durable mapping is 5E.
+final class ReaderLocationNavigated extends ReaderMessage {
+  const ReaderLocationNavigated(this.unit, {this.offset});
+  final int unit;
+  final int? offset;
+}
+
+/// Updates the more panel's page-input draft (RD-10).
+final class ReaderPageInputChanged extends ReaderMessage {
+  const ReaderPageInputChanged(this.draft);
+  final String draft;
+}
+
+/// Submits the more panel's page-input draft (RD-10).
+///
+/// The controller validates the 1-based display ordinal against the document's
+/// unit count, converts it to the 0-based unit and sets the inline error
+/// without navigating on invalid input.
+final class ReaderPageInputSubmitted extends ReaderMessage {
+  const ReaderPageInputSubmitted();
+}
+
+/// Changes reader-local typography presentation (RD-09).
+///
+/// The controller clamps the supplied values. Persisting the change, per-book
+/// override precedence and the typed fit/zoom codec are 5A/6B (contract §4.8).
+final class ReaderTypographyChanged extends ReaderMessage {
+  const ReaderTypographyChanged({
+    this.fontSize,
+    this.lineSpacing,
+    this.theme,
+    this.rasterFit,
+    this.zoom,
+  });
+
+  final double? fontSize;
+  final double? lineSpacing;
+  final String? theme;
+  final ReaderRasterFit? rasterFit;
+  final double? zoom;
+}
+
+/// Requests the Markdown export of the current book's bookmarks (RD-08).
+final class ReaderBookmarkExportRequested extends ReaderMessage {
+  const ReaderBookmarkExportRequested();
+}
+
+/// Steps the current search result by [delta] (±1) without re-querying (RD-11).
+final class ReaderSearchResultStepRequested extends ReaderMessage {
+  const ReaderSearchResultStepRequested({required this.delta});
+  final int delta;
+}
+
+/// Requests the more panel's open-book action (RD-10).
+///
+/// The controller starts the injected document-picker adapter; the selected
+/// supported document opens through the normal open path and cancellation is
+/// neutral. Real tab creation/activation is 5F.
+final class ReaderOpenBookRequested extends ReaderMessage {
+  const ReaderOpenBookRequested();
+}
+
 final class _ReaderSearchCompleted extends ReaderMessage {
   const _ReaderSearchCompleted(this.generation, this.revision, this.results);
   final int generation;
@@ -646,4 +721,59 @@ final class _ReaderNoteEditorFinished extends ReaderMessage {
 
 final class _ReaderDisposeRequested extends ReaderMessage {
   const _ReaderDisposeRequested();
+}
+
+final class _ReaderContentsLoaded extends ReaderMessage {
+  const _ReaderContentsLoaded(this.generation, this.revision, this.entries);
+
+  final int generation;
+  final int revision;
+  final List<ReaderContentsEntry> entries;
+}
+
+final class _ReaderContentsFailed extends ReaderMessage {
+  const _ReaderContentsFailed(this.generation, this.revision, this.error);
+
+  final int generation;
+  final int revision;
+  final String error;
+}
+
+final class _ReaderBookmarkExportFinished extends ReaderMessage {
+  const _ReaderBookmarkExportFinished();
+}
+
+final class _ReaderBookmarkExportCompleted extends ReaderMessage {
+  const _ReaderBookmarkExportCompleted(this.generation, this.revision);
+
+  final int generation;
+  final int revision;
+}
+
+final class _ReaderBookmarkExportFailed extends ReaderMessage {
+  const _ReaderBookmarkExportFailed(this.generation, this.revision, this.error);
+
+  final int generation;
+  final int revision;
+  final String error;
+}
+
+final class _ReaderDocumentPickerCompleted extends ReaderMessage {
+  const _ReaderDocumentPickerCompleted(
+    this.generation,
+    this.revision,
+    this.picked,
+  );
+
+  final int generation;
+  final int revision;
+  final ReaderPickedDocument? picked;
+}
+
+final class _ReaderDocumentPickerFailed extends ReaderMessage {
+  const _ReaderDocumentPickerFailed(this.generation, this.revision, this.error);
+
+  final int generation;
+  final int revision;
+  final String error;
 }

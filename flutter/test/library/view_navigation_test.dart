@@ -171,7 +171,7 @@ void main() {
         locale: locale,
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
       ready: () => harnessImagesReady(tester),
@@ -196,7 +196,7 @@ void main() {
         locale: locale,
         home: ProductShell(
           bridgeFactory: () => effective,
-          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -1374,7 +1374,7 @@ void main() {
             locale: value,
             home: ProductShell(
               bridgeFactory: () => bridge,
-              readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+              readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
             ),
           ),
         ),

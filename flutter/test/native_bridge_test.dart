@@ -22,6 +22,45 @@ void main() {
     if (supported) RustLib.dispose();
   });
 
+  test('database cleanup tolerates a sidecar removed after listing', () async {
+    final directory = await Directory.systemTemp.createTemp('cleanup-race-');
+    try {
+      final database = await File('${directory.path}/db.sqlite').create();
+      final sidecar = await File('${database.path}-wal').create();
+      final entries = [sidecar, database];
+      await sidecar.delete();
+
+      await _deleteDatabaseDirectory(_ListedDirectory(directory, entries));
+
+      expect(await directory.exists(), isFalse);
+    } finally {
+      if (await directory.exists()) await directory.delete(recursive: true);
+    }
+  });
+
+  test(
+    'database cleanup propagates errors other than a missing file',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('cleanup-error-');
+      try {
+        final error = FileSystemException(
+          'Deletion failed',
+          '${directory.path}/db.sqlite',
+          const OSError('Permission denied', 13),
+        );
+        await expectLater(
+          _deleteDatabaseDirectory(
+            _ListedDirectory(directory, [_UndeletableFile(error)]),
+          ),
+          throwsA(same(error)),
+        );
+        expect(await directory.exists(), isTrue);
+      } finally {
+        await directory.delete(recursive: true);
+      }
+    },
+  );
+
   test(
     'opens and renders a PDF through the native bridge',
     () async {
@@ -282,7 +321,7 @@ void main() {
       );
     } finally {
       release();
-      await directory.delete(recursive: true);
+      await _deleteDatabaseDirectory(directory);
     }
   }
 
@@ -404,7 +443,7 @@ void main() {
         }
         bridge.releaseCancellation(id: cancellation);
         bridge.dispose();
-        await directory.delete(recursive: true);
+        await _deleteDatabaseDirectory(directory);
       }
     },
     skip: supported
@@ -459,4 +498,45 @@ void main() {
     },
     skip: supported ? false : 'native bridge smoke test supports desktop hosts',
   );
+}
+
+/// These database fixtures are flat directories. Releasing a native bridge can
+/// leave SQLite finishing its connection shutdown and removing WAL/SHM files.
+/// A recursive delete can fail if a listed sidecar vanishes during traversal.
+/// Ignore only that per-file race; all other errors and root deletion still fail.
+Future<void> _deleteDatabaseDirectory(Directory directory) async {
+  await for (final entry in directory.list()) {
+    try {
+      await entry.delete();
+    } on PathNotFoundException {
+      // SQLite already removed this entry after the directory was listed.
+    }
+  }
+  await directory.delete();
+}
+
+class _ListedDirectory extends Fake implements Directory {
+  _ListedDirectory(this.directory, this.entries);
+
+  final Directory directory;
+  final List<FileSystemEntity> entries;
+
+  @override
+  Stream<FileSystemEntity> list({
+    bool recursive = false,
+    bool followLinks = true,
+  }) => Stream.fromIterable(entries);
+
+  @override
+  Future<FileSystemEntity> delete({bool recursive = false}) =>
+      directory.delete(recursive: recursive);
+}
+
+class _UndeletableFile extends Fake implements File {
+  _UndeletableFile(this.error);
+
+  final FileSystemException error;
+
+  @override
+  Future<File> delete({bool recursive = false}) async => throw error;
 }

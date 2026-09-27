@@ -349,9 +349,18 @@ Primary ownership: `flutter/lib/reader/view*.dart` and reader component tests.
   - [ ] Header, tab strip, progress and edge-navigation components implemented.
   - [ ] Fixture renders inspected; loading/disabled states and keyboard intents tested.
   - [ ] Many-tab overflow tested at wide/compact widths: one scrollable row, readable labels, active-tab reveal and keyboard activation/closing of initially offscreen tabs.
-- [ ] **4C accepted — panels and typography**
+- [ ] **4C accepted — panels and typography** — IN PROGRESS — DeepSeek on framework16 ([thread](https://ampcode.com/threads/T-01a0e422-e7df-759b-9d47-44dfc146c78b)); implementation, verification and Oracle review produced in the isolated workspace `shosai-4c-reader` at remote `main` `1844a7aa` (#130); owner review pending, no baseline approval, merge or publication performed.
   - [ ] Contents/saved-places panel and typography popover implemented.
+    - Produced: Iced-shaped Contents panel (heading/subheading/close, 12 px per-level indent, 38-character truncation, chapter-number fallback for untitled entries, current-entry treatment and reveal), saved-places section (count, empty state, title/page/note rows, note edit through the controller-owned dialog, delete), typography panel (EPUB font size ±2 clamped 8–48 with px label, line spacing cycle, theme cycle; raster zoom ±0.25 clamped 0.25–5.0 and fit width/page) and the more panel (page input with inline validation, bookmark toggle, open book, search toggle) plus the independent search bar. Entries, progress and tabs remain fixture-injected; the real TOC is 5E, live ranges 5G, sessions 5F.
   - [ ] Panel states/actions verified; export scope and mode-specific controls recorded.
+    - Produced: `test/reader/reader_panels_test.dart` (20 rendered-control tests: entry activation, loading/empty/failed/retry, stale-load rejection, saved-place delete, note dialog, export success/failure with notice, EPUB/raster availability, clamps, relayout gating, page-input conversion and validation, picker selection/cancellation, picker-slot retirement on suspension, stale-export rejection, current-entry reveal, search submit/step-wrap/close-cancel/no-matches/failure) and `test/visual/reader_panels_render_test.dart` (12 inspected renders at `W1280`/`C390`, `EN`/`JA`, `T100`/`T200`, two runs byte-identical); `make test-flutter` (697 passing), `lint-flutter`, `check-fmt-flutter`, `check-theme-tokens`, `check-l10n-codegen` pass.
+    - Matched-state parity evidence (`test/visual/reader_panel_parity_test.dart`, 10 captures + 1 negative control, all passing): every capture seeds a disposable store with the committed 1C fixture bytes, opens the book through the real bridge, renders the production shell at the reference viewport/DPR/locale with the reference's panel, location, bookmark, search and note-draft state (the search captures wait for the manifest's settled `1 / 16` with the next-result control enabled; the note capture enters the pinned `check the survey notes` draft), and asserts the panel composition against the pinned reference's own values — panel padding 14, heading spacing 2, child spacing 10, chapter row 27 / pitch 37, entry padding 10, saved-place header group at the entry's right edge (delete inset 10-11), entry-to-export gap 10, more row 58 wide / 88 compact, search bar 54 wide / 92 compact with the wide close control at the bar's 12 px right inset and the compact one left-aligned at 111, wide field 420, typography row 53. The document check reads the Rust chapter raster itself (a blank-raster negative control proves it discriminates), so chrome, edge glyphs, the search bar or the note dialog's scrim cannot satisfy it. Artifacts: `.amp/in/artifacts/4c-parity/` (PNG + JSON sidecar per capture with the reference id/hash, fixture hash, geometry, spacing comparison, raster-ink count, delete-glyph ink box and defect list) and the labeled `Iced top / Flutter bottom` full-frame and 2x crop composites in `.amp/in/artifacts/4c-parity/matched/` (with a provenance table: reference sha256, fixture sha256, viewport, DPR, locale, Flutter revision). The reference PNG's manifest byte length and pixel size are re-verified per run, and the fixture byte length against the manifest. The reader is torn down inside each capture so its document handle is released before the next open.
+    - 4C-owned differences fixed from this evidence: the typography row painted the Iced layout constant (62) instead of the reference's rendered height (52-53); the saved-place links kept the component layer's 36 px minimum instead of the reference's content height; the saved-place page/delete group was left-packed instead of sitting at the entry's right edge; the saved-place entries and the export action had no 10 px column spacing; the export action rendered 42 px instead of 37; the wide search bar's capped field left the count/previous/next/close group ~147 px short of the reference's right padding edge (the pinned render gives the field half the bar's free space and paints it 557 px wide, while the token `layout.readerPanel.searchInputMaxWidth` says 420; Flutter mirrors the render and the token/render discrepancy is flagged to the token owner); the delete control's 10 px `✕` text glyph was illegible (now the bundled icon font's `x` at 12 px in the reference's `[4, 6]` button, ink box 28×28 at 4x with its `Delete Pg 2` accessible name); the Japanese panel copy had drifted from the pinned locale files (`reading`, `no-bookmarks`, `bookmark-empty-hint`, `page-abbreviated`, `edit-note`, `add-note`, `no-results`) and the shared note dialog hardcoded `Save`/`Cancel`, so the catalogs now carry the reference's Japanese strings and localized dialog actions.
+    - Recorded intentional deviations (each needs owner approval, per the plan's difference policy): the retained current-entry highlight (contract §4.6 requires it; the pinned reference marks no current chapter); the EPUB line-spacing control (contract §4.8 requires it; the reference fixes line spacing at 1.6 with no control); the missing `Paginated`/`Continuous` toggle (renderer work, 5H); the note editor as the controller-injected dialog (contract §4.7) where Iced edits inline; the search input's visible border and leading search icon where the reference's field blends into the bar; the pinned Iced app never overrode its text-input style, so its focused field paints Iced's default blue ring, which is not a Shōsai token, while Flutter paints the mapped component border/ring (a focus-ring token would be a 2C/owner decision); the compact more/search rows rendering 88/92 against the reference's fixed 84/88 (Flutter sizes to content instead of centring 3-4 px of overflow); the interface line box placing panel text ink 2-3 px lower than Iced's font stack while every spacing value matches exactly; and the reader chrome above the panel being 4B geometry (panel top 108 in Flutter versus 91 in the reference, excluded from the panel-relative comparison).
+    - Disclosed document capability gap (observed, not hidden): the Rust document rasterizer registers only its math face for a document that declares no font faces, so `slow-rivers.epub` (EN) paints legible Latin text while `mizu-no-kioku.epub` (JA) paints missing-glyph boxes. The missing capability is document fallback-font coverage for CJK (typography.md keeps the book-content role separate from interface fonts), owned by 5C (FM-22); the captures keep the truthful output and the parity assertions compare the chrome/panel, not the document text. Real pagination, page box, spreads, TOC/session sources and page ordinals remain 5A/5E/5F/5G.
+    - Oracle review: round 1 reported three blocking findings — (a) an invalidated document picker retained its modal slot after suspension/replacement, (b) a stale export still reached the sink and had no bridge-operation accounting, (c) the Contents current-entry reveal required the row context during build so an asynchronous load never scheduled it. All fixed with regression tests (see above); round 2 found no blockers. Each regression test was checked for discrimination (the reveal test fails with the reveal disabled). A follow-up round reviewed the parity-evidence work and its findings are recorded with the fixes in the package thread.
+    - Recorded scope decisions: Markdown export delivery is **clipboard + brief notice** through the application notice center (contract §9.2 item 1; the shell now injects its reporter and a `file_selector` document picker into the reader); the Iced reading-mode (Paginated/Continuous) toggle is **not** rendered because switching the live mode is renderer work (5H) and mode-specific availability is derived from the document format; the theme cycle changes the reader chrome/surfaces and the persisted value is 5A/6B, while applying the palette to the rendered document remains 5A/5G (the renderer takes no palette input today); Enter submits the query and the explicit previous/next controls step results (the Iced debounced live search and Enter-steps-next are folded into that recorded difference); note creation at the current location is two-step (bookmark, then Add note), matching Iced.
+    - Identified follow-up needing owner baseline approval (not changed here): the Iced no-document welcome composition (`welcome_view`: 32 px title, 16 px message, `Open File` picker action) replaces the retained welcome copy, which would invalidate the 2B-approved `reader-welcome-1280` golden. 4C does not regenerate that baseline; the item needs an owner-approved baseline replacement (owner of the welcome surface) before it can land.
 - [ ] **4D accepted — selection presentation**
   - [ ] Selection actions and annotation menus implemented without losing existing behavior.
   - [ ] Pointer/keyboard actions tested; compact, expanded, large-text and palette renders inspected.
@@ -567,6 +576,43 @@ evidence before integration; preserve generation/ownership tests rather than
 replacing them wholesale. Mark a package complete only after its accepting checks
 run and its required screenshots are inspected. Record a verification blocker as a
 blocker, never as a passing gate.
+
+### Parity evidence gate (every parity package)
+
+A parity package is not visually ready until it carries inspected, matched-state
+Iced/Flutter evidence. Package acceptance does not transfer to another package.
+
+- **Reproduce the reference state.** Use the committed capture's own fixture
+  bytes, locale, viewport, device-pixel ratio and text scale, and the same
+  document, panel, tab, bookmark, note and search state the capture manifest
+  records. Cite the reference id and its manifest hash. A similar-looking state
+  is not the reference state.
+- **Render the compared surface through its production path.** A chrome/panel
+  comparison must render the production shell and, for a loaded-document state,
+  the real document rendering; a placeholder, stub or painted stand-in is not
+  parity evidence, and a loaded-document capture whose document area paints
+  nothing fails the comparison. States that legitimately have no document
+  (welcome, opening, open failure, empty library) are compared as what they are.
+  Contract-sanctioned fixture-only surfaces stay permitted when the capture
+  declares them: 4A allows fixture-injected tabs, Contents entries, progress
+  ordinals and search results until 5E/5F/5G/5H supply the live sources, and a
+  parity capture must name the injected source rather than hide it.
+- **Measure, then inspect.** Record the chrome/panel values on both sides (row
+  heights, paddings, row pitch, control positions) and inspect side-by-side
+  crops of every compared state. "No detector defect" is not an ink review, and
+  a green metric does not replace looking at the images.
+- **Separate capability gaps from chrome differences.** When a Stage 5
+  capability (page box, pagination, spreads, real TOC/session sources, document
+  font fallback) cannot render yet, state the exact boundary and its owner, keep
+  the truthful rendering, and compare only what both sides actually render.
+  Never hide a gap behind a fabricated surface.
+- **Record every intentional deviation** with its contract/reference rationale
+  and owning package: a difference that is neither matched nor recorded is a
+  defect. Tolerances must be justified by measured toolkit rasterization, never
+  chosen to make a check pass.
+- **Cover the reference matrix where it exists** (wide/compact, EN/JA, and
+  T100/T200 only where the reference has them) and name the states that are
+  Flutter-only.
 
 ## First dispatch and historical crosswalk
 
