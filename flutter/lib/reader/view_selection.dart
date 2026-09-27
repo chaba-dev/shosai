@@ -155,7 +155,6 @@ class _ReachableSelectableSurface extends StatelessWidget {
   const _ReachableSelectableSurface({
     required this.presentationKey,
     required this.document,
-    required this.settings,
     required this.surface,
     required this.image,
     required this.model,
@@ -164,7 +163,6 @@ class _ReachableSelectableSurface extends StatelessWidget {
 
   final Key presentationKey;
   final FlutterDocumentSummary document;
-  final FlutterReaderSettings? settings;
   final FlutterSelectionSurface surface;
   final ui.Image? image;
   final ReaderModel model;
@@ -172,7 +170,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fit = _readerFit(document.format, settings);
+    final fit = _readerFit(model.typography);
     return LayoutBuilder(
       builder: (context, constraints) {
         Widget content(Size size) => SizedBox.fromSize(
@@ -192,7 +190,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
           ),
         );
         if (document.format == FlutterBookFormat.epub &&
-            settings?.continuous == true) {
+            model.typography.continuous) {
           return KeyedSubtree(
             key: presentationKey,
             child: SingleChildScrollView(

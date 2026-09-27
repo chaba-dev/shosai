@@ -4,6 +4,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
     show FlutterError, FlutterErrorDetails, Listenable, VoidCallback;
+import 'package:shosai_flutter/notices/notice.dart';
+import 'package:shosai_flutter/notices/policy.dart';
+import 'package:shosai_flutter/notices/reader_notice_text.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 part 'effects.dart';
@@ -28,7 +31,22 @@ final class ReaderController implements Listenable {
     ReaderNavigationAdapter? navigationAdapter,
     ReaderTabRevealAdapter? tabRevealAdapter,
     ReaderProgressSource? progressSource,
+    ReaderContentsLoader? contentsLoader,
+    ReaderDocumentPickerAdapter? documentPickerAdapter,
+    ReaderExportSink? exportSink,
+    ReaderNoticeReporter? noticeReporter,
     List<ReaderTabPresentation> initialTabs = const [],
+    ReaderTypographyPresentation initialTypography =
+        const ReaderTypographyPresentation(
+          format: FlutterBookFormat.epub,
+          continuous: false,
+          theme: 'light',
+          epubFontSize: 18,
+          epubLineSpacing: 1.5,
+          rasterFit: ReaderRasterFit.fitPage,
+          rasterZoom: 1,
+        ),
+    double? baseScale,
   }) : _bridge = bridge,
        _decoder = decoder,
        _noteEditor = noteEditor ?? ((_) async => null),
@@ -47,11 +65,22 @@ final class ReaderController implements Listenable {
        _navigationAdapter = navigationAdapter ?? (() async {}),
        _tabRevealAdapter = tabRevealAdapter ?? ((_) async {}),
        _progressSource = progressSource,
+       _contentsLoader = contentsLoader,
+       _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
+       _exportSink = exportSink ?? ((_) async {}),
+       _reportNotice = noticeReporter ?? ignoreNotice,
+       _typographyFontSize = initialTypography.epubFontSize,
+       _typographyLineSpacing = initialTypography.epubLineSpacing,
+       _typographyTheme = initialTypography.theme,
+       _typographyContinuous = initialTypography.continuous,
+       _rasterFit = initialTypography.rasterFit,
+       _rasterZoom = initialTypography.rasterZoom,
+       _baseScale = baseScale ?? initialTypography.rasterZoom,
        _requestedLayout = ReaderLayout(
          scale: initialScale,
          lineSpacing: initialLineSpacing,
        ) {
-    _model = ReaderModel(tabs: initialTabs);
+    _model = ReaderModel(tabs: initialTabs, typography: initialTypography);
   }
 
   final FlutterBridge _bridge;
@@ -69,6 +98,10 @@ final class ReaderController implements Listenable {
   final ReaderNavigationAdapter _navigationAdapter;
   final ReaderTabRevealAdapter _tabRevealAdapter;
   final ReaderProgressSource? _progressSource;
+  final ReaderContentsLoader? _contentsLoader;
+  final ReaderDocumentPickerAdapter _documentPickerAdapter;
+  final ReaderExportSink _exportSink;
+  final ReaderNoticeReporter _reportNotice;
 
   ReaderModel _model = ReaderModel();
   int _revealRevision = 0;
@@ -91,6 +124,19 @@ final class ReaderController implements Listenable {
   int _searchRevision = 0;
   int _bookmarkRevision = 0;
   String _searchQuery = '';
+  String? _searchError;
+  int _searchCurrentIndex = 0;
+  int _contentsRevision = 0;
+  int _exportRevision = 0;
+  int _documentPickerRevision = 0;
+  bool _documentPickerActive = false;
+  double _typographyFontSize;
+  double _typographyLineSpacing;
+  String _typographyTheme;
+  final bool _typographyContinuous;
+  ReaderRasterFit _rasterFit;
+  double _rasterZoom;
+  final double _baseScale;
   final Set<BigInt> _toolCancellations = {};
   final Set<BigInt> _searchCancellations = {};
   BigInt? _bookmarkMutationCancellation;
@@ -250,6 +296,105 @@ final class ReaderController implements Listenable {
         if (_model.openPanel == message.panel) {
           _focusAdapter(ReaderFocusTarget.header);
         }
+      case ReaderContentsRequested():
+        _contentsRequested();
+      case ReaderLocationNavigated():
+        _unitRequested(
+          message.unit,
+          offset: message.offset,
+          replaceReadingOffset: true,
+        );
+      case ReaderPageInputChanged():
+        _pageInputChanged(message.draft);
+      case ReaderPageInputSubmitted():
+        _pageInputSubmitted();
+      case ReaderTypographyChanged():
+        _typographyChanged(message);
+      case ReaderBookmarkExportRequested():
+        _bookmarkExportRequested();
+      case ReaderSearchResultStepRequested():
+        _searchResultStepRequested(message.delta);
+      case ReaderOpenBookRequested():
+        _openBookRequested();
+      case _ReaderContentsLoaded():
+        if (_isCurrent(message.generation) &&
+            message.revision == _contentsRevision) {
+          _emit(
+            _model.copyWith(
+              contents: ReaderContentsPresentation(
+                status: message.entries.isEmpty
+                    ? ReaderContentsStatus.empty
+                    : ReaderContentsStatus.ready,
+                entries: message.entries,
+              ),
+            ),
+          );
+        }
+      case _ReaderContentsFailed():
+        if (_isCurrent(message.generation) &&
+            message.revision == _contentsRevision) {
+          _emit(
+            _model.copyWith(
+              contents: ReaderContentsPresentation(
+                status: ReaderContentsStatus.failed,
+                error: message.error,
+              ),
+            ),
+          );
+        }
+      case _ReaderBookmarkExportCompleted():
+        if (_isCurrent(message.generation) &&
+            message.revision == _exportRevision) {
+          _emit(_model.copyWith(exportState: ReaderExportState.idle));
+          _reportNotice(
+            const NoticeRequest(
+              text: ReaderExportSucceededNotice(),
+              kind: NoticeKind.success,
+              lifetime: NoticeLifetime.brief,
+            ),
+          );
+        }
+      case _ReaderBookmarkExportFinished():
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
+      case _ReaderBookmarkExportFailed():
+        if (_isCurrent(message.generation) &&
+            message.revision == _exportRevision) {
+          _emit(
+            _model.copyWith(
+              exportState: ReaderExportState.failed,
+              exportError: message.error,
+            ),
+          );
+          _reportNotice(
+            NoticeRequest(
+              text: const ReaderExportFailedNotice(),
+              kind: NoticeKind.failure,
+              lifetime: NoticeLifetime.persistent,
+              details: RawNoticeText(message.error),
+              dedupeKey: NoticePolicy.readerExportKey,
+            ),
+          );
+        }
+      case _ReaderDocumentPickerCompleted():
+        if (_isCurrent(message.generation) &&
+            message.revision == _documentPickerRevision) {
+          _documentPickerActive = false;
+          _emit(_model);
+          final picked = message.picked;
+          if (picked != null) {
+            _openRequested(
+              ReaderOpenRequested(picked.path, bookId: picked.bookId),
+            );
+          }
+        }
+      case _ReaderDocumentPickerFailed():
+        if (_isCurrent(message.generation) &&
+            message.revision == _documentPickerRevision) {
+          _documentPickerActive = false;
+          _emit(_model.copyWith(toolError: message.error));
+        }
       case ReaderTabActivated():
         _tabActivated(message.tabId);
       case ReaderTabCloseRequested():
@@ -259,13 +404,26 @@ final class ReaderController implements Listenable {
       case _ReaderSearchCompleted():
         if (_isCurrent(message.generation) &&
             message.revision == _searchRevision) {
+          _searchCurrentIndex = 0;
           _emit(
             _model.copyWith(searchResults: message.results, searchBusy: false),
           );
+          // The pinned reference navigates to the first result when a search
+          // completes (`dispatch.rs:2373`); an empty result list navigates
+          // nowhere.
+          if (message.results.isNotEmpty) {
+            final first = message.results.first;
+            _unitRequested(
+              first.unit.toInt(),
+              offset: first.offset.toInt(),
+              length: first.length.toInt(),
+            );
+          }
         }
       case _ReaderSearchFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _searchRevision) {
+          _searchError = message.error;
           _emit(_model.copyWith(searchBusy: false, toolError: message.error));
         }
       case _ReaderSearchFinished():
@@ -645,6 +803,12 @@ final class ReaderController implements Listenable {
     }
     _activeCancellation = cancellation;
     _activeBridgeOperations += 1;
+    _searchQuery = '';
+    _searchError = null;
+    _searchCurrentIndex = 0;
+    _contentsRevision += 1;
+    _exportRevision += 1;
+    _retireDocumentPicker();
     _emit(
       _model.copyWith(
         openPath: path,
@@ -677,6 +841,12 @@ final class ReaderController implements Listenable {
         persistenceError: null,
         openPanel: null,
         searchOpen: false,
+        contents: const ReaderContentsPresentation(
+          status: ReaderContentsStatus.loading,
+        ),
+        pageInput: const ReaderPageInputPresentation(),
+        exportState: ReaderExportState.idle,
+        exportError: null,
         relayoutBusy: false,
         relayoutPending: false,
         contentState: ReaderContentState.loading,
@@ -1179,6 +1349,10 @@ final class ReaderController implements Listenable {
       // Opening changes the content area, so the layout reporter observes new
       // constraints and Rust relayouts through the guarded path (§2.3 item 5).
       _requestPanelFocus(panel);
+      // The Contents panel loads its entries when it opens (RD-07), and the
+      // more panel starts from the reader's current location (RD-10).
+      if (panel == ReaderPanel.contents) _contentsRequested();
+      if (panel == ReaderPanel.more) _syncPageInput();
     } else {
       _requestHeaderFocus();
     }
@@ -1189,6 +1363,9 @@ final class ReaderController implements Listenable {
     if (_closing) return;
     if (_model.searchOpen) {
       _cancelSearch();
+      _searchQuery = '';
+      _searchError = null;
+      _searchCurrentIndex = 0;
       _emit(
         _model.copyWith(
           searchOpen: false,
@@ -1207,6 +1384,173 @@ final class ReaderController implements Listenable {
       _bridge.cancel(id: active);
     }
   }
+
+  /// Steps to another search result and navigates to it (RD-11).
+  ///
+  /// Stepping wraps in both directions, mirroring the pinned reference
+  /// (`dispatch.rs:2386-2404`), and is ignored while searching or without
+  /// results.
+  void _searchResultStepRequested(int delta) {
+    final results = _model.searchResults;
+    if (results.isEmpty ||
+        _model.searchBusy ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _model.annotationOperations.isNotEmpty ||
+        _closing ||
+        _suspended) {
+      return;
+    }
+    final count = results.length;
+    final index = ((_searchCurrentIndex + delta) % count + count) % count;
+    _searchCurrentIndex = index;
+    _emit(_model);
+    final result = results[index];
+    _unitRequested(
+      result.unit.toInt(),
+      offset: result.offset.toInt(),
+      length: result.length.toInt(),
+    );
+  }
+
+  /// Loads or retries the Contents entries through a guarded effect (RD-07).
+  ///
+  /// The effect is controller-owned: the injected loader is fixture-provided
+  /// and the default loader renders the EPUB chapter fallback, because the
+  /// bridge exposes no TOC DTO (contract §4.6). A stale completion cannot
+  /// publish entries for a newer document generation or load.
+  void _contentsRequested() {
+    final document = _model.document;
+    if (document == null || _model.busy || _closing || _suspended) return;
+    final generation = _model.generation;
+    final revision = ++_contentsRevision;
+    _emit(
+      _model.copyWith(
+        contents: ReaderContentsPresentation(
+          status: ReaderContentsStatus.loading,
+          entries: _model.contents.entries,
+        ),
+      ),
+    );
+    unawaited(() async {
+      try {
+        final entries =
+            await (_contentsLoader?.call(document) ??
+                Future<List<ReaderContentsEntry>>.value(
+                  _chapterFallback(document),
+                ));
+        dispatch(_ReaderContentsLoaded(generation, revision, entries));
+      } catch (error) {
+        dispatch(
+          _ReaderContentsFailed(generation, revision, _describeError(error)),
+        );
+      }
+    }());
+  }
+
+  /// The EPUB chapter fallback: one untitled entry per logical unit.
+  ///
+  /// The panel renders the localized chapter number for an untitled entry, so
+  /// no title is invented (contract §4.6).
+  List<ReaderContentsEntry> _chapterFallback(FlutterDocumentSummary document) =>
+      [
+        for (var unit = 0; unit < document.logicalUnitCount.toInt(); unit += 1)
+          ReaderContentsEntry(unit: unit),
+      ];
+
+  /// Seeds the more panel's page input from the current location (RD-10).
+  void _syncPageInput() {
+    final document = _model.document;
+    if (document == null) return;
+    _emit(
+      _model.copyWith(
+        pageInput: ReaderPageInputPresentation(draft: '${_model.unit + 1}'),
+      ),
+    );
+  }
+
+  void _pageInputChanged(String draft) {
+    if (_closing) return;
+    _emit(
+      _model.copyWith(pageInput: ReaderPageInputPresentation(draft: draft)),
+    );
+  }
+
+  /// Validates and converts the 1-based page input, or sets the inline error.
+  void _pageInputSubmitted() {
+    final document = _model.document;
+    if (document == null || _closing) return;
+    final draft = _model.pageInput.draft.trim();
+    final total = document.logicalUnitCount.toInt();
+    final ordinal = int.tryParse(draft);
+    if (ordinal == null || ordinal < 1 || ordinal > total) {
+      _emit(
+        _model.copyWith(
+          pageInput: ReaderPageInputPresentation(
+            draft: _model.pageInput.draft,
+            error: 'page input out of range: "$draft" (1-$total)',
+          ),
+        ),
+      );
+      return;
+    }
+    _emit(
+      _model.copyWith(pageInput: ReaderPageInputPresentation(draft: draft)),
+    );
+    _unitRequested(ordinal - 1);
+  }
+
+  /// Applies a reader-local typography change (RD-09).
+  ///
+  /// Font size, line spacing and zoom are clamped to the pinned ranges; a
+  /// layout-affecting change is applied through the guarded relayout path so a
+  /// failed layout reports through the existing error surface. Persisting the
+  /// value, per-book precedence and the typed fit codec are 5A/6B.
+  void _typographyChanged(ReaderTypographyChanged message) {
+    if (_closing) return;
+    final document = _model.document;
+    final before = _model.typography;
+    final fontSize = message.fontSize?.clamp(8.0, 48.0);
+    final lineSpacing = message.lineSpacing?.clamp(1.0, 2.4);
+    final theme = message.theme;
+    if (fontSize != null) _typographyFontSize = fontSize;
+    if (lineSpacing != null) _typographyLineSpacing = lineSpacing;
+    if (theme != null && _readerThemes.contains(theme)) {
+      _typographyTheme = theme;
+    }
+    if (message.rasterFit case final fit?) {
+      _rasterFit = fit;
+      if (fit != ReaderRasterFit.manual) _rasterZoom = _baseScale;
+    }
+    if (message.zoom case final zoom?) {
+      _rasterFit = ReaderRasterFit.manual;
+      _rasterZoom = zoom.clamp(0.25, 5.0);
+    }
+    _emit(_model);
+    final after = _model.typography;
+    if (document == null ||
+        _model.busy ||
+        _model.contentState != ReaderContentState.ready ||
+        before.epubFontSize == after.epubFontSize &&
+            before.epubLineSpacing == after.epubLineSpacing &&
+            before.rasterZoom == after.rasterZoom) {
+      return;
+    }
+    _startRelayout(
+      document,
+      ReaderLayout(
+        scale: after.rasterZoom,
+        width: _requestedLayout.width,
+        fontSize: after.epubFontSize,
+        lineSpacing: after.epubLineSpacing,
+      ),
+      unit: _model.unit,
+      offset: _model.readingOffset,
+    );
+  }
+
+  /// The reader's supported theme values, in cycle order.
+  static const List<String> _readerThemes = ['light', 'dark', 'sepia'];
 
   void _tabActivated(String tabId) {
     if (_closing) return;
@@ -1332,6 +1676,8 @@ final class ReaderController implements Listenable {
     }
     final revision = ++_searchRevision;
     _searchQuery = query.trim();
+    _searchError = null;
+    _searchCurrentIndex = 0;
     for (final active in _searchCancellations) {
       _bridge.cancel(id: active);
     }
@@ -1541,6 +1887,95 @@ final class ReaderController implements Listenable {
     }());
   }
 
+  /// Exports the book's bookmarks as Markdown through the guarded effect (RD-08).
+  ///
+  /// The bridge returns the Markdown text; the injected sink delivers it (the
+  /// screen's default copies it to the clipboard) and a brief success notice is
+  /// reported through the application notice center. A failure stays visible as
+  /// the panel's export error and a persistent notice.
+  void _bookmarkExportRequested() {
+    final bookId = _model.document?.bookId;
+    if (bookId == null ||
+        _model.exportState == ReaderExportState.busy ||
+        _closing ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    final generation = _model.generation;
+    final revision = ++_exportRevision;
+    _activeBridgeOperations += 1;
+    _emit(
+      _model.copyWith(exportState: ReaderExportState.busy, exportError: null),
+    );
+    unawaited(() async {
+      try {
+        final markdown = await _bridge.exportBookmarks(bookId: bookId);
+        // A stale export must not deliver its text: an older book's Markdown
+        // would overwrite the newer export's clipboard/notice.
+        if (!_isCurrent(generation) || revision != _exportRevision) {
+          return;
+        }
+        await _exportSink(markdown);
+        dispatch(_ReaderBookmarkExportCompleted(generation, revision));
+      } catch (error) {
+        dispatch(
+          _ReaderBookmarkExportFailed(
+            generation,
+            revision,
+            _describeError(error),
+          ),
+        );
+      } finally {
+        dispatch(_ReaderBookmarkExportFinished());
+      }
+    }());
+  }
+
+  /// Retires the document-picker owner when the generation changes.
+  ///
+  /// The slot must be released by the transition that invalidates the effect
+  /// (open, suspension, disposal), not by a completion that is then rejected as
+  /// stale; otherwise the modal gate would stay set forever (contract §3.1).
+  void _retireDocumentPicker() {
+    _documentPickerRevision += 1;
+    _documentPickerActive = false;
+  }
+
+  /// Starts the injected document picker for the more panel's open book (RD-10).
+  ///
+  /// The modal slot is published before the adapter starts and cleared on its
+  /// completion; cancellation is neutral and the picked document opens through
+  /// the normal open path. Real tab creation is 5F.
+  void _openBookRequested() {
+    if (_closing ||
+        _suspended ||
+        _recovering ||
+        _documentPickerActive ||
+        _model.busy ||
+        _model.relayoutBusy) {
+      return;
+    }
+    final generation = _model.generation;
+    final revision = ++_documentPickerRevision;
+    _documentPickerActive = true;
+    _emit(_model);
+    unawaited(() async {
+      try {
+        final picked = await _documentPickerAdapter();
+        dispatch(_ReaderDocumentPickerCompleted(generation, revision, picked));
+      } catch (error) {
+        dispatch(
+          _ReaderDocumentPickerFailed(
+            generation,
+            revision,
+            _describeError(error),
+          ),
+        );
+      }
+    }());
+  }
+
   Future<void> _relayoutEffect(
     FlutterDocumentSummary document,
     int generation,
@@ -1699,6 +2134,11 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         unit: message.unit,
         readingOffset: readingOffset,
+        // The more panel's page input follows the reader's location, the way
+        // the pinned reference syncs `page_input` on navigation (RD-10).
+        pageInput: changedLocation
+            ? ReaderPageInputPresentation(draft: '${message.unit + 1}')
+            : _model.pageInput,
         pageImage: message.pageImage,
         selectionSurface: message.surface == null
             ? null
@@ -3077,6 +3517,7 @@ final class ReaderController implements Listenable {
   void _suspendRequested() {
     if (_suspended || _closing) return;
     _suspended = true;
+    _retireDocumentPicker();
     if (_model.document == null && !_model.busy) return;
     final bookmarkNotice = _activeNoteEditor == _ReaderNoteTarget.bookmark
         ? 'The bookmark note was not saved because the app was suspended. Try again.'
@@ -3198,6 +3639,9 @@ final class ReaderController implements Listenable {
         _model.selectionDescription != model.selectionDescription;
     final derived = model.copyWith(
       progress: _deriveProgress(model),
+      contents: _deriveContents(model),
+      typography: _deriveTypography(model),
+      search: _deriveSearch(model),
       modalEffect: _deriveModalEffect(),
     );
     _model = derived;
@@ -3261,6 +3705,7 @@ final class ReaderController implements Listenable {
   /// The single controller-owned modal effect, derived from the effect slots.
   ReaderModalEffect? _deriveModalEffect() {
     if (_associationPickerActive) return ReaderModalEffect.associationPicker;
+    if (_documentPickerActive) return ReaderModalEffect.documentPicker;
     return switch (_activeNoteEditor) {
       _ReaderNoteTarget.selection => ReaderModalEffect.selectionNote,
       _ReaderNoteTarget.annotation => ReaderModalEffect.annotationNote,
@@ -3268,6 +3713,56 @@ final class ReaderController implements Listenable {
       null => null,
     };
   }
+
+  /// Applies the Contents precedence to [model] (RD-07).
+  ///
+  /// `loading` wins while an open is in flight or before a load starts, and
+  /// the stored entries gain their `current` flag from the live unit; the
+  /// entries themselves come from the guarded load effect.
+  ReaderContentsPresentation _deriveContents(ReaderModel model) {
+    final contents = model.contents;
+    if (model.busy || model.document == null) {
+      return ReaderContentsPresentation(
+        status: ReaderContentsStatus.loading,
+        entries: contents.entries,
+      );
+    }
+    return ReaderContentsPresentation(
+      status: contents.status,
+      entries: [
+        for (final entry in contents.entries)
+          entry.copyWith(current: entry.unit == model.unit),
+      ],
+      error: contents.error,
+    );
+  }
+
+  /// The mode-specific typography presentation for [model] (RD-09).
+  ///
+  /// The document format comes from the open document; the reader-local values
+  /// come from the panel's guarded changes and the screen's initial settings.
+  ReaderTypographyPresentation _deriveTypography(ReaderModel model) =>
+      ReaderTypographyPresentation(
+        format: model.document?.format ?? model.typography.format,
+        continuous: _typographyContinuous,
+        theme: _typographyTheme,
+        epubFontSize: _typographyFontSize,
+        epubLineSpacing: _typographyLineSpacing,
+        rasterFit: _rasterFit,
+        rasterZoom: _rasterZoom,
+      );
+
+  /// The search bar presentation for [model] (RD-11).
+  ReaderSearchPresentation _deriveSearch(ReaderModel model) =>
+      ReaderSearchPresentation(
+        query: _searchQuery,
+        busy: model.searchBusy,
+        results: model.searchResults,
+        currentIndex: model.searchResults.isEmpty
+            ? 0
+            : _searchCurrentIndex.clamp(0, model.searchResults.length - 1),
+        error: _searchError,
+      );
 
   Future<void> _announceSelection(String description) async {
     try {
@@ -3344,6 +3839,7 @@ final class ReaderController implements Listenable {
     }
     _searchRevision += 1;
     _bookmarkRevision += 1;
+    _retireDocumentPicker();
     _model = _model.copyWith(busy: false, generation: _model.generation + 1);
     _disposeBridgeIfIdle();
   }

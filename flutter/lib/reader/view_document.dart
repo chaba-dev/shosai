@@ -5,7 +5,6 @@ class _DocumentView extends StatelessWidget {
     required this.document,
     required this.image,
     required this.model,
-    required this.settings,
     required this.dispatch,
     required this.readerFocus,
     required this.actionFocus,
@@ -14,7 +13,6 @@ class _DocumentView extends StatelessWidget {
   final FlutterDocumentSummary document;
   final ui.Image? image;
   final ReaderModel model;
-  final FlutterReaderSettings? settings;
   final void Function(ReaderMessage) dispatch;
   final FocusNode readerFocus;
   final FocusNode actionFocus;
@@ -260,12 +258,11 @@ class _DocumentView extends StatelessWidget {
                                 onTap: readerFocus.requestFocus,
                                 child: _ReachableSelectableSurface(
                                   presentationKey: ValueKey(
-                                    settings?.continuous == true
+                                    model.typography.continuous
                                         ? 'reader-continuous-presentation'
                                         : 'reader-paginated-presentation',
                                   ),
                                   document: document,
-                                  settings: settings,
                                   surface: surface,
                                   image: page,
                                   model: model,
@@ -281,8 +278,7 @@ class _DocumentView extends StatelessWidget {
                           child: CustomSingleChildLayout(
                             delegate: _SelectionActionsLayout(
                               target:
-                                  _readerFit(document.format, settings) ==
-                                      BoxFit.contain
+                                  _readerFit(model.typography) == BoxFit.contain
                                   ? _selectionActionTarget(
                                       surface,
                                       model,
@@ -387,12 +383,13 @@ class _DocumentView extends StatelessWidget {
   }
 }
 
-BoxFit _readerFit(FlutterBookFormat format, FlutterReaderSettings? settings) {
-  if (format == FlutterBookFormat.epub) return BoxFit.contain;
-  final zoom = settings?.pdfZoom ?? 0;
-  if (zoom == -1) return BoxFit.fitWidth;
-  if (zoom > 0) return BoxFit.none;
-  return BoxFit.contain;
+BoxFit _readerFit(ReaderTypographyPresentation typography) {
+  if (typography.format == FlutterBookFormat.epub) return BoxFit.contain;
+  return switch (typography.rasterFit) {
+    ReaderRasterFit.fitPage => BoxFit.contain,
+    ReaderRasterFit.fitWidth => BoxFit.fitWidth,
+    ReaderRasterFit.manual => BoxFit.none,
+  };
 }
 
 FlutterHighlightColor _nextColor(FlutterHighlightColor color) =>

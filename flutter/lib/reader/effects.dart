@@ -38,6 +38,42 @@ typedef ReaderTabRevealAdapter = Future<void> Function(String tabId);
 typedef ReaderProgressSource =
     ReaderProgressPresentation Function(ReaderModel model);
 
+/// Supplies the Contents entries for a loaded document (RD-07).
+///
+/// The fixture supplies them in 4C because the bridge exposes no TOC DTO; the
+/// default loader renders the EPUB chapter fallback (contract §4.6). The
+/// controller owns the guarded effect and rejects stale completions.
+typedef ReaderContentsLoader =
+    Future<List<ReaderContentsEntry>> Function(FlutterDocumentSummary document);
+
+/// A document the more panel's open-book picker returned (RD-10).
+final class ReaderPickedDocument {
+  const ReaderPickedDocument(this.path, {this.bookId});
+
+  final String path;
+  final int? bookId;
+}
+
+/// Chooses a supported document for the more panel's open-book action (RD-10).
+///
+/// The shell injects the platform picker; a null result is a neutral
+/// cancellation. The selected document opens through the normal open path.
+typedef ReaderDocumentPickerAdapter = Future<ReaderPickedDocument?> Function();
+
+/// Delivers the Markdown export text (RD-08).
+///
+/// The controller calls the injected adapter after `exportBookmarks` succeeds;
+/// the screen's default copies the text to the clipboard. Choosing a save
+/// location instead is a shell-level adapter swap, not a schema change.
+typedef ReaderExportSink = Future<void> Function(String markdown);
+
+/// Reports reader notices through the application notice center.
+///
+/// The reader route is outside the shell's `NoticeHost`, so the composition
+/// root injects the center's reporter; a reader built without one reports
+/// nothing.
+typedef ReaderNoticeReporter = void Function(NoticeRequest request);
+
 final class _QueuedReadingStateSave {
   const _QueuedReadingStateSave({required this.run, required this.discard});
 

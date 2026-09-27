@@ -117,9 +117,12 @@ String _fingerprintLabel(Uint8List fingerprint) {
 }
 
 class _NoteDialog extends StatefulWidget {
-  const _NoteDialog({required this.initialValue, required this.title});
+  const _NoteDialog({required this.initialValue, required this.bookmark});
   final String? initialValue;
-  final String title;
+
+  /// True for the saved-place note action (RD-08); false for the retained
+  /// highlight-note action.
+  final bool bookmark;
   @override
   State<_NoteDialog> createState() => _NoteDialogState();
 }
@@ -135,33 +138,41 @@ class _NoteDialogState extends State<_NoteDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => ShadDialog(
-    title: Text(widget.title),
-    actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
-        ? Axis.vertical
-        : Axis.horizontal,
-    actions: [
-      ShadButton.outline(
-        height: shosaiShadButtonHeight(context),
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return ShadDialog(
+      title: Text(
+        widget.bookmark
+            ? l10n.readerBookmarkNoteTitle
+            : l10n.readerHighlightNoteTitle,
       ),
-      ShadButton(
-        height: shosaiShadButtonHeight(context),
-        onPressed: () => Navigator.pop(context, controller.text),
-        child: const Text('Save'),
+      actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
+          ? Axis.vertical
+          : Axis.horizontal,
+      actions: [
+        ShadButton.outline(
+          height: shosaiShadButtonHeight(context),
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.readerNoteCancel),
+        ),
+        ShadButton(
+          height: shosaiShadButtonHeight(context),
+          onPressed: () => Navigator.pop(context, controller.text),
+          child: Text(l10n.readerNoteSave),
+        ),
+      ],
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: math.min(360, MediaQuery.sizeOf(context).width - 96),
+        ),
+        child: ShadInput(
+          key: const ValueKey('reader-note-editor-field'),
+          controller: controller,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 6,
+        ),
       ),
-    ],
-    child: ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: math.min(360, MediaQuery.sizeOf(context).width - 96),
-      ),
-      child: ShadInput(
-        controller: controller,
-        autofocus: true,
-        minLines: 3,
-        maxLines: 6,
-      ),
-    ),
-  );
+    );
+  }
 }

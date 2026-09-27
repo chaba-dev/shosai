@@ -31,6 +31,7 @@ typedef ProductReaderBuilder =
       String initialPath,
       int? initialBookId,
       void Function(String path, int? bookId) locatorChanged,
+      ReaderNoticeReporter noticeReporter,
     );
 
 class ProductShell extends StatefulWidget {
@@ -171,6 +172,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               _activeBook.value = _encodeBook(book, path: path, bookId: bookId);
             }
           },
+          // The reader route is pushed outside the shell's notice host, so the
+          // composition root's reporter is handed to it (package 4C).
+          widget.noticeReporter ?? ignoreNotice,
         ),
       );
       unawaited(Navigator.of(context).push<void>(route));

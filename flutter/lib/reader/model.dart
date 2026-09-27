@@ -55,12 +55,13 @@ enum ReaderProgressKind { none, loading, single, range }
 /// The one controller-owned modal effect currently active, if any.
 ///
 /// Controls that would start another modal are disabled while this is set.
-/// `documentPicker` is added by 4C with the more panel's open-book action.
+/// `documentPicker` is the more panel's open-book picker (RD-10).
 enum ReaderModalEffect {
   selectionNote,
   annotationNote,
   bookmarkNote,
   associationPicker,
+  documentPicker,
 }
 
 /// One tab strip entry (RD-03, RD-04).
@@ -148,6 +149,231 @@ final class ReaderProgressPresentation {
   );
 }
 
+/// The Contents panel load state (RD-07).
+///
+/// `loading` is the panel-opened-before-entries state, `empty` a document
+/// without chapters, `failed` carries the error payload and a retry.
+enum ReaderContentsStatus { loading, ready, empty, failed }
+
+/// One Contents row (RD-07).
+///
+/// Entries are fixture-provided in 4C: the bridge exposes no TOC DTO, so the
+/// production loader renders the EPUB chapter fallback. [title] is empty when
+/// the row has no authored title and the panel renders the localized chapter
+/// number for [unit] (the pinned Iced fallback, `app.rs:6062-6071`).
+final class ReaderContentsEntry {
+  const ReaderContentsEntry({
+    this.depth = 0,
+    this.title = '',
+    required this.unit,
+    this.offset,
+    this.current = false,
+  });
+
+  /// Nesting depth; the panel indents 12 logical px per level (RD-07).
+  final int depth;
+  final String title;
+  final int unit;
+  final int? offset;
+
+  /// Whether this row is the reader's current location.
+  final bool current;
+
+  ReaderContentsEntry copyWith({bool? current}) => ReaderContentsEntry(
+    depth: depth,
+    title: title,
+    unit: unit,
+    offset: offset,
+    current: current ?? this.current,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderContentsEntry &&
+      other.depth == depth &&
+      other.title == title &&
+      other.unit == unit &&
+      other.offset == offset &&
+      other.current == current;
+
+  @override
+  int get hashCode => Object.hash(depth, title, unit, offset, current);
+}
+
+/// The Contents panel state (RD-07, 4C acceptance).
+final class ReaderContentsPresentation {
+  const ReaderContentsPresentation({
+    required this.status,
+    this.entries = const [],
+    this.error,
+  });
+
+  final ReaderContentsStatus status;
+  final List<ReaderContentsEntry> entries;
+  final String? error;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderContentsPresentation &&
+      other.status == status &&
+      _listEquals(other.entries, entries) &&
+      other.error == error;
+
+  @override
+  int get hashCode => Object.hash(status, Object.hashAll(entries), error);
+}
+
+/// The more panel's page-input draft and inline validation (RD-10).
+final class ReaderPageInputPresentation {
+  const ReaderPageInputPresentation({this.draft = '', this.error});
+
+  final String draft;
+
+  /// The controller's diagnostic for a rejected submission. The panel renders
+  /// its own localized invalid-input message; this value keeps the rejection
+  /// observable for tests and diagnostics.
+  final String? error;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderPageInputPresentation &&
+      other.draft == draft &&
+      other.error == error;
+
+  @override
+  int get hashCode => Object.hash(draft, error);
+}
+
+/// Typed raster fit for PDF/CBZ (RD-09).
+///
+/// The persisted preference codec that replaces the legacy `pdfZoom` sentinel
+/// is 5A/6B work; 4C presents and applies the value locally.
+enum ReaderRasterFit { fitPage, fitWidth, manual }
+
+/// Mode-specific typography presentation (RD-09).
+///
+/// Availability is derived from [format] and [continuous], never from a
+/// widget-local boolean: a reflowable (EPUB) document shows font size, line
+/// spacing and the theme cycle; a raster (PDF/CBZ) document shows zoom and the
+/// fit controls.
+final class ReaderTypographyPresentation {
+  const ReaderTypographyPresentation({
+    required this.format,
+    required this.continuous,
+    required this.theme,
+    required this.epubFontSize,
+    required this.epubLineSpacing,
+    required this.rasterFit,
+    required this.rasterZoom,
+  });
+
+  final FlutterBookFormat format;
+  final bool continuous;
+  final String theme;
+  final double epubFontSize;
+  final double epubLineSpacing;
+  final ReaderRasterFit rasterFit;
+
+  /// The effective raster scale: the manual zoom for [ReaderRasterFit.manual]
+  /// and the reader's base density for the fit modes. Applying a real fit-page
+  /// or fit-width computation from page geometry is 5A/6B.
+  final double rasterZoom;
+
+  /// Whether the document is reflowable (EPUB), so the EPUB controls apply.
+  bool get reflowable => format == FlutterBookFormat.epub;
+
+  /// Whether the document is searchable (Iced: EPUB and PDF, not CBZ).
+  bool get searchable => format != FlutterBookFormat.cbz;
+
+  ReaderTypographyPresentation copyWith({
+    FlutterBookFormat? format,
+    bool? continuous,
+    String? theme,
+    double? epubFontSize,
+    double? epubLineSpacing,
+    ReaderRasterFit? rasterFit,
+    double? rasterZoom,
+  }) => ReaderTypographyPresentation(
+    format: format ?? this.format,
+    continuous: continuous ?? this.continuous,
+    theme: theme ?? this.theme,
+    epubFontSize: epubFontSize ?? this.epubFontSize,
+    epubLineSpacing: epubLineSpacing ?? this.epubLineSpacing,
+    rasterFit: rasterFit ?? this.rasterFit,
+    rasterZoom: rasterZoom ?? this.rasterZoom,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderTypographyPresentation &&
+      other.format == format &&
+      other.continuous == continuous &&
+      other.theme == theme &&
+      other.epubFontSize == epubFontSize &&
+      other.epubLineSpacing == epubLineSpacing &&
+      other.rasterFit == rasterFit &&
+      other.rasterZoom == rasterZoom;
+
+  @override
+  int get hashCode => Object.hash(
+    format,
+    continuous,
+    theme,
+    epubFontSize,
+    epubLineSpacing,
+    rasterFit,
+    rasterZoom,
+  );
+}
+
+/// Markdown export feedback (RD-08).
+enum ReaderExportState { idle, busy, failed }
+
+/// The search bar state (RD-11).
+///
+/// `query.isEmpty` distinguishes idle from no matches; [currentIndex] is the
+/// 0-based index into [results] that the previous/next controls step through.
+final class ReaderSearchPresentation {
+  const ReaderSearchPresentation({
+    this.query = '',
+    this.busy = false,
+    this.results = const [],
+    this.currentIndex = 0,
+    this.error,
+  });
+
+  final String query;
+  final bool busy;
+  final List<FlutterSearchMatch> results;
+  final int currentIndex;
+  final String? error;
+
+  bool get hasQuery => query.isNotEmpty;
+  bool get hasResults => results.isNotEmpty;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderSearchPresentation &&
+      other.query == query &&
+      other.busy == busy &&
+      _listEquals(other.results, results) &&
+      other.currentIndex == currentIndex &&
+      other.error == error;
+
+  @override
+  int get hashCode =>
+      Object.hash(query, busy, Object.hashAll(results), currentIndex, error);
+}
+
+bool _listEquals<T>(List<T> first, List<T> second) {
+  if (identical(first, second)) return true;
+  if (first.length != second.length) return false;
+  for (var index = 0; index < first.length; index += 1) {
+    if (first[index] != second[index]) return false;
+  }
+  return true;
+}
+
 final class ReaderLayout {
   const ReaderLayout({
     this.scale = 1,
@@ -220,6 +446,22 @@ final class ReaderModel {
     this.progress = const ReaderProgressPresentation(
       kind: ReaderProgressKind.none,
     ),
+    this.contents = const ReaderContentsPresentation(
+      status: ReaderContentsStatus.loading,
+    ),
+    this.pageInput = const ReaderPageInputPresentation(),
+    this.typography = const ReaderTypographyPresentation(
+      format: FlutterBookFormat.epub,
+      continuous: false,
+      theme: 'light',
+      epubFontSize: 18,
+      epubLineSpacing: 1.5,
+      rasterFit: ReaderRasterFit.fitPage,
+      rasterZoom: 1,
+    ),
+    this.exportState = ReaderExportState.idle,
+    this.exportError,
+    this.search = const ReaderSearchPresentation(),
     this.modalEffect,
     this.layout = const ReaderLayout(),
     this.relayoutBusy = false,
@@ -288,6 +530,22 @@ final class ReaderModel {
 
   /// Progress bar and status wording inputs (RD-05).
   final ReaderProgressPresentation progress;
+
+  /// The Contents panel state (RD-07).
+  final ReaderContentsPresentation contents;
+
+  /// The more panel's page-input draft and inline validation (RD-10).
+  final ReaderPageInputPresentation pageInput;
+
+  /// Mode-specific typography presentation (RD-09).
+  final ReaderTypographyPresentation typography;
+
+  /// Markdown export feedback (RD-08).
+  final ReaderExportState exportState;
+  final String? exportError;
+
+  /// The search bar state (RD-11).
+  final ReaderSearchPresentation search;
 
   /// The one controller-owned modal effect currently active, if any.
   final ReaderModalEffect? modalEffect;
@@ -363,6 +621,12 @@ final class ReaderModel {
     bool? searchOpen,
     List<ReaderTabPresentation>? tabs,
     ReaderProgressPresentation? progress,
+    ReaderContentsPresentation? contents,
+    ReaderPageInputPresentation? pageInput,
+    ReaderTypographyPresentation? typography,
+    ReaderExportState? exportState,
+    Object? exportError = _unchanged,
+    ReaderSearchPresentation? search,
     Object? modalEffect = _unchanged,
     ReaderLayout? layout,
     bool? relayoutBusy,
@@ -444,6 +708,14 @@ final class ReaderModel {
       searchOpen: searchOpen ?? this.searchOpen,
       tabs: tabs == null ? this.tabs : List.unmodifiable(tabs),
       progress: progress ?? this.progress,
+      contents: contents ?? this.contents,
+      pageInput: pageInput ?? this.pageInput,
+      typography: typography ?? this.typography,
+      exportState: exportState ?? this.exportState,
+      exportError: identical(exportError, _unchanged)
+          ? this.exportError
+          : exportError as String?,
+      search: search ?? this.search,
       modalEffect: identical(modalEffect, _unchanged)
           ? this.modalEffect
           : modalEffect as ReaderModalEffect?,

@@ -229,7 +229,7 @@ Future<HarnessBridge> pumpLibrary(
       locale: locale,
       home: ProductShell(
         bridgeFactory: () => effective,
-        readerBuilder: (_, book, _, _, _, _) {
+        readerBuilder: (_, book, _, _, _, _, _) {
           onOpen?.call(book);
           return const SizedBox();
         },
