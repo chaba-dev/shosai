@@ -14,6 +14,31 @@ const double readerTabMinLabelWidth = 120;
 /// Characters a tab label keeps before it is ellipsized (Iced: 34).
 const int readerTabLabelMaxChars = 34;
 
+/// Line-height ratio for a tab label's own line box.
+///
+/// The Shad interface text style sets `height: 1` (leading-none), which is
+/// shorter than the interface font's ink. A label that does not overflow paints
+/// outside that line box and is still visible, but a *truncated* label turns the
+/// paragraph's own clip on, so the descenders and accents of a long mixed
+/// Latin/Japanese label were cut at 200 % text (`reader-tab-overflow-390-ja-t200`,
+/// `4B-RENDER`, Oracle follow-up). The label therefore carries its own line
+/// metrics and the tab grows by the same delta; the shared button geometry and
+/// the theme stay untouched.
+const double readerTabLabelLineHeight = 1.25;
+
+/// The scaled line box a tab label needs at the current text scale.
+///
+/// The budget is rounded up to a whole logical pixel because the engine rounds
+/// the laid-out line height to whole logical pixels as well (`SkParagraph`
+/// rounds the line height and lays the line out in that rounded box). At a
+/// fractional scale the nominal budget would otherwise fall just below the
+/// engine's line box (1.25 * 12 * 1.92 = 28.8 < 29), constrain the paragraph
+/// and switch its own clip on again — the same clipping the line metrics fix.
+double _readerTabLabelLineBox(BuildContext context) =>
+    (MediaQuery.textScalerOf(context).scale(ShosaiTokens.typeSize12) *
+            readerTabLabelLineHeight)
+        .ceilToDouble();
+
 /// Truncates a reader label the way the pinned Iced reference does.
 String _truncateReaderLabel(String label, int maxChars) {
   final characters = label.characters;
@@ -186,9 +211,22 @@ class _ReaderTab extends StatelessWidget {
     final labelStyle = shosaiInterfaceStyleForText(
       TextStyle(
         fontSize: ShosaiTokens.typeSize12,
+        height: readerTabLabelLineHeight,
         color: selected ? scheme.accentForeground : scheme.mutedForeground,
       ),
       label,
+    );
+    const labelPadding = EdgeInsets.only(
+      top: ShosaiTokens.layoutReaderChromeTabPaddingVertical,
+      right: ShosaiTokens.layoutReaderChromeTabLabelPaddingRight,
+      bottom: ShosaiTokens.layoutReaderChromeTabPaddingVertical,
+      left: ShosaiTokens.layoutReaderChromeTabLabelPaddingLeft,
+    );
+    // The tab grows so the label's own line box fits the content box the Shad
+    // button pins it inside; the theme height stays the floor at 100 % text.
+    final labelHeight = math.max(
+      shosaiShadButtonHeight(context, padding: labelPadding),
+      labelPadding.vertical + _readerTabLabelLineBox(context),
     );
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
@@ -213,22 +251,8 @@ class _ReaderTab extends StatelessWidget {
                 child: ShadButton.raw(
                   variant: ShadButtonVariant.ghost,
                   focusNode: focusNode,
-                  height: shosaiShadButtonHeight(
-                    context,
-                    padding: const EdgeInsets.only(
-                      top: ShosaiTokens.layoutReaderChromeTabPaddingVertical,
-                      right:
-                          ShosaiTokens.layoutReaderChromeTabLabelPaddingRight,
-                      bottom: ShosaiTokens.layoutReaderChromeTabPaddingVertical,
-                      left: ShosaiTokens.layoutReaderChromeTabLabelPaddingLeft,
-                    ),
-                  ),
-                  padding: const EdgeInsets.only(
-                    top: ShosaiTokens.layoutReaderChromeTabPaddingVertical,
-                    right: ShosaiTokens.layoutReaderChromeTabLabelPaddingRight,
-                    bottom: ShosaiTokens.layoutReaderChromeTabPaddingVertical,
-                    left: ShosaiTokens.layoutReaderChromeTabLabelPaddingLeft,
-                  ),
+                  height: labelHeight,
+                  padding: labelPadding,
                   backgroundColor: selected ? scheme.selection : null,
                   hoverBackgroundColor: scheme.muted,
                   pressedBackgroundColor: scheme.muted,

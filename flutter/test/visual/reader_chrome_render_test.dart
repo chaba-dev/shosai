@@ -308,6 +308,36 @@ void main() {
     );
   });
 
+  testWidgets('compact tab overflow at 200% with the long mixed labels', (
+    tester,
+  ) async {
+    // The owner-reported state: at 200 % text the long mixed labels are
+    // ellipsized, which turns the paragraph's own clip on, so the shared
+    // detector reported `clippedText` on the label paragraphs (the Shad
+    // interface style is leading-none, `height: 1`). This is the same fixture
+    // the wide T100 render keeps, at the compact viewport and 200 % text.
+    await render(
+      tester,
+      'reader-tab-overflow-390-ja-t200-long-labels',
+      const HarnessView(size: Size(390, 844), textScale: 2),
+      _reader(
+        bridge: _RenderBridge(),
+        locale: const Locale('ja'),
+        tabs: _overflowTabs(),
+        progressSource: _referenceProgress(first: 1, percentage: 33),
+      ),
+      ready: () => _chromeReady(tester),
+      metadata: const <String, Object?>{
+        'state': 'overflow',
+        'tabs': 8,
+        'labels': 'long mixed Latin/Japanese labels (34-character truncation)',
+        'regression':
+            '4B: an ellipsized label keeps its ink inside its line box at T200',
+        'progress': 'fixture: page 1 of 3, 33% (5G owns real ranges)',
+      },
+    );
+  });
+
   testWidgets('compact tab overflow at 200% interface text', (tester) async {
     await render(
       tester,

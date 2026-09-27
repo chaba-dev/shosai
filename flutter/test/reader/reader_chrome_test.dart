@@ -5,7 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart'
     show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -237,6 +237,15 @@ ShadButton _button(WidgetTester tester, String key) =>
       find.descendant(
         of: find.byKey(ValueKey(key)),
         matching: find.byType(ShadButton),
+      ),
+    );
+
+/// The label paragraph of the tab at [id]: the tab's first laid-out `RichText`.
+RenderParagraph _labelParagraph(WidgetTester tester, String id) =>
+    tester.renderObject<RenderParagraph>(
+      find.descendant(
+        of: find.byKey(ValueKey('reader-tab-$id')),
+        matching: find.byType(RichText),
       ),
     );
 
@@ -628,6 +637,215 @@ void main() {
       expect(
         _visible(tester, 'reader-tab-close-tab-0', 'reader-tab-strip-scroll'),
         isTrue,
+      );
+    });
+
+    testWidgets('a truncated long label keeps its ink inside its line box at '
+        'C390 T200', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await _open(
+        tester,
+        _reader(
+          bridge: _ChromeBridge(
+            // The active tab shows the live document title (RD-03), so the
+            // selected tab carries the long mixed label too.
+            title:
+                '海辺の図書館 — 失われた書架をめぐる長い旅路と '
+                'The Quiet Cartographer',
+          ),
+          locale: const Locale('ja'),
+          tabs: _manyTabs(selected: 7),
+        ),
+      );
+
+      // At 200 % text only part of a long label fits a bounded tab, so the
+      // label is ellipsized and the paragraph's own clip is active. The painted
+      // ink still has to stay inside the line box it is laid out in: the Shad
+      // interface style is leading-none (`height: 1`), which is shorter than
+      // the interface font's ink, so the reader tab label carries its own line
+      // metrics (owner-reported C390/T200 clipping).
+      final truncated = <String>[];
+      for (final id in ['tab-1', 'tab-2', 'tab-3', 'tab-7']) {
+        final paragraph = _labelParagraph(tester, id);
+        expect(
+          paragraph.size.height,
+          greaterThanOrEqualTo(paragraph.textSize.height - 0.01),
+          reason: 'the $id line box must hold its laid-out line',
+        );
+        final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
+        expect(ink, isNotNull);
+        expect(ink!.unmeasured, isFalse);
+        expect(ink.visible, isNotNull);
+        expect(ink.visible!.isEmpty, isFalse);
+        expect(
+          classifyInkOverhang(
+            visibleInk: ink.visible,
+            bodyInk: ink.body,
+            region: Offset.zero & paragraph.size,
+          ),
+          InkOverhangKind.none,
+          reason: 'the $id label ink must not leave its own line box',
+        );
+        if (paragraph.didExceedMaxLines) truncated.add(id);
+      }
+      expect(
+        truncated,
+        isNotEmpty,
+        reason:
+            'the state must really exercise an ellipsized label, or the ink '
+            'check proves nothing about the clipping path',
+      );
+
+      // The active tab is revealed with its close control, so the ink that was
+      // just asserted readable is actually on screen.
+      expect(
+        _visible(tester, 'reader-tab-tab-7', 'reader-tab-strip-scroll'),
+        isTrue,
+        reason: 'the active tab must be revealed inside the strip viewport',
+      );
+      expect(
+        _visible(tester, 'reader-tab-close-tab-7', 'reader-tab-strip-scroll'),
+        isTrue,
+        reason: 'the active tab close control must be revealed too',
+      );
+
+      // The active tab carries the long live title, and its close control is
+      // still hit-testable next to it.
+      expect(
+        tester.getSize(find.byKey(const ValueKey('reader-tab-tab-7'))).width,
+        greaterThan(readerTabMinLabelWidth),
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('reader-tab-close-tab-7')),
+        warnIfMissed: true,
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('reader-tab-tab-7')),
+        findsNothing,
+        reason: 'the revealed close control closes the active tab',
+      );
+    });
+
+    testWidgets('a fractional text scale keeps the label line box inside its '
+        'tab', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      // 1.92 is not free of engine rounding: the nominal line box lands on a
+      // fraction (1.25 * 12 * 1.92 = 28.8), while the engine rounds the laid
+      // out line height up to a whole logical pixel (29). A budget that is not
+      // rounded up as well constrains the paragraph and switches its clip on.
+      tester.platformDispatcher.textScaleFactorTestValue = 1.92;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await _open(
+        tester,
+        _reader(
+          bridge: _ChromeBridge(
+            title:
+                '海辺の図書館 — 失われた書架をめぐる長い旅路と '
+                'The Quiet Cartographer',
+          ),
+          locale: const Locale('ja'),
+          tabs: _manyTabs(selected: 7),
+        ),
+      );
+
+      for (final id in ['tab-2', 'tab-7']) {
+        final paragraph = _labelParagraph(tester, id);
+        expect(
+          paragraph.size.height,
+          greaterThanOrEqualTo(paragraph.textSize.height - 0.01),
+          reason:
+              'the $id line box must round up with the engine, or the '
+              'fractional-scale paragraph is constrained and clipped',
+        );
+        final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
+        expect(ink, isNotNull);
+        expect(ink!.unmeasured, isFalse);
+        expect(ink.visible, isNotNull);
+        expect(ink.visible!.isEmpty, isFalse);
+        expect(
+          classifyInkOverhang(
+            visibleInk: ink.visible,
+            bodyInk: ink.body,
+            region: Offset.zero & paragraph.size,
+          ),
+          InkOverhangKind.none,
+          reason: 'the $id fractional-scale ink must stay inside its line box',
+        );
+      }
+    });
+
+    testWidgets('a non-linear text scaler keeps the label line box inside its '
+        'tab', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      // A deliberately adversarial, piecewise text scaler: small sizes scale
+      // hard and larger sizes barely at all (a shape chosen to separate the two
+      // budget formulas, not a claim about a platform curve). Scaling the
+      // *font size* first and applying the line-height multiplier after
+      // (2.5 * 12 * 1.25 = 37.5) is what the engine does; scaling the
+      // pre-multiplied 15 px size instead under-allocates here
+      // (15 * 1.02 = 15.3, and the shared button-height floor only supplies
+      // 28 px of content), which the ordered budget has to survive.
+      await _open(
+        tester,
+        MediaQuery(
+          data: const MediaQueryData(textScaler: _CurveTextScaler()),
+          child: _reader(
+            bridge: _ChromeBridge(
+              title:
+                  '海辺の図書館 — 失われた書架をめぐる長い旅路と '
+                  'The Quiet Cartographer',
+            ),
+            locale: const Locale('ja'),
+            tabs: _manyTabs(selected: 7),
+          ),
+        ),
+      );
+
+      final truncated = <String>[];
+      for (final id in ['tab-2', 'tab-7']) {
+        final paragraph = _labelParagraph(tester, id);
+        expect(
+          paragraph.textScaler.scale(ShosaiTokens.typeSize12),
+          closeTo(12 * 2.5, 0.01),
+          reason: 'the state must really exercise the non-linear scaler',
+        );
+        expect(
+          paragraph.size.height,
+          greaterThanOrEqualTo(paragraph.textSize.height - 0.01),
+          reason: 'the $id line box must be scaled like the engine scales it',
+        );
+        final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
+        expect(ink, isNotNull);
+        expect(ink!.unmeasured, isFalse);
+        expect(ink.visible, isNotNull);
+        expect(ink.visible!.isEmpty, isFalse);
+        expect(
+          classifyInkOverhang(
+            visibleInk: ink.visible,
+            bodyInk: ink.body,
+            region: Offset.zero & paragraph.size,
+          ),
+          InkOverhangKind.none,
+          reason: 'the $id non-linear ink must stay inside its line box',
+        );
+        if (paragraph.didExceedMaxLines) truncated.add(id);
+      }
+      expect(
+        truncated,
+        isNotEmpty,
+        reason: 'the state must really exercise an ellipsized label',
       );
     });
 
@@ -1415,6 +1633,31 @@ void main() {
     expect(find.byKey(const ValueKey('reader-tab-tab-1')), findsNothing);
     debugDefaultTargetPlatformOverride = null;
   });
+}
+
+/// A deliberately adversarial, piecewise [TextScaler]: small font sizes scale
+/// hard (×2.5) and larger ones barely (×1.02). It is shaped to separate the two
+/// possible tab-label line-box budgets, not to model a platform curve.
+///
+/// It discriminates the *ordering* of that budget: the budget has to scale the
+/// font size first and apply the line-height multiplier after
+/// (`scale(12) * 1.25`), like the engine lays the line out. A budget that scales
+/// the already-multiplied size instead (`scale(12 * 1.25)`) under-allocates
+/// under this scaler, and the ×2.5 small-size factor keeps the scaled line box
+/// (37.5 px) taller than the shared button-height floor, so the label's own
+/// budget is what has to accommodate it.
+class _CurveTextScaler extends TextScaler {
+  const _CurveTextScaler();
+
+  @override
+  double scale(double fontSize) =>
+      fontSize <= ShosaiTokens.typeSize12 ? fontSize * 2.5 : fontSize * 1.02;
+
+  @override
+  double get textScaleFactor => 2.5;
+
+  @override
+  String toString() => 'curve(2.5/1.02)';
 }
 
 /// Pushes [reader] onto the navigator so the reader can leave it.
