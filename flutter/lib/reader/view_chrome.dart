@@ -947,6 +947,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
                     children: [
                       Text(
                         l10n.readerContentsAction,
+                        key: const ValueKey('reader-contents-heading'),
                         style: shosaiInterfaceStyleForText(
                           const TextStyle(
                             fontSize: ShosaiTokens.typeSize18,
@@ -960,6 +961,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
                       ),
                       Text(
                         l10n.readerContentsSubheading,
+                        key: const ValueKey('reader-contents-subheading'),
                         style: shosaiInterfaceStyleForText(
                           const TextStyle(
                             fontSize: ShosaiTokens.typeSize11,
@@ -984,6 +986,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
             const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing),
             Text(
               l10n.readerChaptersHeading,
+              key: const ValueKey('reader-contents-chapters-label'),
               style: shosaiInterfaceStyleForText(
                 const TextStyle(
                   fontSize: ShosaiTokens.typeSize12,
@@ -997,6 +1000,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
             const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing),
             Text(
               l10n.readerBookmarksHeading(model.bookmarks.length),
+              key: const ValueKey('reader-contents-bookmarks-count'),
               style: shosaiInterfaceStyleForText(
                 const TextStyle(
                   fontSize: ShosaiTokens.typeSize12,
@@ -1037,12 +1041,17 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
         child: _ReaderAlertAction(
           key: const ValueKey('reader-contents-retry'),
           label: l10n.readerRetry,
+          contentSized: true,
           onPressed: () => dispatch(const ReaderContentsRequested()),
         ),
       ),
     ],
     ReaderContentsStatus.ready => [
-      for (final entry in contents.entries)
+      for (final entry in contents.entries) ...[
+        // The pinned panel column spaces every child by 10 px, including
+        // consecutive chapter rows.
+        if (entry != contents.entries.first)
+          const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing),
         KeyedSubtree(
           key: entry.current ? _currentEntryKey : null,
           child: _ReaderChapterRow(
@@ -1053,6 +1062,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
             dispatch: dispatch,
           ),
         ),
+      ],
     ],
   };
 
@@ -1065,6 +1075,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
     if (model.bookmarks.isEmpty) {
       return [
         Padding(
+          key: const ValueKey('reader-contents-empty'),
           padding: const EdgeInsets.symmetric(
             vertical: ShosaiTokens.layoutReaderPanelEmptyPaddingVertical,
             horizontal: ShosaiTokens.layoutReaderPanelEmptyPaddingHorizontal,
@@ -1103,25 +1114,34 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
     final exportFailed =
         model.exportState == ReaderExportState.failed &&
         model.exportError != null;
+    // The pinned panel column spaces every child by 10 px, including
+    // consecutive saved places and the export action.
     return [
-      for (final bookmark in model.bookmarks)
+      for (var index = 0; index < model.bookmarks.length; index += 1) ...[
+        if (index > 0)
+          const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing),
         _ReaderSavedPlaceRow(
-          bookmark: bookmark,
+          bookmark: model.bookmarks[index],
           enabled: !model.bookmarkBusy,
           dispatch: dispatch,
         ),
-      if (exportFailed)
+      ],
+      if (exportFailed) ...[
+        const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing),
         _ReaderPanelNote(
           key: const ValueKey('reader-bookmark-export-error'),
           text: model.exportError!,
           danger: true,
           liveRegion: true,
         ),
+      ],
+      const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing),
       Align(
         alignment: Alignment.centerLeft,
         child: _ReaderAlertAction(
           key: const ValueKey('reader-bookmark-export'),
           label: l10n.readerExportMarkdown,
+          contentSized: true,
           onPressed:
               model.exportState == ReaderExportState.busy || model.bookmarkBusy
               ? null
@@ -1155,10 +1175,19 @@ class _ReaderChapterRow extends StatelessWidget {
     final style = shosaiInterfaceStyleForText(
       TextStyle(
         fontSize: ShosaiTokens.typeSize12,
+        height: 1.25,
         color: scheme.accentForeground,
       ),
       label,
     );
+    // The pinned reference entry is its padding plus the 12 px label's line
+    // box. The Shad button's own minimum height would make the row (and the
+    // list pitch) taller than the reference, so the row is sized to its
+    // content; it keeps the full panel width as its target and grows with the
+    // text scale, so a scaled interface never clips the label.
+    final labelBox =
+        (MediaQuery.textScalerOf(context).scale(ShosaiTokens.typeSize12) * 1.25)
+            .ceilToDouble();
     return Padding(
       padding: EdgeInsets.only(
         left: entry.depth * ShosaiTokens.layoutReaderPanelEntryIndent,
@@ -1173,7 +1202,7 @@ class _ReaderChapterRow extends StatelessWidget {
         child: ShadButton.raw(
           variant: ShadButtonVariant.ghost,
           mainAxisAlignment: MainAxisAlignment.start,
-          height: shosaiShadButtonHeight(context, padding: padding),
+          height: padding.vertical + labelBox,
           padding: padding,
           backgroundColor: entry.current ? scheme.selection : null,
           hoverBackgroundColor: scheme.accent,
@@ -1233,6 +1262,12 @@ class _ReaderSavedPlaceRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            // The pinned reference fills the gap between the title and the
+            // page/delete group (`Space::new().width(Length::Fill)`), so the
+            // group sits at the entry's right edge; `spaceBetween` leaves the
+            // title at its content width and puts the remaining space in that
+            // gap.
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Flexible(
                 child: _ReaderLinkButton(
@@ -1248,31 +1283,47 @@ class _ReaderSavedPlaceRow extends StatelessWidget {
                       : null,
                 ),
               ),
-              const SizedBox(
-                width: ShosaiTokens.layoutReaderPanelPlaceRowSpacing,
-              ),
-              Text(
-                l10n.readerPageAbbreviated(page),
-                style: shosaiInterfaceStyleForText(
-                  const TextStyle(
-                    fontSize: ShosaiTokens.typeSize10,
-                    color: ShosaiTokens.appTextMuted,
+              // The page label and the delete control form one right-hand group,
+              // so `spaceBetween` puts the whole remaining gap between the title
+              // and this group (the pinned reference's filler).
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    l10n.readerPageAbbreviated(page),
+                    style: shosaiInterfaceStyleForText(
+                      const TextStyle(
+                        fontSize: ShosaiTokens.typeSize10,
+                        color: ShosaiTokens.appTextMuted,
+                      ),
+                      l10n.readerPageAbbreviated(page),
+                    ),
                   ),
-                  l10n.readerPageAbbreviated(page),
-                ),
-              ),
-              const SizedBox(
-                width: ShosaiTokens.layoutReaderPanelPlaceRowSpacing,
-              ),
-              _ReaderControlButton(
-                key: ValueKey('reader-saved-place-delete-${bookmark.id}'),
-                label: '✕',
-                semanticsLabel: l10n.readerDeleteBookmark(title),
-                fontSize: ShosaiTokens.typeSize10,
-                selected: false,
-                onPressed: enabled
-                    ? () => dispatch(ReaderBookmarkDeleted(bookmark.id))
-                    : null,
+                  const SizedBox(
+                    width: ShosaiTokens.layoutReaderPanelPlaceRowSpacing,
+                  ),
+                  _ReaderControlButton(
+                    key: ValueKey('reader-saved-place-delete-${bookmark.id}'),
+                    label: '✕',
+                    semanticsLabel: l10n.readerDeleteBookmark(title),
+                    // The pinned reference draws the delete control as a 10 px `✕`
+                    // text glyph in a [4, 6] button; that glyph is not legible in
+                    // the interface font at 10 px, so the bundled icon font's `x`
+                    // paints the mark at 12 px in the same [4, 6] button. Recorded
+                    // as a toolkit/glyph-availability difference (plan decision 1:
+                    // accessibility must not regress to match Iced).
+                    icon: LucideIcons.x,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: ShosaiTokens.layoutReaderPanelPlaceSpacing,
+                      horizontal: ShosaiTokens.layoutReaderPanelPlaceRowSpacing,
+                    ),
+                    fontSize: ShosaiTokens.typeSize12,
+                    selected: false,
+                    onPressed: enabled
+                        ? () => dispatch(ReaderBookmarkDeleted(bookmark.id))
+                        : null,
+                  ),
+                ],
               ),
             ],
           ),
@@ -1334,6 +1385,12 @@ class _ReaderTypographyPanel extends StatelessWidget {
       if (typography.reflowable) ..._epubControls(l10n, typography, enabled),
       if (!typography.reflowable) ..._rasterControls(l10n, typography, enabled),
     ];
+    // The pinned reference sizes this row to its content: the row's [7, 12]
+    // padding plus the control group (4 px padding around 13 px controls), which
+    // renders 53 logical px tall in the 1C captures. The Iced layout *math*
+    // reserves 62 px when it sizes the page box (`app.rs:4390`), so that
+    // reservation is a paginated-document concern owned by 5A/5G, not a rendered
+    // row height; painting 62 here would be 9 px taller than the reference.
     return Padding(
       padding: const EdgeInsets.symmetric(
         vertical: ShosaiTokens.layoutReaderPanelSettingsPaddingVertical,
@@ -1566,6 +1623,9 @@ class _ReaderMorePanelState extends State<_ReaderMorePanel> {
             key: const ValueKey('reader-page-input'),
             controller: _pageInput,
             enabled: !busy,
+            // The pinned reference input is its [7, 8] padding plus a 13 px
+            // line; the Shad default would make the row taller.
+            padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
             placeholder: Text(l10n.readerPageInputLabel),
             textInputAction: TextInputAction.go,
             onChanged: (value) => dispatch(ReaderPageInputChanged(value)),
@@ -1643,23 +1703,33 @@ class _ReaderMorePanelState extends State<_ReaderMorePanel> {
     // control (contract §5.4).
     final stacks =
         widget.compact || MediaQuery.textScalerOf(context).scale(1) > 1;
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: ShosaiTokens.layoutReaderPanelMorePaddingVertical,
-        horizontal: ShosaiTokens.layoutReaderPanelMorePaddingHorizontal,
+    // The pinned reference fixes this row's height (58 wide / 84 compact) and
+    // centers its content; a minimum keeps a scaled interface from clipping a
+    // control.
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        minHeight: widget.compact
+            ? ShosaiTokens.layoutReaderMoreHeightCompact
+            : ShosaiTokens.layoutReaderMoreHeightWide,
       ),
-      child: stacks
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                location,
-                const SizedBox(
-                  height: ShosaiTokens.layoutReaderPanelMoreStackSpacing,
-                ),
-                actions,
-              ],
-            )
-          : Row(children: [location, const Spacer(), actions]),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: ShosaiTokens.layoutReaderPanelMorePaddingVertical,
+          horizontal: ShosaiTokens.layoutReaderPanelMorePaddingHorizontal,
+        ),
+        child: stacks
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  location,
+                  const SizedBox(
+                    height: ShosaiTokens.layoutReaderPanelMoreStackSpacing,
+                  ),
+                  actions,
+                ],
+              )
+            : Row(children: [location, const Spacer(), actions]),
+      ),
     );
   }
 }
@@ -1711,6 +1781,9 @@ class _ReaderSearchBarState extends State<_ReaderSearchBar> {
       key: const ValueKey('reader-search-input'),
       controller: _query,
       autofocus: true,
+      // The pinned reference input is its [8, 10] padding plus a line box; the
+      // Shad default would make the compact bar taller than the reference.
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
       placeholder: Text(l10n.readerSearchPlaceholder),
       leading: const Icon(LucideIcons.search, size: 16),
       trailing: search.busy
@@ -1784,29 +1857,39 @@ class _ReaderSearchBarState extends State<_ReaderSearchBar> {
           )
         : Row(
             children: [
-              Flexible(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: ShosaiTokens.layoutReaderPanelSearchInputMaxWidth,
-                  ),
-                  child: input,
-                ),
-              ),
+              // The pinned reference's wide row gives the field and the filler an
+              // equal share of the free space (the field measures 557 px on the
+              // committed capture), which keeps the actions at the bar's right
+              // padding edge. `layout.readerPanel.searchInputMaxWidth` (420) is
+              // not what the pinned build painted; the discrepancy is flagged to
+              // the token owner.
+              Expanded(child: input),
               const Spacer(),
               actions,
             ],
           );
     return DecoratedBox(
+      key: const ValueKey('reader-search-bar'),
       decoration: BoxDecoration(
         color: scheme.card,
         border: Border.all(color: scheme.border),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          vertical: ShosaiTokens.layoutReaderPanelSearchPaddingVertical,
-          horizontal: ShosaiTokens.layoutReaderPanelSearchPaddingHorizontal,
+      // The pinned reference fixes this bar's height (52 wide / 88 compact) and
+      // centers its content; a minimum keeps a scaled interface from clipping a
+      // control.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: widget.compact
+              ? ShosaiTokens.layoutReaderSearchHeightCompact
+              : ShosaiTokens.layoutReaderSearchHeightWide,
         ),
-        child: bar,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            vertical: ShosaiTokens.layoutReaderPanelSearchPaddingVertical,
+            horizontal: ShosaiTokens.layoutReaderPanelSearchPaddingHorizontal,
+          ),
+          child: bar,
+        ),
       ),
     );
   }
@@ -1824,13 +1907,32 @@ class _ReaderControlButton extends StatelessWidget {
     required this.selected,
     required this.onPressed,
     this.semanticsLabel,
+    this.icon,
+    this.padding = const EdgeInsets.symmetric(
+      vertical: ShosaiTokens.layoutReaderChromeControlPaddingVertical,
+      horizontal: ShosaiTokens.layoutReaderChromeControlPaddingHorizontal,
+    ),
     this.fontSize = ShosaiTokens.typeSize13,
   });
 
+  /// The control's text label, or its accessible name when [icon] is set.
   final String label;
   final bool selected;
   final VoidCallback? onPressed;
   final String? semanticsLabel;
+
+  /// An icon glyph from the bundled icon font.
+  ///
+  /// The pinned reference draws some controls as text glyphs (`×`, `‹`, `›`);
+  /// a glyph that the interface font does not carry is not legible, so an
+  /// icon-font glyph is used instead and the difference is recorded as a
+  /// toolkit/glyph-availability difference (plan §"Allowed differences").
+  final IconData? icon;
+
+  /// The control's padding. The pinned reference gives the chrome controls
+  /// [7, 10] and the saved-place row's compact controls [4, 6]
+  /// (`reader_tab_close`).
+  final EdgeInsetsGeometry padding;
   final double fontSize;
 
   @override
@@ -1840,14 +1942,18 @@ class _ReaderControlButton extends StatelessWidget {
     final foreground = enabled
         ? (selected ? scheme.accentForeground : scheme.foreground)
         : scheme.mutedForeground;
-    const padding = EdgeInsets.symmetric(
-      vertical: ShosaiTokens.layoutReaderChromeControlPaddingVertical,
-      horizontal: ShosaiTokens.layoutReaderChromeControlPaddingHorizontal,
-    );
+    final padding = this.padding;
     final style = shosaiInterfaceStyleForText(
       TextStyle(fontSize: fontSize, color: foreground),
       label,
     );
+    final glyph = icon;
+    // The pinned reference control is its padding plus the label's line box;
+    // the Shad button's own minimum would make every panel control taller than
+    // the reference. The row keeps the full panel width as its target and grows
+    // with the text scale.
+    final labelBox = (MediaQuery.textScalerOf(context).scale(fontSize) * 1.25)
+        .ceilToDouble();
     return _readerSemanticButton(
       enabled: enabled,
       selected: selected,
@@ -1856,7 +1962,7 @@ class _ReaderControlButton extends StatelessWidget {
       child: ShadButton.raw(
         variant: ShadButtonVariant.ghost,
         enabled: enabled,
-        height: shosaiShadButtonHeight(context, padding: padding),
+        height: padding.vertical + labelBox,
         padding: padding,
         backgroundColor: selected ? scheme.accent : null,
         hoverBackgroundColor: scheme.muted,
@@ -1864,14 +1970,16 @@ class _ReaderControlButton extends StatelessWidget {
         foregroundColor: foreground,
         hoverForegroundColor: foreground,
         onPressed: onPressed,
-        child: Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: style,
-          ),
-        ),
+        child: glyph == null
+            ? Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
+              )
+            : Icon(glyph, size: fontSize, color: foreground),
       ),
     );
   }
@@ -1906,6 +2014,13 @@ class _ReaderLinkButton extends StatelessWidget {
       TextStyle(fontSize: fontSize, color: foreground),
       label,
     );
+    // The pinned reference link is its padding plus the label's line box (20-24
+    // logical px in the 1C saved-place captures). The Shad button's own minimum
+    // height would make the entry taller than the reference, so the link is
+    // sized to its content; it keeps the panel width as its target and grows
+    // with the text scale, so a scaled interface never clips the label.
+    final labelBox = (MediaQuery.textScalerOf(context).scale(fontSize) * 1.25)
+        .ceilToDouble();
     return _readerSemanticButton(
       enabled: enabled,
       label: label,
@@ -1913,7 +2028,7 @@ class _ReaderLinkButton extends StatelessWidget {
       child: ShadButton.raw(
         variant: ShadButtonVariant.ghost,
         enabled: enabled,
-        height: shosaiShadButtonHeight(context, padding: padding),
+        height: padding.vertical + labelBox,
         padding: padding,
         hoverBackgroundColor: scheme.accent,
         pressedBackgroundColor: scheme.accent,
@@ -2085,10 +2200,19 @@ class _ReaderAlertAction extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
+    this.contentSized = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// Size the action to its padding plus the label's line box.
+  ///
+  /// The pinned reference's panel actions are content-sized (the export action
+  /// renders 35 logical px tall); the component layer's own minimum would make
+  /// them taller than the reference. The chrome's alert keeps the shared
+  /// component height that 4B verified.
+  final bool contentSized;
 
   @override
   Widget build(BuildContext context) {
@@ -2096,8 +2220,16 @@ class _ReaderAlertAction extends StatelessWidget {
       vertical: ShosaiTokens.layoutButtonSecondaryPaddingVertical,
       horizontal: ShosaiTokens.layoutButtonSecondaryPaddingHorizontal,
     );
+    final labelBox =
+        (MediaQuery.textScalerOf(
+                  context,
+                ).scale(ShosaiTokens.layoutButtonLabelSize) *
+                1.25)
+            .ceilToDouble();
     return ShadButton.outline(
-      height: shosaiShadButtonHeight(context, padding: padding),
+      height: contentSized
+          ? padding.vertical + labelBox
+          : shosaiShadButtonHeight(context, padding: padding),
       padding: padding,
       onPressed: onPressed,
       child: Flexible(

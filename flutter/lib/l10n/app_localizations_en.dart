@@ -278,6 +278,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerAddNote => 'Add note';
 
   @override
+  String get readerBookmarkNoteTitle => 'Bookmark note';
+
+  @override
+  String get readerHighlightNoteTitle => 'Highlight note';
+
+  @override
+  String get readerNoteSave => 'Save';
+
+  @override
+  String get readerNoteCancel => 'Cancel';
+
+  @override
   String get readerExportMarkdown => 'Export as Markdown';
 
   @override
@@ -364,7 +376,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerSearchAction => 'Search';
 
   @override
-  String get readerSearchPlaceholder => 'Search in document…';
+  String get readerSearchPlaceholder => 'Search in document...';
 
   @override
   String get readerNoResults => 'No results';

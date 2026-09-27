@@ -560,6 +560,30 @@ abstract class AppLocalizations {
   /// **'Add note'**
   String get readerAddNote;
 
+  /// The controller-injected note dialog title for a saved place.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmark note'**
+  String get readerBookmarkNoteTitle;
+
+  /// The controller-injected note dialog title for a highlight (retained selection behavior).
+  ///
+  /// In en, this message translates to:
+  /// **'Highlight note'**
+  String get readerHighlightNoteTitle;
+
+  /// The note dialog save action.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get readerNoteSave;
+
+  /// The note dialog cancel action.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get readerNoteCancel;
+
   /// Iced reference key: export-markdown. 4C's delivery is the clipboard plus a brief notice (contract 9.2 item 1).
   ///
   /// In en, this message translates to:
@@ -719,7 +743,7 @@ abstract class AppLocalizations {
   /// Iced reference key: search-document-placeholder.
   ///
   /// In en, this message translates to:
-  /// **'Search in document…'**
+  /// **'Search in document...'**
   String get readerSearchPlaceholder;
 
   /// Iced reference key: no-results.

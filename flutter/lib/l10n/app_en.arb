@@ -396,6 +396,22 @@
   "@readerAddNote": {
     "description": "Iced reference key: add-note."
   },
+  "readerBookmarkNoteTitle": "Bookmark note",
+  "readerHighlightNoteTitle": "Highlight note",
+  "readerNoteSave": "Save",
+  "readerNoteCancel": "Cancel",
+  "@readerNoteCancel": {
+    "description": "The note dialog cancel action."
+  },
+  "@readerNoteSave": {
+    "description": "The note dialog save action."
+  },
+  "@readerHighlightNoteTitle": {
+    "description": "The controller-injected note dialog title for a highlight (retained selection behavior)."
+  },
+  "@readerBookmarkNoteTitle": {
+    "description": "The controller-injected note dialog title for a saved place."
+  },
   "readerExportMarkdown": "Export as Markdown",
   "@readerExportMarkdown": {
     "description": "Iced reference key: export-markdown. 4C's delivery is the clipboard plus a brief notice (contract 9.2 item 1)."
@@ -520,7 +536,7 @@
   "@readerSearchAction": {
     "description": "Iced reference key: search."
   },
-  "readerSearchPlaceholder": "Search in document…",
+  "readerSearchPlaceholder": "Search in document...",
   "@readerSearchPlaceholder": {
     "description": "Iced reference key: search-document-placeholder."
   },

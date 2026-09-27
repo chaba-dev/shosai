@@ -95,6 +95,26 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
+/// Installs the application localization delegates for [child] when the
+/// embedding app has not (a bare `MaterialApp` in a widget test, for example),
+/// so the reader and its root-navigator dialogs are never rendered unlocalized.
+/// The production shell already provides them, so this is a no-op there.
+Widget _withReaderLocalizations(BuildContext context, Widget child) {
+  if (Localizations.of<AppLocalizations>(context, AppLocalizations) != null) {
+    return child;
+  }
+  return Localizations(
+    locale: Localizations.maybeLocaleOf(context) ?? const Locale('en'),
+    delegates: const [
+      AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+    ],
+    child: child,
+  );
+}
+
 class _ReaderScreenState extends State<ReaderScreen>
     with WidgetsBindingObserver, RestorationMixin {
   final RestorableTextEditingController _path =
@@ -274,14 +294,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Future<String?> _editNote(String? initialValue) =>
-      _showNoteEditor(initialValue, title: 'Highlight note');
+      _showNoteEditor(initialValue, bookmark: false);
 
   Future<String?> _editBookmarkNote(String? initialValue) =>
-      _showNoteEditor(initialValue, title: 'Bookmark note');
+      _showNoteEditor(initialValue, bookmark: true);
 
   Future<String?> _showNoteEditor(
     String? initialValue, {
-    required String title,
+    required bool bookmark,
   }) async {
     final navigator = Navigator.of(context, rootNavigator: true);
     final readerTheme = _readerTheme(
@@ -289,11 +309,17 @@ class _ReaderScreenState extends State<ReaderScreen>
       _controller.model.typography.theme,
     );
     final route = ShadDialogRoute<String>(
-      pageBuilder: (context) => Theme(
-        data: readerTheme,
-        child: ShadTheme(
-          data: shosaiReaderShadTheme(_controller.model.typography.theme),
-          child: _NoteDialog(initialValue: initialValue, title: title),
+      // The dialog is pushed on the root navigator, outside the reader's own
+      // localization subtree, so it installs the application delegates for its
+      // own subtree when the embedding app has not provided them.
+      pageBuilder: (context) => _withReaderLocalizations(
+        context,
+        Theme(
+          data: readerTheme,
+          child: ShadTheme(
+            data: shosaiReaderShadTheme(_controller.model.typography.theme),
+            child: _NoteDialog(initialValue: initialValue, bookmark: bookmark),
+          ),
         ),
       ),
       barrierDismissible: true,
@@ -611,24 +637,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         ),
       ),
     );
-    // The reader chrome is localized; when the embedding app has not installed
-    // the application delegates (a bare `MaterialApp` in a widget test, for
-    // example), the reader installs them for its own subtree so its chrome is
-    // never rendered unlocalized. The production shell already provides them,
-    // so this is a no-op there.
-    if (Localizations.of<AppLocalizations>(context, AppLocalizations) != null) {
-      return reader;
-    }
-    return Localizations(
-      locale: Localizations.maybeLocaleOf(context) ?? const Locale('en'),
-      delegates: const [
-        AppLocalizations.delegate,
-        GlobalMaterialLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-      ],
-      child: reader,
-    );
+    return _withReaderLocalizations(context, reader);
   }
 
   /// Reader-chrome shortcuts: `Ctrl+W`, `Ctrl+Tab` and `Ctrl+1..9`.

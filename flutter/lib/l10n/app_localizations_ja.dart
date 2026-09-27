@@ -246,10 +246,10 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get readerNoBookmarks => 'ブックマークはまだありません';
+  String get readerNoBookmarks => 'ブックマークはありません';
 
   @override
-  String get readerBookmarkEmptyHint => 'ページを保存すると、ここに表示されます。';
+  String get readerBookmarkEmptyHint => 'ページを保存すると、あとですぐに開けます。';
 
   @override
   String readerPageShort(int page) {
@@ -258,7 +258,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String readerPageAbbreviated(int page) {
-    return 'p.$page';
+    return '$pageページ';
   }
 
   @override
@@ -267,10 +267,22 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get readerEditNote => 'ノートを編集';
+  String get readerEditNote => 'メモを編集';
 
   @override
-  String get readerAddNote => 'ノートを追加';
+  String get readerAddNote => 'メモを追加';
+
+  @override
+  String get readerBookmarkNoteTitle => 'ブックマークのメモ';
+
+  @override
+  String get readerHighlightNoteTitle => 'ハイライトのメモ';
+
+  @override
+  String get readerNoteSave => '保存';
+
+  @override
+  String get readerNoteCancel => 'キャンセル';
 
   @override
   String get readerExportMarkdown => 'Markdownで書き出す';
@@ -288,7 +300,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerRetry => '再試行';
 
   @override
-  String get readerReading => '読書';
+  String get readerReading => '表示';
 
   @override
   String get readerDecreaseFontSize => '文字を小さく';
@@ -359,10 +371,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerSearchAction => '検索';
 
   @override
-  String get readerSearchPlaceholder => '文書内を検索…';
+  String get readerSearchPlaceholder => '文書内を検索...';
 
   @override
-  String get readerNoResults => '該当なし';
+  String get readerNoResults => '結果なし';
 
   @override
   String readerSearchCount(int current, int total) {
