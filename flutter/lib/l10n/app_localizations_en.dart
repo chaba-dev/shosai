@@ -396,6 +396,50 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerCloseSearch => 'Close search';
 
   @override
+  String get readerSelectionActions => 'Selection actions';
+
+  @override
+  String get readerCopy => 'Copy';
+
+  @override
+  String get readerSelectionCancel => 'Cancel';
+
+  @override
+  String get readerHighlightYellow => 'Yellow';
+
+  @override
+  String get readerHighlightGreen => 'Green';
+
+  @override
+  String get readerHighlightBlue => 'Blue';
+
+  @override
+  String get readerHighlightPink => 'Pink';
+
+  @override
+  String get readerHighlightPurple => 'Purple';
+
+  @override
+  String readerHighlightLabel(int number) {
+    return 'Highlight $number';
+  }
+
+  @override
+  String get readerAnnotationRecovered => 'recovered';
+
+  @override
+  String get readerAnnotationAmbiguous => 'ambiguous';
+
+  @override
+  String get readerAnnotationUnavailable => 'unavailable';
+
+  @override
+  String get readerChangeColor => 'Change color';
+
+  @override
+  String get readerDeleteHighlight => 'Delete highlight';
+
+  @override
   String get noticeReaderExportSucceeded => 'Bookmarks copied as Markdown';
 
   @override

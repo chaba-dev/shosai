@@ -391,6 +391,50 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerCloseSearch => '検索を閉じる';
 
   @override
+  String get readerSelectionActions => '選択操作';
+
+  @override
+  String get readerCopy => 'コピー';
+
+  @override
+  String get readerSelectionCancel => 'キャンセル';
+
+  @override
+  String get readerHighlightYellow => '黄';
+
+  @override
+  String get readerHighlightGreen => '緑';
+
+  @override
+  String get readerHighlightBlue => '青';
+
+  @override
+  String get readerHighlightPink => 'ピンク';
+
+  @override
+  String get readerHighlightPurple => '紫';
+
+  @override
+  String readerHighlightLabel(int number) {
+    return 'ハイライト$number';
+  }
+
+  @override
+  String get readerAnnotationRecovered => '復元';
+
+  @override
+  String get readerAnnotationAmbiguous => '候補が複数';
+
+  @override
+  String get readerAnnotationUnavailable => '利用不可';
+
+  @override
+  String get readerChangeColor => '色を変更';
+
+  @override
+  String get readerDeleteHighlight => 'ハイライトを削除';
+
+  @override
   String get noticeReaderExportSucceeded => 'ブックマークをMarkdownとしてコピーしました';
 
   @override

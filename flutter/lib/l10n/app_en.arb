@@ -568,6 +568,67 @@
   "@readerCloseSearch": {
     "description": "NEW: no Iced string. The search close control's accessible label (RD-11)."
   },
+  "readerSelectionActions": "Selection actions",
+  "@readerSelectionActions": {
+    "description": "NEW: no Iced string (RFD 6 authority). The selection action surface's container label (RD-12)."
+  },
+  "readerCopy": "Copy",
+  "@readerCopy": {
+    "description": "NEW: no Iced string (RFD 6 authority). The selection copy action, enabled only for a copy-eligible surface (RD-12)."
+  },
+  "readerSelectionCancel": "Cancel",
+  "@readerSelectionCancel": {
+    "description": "NEW: no Iced string (RFD 6 authority). The selection cancel action (RD-12)."
+  },
+  "readerHighlightYellow": "Yellow",
+  "@readerHighlightYellow": {
+    "description": "NEW: no Iced string (RFD 6 authority). The yellow highlight color action (RD-12)."
+  },
+  "readerHighlightGreen": "Green",
+  "@readerHighlightGreen": {
+    "description": "NEW: no Iced string (RFD 6 authority). The green highlight color action (RD-12)."
+  },
+  "readerHighlightBlue": "Blue",
+  "@readerHighlightBlue": {
+    "description": "NEW: no Iced string (RFD 6 authority). The blue highlight color action (RD-12)."
+  },
+  "readerHighlightPink": "Pink",
+  "@readerHighlightPink": {
+    "description": "NEW: no Iced string (RFD 6 authority). The pink highlight color action (RD-12)."
+  },
+  "readerHighlightPurple": "Purple",
+  "@readerHighlightPurple": {
+    "description": "NEW: no Iced string (RFD 6 authority). The purple highlight color action (RD-12)."
+  },
+  "readerHighlightLabel": "Highlight {number}",
+  "@readerHighlightLabel": {
+    "description": "NEW: no Iced string (RFD 6 authority). One saved highlight's navigation label in the annotation strip (RD-12).",
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "readerAnnotationRecovered": "recovered",
+  "@readerAnnotationRecovered": {
+    "description": "NEW: no Iced string (RFD 6 authority). The resolution suffix of a highlight recovered by quote context (RD-12)."
+  },
+  "readerAnnotationAmbiguous": "ambiguous",
+  "@readerAnnotationAmbiguous": {
+    "description": "NEW: no Iced string (RFD 6 authority). The resolution suffix of a highlight with several candidate locations (RD-12)."
+  },
+  "readerAnnotationUnavailable": "unavailable",
+  "@readerAnnotationUnavailable": {
+    "description": "NEW: no Iced string (RFD 6 authority). The resolution suffix of an orphaned highlight (RD-12)."
+  },
+  "readerChangeColor": "Change color",
+  "@readerChangeColor": {
+    "description": "NEW: no Iced string (RFD 6 authority). The recolor annotation action and its menu entry (RD-12, salvaged from #114)."
+  },
+  "readerDeleteHighlight": "Delete highlight",
+  "@readerDeleteHighlight": {
+    "description": "NEW: no Iced string (RFD 6 authority). The delete annotation action and its menu entry (RD-12, salvaged from #114)."
+  },
   "noticeReaderExportSucceeded": "Bookmarks copied as Markdown",
   "@noticeReaderExportSucceeded": {
     "description": "Package 4C notice copy: brief success after copying the Markdown bookmark export."

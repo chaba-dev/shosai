@@ -19,10 +19,8 @@ import 'package:shosai_flutter/theme_tokens.dart';
 // | --- | --- |
 // | `shosaiShadTheme(Brightness.light)` | `app.*` (the pinned Iced application palette) |
 // | `shosaiShadTheme(Brightness.dark)` | `app.dark.*` (retained Flutter: Iced defines no dark application palette) |
-// | `shosaiReaderShadTheme('light')` | `app.*` (the Iced reader chrome) |
-// | `shosaiReaderShadTheme('dark')` | `app.dark.*` (retained Flutter chrome) |
-// | `shosaiReaderShadTheme('sepia')` | `reader.sepia.*` surfaces with the `app.*` structural roles and accent |
-// | reader page colors (`pageColors`) | `reader.<theme>.*` (the pinned Iced document palettes) |
+// | `shosaiReaderShadTheme(<any reader theme>)` | `app.*` (the pinned Iced reader chrome; owner decision 2026-09-28: the chrome does not follow the reader theme) |
+// | reader page colors (`pageColors`) | `reader.<theme>.*` (the pinned Iced document palettes; the reader palette applies to the document area only) |
 // | radii | `radius.small` / `radius.medium` |
 // | type | `type.family.*` and `type.size.*` |
 //
@@ -176,42 +174,37 @@ const _appDarkColorScheme = ShadColorScheme(
 
 /// The reader chrome palette for [readerTheme].
 ///
-/// The light reader uses the Iced application palette, which is what the
-/// pinned reader chrome is built from. The dark and sepia readers are a
-/// retained Flutter capability that Iced does not define: dark keeps the
-/// retained dark palette, and sepia takes its surfaces and text from the pinned
-/// Iced sepia document palette while the structural roles and the accent stay
-/// on the application palette. The pre-2C brown accent is rejected by plan
-/// decision 2 and is not part of this mapping.
+/// Owner decision (2026-09-28): the shared reader chrome keeps the pinned Iced
+/// application palette in **every** reader theme, matching the pinned
+/// references (which recolor only the page); the reader palette applies to the
+/// document area alone, through [shosaiReaderDocumentColors]. The [readerTheme]
+/// argument is retained so call sites stay explicit about the reader theme in
+/// force, and so a future owner decision to theme the chrome again has one
+/// boundary to change.
 ShadColorScheme shosaiReaderColorScheme(String? readerTheme) =>
-    switch (readerTheme) {
-      'dark' => _appDarkColorScheme,
-      'sepia' => _readerSepiaColorScheme,
-      _ => _appLightColorScheme,
-    };
+    _appLightColorScheme;
 
-const _readerSepiaColorScheme = ShadColorScheme(
-  background: ShosaiTokens.readerSepiaBackground,
-  foreground: ShosaiTokens.readerSepiaText,
-  card: ShosaiTokens.readerSepiaTableHeaderBackground,
-  cardForeground: ShosaiTokens.readerSepiaText,
-  popover: ShosaiTokens.readerSepiaTableHeaderBackground,
-  popoverForeground: ShosaiTokens.readerSepiaText,
-  primary: ShosaiTokens.appAccent,
-  primaryForeground: ShosaiTokens.appTextOnAccent,
-  secondary: ShosaiTokens.readerSepiaTableHeaderBackground,
-  secondaryForeground: ShosaiTokens.readerSepiaText,
-  muted: ShosaiTokens.readerSepiaTableHeaderBackground,
-  mutedForeground: ShosaiTokens.readerSepiaText,
-  accent: ShosaiTokens.readerSepiaTableHeaderBackground,
-  accentForeground: ShosaiTokens.readerSepiaText,
-  destructive: ShosaiTokens.appDanger,
-  destructiveForeground: ShosaiTokens.appTextOnAccent,
-  border: ShosaiTokens.appBorder,
-  input: ShosaiTokens.appBorder,
-  ring: ShosaiTokens.appAccent,
-  selection: ShosaiTokens.readerSepiaTableHeaderBackground,
-);
+/// The reader **document** palette for [readerTheme].
+///
+/// These are the pinned Iced document palettes (`reader.light.*`,
+/// `reader.dark.*`, `reader.sepia.*`); the shared chrome does not use them
+/// (see [shosaiReaderColorScheme]).
+({Color background, Color foreground}) shosaiReaderDocumentColors(
+  String? readerTheme,
+) => switch (readerTheme) {
+  'dark' => (
+    background: ShosaiTokens.readerDarkBackground,
+    foreground: ShosaiTokens.readerDarkText,
+  ),
+  'sepia' => (
+    background: ShosaiTokens.readerSepiaBackground,
+    foreground: ShosaiTokens.readerSepiaText,
+  ),
+  _ => (
+    background: ShosaiTokens.readerLightBackground,
+    foreground: ShosaiTokens.readerLightText,
+  ),
+};
 
 /// The application Shad theme for [brightness].
 ShadThemeData shosaiShadTheme(Brightness brightness) => ShadThemeData(
@@ -222,10 +215,13 @@ ShadThemeData shosaiShadTheme(Brightness brightness) => ShadThemeData(
 );
 
 /// The reader Shad theme for [readerTheme] (`light`, `dark`, `sepia` or null).
+///
+/// The chrome is light in every reader theme (owner decision 2026-09-28): see
+/// [shosaiReaderColorScheme]. The reader palette is the document's
+/// ([shosaiReaderDocumentColors]).
 ShadThemeData shosaiReaderShadTheme(String? readerTheme) {
-  final brightness = readerTheme == 'dark' ? Brightness.dark : Brightness.light;
   return ShadThemeData(
-    brightness: brightness,
+    brightness: Brightness.light,
     colorScheme: shosaiReaderColorScheme(readerTheme),
     radius: BorderRadius.circular(ShosaiTokens.radiusSmall),
     textTheme: _shosaiShadTextTheme(),
@@ -326,17 +322,25 @@ ThemeData _materialTheme(ThemeData base, ColorScheme scheme) {
 
 /// The reader Material theme for [readerTheme].
 ///
-/// The page and surface colors are the pinned Iced reader palettes (`reader.*`)
-/// for the active theme, which is what [pageColors] reads. The interactive
-/// color is the application accent for the light reader and the palette's own
-/// link color for the dark and sepia readers: those palettes define an
-/// interactive color for their surface, so document interaction keeps the
-/// palette's semantics rather than the application accent. The application
-/// accent still paints the reader chrome (see [shosaiReaderColorScheme]).
+/// Owner decision (2026-09-28): the reader chrome — the scaffold background,
+/// the fixed chrome rows, the panels and the reader dialogs — keeps the
+/// application palette in every reader theme, matching the pinned references.
+/// The reader palette is the *document* palette and is read directly by the
+/// page painters ([pageColors] → [shosaiReaderDocumentColors]), not through
+/// this theme.
 ThemeData shosaiReaderMaterialTheme(BuildContext context, String? readerTheme) {
   final base = Theme.of(context);
   return _materialTheme(base, shosaiReaderMaterialColorScheme(readerTheme));
 }
+
+/// The reader **chrome** Material color scheme for [readerTheme].
+///
+/// Owner decision (2026-09-28): the application (light) palette in every reader
+/// theme, so the scaffold background, tooltips, icons, focus rings and the
+/// Material chrome widgets match the pinned Iced chrome. The document palette
+/// is separate ([shosaiReaderDocumentColors]).
+ColorScheme shosaiReaderMaterialColorScheme(String? readerTheme) =>
+    shosaiMaterialColorScheme(Brightness.light);
 
 /// The application Material color scheme for [brightness].
 ColorScheme shosaiMaterialColorScheme(Brightness brightness) =>
@@ -379,51 +383,6 @@ ColorScheme shosaiMaterialColorScheme(Brightness brightness) =>
         shadow: ShosaiTokens.appShadowBase,
         scrim: ShosaiTokens.appBackdrop,
       );
-
-/// The reader Material color scheme for [readerTheme].
-ColorScheme shosaiReaderMaterialColorScheme(String? readerTheme) {
-  final (surface, onSurface, primary, onPrimary) = switch (readerTheme) {
-    'dark' => (
-      ShosaiTokens.readerDarkBackground,
-      ShosaiTokens.readerDarkText,
-      ShosaiTokens.readerDarkLink,
-      ShosaiTokens.readerDarkBackground,
-    ),
-    'sepia' => (
-      ShosaiTokens.readerSepiaBackground,
-      ShosaiTokens.readerSepiaText,
-      ShosaiTokens.readerSepiaLink,
-      ShosaiTokens.readerSepiaBackground,
-    ),
-    _ => (
-      ShosaiTokens.readerLightBackground,
-      ShosaiTokens.readerLightText,
-      ShosaiTokens.appAccent,
-      ShosaiTokens.appTextOnAccent,
-    ),
-  };
-  final chrome = shosaiReaderColorScheme(readerTheme);
-  return ColorScheme(
-    brightness: readerTheme == 'dark' ? Brightness.dark : Brightness.light,
-    primary: primary,
-    onPrimary: onPrimary,
-    primaryContainer: chrome.selection,
-    onPrimaryContainer: onPrimary,
-    secondary: chrome.secondary,
-    onSecondary: chrome.secondaryForeground,
-    error: ShosaiTokens.appDanger,
-    onError: ShosaiTokens.appTextOnAccent,
-    surface: surface,
-    onSurface: onSurface,
-    onSurfaceVariant: chrome.mutedForeground,
-    outline: chrome.border,
-    outlineVariant: chrome.input,
-    surfaceContainerHighest: chrome.muted,
-    surfaceContainerLow: chrome.card,
-    shadow: ShosaiTokens.appShadowBase,
-    scrim: ShosaiTokens.appBackdrop,
-  );
-}
 
 /// The Material text theme mapped to the Iced UI size scale.
 ///
