@@ -25,6 +25,10 @@ final class ReaderController implements Listenable {
     ReaderFrameScheduler? frameScheduler,
     SelectionCopier? selectionCopier,
     ReaderSelectionAnnouncer? selectionAnnouncer,
+    ReaderNavigationAdapter? navigationAdapter,
+    ReaderTabRevealAdapter? tabRevealAdapter,
+    ReaderProgressSource? progressSource,
+    List<ReaderTabPresentation> initialTabs = const [],
   }) : _bridge = bridge,
        _decoder = decoder,
        _noteEditor = noteEditor ?? ((_) async => null),
@@ -40,10 +44,15 @@ final class ReaderController implements Listenable {
        _frameScheduler = frameScheduler ?? ((callback) => callback()),
        _selectionCopier = selectionCopier ?? ((_) async {}),
        _selectionAnnouncer = selectionAnnouncer,
+       _navigationAdapter = navigationAdapter ?? (() async {}),
+       _tabRevealAdapter = tabRevealAdapter ?? ((_) async {}),
+       _progressSource = progressSource,
        _requestedLayout = ReaderLayout(
          scale: initialScale,
          lineSpacing: initialLineSpacing,
-       );
+       ) {
+    _model = ReaderModel(tabs: initialTabs);
+  }
 
   final FlutterBridge _bridge;
   final PageDecoder _decoder;
@@ -57,8 +66,13 @@ final class ReaderController implements Listenable {
   final ReaderFrameScheduler _frameScheduler;
   final SelectionCopier _selectionCopier;
   final ReaderSelectionAnnouncer? _selectionAnnouncer;
+  final ReaderNavigationAdapter _navigationAdapter;
+  final ReaderTabRevealAdapter _tabRevealAdapter;
+  final ReaderProgressSource? _progressSource;
 
   ReaderModel _model = ReaderModel();
+  int _revealRevision = 0;
+  double? _lastReportedWidth;
   BigInt? _activeCancellation;
   final Set<BigInt> _relayoutCancellations = {};
   final Set<BigInt> _annotationCancellations = {};
@@ -81,8 +95,19 @@ final class ReaderController implements Listenable {
   final Set<BigInt> _searchCancellations = {};
   BigInt? _bookmarkMutationCancellation;
   _ReaderNoteTarget? _activeNoteEditor;
-  int? _activeNoteEditorRevision;
   bool _associationPickerActive = false;
+
+  /// Controller-wide ownership token of the active note editor.
+  ///
+  /// The per-operation revisions are not comparable across editors (bookmark
+  /// editors count with `_bookmarkRevision`, selection/annotation editors with
+  /// `_noteRevision`), so completion ownership needs its own token.
+  int _noteEditorToken = 0;
+  int? _activeNoteEditorToken;
+
+  /// Revision that owns [ _associationPickerActive]; a stale completion may not
+  /// clear a newer picker's slot.
+  int? _associationPickerRevision;
   String? _recoverySelectionNotice;
   String? _recoveryAnnotationNotice;
   ReaderLayout _requestedLayout;
@@ -217,8 +242,20 @@ final class ReaderController implements Listenable {
           offset: message.offset,
           replaceReadingOffset: true,
         );
-      case ReaderToolsToggled():
-        _emit(_model.copyWith(toolsVisible: !_model.toolsVisible));
+      case ReaderPanelToggled():
+        _panelToggled(message.panel);
+      case ReaderSearchToggled():
+        _searchToggled();
+      case ReaderPanelFocusRequested():
+        if (_model.openPanel == message.panel) {
+          _focusAdapter(ReaderFocusTarget.header);
+        }
+      case ReaderTabActivated():
+        _tabActivated(message.tabId);
+      case ReaderTabCloseRequested():
+        _tabCloseRequested(message.tabId);
+      case ReaderBackRequested():
+        unawaited(_leaveReader());
       case _ReaderSearchCompleted():
         if (_isCurrent(message.generation) &&
             message.revision == _searchRevision) {
@@ -476,7 +513,7 @@ final class ReaderController implements Listenable {
             _model.copyWith(
               relayoutBusy: false,
               relayoutPending: false,
-              selectionError: 'Relayout failed: ${message.error}',
+              relayoutError: 'Layout failed: ${message.error}',
             ),
           );
         }
@@ -522,9 +559,12 @@ final class ReaderController implements Listenable {
         _recoverIfIdle();
         _disposeBridgeIfIdle();
       case _ReaderNoteEditorFinished():
-        if (message.revision == _activeNoteEditorRevision) {
+        if (message.token == _activeNoteEditorToken) {
           _activeNoteEditor = null;
-          _activeNoteEditorRevision = null;
+          _activeNoteEditorToken = null;
+          // Publish the owner-checked clear so the chrome is re-enabled as soon
+          // as the dialog is gone, even if the effect reported no result.
+          _emit(_model);
         }
       case _ReaderAnnotationUpdateCompleted():
         _recordNoteUpdateOutcome(
@@ -551,7 +591,7 @@ final class ReaderController implements Listenable {
         _model.copyWith(
           toolError:
               'Bookmark changes are still saving. Try opening again shortly.',
-          toolsVisible: true,
+          openPanel: ReaderPanel.more,
         ),
       );
       return;
@@ -583,7 +623,7 @@ final class ReaderController implements Listenable {
         _model.copyWith(
           openPath: path,
           openBookId: message.bookId,
-          error: _consumeRecoveryNotices(error.message),
+          error: _consumeRecoveryNotices(_describeError(error)),
           generation: generation,
           relayoutBusy: false,
           relayoutPending: false,
@@ -595,7 +635,7 @@ final class ReaderController implements Listenable {
         _model.copyWith(
           openPath: path,
           openBookId: message.bookId,
-          error: _consumeRecoveryNotices(error.toString()),
+          error: _consumeRecoveryNotices(_describeError(error)),
           generation: generation,
           relayoutBusy: false,
           relayoutPending: false,
@@ -635,7 +675,8 @@ final class ReaderController implements Listenable {
         bookmarkBusy: false,
         toolError: null,
         persistenceError: null,
-        toolsVisible: false,
+        openPanel: null,
+        searchOpen: false,
         relayoutBusy: false,
         relayoutPending: false,
         contentState: ReaderContentState.loading,
@@ -681,7 +722,8 @@ final class ReaderController implements Listenable {
           );
         } catch (error) {
           restorationFailed = true;
-          restorationError = 'Reading position could not be restored: $error';
+          restorationError =
+              'Reading position could not be restored: ${_describeError(error)}';
         }
       }
       final unit = (restored?.unit.toInt() ?? 0).clamp(
@@ -704,7 +746,7 @@ final class ReaderController implements Listenable {
             cancellationId: cancellation,
           );
         } catch (error) {
-          toolError = 'Bookmarks are unavailable: $error';
+          toolError = 'Bookmarks are unavailable: ${_describeError(error)}';
         }
       }
       dispatch(
@@ -787,7 +829,9 @@ final class ReaderController implements Listenable {
         } catch (error) {
           if (effectSurface case final surface?) _releaseSurface(surface);
           if (!_isCurrent(generation)) return;
-          dispatch(_ReaderSelectionSupportFailed(generation, error.toString()));
+          dispatch(
+            _ReaderSelectionSupportFailed(generation, _describeError(error)),
+          );
         }
         final revision = _annotationRevision;
         try {
@@ -809,7 +853,11 @@ final class ReaderController implements Listenable {
         } catch (error) {
           if (!_isCurrent(generation)) return;
           dispatch(
-            _ReaderAnnotationListFailed(generation, revision, error.toString()),
+            _ReaderAnnotationListFailed(
+              generation,
+              revision,
+              _describeError(error),
+            ),
           );
         }
       }
@@ -850,7 +898,7 @@ final class ReaderController implements Listenable {
         _ReaderOpenFailed(
           generation: generation,
           document: opened,
-          error: error.message,
+          error: _describeError(error),
         ),
       );
       opened = null;
@@ -859,7 +907,7 @@ final class ReaderController implements Listenable {
         _ReaderOpenFailed(
           generation: generation,
           document: opened,
-          error: error.toString(),
+          error: _describeError(error),
         ),
       );
       opened = null;
@@ -889,6 +937,7 @@ final class ReaderController implements Listenable {
     );
     _requestedLayout = requestedLayout;
     _readingStatePersistenceBlocked = message.restorationFailed;
+    final title = message.document.title;
     _emit(
       _model.copyWith(
         document: message.document,
@@ -901,6 +950,13 @@ final class ReaderController implements Listenable {
         focus: message.offset,
         toolError: message.toolError,
         persistenceError: message.restorationError,
+        // The active tab shows the live document title (RD-03).
+        tabs: title == null
+            ? _model.tabs
+            : [
+                for (final tab in _model.tabs)
+                  tab.selected ? tab.copyWith(title: title) : tab,
+              ],
       ),
     );
   }
@@ -962,6 +1018,12 @@ final class ReaderController implements Listenable {
   }
 
   void _viewportChanged(ReaderLayout observed) {
+    // The strip re-reveals the active tab after a resize as well as after its
+    // initial layout; both arrive as a changed reported width.
+    if (_lastReportedWidth != observed.width) {
+      _lastReportedWidth = observed.width;
+      _scheduleTabReveal();
+    }
     final layout = _model.document == null && !_model.busy
         ? observed
         : ReaderLayout(
@@ -1024,7 +1086,7 @@ final class ReaderController implements Listenable {
       _emit(
         _model.copyWith(
           relayoutPending: false,
-          selectionError: 'Relayout failed: ${error.toString()}',
+          relayoutError: 'Layout failed: ${_describeError(error)}',
         ),
       );
       return;
@@ -1043,12 +1105,17 @@ final class ReaderController implements Listenable {
     _relayoutCancellations.add(cancellation);
     _activeBridgeOperations += 1;
     final selectionActionError = _model.selectionActionError;
-    _selectionCancelled();
+    // A relayout invalidates the selection passively: it must not move focus
+    // into the document. An explicit user cancellation still returns focus to
+    // the surface (see [_selectionCancelled]); otherwise a resize would steal
+    // focus from an open panel or the header.
+    _selectionCancelled(requestSurfaceFocus: false);
     _emit(
       _model.copyWith(
         relayoutBusy: true,
         relayoutPending: false,
         selectionError: null,
+        relayoutError: null,
         selectionActionError: selectionActionError,
       ),
     );
@@ -1095,6 +1162,165 @@ final class ReaderController implements Listenable {
     );
   }
 
+  /// The active tab id, or null when the strip has no tab.
+  String? get _activeTabId {
+    for (final tab in _model.tabs) {
+      if (tab.selected) return tab.id;
+    }
+    return null;
+  }
+
+  /// Toggles one panel; at most one of the three is open (RD-13).
+  void _panelToggled(ReaderPanel panel) {
+    if (_closing) return;
+    final opening = _model.openPanel != panel;
+    _emit(_model.copyWith(openPanel: opening ? panel : null));
+    if (opening) {
+      // Opening changes the content area, so the layout reporter observes new
+      // constraints and Rust relayouts through the guarded path (§2.3 item 5).
+      _requestPanelFocus(panel);
+    } else {
+      _requestHeaderFocus();
+    }
+  }
+
+  /// Opens or closes the search bar and cancels an in-flight search on close.
+  void _searchToggled() {
+    if (_closing) return;
+    if (_model.searchOpen) {
+      _cancelSearch();
+      _emit(
+        _model.copyWith(
+          searchOpen: false,
+          searchResults: const [],
+          searchBusy: false,
+        ),
+      );
+      return;
+    }
+    _emit(_model.copyWith(searchOpen: true));
+  }
+
+  void _cancelSearch() {
+    _searchRevision += 1;
+    for (final active in _searchCancellations) {
+      _bridge.cancel(id: active);
+    }
+  }
+
+  void _tabActivated(String tabId) {
+    if (_closing) return;
+    if (!_model.tabs.any((tab) => tab.id == tabId)) return;
+    if (_activeTabId == tabId) return;
+    _emit(
+      _model.copyWith(
+        tabs: [
+          for (final tab in _model.tabs)
+            tab.copyWith(selected: tab.id == tabId),
+        ],
+      ),
+    );
+    _scheduleTabReveal();
+  }
+
+  /// Closes one tab with the documented 4B fixture policy.
+  ///
+  /// 5F owns the real lifecycle policy (duplicate-open, pending saves,
+  /// resource release); until then the next tab becomes active, else the
+  /// previous one, else the strip is empty and hidden.
+  void _tabCloseRequested(String tabId) {
+    if (_closing) return;
+    final tabs = _model.tabs;
+    final index = tabs.indexWhere((tab) => tab.id == tabId);
+    if (index < 0) return;
+    final closedSelected = tabs[index].selected;
+    final remaining = [...tabs]..removeAt(index);
+    var next = remaining;
+    if (remaining.isNotEmpty &&
+        (closedSelected || !remaining.any((tab) => tab.selected))) {
+      final nextIndex = closedSelected
+          ? (index < remaining.length ? index : remaining.length - 1)
+          : 0;
+      next = [
+        for (var position = 0; position < remaining.length; position += 1)
+          remaining[position].copyWith(selected: position == nextIndex),
+      ];
+    }
+    _emit(_model.copyWith(tabs: next));
+    if (_activeTabId != null) {
+      _focusAdapter(ReaderFocusTarget.tabStrip);
+      _scheduleTabReveal();
+    }
+  }
+
+  Future<void> _leaveReader() async {
+    if (_closing) return;
+    try {
+      await _navigationAdapter();
+    } catch (error, stackTrace) {
+      if (!_closing) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stackTrace,
+            library: 'shosai_flutter',
+          ),
+        );
+      }
+    }
+  }
+
+  void _requestPanelFocus(ReaderPanel panel) {
+    // The panel is built in the frame the open transition schedules, so the
+    // request is deferred one further frame before the adapter runs.
+    _frameScheduler(() {
+      if (_closing || _model.openPanel != panel) return;
+      _frameScheduler(() {
+        if (_closing || _model.openPanel != panel) return;
+        _focusAdapter(ReaderFocusTarget.panel);
+      });
+    });
+  }
+
+  void _requestHeaderFocus() {
+    _frameScheduler(() {
+      if (_closing) return;
+      _focusAdapter(ReaderFocusTarget.header);
+    });
+  }
+
+  /// Starts a reveal for the active tab; obsolete requests are ignored.
+  ///
+  /// The controller decides when a reveal happens (initial layout, active-tab
+  /// change, close and resize) and the injected adapter performs it.
+  void _scheduleTabReveal() {
+    if (_closing) return;
+    final active = _activeTabId;
+    if (active == null) return;
+    final revision = ++_revealRevision;
+    _frameScheduler(() {
+      if (_closing || revision != _revealRevision) return;
+      if (_activeTabId != active) return;
+      unawaited(_revealTab(active));
+    });
+  }
+
+  Future<void> _revealTab(String tabId) async {
+    try {
+      await _tabRevealAdapter(tabId);
+    } catch (error, stackTrace) {
+      if (!_closing) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stackTrace,
+            library: 'shosai_flutter',
+          ),
+        );
+      }
+    }
+  }
+
   void _searchRequested(String query) {
     final document = _model.document;
     if (document == null ||
@@ -1117,7 +1343,7 @@ final class ReaderController implements Listenable {
     try {
       cancellation = _bridge.createCancellation();
     } catch (error) {
-      _emit(_model.copyWith(toolError: error.toString()));
+      _emit(_model.copyWith(toolError: _describeError(error)));
       return;
     }
     _toolCancellations.add(cancellation);
@@ -1134,7 +1360,9 @@ final class ReaderController implements Listenable {
         );
         dispatch(_ReaderSearchCompleted(generation, revision, results));
       } catch (error) {
-        dispatch(_ReaderSearchFailed(generation, revision, error.toString()));
+        dispatch(
+          _ReaderSearchFailed(generation, revision, _describeError(error)),
+        );
       } finally {
         dispatch(_ReaderSearchFinished(cancellation));
       }
@@ -1183,9 +1411,12 @@ final class ReaderController implements Listenable {
     final unit = _model.unit;
     final offset = _model.readingOffset;
     if (bookId == null) return;
-    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
+    final token = ++_noteEditorToken;
     _activeNoteEditor = _ReaderNoteTarget.bookmark;
-    _activeNoteEditorRevision = revision;
+    _activeNoteEditorToken = token;
+    // The owned modal slot is published with the same emission that starts the
+    // dialog (contract §3.1 `modalEffect`).
+    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     unawaited(() async {
       try {
         final note = await _bookmarkNoteEditor(bookmark?.note);
@@ -1202,10 +1433,14 @@ final class ReaderController implements Listenable {
         );
       } catch (error) {
         dispatch(
-          _ReaderBookmarkNoteEditFailed(generation, revision, error.toString()),
+          _ReaderBookmarkNoteEditFailed(
+            generation,
+            revision,
+            _describeError(error),
+          ),
         );
       } finally {
-        dispatch(_ReaderNoteEditorFinished(revision));
+        dispatch(_ReaderNoteEditorFinished(token));
       }
     }());
   }
@@ -1262,7 +1497,9 @@ final class ReaderController implements Listenable {
     try {
       cancellation = _bridge.createCancellation();
     } catch (error) {
-      _emit(_model.copyWith(bookmarkBusy: false, toolError: error.toString()));
+      _emit(
+        _model.copyWith(bookmarkBusy: false, toolError: _describeError(error)),
+      );
       return;
     }
     _toolCancellations.add(cancellation);
@@ -1282,12 +1519,12 @@ final class ReaderController implements Listenable {
         );
         dispatch(_ReaderBookmarksCompleted(generation, revision, items));
       } catch (error) {
-        if (!mutationCommitted) writeError = error.toString();
+        if (!mutationCommitted) writeError = _describeError(error);
         dispatch(
           _ReaderBookmarksFailed(
             generation,
             revision,
-            error.toString(),
+            _describeError(error),
             persistence: !mutationCommitted,
           ),
         );
@@ -1334,10 +1571,12 @@ final class ReaderController implements Listenable {
           );
           ownedSurface = surface;
           ownedRaster = surface.raster?.handle;
-          if (!_isCurrentLayout(generation, revision)) return;
+          if (!_isCurrentLayout(generation, revision)) {
+            return;
+          }
         } catch (error) {
           if (document.format == FlutterBookFormat.epub) rethrow;
-          selectionError = error.toString();
+          selectionError = _describeError(error);
         }
       }
       if (document.format == FlutterBookFormat.epub) {
@@ -1365,7 +1604,9 @@ final class ReaderController implements Listenable {
           cancellationId: cancellation,
         );
         try {
-          if (!_isCurrentLayout(generation, revision)) return;
+          if (!_isCurrentLayout(generation, revision)) {
+            return;
+          }
           final pixels = _bridge.takeBuffer(handle: rendered.handle);
           if (document.format == FlutterBookFormat.cbz) {
             premultiplyRgba(pixels);
@@ -1379,7 +1620,9 @@ final class ReaderController implements Listenable {
           _bridge.releaseBuffer(handle: rendered.handle);
         }
       }
-      if (!_isCurrentLayout(generation, revision)) return;
+      if (!_isCurrentLayout(generation, revision)) {
+        return;
+      }
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       if (document.format != FlutterBookFormat.cbz) {
@@ -1390,10 +1633,12 @@ final class ReaderController implements Listenable {
             cancellationId: cancellation,
           );
         } catch (error) {
-          annotationError = error.toString();
+          annotationError = _describeError(error);
         }
       }
-      if (!_isCurrentLayout(generation, revision)) return;
+      if (!_isCurrentLayout(generation, revision)) {
+        return;
+      }
       dispatch(
         _ReaderRelayoutCompleted(
           generation: generation,
@@ -1419,7 +1664,7 @@ final class ReaderController implements Listenable {
           generation: generation,
           revision: revision,
           layout: layout,
-          error: error.toString(),
+          error: _describeError(error),
         ),
       );
     } finally {
@@ -1467,6 +1712,7 @@ final class ReaderController implements Listenable {
         selectionPhase: message.length == null
             ? _model.selectionPhase
             : ReaderSelectionPhase.selected,
+        relayoutError: null,
         annotationsReady: message.annotationError == null,
         annotationError:
             message.annotationError ??
@@ -1533,7 +1779,7 @@ final class ReaderController implements Listenable {
             );
             dispatch(_ReaderReadingStateSaveSucceeded(generation, revision));
           } catch (error) {
-            writeError = error.toString();
+            writeError = _describeError(error);
             dispatch(
               _ReaderReadingStateSaveFailed(generation, revision, writeError),
             );
@@ -1850,12 +2096,16 @@ final class ReaderController implements Listenable {
         _activeNoteEditor != null) {
       return;
     }
-    _emit(_model.copyWith(selectionActionError: null));
     final generation = _model.generation;
     final revision = ++_noteRevision;
     final selectionRevision = _selectionRevision;
+    final token = ++_noteEditorToken;
     _activeNoteEditor = _ReaderNoteTarget.selection;
-    _activeNoteEditorRevision = revision;
+    _activeNoteEditorToken = token;
+    // The owned modal slot is set before the adapter starts and published with
+    // the same emission, so the chrome gates on the modal for the whole dialog
+    // lifetime instead of only after an unrelated transition.
+    _emit(_model.copyWith(selectionActionError: null));
     unawaited(() async {
       try {
         final body = await _noteEditor(null);
@@ -1875,11 +2125,11 @@ final class ReaderController implements Listenable {
             generation,
             revision,
             selectionRevision,
-            error.toString(),
+            _describeError(error),
           ),
         );
       } finally {
-        dispatch(_ReaderNoteEditorFinished(revision));
+        dispatch(_ReaderNoteEditorFinished(token));
       }
     }());
   }
@@ -1903,7 +2153,7 @@ final class ReaderController implements Listenable {
             generation,
             revision,
             selectionRevision,
-            error.toString(),
+            _describeError(error),
           ),
         );
       }
@@ -1937,7 +2187,7 @@ final class ReaderController implements Listenable {
     try {
       cancellation = _bridge.createCancellation();
     } catch (error) {
-      _emit(_model.copyWith(selectionActionError: error.toString()));
+      _emit(_model.copyWith(selectionActionError: _describeError(error)));
       return;
     }
     _annotationCancellations.add(cancellation);
@@ -1979,7 +2229,7 @@ final class ReaderController implements Listenable {
           ),
         );
       } catch (error) {
-        writeError = error.toString();
+        writeError = _describeError(error);
         dispatch(
           _ReaderAnnotationsChanged(
             generation,
@@ -2042,12 +2292,12 @@ final class ReaderController implements Listenable {
       cancellation = _bridge.createCancellation();
     } on FlutterBridgeError catch (error) {
       if (_isCurrent(generation)) {
-        _emit(_model.copyWith(annotationError: error.message));
+        _emit(_model.copyWith(annotationError: _describeError(error)));
       }
       return;
     } catch (error) {
       if (_isCurrent(generation)) {
-        _emit(_model.copyWith(annotationError: error.toString()));
+        _emit(_model.copyWith(annotationError: _describeError(error)));
       }
       return;
     }
@@ -2083,7 +2333,7 @@ final class ReaderController implements Listenable {
         ),
       );
     } catch (error) {
-      writeError = error.toString();
+      writeError = _describeError(error);
       dispatch(
         _ReaderAnnotationsChanged(
           generation,
@@ -2183,7 +2433,7 @@ final class ReaderController implements Listenable {
         ),
       );
     } catch (error) {
-      writeError = error.toString();
+      writeError = _describeError(error);
       dispatch(
         _ReaderAnnotationsChanged(
           generation,
@@ -2216,8 +2466,11 @@ final class ReaderController implements Listenable {
     if (annotation == null) return;
     final generation = _model.generation;
     final revision = ++_noteRevision;
+    final token = ++_noteEditorToken;
     _activeNoteEditor = _ReaderNoteTarget.annotation;
-    _activeNoteEditorRevision = revision;
+    _activeNoteEditorToken = token;
+    // Publish the owned modal slot before the adapter starts (contract §3.1).
+    _emit(_model);
     unawaited(() async {
       try {
         final body = await _noteEditor(annotation.body);
@@ -2228,10 +2481,14 @@ final class ReaderController implements Listenable {
         }
       } catch (error) {
         dispatch(
-          _ReaderAnnotationNoteFailed(generation, revision, error.toString()),
+          _ReaderAnnotationNoteFailed(
+            generation,
+            revision,
+            _describeError(error),
+          ),
         );
       } finally {
-        dispatch(_ReaderNoteEditorFinished(revision));
+        dispatch(_ReaderNoteEditorFinished(token));
       }
     }());
   }
@@ -2404,7 +2661,7 @@ final class ReaderController implements Listenable {
     try {
       cancellation = _bridge.createCancellation();
     } catch (error) {
-      _emit(_model.copyWith(annotationError: error.toString()));
+      _emit(_model.copyWith(annotationError: _describeError(error)));
       return;
     }
     final generation = _model.generation;
@@ -2445,7 +2702,7 @@ final class ReaderController implements Listenable {
     try {
       cancellation = _bridge.createCancellation();
     } catch (error) {
-      _emit(_model.copyWith(annotationError: error.toString()));
+      _emit(_model.copyWith(annotationError: _describeError(error)));
       return;
     }
     final generation = _model.generation;
@@ -2469,7 +2726,7 @@ final class ReaderController implements Listenable {
           cancellationId: cancellation,
         );
       } catch (caught) {
-        error = caught.toString();
+        error = _describeError(caught);
       }
       if (_annotationCancellations.remove(cancellation)) {
         dispatch(
@@ -2526,7 +2783,7 @@ final class ReaderController implements Listenable {
             cursor: cursor,
             page: const FlutterAnnotationAssociationSourcePage(sources: []),
           ),
-          error: error.toString(),
+          error: _describeError(error),
         ),
       );
     }
@@ -2547,6 +2804,9 @@ final class ReaderController implements Listenable {
       return;
     }
     _associationPickerActive = true;
+    _associationPickerRevision = message.revision;
+    // Publish the owned modal slot before the picker adapter starts.
+    _emit(_model);
     unawaited(() async {
       AnnotationAssociationChoice? choice;
       String? error;
@@ -2559,7 +2819,7 @@ final class ReaderController implements Listenable {
           ),
         );
       } catch (caught) {
-        error = caught.toString();
+        error = _describeError(caught);
       }
       dispatch(
         _ReaderAssociationChoiceCompleted(
@@ -2573,11 +2833,19 @@ final class ReaderController implements Listenable {
 
   void _associationChoiceCompleted(_ReaderAssociationChoiceCompleted message) {
     final sources = message.sources;
-    if (!_isCurrentAssociation(sources)) {
+    final current = _isCurrentAssociation(sources);
+    // Clear the slot this completion owns (and only this one), including a
+    // stale completion: leaving it set would keep the chrome gated on a modal
+    // that is no longer open. A newer picker's slot is left alone.
+    if (_associationPickerRevision == sources.revision) {
+      _associationPickerActive = false;
+      _associationPickerRevision = null;
+      if (current) _emit(_model);
+    }
+    if (!current) {
       dispatch(_ReaderAssociationFinished(sources: sources));
       return;
     }
-    _associationPickerActive = false;
     if (message.error case final error?) {
       dispatch(_ReaderAssociationFinished(sources: sources, error: error));
       return;
@@ -2641,7 +2909,7 @@ final class ReaderController implements Listenable {
       );
       dispatch(_ReaderAssociationPersisted(sources: sources, outcome: outcome));
     } catch (error) {
-      writeError = error.toString();
+      writeError = _describeError(error);
       if (_isCurrentAssociation(sources)) {
         _emit(
           _model.copyWith(
@@ -2695,7 +2963,8 @@ final class ReaderController implements Listenable {
         _ReaderAssociationFinished(
           sources: sources,
           error:
-              'Association saved, but highlights could not be loaded: $error',
+              'Association saved, but highlights could not be loaded: '
+              '${_describeError(error)}',
         ),
       );
     }
@@ -2725,7 +2994,7 @@ final class ReaderController implements Listenable {
       _model.annotationOperations.contains(message.operationId) &&
       _annotationCancellations.contains(message.cancellation);
 
-  void _selectionCancelled() {
+  void _selectionCancelled({bool requestSurfaceFocus = true}) {
     _cancelSelectionCreates();
     _selectionRevision += 1;
     _emit(
@@ -2740,7 +3009,7 @@ final class ReaderController implements Listenable {
         keyboardActionInvocation: false,
       ),
     );
-    _focusAdapter(ReaderFocusTarget.surface);
+    if (requestSurfaceFocus) _focusAdapter(ReaderFocusTarget.surface);
   }
 
   void _cancelSelectionCreates() {
@@ -2911,6 +3180,15 @@ final class ReaderController implements Listenable {
     }
   }
 
+  /// Renders a bridge or platform error for the reader's error surfaces.
+  ///
+  /// `FlutterBridgeError` carries a kind and a message but no `toString()`, so a
+  /// bare `_describeError(error)` renders as "Instance of 'FlutterBridgeError'" and
+  /// hides the reason the user (and a bug report) needs.
+  static String _describeError(Object error) => error is FlutterBridgeError
+      ? '${error.message} (${error.kind.name})'
+      : error.toString();
+
   bool _isCurrent(int generation) {
     return !_closing && generation == _model.generation;
   }
@@ -2918,9 +3196,13 @@ final class ReaderController implements Listenable {
   void _emit(ReaderModel model, {bool notifyListeners = true}) {
     final selectionChanged =
         _model.selectionDescription != model.selectionDescription;
-    _model = model;
+    final derived = model.copyWith(
+      progress: _deriveProgress(model),
+      modalEffect: _deriveModalEffect(),
+    );
+    _model = derived;
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
-      unawaited(_announceSelection(model.selectionDescription));
+      unawaited(_announceSelection(derived.selectionDescription));
     }
     if (notifyListeners && !_listenersDisposed) {
       for (final listener in _listeners.toList(growable: false)) {
@@ -2939,6 +3221,52 @@ final class ReaderController implements Listenable {
         }
       }
     }
+  }
+
+  /// Applies the RD-05 wording precedence to [model].
+  ///
+  /// `loading` wins while an open is in flight, `none` when no document is
+  /// loaded, and only then is the supplied presentation source consulted. The
+  /// 4B default source is the retained logical-unit fallback: the document's
+  /// unit ordinal with the format's display kind. Real page ranges, spreads and
+  /// durable-location mapping are 5A/5G.
+  ReaderProgressPresentation _deriveProgress(ReaderModel model) {
+    if (model.busy) {
+      return ReaderProgressPresentation(
+        kind: ReaderProgressKind.loading,
+        hasDocument: model.document != null,
+      );
+    }
+    final document = model.document;
+    if (document == null) {
+      return const ReaderProgressPresentation(kind: ReaderProgressKind.none);
+    }
+    final supplied = _progressSource?.call(model);
+    if (supplied != null) return supplied;
+    final total = document.logicalUnitCount.toInt();
+    final ordinal = model.unit + 1;
+    return ReaderProgressPresentation(
+      kind: ReaderProgressKind.single,
+      hasDocument: true,
+      displayUnit: document.format == FlutterBookFormat.epub
+          ? ReaderDisplayUnit.chapter
+          : ReaderDisplayUnit.page,
+      firstOrdinal: ordinal,
+      percentage: total <= 0
+          ? 0
+          : ((ordinal / total) * 100).round().clamp(0, 100),
+    );
+  }
+
+  /// The single controller-owned modal effect, derived from the effect slots.
+  ReaderModalEffect? _deriveModalEffect() {
+    if (_associationPickerActive) return ReaderModalEffect.associationPicker;
+    return switch (_activeNoteEditor) {
+      _ReaderNoteTarget.selection => ReaderModalEffect.selectionNote,
+      _ReaderNoteTarget.annotation => ReaderModalEffect.annotationNote,
+      _ReaderNoteTarget.bookmark => ReaderModalEffect.bookmarkNote,
+      null => null,
+    };
   }
 
   Future<void> _announceSelection(String description) async {
@@ -2971,6 +3299,14 @@ final class ReaderController implements Listenable {
       selectionPointer: null,
       selectionVisualLine: null,
       selectionPreferredX: null,
+      // A layout failure belongs to the document that failed to lay out: the
+      // release path is shared by open/replacement, failed open, recovery and
+      // dispose, so clearing it here keeps a stale "Layout failed" alert from
+      // surviving into the next document (the next open clears the other error
+      // fields in its own transition, but a successful open whose requested
+      // layout already matches the committed one never runs a relayout to
+      // clear this one).
+      relayoutError: null,
     );
     if (publish) {
       _emit(released, notifyListeners: false);
@@ -3015,7 +3351,7 @@ final class ReaderController implements Listenable {
   void _cancelActiveNoteEditor() {
     if (_activeNoteEditor == null) return;
     _activeNoteEditor = null;
-    _activeNoteEditorRevision = null;
+    _activeNoteEditorToken = null;
     try {
       _noteEditorCanceller();
     } catch (error, stackTrace) {
@@ -3034,6 +3370,7 @@ final class ReaderController implements Listenable {
   void _cancelAssociationPicker() {
     if (!_associationPickerActive) return;
     _associationPickerActive = false;
+    _associationPickerRevision = null;
     try {
       _annotationAssociationPickerCanceller();
     } catch (error, stackTrace) {
