@@ -606,6 +606,161 @@ abstract final class ShosaiTokens {
   /// 3.5)
   static const layoutReaderProgressWidth = 280.0;
 
+  /// `layout.readerPanel.padding` — Iced (crates/shosai-app/src/app.rs
+  /// reader panels: reader_settings, reader_more_panel, bookmarks_panel and
+  /// search_bar, the pinned reference)
+  static const layoutReaderPanelPadding = 14.0;
+
+  /// `layout.readerPanel.spacing` — Iced (crates/shosai-app/src/app.rs
+  /// reader panels: reader_settings, reader_more_panel, bookmarks_panel and
+  /// search_bar, the pinned reference)
+  static const layoutReaderPanelSpacing = 10.0;
+
+  /// `layout.readerPanel.headingSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelHeadingSpacing = 2.0;
+
+  /// `layout.readerPanel.entryIndent` — Iced (crates/shosai-app/src/app.rs
+  /// reader panels: reader_settings, reader_more_panel, bookmarks_panel and
+  /// search_bar, the pinned reference)
+  static const layoutReaderPanelEntryIndent = 12.0;
+
+  /// `layout.readerPanel.entryPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelEntryPaddingVertical = 6.0;
+
+  /// `layout.readerPanel.entryPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelEntryPaddingHorizontal = 8.0;
+
+  /// `layout.readerPanel.placePadding` — Iced (crates/shosai-app/src/app.rs
+  /// reader panels: reader_settings, reader_more_panel, bookmarks_panel and
+  /// search_bar, the pinned reference)
+  static const layoutReaderPanelPlacePadding = 10.0;
+
+  /// `layout.readerPanel.placeSpacing` — Iced (crates/shosai-app/src/app.rs
+  /// reader panels: reader_settings, reader_more_panel, bookmarks_panel and
+  /// search_bar, the pinned reference)
+  static const layoutReaderPanelPlaceSpacing = 4.0;
+
+  /// `layout.readerPanel.placeRowSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelPlaceRowSpacing = 6.0;
+
+  /// `layout.readerPanel.emptyPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelEmptyPaddingVertical = 18.0;
+
+  /// `layout.readerPanel.emptyPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelEmptyPaddingHorizontal = 4.0;
+
+  /// `layout.readerPanel.emptySpacing` — Iced (crates/shosai-app/src/app.rs
+  /// reader panels: reader_settings, reader_more_panel, bookmarks_panel and
+  /// search_bar, the pinned reference)
+  static const layoutReaderPanelEmptySpacing = 5.0;
+
+  /// `layout.readerPanel.settingsPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelSettingsPaddingVertical = 7.0;
+
+  /// `layout.readerPanel.settingsPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelSettingsPaddingHorizontal = 12.0;
+
+  /// `layout.readerPanel.settingsSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelSettingsSpacing = 10.0;
+
+  /// `layout.readerPanel.controlGroupPadding` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelControlGroupPadding = 4.0;
+
+  /// `layout.readerPanel.morePaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelMorePaddingVertical = 7.0;
+
+  /// `layout.readerPanel.morePaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelMorePaddingHorizontal = 12.0;
+
+  /// `layout.readerPanel.moreRowSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelMoreRowSpacing = 5.0;
+
+  /// `layout.readerPanel.moreStackSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelMoreStackSpacing = 7.0;
+
+  /// `layout.readerPanel.pageInputWidth` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelPageInputWidth = 64.0;
+
+  /// `layout.readerPanel.zoomLabelWidth` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelZoomLabelWidth = 70.0;
+
+  /// `layout.readerPanel.searchPaddingVertical` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelSearchPaddingVertical = 8.0;
+
+  /// `layout.readerPanel.searchPaddingHorizontal` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelSearchPaddingHorizontal = 12.0;
+
+  /// `layout.readerPanel.searchSpacing` — Iced (crates/shosai-app/src/app.rs
+  /// reader panels: reader_settings, reader_more_panel, bookmarks_panel and
+  /// search_bar, the pinned reference)
+  static const layoutReaderPanelSearchSpacing = 10.0;
+
+  /// `layout.readerPanel.searchStackSpacing` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelSearchStackSpacing = 7.0;
+
+  /// `layout.readerPanel.searchInputMaxWidth` — Iced
+  /// (crates/shosai-app/src/app.rs reader panels: reader_settings,
+  /// reader_more_panel, bookmarks_panel and search_bar, the pinned
+  /// reference)
+  static const layoutReaderPanelSearchInputMaxWidth = 420.0;
+
   /// `layout.readerChrome.headerPaddingVertical` — Iced
   /// (crates/shosai-app/src/app.rs reader chrome, the pinned reference)
   static const layoutReaderChromeHeaderPaddingVertical = 8.0;

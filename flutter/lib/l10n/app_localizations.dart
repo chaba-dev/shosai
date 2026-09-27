@@ -487,6 +487,282 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Remove from Library'**
   String get readerRemoveFromLibrary;
+
+  /// Iced reference key: chapters-saved-places. The Contents panel subheading.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapters and saved places'**
+  String get readerContentsSubheading;
+
+  /// NEW: no Iced string. The Contents panel close control; Iced paints a x glyph (app.rs bookmarks_panel).
+  ///
+  /// In en, this message translates to:
+  /// **'Close contents'**
+  String get readerCloseContents;
+
+  /// Iced reference key: chapters.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapters'**
+  String get readerChaptersHeading;
+
+  /// Iced reference key: chapter-number. The chapter fallback for an untitled Contents entry.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapter {number}'**
+  String readerChapterNumber(int number);
+
+  /// Iced reference key: bookmark-count.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmarks · {count}'**
+  String readerBookmarksHeading(int count);
+
+  /// Iced reference key: no-bookmarks.
+  ///
+  /// In en, this message translates to:
+  /// **'No bookmarks yet'**
+  String get readerNoBookmarks;
+
+  /// Iced reference key: bookmark-empty-hint.
+  ///
+  /// In en, this message translates to:
+  /// **'Save a page to keep it close at hand.'**
+  String get readerBookmarkEmptyHint;
+
+  /// Iced reference key: page-short. The saved-place title fallback.
+  ///
+  /// In en, this message translates to:
+  /// **'Pg {page}'**
+  String readerPageShort(int page);
+
+  /// Iced reference key: page-abbreviated.
+  ///
+  /// In en, this message translates to:
+  /// **'p.{page}'**
+  String readerPageAbbreviated(int page);
+
+  /// NEW: no Iced string. The saved-place delete control; Iced paints a x glyph (app.rs bookmarks_panel).
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {title}'**
+  String readerDeleteBookmark(String title);
+
+  /// Iced reference key: edit-note.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit note'**
+  String get readerEditNote;
+
+  /// Iced reference key: add-note.
+  ///
+  /// In en, this message translates to:
+  /// **'Add note'**
+  String get readerAddNote;
+
+  /// Iced reference key: export-markdown. 4C's delivery is the clipboard plus a brief notice (contract 9.2 item 1).
+  ///
+  /// In en, this message translates to:
+  /// **'Export as Markdown'**
+  String get readerExportMarkdown;
+
+  /// NEW: no Iced string. The Contents panel's loading state (RD-07).
+  ///
+  /// In en, this message translates to:
+  /// **'Loading contents…'**
+  String get readerContentsLoading;
+
+  /// NEW: no Iced string. The Contents panel's empty state (RD-07).
+  ///
+  /// In en, this message translates to:
+  /// **'No chapters in this document'**
+  String get readerContentsEmpty;
+
+  /// NEW: no Iced string. The Contents panel's failure fallback (RD-07).
+  ///
+  /// In en, this message translates to:
+  /// **'Contents unavailable'**
+  String get readerContentsUnavailable;
+
+  /// NEW: no Iced string. The Contents panel's retry action (RD-07).
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get readerRetry;
+
+  /// Iced reference key: reading. The compact typography row label.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading'**
+  String get readerReading;
+
+  /// NEW: no Iced string. The EPUB A- control's accessible label (RD-09).
+  ///
+  /// In en, this message translates to:
+  /// **'Decrease font size'**
+  String get readerDecreaseFontSize;
+
+  /// NEW: no Iced string. The EPUB A+ control's accessible label (RD-09).
+  ///
+  /// In en, this message translates to:
+  /// **'Increase font size'**
+  String get readerIncreaseFontSize;
+
+  /// Iced reference format: the pinned reader_settings_panel renders `{}px` (app.rs:5914).
+  ///
+  /// In en, this message translates to:
+  /// **'{size}px'**
+  String readerFontSizeValue(int size);
+
+  /// Iced reference key: default-epub-line-spacing. The line-spacing control's accessible label (contract 4.8).
+  ///
+  /// In en, this message translates to:
+  /// **'Line spacing'**
+  String get readerLineSpacingLabel;
+
+  /// NEW: no Iced string. The line-spacing control's numeric label; the pinned settings pick list shows the raw value.
+  ///
+  /// In en, this message translates to:
+  /// **'{spacing}×'**
+  String readerLineSpacingValue(String spacing);
+
+  /// NEW: no Iced string. The theme cycle control's accessible label; Iced shows only the theme name (RD-09).
+  ///
+  /// In en, this message translates to:
+  /// **'Reading theme'**
+  String get readerThemeCycle;
+
+  /// Iced reference key: light.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get readerThemeLight;
+
+  /// Iced reference key: dark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get readerThemeDark;
+
+  /// Iced reference key: sepia.
+  ///
+  /// In en, this message translates to:
+  /// **'Sepia'**
+  String get readerThemeSepia;
+
+  /// NEW: no Iced string. The raster zoom-out control's accessible label (RD-09).
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom out'**
+  String get readerZoomOut;
+
+  /// NEW: no Iced string. The raster zoom-in control's accessible label (RD-09).
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom in'**
+  String get readerZoomIn;
+
+  /// Iced reference key: fit-width.
+  ///
+  /// In en, this message translates to:
+  /// **'Fit width'**
+  String get readerFitWidth;
+
+  /// Iced reference key: fit-page.
+  ///
+  /// In en, this message translates to:
+  /// **'Fit page'**
+  String get readerFitPage;
+
+  /// Iced reference key: page. The more panel's page-input placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Page'**
+  String get readerPageInputLabel;
+
+  /// Iced reference key: of-pages.
+  ///
+  /// In en, this message translates to:
+  /// **'of {total}'**
+  String readerPageOf(int total);
+
+  /// NEW: no Iced string; the contract requires an inline error instead of the pinned field reset (contract 4.9).
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a page between 1 and {total}.'**
+  String readerPageInputInvalid(int total);
+
+  /// Iced reference key: saved.
+  ///
+  /// In en, this message translates to:
+  /// **'★ Saved'**
+  String get readerSaved;
+
+  /// Iced reference key: bookmark.
+  ///
+  /// In en, this message translates to:
+  /// **'☆ Bookmark'**
+  String get readerBookmark;
+
+  /// Iced reference key: open-book.
+  ///
+  /// In en, this message translates to:
+  /// **'Open book'**
+  String get readerOpenBook;
+
+  /// Iced reference key: search.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get readerSearchAction;
+
+  /// Iced reference key: search-document-placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Search in document…'**
+  String get readerSearchPlaceholder;
+
+  /// Iced reference key: no-results.
+  ///
+  /// In en, this message translates to:
+  /// **'No results'**
+  String get readerNoResults;
+
+  /// Iced reference format: the pinned search_bar renders `{current} / {total}` (app.rs:6247).
+  ///
+  /// In en, this message translates to:
+  /// **'{current} / {total}'**
+  String readerSearchCount(int current, int total);
+
+  /// NEW: no Iced string. The search previous-result control's accessible label (RD-11).
+  ///
+  /// In en, this message translates to:
+  /// **'Previous result'**
+  String get readerPreviousResult;
+
+  /// NEW: no Iced string. The search next-result control's accessible label (RD-11).
+  ///
+  /// In en, this message translates to:
+  /// **'Next result'**
+  String get readerNextResult;
+
+  /// NEW: no Iced string. The search close control's accessible label (RD-11).
+  ///
+  /// In en, this message translates to:
+  /// **'Close search'**
+  String get readerCloseSearch;
+
+  /// Package 4C notice copy: brief success after copying the Markdown bookmark export.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmarks copied as Markdown'**
+  String get noticeReaderExportSucceeded;
+
+  /// Package 4C notice copy: persistent failure title after a failed Markdown bookmark export.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmarks could not be exported'**
+  String get noticeReaderExportFailed;
 }
 
 class _AppLocalizationsDelegate

@@ -65,6 +65,9 @@ abstract final class NoticePolicy {
   /// Identity of the unresolved condition behind a book removal.
   static const String libraryRemovalKey = 'library.removal';
 
+  /// Identity of the unresolved condition behind a reader Markdown export.
+  static const String readerExportKey = 'reader.export';
+
   static NoticeDisposition? dispositionFor(NoticeOutcome outcome) =>
       switch (outcome) {
         NoticeOutcome.success => const NoticeDisposition(

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
@@ -10,6 +11,7 @@ import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/notices/notices.dart';
+import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
@@ -38,6 +40,7 @@ export 'package:shosai_flutter/reader/controller.dart'
         NoteEditorCanceller,
         ReaderController,
         ReaderPersistenceException,
+        ReaderPickedDocument,
         ReaderAnnotationAssociationRequested,
         ReaderAnnotationReloadRequested,
         ReaderAnnotationDeleted,
@@ -223,6 +226,21 @@ class _ShosaiShellState extends State<ShosaiShell> {
   }
 }
 
+/// Chooses a supported document for the reader's more panel (RD-10).
+///
+/// The reader opens the picked document through its normal open path; a
+/// cancellation returns null and stays neutral. The platform picker is the
+/// same capability the library import flow uses.
+Future<ReaderPickedDocument?> pickReaderDocument() async {
+  final file = await openFile(
+    acceptedTypeGroups: const [
+      XTypeGroup(label: 'Books', extensions: ['pdf', 'epub', 'cbz']),
+    ],
+  );
+  if (file == null) return null;
+  return ReaderPickedDocument(file.path);
+}
+
 class ShosaiApp extends StatefulWidget {
   const ShosaiApp({
     super.key,
@@ -266,14 +284,26 @@ class _ShosaiAppState extends State<ShosaiApp> {
               bridgeFactory: widget.productBridgeFactory!,
               noticeReporter: _noticeCenter.reporter,
               readerBuilder:
-                  (bridge, book, settings, path, bookId, locatorChanged) =>
-                      ReaderScreen(
-                        bridge: bridge,
-                        initialPath: path,
-                        initialBookId: bookId,
-                        initialSettings: settings,
-                        onLocatorChanged: locatorChanged,
-                      ),
+                  (
+                    bridge,
+                    book,
+                    settings,
+                    path,
+                    bookId,
+                    locatorChanged,
+                    noticeReporter,
+                  ) => ReaderScreen(
+                    bridge: bridge,
+                    initialPath: path,
+                    initialBookId: bookId,
+                    initialSettings: settings,
+                    onLocatorChanged: locatorChanged,
+                    noticeReporter: noticeReporter,
+                    // The more panel's open-book action uses the same platform
+                    // picker capability as the library import flow; the reader
+                    // opens the picked document through its normal open path.
+                    documentPicker: pickReaderDocument,
+                  ),
             ),
     );
   }

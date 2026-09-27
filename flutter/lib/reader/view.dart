@@ -49,6 +49,10 @@ class ReaderScreen extends StatefulWidget {
     this.onLocatorChanged,
     this.initialTabs = const [],
     this.progressSource,
+    this.contentsLoader,
+    this.documentPicker,
+    this.exportSink,
+    this.noticeReporter,
     this.debugPathEntry = false,
   }) : assert(bridge == null || bridgeFactory == null);
 
@@ -66,11 +70,24 @@ class ReaderScreen extends StatefulWidget {
   /// Fixture-supplied progress ordinals (RD-05); 5G supplies real values.
   final ReaderProgressSource? progressSource;
 
+  /// Fixture-supplied Contents entries (RD-07); 5E supplies the real TOC.
+  final ReaderContentsLoader? contentsLoader;
+
+  /// The shell's platform document picker for the more panel (RD-10).
+  final ReaderDocumentPickerAdapter? documentPicker;
+
+  /// Delivers the Markdown export text (RD-08); defaults to the clipboard.
+  final ReaderExportSink? exportSink;
+
+  /// The application notice center's reporter, injected by the composition
+  /// root; a reader built without one reports no notices.
+  final ReaderNoticeReporter? noticeReporter;
+
   /// Renders the retired path entry for tests and development only.
   ///
   /// Contract §7.2 item 6 retires the raw path field from the restored reader
-  /// composition; the capability moves to the library entry and, for 4C, the
-  /// more panel's document picker. This dev/test-only entry must not appear in
+  /// composition; the capability moves to the library entry and the more
+  /// panel's document picker. This dev/test-only entry must not appear in
   /// production renders, so it is off by default.
   final bool debugPathEntry;
 
@@ -187,6 +204,10 @@ class _ReaderScreenState extends State<ReaderScreen>
             ? widget.initialSettings!.pdfZoom
             : View.of(context).devicePixelRatio,
         initialLineSpacing: widget.initialSettings?.epubLineSpacing ?? 1.5,
+        initialTypography: _initialTypography(
+          View.of(context).devicePixelRatio,
+        ),
+        baseScale: View.of(context).devicePixelRatio,
         noteEditor: _editNote,
         bookmarkNoteEditor: _editBookmarkNote,
         noteEditorCanceller: _cancelNoteEditor,
@@ -211,6 +232,10 @@ class _ReaderScreenState extends State<ReaderScreen>
         },
         tabRevealAdapter: _revealTab,
         progressSource: widget.progressSource,
+        contentsLoader: widget.contentsLoader,
+        documentPickerAdapter: widget.documentPicker,
+        exportSink: widget.exportSink ?? _copyExportToClipboard,
+        noticeReporter: widget.noticeReporter,
         initialTabs: widget.initialTabs,
         frameScheduler: (callback) =>
             WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
@@ -259,12 +284,15 @@ class _ReaderScreenState extends State<ReaderScreen>
     required String title,
   }) async {
     final navigator = Navigator.of(context, rootNavigator: true);
-    final readerTheme = _readerTheme(context, widget.initialSettings?.theme);
+    final readerTheme = _readerTheme(
+      context,
+      _controller.model.typography.theme,
+    );
     final route = ShadDialogRoute<String>(
       pageBuilder: (context) => Theme(
         data: readerTheme,
         child: ShadTheme(
-          data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+          data: shosaiReaderShadTheme(_controller.model.typography.theme),
           child: _NoteDialog(initialValue: initialValue, title: title),
         ),
       ),
@@ -293,12 +321,15 @@ class _ReaderScreenState extends State<ReaderScreen>
     AnnotationAssociationPage page,
   ) async {
     final navigator = Navigator.of(context, rootNavigator: true);
-    final readerTheme = _readerTheme(context, widget.initialSettings?.theme);
+    final readerTheme = _readerTheme(
+      context,
+      _controller.model.typography.theme,
+    );
     final route = ShadDialogRoute<AnnotationAssociationChoice>(
       pageBuilder: (context) => Theme(
         data: readerTheme,
         child: ShadTheme(
-          data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+          data: shosaiReaderShadTheme(_controller.model.typography.theme),
           child: _AnnotationAssociationDialog(page: page),
         ),
       ),
@@ -395,17 +426,49 @@ class _ReaderScreenState extends State<ReaderScreen>
     _controller.dispatch(ReaderOpenRequested(path));
   }
 
+  /// The reader-local typography the controller starts from.
+  ///
+  /// The legacy `pdfZoom` sentinel (0 = fit page, -1 = fit width, >0 = manual
+  /// scale) maps onto the typed [ReaderRasterFit]; the codec that replaces the
+  /// sentinel is 5A/6B.
+  ReaderTypographyPresentation _initialTypography(double baseScale) {
+    final settings = widget.initialSettings;
+    final zoom = settings?.pdfZoom ?? 0;
+    final fit = zoom == 0
+        ? ReaderRasterFit.fitPage
+        : zoom == -1
+        ? ReaderRasterFit.fitWidth
+        : ReaderRasterFit.manual;
+    return ReaderTypographyPresentation(
+      format: FlutterBookFormat.epub,
+      continuous: settings?.continuous ?? false,
+      theme: settings?.theme ?? 'light',
+      epubFontSize: settings?.epubFontSize ?? 18,
+      epubLineSpacing: settings?.epubLineSpacing ?? 1.5,
+      rasterFit: fit,
+      rasterZoom: fit == ReaderRasterFit.manual ? zoom : baseScale,
+    );
+  }
+
+  /// The default export delivery (RD-08): copy the Markdown to the clipboard.
+  ///
+  /// A shell that wants a save location injects its own [ReaderExportSink]
+  /// instead; the success/failure feedback stays with the controller's notice
+  /// and export state.
+  Future<void> _copyExportToClipboard(String markdown) =>
+      Clipboard.setData(ClipboardData(text: markdown));
+
   @override
   Widget build(BuildContext context) {
     final model = _controller.model;
     final compact =
         MediaQuery.sizeOf(context).width <
         ShosaiTokens.layoutReaderCompactBreakpoint;
-    final theme = _readerTheme(context, widget.initialSettings?.theme);
+    final theme = _readerTheme(context, model.typography.theme);
     final reader = Theme(
       data: theme,
       child: ShadTheme(
-        data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+        data: shosaiReaderShadTheme(model.typography.theme),
         child: Scaffold(
           body: SafeArea(
             child: _withChromeShortcuts(
@@ -454,6 +517,20 @@ class _ReaderScreenState extends State<ReaderScreen>
                         viewportHeight: constraints.maxHeight,
                         share: _readerPanelBoundShare,
                         child: row,
+                      ),
+                    // The search bar is its own row below the panels (RD-11);
+                    // search is independent of the three exclusive panels.
+                    if (model.searchOpen &&
+                        model.document != null &&
+                        model.typography.searchable)
+                      _boundedChrome(
+                        viewportHeight: constraints.maxHeight,
+                        share: _readerPanelBoundShare,
+                        child: _ReaderSearchBar(
+                          model: model,
+                          compact: compact,
+                          dispatch: _controller.dispatch,
+                        ),
                       ),
                     // A content failure is shown inside the document view; the
                     // alert is for an open that never produced one.
@@ -675,7 +752,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     final content = _ReaderContentPane(
       key: _contentKey,
       model: model,
-      settings: widget.initialSettings,
       dispatch: _controller.dispatch,
       readerFocus: _readerFocus,
       actionFocus: _actionFocus,
@@ -699,7 +775,6 @@ class _ReaderScreenState extends State<ReaderScreen>
           Expanded(
             child: _ReaderSurface(
               model: model,
-              settings: widget.initialSettings,
               compact: compact,
               dispatch: _controller.dispatch,
               content: content,
@@ -714,7 +789,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     return _ReaderSurface(
       model: model,
-      settings: widget.initialSettings,
       compact: compact,
       dispatch: _controller.dispatch,
       content: content,
@@ -726,14 +800,12 @@ class _ReaderScreenState extends State<ReaderScreen>
 class _ReaderSurface extends StatelessWidget {
   const _ReaderSurface({
     required this.model,
-    required this.settings,
     required this.compact,
     required this.dispatch,
     required this.content,
   });
 
   final ReaderModel model;
-  final FlutterReaderSettings? settings;
   final bool compact;
   final void Function(ReaderMessage) dispatch;
   final Widget content;
@@ -742,7 +814,7 @@ class _ReaderSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final document = model.document;
-    final continuous = settings?.continuous ?? false;
+    final continuous = model.typography.continuous;
     // Edge navigation is hidden entirely in continuous mode and when no
     // document is open (Iced returns the bare content). While no document is
     // open the columns keep their space with the controls invisible, so the
@@ -894,7 +966,6 @@ class _ReaderContentPane extends StatelessWidget {
   const _ReaderContentPane({
     super.key,
     required this.model,
-    required this.settings,
     required this.dispatch,
     required this.readerFocus,
     required this.actionFocus,
@@ -902,7 +973,6 @@ class _ReaderContentPane extends StatelessWidget {
   });
 
   final ReaderModel model;
-  final FlutterReaderSettings? settings;
   final void Function(ReaderMessage) dispatch;
   final FocusNode readerFocus;
   final FocusNode actionFocus;
@@ -920,7 +990,6 @@ class _ReaderContentPane extends StatelessWidget {
         Expanded(
           child: _ReaderLayoutReporter(
             model: model,
-            settings: settings,
             dispatch: dispatch,
             child: model.busy
                 ? _ReaderOpeningView(
@@ -940,7 +1009,6 @@ class _ReaderContentPane extends StatelessWidget {
                     document: document,
                     image: model.pageImage,
                     model: model,
-                    settings: settings,
                     dispatch: dispatch,
                     readerFocus: readerFocus,
                     actionFocus: actionFocus,
@@ -962,13 +1030,11 @@ class _ReaderContentPane extends StatelessWidget {
 class _ReaderLayoutReporter extends StatefulWidget {
   const _ReaderLayoutReporter({
     required this.model,
-    required this.settings,
     required this.dispatch,
     required this.child,
   });
 
   final ReaderModel model;
-  final FlutterReaderSettings? settings;
   final void Function(ReaderMessage) dispatch;
   final Widget child;
 
@@ -987,18 +1053,17 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
       final availableWidth = constraints.maxWidth.isFinite
           ? math.max(1.0, constraints.maxWidth).roundToDouble()
           : widget.model.layout.width;
+      final typography = widget.model.typography;
       final layout = ReaderLayout(
         scale: widget.model.document != null
             ? widget.model.layout.scale
-            : (widget.settings?.pdfZoom ?? 0) > 0
-            ? widget.settings!.pdfZoom
-            : MediaQuery.devicePixelRatioOf(context),
+            : typography.rasterZoom,
         width: availableWidth,
         // The interface text scale must not change the document font: `T200`
         // scales interface chrome only (specification `T200`/`BF*` separation,
         // contract §2.3 item 5b). The EPUB font size is the reader preference.
-        fontSize: widget.settings?.epubFontSize ?? 18,
-        lineSpacing: widget.settings?.epubLineSpacing ?? 1.5,
+        fontSize: typography.epubFontSize,
+        lineSpacing: typography.epubLineSpacing,
       );
       if (layout != _observedLayout) {
         _observedLayout = layout;

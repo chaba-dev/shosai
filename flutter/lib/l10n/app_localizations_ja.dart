@@ -225,4 +225,162 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get readerRemoveFromLibrary => 'ライブラリから削除';
+
+  @override
+  String get readerContentsSubheading => '章と保存した場所';
+
+  @override
+  String get readerCloseContents => '目次を閉じる';
+
+  @override
+  String get readerChaptersHeading => '章';
+
+  @override
+  String readerChapterNumber(int number) {
+    return '第$number章';
+  }
+
+  @override
+  String readerBookmarksHeading(int count) {
+    return 'ブックマーク · $count';
+  }
+
+  @override
+  String get readerNoBookmarks => 'ブックマークはまだありません';
+
+  @override
+  String get readerBookmarkEmptyHint => 'ページを保存すると、ここに表示されます。';
+
+  @override
+  String readerPageShort(int page) {
+    return '$pageページ';
+  }
+
+  @override
+  String readerPageAbbreviated(int page) {
+    return 'p.$page';
+  }
+
+  @override
+  String readerDeleteBookmark(String title) {
+    return '$titleを削除';
+  }
+
+  @override
+  String get readerEditNote => 'ノートを編集';
+
+  @override
+  String get readerAddNote => 'ノートを追加';
+
+  @override
+  String get readerExportMarkdown => 'Markdownで書き出す';
+
+  @override
+  String get readerContentsLoading => '目次を読み込んでいます…';
+
+  @override
+  String get readerContentsEmpty => 'この文書に章はありません';
+
+  @override
+  String get readerContentsUnavailable => '目次を表示できません';
+
+  @override
+  String get readerRetry => '再試行';
+
+  @override
+  String get readerReading => '読書';
+
+  @override
+  String get readerDecreaseFontSize => '文字を小さく';
+
+  @override
+  String get readerIncreaseFontSize => '文字を大きく';
+
+  @override
+  String readerFontSizeValue(int size) {
+    return '${size}px';
+  }
+
+  @override
+  String get readerLineSpacingLabel => '行間';
+
+  @override
+  String readerLineSpacingValue(String spacing) {
+    return '$spacing×';
+  }
+
+  @override
+  String get readerThemeCycle => '読書テーマ';
+
+  @override
+  String get readerThemeLight => 'ライト';
+
+  @override
+  String get readerThemeDark => 'ダーク';
+
+  @override
+  String get readerThemeSepia => 'セピア';
+
+  @override
+  String get readerZoomOut => '縮小';
+
+  @override
+  String get readerZoomIn => '拡大';
+
+  @override
+  String get readerFitWidth => '幅に合わせる';
+
+  @override
+  String get readerFitPage => 'ページに合わせる';
+
+  @override
+  String get readerPageInputLabel => 'ページ';
+
+  @override
+  String readerPageOf(int total) {
+    return '/ $total';
+  }
+
+  @override
+  String readerPageInputInvalid(int total) {
+    return '1～$totalのページを入力してください。';
+  }
+
+  @override
+  String get readerSaved => '★ 保存済み';
+
+  @override
+  String get readerBookmark => '☆ ブックマーク';
+
+  @override
+  String get readerOpenBook => '本を開く';
+
+  @override
+  String get readerSearchAction => '検索';
+
+  @override
+  String get readerSearchPlaceholder => '文書内を検索…';
+
+  @override
+  String get readerNoResults => '該当なし';
+
+  @override
+  String readerSearchCount(int current, int total) {
+    return '$current / $total';
+  }
+
+  @override
+  String get readerPreviousResult => '前の結果';
+
+  @override
+  String get readerNextResult => '次の結果';
+
+  @override
+  String get readerCloseSearch => '検索を閉じる';
+
+  @override
+  String get noticeReaderExportSucceeded => 'ブックマークをMarkdownとしてコピーしました';
+
+  @override
+  String get noticeReaderExportFailed => 'ブックマークを書き出せませんでした';
 }

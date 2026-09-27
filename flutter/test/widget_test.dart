@@ -6353,7 +6353,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
-    await tester.tap(find.byTooltip('Bookmark this location'));
+    await tester.tap(find.byKey(const ValueKey('reader-more-bookmark')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
@@ -6949,7 +6949,7 @@ void main() {
     const usableHeight = 640 - 280;
     final readerRect = tester.getRect(find.byType(ReaderScreen));
     final toolsRect = tester.getRect(
-      find.byKey(const ValueKey('reader-tools-scroll')),
+      find.byKey(const ValueKey('reader-page-input')),
     );
     final panelRect = tester.getRect(
       find.byKey(const ValueKey('reader-panel-more')),
@@ -7317,9 +7317,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
     expect(find.byKey(const ValueKey('reader-panel-more')), findsOneWidget);
-    expect(find.byTooltip('Bookmark this location'), findsOneWidget);
-    expect(find.byTooltip('Bookmark with note'), findsOneWidget);
-    // A CBZ has no text search, so the retained search field stays hidden.
+    expect(find.byKey(const ValueKey('reader-more-bookmark')), findsOneWidget);
+    // A CBZ has no text search, so the more panel offers no search control and
+    // the search bar stays absent.
+    expect(find.byKey(const ValueKey('reader-more-search')), findsNothing);
     expect(find.byKey(const ValueKey('reader-search-input')), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
@@ -7354,7 +7355,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
-    await tester.tap(find.byTooltip('Bookmark this location'));
+    await tester.tap(find.byKey(const ValueKey('reader-more-bookmark')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();

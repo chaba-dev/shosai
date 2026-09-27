@@ -230,4 +230,162 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readerRemoveFromLibrary => 'Remove from Library';
+
+  @override
+  String get readerContentsSubheading => 'Chapters and saved places';
+
+  @override
+  String get readerCloseContents => 'Close contents';
+
+  @override
+  String get readerChaptersHeading => 'Chapters';
+
+  @override
+  String readerChapterNumber(int number) {
+    return 'Chapter $number';
+  }
+
+  @override
+  String readerBookmarksHeading(int count) {
+    return 'Bookmarks · $count';
+  }
+
+  @override
+  String get readerNoBookmarks => 'No bookmarks yet';
+
+  @override
+  String get readerBookmarkEmptyHint => 'Save a page to keep it close at hand.';
+
+  @override
+  String readerPageShort(int page) {
+    return 'Pg $page';
+  }
+
+  @override
+  String readerPageAbbreviated(int page) {
+    return 'p.$page';
+  }
+
+  @override
+  String readerDeleteBookmark(String title) {
+    return 'Delete $title';
+  }
+
+  @override
+  String get readerEditNote => 'Edit note';
+
+  @override
+  String get readerAddNote => 'Add note';
+
+  @override
+  String get readerExportMarkdown => 'Export as Markdown';
+
+  @override
+  String get readerContentsLoading => 'Loading contents…';
+
+  @override
+  String get readerContentsEmpty => 'No chapters in this document';
+
+  @override
+  String get readerContentsUnavailable => 'Contents unavailable';
+
+  @override
+  String get readerRetry => 'Retry';
+
+  @override
+  String get readerReading => 'Reading';
+
+  @override
+  String get readerDecreaseFontSize => 'Decrease font size';
+
+  @override
+  String get readerIncreaseFontSize => 'Increase font size';
+
+  @override
+  String readerFontSizeValue(int size) {
+    return '${size}px';
+  }
+
+  @override
+  String get readerLineSpacingLabel => 'Line spacing';
+
+  @override
+  String readerLineSpacingValue(String spacing) {
+    return '$spacing×';
+  }
+
+  @override
+  String get readerThemeCycle => 'Reading theme';
+
+  @override
+  String get readerThemeLight => 'Light';
+
+  @override
+  String get readerThemeDark => 'Dark';
+
+  @override
+  String get readerThemeSepia => 'Sepia';
+
+  @override
+  String get readerZoomOut => 'Zoom out';
+
+  @override
+  String get readerZoomIn => 'Zoom in';
+
+  @override
+  String get readerFitWidth => 'Fit width';
+
+  @override
+  String get readerFitPage => 'Fit page';
+
+  @override
+  String get readerPageInputLabel => 'Page';
+
+  @override
+  String readerPageOf(int total) {
+    return 'of $total';
+  }
+
+  @override
+  String readerPageInputInvalid(int total) {
+    return 'Enter a page between 1 and $total.';
+  }
+
+  @override
+  String get readerSaved => '★ Saved';
+
+  @override
+  String get readerBookmark => '☆ Bookmark';
+
+  @override
+  String get readerOpenBook => 'Open book';
+
+  @override
+  String get readerSearchAction => 'Search';
+
+  @override
+  String get readerSearchPlaceholder => 'Search in document…';
+
+  @override
+  String get readerNoResults => 'No results';
+
+  @override
+  String readerSearchCount(int current, int total) {
+    return '$current / $total';
+  }
+
+  @override
+  String get readerPreviousResult => 'Previous result';
+
+  @override
+  String get readerNextResult => 'Next result';
+
+  @override
+  String get readerCloseSearch => 'Close search';
+
+  @override
+  String get noticeReaderExportSucceeded => 'Bookmarks copied as Markdown';
+
+  @override
+  String get noticeReaderExportFailed => 'Bookmarks could not be exported';
 }
