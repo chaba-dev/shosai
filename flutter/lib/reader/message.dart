@@ -18,9 +18,27 @@ final class ReaderLayoutChanged extends ReaderMessage {
 }
 
 final class ReaderViewportChanged extends ReaderMessage {
-  const ReaderViewportChanged(this.layout);
+  const ReaderViewportChanged(this.layout, {this.height});
 
   final ReaderLayout layout;
+
+  /// The reported content-box height, when the reporter could measure it.
+  ///
+  /// Real EPUB pagination needs a page height; the retained width-based layout
+  /// key is unchanged, and a document that has no reported height is served by
+  /// the retained renderer rather than paginated for a guessed box.
+  final double? height;
+}
+
+/// Steps the reader's page by [delta] (±1) (RD-06 edge navigation).
+///
+/// On the Dart EPUB path this turns a page inside the chapter and only crosses
+/// into the neighbouring chapter at a chapter edge. Every other document and
+/// the retained EPUB path keep the logical-unit semantics of
+/// [ReaderUnitRequested].
+final class ReaderPageStepRequested extends ReaderMessage {
+  const ReaderPageStepRequested(this.delta);
+  final int delta;
 }
 
 final class ReaderUnitRequested extends ReaderMessage {
@@ -614,6 +632,52 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
   final int? length;
   final String? selectionError;
   final String? annotationError;
+}
+
+/// One installed page window of the Dart EPUB renderer.
+///
+/// The effect reports the page it wants installed (by canonical scalar); the
+/// controller derives the window from the session it owns, so a completion
+/// cannot install a page from a session the controller has already retired.
+final class _ReaderEpubPageLoaded extends ReaderMessage {
+  const _ReaderEpubPageLoaded({
+    required this.generation,
+    required this.revision,
+    required this.cancellation,
+    required this.unit,
+    required this.scalar,
+    required this.layout,
+    required this.height,
+    required this.annotations,
+    required this.replaceReadingOffset,
+    this.offset,
+    this.length,
+    this.annotationError,
+    this.session,
+    this.sessionKey,
+  });
+
+  final int generation;
+  final int revision;
+  final BigInt cancellation;
+  final int unit;
+  final int scalar;
+  final ReaderLayout layout;
+  final double height;
+  final List<FlutterAnnotation> annotations;
+  final bool replaceReadingOffset;
+  final int? offset;
+  final int? length;
+  final String? annotationError;
+
+  /// The replacement chapter session this page was measured from, when the
+  /// relayout built one. The handler adopts it together with the page; a page
+  /// that is superseded before installing never adopts it, and the effect that
+  /// created it releases it.
+  final ChapterLayoutSession? session;
+
+  /// The layout key [session] was measured for.
+  final _EpubLayoutKey? sessionKey;
 }
 
 final class _ReaderRelayoutFailed extends ReaderMessage {

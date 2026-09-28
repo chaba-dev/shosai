@@ -64,6 +64,13 @@ pub const MAX_BRIDGE_PATH_KEY_BYTES: usize = 64 * 1024;
 // text at peak. Limiting PDF text to 2 MiB keeps the conservative 144 MiB
 // reservation below the process-wide transient buffer budget on 64-bit hosts.
 const MAX_ANNOTATION_PDF_TEXT_BYTES: usize = 2 * 1024 * 1024;
+/// Ceiling for the EPUB archive bytes handed to the Dart content service.
+///
+/// The service needs the source archive to parse and normalize a chapter
+/// itself. A document above this ceiling stays on the retained services; the
+/// accessor is a bounded read of the file the document was opened from, not a
+/// second storage owner.
+pub const MAX_BRIDGE_EPUB_SOURCE_BYTES: usize = 256 * 1024 * 1024;
 const ANNOTATION_RESOLUTION_WORKSPACE_BYTES: u32 = 144 * 1024 * 1024;
 const ANNOTATION_GEOMETRY_WORKSPACE_BYTES: u32 = 8 * 1024 * 1024;
 
@@ -2814,6 +2821,64 @@ impl Bridge {
         Ok(extracted.surface)
     }
 
+    /// The EPUB archive bytes the document was opened from.
+    ///
+    /// The Dart EPUB content service parses and normalizes chapters from the
+    /// same source the retained services opened; resolving and reading that
+    /// source stays here, so no other component decides which file a document
+    /// refers to. Transfer is bounded by [`MAX_BRIDGE_EPUB_SOURCE_BYTES`].
+    pub async fn epub_source_bytes(
+        &self,
+        document: DocumentHandle,
+        cancellation: Cancellation,
+    ) -> Result<Vec<u8>, BridgeError> {
+        check_cancelled(&cancellation)?;
+        let retained = self.document(document)?;
+        if !matches!(retained.document, OpenDocument::Epub(_)) {
+            return Err(BridgeError::UnsupportedOperation(
+                retained.document.format(),
+            ));
+        }
+        let path = crate::path_from_key(&retained.local_path);
+        let owned = cancellation.clone();
+        tokio::task::spawn_blocking(move || {
+            let is_cancelled = || owned.is_cancelled();
+            read_bounded_epub_source(&path, &is_cancelled)
+        })
+        .await
+        .map_err(|_| BridgeError::Worker)?
+    }
+
+    /// One EPUB chapter's canonical text, in the retained `search_text()` order.
+    ///
+    /// This is the parity reference for offsets that Rust still stores. It
+    /// returns the same bounded stream the retained selection layout uses, so
+    /// an EPUB content service can prove its chapter offsets before it serves
+    /// them, without producing pixels or a selection surface.
+    pub async fn epub_canonical_text(
+        &self,
+        document: DocumentHandle,
+        unit: usize,
+        cancellation: Cancellation,
+    ) -> Result<String, BridgeError> {
+        check_cancelled(&cancellation)?;
+        let retained = self.document(document)?;
+        let is_cancelled = || cancellation.is_cancelled();
+        match &retained.document {
+            OpenDocument::Epub(epub) => {
+                let chapter =
+                    epub.presentation()
+                        .chapter(unit)
+                        .ok_or(BridgeError::InvalidPage {
+                            page: unit,
+                            page_count: epub.chapter_count(),
+                        })?;
+                bounded_epub_selection_text(chapter.search_text(), &is_cancelled)
+            }
+            other => Err(BridgeError::UnsupportedOperation(other.format())),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn extract_selection(
         &self,
@@ -3562,6 +3627,40 @@ fn selection_retained_byte_len(surface: &SelectionSurface) -> Result<usize, Brid
         })
         .and_then(|bytes| bytes.checked_add(vectors))
         .ok_or(BridgeError::BufferLimit)
+}
+
+/// Read an EPUB source file into memory, bounded and cancellable.
+fn read_bounded_epub_source(
+    path: &std::path::Path,
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<u8>, BridgeError> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path).map_err(|error| BridgeError::Open {
+        format: BookFormat::Epub,
+        detail: format!("failed to read the EPUB source: {error}"),
+    })?;
+    let mut reader = file.take((MAX_BRIDGE_EPUB_SOURCE_BYTES + 1) as u64);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut bytes = Vec::new();
+    loop {
+        if is_cancelled() {
+            return Err(BridgeError::Cancelled);
+        }
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| BridgeError::Open {
+                format: BookFormat::Epub,
+                detail: format!("failed to read the EPUB source: {error}"),
+            })?;
+        if read == 0 {
+            return Ok(bytes);
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if bytes.len() > MAX_BRIDGE_EPUB_SOURCE_BYTES {
+            return Err(BridgeError::DocumentLimit);
+        }
+    }
 }
 
 fn bounded_epub_selection_text(
@@ -5083,6 +5182,119 @@ mod tests {
         .await
         .expect("detached annotation conversion must release request admission");
         assert_eq!(admission.request_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn epub_content_accessors_serve_the_source_and_the_retained_canonical_stream() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("accessors.epub");
+        let bytes = epub_with_body("<h1>Chapter</h1><p>lead target tail</p><p>second block</p>");
+        std::fs::write(&path, &bytes).unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("annotations.sqlite"));
+        let document = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "accessors".into(),
+                    path_key: crate::path_key::path_key(&path),
+                    format_hint: Some(BookFormat::Epub),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let source = bridge
+            .epub_source_bytes(document.handle, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(source, bytes);
+
+        let canonical = bridge
+            .epub_canonical_text(document.handle, 0, Cancellation::new())
+            .await
+            .unwrap();
+        assert!(!canonical.is_empty());
+        assert!(canonical.contains("lead target tail"));
+        let surface = bridge
+            .selection_surface(document.handle, 0, 1.0, 680.0, 18.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            canonical, surface.text,
+            "the accessor returns the same canonical stream the selection layout uses"
+        );
+        assert!(bridge.release_buffer(surface.raster.unwrap().handle));
+        assert!(bridge.release_selection(surface.handle));
+
+        assert!(matches!(
+            bridge
+                .epub_canonical_text(document.handle, 7, Cancellation::new())
+                .await,
+            Err(BridgeError::InvalidPage { page: 7, .. })
+        ));
+
+        let cancelled = Cancellation::new();
+        cancelled.cancel();
+        assert_eq!(
+            bridge
+                .epub_source_bytes(document.handle, cancelled.clone())
+                .await,
+            Err(BridgeError::Cancelled)
+        );
+        assert_eq!(
+            bridge
+                .epub_canonical_text(document.handle, 0, cancelled)
+                .await,
+            Err(BridgeError::Cancelled)
+        );
+
+        let pdf = bridge
+            .open_document(pdf_request(), Cancellation::new())
+            .await
+            .unwrap();
+        assert!(matches!(
+            bridge
+                .epub_source_bytes(pdf.handle, Cancellation::new())
+                .await,
+            Err(BridgeError::UnsupportedOperation(BookFormat::Pdf))
+        ));
+        assert!(matches!(
+            bridge
+                .epub_canonical_text(pdf.handle, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::UnsupportedOperation(BookFormat::Pdf))
+        ));
+    }
+
+    #[tokio::test]
+    async fn epub_canonical_text_shares_the_selection_stream_ceiling() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oversized.epub");
+        std::fs::write(
+            &path,
+            epub_with_body(&"x".repeat(EPUB_TEXT_MAX_SCALARS + 1)),
+        )
+        .unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("annotations.sqlite"));
+        let document = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "oversized".into(),
+                    path_key: crate::path_key::path_key(&path),
+                    format_hint: Some(BookFormat::Epub),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge
+                .epub_canonical_text(document.handle, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::BufferLimit)
+        );
     }
 
     #[tokio::test]

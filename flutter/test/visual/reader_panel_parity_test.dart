@@ -184,7 +184,7 @@ void main() {
       // The document check reads the Rust chapter raster itself, so chrome,
       // edge-navigation glyphs, the search bar or the note dialog's scrim can
       // never be mistaken for document content.
-      final documentInk = await _documentRasterInk(tester);
+      final documentInk = await _documentBandInk(tester);
       Map<String, Object?>? deleteInk;
       // The note-editor capture shows the modal dialog over the panel, so its
       // crop would measure the scrim rather than the control.
@@ -222,15 +222,14 @@ void main() {
           'state': capture.stateDerivation,
           'fixturePresentation': capture.fixturePresentation,
           'documentCapability':
-              'real Rust chapter surface; no page box/spread/footer '
-              '(5A/5B/5G/5H). Disclosed document-font gap, observed in these '
-              'captures: a document that declares no font faces gets only the '
-              'rasterizer\'s math fallback, so Latin text paints legibly '
-              '(slow-rivers.epub) while Japanese text paints missing-glyph '
-              'boxes (mizu-no-kioku.epub). The missing capability is document '
-              'fallback-font registration/coverage for CJK, not interface-font '
-              'mapping (typography.md keeps the book-content role separate); '
-              'owned by 5C (FM-22) and not hidden by this capture',
+              'the document area is painted by the reader document renderer '
+              '(the Dart EPUB page window for a routed chapter, the retained '
+              'Rust chapter surface otherwise); no page box/spread/footer '
+              '(5A/5B/5G/5H). The retained rasterizer\'s disclosed CJK '
+              'fallback gap (5C/FM-22) is what the Dart renderer closes for a '
+              'routed chapter: it lays text out with the bundled document '
+              'family, so Japanese text paints real glyphs instead of '
+              'missing-glyph boxes',
           'referenceRow': capture.referenceRow,
           'flutterGeometry': geometry,
           'spacingComparison': spacing,
@@ -716,11 +715,28 @@ bool _ready(WidgetTester tester, _Capture capture) {
       .enabled;
 }
 
+/// Whether the control at [finder] is enabled.
+bool _controlEnabled(WidgetTester tester, Finder finder) {
+  if (finder.evaluate().isEmpty) return false;
+  final button = find.descendant(of: finder, matching: find.byType(ShadButton));
+  if (button.evaluate().isEmpty) return false;
+  return tester.widget<ShadButton>(button).enabled;
+}
+
 Future<void> _openPanel(WidgetTester tester, _Capture capture) async {
   await tester.tap(find.byKey(ValueKey('reader-header-${capture.panel.name}')));
   await pumpHarnessFrames(tester, frames: 4);
   if (capture.searchQuery case final query?) {
-    await tester.tap(find.byKey(const ValueKey('reader-more-search')));
+    // Opening the panel changes the document box, so the reader re-lays the
+    // chapter out and disables its controls until the new page lands. Wait
+    // (bounded) for the control to be enabled before tapping it: the same
+    // settle the other captures use for their own delayed state.
+    final search = find.byKey(const ValueKey('reader-more-search'));
+    for (var round = 0; round < 8; round += 1) {
+      if (_controlEnabled(tester, search)) break;
+      await _settleNative(tester, rounds: 1);
+    }
+    await tester.tap(search);
     await pumpHarnessFrames(tester, frames: 2);
     await tester.enterText(
       find.byKey(const ValueKey('reader-search-input')),
@@ -940,32 +956,42 @@ Map<String, Object?> _flutterGeometry(WidgetTester tester, _Capture capture) {
 bool _isInk(int r, int g, int b) =>
     (0.2126 * r + 0.7152 * g + 0.0722 * b) < 170;
 
-/// Ink pixels in the document raster the reader paints.
+/// Ink pixels in the rendered document area.
 ///
-/// The reader paints its Rust chapter surface through [PagePainter]; measuring
-/// that image (not the composed frame) proves the document itself has content,
-/// so a blank raster fails while the surrounding chrome stays irrelevant.
-Future<int> _documentRasterInk(WidgetTester tester) async {
-  PagePainter? painter;
-  for (final paint in tester.widgetList<CustomPaint>(
-    find.byType(CustomPaint),
-  )) {
-    final candidate = paint.painter;
-    if (candidate is PagePainter && candidate.image != null) {
-      painter = candidate;
-      break;
+/// The document area is the reader's own page box, painted by whichever
+/// document renderer is active (the Dart EPUB page window for a routed
+/// chapter, the retained Rust chapter surface otherwise); measuring the
+/// captured frame inside that box proves the document itself has content, so a
+/// blank page fails while the surrounding chrome stays irrelevant.
+/// The document area is the reader's own page box, painted by whichever
+/// document renderer is active (the Dart EPUB page window for a routed
+/// chapter, the retained Rust chapter surface otherwise).
+///
+/// The measurement reads the page box's own repaint boundary rather than the
+/// composed frame: a selection overlay, a panel or a dialog that happens to sit
+/// inside the same rectangle cannot supply ink for a blank document, so the
+/// assertion is about the document's paint, not the screen's.
+Future<int> _documentBandInk(WidgetTester tester) async {
+  final boundary = tester.renderObject<RenderRepaintBoundary>(
+    find.byKey(const ValueKey('reader-page-paint')),
+  );
+  final data = await tester.runAsync(() async {
+    final image = await boundary.toImage();
+    try {
+      return await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    } finally {
+      image.dispose();
     }
-  }
-  expect(
-    painter,
-    isNotNull,
-    reason: 'the reader paints a document raster (PagePainter with an image)',
+  });
+  final rgba = data!.buffer.asUint8List();
+  return regionInk(
+    HarnessImage(
+      width: boundary.size.width.round(),
+      height: boundary.size.height.round(),
+      rgba: rgba,
+    ),
+    rect: Rect.fromLTWH(0, 0, boundary.size.width, boundary.size.height),
   );
-  final image = painter!.image!;
-  final data = await tester.runAsync(
-    () => image.toByteData(format: ui.ImageByteFormat.rawRgba),
-  );
-  return _inkPixels(data!.buffer.asUint8List());
 }
 
 /// Ink pixels in raw RGBA bytes.

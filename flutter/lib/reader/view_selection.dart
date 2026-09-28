@@ -149,6 +149,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
     required this.document,
     required this.surface,
     required this.image,
+    required this.epubPage,
     required this.model,
     required this.dispatch,
   });
@@ -164,6 +165,10 @@ class _ReachableSelectableSurface extends StatelessWidget {
   final FlutterDocumentSummary document;
   final FlutterSelectionSurface surface;
   final ui.Image? image;
+
+  /// The Dart-engine page window whose slices are painted, or null when the
+  /// surface is the retained renderer's raster.
+  final ReaderEpubPage? epubPage;
   final ReaderModel model;
   final void Function(ReaderMessage) dispatch;
 
@@ -187,9 +192,11 @@ class _ReachableSelectableSurface extends StatelessWidget {
                   model.unit,
                   surface.handle.registry,
                   surface.handle.id,
+                  epubPage?.pageIndex,
                 )),
                 surface: surface,
                 image: image,
+                epubPage: epubPage,
                 model: model,
                 fit: fit,
                 dispatch: dispatch,
@@ -289,11 +296,43 @@ class _ContentSizeProbeState extends State<_ContentSizeProbe> {
   );
 }
 
+/// Paints one Dart-engine page window's slices.
+///
+/// The painters are the measured ones the page's own selection surface was
+/// built from, so what is painted and what a pointer addresses cannot drift.
+class ReaderEpubPageContentPainter extends CustomPainter {
+  const ReaderEpubPageContentPainter({required this.page, required this.fit});
+
+  final ReaderEpubPage page;
+  final BoxFit fit;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final source = Rect.fromLTWH(
+      0,
+      0,
+      page.box.size.width,
+      page.box.size.height,
+    );
+    final transform = SurfaceTransform.create(fit, source.size, size);
+    canvas.save();
+    transform.apply(canvas);
+    canvas.drawRect(source, Paint()..color = page.palette.background);
+    paintPageSlices(canvas, page.page, page.palette, page.box);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(ReaderEpubPageContentPainter oldDelegate) =>
+      oldDelegate.page != page || oldDelegate.fit != fit;
+}
+
 class _SelectableSurface extends StatefulWidget {
   const _SelectableSurface({
     super.key,
     required this.surface,
     required this.image,
+    required this.epubPage,
     required this.model,
     required this.fit,
     required this.dispatch,
@@ -301,6 +340,9 @@ class _SelectableSurface extends StatefulWidget {
 
   final FlutterSelectionSurface surface;
   final ui.Image? image;
+
+  /// The Dart-engine page window to paint, or null for the retained raster.
+  final ReaderEpubPage? epubPage;
   final ReaderModel model;
   final BoxFit fit;
   final void Function(ReaderMessage) dispatch;
@@ -356,6 +398,22 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
           return closest;
         }
 
+        final epubPage = widget.epubPage;
+        final contentPainter = epubPage == null
+            ? _PageContentPainter(
+                image: widget.image,
+                surface: widget.surface,
+                backgroundColor: pageColors(
+                  widget.model.typography.theme,
+                ).background,
+                foregroundColor: pageColors(
+                  widget.model.typography.theme,
+                ).foreground,
+                recolorImage:
+                    widget.model.document?.format == FlutterBookFormat.epub,
+                fit: widget.fit,
+              )
+            : ReaderEpubPageContentPainter(page: epubPage, fit: widget.fit);
         return Listener(
           key: const ValueKey('reader-selection-surface'),
           behavior: HitTestBehavior.opaque,
@@ -473,22 +531,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                   key: const ValueKey('reader-page-paint'),
                   child: KeyedSubtree(
                     key: ValueKey('reader-fit-${widget.fit.name}'),
-                    child: CustomPaint(
-                      painter: _PageContentPainter(
-                        image: widget.image,
-                        surface: widget.surface,
-                        backgroundColor: pageColors(
-                          widget.model.typography.theme,
-                        ).background,
-                        foregroundColor: pageColors(
-                          widget.model.typography.theme,
-                        ).foreground,
-                        recolorImage:
-                            widget.model.document?.format ==
-                            FlutterBookFormat.epub,
-                        fit: widget.fit,
-                      ),
-                    ),
+                    child: CustomPaint(painter: contentPainter),
                   ),
                 ),
                 CustomPaint(

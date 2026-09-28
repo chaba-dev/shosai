@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -9,6 +10,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/main.dart';
+import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 /// Test support for rendering and inspecting the production shell.
@@ -402,6 +404,9 @@ class HarnessBridge implements FlutterBridge {
 
   int pageCalls = 0;
   int surfaceCalls = 0;
+
+  /// The layouts the reader asked the bridge to lay out, in call order.
+  final List<ReaderLayout> selectionLayouts = <ReaderLayout>[];
   int coverCalls = 0;
   int importCalls = 0;
   int removeCalls = 0;
@@ -550,12 +555,25 @@ class HarnessBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async => const [];
 
+  /// Pending annotation-list answers, consumed before the immediate empty list.
+  ///
+  /// A test uses one to hold a relayout open between its session creation and
+  /// its page installation, which is the window a superseding relayout must not
+  /// dispose the installed session in.
+  final List<Completer<List<FlutterAnnotation>>> annotationListCompleters =
+      <Completer<List<FlutterAnnotation>>>[];
+
   @override
   Future<List<FlutterAnnotation>> listAnnotations({
     required FlutterDocumentHandle document,
     required double scale,
     required BigInt cancellationId,
-  }) async => const [];
+  }) async {
+    if (annotationListCompleters.isNotEmpty) {
+      return annotationListCompleters.removeAt(0).future;
+    }
+    return const [];
+  }
 
   @override
   Future<FlutterSelectionSurface> selectionSurface({
@@ -568,6 +586,14 @@ class HarnessBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     surfaceCalls += 1;
+    selectionLayouts.add(
+      ReaderLayout(
+        scale: scale,
+        width: width,
+        fontSize: fontSize,
+        lineSpacing: lineSpacing,
+      ),
+    );
     final format = _documentFormats[document.id] ?? FlutterBookFormat.pdf;
     return FlutterSelectionSurface(
       handle: FlutterSelectionHandle(registry: BigInt.one, id: unit),
@@ -585,6 +611,62 @@ class HarnessBridge implements FlutterBridge {
     );
   }
 
+  /// The EPUB archive bytes the harness serves for an open document.
+  ///
+  /// Empty by default: a harness reader without EPUB bytes keeps every chapter
+  /// on the retained renderer, which is what the existing surface fixtures
+  /// exercise.
+  Uint8List epubBytes = Uint8List(0);
+
+  /// The canonical stream the harness reports per unit, when the Dart engine
+  /// path asks for the comparison.
+  Map<int, String> canonicalTexts = const {};
+
+  int epubSourceCalls = 0;
+  int epubCanonicalCalls = 0;
+
+  /// Pending canonical-stream answers, consumed before [canonicalTexts].
+  ///
+  /// A test uses one to hold the comparison open while it supersedes the
+  /// layout that started it (a resize), which is how the retry path is
+  /// exercised.
+  final List<Completer<String>> epubCanonicalCompleters = <Completer<String>>[];
+
+  @override
+  Future<Uint8List> epubSourceBytes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) async {
+    epubSourceCalls += 1;
+    if (epubBytes.isEmpty) {
+      throw FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.limitExceeded,
+        message: 'the harness serves no EPUB archive',
+      );
+    }
+    return epubBytes;
+  }
+
+  @override
+  Future<String> epubCanonicalText({
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required BigInt cancellationId,
+  }) async {
+    epubCanonicalCalls += 1;
+    if (epubCanonicalCompleters.isNotEmpty) {
+      return epubCanonicalCompleters.removeAt(0).future;
+    }
+    final text = canonicalTexts[unit.toInt()];
+    if (text == null) {
+      throw FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.invalidRequest,
+        message: 'the harness has no canonical text for unit $unit',
+      );
+    }
+    return text;
+  }
+
   @override
   Future<FlutterRenderedBuffer> renderPage({
     required FlutterDocumentHandle document,
@@ -596,28 +678,54 @@ class HarnessBridge implements FlutterBridge {
     return _rasterFor(page.toInt());
   }
 
+  /// The buffer handles the reader took, and the ones it released.
+  ///
+  /// The reader owns a handle once the bridge hands it one; a test asserts the
+  /// ownership is complete (every taken handle released) and honest (nothing
+  /// released that the reader was never given).
+  final List<FlutterBufferHandle> takenBuffers = <FlutterBufferHandle>[];
+  final List<FlutterBufferHandle> releasedBuffers = <FlutterBufferHandle>[];
+  final List<FlutterSelectionHandle> releasedSelections =
+      <FlutterSelectionHandle>[];
+  final List<FlutterDocumentHandle> releasedDocuments =
+      <FlutterDocumentHandle>[];
+
   @override
-  Uint8List takeBuffer({required FlutterBufferHandle handle}) =>
-      _buffers[handle.id] ?? Uint8List(0);
+  Uint8List takeBuffer({required FlutterBufferHandle handle}) {
+    takenBuffers.add(handle);
+    return _buffers[handle.id] ?? Uint8List(0);
+  }
 
   @override
   bool releaseBuffer({required FlutterBufferHandle handle}) {
+    releasedBuffers.add(handle);
     _buffers.remove(handle.id);
     return true;
   }
 
   @override
-  bool releaseDocument({required FlutterDocumentHandle handle}) => true;
+  bool releaseDocument({required FlutterDocumentHandle handle}) {
+    releasedDocuments.add(handle);
+    return true;
+  }
 
   @override
-  bool releaseSelection({required FlutterSelectionHandle handle}) => true;
+  bool releaseSelection({required FlutterSelectionHandle handle}) {
+    releasedSelections.add(handle);
+    return true;
+  }
+
+  /// Reading states the reader saved, in order.
+  final List<FlutterReadingState> savedReadingStates = <FlutterReadingState>[];
 
   @override
   Future<void> saveReadingState({
     required int bookId,
     required FlutterReadingState value,
     required BigInt unitCount,
-  }) async {}
+  }) async {
+    savedReadingStates.add(value);
+  }
 
   @override
   Future<List<FlutterSearchMatch>> searchDocument({
@@ -651,6 +759,9 @@ class HarnessBridge implements FlutterBridge {
   @override
   Future<void> deleteBookmark({required int id}) async {}
 
+  /// The ranges the reader asked to persist, in call order.
+  final List<(BigInt, BigInt, BigInt)> createdRanges = [];
+
   @override
   Future<FlutterAnnotation> createAnnotation({
     required FlutterDocumentHandle document,
@@ -661,13 +772,16 @@ class HarnessBridge implements FlutterBridge {
     required FlutterHighlightColor color,
     String? body,
     required BigInt cancellationId,
-  }) async => FlutterAnnotation(
-    id: 'harness',
-    unit: unit,
-    resolution: FlutterAnnotationResolution.exact,
-    color: color,
-    body: body,
-  );
+  }) async {
+    createdRanges.add((unit, start, end));
+    return FlutterAnnotation(
+      id: 'harness',
+      unit: unit,
+      resolution: FlutterAnnotationResolution.exact,
+      color: color,
+      body: body,
+    );
+  }
 
   @override
   Future<bool> updateAnnotation({
@@ -1781,11 +1895,86 @@ bool harnessImagesReady(WidgetTester tester) {
 ///
 /// An open document paints its page through [PagePainter] rather than
 /// [RawImage], and shows a progress indicator until the raster arrives.
-bool harnessReaderPageReady(WidgetTester tester) => tester
-    .widgetList<CustomPaint>(find.byType(CustomPaint))
-    .map((paint) => paint.painter)
-    .whereType<PagePainter>()
-    .any((painter) => painter.image != null);
+/// Ink pixels inside [rect] of a captured frame.
+///
+/// A pixel counts as ink when its luminance deviates from the region's modal
+/// color (its paper) by more than [threshold], which holds in every reader
+/// palette — dark ink on light paper, or light ink on the dark palette — while
+/// a blank region measures zero. The region is the reader's own page box, so
+/// the measurement follows whichever renderer painted the document (the
+/// retained Rust raster, or the Dart EPUB page window).
+int regionInk(HarnessImage image, {required Rect rect, int threshold = 8}) {
+  final left = rect.left.floor().clamp(0, image.width - 1);
+  final right = rect.right.ceil().clamp(left + 1, image.width);
+  final top = rect.top.floor().clamp(0, image.height - 1);
+  final bottom = rect.bottom.ceil().clamp(top + 1, image.height);
+  final histogram = <int, int>{};
+  for (var y = top; y < bottom; y += 1) {
+    for (var x = left; x < right; x += 1) {
+      final index = (y * image.width + x) * 4;
+      final luma = _lumaOf(
+        image.rgba[index],
+        image.rgba[index + 1],
+        image.rgba[index + 2],
+      );
+      histogram[luma] = (histogram[luma] ?? 0) + 1;
+    }
+  }
+  if (histogram.isEmpty) return 0;
+  var paper = 0;
+  var best = -1;
+  for (final entry in histogram.entries) {
+    if (entry.value > best) {
+      best = entry.value;
+      paper = entry.key;
+    }
+  }
+  var count = 0;
+  for (var y = top; y < bottom; y += 1) {
+    for (var x = left; x < right; x += 1) {
+      final index = (y * image.width + x) * 4;
+      final luma = _lumaOf(
+        image.rgba[index],
+        image.rgba[index + 1],
+        image.rgba[index + 2],
+      );
+      if ((luma - paper).abs() > threshold) count += 1;
+    }
+  }
+  return count;
+}
+
+int _lumaOf(int r, int g, int b) =>
+    (0.2126 * r + 0.7152 * g + 0.0722 * b).round();
+
+/// Whether the reader's page has settled.
+///
+/// A raster page must be painted, and — when [surfaceWidth] is supplied — it
+/// must be the surface the bridge was last asked for. A reader that is still
+/// converging (an open whose first layout used the placeholder width, followed
+/// by the report-driven relayout) paints the older surface until the newer
+/// completion lands; capturing then would record a frame the reader has already
+/// superseded.
+bool harnessReaderPageReady(WidgetTester tester, {double? surfaceWidth}) {
+  final painters = tester
+      .widgetList<CustomPaint>(find.byType(CustomPaint))
+      .map((paint) => paint.painter)
+      .toList();
+  for (final painter in painters.whereType<PagePainter>()) {
+    if (painter.image == null) continue;
+    if (surfaceWidth != null && painter.surface.width != surfaceWidth) continue;
+    return true;
+  }
+  // The Dart EPUB renderer paints its page window with its own painter instead
+  // of the retained raster; a page window is a painted page too.
+  for (final painter in painters.whereType<ReaderEpubPageContentPainter>()) {
+    if (surfaceWidth != null && painter.page.box.size.width != surfaceWidth) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
 
 /// Thrown when a harness render never became ready.
 class HarnessNotReadyException implements Exception {

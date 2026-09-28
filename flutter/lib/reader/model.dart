@@ -418,6 +418,7 @@ final class ReaderModel {
     this.unit = 0,
     this.readingOffset,
     this.pageImage,
+    this.epubPage,
     FlutterSelectionSurface? selectionSurface,
     this.selectionPhase = ReaderSelectionPhase.idle,
     this.anchor,
@@ -488,6 +489,10 @@ final class ReaderModel {
   /// Durable document location. Selection endpoints are intentionally separate.
   final int? readingOffset;
   final ui.Image? pageImage;
+
+  /// The Dart-engine page window currently rendered, or null when the page is
+  /// the retained renderer's raster.
+  final ReaderEpubPage? epubPage;
   final FlutterSelectionSurface? selectionSurface;
   final ReaderSelectionPhase selectionPhase;
   final int? anchor;
@@ -595,6 +600,7 @@ final class ReaderModel {
     int? unit,
     Object? readingOffset = _unchanged,
     Object? pageImage = _unchanged,
+    Object? epubPage = _unchanged,
     Object? selectionSurface = _unchanged,
     ReaderSelectionPhase? selectionPhase,
     Object? anchor = _unchanged,
@@ -653,6 +659,9 @@ final class ReaderModel {
       pageImage: identical(pageImage, _unchanged)
           ? this.pageImage
           : pageImage as ui.Image?,
+      epubPage: identical(epubPage, _unchanged)
+          ? this.epubPage
+          : epubPage as ReaderEpubPage?,
       selectionSurface: identical(selectionSurface, _unchanged)
           ? this.selectionSurface
           : selectionSurface as FlutterSelectionSurface?,

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:test/test.dart';
+import 'package:xml/xml.dart';
 
 /// Ports of production Rust parser assertions
 /// (`crates/shosai-core/src/epub/render.rs` tests) plus fixture checks.
@@ -17,6 +18,10 @@ void main() {
     stylesheets: const [],
     limits: const EpubLimits(),
   );
+
+  /// The bounded MathML parse of [source], the way an XHTML chapter reaches it.
+  EpubMath findMath(String source) =>
+      parseMath(XmlDocument.parse(source).rootElement, const EpubLimits());
 
   group('canonical stream and anchors', () {
     test('chapter anchors follow search text character offsets', () {
@@ -261,6 +266,106 @@ void main() {
       expect(text, contains('π'));
       expect(text, isNot(contains(r'\pi')));
     });
+
+    // Rust: `crates/shosai-core/src/epub/math.rs`
+    // `malformed_supported_constructs_use_source_order_fallback`. A malformed
+    // supported construct falls back to its source-order children text; it is
+    // not reported as unsupported, and its direct text is preserved.
+    test('malformed supported constructs use source-order fallback', () {
+      final fraction = findMath(
+        '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+        '<mfrac>before<mi>a</mi><mi>b</mi>after</mfrac></math>',
+      );
+      expect(fraction.expression, isNull);
+      expect(fraction.fallback, 'before a b after');
+
+      final nestedToken = findMath(
+        '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+        '<mi>before<mtext>inside</mtext>after</mi></math>',
+      );
+      expect(nestedToken.expression, isNull);
+      expect(nestedToken.fallback, 'before inside after');
+
+      final semanticsText = findMath(
+        '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+        '<semantics>before<mi>x</mi>'
+        '<annotation>ignored</annotation></semantics></math>',
+      );
+      expect(semanticsText.expression, isNull);
+      expect(semanticsText.fallback, '[math expression omitted]');
+    });
+
+    // Rust: `malformed_supported_constructs_use_source_order_fallback` covers
+    // the same rule for a construct with too few children. The conformance
+    // fixture `mathml.epub` chapter 16 carries
+    // `<m:mfrac id="malformed-fallback"><m:mn>1</m:mn></m:mfrac>`.
+    test('an mfrac missing its denominator falls back to its child', () {
+      final fraction = findMath(
+        '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+        '<mfrac><mn>1</mn></mfrac></math>',
+      );
+      expect(fraction.expression, isNull);
+      expect(fraction.fallback, '1');
+    });
+
+    // Rust: `crates/shosai-core/src/epub/math.rs` `trimmed_direct_text_bytes`
+    // charges UTF-8 bytes, and the budget also counts the denominator's single
+    // byte: 511 two-byte characters fill 1023 of the 1024 bytes and are
+    // admitted, while 512 need 1025 and are refused. Counting UTF-16 units
+    // would admit the 512-character node.
+    test('the visible-text budget counts UTF-8 bytes', () {
+      final accepted = findMath(
+        '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+        '<mfrac><mn>${List.filled(511, 'π').join()}</mn><mn>2</mn></mfrac>'
+        '</math>',
+      );
+      expect(accepted.expression, isNotNull);
+
+      final refused = findMath(
+        '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+        '<mfrac><mn>${List.filled(512, 'π').join()}</mn><mn>2</mn></mfrac>'
+        '</math>',
+      );
+      expect(refused.expression, isNull);
+      expect(refused.fallback, '[math expression omitted]');
+    });
+
+    // Rust: `bounded_math_model_retains_supported_structure_and_fallback`.
+    test('fenced matrix uses production separators', () {
+      final matrix = findMath(
+        '<math display="block" xmlns="http://www.w3.org/1998/Math/MathML">'
+        '<mfenced><mtable><mtr><mtd><mi>a</mi></mtd>'
+        '<mtd><msqrt><mi>b</mi></msqrt></mtd></mtr></mtable></mfenced></math>',
+      );
+      expect(matrix.display, EpubMathDisplay.block);
+      expect(matrix.expression, isNotNull);
+      expect(matrix.fallback, '(a sqrt(b))');
+    });
+
+    // Rust: `unsupported_fallback_preserves_direct_text_in_source_order` and
+    // the `menclose` arm of
+    // `unsupported_and_malformed_math_keep_readable_bounded_fallback`. The
+    // production fallback joins every row and cell with one space, so a
+    // multi-row table has no row separator of its own.
+    test(
+      'unsupported constructs keep source order and join rows with one space',
+      () {
+        final unsupported = findMath(
+          '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+          '<menclose>before<mtext>inside</mtext>after</menclose></math>',
+        );
+        expect(unsupported.expression, isNull);
+        expect(unsupported.fallback, 'before inside after');
+
+        final table = findMath(
+          '<math xmlns="http://www.w3.org/1998/Math/MathML"><mtable>'
+          '<mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd></mtr>'
+          '<mtr><mtd><mi>c</mi></mtd><mtd><mi>d</mi></mtd></mtr>'
+          '</mtable></math>',
+        );
+        expect(table.fallback, 'a b c d');
+      },
+    );
   });
 
   group('fixtures', () {

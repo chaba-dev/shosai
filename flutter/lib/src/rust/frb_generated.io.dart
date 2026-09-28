@@ -2237,6 +2237,86 @@ class RustLibWire implements BaseWire {
       _wire__crate__api__FlutterBridge_delete_bookmarkPtr
           .asFunction<void Function(int, int, int)>();
 
+  void wire__crate__api__FlutterBridge_epub_canonical_text(
+    int port_,
+    int that,
+    ffi.Pointer<wire_cst_flutter_document_handle> document,
+    int unit,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_epub_canonical_text(
+      port_,
+      that,
+      document,
+      unit,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_epub_canonical_textPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_flutter_document_handle>,
+            ffi.UintPtr,
+            ffi.Uint64,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_epub_canonical_text',
+      );
+  late final _wire__crate__api__FlutterBridge_epub_canonical_text =
+      _wire__crate__api__FlutterBridge_epub_canonical_textPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              ffi.Pointer<wire_cst_flutter_document_handle>,
+              int,
+              int,
+            )
+          >();
+
+  void wire__crate__api__FlutterBridge_epub_source_bytes(
+    int port_,
+    int that,
+    ffi.Pointer<wire_cst_flutter_document_handle> document,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_epub_source_bytes(
+      port_,
+      that,
+      document,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_epub_source_bytesPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_flutter_document_handle>,
+            ffi.Uint64,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_epub_source_bytes',
+      );
+  late final _wire__crate__api__FlutterBridge_epub_source_bytes =
+      _wire__crate__api__FlutterBridge_epub_source_bytesPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              ffi.Pointer<wire_cst_flutter_document_handle>,
+              int,
+            )
+          >();
+
   void wire__crate__api__FlutterBridge_export_bookmarks(
     int port_,
     int that,
