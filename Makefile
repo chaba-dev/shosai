@@ -18,8 +18,13 @@ lint-rust:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 ## Run Flutter static analysis
+## The package's `pub get` must run before the app-root `flutter analyze`: that
+## command walks into flutter/packages and needs the nested package's own
+## package config to resolve its `package:test` imports on a fresh checkout.
 lint-flutter:
+	cd flutter/packages/shosai_epub && dart pub get
 	cd flutter && flutter analyze
+	cd flutter/packages/shosai_epub && dart analyze
 
 ## Format all Rust and Dart source files
 fmt: fmt-rust fmt-flutter
@@ -30,7 +35,7 @@ fmt-rust:
 
 ## Format Dart source files
 fmt-flutter:
-	cd flutter && dart format integration_test lib test
+	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test
 
 ## Check Rust formatting without changing files
 check-fmt-rust:
@@ -38,7 +43,7 @@ check-fmt-rust:
 
 ## Check Dart formatting without changing files
 check-fmt-flutter:
-	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test
+	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test
 
 ## Render the 1B reference captures (deterministic Iced PNGs + provenance manifest).
 ## Set VERIFY=1 to re-render without writing and fail if anything differs from the
@@ -91,6 +96,7 @@ test-rust:
 test-flutter:
 	cargo build --package shosai-flutter-bridge
 	cd flutter && flutter test
+	cd flutter/packages/shosai_epub && dart pub get && dart test
 
 ## Run tests for repository scripts
 test-scripts:
@@ -138,8 +144,7 @@ flutter-codegen:
 
 ## Validate generated bindings and the Flutter host
 check-flutter: check-flutter-codegen
-	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test
-	cd flutter && flutter analyze
+	$(MAKE) check-fmt-flutter lint-flutter
 	$(MAKE) test-flutter
 
 ## Run the Linux Flutter host in debug mode
