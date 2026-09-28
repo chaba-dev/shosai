@@ -58,6 +58,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Restore selection actions and reader palette boundaries (#133)
 - *(eval)* Add Dart EPUB vertical slice prototype (#135)
 - *(eval)* Progressive EPUB layout with bounded batches and reuse (#136)
+- *(epub)* Add the production Dart EPUB engine module (#139)
 
 ### 🐛 Bug Fixes
 
