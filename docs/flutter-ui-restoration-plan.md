@@ -49,14 +49,18 @@ was performed. The owner authorized 5A after #133 merged, without waiving 4D,
 3D integration acceptance or earlier gaps.
 
 **Current work:** 5A [contract and handoff](flutter-renderer-persistence-contract.md)
-and [independent vectors](renderer-contract-fixtures.json) are complete locally in
-isolated `shosai-5a-contract`, based on freshly fetched #133, not stale local `main`.
+and [independent vectors](renderer-contract-fixtures.json) are published for review in
+[PR #134](https://github.com/chaba-dev/shosai/pull/134), from isolated
+`shosai-5a-contract`, based on freshly fetched #133, not stale local `main`.
 Oracle round 2 closed all blockers; explicit acceptance and 5B dispatch remain
-owner decisions. Local change `twylzwyw` follows the separate closeout/gap commit
-`d42596bc` (`docs(plan): record restoration gaps and merged presentation closeout`).
+owner decisions. Contract commit [6b77968b](https://github.com/chaba-dev/shosai/commit/6b77968b2b9f22cac6d6cde826c894f2e38ab31e)
+follows the separate closeout/gap commit
+[d42596bc](https://github.com/chaba-dev/shosai/commit/d42596bcf20d2d03e915bfc3d7524a4a4f311b05)
+(`docs(plan): record restoration gaps and merged presentation closeout`).
 Default remains at independent change `uzktlxoq` / `9b23e927` with older on-disk
-work deliberately preserved. 5A has not been pushed, opened as a PR or merged;
-its isolated workspace remains available for review. No baseline was installed.
+work deliberately preserved. The owner authorized PR creation; branch
+`docs/renderer-persistence-contract-5a` is pushed, but 5A is not merged or accepted.
+Its isolated workspace remains available for review. No baseline was installed.
 
 **Outstanding gaps (acceptance remains open; implementation is not approval):**
 - **4B/5G**: inherited chrome-height offset (4B
@@ -456,7 +460,7 @@ do not assign the whole renderer as one task.
 
 ### Delivery checklist
 
-- [ ] **5A accepted — renderer/persistence contract** — IN PROGRESS — stronger-model design delivered locally in [contract thread](https://ampcode.com/threads/T-01a0e64e-c3e6-71fb-bb9b-1a7a40618e26), isolated `shosai-5a-contract` from fetched #133. Explicit acceptance/publication remain pending; 5B consumers may use the reviewed handoff only after dispatch authorization.
+- [ ] **5A accepted — renderer/persistence contract** — IN PROGRESS — stronger-model design published in [PR #134](https://github.com/chaba-dev/shosai/pull/134), [contract thread](https://ampcode.com/threads/T-01a0e64e-c3e6-71fb-bb9b-1a7a40618e26), isolated `shosai-5a-contract` from fetched #133. Explicit acceptance and merge remain pending; 5B consumers may use the reviewed handoff only after dispatch authorization.
   - [x] Addresses, layout identity, DTOs, extraction/mapping and persistence rules specified in [renderer/persistence contract](flutter-renderer-persistence-contract.md), including atomic publication, bounded viewport discovery, geometry-only PDF projection and typed zoom inheritance without SQL migration. The merged Dart evaluation does not override Rust ownership.
   - [x] Contract and [independent fixture expectations](renderer-contract-fixtures.json) reviewed before consumer work. Oracle round 1 found three blockers (clear-fit fallback, missing viewport discovery and geometry-only PDF projection); all corrected with discriminating vectors. Round 2 at local revision `553b25af` closed all findings, no blockers; its optional cursor clarification is incorporated. `python3 scripts/check_renderer_contract.py` passes vectors, 12 negative controls, 15 existing conformance hashes, local links and 30-package/3-accepted accounting; rerun after editorial closeout. No renderer, database round-trip, performance or visual pass is claimed. 5B owns the real long-chapter/legacy-store tests, EN/JA readability calibration and measured prototype described in contract §8; inherited gaps and all parent acceptance checks remain open.
 - [ ] **5B accepted — pagination prototype**
@@ -685,7 +689,7 @@ Iced/Flutter evidence. Package acceptance does not transfer to another package.
 
 ## First dispatch and historical crosswalk
 
-**Current package: 5A (local contract/review delivered; acceptance pending); 1A/1B/2A fully accepted, 3/30.**
+**Current package: 5A (contract/review published in #134; acceptance pending); 1A/1B/2A fully accepted, 3/30.**
 2C, 3A–3C and 4A–4D delivery has merged; explicit acceptance/follow-ups remain
 as checked above. The reviewed 5A contract/independent expectations are ready for
 owner handoff; 5B dispatch is next, not started here. The remaining native macOS picker check stays open and does not
