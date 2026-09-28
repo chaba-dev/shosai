@@ -5,7 +5,7 @@ useful Flutter capabilities. This is a presentation rebuild and targeted reader
 contract work, not a frontend restart or pixel-identical port.
 
 - Opened: 2026-09-14. Restructured: 2026-09-20.
-- Status: Stages 1–6 in progress; 3/30 delivery packages fully accepted (1A, 1B, 2A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and re-verified locally (owner review pending); 3D integration acceptance and the earlier explicit acceptance gaps remain open.
+- Status: Stages 1–5 IN PROGRESS; Stage 6 TODO; 3/30 delivery packages fully accepted (1A, 1B, 2A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A contract and review are complete locally, acceptance/5B dispatch pending; 3D integration acceptance and earlier gaps remain open.
 - Governing documents: [RFD 4](../rfd/0004/README.adoc), its
   [implementation checklist](../rfd/0004/IMPLEMENTATION.org),
   [performance contract](../rfd/0004/PHASE-0.adoc), and
@@ -27,24 +27,59 @@ there. Do not claim the governing records have already been updated.
 - [ ] Final restoration exit criteria met and governing records reconciled.
 
 **2026-09-28 handoff:** 2C (#123), 3A (#125), 3B (#126), 4A (#127),
-2D (#128), 3C (#129), 4B (#130) and 4C (#132) are merged. The active 4D
-workspace is based on remote `main` at
-[`e5d0be70`](https://github.com/chaba-dev/shosai/commit/e5d0be70b1ee0c3bc8ea47fbb2a3ff82fedd51cf),
-not the stale local `main` bookmark or the default workspace. The 4B/4C
-workspaces were removed and their threads archived after evidence preservation.
+2D (#128), 3C (#129), 4B (#130), 4C (#132) and 4D (#133) are merged. PR #133
+merged at [6514f5de](https://github.com/chaba-dev/shosai/commit/6514f5de62caecaf781edee0774bc3880ff95bf5)
+on 2026-09-28T04:22:22Z with 15 green CI checks; its publication branch was deleted.
+The 4B/4C/4D workspaces were removed and their threads archived after evidence preservation.
 Local evidence remains in the default checkout's `target/4b-final-evidence`
-and `target/4c-final-evidence` (the latter verified 839/839 files).
+and `target/4c-final-evidence` (839/839 files), and `target/4d-final-evidence`
+(167 manifest entries verified at closeout, including reproduction scripts and unpublished plan notes).
 
-**Current work:** 4D is implemented and re-verified at revision `05adf79833f6` in the
-`shosai-4d-reader` workspace after the owner's 2026-09-28 light-chrome/document-palette
+**Merged presentation closeout:** 4D was implemented and re-verified at revision `05adf79833f6` in the
+now-removed `shosai-4d-reader` workspace after the owner's 2026-09-28 light-chrome/document-palette
 decision: the shared reader chrome keeps the application palette in every reader theme,
 the reader palettes apply to the document area (paper, backdrop and its text leaves),
 and the welcome/2B golden passes unchanged. `make test-flutter` 753 passing / 2 skipped,
 canonical checks clean, renders/parity/walkthrough byte-identical across two runs
-(`.amp/in/artifacts/4d-*`), Oracle clear. 4D awaits owner review and explicit package
-acceptance; no baseline replacement, merge or publication was performed. Review 4D
-before advancing to the Stage 5 contract/capability work. 3D integration acceptance
-and earlier explicit acceptance gaps remain open.
+(`.amp/in/artifacts/4d-*`, now preserved in `target/4d-final-evidence`), Oracle clear.
+Publication at [629ffeaa](https://github.com/chaba-dev/shosai/commit/629ffeaad7ab)
+was content-identical to verified working-copy revision `f991a270`; #133 merged it.
+4D still awaits explicit package acceptance; no baseline replacement or approval
+was performed. The owner authorized 5A after #133 merged, without waiving 4D,
+3D integration acceptance or earlier gaps.
+
+**Current work:** 5A [contract and handoff](flutter-renderer-persistence-contract.md)
+and [independent vectors](renderer-contract-fixtures.json) are published for review in
+[PR #134](https://github.com/chaba-dev/shosai/pull/134), from isolated
+`shosai-5a-contract`, based on freshly fetched #133, not stale local `main`.
+Oracle round 2 closed all blockers; explicit acceptance and 5B dispatch remain
+owner decisions. Contract commit [6b77968b](https://github.com/chaba-dev/shosai/commit/6b77968b2b9f22cac6d6cde826c894f2e38ab31e)
+follows the separate closeout/gap commit
+[d42596bc](https://github.com/chaba-dev/shosai/commit/d42596bcf20d2d03e915bfc3d7524a4a4f311b05)
+(`docs(plan): record restoration gaps and merged presentation closeout`).
+Default remains at independent change `uzktlxoq` / `9b23e927` with older on-disk
+work deliberately preserved. The owner authorized PR creation; branch
+`docs/renderer-persistence-contract-5a` is pushed, but 5A is not merged or accepted.
+Its isolated workspace remains available for review. No baseline was installed.
+
+**Outstanding gaps (acceptance remains open; implementation is not approval):**
+- **4B/5G**: inherited chrome-height offset (4B
+  header/tab/document top 61/48/111 versus reference 52/35/90); 4B acceptance open.
+- **4C, 2B, owner**: welcome composition/picker action needs a distinct baseline
+  decision. The dark welcome-text golden regression was fixed in #133 and is not
+  this composition decision; dark/sepia shared-chrome contrast is also resolved.
+- **4C, 2C, owner**: recorded deviations below remain unapproved, including current
+  chapter highlight, line spacing, modal note editing, search submission/style/focus,
+  compact row heights and text line box. Search token 420 versus reference-rendered
+  557 px remains a token-owner discrepancy, not an approved permanent difference.
+- **5C/FM-22**: CJK document fallback still missing. **5A/5B/5G/5H**: real page
+  boxes, spreads and footer remain absent. **5E/5F/5G**: TOC/tabs/progress still use
+  declared presentation fixtures; no live capability acceptance is implied.
+- **2A/2B/6C**: remaining native picker/interaction and platform screen-reader,
+  keyboard/accessibility matrix coverage stays open where the checklists say so.
+- **1C/owner**: reference acceptance/rebaseline approvals remain open; no new
+  reference or golden is approved by carrying this closeout forward.
+- **3D**: library integration acceptance remains open despite merged 3A–3C delivery.
 
 **Acceptance accounting:** 3/30 remains the number of explicitly checked package
 acceptances (1A, 1B, 2A), not the number of merged implementations. Completed
@@ -221,7 +256,7 @@ package below, not an entire stage. `TODO` means not completed, not ready to dis
 | 2. Safe foundations | Accessible add-books dialog, production-shell harness, theme mappings and retained notices | 2A–2D | 1/4 | IN PROGRESS |
 | 3. Library restoration | Iced-shaped library with working existing actions | 3A–3D | 0/4 | IN PROGRESS |
 | 4. Reader presentation | Verified reader components and typed presentation contract | 4A–4D | 0/4 | IN PROGRESS |
-| 5. Reader capabilities | Real sessions, rich EPUB, navigation, selection and reading modes | 5A–5J | 0/10 | TODO |
+| 5. Reader capabilities | Real sessions, rich EPUB, navigation, selection and reading modes | 5A–5J | 0/10 | IN PROGRESS |
 | 6. Workflow closure | Import/settings coverage and cross-format acceptance | 6A–6D | 0/4 | TODO |
 
 Dependencies are **package IDs**, not whole-stage completion. This permits reference
@@ -311,7 +346,7 @@ under one owner rather than building competing runners.
   - [x] Owner approved nine new macOS baselines and six updated Linux baselines for the typography and scaled-button clipping fixes on 2026-09-22. All 15 installed images hash-match the approved candidates. This approves current rendering, not Iced layout parity or the known overlap below.
   - [x] Native macOS dismissal, recovery and window-scoped screenshots verified on the frozen #125 head, as recorded in [its native smoke evidence](https://github.com/chaba-dev/shosai/pull/125): unlocked console, successful preflights, native panel open, Escape dismissal, recovery true and runner PASS. This supersedes the earlier Automation-permission blocker; it does not prove file selection/confirmation or native behavior of subsequent reader packages.
   - Deferred production defect: at 900×700 with 200% Japanese text, the floating Add books button overlaps the bottom-right card metadata. Stage 3 owns the layout fix; geometric clipping detectors do not claim to detect arbitrary overlap.
-- [ ] **2C accepted — theme mappings** — IN PROGRESS — implementation merged in [PR #123](https://github.com/chaba-dev/shosai/pull/123); scoped theme baseline approvals recorded there, not blanket Iced parity. Reader chrome palette mapping was corrected under the owner decision recorded in 4D; that correction is verified in 4D and not yet merged.
+- [ ] **2C accepted — theme mappings** — IN PROGRESS — implementation merged in [PR #123](https://github.com/chaba-dev/shosai/pull/123); scoped theme baseline approvals recorded there, not blanket Iced parity. Reader chrome palette mapping was corrected under the owner decision recorded in 4D; that correction is verified and merged in #133.
   - [x] Shared tokens and Rust/Shad/Material mappings implemented in #123.
   - [x] Mapping/literal checks pass; palette renders inspected and baselines reviewed at #123: 13 Linux and nine macOS approved images installed byte-exact, Linux 394 passes, macOS 392 passes / two skips, all 15 CI checks green. This historical verification does not certify the 4D chrome/document-palette correction; that correction is verified in 4D.
 - [ ] **2D accepted — notices** — IN PROGRESS — implementation and library integration merged in [PR #128](https://github.com/chaba-dev/shosai/pull/128); explicit package acceptance remains unrecorded.
@@ -390,7 +425,7 @@ Primary ownership: `flutter/lib/reader/view*.dart` and reader component tests.
     - Oracle review: round 1 reported three blocking findings — (a) an invalidated document picker retained its modal slot after suspension/replacement, (b) a stale export still reached the sink and had no bridge-operation accounting, (c) the Contents current-entry reveal required the row context during build so an asynchronous load never scheduled it. All fixed with regression tests (see above); round 2 found no blockers. Each regression test was checked for discrimination (the reveal test fails with the reveal disabled). A follow-up round reviewed the parity-evidence work and its findings are recorded with the fixes in the package thread.
     - Recorded scope decisions: Markdown export delivery is **clipboard + brief notice** through the application notice center (contract §9.2 item 1; the shell now injects its reporter and a `file_selector` document picker into the reader); the Iced reading-mode (Paginated/Continuous) toggle is **not** rendered because switching the live mode is renderer work (5H) and mode-specific availability is derived from the document format; the theme cycle changes the reader chrome/surfaces and the persisted value is 5A/6B, while applying the palette to the rendered document remains 5A/5G (the renderer takes no palette input today); Enter submits the query and the explicit previous/next controls step results (the Iced debounced live search and Enter-steps-next are folded into that recorded difference); note creation at the current location is two-step (bookmark, then Add note), matching Iced.
     - Identified follow-up needing owner baseline approval (not changed here): the Iced no-document welcome composition (`welcome_view`: 32 px title, 16 px message, `Open File` picker action) replaces the retained welcome copy, which would invalidate the 2B-approved `reader-welcome-1280` golden. 4C does not regenerate that baseline; the item needs an owner-approved baseline replacement (owner of the welcome surface) before it can land.
-- [ ] **4D accepted — selection presentation** — IN PROGRESS — DeepSeek on framework16 ([thread](https://ampcode.com/threads/T-01a0e52f-cedb-7010-bcac-0ec4048f6c54)); implementation, verification and matched-state evidence produced in the isolated workspace `shosai-4d-reader` at remote `main` `e5d0be70` (#132); owner review pending, no baseline approval, merge or publication performed.
+- [ ] **4D accepted — selection presentation** — IN PROGRESS — implementation and evidence merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133) as [6514f5de](https://github.com/chaba-dev/shosai/commit/6514f5de62caecaf781edee0774bc3880ff95bf5), 15 green CI checks, 2026-09-28. [Implementation thread](https://ampcode.com/threads/T-01a0e52f-cedb-7010-bcac-0ec4048f6c54) archived; `shosai-4d-reader` removed; publication branch deleted; evidence/scripts/unpublished closeout retained at `target/4d-final-evidence` (167 manifest entries verified). Explicit package acceptance and baseline decisions remain unapproved; merge does not waive the gaps below.
   - [x] Selection actions and annotation menus implemented without losing existing behavior; re-verified at revision `05adf79833f6` for the owner-approved light-chrome/document-palette separation (see the reopened-and-re-verified paragraph below).
     - Authority matrix (recorded before any visual change): **RD-12 has no Iced counterpart** — its authority is RFD 6 plus the retained Flutter implementation (plan decision 8; the 1C non-Iced authority record), so no Iced selection baseline is invented. The **shared chrome** the selection surface sits on does have pinned references (`rd-chrome-w1280-en`, `rd-chrome-c390-ja`, `rd-chrome-theme-dark-w1280-en`, `rd-chrome-theme-sepia-w1280-en`), so those states are compared as matched measurements. The **reader palette** states initially disagreed between the two authorities (the pinned reference keeps the chrome on the application palette in every reader theme; the 2C mapping themed the whole reader); that disagreement was measured and recorded, then **resolved by the owner decision of 2026-09-28** (below) rather than silently absorbed.
     - Produced (implementation): the annotation action set salvaged from #114 — the card's secondary-click menu (`Change color` / `Edit note` / `Delete highlight`, same gating, same messages as the inline controls, `tapEnabled: false`/`longPressEnabled: false` so the retained gestures are untouched) with the keyboard equivalents the contract requires (ContextMenu key or Shift+F10 while a control in the card has focus); the card's inline controls stay the primary, Tab-reachable actions. The #114 visual ancestors (badges, separators, default Shad composition) are not restored. The action surface is now positioned from the selected range through the rendered content box's own transform, so it follows the range in every fit (EPUB contain, PDF fit page/width/manual) and while the content is scrolled, instead of assuming the content box equals the viewport, and it stays clamped inside the viewport. The 4D copy is localized (14 new keys in `app_en.arb`/`app_ja.arb` + regenerated localizations: selection actions, color names, highlight label, resolution suffixes, menu entries), and the annotation navigate button uses the shared scaled-button height so 200% text is not clipped — a defect the RD-15 `T200` render found (`clippedText` on `ハイライト1`) and this package fixed.
@@ -425,9 +460,9 @@ do not assign the whole renderer as one task.
 
 ### Delivery checklist
 
-- [ ] **5A accepted — renderer/persistence contract**
-  - [ ] Addresses, layout identity, DTOs, extraction/mapping and persistence rules specified.
-  - [ ] Contract and independent fixture expectations reviewed before consumer work.
+- [ ] **5A accepted — renderer/persistence contract** — IN PROGRESS — stronger-model design published in [PR #134](https://github.com/chaba-dev/shosai/pull/134), [contract thread](https://ampcode.com/threads/T-01a0e64e-c3e6-71fb-bb9b-1a7a40618e26), isolated `shosai-5a-contract` from fetched #133. Explicit acceptance and merge remain pending; 5B consumers may use the reviewed handoff only after dispatch authorization.
+  - [x] Addresses, layout identity, DTOs, extraction/mapping and persistence rules specified in [renderer/persistence contract](flutter-renderer-persistence-contract.md), including atomic publication, bounded viewport discovery, geometry-only PDF projection and typed zoom inheritance without SQL migration. The merged Dart evaluation does not override Rust ownership.
+  - [x] Contract and [independent fixture expectations](renderer-contract-fixtures.json) reviewed before consumer work. Oracle round 1 found three blockers (clear-fit fallback, missing viewport discovery and geometry-only PDF projection); all corrected with discriminating vectors. Round 2 at local revision `553b25af` closed all findings, no blockers; its optional cursor clarification is incorporated. `python3 scripts/check_renderer_contract.py` passes vectors, 12 negative controls, 15 existing conformance hashes, local links and 30-package/3-accepted accounting; rerun after editorial closeout. No renderer, database round-trip, performance or visual pass is claimed. 5B owns the real long-chapter/legacy-store tests, EN/JA readability calibration and measured prototype described in contract §8; inherited gaps and all parent acceptance checks remain open.
 - [ ] **5B accepted — pagination prototype**
   - [ ] Bounded pagination, bridge transport and legacy persistence handling implemented.
   - [ ] Long-chapter/round-trip tests pass; prototype measurements recorded against budgets.
@@ -654,11 +689,11 @@ Iced/Flutter evidence. Package acceptance does not transfer to another package.
 
 ## First dispatch and historical crosswalk
 
-**Current package: 2C (in progress); 1C/2B merged with explicit follow-ups;
-1A/1B/2A fully accepted.** Start theme mapping from merged #121, preserving #120's
-approved typography and clipping checks. Start library restoration after 2C
-acceptance, independently of renderer completion. The remaining native macOS
-picker check stays open and does not become a pass by advancing the plan.
+**Current package: 5A (contract/review published in #134; acceptance pending); 1A/1B/2A fully accepted, 3/30.**
+2C, 3A–3C and 4A–4D delivery has merged; explicit acceptance/follow-ups remain
+as checked above. The reviewed 5A contract/independent expectations are ready for
+owner handoff; 5B dispatch is next, not started here. The remaining native macOS picker check stays open and does not
+become a pass by advancing the plan.
 
 | Previous plan phase | New owner(s) |
 | --- | --- |
