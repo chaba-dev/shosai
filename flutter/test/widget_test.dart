@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
 
 final _documentHandle = FlutterDocumentHandle(
   registry: BigInt.one,
@@ -91,7 +92,7 @@ void main() {
   });
 
   test('page colors retain strong content contrast in dark mode', () {
-    final colors = pageColors(const ColorScheme.dark());
+    final colors = pageColors('dark');
     expect(
       ThemeData.estimateBrightnessForColor(colors.background),
       isNot(ThemeData.estimateBrightnessForColor(colors.foreground)),
@@ -2970,6 +2971,30 @@ void main() {
 
   testWidgets('reader applies the persisted dark theme', (tester) async {
     final bridge = _ControlledBridge(immediateLists: true);
+    bridge.selectionCompleters.add(
+      Completer<FlutterSelectionSurface>()..complete(
+        FlutterSelectionSurface(
+          handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.one),
+          width: 352,
+          height: 1200,
+          text: 'dark chapter',
+          copyEligible: true,
+          raster: FlutterRenderedBuffer(
+            handle: FlutterBufferHandle(
+              registry: BigInt.one,
+              id: BigInt.from(101),
+            ),
+            width: 1,
+            height: 1,
+            byteLen: BigInt.from(4),
+          ),
+          endpoints: const [],
+          graphemeBoundaries: Uint32List.fromList([0, 12]),
+          wordBoundaries: Uint32List.fromList([0, 12]),
+          visualLines: const [],
+        ),
+      ),
+    );
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData(
@@ -2977,6 +3002,56 @@ void main() {
           fontFamily: 'Inter',
           fontFamilyFallback: const ['Noto Sans JP'],
         ),
+        home: ReaderScreen(
+          debugPathEntry: true,
+          bridge: bridge,
+          initialPath: '/books/book.epub',
+          initialSettings: const FlutterReaderSettings(
+            continuous: false,
+            theme: 'dark',
+            epubFontSize: 18,
+            epubLineSpacing: 1.5,
+            pdfZoom: 0,
+          ),
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scaffoldContext = tester.element(find.byType(Scaffold));
+    final theme = Theme.of(scaffoldContext);
+    // The persisted reader theme paints the document area only. The surrounding
+    // reader chrome stays on the application palette in every reader theme
+    // (owner decision 2026-09-28, matching the pinned Iced references).
+    expect(theme.brightness, Brightness.light);
+    expect(theme.textTheme.bodyMedium?.fontFamily, 'Inter');
+    expect(
+      theme.textTheme.bodyMedium?.fontFamilyFallback,
+      contains('Noto Sans JP'),
+    );
+    expect(theme.textTheme.bodyMedium?.color, ShosaiTokens.appText);
+    expect(theme.scaffoldBackgroundColor, ShosaiTokens.appBackground);
+    final documentPainter =
+        tester
+                .widget<CustomPaint>(
+                  find.byWidgetPredicate(
+                    (widget) =>
+                        widget is CustomPaint && widget.painter is PagePainter,
+                  ),
+                )
+                .painter
+            as PagePainter;
+    expect(documentPainter.backgroundColor, ShosaiTokens.readerDarkBackground);
+    expect(documentPainter.foregroundColor, ShosaiTokens.readerDarkText);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets('dark reader keeps the no-document body legible', (tester) async {
+    final bridge = _ControlledBridge(immediateLists: true);
+    await tester.pumpWidget(
+      MaterialApp(
         home: ReaderScreen(
           debugPathEntry: true,
           bridge: bridge,
@@ -2990,23 +3065,75 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await tester.pumpAndSettle();
 
+    // The welcome body is document-area copy: it keeps the reader palette ink
+    // and paper (owner decision 2026-09-28) while the shared chrome stays on the
+    // light application palette.
+    final welcome = tester.widget<Text>(
+      find.textContaining('generated Rust bridge'),
+    );
+    expect(welcome.style?.color, ShosaiTokens.readerDarkText);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is ColoredBox &&
+            widget.color == ShosaiTokens.readerDarkBackground,
+      ),
+      findsOneWidget,
+    );
+    expect(
+      ThemeData.estimateBrightnessForColor(welcome.style!.color!),
+      isNot(
+        ThemeData.estimateBrightnessForColor(ShosaiTokens.readerDarkBackground),
+      ),
+      reason: 'the no-document copy stays legible on the document paper',
+    );
     final scaffoldContext = tester.element(find.byType(Scaffold));
-    final theme = Theme.of(scaffoldContext);
-    expect(theme.brightness, Brightness.dark);
-    expect(theme.textTheme.bodyMedium?.fontFamily, 'Inter');
-    expect(
-      theme.textTheme.bodyMedium?.fontFamilyFallback,
-      contains('Noto Sans JP'),
+    expect(Theme.of(scaffoldContext).brightness, Brightness.light);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets('dark reader keeps the failed-document message legible', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(
+      immediateLists: true,
+      selectionFailure: true,
     );
-    expect(
-      ThemeData.estimateBrightnessForColor(theme.textTheme.bodyMedium!.color!),
-      Brightness.light,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          debugPathEntry: true,
+          bridge: bridge,
+          initialPath: '/books/book.epub',
+          initialSettings: const FlutterReaderSettings(
+            continuous: false,
+            theme: 'dark',
+            epubFontSize: 18,
+            epubLineSpacing: 1.5,
+            pdfZoom: 0,
+          ),
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
     );
+    await tester.pumpAndSettle();
+
+    // A failed chapter is still document-area copy: the message follows the
+    // reader palette ink over the reader paper.
+    final message = tester.widget<Text>(
+      find.text('Bad state: selection failed'),
+    );
+    expect(message.style?.color, ShosaiTokens.readerDarkText);
     expect(
-      ThemeData.estimateBrightnessForColor(theme.scaffoldBackgroundColor),
-      Brightness.dark,
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is ColoredBox &&
+            widget.color == ShosaiTokens.readerDarkBackground,
+      ),
+      findsOneWidget,
     );
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;

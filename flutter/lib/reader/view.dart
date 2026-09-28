@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -766,6 +767,21 @@ class _ReaderScreenState extends State<ReaderScreen>
       actionFocus: _actionFocus,
       debugPathEntry: widget.debugPathEntry,
     );
+    // The reader palette is the *document* palette (owner decision 2026-09-28):
+    // the surface the page (or the no-document welcome body) sits on follows the
+    // reader theme, while the shared chrome around it keeps the application
+    // palette. Painting it here preserves the pre-decision document-area
+    // backdrop — including behind the RD-06 edge columns — instead of letting
+    // the light chrome scaffold show through.
+    Widget surface() => ColoredBox(
+      color: pageColors(model.typography.theme).background,
+      child: _ReaderSurface(
+        model: model,
+        compact: compact,
+        dispatch: _controller.dispatch,
+        content: content,
+      ),
+    );
     if (model.openPanel == ReaderPanel.contents) {
       final panel = _ReaderPanelHost(
         panel: ReaderPanel.contents,
@@ -781,14 +797,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       return Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: _ReaderSurface(
-              model: model,
-              compact: compact,
-              dispatch: _controller.dispatch,
-              content: content,
-            ),
-          ),
+          Expanded(child: surface()),
           SizedBox(
             width: ShosaiTokens.layoutReaderBookmarksPanelWidth,
             child: panel,
@@ -796,12 +805,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         ],
       );
     }
-    return _ReaderSurface(
-      model: model,
-      compact: compact,
-      dispatch: _controller.dispatch,
-      content: content,
-    );
+    return surface();
   }
 }
 
@@ -1013,7 +1017,9 @@ class _ReaderContentPane extends StatelessWidget {
                 // the retired path entry, which is recorded as a 4C item; the
                 // production composition renders no path field (contract §7.2
                 // item 6).
-                ? const WelcomePanel()
+                ? WelcomePanel(
+                    color: pageColors(model.typography.theme).foreground,
+                  )
                 : _DocumentView(
                     document: document,
                     image: model.pageImage,
@@ -1095,14 +1101,22 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
 }
 
 class WelcomePanel extends StatelessWidget {
-  const WelcomePanel({super.key});
+  const WelcomePanel({super.key, this.color});
+
+  /// The document-area foreground for the active reader theme
+  /// ([pageColors]). The welcome body sits on the document backdrop, so its ink
+  /// follows the reader palette while the shared chrome stays on the
+  /// application palette (owner decision 2026-09-28); a caller that renders the
+  /// panel outside the reader keeps the ambient style.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Text(
         'Enter a local document path to exercise the generated Rust bridge.',
         textAlign: TextAlign.center,
+        style: color == null ? null : TextStyle(color: color),
       ),
     );
   }

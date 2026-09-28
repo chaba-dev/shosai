@@ -163,12 +163,23 @@ void main() {
         expect(painter.backgroundColor, entry.value.background);
         expect(painter.foregroundColor, entry.value.foreground);
         expect(painter.recolorImage, isTrue);
-        expect(Theme.of(context).colorScheme.surface, entry.value.background);
-        expect(Theme.of(context).colorScheme.onSurface, entry.value.foreground);
+        // The reader palette is the document palette (owner decision
+        // 2026-09-28): the surface the page sits on follows it, while the
+        // shared chrome keeps the application palette in every reader theme.
         expect(
-          ShadTheme.of(context).brightness,
-          entry.key == 'dark' ? Brightness.dark : Brightness.light,
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is ColoredBox && widget.color == entry.value.background,
+          ),
+          findsOneWidget,
+          reason: 'the document area backdrop uses the ${entry.key} palette',
         );
+        expect(
+          Theme.of(context).colorScheme.surface,
+          ShosaiTokens.appBackground,
+        );
+        expect(Theme.of(context).colorScheme.onSurface, ShosaiTokens.appText);
+        expect(ShadTheme.of(context).brightness, Brightness.light);
       });
     }
   });

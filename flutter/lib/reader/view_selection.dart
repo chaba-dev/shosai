@@ -13,6 +13,7 @@ class _SelectionActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final copyEnabled = model.selectedText != null;
     final persistenceEnabled =
         !model.busy &&
@@ -21,7 +22,7 @@ class _SelectionActions extends StatelessWidget {
         model.annotationOperations.isEmpty;
     return Semantics(
       key: const ValueKey('selection-actions'),
-      label: 'Selection actions',
+      label: l10n.readerSelectionActions,
       container: true,
       child: ShadCard(
         padding: const EdgeInsets.all(8),
@@ -43,7 +44,7 @@ class _SelectionActions extends StatelessWidget {
                 // surface is narrower than the label's natural width (a
                 // compact viewport at a scaled interface, where the RD-06 edge
                 // columns also scale with the interface).
-                child: const Flexible(child: Text('Copy')),
+                child: Flexible(child: Text(l10n.readerCopy)),
               ),
               for (final color in FlutterHighlightColor.values)
                 ShadButton(
@@ -59,7 +60,7 @@ class _SelectionActions extends StatelessWidget {
                       : () => dispatch(ReaderSelectionCommitted(color: color)),
                   child: Flexible(
                     child: Text(
-                      _colorName(color),
+                      _colorName(l10n, color),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -70,7 +71,7 @@ class _SelectionActions extends StatelessWidget {
                 onPressed: !persistenceEnabled
                     ? null
                     : () => dispatch(const ReaderSelectionNoteRequested()),
-                child: const Flexible(child: Text('Add note')),
+                child: Flexible(child: Text(l10n.readerAddNote)),
               ),
               ShadButton.ghost(
                 height: shosaiShadButtonHeight(context),
@@ -78,7 +79,7 @@ class _SelectionActions extends StatelessWidget {
                     ? focusNode
                     : null,
                 onPressed: () => dispatch(const ReaderSelectionCancelled()),
-                child: const Flexible(child: Text('Cancel')),
+                child: Flexible(child: Text(l10n.readerSelectionCancel)),
               ),
             ],
           ),
@@ -88,12 +89,7 @@ class _SelectionActions extends StatelessWidget {
   }
 }
 
-Rect _selectionActionTarget(
-  FlutterSelectionSurface surface,
-  ReaderModel model,
-  Size viewport,
-  BoxFit fit,
-) {
+Rect? _selectionRangeRect(FlutterSelectionSurface surface, ReaderModel model) {
   final first = model.anchor!;
   final second = model.focus!;
   final start = first < second ? first : second;
@@ -113,13 +109,7 @@ Rect _selectionActionTarget(
     final area = Rect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom);
     selected = selected?.expandToInclude(area) ?? area;
   }
-  if (selected == null) return Offset.zero & Size.zero;
-  final transform = SurfaceTransform.create(
-    fit,
-    Size(surface.width, surface.height),
-    viewport,
-  );
-  return transform.toDestinationRect(selected);
+  return selected;
 }
 
 class _SelectionActionsLayout extends SingleChildLayoutDelegate {
@@ -153,6 +143,8 @@ class _SelectionActionsLayout extends SingleChildLayoutDelegate {
 
 class _ReachableSelectableSurface extends StatelessWidget {
   const _ReachableSelectableSurface({
+    required this.contentKey,
+    required this.onContentGeometryChanged,
     required this.presentationKey,
     required this.document,
     required this.surface,
@@ -161,6 +153,13 @@ class _ReachableSelectableSurface extends StatelessWidget {
     required this.dispatch,
   });
 
+  /// The rendered content box, used to map the selected range into the
+  /// overlay's coordinate space.
+  final Key contentKey;
+
+  /// Called after the content box's laid-out size changes, so the overlay can
+  /// re-read the geometry it positions itself from.
+  final VoidCallback onContentGeometryChanged;
   final Key presentationKey;
   final FlutterDocumentSummary document;
   final FlutterSelectionSurface surface;
@@ -173,20 +172,29 @@ class _ReachableSelectableSurface extends StatelessWidget {
     final fit = _readerFit(model.typography);
     return LayoutBuilder(
       builder: (context, constraints) {
-        Widget content(Size size) => SizedBox.fromSize(
-          size: size,
-          child: _SelectableSurface(
-            key: ValueKey((
-              model.generation,
-              model.unit,
-              surface.handle.registry,
-              surface.handle.id,
-            )),
-            surface: surface,
-            image: image,
-            model: model,
-            fit: fit,
-            dispatch: dispatch,
+        Widget content(Size size) => KeyedSubtree(
+          key: contentKey,
+          child: SizedBox.fromSize(
+            size: size,
+            child: _ContentSizeProbe(
+              // Inside the sized box, so the probe observes the content's own
+              // tight, finite size rather than the scroll view's unbounded
+              // constraints.
+              onSizeChanged: onContentGeometryChanged,
+              child: _SelectableSurface(
+                key: ValueKey((
+                  model.generation,
+                  model.unit,
+                  surface.handle.registry,
+                  surface.handle.id,
+                )),
+                surface: surface,
+                image: image,
+                model: model,
+                fit: fit,
+                dispatch: dispatch,
+              ),
+            ),
           ),
         );
         if (document.format == FlutterBookFormat.epub &&
@@ -245,6 +253,40 @@ class _ReachableSelectableSurface extends StatelessWidget {
       },
     );
   }
+}
+
+/// Reports the content box's laid-out size after it changes.
+///
+/// The action overlay positions itself from the content box's rendered
+/// transform, and a size change (a resize, a new fit) does not necessarily
+/// rebuild the document view: the probe schedules a post-layout notification so
+/// the overlay re-reads the geometry instead of keeping a stale target.
+class _ContentSizeProbe extends StatefulWidget {
+  const _ContentSizeProbe({required this.onSizeChanged, required this.child});
+
+  final VoidCallback onSizeChanged;
+  final Widget child;
+
+  @override
+  State<_ContentSizeProbe> createState() => _ContentSizeProbeState();
+}
+
+class _ContentSizeProbeState extends State<_ContentSizeProbe> {
+  Size? _reported;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final size = constraints.biggest;
+      if (_reported != size) {
+        _reported = size;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.onSizeChanged();
+        });
+      }
+      return widget.child;
+    },
+  );
 }
 
 class _SelectableSurface extends StatefulWidget {
@@ -436,10 +478,10 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                         image: widget.image,
                         surface: widget.surface,
                         backgroundColor: pageColors(
-                          Theme.of(context).colorScheme,
+                          widget.model.typography.theme,
                         ).background,
                         foregroundColor: pageColors(
-                          Theme.of(context).colorScheme,
+                          widget.model.typography.theme,
                         ).foreground,
                         recolorImage:
                             widget.model.document?.format ==
@@ -454,10 +496,10 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                     image: widget.image,
                     surface: widget.surface,
                     backgroundColor: pageColors(
-                      Theme.of(context).colorScheme,
+                      widget.model.typography.theme,
                     ).background,
                     foregroundColor: pageColors(
-                      Theme.of(context).colorScheme,
+                      widget.model.typography.theme,
                     ).foreground,
                     recolorImage:
                         widget.model.document?.format == FlutterBookFormat.epub,
