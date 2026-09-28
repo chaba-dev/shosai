@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-27
+## [0.1.0] - 2026-09-28
 
 ### 🚀 Features
 
@@ -55,6 +55,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Add app-level notice infrastructure and host (#128)
 - *(flutter)* Restore the reader header, tab strip, progress and edge navigation (#130)
 - *(flutter)* Restore reader panels with matched Iced reference evidence (#132)
+- *(flutter)* Restore selection actions and reader palette boundaries (#133)
 
 ### 🐛 Bug Fixes
 
