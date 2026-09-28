@@ -6,17 +6,14 @@ import 'package:shosai_flutter/reader/view.dart';
 
 void main() {
   test('page colors keep background and foreground distinct', () {
-    for (final brightness in Brightness.values) {
-      final scheme = ColorScheme.fromSeed(
-        seedColor: const Color(0xff745b3e),
-        brightness: brightness,
-      );
-      final colors = pageColors(scheme);
-      expect(colors.background, scheme.surface);
-      expect(colors.foreground, scheme.onSurface);
+    // The reader palette is the document palette (owner decision 2026-09-28):
+    // every reader theme keeps its paper and foreground distinct.
+    for (final theme in const [null, 'light', 'dark', 'sepia']) {
+      final colors = pageColors(theme);
       expect(
         ThemeData.estimateBrightnessForColor(colors.background),
         isNot(ThemeData.estimateBrightnessForColor(colors.foreground)),
+        reason: '$theme',
       );
     }
   });

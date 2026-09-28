@@ -83,7 +83,6 @@ void main() {
     green: 0.2,
     blue: 0.1,
   );
-  const readerSepiaTableHeader = Color(0xFFE5D6BA);
 
   group('application palette mapping', () {
     test('the light Shad scheme is the pinned Iced palette', () {
@@ -242,29 +241,32 @@ void main() {
       );
     });
 
-    test('the dark reader chrome is the retained dark palette', () {
+    test('the chrome keeps the application palette in every reader theme', () {
+      // Owner decision 2026-09-28: the shared reader chrome matches the pinned
+      // Iced references, which recolor only the page; the reader palette is the
+      // document palette.
+      for (final theme in const [null, 'light', 'dark', 'sepia']) {
+        expect(
+          shosaiReaderShadTheme(theme).colorScheme,
+          shosaiAppColorScheme(Brightness.light),
+          reason: '$theme chrome',
+        );
+        expect(
+          shosaiReaderShadTheme(theme).brightness,
+          Brightness.light,
+          reason: '$theme chrome brightness',
+        );
+        expect(
+          shosaiReaderMaterialColorScheme(theme),
+          shosaiMaterialColorScheme(Brightness.light),
+          reason: '$theme chrome Material scheme',
+        );
+      }
+      // Plan decision 2 rejects the #109 brown accent.
       expect(
-        shosaiReaderShadTheme('dark').colorScheme,
-        shosaiAppColorScheme(Brightness.dark),
+        shosaiReaderShadTheme('sepia').colorScheme.primary,
+        isNot(const Color(0xFF8A6338)),
       );
-      expect(shosaiReaderShadTheme('dark').brightness, Brightness.dark);
-    });
-
-    test('the sepia reader chrome uses the Iced sepia surfaces and accent', () {
-      final scheme = shosaiReaderShadTheme('sepia').colorScheme;
-      expect(scheme.background, readerSepiaBackground);
-      expect(scheme.foreground, readerSepiaText);
-      expect(scheme.card, readerSepiaTableHeader);
-      expect(scheme.muted, readerSepiaTableHeader);
-      expect(scheme.mutedForeground, readerSepiaText);
-      expect(scheme.border, appBorder);
-      expect(scheme.input, appBorder);
-      // Plan decision 2 rejects the #109 brown accent; the sepia reader keeps
-      // the Iced application accent instead.
-      expect(scheme.primary, appAccent);
-      expect(scheme.ring, appAccent);
-      expect(scheme.primary, isNot(const Color(0xFF8A6338)));
-      expect(shosaiReaderShadTheme('sepia').brightness, Brightness.light);
     });
 
     test('reader page colors are the pinned Iced document palettes', () {
@@ -281,8 +283,7 @@ void main() {
         ),
       };
       expectations.forEach((readerTheme, expected) {
-        final scheme = shosaiReaderMaterialColorScheme(readerTheme);
-        final colors = pageColors(scheme);
+        final colors = pageColors(readerTheme);
         expect(colors.background, expected.background, reason: '$readerTheme');
         expect(colors.foreground, expected.foreground, reason: '$readerTheme');
         expect(
@@ -293,16 +294,14 @@ void main() {
       });
     });
 
-    test('the reader interactive color holds contrast on each palette', () {
-      expect(shosaiReaderMaterialColorScheme(null).primary, appAccent);
-      expect(
-        shosaiReaderMaterialColorScheme('dark').primary,
-        ShosaiTokens.readerDarkLink,
-      );
-      expect(
-        shosaiReaderMaterialColorScheme('sepia').primary,
-        ShosaiTokens.readerSepiaLink,
-      );
+    test('the chrome interactive color is the application accent', () {
+      for (final theme in const [null, 'light', 'dark', 'sepia']) {
+        expect(
+          shosaiReaderMaterialColorScheme(theme).primary,
+          appAccent,
+          reason: '$theme chrome accent',
+        );
+      }
     });
 
     testWidgets('reader document palettes are not interface font sources', (
@@ -310,7 +309,10 @@ void main() {
     ) async {
       // Interface fonts are separate from document fonts: the reader chrome
       // uses the interface family and never forces a document font onto the
-      // page, which the Rust raster supplies.
+      // page, which the Rust raster supplies. The chrome surfaces keep the
+      // application palette in every reader theme (owner decision 2026-09-28);
+      // the reader theme selects the *document* palette, which the page
+      // painters read through [pageColors].
       final context = await pumpThemeContext(tester);
       final theme = shosaiReaderMaterialTheme(context, 'sepia');
       expect(theme.textTheme.bodyMedium?.fontFamily, shosaiInterfaceFontFamily);
@@ -318,9 +320,12 @@ void main() {
         theme.textTheme.bodyMedium?.fontFamilyFallback,
         shosaiInterfaceFontFallback,
       );
-      expect(theme.scaffoldBackgroundColor, readerSepiaBackground);
-      expect(theme.colorScheme.surface, readerSepiaBackground);
-      expect(theme.colorScheme.onSurface, readerSepiaText);
+      expect(theme.scaffoldBackgroundColor, appBackground);
+      expect(theme.colorScheme.surface, appBackground);
+      expect(theme.colorScheme.onSurface, appText);
+      final document = pageColors('sepia');
+      expect(document.background, readerSepiaBackground);
+      expect(document.foreground, readerSepiaText);
     });
   });
 
@@ -385,13 +390,12 @@ void main() {
         await pumpThemeContext(tester),
         'sepia',
       );
+      // The reader chrome keeps the application palette (owner decision
+      // 2026-09-28); only the document area follows the reader theme.
       expect(reader.dividerTheme.color, appBorder);
-      expect(reader.textSelectionTheme.selectionColor, readerSepiaTableHeader);
-      expect(
-        reader.textSelectionTheme.cursorColor,
-        ShosaiTokens.readerSepiaLink,
-      );
-      expect(reader.iconTheme.color, readerSepiaText);
+      expect(reader.textSelectionTheme.selectionColor, appAccentSoft);
+      expect(reader.textSelectionTheme.cursorColor, appAccent);
+      expect(reader.iconTheme.color, appText);
     });
 
     testWidgets('every Material text role resolves to an Iced UI size', (

@@ -200,8 +200,14 @@ void _paintPageContent(
   }
 }
 
-({Color background, Color foreground}) pageColors(ColorScheme scheme) =>
-    (background: scheme.surface, foreground: scheme.onSurface);
+/// The document paint colors of the reader palette for [readerTheme].
+///
+/// The reader palette is the *document* palette (owner decision 2026-09-28):
+/// the page paper and the page foreground follow the reader theme while the
+/// shared chrome keeps the application palette
+/// ([shosaiReaderColorScheme]/[shosaiReaderMaterialColorScheme]).
+({Color background, Color foreground}) pageColors(String? readerTheme) =>
+    shosaiReaderDocumentColors(readerTheme);
 
 Rect pageImageSource(ui.Image image) =>
     Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());

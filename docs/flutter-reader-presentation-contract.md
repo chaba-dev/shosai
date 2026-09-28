@@ -722,11 +722,12 @@ without the controller's localization/formatting step.
 
 ### 5.5 Palette and typography
 
-Reader chrome uses the mapped application palette and the reader palettes via
-`pageColors`/`shosaiReaderShadTheme` (2C-owned). 4B–4D render light, dark and
-sepia reader states for inspection; they do not add colors. Interface text uses
-the Inter/Noto Sans JP roles; document text keeps document fonts or the reader
-preference (typography.md).
+Reader chrome uses the mapped application palette in every reader theme
+(owner decision 2026-09-28, matching the pinned Iced references); the reader
+palettes apply to the document area via `pageColors` (2C-owned). 4B–4D render
+light, dark and sepia reader states for inspection; they do not add colors.
+Interface text uses the Inter/Noto Sans JP roles; document text keeps document
+fonts or the reader preference (typography.md).
 
 ## 6. Durable navigation and persistence boundary
 
