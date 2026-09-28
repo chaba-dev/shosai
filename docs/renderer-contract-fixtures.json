@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "provenance": "Hand-derived source/coordinate/codec expectations; not renderer captures",
+  "scalar": {
+    "text": "A😀é日\nZ", "count": 7, "utf16_count": 8,
+    "range": [1, 4], "original": "😀é", "normalized": "😀é",
+    "utf16_range": [1, 5], "grapheme_boundaries": [0, 1, 2, 4, 5, 6, 7]
+  },
+  "long": {
+    "paragraph": "ab日😀é Z", "repeat": 10000, "separator": "\n",
+    "scalar_count": 90000, "range": [72002, 72006],
+    "original": "日😀é", "normalized": "日😀é", "utf16_range": [80002, 80007]
+  },
+  "reflow": {
+    "a": [[0, 6], [6, 12], [12, 20]],
+    "b": [[0, 4], [4, 10], [10, 15], [15, 20]],
+    "range": [8, 16],
+    "a_intersections": [[1, 8, 12], [2, 12, 16]],
+    "b_intersections": [[1, 8, 10], [2, 10, 15], [3, 15, 16]],
+    "locations": [
+      {"point": 8, "affinity": "downstream", "a": 1, "b": 1},
+      {"point": 12, "affinity": "downstream", "a": 2, "b": 2},
+      {"point": 12, "affinity": "upstream", "a": 1, "b": 2},
+      {"point": 20, "affinity": "downstream", "a": 2, "b": 3}
+    ]
+  },
+  "mapping": {
+    "canonical": "A\ncat\nB\nx+1\nC\n",
+    "image": [2, 5], "math": [8, 11],
+    "objects_copy": "A\n\nB\n\nC\n",
+    "image_fallback_copy": "A\ncat\nB\n\nC\n",
+    "normalized_canonical": "A cat B x+1 C"
+  },
+  "continuous": {
+    "scale": 1.25, "chapter_height": 1001, "chapter_origin": 20,
+    "spacing": 32, "rows": [0, 512, 1024, 1252],
+    "origins": [0, 409.6, 819.2], "heights": [409.6, 409.6, 182.4],
+    "last_clip_height": 181.8, "next_chapter_origin": 1053
+  },
+  "spreads": [
+    {"width": 719, "font": 16, "columns": 1},
+    {"width": 720, "font": 16, "columns": 2},
+    {"width": 867, "font": 32, "columns": 1},
+    {"width": 868, "font": 32, "columns": 2},
+    {"width": 869, "font": 32, "columns": 2},
+    {"width": 1251, "font": 48, "columns": 1},
+    {"width": 1252, "font": 48, "columns": 2}
+  ],
+  "progress": [
+    {"spine": 1, "offset": 25, "chapter_scalars": 100, "spines": 4, "expected": 0.3125},
+    {"spine": 2, "offset": null, "chapter_scalars": 70, "spines": 4, "expected": 0.5},
+    {"spine": 3, "offset": 100, "chapter_scalars": 100, "spines": 4, "expected": 1.0},
+    {"spine": 1, "offset": 0, "chapter_scalars": 0, "spines": 4, "edge": "start", "expected": 0.25},
+    {"spine": 1, "offset": 0, "chapter_scalars": 0, "spines": 4, "edge": "end", "expected": 0.5}
+  ],
+  "legacy_zoom": [
+    {"input": "0", "kind": "fit-page"},
+    {"input": "-1", "kind": "fit-width"},
+    {"input": "1.75", "kind": "manual", "scale": 1.75},
+    {"input": "8", "kind": "manual", "scale": 8.0},
+    {"input": "-2", "kind": "invalid"},
+    {"input": "NaN", "kind": "invalid"},
+    {"input": "inf", "kind": "invalid"},
+    {"input": "oops", "kind": "invalid"}
+  ],
+  "legacy_state": [
+    {"page": 2, "offset": null, "zoom": 1.75},
+    {"page": 1, "offset": 72002, "zoom": 2.25}
+  ],
+  "zoom_precedence": [
+    {"book": {"kind": "fit-width"}, "legacy_state": 1.75, "default": {"kind": "fit-page"}, "expected": {"kind": "fit-width"}},
+    {"book": null, "legacy_state": 1.75, "default": {"kind": "fit-page"}, "expected": {"kind": "manual", "scale": 1.75}},
+    {"book": null, "legacy_state": null, "default": {"kind": "fit-width"}, "expected": {"kind": "fit-width"}},
+    {"book": {"kind": "inherit"}, "legacy_state": 1.0, "default": {"kind": "fit-width"}, "expected": {"kind": "fit-width"}}
+  ],
+  "zoom_transitions": [
+    {"id": "first-position-save", "initial_book": null, "initial_state": null, "default": {"kind": "fit-width"}, "action": "position", "saved_book": {"kind": "inherit"}, "saved_state": 1.0, "reopened": {"kind": "fit-width"}},
+    {"id": "clear-fit", "initial_book": {"kind": "fit-page"}, "initial_state": 1.0, "default": {"kind": "fit-width"}, "action": "clear", "saved_book": {"kind": "inherit"}, "saved_state": 1.0, "reopened": {"kind": "fit-width"}},
+    {"id": "default-change-after-clear", "initial_book": {"kind": "inherit"}, "initial_state": 1.0, "default": {"kind": "manual", "scale": 2.5}, "action": "position", "saved_book": {"kind": "inherit"}, "saved_state": 2.5, "reopened": {"kind": "manual", "scale": 2.5}},
+    {"id": "legacy-position-save", "initial_book": null, "initial_state": 1.75, "default": {"kind": "fit-width"}, "action": "position", "saved_book": null, "saved_state": 1.75, "reopened": {"kind": "manual", "scale": 1.75}},
+    {"id": "failed-clear", "initial_book": {"kind": "fit-page"}, "initial_state": 1.0, "default": {"kind": "fit-width"}, "action": "failed-clear", "saved_book": {"kind": "fit-page"}, "saved_state": 1.0, "reopened": {"kind": "fit-page"}}
+  ],
+  "viewport_lookup": {
+    "layout": 7, "extent": 1173,
+    "descriptors": [
+      {"id": "0:0", "top": 20, "bottom": 429.6},
+      {"id": "0:1", "top": 429.6, "bottom": 839.2},
+      {"id": "0:2", "top": 839.2, "bottom": 1021},
+      {"id": "1:0", "top": 1053, "bottom": 1153}
+    ],
+    "cases": [
+      {"top": 900, "bottom": 950, "cap": 8, "after": null, "ids": ["0:2"], "next": null, "end": false},
+      {"top": 429.6, "bottom": 430, "cap": 8, "after": null, "ids": ["0:1"], "next": null, "end": false},
+      {"top": 1020.9, "bottom": 1021, "cap": 8, "after": null, "ids": ["0:2"], "next": null, "end": false},
+      {"top": 1021, "bottom": 1053, "cap": 8, "after": null, "ids": [], "next": null, "end": false},
+      {"top": 1053, "bottom": 1060, "cap": 8, "after": null, "ids": ["1:0"], "next": null, "end": false},
+      {"top": 20, "bottom": 1173, "cap": 2, "after": null, "ids": ["0:0", "0:1"], "next": "0:1", "end": true},
+      {"top": 20, "bottom": 1173, "cap": 2, "after": "0:1", "ids": ["0:2", "1:0"], "next": null, "end": true}
+    ],
+    "stale_request": {"layout": 6, "expected": "StaleLayout"},
+    "unknown_request": {"known_prefix": 429.6, "top": 900, "bottom": 950, "work_remaining": true, "waiting": true, "end": false}
+  },
+  "pdf_geometry": {
+    "page": 2, "page_height": 200, "character_range": null, "quote": null,
+    "canonical_rect": [10, 20, 30, 50],
+    "layouts": [
+      {"layout": 1, "scale": 1, "clip": [0, 0, 100, 200], "expected": [10, 150, 30, 180]},
+      {"layout": 2, "scale": 2, "clip": [0, 320, 50, 400], "expected": [20, 320, 50, 360]}
+    ]
+  },
+  "context": {
+    "long_prefix_repeat": 70000, "tail": " prefix selected suffix",
+    "range": [70008, 70016], "exact": "selected",
+    "prefix": "xxxxxxxxxxxxxxxxxxxxxxxxx prefix", "suffix": "suffix",
+    "boundary_grapheme": "q́", "ascii_repeat": 31,
+    "prefix_boundary_expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "suffix_boundary_expected": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "cap_case": {"ignored_scalar": "­", "repeat": 65537, "input_cap": 65536, "expected": "ResourceLimit"}
+  }
+}

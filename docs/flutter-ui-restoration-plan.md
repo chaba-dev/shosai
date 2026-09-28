@@ -5,7 +5,7 @@ useful Flutter capabilities. This is a presentation rebuild and targeted reader
 contract work, not a frontend restart or pixel-identical port.
 
 - Opened: 2026-09-14. Restructured: 2026-09-20.
-- Status: Stages 1–6 in progress; 3/30 delivery packages fully accepted (1A, 1B, 2A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A is the authorized next package; 3D integration acceptance and earlier acceptance gaps remain open.
+- Status: Stages 1–5 IN PROGRESS; Stage 6 TODO; 3/30 delivery packages fully accepted (1A, 1B, 2A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A contract and review are complete locally, acceptance/5B dispatch pending; 3D integration acceptance and earlier gaps remain open.
 - Governing documents: [RFD 4](../rfd/0004/README.adoc), its
   [implementation checklist](../rfd/0004/IMPLEMENTATION.org),
   [performance contract](../rfd/0004/PHASE-0.adoc), and
@@ -48,10 +48,15 @@ was content-identical to verified working-copy revision `f991a270`; #133 merged 
 was performed. The owner authorized 5A after #133 merged, without waiving 4D,
 3D integration acceptance or earlier gaps.
 
-**Current work:** 5A contract preparation in isolated `shosai-5a-contract`, based
-on freshly fetched #133, not stale local `main`. Default remains at independent
-change `uzktlxoq` with its older on-disk work deliberately preserved. Carry-forward
-closeout/gaps are committed separately before the renderer contract.
+**Current work:** 5A [contract and handoff](flutter-renderer-persistence-contract.md)
+and [independent vectors](renderer-contract-fixtures.json) are complete locally in
+isolated `shosai-5a-contract`, based on freshly fetched #133, not stale local `main`.
+Oracle round 2 closed all blockers; explicit acceptance and 5B dispatch remain
+owner decisions. Local change `twylzwyw` follows the separate closeout/gap commit
+`d42596bc` (`docs(plan): record restoration gaps and merged presentation closeout`).
+Default remains at independent change `uzktlxoq` / `9b23e927` with older on-disk
+work deliberately preserved. 5A has not been pushed, opened as a PR or merged;
+its isolated workspace remains available for review. No baseline was installed.
 
 **Outstanding gaps (acceptance remains open; implementation is not approval):**
 - **4B/5G**: inherited chrome-height offset (4B
@@ -247,7 +252,7 @@ package below, not an entire stage. `TODO` means not completed, not ready to dis
 | 2. Safe foundations | Accessible add-books dialog, production-shell harness, theme mappings and retained notices | 2A–2D | 1/4 | IN PROGRESS |
 | 3. Library restoration | Iced-shaped library with working existing actions | 3A–3D | 0/4 | IN PROGRESS |
 | 4. Reader presentation | Verified reader components and typed presentation contract | 4A–4D | 0/4 | IN PROGRESS |
-| 5. Reader capabilities | Real sessions, rich EPUB, navigation, selection and reading modes | 5A–5J | 0/10 | TODO |
+| 5. Reader capabilities | Real sessions, rich EPUB, navigation, selection and reading modes | 5A–5J | 0/10 | IN PROGRESS |
 | 6. Workflow closure | Import/settings coverage and cross-format acceptance | 6A–6D | 0/4 | TODO |
 
 Dependencies are **package IDs**, not whole-stage completion. This permits reference
@@ -451,9 +456,9 @@ do not assign the whole renderer as one task.
 
 ### Delivery checklist
 
-- [ ] **5A accepted — renderer/persistence contract**
-  - [ ] Addresses, layout identity, DTOs, extraction/mapping and persistence rules specified.
-  - [ ] Contract and independent fixture expectations reviewed before consumer work.
+- [ ] **5A accepted — renderer/persistence contract** — IN PROGRESS — stronger-model design delivered locally in [contract thread](https://ampcode.com/threads/T-01a0e64e-c3e6-71fb-bb9b-1a7a40618e26), isolated `shosai-5a-contract` from fetched #133. Explicit acceptance/publication remain pending; 5B consumers may use the reviewed handoff only after dispatch authorization.
+  - [x] Addresses, layout identity, DTOs, extraction/mapping and persistence rules specified in [renderer/persistence contract](flutter-renderer-persistence-contract.md), including atomic publication, bounded viewport discovery, geometry-only PDF projection and typed zoom inheritance without SQL migration. The merged Dart evaluation does not override Rust ownership.
+  - [x] Contract and [independent fixture expectations](renderer-contract-fixtures.json) reviewed before consumer work. Oracle round 1 found three blockers (clear-fit fallback, missing viewport discovery and geometry-only PDF projection); all corrected with discriminating vectors. Round 2 at local revision `553b25af` closed all findings, no blockers; its optional cursor clarification is incorporated. `python3 scripts/check_renderer_contract.py` passes vectors, 12 negative controls, 15 existing conformance hashes, local links and 30-package/3-accepted accounting; rerun after editorial closeout. No renderer, database round-trip, performance or visual pass is claimed. 5B owns the real long-chapter/legacy-store tests, EN/JA readability calibration and measured prototype described in contract §8; inherited gaps and all parent acceptance checks remain open.
 - [ ] **5B accepted — pagination prototype**
   - [ ] Bounded pagination, bridge transport and legacy persistence handling implemented.
   - [ ] Long-chapter/round-trip tests pass; prototype measurements recorded against budgets.
@@ -680,10 +685,10 @@ Iced/Flutter evidence. Package acceptance does not transfer to another package.
 
 ## First dispatch and historical crosswalk
 
-**Current package: 5A (authorized after #133); 1A/1B/2A fully accepted, 3/30.**
+**Current package: 5A (local contract/review delivered; acceptance pending); 1A/1B/2A fully accepted, 3/30.**
 2C, 3A–3C and 4A–4D delivery has merged; explicit acceptance/follow-ups remain
-as checked above. Freeze the contract and independent expectations before 5B
-consumers start. The remaining native macOS picker check stays open and does not
+as checked above. The reviewed 5A contract/independent expectations are ready for
+owner handoff; 5B dispatch is next, not started here. The remaining native macOS picker check stays open and does not
 become a pass by advancing the plan.
 
 | Previous plan phase | New owner(s) |
