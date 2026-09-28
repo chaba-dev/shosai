@@ -60,6 +60,19 @@ logical range and returns display geometry for that range:
   user space, then uses PDFium text data to resolve character boundaries and
   ordered page-space rectangles.
 
+[NOTE]
+====
+*Amended 2026-09-28 — EPUB ownership.* The owner adopted Dart-owned EPUB
+parsing/normalization with Flutter layout
+(link:../../docs/dart-document-stack-evaluation-plan.md[decision record]). The
+EPUB selection adapter is therefore Dart/Flutter-owned: it maps Flutter's own
+laid-out text to logical chapter scalar boundaries and returns geometry derived
+from the same layout, exactly as required below. The layered anchor model, the
+four resolution states, bounded quote/context recovery and the Rust annotation
+store are unchanged, and Rust remains the only database writer while the EPUB
+slice is integrated. PDF keeps its Rust adapter and PDFium geometry path.
+====
+
 The first release uses each format's natural document boundary.  An EPUB
 selection may cross inline spans, block widgets, and visual page fragments
 within one spine item, but not cross into another spine item.  A PDF selection
@@ -267,10 +280,11 @@ make one format mutate source files while EPUB still needs sidecar storage.
 A browser DOM supplies built-in selection and range APIs, but RFD 1 rejected a
 production Wry renderer because of Wayland embedding, packaging, clipboard,
 accessibility-tree, and dual-renderer costs. Highlighting retains the bounded
-Rust parser, resource policy, logical locations, and renderer-neutral layout
-work rather than reopening that architecture decision. RFD 4 may replace Iced
-presentation with Flutter without introducing a browser DOM or a second EPUB
-parser.
+parser, resource policy, logical locations, and renderer-neutral layout work
+rather than reopening that architecture decision (for EPUB, the parser and
+layout are Dart/Flutter-owned per the 2026-09-28 amendment above). RFD 4 may
+replace Iced presentation with Flutter without introducing a browser DOM or a
+second EPUB parser.
 
 == Decisions
 

@@ -1,11 +1,17 @@
 # 5A renderer and persistence contract
 
-Status: **design for consumer implementation; explicit package acceptance pending**.
+Status: **accepted by the owner; merged in [PR #134](https://github.com/chaba-dev/shosai/pull/134)
+at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e)
+on 2026-09-28T05:17:09Z. Its Rust-specific EPUB renderer/persistence portions
+are superseded by the 2026-09-28 EPUB adoption decision (see §1); its behavioral
+rules and PDF/CBZ portions remain in force.**
 Base: [PR #133](https://github.com/chaba-dev/shosai/pull/133),
 [6514f5de](https://github.com/chaba-dev/shosai/commit/6514f5de62caecaf781edee0774bc3880ff95bf5).
 Owner: [5A thread](https://ampcode.com/threads/T-01a0e64e-c3e6-71fb-bb9b-1a7a40618e26).
 The [restoration plan](flutter-ui-restoration-plan.md) owns acceptance and gaps.
-This document freezes the 5B interface, not an implemented renderer or a baseline.
+This document freezes the former 5B interface, not an implemented renderer or a
+baseline. 5B is superseded (see §1); its EPUB mechanisms are reference-only and
+its acceptance run below is historical, not a pending dispatch.
 
 ## 1. Authority and the implementation being replaced
 
@@ -16,11 +22,45 @@ Flutter renders immutable state and dispatches typed messages; controller effect
 own handles, image decode, cancellation and guarded completion. No second text
 layout in Flutter may generate geometry for Rust pixels.
 
-The merged [Dart evaluation](dart-document-stack-evaluation-plan.md) is planning
-only. Its allowance to discard old-schema compatibility applies to a separately
-authorized adoption investigation, not this production Rust package. No engine
-adoption or architecture amendment is recorded. **5B preserves existing stores;
-no schema migration, reset or old-anchor conversion is authorized.** RFD 4's
+The merged [Dart evaluation](dart-document-stack-evaluation-plan.md) was planning
+only when this contract was written; the owner's 2026-09-28 EPUB adoption
+decision now amends it for EPUB (see the supersession note below). Its allowance
+to discard old-schema compatibility applies to a separately authorized adoption
+investigation, not to the retained stores. **Existing stores are preserved while
+the EPUB slice is integrated; no schema migration, reset or old-anchor conversion
+is authorized.**
+
+**Superseded for EPUB (2026-09-28).** The owner's
+[EPUB adoption decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28)
+adopted Dart-owned EPUB parsing/normalization with Flutter layout and amended
+[architecture rules](flutter-architecture.md#document-ownership-by-format). This
+contract splits for EPUB:
+
+- **Still binding behavioral invariants:** durable locations are not presentation
+  addresses and a layout page index is never a durable chapter or a progress
+  value; layout identity covers mode, dimensions, DPR/raster scale, typography,
+  palette and layout revision; one atomic publication replaces displayed state
+  and no mixed-identity frame is shown; work is bounded, cancellable, and stale
+  completions are rejected after every await; every retained resource has one
+  explicit owner and is released exactly once; canonical durable text maps to
+  visible text explicitly; selection/annotation ranges are extracted
+  independently of retained tiles; and Rust remains the only database writer
+  while the slice is integrated.
+- **Superseded EPUB mechanisms (reference-only for EPUB):** the Rust-side
+  `FragmentBundle` RGBA raster, the bridge `layout`/`fragment`/
+  `viewport_fragments`/`locate`/`point_at`/`extract_range`/`project_range`/
+  `release_*` operation set with `FragmentLease`/`take_buffer` transfer and host
+  decode, and Rust EPUB layout ownership. The adopted EPUB boundary produces its
+  pixels and geometry from one Flutter layout inside the controller's effect
+  contract, without a bridge raster round trip. These shapes remain normative for
+  PDF/CBZ and for any consumer that keeps the Rust renderer; they are not
+  requirements for the EPUB engine slices, and their names/bindings are not
+  generated for them.
+- The superseded 5B package is paused and is not a consumer; the restoration plan
+  records that disposition and keeps all package acceptance unchanged. A later
+  slice may reuse an operation shape it still needs, but must say so explicitly.
+
+The contract remains fully in force for PDF/CBZ. RFD 4's
 renderer-neutral scene can be encoded as the selected RGBA + sidecars, not Flutter
 reshaping. 1D still owns governing-record reconciliation.
 
@@ -510,13 +550,15 @@ these preference fields must preserve revision ordering, restore-failure write
 blocking, removed-book checks and save draining. A stale frontend completion is not
 permission to undo a newer durable write.
 
-## 8. Independent fixtures and 5B handoff
+## 8. Independent fixtures and former 5B handoff
 
 [`renderer-contract-fixtures.json`](renderer-contract-fixtures.json) contains
 literal expected values, not output captured from the proposed implementation.
 Run `python3 scripts/check_renderer_contract.py` to check scalar/UTF-16 arithmetic,
 range normalization, progress, boundary/spread/tile arithmetic and plan accounting.
-This is a specification consistency check, **not evidence that 5B works**.
+This is a specification consistency check, **not evidence that 5B works**. The 5B
+consumer is superseded; the fixture expectations remain usable by a later named
+consumer of these behavioral rules.
 
 Fixture expectations and derivations:
 
@@ -598,6 +640,11 @@ local links and restoration accounting. The subsequent handoff/checklist edits
 do not change the reviewed interfaces; the same checks are rerun before commit.
 
 No consumer implementation or publication is authorized by
-this document alone. Explicit 5A acceptance, 5B dispatch, future numeric readability
-calibration, and the existing restoration gaps remain distinct decisions. No new
+this document alone. The 5A acceptance is now recorded (owner acceptance in the
+parent thread and the #134 merge at `154088a4`); future numeric readability
+calibration and the existing restoration gaps remain distinct decisions. The
+former 5B dispatch is superseded by the 2026-09-28 EPUB adoption decision and
+will not start: the replacement EPUB engine slices own the long-chapter/
+legacy-store tests, EN/JA readability calibration and measured prototype that
+contract §8 assigned to 5B, and none of that evidence is claimed here. No new
 UI screenshot is required for this documentation-only package.
