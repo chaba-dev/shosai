@@ -159,6 +159,20 @@ What the slice established:
   and emoji fonts, over-tall table-row splitting, and retained-heap attribution
   (RSS is current resident memory, not retained memory).
 
+Follow-up (progressive layout, same prototype). The reader now installs a
+window around the durable location first and extends it in bounded batches that
+yield, cancels superseded work at batch boundaries and reuses still-valid
+measured blocks from a bounded cache. On one runner the 606k-scalar chapter
+became usable in 120 ms instead of 300 ms with a longest UI-thread block of
+24 ms instead of 173 ms; a new session at 85 % was usable in 123 ms instead of
+298 ms; relayouts returning to a measured typography cost the 80 ms coalescing
+delay and no layout work. A 120k-scalar single paragraph initially stalled
+~1 s; profiling attributed that to the prototype's per-line boundary and
+canonical-mapping loops (Flutter shaping is ~29 ms), and after fixing both the
+fixture is usable in ~0.17 s. The paragraph remains one indivisible shaping
+call, which bounds the worst case. Numbers, method and limits
+are in the prototype's `EVIDENCE.md`.
+
 Recommendation carried to the adoption decision: **insufficient evidence to
 choose full Dart or hybrid, and no evidence that retaining Rust is worse**. The
 slice supports continuing with the existing Rust path while a bounded follow-up

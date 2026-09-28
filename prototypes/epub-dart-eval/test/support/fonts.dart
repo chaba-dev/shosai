@@ -12,8 +12,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub_eval/reader/script_fonts.dart';
 
-/// Registers the bundled faces plus the prototype's script fallbacks and
-/// returns the fallback family list for the controller.
+/// Registers the bundled faces, the platform monospace family and the
+/// prototype's script fallbacks, then returns the fallback family list for the
+/// controller.
+///
+/// `flutter_test` provides no platform fonts, so without a registered
+/// monospace face every code glyph would fall back to the Ahem placeholder and
+/// paint as a filled box in captures. The release app resolves the same family
+/// through the platform font manager.
 Future<List<String>> loadPrototypeFonts(WidgetTester tester) async {
   late List<String> scriptFallbacks;
   await tester.runAsync(() async {
@@ -32,7 +38,47 @@ Future<List<String>> loadPrototypeFonts(WidgetTester tester) async {
       await loader.load();
     }
   });
+  await _loadMonospace(tester);
   return scriptFallbacks;
+}
+
+/// Register a real monospace TTF as the `monospace` family, matching what the
+/// platform provides to the release app.
+Future<void> _loadMonospace(WidgetTester tester) async {
+  final path = _systemMonospacePath();
+  if (path == null) return;
+  await tester.runAsync(() async {
+    final loader = FontLoader('monospace');
+    loader.addFont(
+      Future.value(
+        ByteData.sublistView(Uint8List.fromList(File(path).readAsBytesSync())),
+      ),
+    );
+    await loader.load();
+  });
+}
+
+String? _systemMonospacePath() {
+  // Font collections (.ttc) cannot be loaded as a single face.
+  bool usable(String path) =>
+      path.isNotEmpty && !path.endsWith('.ttc') && File(path).existsSync();
+  try {
+    final result = Process.runSync('fc-match', ['-f', '%{file}', 'monospace']);
+    if (result.exitCode == 0) {
+      final path = (result.stdout as String).trim();
+      if (usable(path)) return path;
+    }
+  } catch (_) {
+    // Fall through to the fixed candidates.
+  }
+  for (final candidate in const [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf',
+    '/usr/share/fonts/noto/NotoSansMono-Regular.ttf',
+  ]) {
+    if (usable(candidate)) return candidate;
+  }
+  return null;
 }
 
 String _pathFor(String family) {

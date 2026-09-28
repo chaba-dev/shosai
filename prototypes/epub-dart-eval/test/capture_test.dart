@@ -337,4 +337,87 @@ void main() {
     await writeCapture(tester, image, 'long-chapter-page1');
     controller.dispose();
   });
+
+  testWidgets('the first progressive window renders the durable location', (
+    tester,
+  ) async {
+    // The reader opens at a distant stored position; the first installed layout
+    // is a window around it, not the whole chapter. This capture is taken while
+    // the chapter is still incomplete, so it shows exactly what the user sees
+    // first.
+    final documentKey = GlobalKey(debugLabel: 'document');
+    final fallbacks = await loadPrototypeFonts(tester);
+    final path = _fixturePath('long-chapter.epub');
+    final store = EpubMemoryPositionStore();
+    await store.write(path, const EpubStoredPosition(spine: 1, scalar: 85000));
+    final controller = EpubReaderController(
+      source: _FixtureSource(path),
+      positionStore: store,
+      contentFallbackFamilies: fallbacks,
+      layoutStrategy: EpubLayoutStrategy.progressive,
+    );
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => EpubReaderView(
+            controller: controller,
+            model: controller.model,
+            documentKey: documentKey,
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      controller.dispatch(EpubReaderOpenRequested(path));
+      final stopwatch = Stopwatch()..start();
+      while (controller.model.status != EpubReaderStatus.ready &&
+          stopwatch.elapsed < const Duration(seconds: 20)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    for (var attempt = 0; attempt < 300; attempt++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (controller.model.flow != null &&
+          !controller.model.relayoutBusy &&
+          !controller.model.relayoutPending) {
+        break;
+      }
+    }
+    final model = controller.model;
+    expect(model.spine, 1);
+    expect(model.scalar, 85000);
+    expect(
+      model.layoutComplete,
+      isFalse,
+      reason: 'the capture must show the partial window, not a full layout',
+    );
+    expect(model.flow!.covers(85000), isTrue);
+    final image = await captureDocument(tester, documentKey);
+    final analysis = await analyze(
+      tester,
+      image,
+      model.typography.palette.background,
+    );
+    await writeCapture(tester, image, 'progressive-first-window');
+    expect(analysis.hasContent, isTrue);
+    // The window is usable before the chapter's totals are known.
+    expect(model.unitCount, greaterThan(0));
+
+    // Let the background fill finish, then capture the completed layout of the
+    // same location for comparison, and leave no driver work pending.
+    for (var attempt = 0; attempt < 600; attempt++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (controller.model.layoutComplete && !controller.model.relayoutBusy) {
+        break;
+      }
+    }
+    expect(controller.model.layoutComplete, isTrue);
+    final finalImage = await captureDocument(tester, documentKey);
+    await writeCapture(tester, finalImage, 'progressive-complete-location');
+    expect(controller.model.scalar, 85000);
+    controller.dispose();
+  });
 }

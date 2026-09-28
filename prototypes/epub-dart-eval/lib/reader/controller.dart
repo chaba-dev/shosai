@@ -16,12 +16,24 @@ import 'package:shosai_epub/shosai_epub.dart';
 
 import 'effects.dart';
 import 'geometry.dart';
+import 'layout/cache.dart';
 import 'layout/flow.dart';
 import 'layout/text_style.dart';
 import 'layout/pages.dart';
 import 'message.dart';
 import 'model.dart';
 import 'theme.dart';
+
+/// How the controller measures a chapter.
+enum EpubLayoutStrategy {
+  /// Measure every node before installing the layout. This is the
+  /// pre-progressive baseline, kept for comparison.
+  eager,
+
+  /// Install a window around the durable location first, then extend it in
+  /// bounded batches that yield to the event loop.
+  progressive,
+}
 
 class EpubReaderController extends ChangeNotifier {
   EpubReaderController({
@@ -32,8 +44,12 @@ class EpubReaderController extends ChangeNotifier {
     EpubPositionStore? positionStore,
     List<String> contentFallbackFamilies = const [],
     EpubLimits limits = const EpubLimits(),
+    EpubLayoutStrategy layoutStrategy = EpubLayoutStrategy.progressive,
+    EpubLayoutCache? layoutCache,
     this.onNotice,
-  }) : _contentFallbackFamilies = contentFallbackFamilies,
+  }) : _layoutStrategy = layoutStrategy,
+       _layoutCache = layoutCache ?? EpubLayoutCache(),
+       _contentFallbackFamilies = contentFallbackFamilies,
        _source = source,
        _clipboard = clipboard,
        _fontRegistrar = fontRegistrar,
@@ -48,6 +64,36 @@ class EpubReaderController extends ChangeNotifier {
   final EpubPositionStore _positionStore;
   final List<String> _contentFallbackFamilies;
   final EpubLimits _limits;
+  final EpubLayoutStrategy _layoutStrategy;
+  final EpubLayoutCache _layoutCache;
+
+  /// The session the progressive driver is currently extending, if any.
+  /// Navigation uses it to extend the laid-out range on demand.
+  ChapterLayoutSession? _activeSession;
+  _LayoutRequest? _activeRequest;
+
+  /// Batch bounds for the progressive driver: one batch stays under a frame
+  /// budget, and the driver yields between batches.
+  static const int _layoutBatchNodes = 24;
+  static const int _layoutBatchMicros = 8000;
+
+  /// Total synchronous layout work this controller spent, microseconds.
+  /// Measurement-only: wall time also includes the driver's yields.
+  int _layoutWorkMicros = 0;
+  int get layoutWorkMicros => _layoutWorkMicros;
+
+  void _countSessionWork(ChapterLayoutSession session) {
+    final delta = session.layoutWorkMicros - session.reportedWorkMicros;
+    if (delta > 0) {
+      _layoutWorkMicros += delta;
+      session.reportedWorkMicros = session.layoutWorkMicros;
+    }
+  }
+
+  /// Layout cache statistics, for measurement and tests.
+  int get layoutCacheHits => _layoutCache.hits;
+  int get layoutCacheMisses => _layoutCache.misses;
+  int get layoutCacheEvictions => _layoutCache.evictions;
   final void Function(String message)? onNotice;
 
   EpubReaderModel get _initialModel => EpubReaderModel(
@@ -72,6 +118,8 @@ class EpubReaderController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _relayoutTimer?.cancel();
+    _layoutCache.clear();
+    _clearActiveSessionForDisposal();
     _releaseImages();
     super.dispose();
   }
@@ -154,6 +202,8 @@ class EpubReaderController extends ChangeNotifier {
         _documentLoaded(message);
       case EpubReaderOpenFailed():
         _openFailed(message);
+      case EpubReaderLayoutProgressed():
+        _layoutProgressed(message);
       case EpubReaderLayoutCompleted():
         _layoutCompleted(message);
     }
@@ -170,6 +220,11 @@ class EpubReaderController extends ChangeNotifier {
 
   void _open(EpubReaderOpenRequested message) {
     _generation++;
+    // The cache is scoped to one document lifetime: keys use internal
+    // resource paths, which two books can share, and cached blocks can
+    // reference images that `_releaseImages` is about to dispose.
+    _layoutCache.clear();
+    _clearActiveSessionForDisposal();
     _releaseImages();
     _emit(
       EpubReaderModel(
@@ -373,13 +428,17 @@ class EpubReaderController extends ChangeNotifier {
         .clamp(12.0, 48.0)
         .toDouble();
     if (next == _model.typography.fontSize) return;
+    final typography = _model.typography.copyWith(fontSize: next);
+    // Geometry follows the new typography: a page height computed for the
+    // previous font size would lay the chapter out against the wrong page.
     final geometry = _geometryFor(
       _model.geometry?.viewportWidth ?? 0,
       _model.geometry?.viewportHeight ?? 0,
+      typography: typography,
     );
     _emit(
       _model.copyWith(
-        typography: _model.typography.copyWith(fontSize: next),
+        typography: typography,
         geometry: geometry,
         relayoutPending: true,
       ),
@@ -422,25 +481,63 @@ class EpubReaderController extends ChangeNotifier {
       mode: _model.mode,
       book: book,
       images: Map.of(_model.images),
+      strategy: _layoutStrategy,
     );
     _emit(_model.copyWith(relayoutBusy: true, relayoutPending: false));
     unawaited(_layoutEffect(request));
   }
 
-  /// One immutable layout request: the effect never re-reads live model state.
+  bool _isStale(_LayoutRequest request) =>
+      _disposed ||
+      request.generation != _generation ||
+      request.revision != _layoutRevision;
+
+  EpubLayoutKey _layoutKey(_LayoutRequest request, EpubChapter chapter) =>
+      EpubLayoutKey(
+        resource: chapter.resource,
+        contentWidth: request.geometry.contentWidth,
+        contentHeight: request.geometry.contentHeight,
+        typography: request.typography,
+        imageSignature: Object.hashAll(request.images.keys),
+      );
+
+  Map<String, String> _imageMediaTypes(EpubBook book) => {
+    for (final resource in book.resources.values)
+      resource.path: resource.mediaType,
+  };
+
+  PaginatedChapter? _paginate(ChapterFlow flow, _LayoutRequest request) =>
+      request.mode == EpubReaderMode.paginated
+      ? paginateFlow(
+          flow: flow,
+          pageHeight: request.geometry.contentHeight,
+          pageWidth: request.geometry.contentWidth,
+        )
+      : null;
+
+  /// Measure one chapter according to the configured strategy.
   Future<void> _layoutEffect(_LayoutRequest request) async {
     final stopwatch = Stopwatch()..start();
     // Yield once so a loading state can paint; Flutter text layout itself
     // cannot move to a background isolate (dart:ui is UI-thread bound).
     await Future<void>.delayed(Duration.zero);
-    if (_disposed ||
-        request.generation != _generation ||
-        request.revision != _layoutRevision) {
-      return;
-    }
+    if (_isStale(request)) return;
     final book = request.book;
     if (request.spine >= book.chapters.length) return;
     final chapter = book.chapters[request.spine];
+    if (request.strategy == EpubLayoutStrategy.eager) {
+      _layoutEager(request, chapter, stopwatch);
+      return;
+    }
+    await _layoutProgressive(request, chapter, stopwatch);
+  }
+
+  /// The pre-progressive baseline: measure the whole chapter, then install.
+  void _layoutEager(
+    _LayoutRequest request,
+    EpubChapter chapter,
+    Stopwatch stopwatch,
+  ) {
     final flow = layoutChapterFlow(
       chapter: chapter,
       spec: ChapterLayoutSpec(
@@ -449,38 +546,153 @@ class EpubReaderController extends ChangeNotifier {
         typography: request.typography,
       ),
       images: request.images,
-      imageMediaTypes: {
-        for (final resource in book.resources.values)
-          resource.path: resource.mediaType,
-      },
+      imageMediaTypes: _imageMediaTypes(request.book),
     );
-    PaginatedChapter? paginated;
-    if (request.mode == EpubReaderMode.paginated) {
-      paginated = paginateFlow(
-        flow: flow,
-        pageHeight: request.geometry.contentHeight,
-        pageWidth: request.geometry.contentWidth,
-      );
-    }
-    final clampedScalar = clampScalar(request.scalar, chapter.scalarCount);
-    final unit = paginated == null
-        ? 0
-        : paginated.pageOfCanonical(clampedScalar) ~/ request.geometry.columns;
-    final continuousOffset = paginated == null
-        ? offsetForCanonical(flow, clampedScalar)
-        : 0.0;
+    if (_isStale(request)) return;
     dispatch(
       EpubReaderLayoutCompleted(
         generation: request.generation,
         revision: request.revision,
         spine: request.spine,
         flow: flow,
-        paginated: paginated,
-        anchorScalar: clampedScalar,
-        unit: unit,
-        continuousOffset: continuousOffset,
+        paginated: _paginate(flow, request),
         elapsedMicros: stopwatch.elapsedMicroseconds,
       ),
+    );
+  }
+
+  /// Visible-location-first: install a window around the durable location, then
+  /// extend it forward and backward in bounded batches that yield between
+  /// batches. A superseded request stops at the next batch boundary and its
+  /// measured blocks stay in the cache for a later request with the same key.
+  Future<void> _layoutProgressive(
+    _LayoutRequest request,
+    EpubChapter chapter,
+    Stopwatch stopwatch,
+  ) async {
+    final key = _layoutKey(request, chapter);
+    var session = _layoutCache.get(key);
+    if (session == null ||
+        (!session.complete && !session.covers(request.scalar))) {
+      // No reusable session, or the cached range does not contain the
+      // requested location (a distant jump): start a fresh window.
+      session = ChapterLayoutSession(
+        chapter: chapter,
+        spec: ChapterLayoutSpec(
+          width: request.geometry.contentWidth,
+          height: request.geometry.contentHeight,
+          typography: request.typography,
+        ),
+        images: request.images,
+        imageMediaTypes: _imageMediaTypes(request.book),
+      );
+      _layoutCache.store(key, session);
+      session.layoutWindowAt(request.scalar);
+    }
+    _activeSession = session;
+    _activeRequest = request;
+    if (_isStale(request)) {
+      _clearActiveSession(request);
+      return;
+    }
+    _installSession(
+      session,
+      request,
+      elapsedMicros: stopwatch.elapsedMicroseconds,
+    );
+    while (!session.complete) {
+      // A real event-loop turn: frames and input run between batches.
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+      if (_isStale(request)) {
+        _clearActiveSession(request);
+        return;
+      }
+      final progressed = session.lastNodeIndex + 1 < session.totalNodes
+          ? session.layoutForward(
+              maxNodes: _layoutBatchNodes,
+              maxMicros: _layoutBatchMicros,
+            )
+          : session.layoutBackward(
+              maxNodes: _layoutBatchNodes,
+              maxMicros: _layoutBatchMicros,
+            );
+      if (progressed == 0) break;
+      if (_isStale(request)) {
+        _clearActiveSession(request);
+        return;
+      }
+      _installSession(
+        session,
+        request,
+        elapsedMicros: stopwatch.elapsedMicroseconds,
+      );
+    }
+    _clearActiveSession(request);
+  }
+
+  /// Detach the active session unconditionally (document replacement or
+  /// disposal), where no driver may keep using it.
+  void _clearActiveSessionForDisposal() {
+    _activeSession = null;
+    _activeRequest = null;
+  }
+
+  /// Release the active session only when it still belongs to [request].
+  ///
+  /// A superseded driver resumes after its successor installed a new session;
+  /// without the identity guard it would clear the successor's session and
+  /// on-demand navigation would lose its handle.
+  void _clearActiveSession(_LayoutRequest request) {
+    if (!identical(_activeRequest, request)) return;
+    _activeSession = null;
+    _activeRequest = null;
+  }
+
+  /// Report a session snapshot: partial installs stay honest about totals,
+  /// the final one is a completion.
+  void _installSession(
+    ChapterLayoutSession session,
+    _LayoutRequest request, {
+    required int elapsedMicros,
+  }) {
+    _countSessionWork(session);
+    final flow = session.snapshot();
+    final paginated = _paginate(flow, request);
+    if (session.complete) {
+      dispatch(
+        EpubReaderLayoutCompleted(
+          generation: request.generation,
+          revision: request.revision,
+          spine: request.spine,
+          flow: flow,
+          paginated: paginated,
+          elapsedMicros: elapsedMicros,
+        ),
+      );
+      return;
+    }
+    dispatch(
+      EpubReaderLayoutProgressed(
+        generation: request.generation,
+        revision: request.revision,
+        spine: request.spine,
+        flow: flow,
+        paginated: paginated,
+        elapsedMicros: elapsedMicros,
+      ),
+    );
+  }
+
+  void _layoutProgressed(EpubReaderLayoutProgressed message) {
+    if (message.generation != _generation ||
+        message.revision != _layoutRevision) {
+      return;
+    }
+    _installLayout(
+      message.flow,
+      message.paginated,
+      complete: false,
+      elapsedMicros: message.elapsedMicros,
     );
   }
 
@@ -489,28 +701,94 @@ class EpubReaderController extends ChangeNotifier {
         message.revision != _layoutRevision) {
       return;
     }
-    final book = _model.book!;
-    final chapter = book.chapters[message.spine];
+    _installLayout(
+      message.flow,
+      message.paginated,
+      complete: true,
+      elapsedMicros: message.elapsedMicros,
+    );
+  }
+
+  /// Install a flow (complete or partial) and re-derive the presentation from
+  /// the durable scalar, so extending the window never moves the reader.
+  void _installLayout(
+    ChapterFlow flow,
+    PaginatedChapter? paginated, {
+    required bool complete,
+    required int elapsedMicros,
+  }) {
+    final book = _model.book;
+    if (book == null) return;
+    final spine = _model.spine
+        .clamp(0, math.max(0, book.chapters.length - 1))
+        .toInt();
+    final chapter = book.chapters[spine];
     final columns = _model.geometry?.columns ?? 1;
-    final unitCount = message.paginated == null
+    // The durable scalar is clamped to the chapter, never to the rendered
+    // range: a chapter-end position sits after the last rendered glyph (the
+    // canonical stream has trailing separators) and must not move. Pagination
+    // and continuous geometry clamp internally.
+    final scalar = clampScalar(_model.scalar, chapter.scalarCount);
+    final unit = paginated == null
+        ? 0
+        : paginated.pageOfCanonical(scalar) ~/ columns;
+    // Continuous geometry clamps to the scrollable extent: a chapter-end
+    // scalar maps to the last screenful, never to an offset the view cannot
+    // reach (which would make the scroll surface correct it and report that
+    // correction as navigation).
+    final double continuousOffset = paginated == null
+        ? offsetForCanonical(flow, scalar).clamp(
+            0.0,
+            math.max(0.0, flow.height - (_model.geometry?.viewportHeight ?? 0)),
+          )
+        : 0.0;
+    final unitCount = paginated == null
         ? book.chapters.length
-        : (message.paginated!.pages.length + columns - 1) ~/ columns;
+        : (paginated.pages.length + columns - 1) ~/ columns;
     _emit(
       _model.copyWith(
-        flow: message.flow,
-        paginated: message.paginated,
-        unit: message.unit,
+        flow: flow,
+        paginated: paginated,
+        unit: unit,
         unitCount: unitCount,
-        scalar: message.anchorScalar,
-        spine: message.spine,
-        continuousOffset: message.continuousOffset,
+        scalar: scalar,
+        spine: spine,
+        continuousOffset: continuousOffset,
         relayoutBusy: false,
         relayoutPending: false,
-        progress: _progress(message.spine, message.anchorScalar, chapter),
-        lastLayoutMicros: message.elapsedMicros,
-        contentsSpine: message.spine,
+        layoutComplete: complete,
+        progress: _progress(spine, scalar, chapter),
+        lastLayoutMicros: elapsedMicros,
+        contentsSpine: spine,
       ),
     );
+  }
+
+  /// Extend the active session so [scalar] is inside the laid-out range.
+  ///
+  /// Bounded: returns false when there is no session to extend, the session is
+  /// already complete or already covers the scalar, or the budget is spent
+  /// (the background fill continues and a later attempt succeeds).
+  bool _ensureLaidOut(int scalar) {
+    final session = _activeSession;
+    final request = _activeRequest;
+    if (session == null || request == null || !session.started) return false;
+    if (session.complete || session.covers(scalar)) return false;
+    final first = session.firstCanonical;
+    final last = session.lastCanonical;
+    if (first == null || last == null) return false;
+    final progressed = scalar < first
+        ? session.layoutBackward(
+            maxNodes: _layoutBatchNodes,
+            maxMicros: _layoutBatchMicros,
+          )
+        : session.layoutForward(
+            maxNodes: _layoutBatchNodes,
+            maxMicros: _layoutBatchMicros,
+          );
+    if (progressed == 0) return false;
+    _installSession(session, request, elapsedMicros: 0);
+    return true;
   }
 
   /// Position writes are serialized: an older write can never land after a
@@ -561,9 +839,25 @@ class EpubReaderController extends ChangeNotifier {
       );
       return;
     }
-    final next = (_model.unit + message.delta)
+    var next = (_model.unit + message.delta)
         .clamp(0, math.max(0, _model.unitCount - 1))
         .toInt();
+    if (next == _model.unit && !_model.layoutComplete) {
+      // At the edge of a partially measured chapter: measure more content in
+      // the requested direction, then retry once.
+      final flow = _model.flow;
+      final edge = message.delta > 0
+          ? flow?.lastCanonical
+          : flow?.firstCanonical;
+      if (edge != null &&
+          _ensureLaidOut(
+            message.delta > 0 ? edge + 1 : math.max(0, edge - 1),
+          )) {
+        next = (_model.unit + message.delta)
+            .clamp(0, math.max(0, _model.unitCount - 1))
+            .toInt();
+      }
+    }
     if (next == _model.unit) return;
     final pages = _model.pagesForUnit(next);
     final page = _model.paginated!.pages[pages.first];
@@ -586,9 +880,11 @@ class EpubReaderController extends ChangeNotifier {
       message.scalar,
       book.chapters[spine].scalarCount,
     );
+    final flow = _model.flow;
     if (spine == _model.spine &&
-        _model.flow != null &&
-        _model.paginated != null) {
+        flow != null &&
+        _model.paginated != null &&
+        flow.covers(scalar)) {
       final page = _model.paginated!.pageOfCanonical(scalar);
       final columns = _model.geometry?.columns ?? 1;
       _emit(
@@ -619,8 +915,15 @@ class EpubReaderController extends ChangeNotifier {
 
   void _continuousOffsetChanged(EpubReaderContinuousOffsetChanged message) {
     if (_model.mode != EpubReaderMode.continuous) return;
-    final flow = _model.flow;
+    var flow = _model.flow;
     if (flow == null) return;
+    if (!_model.layoutComplete && message.offset >= flow.height - 1) {
+      // Scrolled to the end of a partially measured chapter: measure more.
+      final edge = flow.lastCanonical;
+      if (edge != null && _ensureLaidOut(edge + 1)) {
+        flow = _model.flow ?? flow;
+      }
+    }
     final clamped = message.offset
         .clamp(0.0, math.max(0.0, flow.height))
         .toDouble();
@@ -839,6 +1142,7 @@ class _LayoutRequest {
     required this.mode,
     required this.book,
     required this.images,
+    required this.strategy,
   });
 
   final int generation;
@@ -850,6 +1154,7 @@ class _LayoutRequest {
   final EpubReaderMode mode;
   final EpubBook book;
   final Map<String, ui.Image> images;
+  final EpubLayoutStrategy strategy;
 }
 
 /// Flow-space offset of a canonical scalar (top of its block, plus the line

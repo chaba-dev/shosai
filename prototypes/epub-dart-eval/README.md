@@ -17,9 +17,10 @@ packages/shosai_epub/   pure Dart: ZIP/OPF/spine/TOC, bounded CSS cascade,
                         XHTML normalization, canonical text stream + scalar
                         checkpoints, durable addresses, MathML fallback
 lib/reader/             Flutter: Elm-style controller, flow layout with
-                        line-level canonical ranges, pagination, continuous
-                        window, selection/copy/highlight projection, capture
-                        analysis, adapters (file/clipboard/fonts/images/position)
+                        line-level canonical ranges, progressive windowed
+                        layout (bounded batches, cancellation, LRU reuse),
+                        pagination, continuous window, selection/copy/highlight
+                        projection, capture analysis, adapters
 lib/main.dart           interactive app (fixture picker → reader)
 lib/measure_main.dart   measurement harness (frame latencies, RSS, captures)
 tool/generate_fixtures.py  deterministic fixture generator (+ SHA256SUMS)
@@ -45,10 +46,43 @@ From the repository root, inside the dev shell (`.agents/dev`):
 
 # measurements (builds a release bundle, runs under Xvfb)
 .agents/dev bash -lc 'cd prototypes/epub-dart-eval && bash tool/measure.sh'
+
+# eager vs progressive comparison (one strategy per run)
+.agents/dev bash -lc 'cd prototypes/epub-dart-eval && \
+  SHOSAI_MEASURE_LAYOUT=eager bash tool/measure.sh'
 ```
 
 The `make test-epub-prototype` and `make measure-epub-prototype` targets at the
 repository root wrap these commands.
+
+## Progressive layout (follow-up experiment)
+
+The reader installs a **window** around the durable location first and extends
+it in bounded batches that yield to the event loop, instead of measuring the
+whole chapter before showing anything:
+
+- `ChapterLayoutSession` measures a contiguous node range; the priority window
+  covers ~2.5 viewports from the requested location, then forward and backward
+  batches fill the rest (8 ms / 24 nodes per batch, 1 ms yield).
+- Cancellation is checked at every batch boundary; a superseded request's
+  measured blocks stay in a bounded LRU cache keyed by chapter, width,
+  typography and admitted images (mode-independent), so a burst that returns to
+  a measured configuration installs with zero layout work.
+- The model reports `layoutComplete`; while false the footer shows durable
+  progress ("Laying out — N%") instead of a page total, and the page ordinal is
+  window-local until the fill reaches the chapter start.
+- `SHOSAI_MEASURE_LAYOUT=eager|progressive` runs the comparison;
+  `EVIDENCE.md` holds the measured table and limits.
+
+Measured on one runner (release bundle, Xvfb, software rasterization, one
+session): the 606k-scalar chapter is usable in 120 ms instead of 300 ms with a
+longest UI-thread block of 24 ms instead of 173 ms; a new session at 85 % is
+usable in 123 ms instead of 298 ms; relayouts that return to a measured
+typography cost the 80 ms coalescing delay and no layout work. A single
+120k-scalar paragraph used to stall ~1 s; profiling showed that was the
+prototype's own per-line boundary and mapping loops, not Flutter shaping
+(~29 ms), and after fixing both the fixture is usable in ~0.17 s with a ~45 ms
+longest block.
 
 ## What the slice demonstrates
 

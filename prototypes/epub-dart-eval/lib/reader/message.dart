@@ -168,16 +168,15 @@ class EpubReaderOpenFailed extends EpubReaderMessage {
   final String error;
 }
 
-class EpubReaderLayoutCompleted extends EpubReaderMessage {
-  const EpubReaderLayoutCompleted({
+/// A partial layout install: the requested location is usable, but the
+/// chapter is not fully measured yet. Totals are partial, never fabricated.
+class EpubReaderLayoutProgressed extends EpubReaderMessage {
+  const EpubReaderLayoutProgressed({
     required this.generation,
     required this.revision,
     required this.spine,
     required this.flow,
     required this.paginated,
-    required this.anchorScalar,
-    required this.unit,
-    required this.continuousOffset,
     required this.elapsedMicros,
   });
 
@@ -186,8 +185,23 @@ class EpubReaderLayoutCompleted extends EpubReaderMessage {
   final int spine;
   final ChapterFlow flow;
   final PaginatedChapter? paginated;
-  final int anchorScalar;
-  final int unit;
-  final double continuousOffset;
+  final int elapsedMicros;
+}
+
+class EpubReaderLayoutCompleted extends EpubReaderMessage {
+  const EpubReaderLayoutCompleted({
+    required this.generation,
+    required this.revision,
+    required this.spine,
+    required this.flow,
+    required this.paginated,
+    required this.elapsedMicros,
+  });
+
+  final int generation;
+  final int revision;
+  final int spine;
+  final ChapterFlow flow;
+  final PaginatedChapter? paginated;
   final int elapsedMicros;
 }

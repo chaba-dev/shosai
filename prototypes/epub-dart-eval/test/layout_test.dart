@@ -879,6 +879,78 @@ void main() {
       );
     });
 
+    test('the huge-paragraph chapter paginates with exact-once coverage', () {
+      // One ~120k-scalar paragraph is the largest single text block: this
+      // covers the line-boundary fast path and the one-pass canonical mapping.
+      final book = _fixture('huge-paragraph.epub');
+      final flow = _flow(book, 0, width: 520, height: 700);
+      final paginated = paginateFlow(
+        flow: flow,
+        pageHeight: 700,
+        pageWidth: 520,
+      );
+      expect(flow.overflowClippedBlocks, 0);
+      expect(paginated.overflowPages, 0);
+      expectExactlyOnce(
+        flow: _flowCoverage(flow),
+        pages: _pageCoverage(paginated),
+        reason: 'huge paragraph',
+      );
+      final expected = _expectedRenderedScalars(
+        book.chapters[0],
+        hasImage: false,
+      );
+      expectCountsEqual(
+        actual: _flowCoverage(flow),
+        expected: expected,
+        reason: 'huge paragraph flow',
+      );
+      expectCountsEqual(
+        actual: _pageCoverage(paginated),
+        expected: expected,
+        reason: 'huge paragraph pages',
+      );
+    });
+
+    test('the left-to-right line fast path equals the logical boundary API', () {
+      // The fast path probes one caret per line instead of scanning the
+      // paragraph per line; a bidi-safe path stays for mixed-direction blocks.
+      // Aggregate coverage cannot catch a misplaced boundary, so compare the
+      // ranges line by line for every text block of two fixtures.
+      for (final entry in [
+        ('long-chapter.epub', 1),
+        ('huge-paragraph.epub', 0),
+      ]) {
+        final book = _fixture(entry.$1);
+        final flow = _flow(book, entry.$2, width: 520, height: 700);
+        var compared = 0;
+        for (final block in flow.blocks) {
+          final text = block.text;
+          if (text == null) continue;
+          final logical = logicalLineBoundsForTest(text.painter, text.map);
+          expect(
+            logical.length,
+            text.lines.length,
+            reason: '${entry.$1}: line count for a text block',
+          );
+          for (var index = 0; index < logical.length; index++) {
+            expect(
+              text.lines[index].codeUnitStart,
+              logical[index].start,
+              reason: '${entry.$1}: line $index start',
+            );
+            expect(
+              text.lines[index].codeUnitEnd,
+              logical[index].end,
+              reason: '${entry.$1}: line $index end',
+            );
+          }
+          compared++;
+        }
+        expect(compared, greaterThan(0));
+      }
+    });
+
     test('tile plan for the long chapter stays bounded', () {
       final book = _fixture('long-chapter.epub');
       final flow = _flow(book, 1, width: 520, height: 700);

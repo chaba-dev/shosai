@@ -276,4 +276,94 @@ void main() {
     expect(selection.start, lessThanOrEqualTo(scalar + 4));
     controller.dispose();
   });
+
+  testWidgets('a chapter-end position survives a continuous-mode relayout', (
+    tester,
+  ) async {
+    // The scroll surface must not report its own extent correction as user
+    // navigation: a chapter-end position in continuous mode maps to the last
+    // screenful, and a relayout must not move it.
+    final documentKey = GlobalKey(debugLabel: 'pointer-document');
+    final fallbacks = await loadPrototypeFonts(tester);
+    final path = File('fixtures/rich-chapter.epub').existsSync()
+        ? 'fixtures/rich-chapter.epub'
+        : '../../crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub';
+    final store = EpubMemoryPositionStore();
+    final controller = EpubReaderController(
+      source: _FixtureSource(path),
+      positionStore: store,
+      contentFallbackFamilies: fallbacks,
+    );
+    await tester.binding.setSurfaceSize(const Size(900, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => EpubReaderView(
+            controller: controller,
+            model: controller.model,
+            documentKey: documentKey,
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      controller.dispatch(EpubReaderOpenRequested(path));
+      final stopwatch = Stopwatch()..start();
+      while (controller.model.status != EpubReaderStatus.ready &&
+          stopwatch.elapsed < const Duration(seconds: 20)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    for (var attempt = 0; attempt < 300; attempt++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (controller.model.flow != null && !controller.model.relayoutBusy) {
+        break;
+      }
+    }
+    controller.dispatch(const EpubReaderModeChanged(EpubReaderMode.continuous));
+    for (var attempt = 0; attempt < 300; attempt++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (controller.model.paginated == null &&
+          !controller.model.relayoutBusy &&
+          !controller.model.relayoutPending) {
+        break;
+      }
+    }
+    final end = controller.model.chapter!.scalarCount;
+    controller.dispatch(EpubReaderScalarJumpRequested(spine: 0, scalar: end));
+    for (var attempt = 0; attempt < 400; attempt++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (!controller.model.relayoutBusy &&
+          !controller.model.relayoutPending &&
+          controller.model.scalar == end) {
+        break;
+      }
+    }
+    expect(controller.model.scalar, end);
+
+    // A typography relayout while the scroll surface is attached.
+    controller.dispatch(const EpubReaderFontSizeChanged(2));
+    for (var attempt = 0; attempt < 400; attempt++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (!controller.model.relayoutBusy &&
+          !controller.model.relayoutPending &&
+          controller.model.typography.fontSize == 20) {
+        break;
+      }
+    }
+    // Let any ballistic scroll correction settle.
+    for (var attempt = 0; attempt < 60; attempt++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(
+      controller.model.scalar,
+      end,
+      reason: 'a layout-driven scroll correction must not move the position',
+    );
+    final stored = await store.read(path);
+    expect(stored?.scalar, end);
+    controller.dispose();
+  });
 }

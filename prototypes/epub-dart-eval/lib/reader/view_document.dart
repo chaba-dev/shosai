@@ -171,12 +171,22 @@ class _ContinuousSurfaceState extends State<_ContinuousSurface> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final target = model.continuousOffset;
+        final maxExtent = math.max(0.0, flow.height - constraints.maxHeight);
         if (_scroll.hasClients && (target - _scroll.offset).abs() > 1) {
-          _lastReported = target;
+          // Jump to a reachable offset and record the programmed value, so the
+          // scroll surface's own extent correction is not reported back as user
+          // navigation.
+          final programmatic = target.clamp(0.0, maxExtent);
+          _lastReported = programmatic;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scroll.hasClients) {
-              _scroll.jumpTo(target.clamp(0.0, math.max(0.0, flow.height)));
-            }
+            if (!mounted || !_scroll.hasClients) return;
+            _lastReported = programmatic;
+            _scroll.jumpTo(programmatic);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _scroll.hasClients) {
+                _lastReported = _scroll.offset;
+              }
+            });
           });
         }
         // The scroll extent is a bare spacer; the document is painted by a

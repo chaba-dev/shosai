@@ -5,7 +5,8 @@ Usage (from the repository root):
 
     python3 prototypes/epub-dart-eval/tool/generate_fixtures.py
 
-Writes `rich-chapter.epub` and `long-chapter.epub` next to this script's
+Writes `rich-chapter.epub`, `long-chapter.epub`, `long-chapter-stress.epub` and
+`huge-paragraph.epub` next to this script's
 `../fixtures/` directory plus a SHA256SUMS file. The generator mirrors the
 conventions of `crates/shosai-core/tests/fixtures/epub-conformance/generate.py`:
 fixed ZIP timestamps, stored entries, and a deterministic byte layout so the
@@ -169,6 +170,29 @@ def long_chapter(index: int, paragraphs: int, repeats: int) -> tuple[str, bytes]
     ).encode()
 
 
+def huge_paragraph_chapter(scalars: int) -> tuple[str, bytes]:
+    """One paragraph that cannot be measured in a single bounded batch.
+
+    The paragraph is the indivisible case for Flutter text layout: a
+    `TextPainter.layout()` call measures it whole, so a chapter made of one
+    huge paragraph cannot be made responsive by batching between blocks.
+    """
+    words = LOREM.split()
+    body = [f'<main id="huge"><h1 id="huge-title">Huge Paragraph</h1>']
+    text = []
+    written = 0
+    index = 0
+    while written < scalars:
+        word = words[index % len(words)]
+        text.append(word)
+        written += len(word) + 1
+        index += 1
+    body.append(f'<p id="huge-paragraph">{" ".join(text)}</p>')
+    body.append('<p id="huge-tail">Tail paragraph after the huge one.</p>')
+    body.append("</main>")
+    return "Huge Paragraph", xhtml("Huge Paragraph", "\n".join(body)).encode()
+
+
 def write_book(path: Path, book_id: str, chapters: list[tuple[str, bytes]], resources: dict[str, tuple[str, bytes]]) -> None:
     manifest = [
         '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
@@ -246,6 +270,13 @@ h2 { text-align: left; }
                 long_chapter(2, paragraphs=110, repeats=3),
                 long_chapter(3, paragraphs=8, repeats=4),
             ],
+            "resources": {
+                "Styles/book.css": ("text/css", b"body { font-size: 1rem; }\n"),
+            },
+        },
+        # One ~120k-scalar paragraph: the indivisible text-layout case.
+        "huge-paragraph": {
+            "chapters": [huge_paragraph_chapter(120000)],
             "resources": {
                 "Styles/book.css": ("text/css", b"body { font-size: 1rem; }\n"),
             },
