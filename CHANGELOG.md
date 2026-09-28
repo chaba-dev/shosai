@@ -56,6 +56,8 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Restore the reader header, tab strip, progress and edge navigation (#130)
 - *(flutter)* Restore reader panels with matched Iced reference evidence (#132)
 - *(flutter)* Restore selection actions and reader palette boundaries (#133)
+- *(eval)* Add Dart EPUB vertical slice prototype (#135)
+- *(eval)* Progressive EPUB layout with bounded batches and reuse (#136)
 
 ### 🐛 Bug Fixes
 
