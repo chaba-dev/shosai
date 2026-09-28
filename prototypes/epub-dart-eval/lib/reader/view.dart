@@ -116,7 +116,10 @@ class _ReaderHeader extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (model.relayoutBusy || model.relayoutPending)
+          if (model.status == EpubReaderStatus.ready &&
+              (model.relayoutBusy ||
+                  model.relayoutPending ||
+                  !model.layoutComplete))
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: SizedBox(
@@ -200,7 +203,12 @@ class _ReaderFooter extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = model.typography.palette;
     final pages = model.visiblePages;
-    final label = model.mode == EpubReaderMode.paginated
+    // While the progressive layout is still measuring the chapter, the page
+    // count is partial: report the durable progress instead of a fabricated
+    // total.
+    final label = !model.layoutComplete
+        ? 'Laying out — ${(model.progress * 100).round()}%'
+        : model.mode == EpubReaderMode.paginated
         ? 'Page ${pages.isEmpty ? 0 : pages.first + 1}'
               ' of ${model.paginated?.pages.length ?? 0}'
         : 'Continuous — ${(model.progress * 100).round()}%';

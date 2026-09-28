@@ -28,6 +28,7 @@ import 'package:flutter/rendering.dart';
 import 'reader/capture.dart';
 import 'reader/controller.dart';
 import 'reader/effects.dart';
+import 'reader/layout/cache.dart';
 import 'reader/message.dart';
 import 'reader/model.dart';
 import 'reader/script_fonts.dart';
@@ -53,9 +54,103 @@ void main() {
   final out = Platform.environment['SHOSAI_MEASURE_OUT'] ?? '';
   final trials =
       int.tryParse(Platform.environment['SHOSAI_MEASURE_TRIALS'] ?? '') ?? 5;
+  final strategy = switch (Platform.environment['SHOSAI_MEASURE_LAYOUT']) {
+    'eager' => EpubLayoutStrategy.eager,
+    _ => EpubLayoutStrategy.progressive,
+  };
+  final cacheEntries =
+      int.tryParse(Platform.environment['SHOSAI_MEASURE_LAYOUT_CACHE'] ?? '') ??
+      2;
   runApp(
-    _MeasureApp(books: books, spines: spines, outputPath: out, trials: trials),
+    _MeasureApp(
+      books: books,
+      spines: spines,
+      outputPath: out,
+      trials: trials,
+      strategy: strategy,
+      cacheEntries: cacheEntries,
+    ),
   );
+}
+
+/// Longest event-loop gap seen while an operation ran.
+///
+/// A periodic timer that cannot run while the UI thread is inside a
+/// synchronous layout call reports the gap when it finally runs, so the
+/// longest gap is a lower bound on the longest uninterrupted UI-thread work
+/// interval. It is not a presented-frame measurement: the harness runs
+/// headless under Xvfb and does not drive vsync.
+class _ResponsivenessProbe {
+  static const Duration _interval = Duration(milliseconds: 2);
+  static const int longGapMicros = 50000;
+
+  final Stopwatch _clock = Stopwatch();
+  Timer? _timer;
+  int _lastMicros = 0;
+  int samples = 0;
+  int longestGapMicros = 0;
+  int longGaps = 0;
+
+  void start() {
+    _clock
+      ..reset()
+      ..start();
+    _lastMicros = _clock.elapsedMicroseconds;
+    _timer = Timer.periodic(_interval, (_) => _tick());
+  }
+
+  void _tick() {
+    final now = _clock.elapsedMicroseconds;
+    final gap = now - _lastMicros;
+    _lastMicros = now;
+    samples++;
+    if (gap > longestGapMicros) longestGapMicros = gap;
+    if (gap >= longGapMicros) longGaps++;
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  ({int longestGapMicros, int longGaps, int samples}) take() => (
+    longestGapMicros: longestGapMicros,
+    longGaps: longGaps,
+    samples: samples,
+  );
+}
+
+/// The endpoints of one measured operation.
+class _Measurement {
+  const _Measurement({
+    required this.usableMicros,
+    required this.completeMicros,
+    required this.verifiedMicros,
+    required this.contentVerified,
+    required this.layoutWorkMicros,
+    required this.probe,
+  });
+
+  final int usableMicros;
+  final int completeMicros;
+  final int verifiedMicros;
+  final bool contentVerified;
+
+  /// Synchronous layout work this operation spent (0 for the eager baseline,
+  /// which does not run through a session).
+  final int layoutWorkMicros;
+  final ({int longestGapMicros, int longGaps, int samples}) probe;
+
+  Map<String, Object?> toJson() => {
+    'usable_state_micros': usableMicros,
+    'complete_state_micros': completeMicros,
+    'verified_capture_micros': verifiedMicros,
+    'content_verified': contentVerified,
+    'layout_work_micros': layoutWorkMicros,
+    'longest_block_micros': probe.longestGapMicros,
+    'long_gaps': probe.longGaps,
+    'probe_samples': probe.samples,
+  };
 }
 
 class _MeasureApp extends StatefulWidget {
@@ -64,12 +159,16 @@ class _MeasureApp extends StatefulWidget {
     required this.spines,
     required this.outputPath,
     required this.trials,
+    required this.strategy,
+    required this.cacheEntries,
   });
 
   final List<String> books;
   final List<int> spines;
   final String outputPath;
   final int trials;
+  final EpubLayoutStrategy strategy;
+  final int cacheEntries;
 
   @override
   State<_MeasureApp> createState() => _MeasureAppState();
@@ -88,9 +187,20 @@ class _MeasureAppState extends State<_MeasureApp> {
           'Linux release bundle under Xvfb with software rasterization '
           '(llvmpipe); absolute frame latencies are not desktop-GPU numbers.',
       'relayout_includes_coalescing':
-          'relayout frame latency includes the 80 ms '
-          'resize/typography coalescing delay; layout_work_micros reports the '
-          'layout computation alone.',
+          'relayout state latency includes the 80 ms resize/typography '
+          'coalescing delay; layout_work_micros reports the layout computation '
+          'alone and longest_block_micros the longest event-loop gap during the '
+          'operation.',
+      'responsiveness_probe':
+          'longest_block_micros is the longest gap between 2 ms event-loop '
+          'timer ticks while the operation ran. It is a lower bound on the '
+          'longest uninterrupted UI-thread work interval (a blocking layout '
+          'call delays the tick), not a presented-frame or vsync measurement.',
+      'layout_strategy':
+          'layout_strategy is the controller strategy under test; eager is the '
+          'pre-progressive baseline (measure the whole chapter, then install), '
+          'progressive installs a window around the durable location first and '
+          'extends it in bounded batches that yield.',
     },
     'endpoint_definitions': {
       'first_displayed_content':
@@ -117,7 +227,13 @@ class _MeasureAppState extends State<_MeasureApp> {
   /// Writes the report after every completed book so partial results survive a
   /// stalled later book.
   void _writeReport() {
-    final encoded = const JsonEncoder.withIndent('  ').convert(_report);
+    String encoded;
+    try {
+      encoded = const JsonEncoder.withIndent('  ').convert(_report);
+    } catch (error) {
+      _log('report encode failed: $error');
+      return;
+    }
     for (final path in [
       if (widget.outputPath.isNotEmpty) widget.outputPath,
       'artifacts/measurements/report.json',
@@ -196,29 +312,46 @@ class _MeasureAppState extends State<_MeasureApp> {
     };
     // A fresh in-memory store: a persistent store would reopen at whatever
     // position a previous run stopped at, so runs would not be comparable.
+    final cache = EpubLayoutCache(maxEntries: widget.cacheEntries);
     final controller = EpubReaderController(
       contentFallbackFamilies: fallbacks,
       positionStore: EpubMemoryPositionStore(),
+      layoutStrategy: widget.strategy,
+      layoutCache: cache,
     );
+    entry['layout_strategy'] = widget.strategy.name;
+    entry['layout_cache_max_entries'] = widget.cacheEntries;
     entry['initial_spine'] = controller.model.spine;
     entry['initial_scalar'] = controller.model.scalar;
     // The reader view must be built before any viewport or layout can happen.
     setState(() => _controller = controller);
     await _pumpUntil(() => false, timeout: const Duration(milliseconds: 50));
 
+    // Idle calibration: what the probe reports when the UI thread is free.
+    final idleProbe = _ResponsivenessProbe()..start();
+    await _pumpUntil(() => false, timeout: const Duration(milliseconds: 250));
+    idleProbe.stop();
+    final idleStats = idleProbe.take();
+    entry['idle_probe'] = {
+      'longest_gap_micros': idleStats.longestGapMicros,
+      'long_gaps': idleStats.longGaps,
+      'samples': idleStats.samples,
+    };
+
     // Cold open.
     final open = await _measure(
       controller,
       () => controller.dispatch(EpubReaderOpenRequested(path)),
-      () =>
+      usable: () =>
           controller.model.status == EpubReaderStatus.ready &&
           controller.model.flow != null &&
           !controller.model.relayoutBusy &&
           !controller.model.relayoutPending,
     );
     _log(
-      'cold open: state ${open.stateMicros}us '
-      'verified ${open.verifiedMicros}us content=${open.contentVerified}',
+      'cold open: usable ${open.usableMicros}us complete '
+      '${open.completeMicros}us verified ${open.verifiedMicros}us '
+      'content=${open.contentVerified} longestBlock=${open.probe.longestGapMicros}us',
     );
     entry['open_effect_micros'] = controller.model.firstContentMicros;
     entry['cold_open_layout_work_micros'] = controller.model.lastLayoutMicros;
@@ -226,9 +359,7 @@ class _MeasureAppState extends State<_MeasureApp> {
     _log('first content: $firstContent');
     (entry['samples'] as List).add({
       'operation': 'cold_open',
-      'state_latency_micros': open.stateMicros,
-      'verified_capture_micros': open.verifiedMicros,
-      'content_verified': open.contentVerified,
+      ...open.toJson(),
       'capture': firstContent,
     });
     // Move to the requested spine (the long fixture's large chapter is spine 1)
@@ -239,7 +370,7 @@ class _MeasureAppState extends State<_MeasureApp> {
         () => controller.dispatch(
           EpubReaderScalarJumpRequested(spine: spine, scalar: 0),
         ),
-        () =>
+        usable: () =>
             controller.model.spine == spine &&
             controller.model.flow != null &&
             !controller.model.relayoutBusy &&
@@ -247,10 +378,7 @@ class _MeasureAppState extends State<_MeasureApp> {
       );
       (entry['samples'] as List).add({
         'operation': 'spine_jump',
-        'state_latency_micros': jumpLatency.stateMicros,
-        'verified_capture_micros': jumpLatency.verifiedMicros,
-        'content_verified': jumpLatency.contentVerified,
-        'layout_work_micros': controller.model.lastLayoutMicros,
+        ...jumpLatency.toJson(),
       });
     }
     entry['spine'] = controller.model.spine;
@@ -289,7 +417,7 @@ class _MeasureAppState extends State<_MeasureApp> {
             controller.dispatch(EpubReaderUnitRequested(delta));
           }
         },
-        () => singleSpread
+        usable: () => singleSpread
             ? controller.model.spine != beforeSpine &&
                   !controller.model.relayoutBusy
             : controller.model.unit != beforeUnit &&
@@ -299,13 +427,10 @@ class _MeasureAppState extends State<_MeasureApp> {
         'operation': singleSpread
             ? 'warm_chapter_transition'
             : 'warm_navigation',
-        'state_latency_micros': latency.stateMicros,
-        'verified_capture_micros': latency.verifiedMicros,
-        'content_verified': latency.contentVerified,
+        ...latency.toJson(),
         'page': controller.model.unit,
         'spine': controller.model.spine,
         'pages': controller.model.paginated?.pages.length,
-        'layout_work_micros': controller.model.lastLayoutMicros,
       });
       stdout.writeln('[measure] warm nav $trial: $latency');
       if (singleSpread) {
@@ -331,24 +456,55 @@ class _MeasureAppState extends State<_MeasureApp> {
       final latency = await _measure(
         controller,
         () => controller.dispatch(EpubReaderFontSizeChanged(delta)),
-        () =>
+        usable: () =>
             controller.model.typography.fontSize == target &&
             !controller.model.relayoutBusy &&
             !controller.model.relayoutPending,
       );
       (entry['samples'] as List).add({
         'operation': 'relayout_font_size',
-        'state_latency_micros': latency.stateMicros,
-        'verified_capture_micros': latency.verifiedMicros,
-        'content_verified': latency.contentVerified,
+        ...latency.toJson(),
         'font_size': target,
-        'layout_work_micros': controller.model.lastLayoutMicros,
       });
       _log(
-        'relayout $trial: state ${latency.stateMicros}us '
-        'verified ${latency.verifiedMicros}us',
+        'relayout $trial: usable ${latency.usableMicros}us complete '
+        '${latency.completeMicros}us longestBlock '
+        '${latency.probe.longestGapMicros}us',
       );
     }
+
+    // Cancellation burst: intents spaced past the 80 ms coalescing delay and
+    // inside the chapter's measurement time, so each one starts a layout and
+    // is then superseded by the next.
+    final burstProbe = _ResponsivenessProbe()..start();
+    final burstStopwatch = Stopwatch()..start();
+    for (final delta in [2.0, 2.0, -2.0, -2.0]) {
+      controller.dispatch(EpubReaderFontSizeChanged(delta));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    while (!(controller.model.layoutComplete &&
+            !controller.model.relayoutBusy &&
+            !controller.model.relayoutPending) &&
+        burstStopwatch.elapsed < const Duration(seconds: 60)) {
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+    }
+    burstProbe.stop();
+    final burstProbeStats = burstProbe.take();
+    final burst = {
+      'operation': 'cancellation_burst',
+      'settle_micros': burstStopwatch.elapsedMicroseconds,
+      'final_font_size': controller.model.typography.fontSize,
+      'layout_complete': controller.model.layoutComplete,
+      'cache_hits': cache.hits,
+      'cache_misses': cache.misses,
+      'cache_evictions': cache.evictions,
+      'layout_work_micros_total': controller.layoutWorkMicros,
+      'longest_block_micros': burstProbeStats.longestGapMicros,
+      'long_gaps': burstProbeStats.longGaps,
+      'probe_samples': burstProbeStats.samples,
+    };
+    (entry['samples'] as List).add(burst);
+    _log('cancellation burst: $burst');
 
     // Mode switch.
     final modeLatency = await _measure(
@@ -356,7 +512,7 @@ class _MeasureAppState extends State<_MeasureApp> {
       () => controller.dispatch(
         const EpubReaderModeChanged(EpubReaderMode.continuous),
       ),
-      () =>
+      usable: () =>
           controller.model.paginated == null &&
           controller.model.flow != null &&
           !controller.model.relayoutBusy &&
@@ -364,12 +520,9 @@ class _MeasureAppState extends State<_MeasureApp> {
     );
     (entry['samples'] as List).add({
       'operation': 'mode_switch_to_continuous',
-      'state_latency_micros': modeLatency.stateMicros,
-      'verified_capture_micros': modeLatency.verifiedMicros,
-      'content_verified': modeLatency.contentVerified,
-      'layout_work_micros': controller.model.lastLayoutMicros,
+      ...modeLatency.toJson(),
     });
-    _log('mode switch: ${modeLatency.stateMicros}us');
+    _log('mode switch: usable ${modeLatency.usableMicros}us');
     entry['rss_continuous'] = ProcessInfo.currentRss;
     final continuousCapture = await _verifyContent(controller);
     entry['continuous_capture'] = continuousCapture;
@@ -380,11 +533,15 @@ class _MeasureAppState extends State<_MeasureApp> {
       () => controller.dispatch(
         const EpubReaderModeChanged(EpubReaderMode.paginated),
       ),
-      () =>
+      usable: () =>
           controller.model.paginated != null &&
           !controller.model.relayoutBusy &&
           !controller.model.relayoutPending,
     );
+    entry['cache_hits'] = cache.hits;
+    entry['cache_misses'] = cache.misses;
+    entry['cache_evictions'] = cache.evictions;
+    entry['layout_work_micros_total'] = controller.layoutWorkMicros;
     controller.dispose();
     // Drop the model reference so the disposed document's flow can be
     // collected before the retained-memory sample.
@@ -392,43 +549,110 @@ class _MeasureAppState extends State<_MeasureApp> {
     await _pumpUntil(() => false, timeout: const Duration(milliseconds: 200));
     entry['rss_after_dispose'] = ProcessInfo.currentRss;
     entry['max_rss_after_dispose'] = ProcessInfo.maxRss;
+
+    // A new session at a distant location: reopen the book where a previous
+    // session stopped (85 % of the measured chapter).
+    final chapter = controller.model.book!.chapters[spine];
+    final distantScalar = (chapter.scalarCount * 0.85).round();
+    final distantStore = EpubMemoryPositionStore();
+    await distantStore.write(
+      path,
+      EpubStoredPosition(spine: spine, scalar: distantScalar),
+    );
+    final distantController = EpubReaderController(
+      contentFallbackFamilies: fallbacks,
+      positionStore: distantStore,
+      layoutStrategy: widget.strategy,
+      layoutCache: EpubLayoutCache(maxEntries: widget.cacheEntries),
+    );
+    setState(() => _controller = distantController);
+    await _pumpUntil(() => false, timeout: const Duration(milliseconds: 50));
+    final distant = await _measure(
+      distantController,
+      () => distantController.dispatch(EpubReaderOpenRequested(path)),
+      usable: () =>
+          distantController.model.status == EpubReaderStatus.ready &&
+          distantController.model.flow != null &&
+          !distantController.model.relayoutBusy &&
+          !distantController.model.relayoutPending,
+    );
+    (entry['samples'] as List).add({
+      'operation': 'distant_new_session_open',
+      ...distant.toJson(),
+      'requested_scalar': distantScalar,
+      'restored_scalar': distantController.model.scalar,
+      'window_first_node': distantController.model.flow?.firstNodeIndex,
+    });
+    _log(
+      'distant reopen: usable ${distant.usableMicros}us complete '
+      '${distant.completeMicros}us restored '
+      '${distantController.model.scalar}',
+    );
+    entry['rss_after_distant_open'] = ProcessInfo.currentRss;
+    distantController.dispose();
+    setState(() => _controller = null);
+    await _pumpUntil(() => false, timeout: const Duration(milliseconds: 100));
     (_report['books'] as List).add(entry);
     _writeReport();
   }
 
-  /// Dispatch [action], wait for [condition], then verify the rendered pixels.
+  /// Dispatch [action] and measure two state endpoints with a responsiveness
+  /// probe running:
   ///
-  /// Returns two honest endpoints:
-  /// - `state_latency_micros`: dispatch → the model state the operation
-  ///   produces. This is a state-change latency, not a presented frame.
+  /// - `usable_state_micros`: dispatch → the model state that renders the
+  ///   requested location. This is a state-change latency, not a presented
+  ///   frame.
+  /// - `complete_state_micros`: dispatch → `layoutComplete`. For the eager
+  ///   baseline this equals the usable endpoint.
   /// - `verified_capture_micros`: dispatch → a content-verified capture of the
-  ///   document boundary. This includes the capture round-trip, so it is an
-  ///   upper bound on the user-visible update, not a presentation measurement.
-  Future<({int stateMicros, int verifiedMicros, bool contentVerified})>
-  _measure(
+  ///   document boundary, including the capture round-trip (an upper bound).
+  /// - `longest_block_micros`: the longest event-loop gap while the operation
+  ///   ran (a lower bound on the longest UI-thread work interval).
+  Future<_Measurement> _measure(
     EpubReaderController controller,
-    void Function() action,
-    bool Function() condition,
-  ) async {
+    void Function() action, {
+    required bool Function() usable,
+    bool Function()? complete,
+  }) async {
+    final probe = _ResponsivenessProbe()..start();
     final stopwatch = Stopwatch()..start();
+    final workBefore = controller.layoutWorkMicros;
     action();
-    final deadline = DateTime.now().add(const Duration(seconds: 30));
-    while (!condition() && DateTime.now().isBefore(deadline)) {
+    final deadline = DateTime.now().add(const Duration(seconds: 90));
+    while (!usable() && DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 2));
     }
-    if (!condition()) {
-      _log('timeout waiting for a condition');
-      return (stateMicros: -1, verifiedMicros: -1, contentVerified: false);
+    if (!usable()) {
+      _log('timeout waiting for a usable state');
+      probe.stop();
+      return _Measurement(
+        usableMicros: -1,
+        completeMicros: -1,
+        verifiedMicros: -1,
+        contentVerified: false,
+        layoutWorkMicros: 0,
+        probe: probe.take(),
+      );
     }
-    // The state endpoint is sampled immediately; the capture below renders the
-    // document boundary directly, so no frame wait is required (and waiting on
-    // endOfFrame can hang when the window is not producing frames).
-    final stateMicros = stopwatch.elapsedMicroseconds;
+    final usableMicros = stopwatch.elapsedMicroseconds;
+    final isComplete = complete ?? () => controller.model.layoutComplete;
+    while (!isComplete() && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+    }
+    final completeMicros = stopwatch.elapsedMicroseconds;
+    // The capture below renders the document boundary directly, so no frame
+    // wait is required (and waiting on endOfFrame can hang when the window is
+    // not producing frames).
     final capture = await _verifyContent(controller);
-    return (
-      stateMicros: stateMicros,
-      verifiedMicros: stopwatch.elapsedMicroseconds,
+    final verifiedMicros = stopwatch.elapsedMicroseconds;
+    probe.stop();
+    return _Measurement(
+      usableMicros: usableMicros,
+      completeMicros: completeMicros,
+      verifiedMicros: verifiedMicros,
       contentVerified: capture['content_verified'] == true,
+      layoutWorkMicros: controller.layoutWorkMicros - workBefore,
+      probe: probe.take(),
     );
   }
 

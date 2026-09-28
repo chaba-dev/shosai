@@ -285,8 +285,15 @@ void main() {
     second.dispatch(EpubReaderOpenRequested(path));
     second.dispatch(const EpubReaderViewportChanged(700, 700));
     await _waitUntil(() => second.model.flow != null);
+    // The durable position is usable immediately: the first installed layout
+    // is a window around the stored scalar (the whole chapter for a short one).
     expect(second.model.spine, spine);
     expect(second.model.scalar, scalar);
+    // Once the chapter is fully measured, the presentation ordinal is the
+    // chapter's, not the window's.
+    await _waitUntil(
+      () => second.model.layoutComplete && !second.model.relayoutBusy,
+    );
     expect(second.model.unit, unit);
     second.dispose();
   });

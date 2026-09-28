@@ -268,9 +268,28 @@ class FlowBlock {
       0;
 
   bool get isSplittable => text != null || table != null;
+
+  /// A copy at a different flow-space top. Painters are shared: only the
+  /// position changes, never the measured pixels.
+  FlowBlock shifted(double delta) => FlowBlock(
+    nodeIndex: nodeIndex,
+    top: top + delta,
+    height: height,
+    text: text,
+    image: image,
+    table: table,
+    rule: rule,
+  );
 }
 
-/// The complete laid-out chapter flow.
+/// The laid-out chapter flow.
+///
+/// A flow is [layoutComplete] when every chapter node has been measured. The
+/// progressive layout installs an incomplete flow first (a window around the
+/// reader's durable location) and extends it in bounded batches, so a partial
+/// flow is a normal, supported state: it renders, hit tests and paginates the
+/// range it covers, and its totals are reported as partial rather than
+/// fabricated.
 class ChapterFlow {
   ChapterFlow({
     required this.spine,
@@ -280,6 +299,9 @@ class ChapterFlow {
     required this.canonicalScalarCount,
     required this.overflowClippedBlocks,
     required this.palette,
+    this.layoutComplete = true,
+    this.firstNodeIndex = 0,
+    this.nodeCount = 0,
   });
 
   final int spine;
@@ -296,6 +318,31 @@ class ChapterFlow {
   /// Blocks that cannot fit one page/tile and are painted clipped. A non-zero
   /// count is reported in evidence rather than hidden.
   final int overflowClippedBlocks;
+
+  /// Whether every node of the chapter is measured into this flow.
+  final bool layoutComplete;
+
+  /// Node index of the first laid-out block (non-zero for a window that has
+  /// not been extended back to the chapter start yet).
+  final int firstNodeIndex;
+
+  /// Total nodes in the chapter (0 when the caller did not record it).
+  final int nodeCount;
+
+  /// Canonical scalar of the first laid-out block, or null when empty.
+  int? get firstCanonical =>
+      blocks.isEmpty ? null : blocks.first.canonicalStart;
+
+  /// Canonical scalar of the last laid-out block, or null when empty.
+  int? get lastCanonical => blocks.isEmpty ? null : blocks.last.canonicalEnd;
+
+  /// Whether [scalar] falls inside the laid-out range.
+  bool covers(int scalar) {
+    final first = firstCanonical;
+    final last = lastCanonical;
+    if (first == null || last == null) return false;
+    return scalar >= first && scalar <= last;
+  }
 }
 
 class ChapterLayoutSpec {
@@ -346,11 +393,204 @@ ChapterFlow layoutChapterFlow({
     spine: chapter.spine,
     width: spec.width,
     height: context.cursor,
-    blocks: context.blocks,
+    blocks: List.unmodifiable(context.blocks),
     canonicalScalarCount: chapter.scalarCount,
     overflowClippedBlocks: context.overflowClippedBlocks,
     palette: spec.typography.palette,
+    nodeCount: chapter.blocks.length,
   );
+}
+
+/// Incremental, windowed layout of one chapter.
+///
+/// The session measures a contiguous range of chapter nodes. The first range
+/// is a priority window around the reader's durable location, so the current
+/// page can be installed before the rest of the chapter is measured; the
+/// driver then extends the window forward and backward in bounded batches and
+/// yields between them. Blocks keep their measured pixels ([TextPainter]s) and
+/// only their flow-space tops change as the range grows.
+///
+/// The session frame is stable while it fills: extending backward prepends
+/// into negative space, and [snapshot] normalizes the frame so an installed
+/// flow always starts at zero. Installed snapshots are immutable copies, so
+/// later extension never mutates a model the view already renders.
+class ChapterLayoutSession {
+  ChapterLayoutSession({
+    required this.chapter,
+    required this.spec,
+    required this.images,
+    required this.imageMediaTypes,
+  }) : _maxBlockHeight = math.max(120.0, spec.height - 8);
+
+  final EpubChapter chapter;
+  final ChapterLayoutSpec spec;
+  final Map<String, ui.Image> images;
+  final Map<String, String> imageMediaTypes;
+  final double _maxBlockHeight;
+
+  final List<FlowBlock> _blocks = [];
+  _FlowContext? _forward;
+  double _rangeStart = 0;
+  double _cursor = 0;
+  int _firstNode = 0;
+  int _nextNode = 0;
+  int _overflowClipped = 0;
+  bool _started = false;
+
+  /// Total synchronous layout time spent in this session, microseconds.
+  int layoutWorkMicros = 0;
+
+  /// Work already reported to an owner (measurement bookkeeping only).
+  int reportedWorkMicros = 0;
+
+  bool get started => _started;
+  bool get complete =>
+      _started && _firstNode == 0 && _nextNode == chapter.blocks.length;
+  int get firstNodeIndex => _firstNode;
+  int get lastNodeIndex => _nextNode - 1;
+  int get laidOutNodes => _started ? _nextNode - _firstNode : 0;
+  int get totalNodes => chapter.blocks.length;
+
+  /// Canonical scalar of the first laid-out block, or null when empty.
+  int? get firstCanonical =>
+      _blocks.isEmpty ? null : _blocks.first.canonicalStart;
+
+  /// Canonical scalar of the last laid-out block, or null when empty.
+  int? get lastCanonical => _blocks.isEmpty ? null : _blocks.last.canonicalEnd;
+
+  /// Whether [scalar] is inside the laid-out range.
+  bool covers(int scalar) {
+    final first = firstCanonical;
+    final last = lastCanonical;
+    if (first == null || last == null) return false;
+    return scalar >= first && scalar <= last;
+  }
+
+  /// Node index whose canonical range contains [scalar] (or the last node that
+  /// starts before it, clamped to the chapter).
+  int nodeIndexForScalar(int scalar) {
+    var result = 0;
+    for (var index = 0; index < chapter.blocks.length; index++) {
+      final canonical = chapter.blocks[index].canonical;
+      if (canonical == null) continue;
+      if (canonical.start <= scalar) {
+        result = index;
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+
+  _FlowContext _newContext() => _FlowContext(
+    spec: spec,
+    images: images,
+    imageMediaTypes: imageMediaTypes,
+    maxBlockHeight: _maxBlockHeight,
+    canonicalText: chapter.canonicalText,
+  );
+
+  /// Measure the priority window around [scalar]: from the node containing it
+  /// forward until at least [viewports] viewport heights are measured, so the
+  /// reader can show the durable location plus the following page.
+  void layoutWindowAt(int scalar, {double viewports = 2.5}) {
+    assert(!_started, 'the priority window is the first range of a session');
+    final context = _newContext();
+    final stopwatch = Stopwatch()..start();
+    final target = nodeIndexForScalar(scalar);
+    var index = target;
+    final targetHeight = math.max(120.0, spec.height) * viewports;
+    while (index < chapter.blocks.length) {
+      context.layoutNode(chapter.blocks[index], index, 0, 0);
+      index++;
+      if (context.cursor >= targetHeight) break;
+    }
+    layoutWorkMicros += stopwatch.elapsedMicroseconds;
+    _forward = context;
+    _blocks.addAll(context.blocks);
+    _overflowClipped += context.overflowClippedBlocks;
+    _countedOverflow = context.overflowClippedBlocks;
+    _firstNode = target;
+    _nextNode = index;
+    _rangeStart = 0;
+    _cursor = context.cursor;
+    _started = true;
+  }
+
+  /// Measure up to [maxNodes] further nodes after the current range, stopping
+  /// early when [maxMicros] of layout work has been spent.
+  int layoutForward({int maxNodes = 24, int maxMicros = 8000}) {
+    final context = _forward;
+    if (!_started || context == null || _nextNode >= chapter.blocks.length) {
+      return 0;
+    }
+    final stopwatch = Stopwatch()..start();
+    var laid = 0;
+    final before = context.blocks.length;
+    while (_nextNode < chapter.blocks.length &&
+        laid < maxNodes &&
+        stopwatch.elapsedMicroseconds < maxMicros) {
+      context.layoutNode(chapter.blocks[_nextNode], _nextNode, 0, 0);
+      _nextNode++;
+      laid++;
+    }
+    _blocks.addAll(context.blocks.sublist(before));
+    _overflowClipped += context.overflowClippedBlocks - _countedOverflow;
+    _countedOverflow = context.overflowClippedBlocks;
+    _cursor = context.cursor;
+    layoutWorkMicros += stopwatch.elapsedMicroseconds;
+    return laid;
+  }
+
+  int _countedOverflow = 0;
+
+  /// Measure up to [maxNodes] earlier nodes before the current range, stopping
+  /// early when [maxMicros] of layout work has been spent. Existing blocks
+  /// keep their tops; the prepended nodes occupy negative frame space, which
+  /// [snapshot] normalizes away.
+  int layoutBackward({int maxNodes = 24, int maxMicros = 8000}) {
+    if (!_started || _firstNode == 0) return 0;
+    final stopwatch = Stopwatch()..start();
+    var laid = 0;
+    while (_firstNode > 0 &&
+        laid < maxNodes &&
+        stopwatch.elapsedMicroseconds < maxMicros) {
+      final index = _firstNode - 1;
+      final context = _newContext();
+      context.layoutNode(chapter.blocks[index], index, 0, 0);
+      final height = context.cursor;
+      _rangeStart -= height;
+      _blocks.insertAll(0, [
+        for (final block in context.blocks) block.shifted(_rangeStart),
+      ]);
+      _overflowClipped += context.overflowClippedBlocks;
+      _firstNode = index;
+      laid++;
+    }
+    layoutWorkMicros += stopwatch.elapsedMicroseconds;
+    return laid;
+  }
+
+  /// A snapshot of the laid-out range, normalized so its first block starts at
+  /// flow offset zero. Blocks are copies: a later extension cannot mutate a
+  /// flow the model already installed.
+  ChapterFlow snapshot() {
+    final shift = -_rangeStart;
+    return ChapterFlow(
+      spine: chapter.spine,
+      width: spec.width,
+      height: _cursor - _rangeStart,
+      blocks: List.unmodifiable([
+        for (final block in _blocks) block.shifted(shift),
+      ]),
+      canonicalScalarCount: chapter.scalarCount,
+      overflowClippedBlocks: _overflowClipped,
+      palette: spec.typography.palette,
+      layoutComplete: complete,
+      firstNodeIndex: _firstNode,
+      nodeCount: chapter.blocks.length,
+    );
+  }
 }
 
 /// A synthetic span (code block, math fallback, image alt) whose canonical
@@ -997,47 +1237,31 @@ class _FlowContext {
     painter.layout(maxWidth: width);
     final lines = <FlowLine>[];
     final metrics = painter.computeLineMetrics();
-    final totalLength = built.map.codeUnitLength;
-    var cursor = 0;
-    for (final metric in metrics) {
-      // Logical line boundaries come from the painter's own line boundary API.
-      // Two visual-edge caret probes are not sufficient for bidi: a logical
-      // endpoint can sit at an internal visual boundary.
-      var range = cursor < totalLength
-          ? painter.getLineBoundary(TextPosition(offset: cursor))
-          : TextRange(start: cursor, end: cursor);
-      var start = math.max(range.start, cursor);
-      var end = math.max(range.end, cursor);
-      if (end <= start) {
-        // The cursor sits on a hard newline (which the boundary API excludes);
-        // skip separators and re-probe so the next visual line is found.
-        var probe = cursor;
-        while (probe < totalLength &&
-            built.map.text.codeUnitAt(probe) == 0x0A) {
-          probe++;
-        }
-        if (probe < totalLength) {
-          range = painter.getLineBoundary(TextPosition(offset: probe));
-          start = math.max(range.start, probe);
-          end = math.max(range.end, probe);
-          cursor = probe;
-        }
-      }
-      if (end <= start) {
-        // An empty trailing line: keep the metric's box with no text range.
-        end = start;
-      }
+    final bounds = _lineBounds(
+      painter: painter,
+      map: built.map,
+      metrics: metrics,
+      fastPath: direction == EpubDirection.ltr && !_hasBidiText(built.map.text),
+    );
+    // One monotone pass maps every line boundary to its canonical scalar: the
+    // per-boundary lookup is O(text) on a single huge span, which dominated the
+    // layout of a very long paragraph.
+    final offsets = <int>[
+      for (final bound in bounds) ...[bound.start, bound.end],
+    ];
+    final scalars = built.map.canonicalAtAll(offsets);
+    for (var index = 0; index < bounds.length; index++) {
+      final metric = metrics[index];
       lines.add(
         FlowLine(
-          codeUnitStart: start,
-          codeUnitEnd: end,
-          canonicalStart: built.map.canonicalAt(start),
-          canonicalEnd: built.map.canonicalAt(end),
+          codeUnitStart: bounds[index].start,
+          codeUnitEnd: bounds[index].end,
+          canonicalStart: scalars[index * 2],
+          canonicalEnd: scalars[index * 2 + 1],
           top: metric.baseline - metric.ascent,
           height: metric.height,
         ),
       );
-      cursor = math.max(cursor, end);
     }
     final links = <({int start, int end, String href})>[
       for (final segment in built.map.segments)
@@ -1179,4 +1403,112 @@ class _TableCellPlacement {
   final int span;
   final int rowSpan;
   final int cellIndex;
+}
+
+/// Line ranges from the logical boundary API, for equivalence tests against
+/// the left-to-right fast path. Exposed for evidence, not used by layout.
+List<({int start, int end})> logicalLineBoundsForTest(
+  TextPainter painter,
+  BlockTextMap map,
+) => _lineBounds(
+  painter: painter,
+  map: map,
+  metrics: painter.computeLineMetrics(),
+  fastPath: false,
+);
+
+/// Code-unit ranges of every laid-out line, one per line metric.
+///
+/// The fast path probes the caret at the left edge of each line's vertical
+/// centre. That is O(log lines) per line instead of the boundary API's O(text)
+/// scan, which is what made a single huge paragraph expensive. It is only
+/// correct when visual order equals logical order, so any right-to-left or
+/// bidi-control content (or a right-to-left block) uses the boundary API.
+List<({int start, int end})> _lineBounds({
+  required TextPainter painter,
+  required BlockTextMap map,
+  required List<ui.LineMetrics> metrics,
+  required bool fastPath,
+}) {
+  final text = map.text;
+  final markerOffset = map.codeUnitOffset;
+  final totalLength = map.codeUnitLength;
+  final bounds = <({int start, int end})>[];
+  if (fastPath) {
+    for (var index = 0; index < metrics.length; index++) {
+      final metric = metrics[index];
+      final y = metric.baseline - metric.ascent + metric.height / 2;
+      var start = painter.getPositionForOffset(Offset(0, y)).offset;
+      if (index > 0 && start < bounds[index - 1].start) {
+        start = bounds[index - 1].start;
+      }
+      bounds.add((start: start, end: start));
+    }
+    for (var index = 0; index < bounds.length; index++) {
+      final end = index + 1 < bounds.length
+          ? bounds[index + 1].start
+          : totalLength;
+      // Painter offsets include any generated marker prefix; trim hard-break
+      // newlines in the map's own coordinates (they belong to no line).
+      final startUnit = (bounds[index].start - markerOffset).clamp(
+        0,
+        text.length,
+      );
+      var endUnit = (end - markerOffset).clamp(0, text.length);
+      while (endUnit > startUnit && text.codeUnitAt(endUnit - 1) == 0x0A) {
+        endUnit--;
+      }
+      bounds[index] = (start: bounds[index].start, end: endUnit + markerOffset);
+    }
+    return bounds;
+  }
+
+  var cursor = 0;
+  for (var index = 0; index < metrics.length; index++) {
+    var range = cursor < totalLength
+        ? painter.getLineBoundary(TextPosition(offset: cursor))
+        : TextRange(start: cursor, end: cursor);
+    var start = math.max(range.start, cursor);
+    var end = math.max(range.end, cursor);
+    if (end <= start) {
+      // The cursor sits on a hard newline (which the boundary API excludes);
+      // skip separators and re-probe so the next visual line is found.
+      var probe = cursor;
+      while (probe < totalLength && text.codeUnitAt(probe) == 0x0A) {
+        probe++;
+      }
+      if (probe < totalLength) {
+        range = painter.getLineBoundary(TextPosition(offset: probe));
+        start = math.max(range.start, probe);
+        end = math.max(range.end, probe);
+        cursor = probe;
+      }
+    }
+    if (end <= start) {
+      // An empty trailing line: keep the metric's box with no text range.
+      end = start;
+    }
+    bounds.add((start: start, end: end));
+    cursor = math.max(cursor, end);
+  }
+  return bounds;
+}
+
+/// Whether [text] contains right-to-left letters or bidi control characters,
+/// where a visual edge probe would not give the logical line boundary.
+bool _hasBidiText(String text) {
+  for (final rune in text.runes) {
+    if ((rune >= 0x0590 && rune <= 0x08FF) ||
+        (rune >= 0xFB1D && rune <= 0xFDFF) ||
+        (rune >= 0xFE70 && rune <= 0xFEFF) ||
+        (rune >= 0x10800 && rune <= 0x10FFF) ||
+        (rune >= 0x1E800 && rune <= 0x1EFFF) ||
+        rune == 0x200E ||
+        rune == 0x200F ||
+        (rune >= 0x202A && rune <= 0x202E) ||
+        (rune >= 0x2066 && rune <= 0x2069)) {
+      return true;
+    }
+  }
+  return false;
 }

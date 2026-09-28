@@ -134,6 +134,7 @@ class EpubReaderModel {
     Map<String, String> embeddedFamilies = const {},
     this.relayoutBusy = false,
     this.relayoutPending = false,
+    this.layoutComplete = false,
     this.selection,
     List<EpubHighlight> highlights = const [],
     this.contentsOpen = false,
@@ -174,6 +175,11 @@ class EpubReaderModel {
   final Map<String, String> embeddedFamilies;
   final bool relayoutBusy;
   final bool relayoutPending;
+
+  /// Whether the installed flow measured every node of the chapter. False
+  /// while the progressive layout is still extending the window: the reader is
+  /// usable and its position is durable, but page totals are partial.
+  final bool layoutComplete;
   final EpubSelection? selection;
   final List<EpubHighlight> highlights;
   final bool contentsOpen;
@@ -242,6 +248,7 @@ class EpubReaderModel {
     Map<String, String>? embeddedFamilies,
     bool? relayoutBusy,
     bool? relayoutPending,
+    bool? layoutComplete,
     Object? selection = _unset,
     List<EpubHighlight>? highlights,
     bool? contentsOpen,
@@ -279,6 +286,7 @@ class EpubReaderModel {
         : Map.unmodifiable(embeddedFamilies),
     relayoutBusy: relayoutBusy ?? this.relayoutBusy,
     relayoutPending: relayoutPending ?? this.relayoutPending,
+    layoutComplete: layoutComplete ?? this.layoutComplete,
     selection: identical(selection, _unset)
         ? this.selection
         : selection as EpubSelection?,

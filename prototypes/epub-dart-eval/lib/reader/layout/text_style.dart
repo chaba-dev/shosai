@@ -174,6 +174,34 @@ class BlockTextMap {
     return text.length + codeUnitOffset;
   }
 
+  /// Canonical scalars for a monotonically non-decreasing list of code-unit
+  /// offsets, computed in one pass over the text.
+  ///
+  /// The per-offset [canonicalAt] lookup counts scalars from the segment start,
+  /// which is O(text) on a single huge span; a laid-out line walk calls it twice
+  /// per line, so a very long paragraph made layout quadratic in its length.
+  List<int> canonicalAtAll(List<int> codeUnits) {
+    if (segments.isEmpty) {
+      return List<int>.filled(codeUnits.length, 0);
+    }
+    final result = List<int>.filled(codeUnits.length, 0);
+    var unit = 0;
+    var scalar = segments.first.canonicalStart;
+    for (var index = 0; index < codeUnits.length; index++) {
+      final target = (codeUnits[index] - codeUnitOffset).clamp(0, text.length);
+      while (unit < target) {
+        final codeUnit = text.codeUnitAt(unit);
+        unit +=
+            codeUnit >= 0xD800 && codeUnit <= 0xDBFF && unit + 1 < text.length
+            ? 2
+            : 1;
+        scalar++;
+      }
+      result[index] = scalar;
+    }
+    return result;
+  }
+
   /// Whether every canonical scalar in the range is selectable.
   bool rangeSelectable(int canonicalStart, int canonicalEnd) {
     for (final segment in segments) {
