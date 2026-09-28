@@ -123,6 +123,51 @@ relayout failure reported during 4B remains undiagnosed; better error messages
 do not fix it, and a Dart migration is not proven to avoid it. Do not derive a
 rewrite schedule from current Rust line counts.
 
+### Phase C result: Dart EPUB vertical slice (prototype)
+
+The isolated prototype in `prototypes/epub-dart-eval/` implements a fully
+Dart-owned parser/normalizer (`packages/shosai_epub/`) and a Flutter layout
+(`lib/reader/`) over one rich chapter, one 103k-scalar chapter, a 606k-scalar
+stress chapter, and the existing difficult-content fixtures. It is an evaluation
+artifact: it is not wired into the application, it does not amend
+[architecture rules](flutter-architecture.md), and **no adoption decision is
+recorded here**. Its evidence, reproduction commands, measurements and explicit
+limitations are in
+[`prototypes/epub-dart-eval/EVIDENCE.md`](../prototypes/epub-dart-eval/EVIDENCE.md)
+and [`README.md`](../prototypes/epub-dart-eval/README.md).
+
+What the slice established:
+
+- Parsing, canonical text, anchors, tables, lists, images, MathML fallback,
+  embedded-font admission (TTF/OTF), TOC and durable `(spine, scalar)` positions
+  can be Dart-owned; the prototype's canonical stream and anchor offsets are
+  cross-checked against ported Rust test expectations, including one documented
+  deviation (display-block math promotion).
+- Flutter layout can produce paginated and continuous reading with selection,
+  copy, highlight projection and TOC navigation where pixels, hit testing and
+  selection geometry come from the same `TextPainter`s. Content-aware captures
+  (and a blank-placeholder rejection test) back the visual evidence.
+- The dominant cost is layout on the UI thread: ~40–70 ms of layout work for
+  a 103k-scalar chapter and ~0.5–0.65 s for 606k scalars in the release bundle
+  under software rasterization (cold open 790 ms state / 1.05 s verified
+  capture for the 606k fixture). Warm page turns are cheap because composition
+  is precomputed. Continuous-mode RSS snapshots are higher than the paginated
+  ones (long 294→309 MiB, stress 389→480 MiB) but the run cannot attribute that
+  to the mode: relayouts intervene and RSS is not retained heap. The prototype has
+  no isolate strategy for `dart:ui` text layout.
+- Unsupported or unproven: real-world CSS breadth, MathML geometry, WOFF/WOFF2
+  and emoji fonts, over-tall table-row splitting, and retained-heap attribution
+  (RSS is current resident memory, not retained memory).
+
+Recommendation carried to the adoption decision: **insufficient evidence to
+choose full Dart or hybrid, and no evidence that retaining Rust is worse**. The
+slice supports continuing with the existing Rust path while a bounded follow-up
+answers the two open questions that actually decide the boundary — whether
+Dart-owned layout can meet the relayout/UX budget on the UI thread, and whether
+a hybrid (Rust normalization + Flutter layout) avoids the canonical-mapping
+costs this prototype paid. That follow-up is not authorized by this plan.
+
+
 ## Proposed gated work, not an automatic rewrite
 
 Each phase produces a reviewable result. The owner authorizes follow-up work and

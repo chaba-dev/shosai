@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens test-epub-prototype epub-prototype-fixtures measure-epub-prototype
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -98,6 +98,26 @@ test-scripts:
 		-s benchmarks/epub-page-turn/2026-08-17/tests
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 		-s scripts/tests
+
+## Run the Phase C Dart EPUB evaluation prototype's tests (isolated; see
+## prototypes/epub-dart-eval/README.md). Not part of `make test`: the prototype
+## is an evaluation artifact, not a shipped component.
+test-epub-prototype:
+	cd prototypes/epub-dart-eval && dart format --output=none --set-exit-if-changed lib test packages/shosai_epub/lib packages/shosai_epub/test
+	cd prototypes/epub-dart-eval && flutter analyze
+	cd prototypes/epub-dart-eval && flutter test
+	cd prototypes/epub-dart-eval/packages/shosai_epub && dart analyze
+	cd prototypes/epub-dart-eval/packages/shosai_epub && dart test
+	python3 prototypes/epub-dart-eval/tool/generate_fixtures.py --check
+
+## Regenerate the Phase C prototype fixtures (writes fixtures/ + SHA256SUMS)
+epub-prototype-fixtures:
+	python3 prototypes/epub-dart-eval/tool/generate_fixtures.py
+
+## Build the prototype release bundle and run the measurement harness under
+## Xvfb; writes prototypes/epub-dart-eval/artifacts/measurements/*.json
+measure-epub-prototype:
+	bash prototypes/epub-dart-eval/tool/measure.sh
 
 ## Verify that the core bridge API is accepted by flutter_rust_bridge codegen
 check-frb:
