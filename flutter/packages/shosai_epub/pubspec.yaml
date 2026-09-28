@@ -1,0 +1,21 @@
+name: shosai_epub
+description: >-
+  Dart-owned EPUB parsing, normalization, canonical text and durable addresses
+  for the Shōsai reader. Adopted as the production EPUB engine module on
+  2026-09-28; see docs/dart-document-stack-evaluation-plan.md.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  archive: ^4.3.0
+  characters: ^1.4.1
+  collection: ^1.19.1
+  image: ^4.10.1
+  xml: ^7.0.1
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0

@@ -98,6 +98,11 @@ and geometry, but production highlighting continues in core and Flutter.
 
 - [ ] Expose grapheme-safe logical hit testing from the renderer-neutral EPUB
   layout/scene chosen by RFD 4, using the same geometry Flutter paints.
+  - EPUB layout is Dart/Flutter-owned as of 2026-09-28
+    ([[file:../../docs/dart-document-stack-evaluation-plan.md][decision
+    record]]); the adapter must derive logical ranges and display geometry from
+    the same Flutter layout. The anchor model and Rust annotation store are
+    unchanged.
 - [ ] Coordinate drag selection across inline spans, block widgets, and visual
   page fragments within one spine item, stopping at the spine boundary.
 - [ ] Render temporary and saved EPUB highlights in continuous and paginated
@@ -116,7 +121,9 @@ and geometry, but production highlighting continues in core and Flutter.
 - [ ] Load annotations outside the document-open critical path and preserve
   active-tab isolation when switching or closing reader tabs.
 - [ ] Add selection and annotation commands to the Dart/Rust application
-  boundary; keep PDF/EPUB extraction and anchor logic in ~shosai-core~.
+  boundary; keep PDF extraction and anchor logic in ~shosai-core~, and keep the
+  EPUB anchor schema, resolution states and annotation store there while the
+  EPUB parser/normalizer moves to the Dart engine (2026-09-28 amendment above).
 - [ ] Provide the shared selection action surface for copy, named color choice,
   optional note creation, and cancellation with equivalent behavior in both
   formats.

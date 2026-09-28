@@ -17,7 +17,8 @@ assuming native FFI works in a browser.
   caches, import orchestration, and platform integration.
 - ~crates/shosai-core~ owns parsing, PDF/CBZ rendering, EPUB presentation,
   search, library persistence, reading state, and bookmarks, but its public API
-  is not yet designed as a Dart bridge or browser boundary.
+  is not yet designed as a Dart bridge or browser boundary.  (EPUB presentation
+  ownership was amended on 2026-09-28; see M3.2.)
 - RFD 6 Phase 0 has proved cross-format selection endpoints and bounded retained
   geometry with real Iced/PDFium/cosmic-text paths.  This evidence is sufficient
   to stop extending the Iced proof and use highlighting as the Flutter slice.
@@ -228,6 +229,15 @@ regressions for failure and cancellation paths.
   themes, zoom, continuous/paginated modes, document navigation, keyboard
   shortcuts, and touch interactions.
 - [ ] Complete EPUB reader parity for the same applicable feature matrix.
+  - EPUB ownership was amended on 2026-09-28: the owner adopted Dart-owned EPUB
+    parsing/normalization with Flutter layout
+    ([[file:../../docs/dart-document-stack-evaluation-plan.md][decision
+    record]]).  Rust retains PDF/CBZ rendering, library/import, SQLite storage,
+    bookmarks, annotations, reading state and search.  The Rust pagination
+    package 5B is paused/superseded, and the production gates (real corpus
+    including Japanese and mixed-direction text, tall table rows, fonts, scroll
+    position, responsiveness, bounded retained memory and existing interaction
+    coverage) remain open until a slice closes them with evidence.
 - [ ] Complete CBZ reader parity for the same applicable feature matrix.
 
 *Exit*: each format passes its own reader behavior and regression matrix; work

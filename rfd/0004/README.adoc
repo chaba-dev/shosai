@@ -71,9 +71,10 @@ The Rust core owns document admission and parsing, resource limits, format
 capabilities, stable locations, pagination and renderer-neutral layout where
 portable, library operations, reader sessions, reading progress, bookmarks,
 annotations, search, caching policy, stable content identity, SQLite storage,
-and synchronization. Move code from `shosai-app` only when it is a coherent
-platform-neutral responsibility; do not move widgets or event-loop state merely
-to reduce the old crate's size.
+and synchronization (EPUB parsing/layout amended 2026-09-28; see the note under
+"Flutter frontend and platform adapters"). Move code from `shosai-app` only when
+it is a coherent platform-neutral responsibility; do not move widgets or
+event-loop state merely to reduce the old crate's size.
 
 Core APIs expose coarse commands, owned data transfer objects, opaque stable
 handles, typed errors, bounded buffers, cancellation, and explicit resource
@@ -92,10 +93,31 @@ packaging. Platform plugins are replaceable adapters, not domain dependencies.
 Native targets call Rust through a generated or hand-written Dart FFI bridge
 selected by a measured spike. PDF rendering initially reuses Rust PDFium and
 transfers bounded page or tile buffers. EPUB parsing, resource admission,
-computed styles, stable offsets, embedded fonts, and MathML remain Rust-owned.
-The spike decides the granularity of a Rust-laid-out renderer-neutral scene and
-semantic representation that Flutter paints; it must not move document layout,
-parsing, or resource security policy into Flutter.
+computed styles, stable offsets, embedded fonts, and MathML were proposed as
+Rust-owned; the 2026-09-28 EPUB adoption decision supersedes that ownership for
+EPUB (note below). The spike decides the granularity of a Rust-laid-out
+renderer-neutral scene and semantic representation that Flutter paints; for
+PDF/CBZ and the bridge decision it must not move document layout, parsing, or
+resource security policy into Flutter, while EPUB parsing and layout follow the
+amendment below.
+
+[NOTE]
+====
+*Amended 2026-09-28 — EPUB ownership.* The owner adopted a Dart-owned EPUB
+parser/normalizer with Flutter layout
+(link:../../docs/dart-document-stack-evaluation-plan.md[decision record]). For
+EPUB, parsing, normalization, canonical text, durable anchors, resource
+admission for rendering, and layout/selection geometry move to the Dart/Flutter
+boundary, and Flutter paints the text it lays out. Rust retains PDF and CBZ
+parsing/rendering, library and import, SQLite storage, bookmarks, annotations,
+reading state and search, and remains the only database writer while the EPUB
+slice is integrated. The evaluation's own recommendation was "insufficient
+evidence to choose"; adoption is an owner decision above that recommendation,
+with production gates recorded in the decision and in
+link:../../docs/flutter-ui-restoration-plan.md[the restoration plan]. Recording
+the decision closes no gate and ships no planned capability, and the superseded
+5B package is paused rather than accepted.
+====
 
 Canonical paths, Android content URIs, iOS security-scoped URLs, and browser file
 handles are device-local locators, never portable book identities. Flutter

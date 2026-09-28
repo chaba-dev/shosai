@@ -1,8 +1,12 @@
 # Dart document stack evaluation plan
 
-Status: **proposed, planning only**. This document records the investigations and
-decision gates for moving document and database services into Dart. Merging it
-does not select a renderer, authorize a production rewrite, or approve baselines.
+Status: **EPUB adoption decision recorded 2026-09-28; PDF and SQLite remain
+unselected.** The owner adopted a Dart-owned EPUB parser/normalizer with Flutter
+layout, integrated incrementally behind the retained reader UI (see
+[Adoption decision](#adoption-decision-2026-09-28)). This document does not select
+a PDF engine, adopt Dart SQLite, authorize a rewrite of retained behavior, or
+approve baselines. Every production gate below is still a gate, and no restoration
+package is accepted because the architecture changed.
 
 ## Continue the parity work; preserve the Flutter UI
 
@@ -23,12 +27,14 @@ reliable storage remain requirements; discarding old data does not authorize
 discarding user-facing capabilities or deleting existing development data without
 an explicit reset decision.
 
-Current [architecture rules](flutter-architecture.md) keep parsing, layout,
-anchors and persistence in Rust. They remain in force for production work until
-an explicit migration decision updates those rules and the applicable
-[RFD 4](../rfd/0004/README.adoc), [RFD 6](../rfd/0006/README.adoc) and restoration
-contracts. This document proposes alternatives; it does not silently override
-those rules or declare all planned parity capabilities shipped.
+The 2026-09-28 decision amended [architecture rules](flutter-architecture.md) 6
+and 7 for EPUB only, and recorded supersessions in the applicable
+[RFD 4](../rfd/0004/README.adoc), [RFD 6](../rfd/0006/README.adoc), restoration and
+renderer-contract documents. Parsing, layout, anchors and persistence remain
+Rust-owned for PDF and CBZ, and Rust keeps storage, records and its other current
+services for every format until a separate decision replaces them. Adoption is a
+direction with production gates, not an assertion of completed parity; this
+document does not declare planned capabilities shipped.
 
 ## What the investigations established
 
@@ -129,9 +135,11 @@ The isolated prototype in `prototypes/epub-dart-eval/` implements a fully
 Dart-owned parser/normalizer (`packages/shosai_epub/`) and a Flutter layout
 (`lib/reader/`) over one rich chapter, one 103k-scalar chapter, a 606k-scalar
 stress chapter, and the existing difficult-content fixtures. It is an evaluation
-artifact: it is not wired into the application, it does not amend
-[architecture rules](flutter-architecture.md), and **no adoption decision is
-recorded here**. Its evidence, reproduction commands, measurements and explicit
+artifact: it is not wired into the application, it did not amend
+[architecture rules](flutter-architecture.md), and **no adoption decision was
+recorded when the prototype merged**. (The owner recorded one on 2026-09-28; see
+[Adoption decision](#adoption-decision-2026-09-28).) Its evidence, reproduction
+commands, measurements and explicit
 limitations are in
 [`prototypes/epub-dart-eval/EVIDENCE.md`](../prototypes/epub-dart-eval/EVIDENCE.md)
 and [`README.md`](../prototypes/epub-dart-eval/README.md).
@@ -179,7 +187,117 @@ slice supports continuing with the existing Rust path while a bounded follow-up
 answers the two open questions that actually decide the boundary — whether
 Dart-owned layout can meet the relayout/UX budget on the UI thread, and whether
 a hybrid (Rust normalization + Flutter layout) avoids the canonical-mapping
-costs this prototype paid. That follow-up is not authorized by this plan.
+costs this prototype paid. That follow-up is not authorized by this plan. The
+owner's 2026-09-28 decision below resolves the boundary question in favor of
+adoption; this recommendation is retained as the evaluation's actual conclusion,
+not rewritten into evidence that did not exist.
+
+### Adoption decision (2026-09-28)
+
+The owner **adopted** the evaluation's proposed direction: **Dart-owned EPUB
+parsing and normalization with Flutter layout**, followed by incremental
+production integration behind the existing reader UI. The decision was taken in
+the [adoption thread](https://ampcode.com/threads/T-01a0e675-f4f2-7202-8eef-bdd8ca70b093)
+after [PR #135](https://github.com/chaba-dev/shosai/pull/135) and
+[PR #136](https://github.com/chaba-dev/shosai/pull/136) merged the Phase C slice
+and its progressive-layout follow-up at
+[0a2f6a02](https://github.com/chaba-dev/shosai/commit/0a2f6a0285733e77cf8c4a708992285610996bc2).
+It is a direction with production gates, not an assertion of completed parity.
+
+What the decision selects, and what it does not:
+
+- **Selected:** EPUB parsing, normalization, canonical text/anchors, CSS subset,
+  resource admission for rendering, and Flutter layout of EPUB chapters. Flutter
+  owns presentation, gestures, focus, navigation and platform adapters as before.
+- **Retained in Rust:** library and import, SQLite storage, bookmarks,
+  annotations and reading state, search, PDF and CBZ parsing/rendering, and any
+  remaining consumers of the current EPUB services until a bounded slice replaces
+  them. Rust remains a behavioral reference; its internal abstractions are not
+  reproduced for their own sake.
+- **Not selected:** PDF engine choice and Dart SQLite. They remain separate,
+  unselected decisions and their proposed phases below are unchanged.
+- **Not authorized:** deleting development data, incompatible saves, or two
+  writers to the same database. The project is unannounced, so old schemas and
+  persisted anchors need no migration, but retained persistence stays the only
+  owner of every transaction until its replacement slice explicitly takes over.
+- **Not resumed:** Rust package **5B** (core pagination, bridge transport and
+  measured prototype). Its local workspace `shosai-5b-pagination` is paused
+  reference work; the restoration plan records it as superseded rather than
+  accepted. Historical evidence and package counts are preserved.
+
+Production gates carried by the decision. A gate is satisfied only by evidence
+at a named revision; a passing prototype test is not production acceptance:
+
+1. Representative real books, including Japanese and mixed-direction text and
+   documents with images and tables. Licensed or otherwise permitted local
+   material only; corpus and access limitations are documented rather than
+   replaced with generated fixtures that manufacture a pass.
+2. Correctness for over-tall table rows, font admission/fallback, and scroll
+   position (durable location ↔ rendered position, including reopen).
+3. Real frame responsiveness and bounded retained-memory verification. Timer-gap
+   probes are not presented-frame timing, and RSS is not retained heap; a claim
+   may not upgrade either measurement into what it is not.
+4. Existing reader interaction, selection, navigation and restoration coverage
+   stays green through the replacement, and PDF/CBZ behavior is untouched.
+
+Which gates a bounded slice owns, and which remain open, is recorded with the
+slice. The first slice after this decision is the production engine module and
+its boundary; it does not enable replacement broadly. The remaining gates stay
+explicit before EPUB routing changes for users, and no partial integration is
+reported as whole EPUB adoption.
+
+The decision also fixes the incremental sequence: architecture and explicit
+production gates are recorded first (this document, the architecture rules, the
+RFD amendments and the restoration plan), then bounded implementation PRs, one
+commit per PR, each stacked on the previous one. Package acceptance stays with
+the [restoration plan](flutter-ui-restoration-plan.md); recording a decision does
+not tick any package checkbox.
+
+### The adopted module boundary
+
+The smallest coherent boundary that replaces the EPUB service behind the
+retained UI is the **EPUB document content service**: the operations that turn a
+stored EPUB resource into the reader's rendered chapter and its selection
+geometry. It is implemented in Dart and consumed through the existing
+controller-owned effect pattern; the retained UI (chrome, panels, tabs,
+selection overlays, annotation cards, search bar, typography controls,
+restoration) is not replaced.
+
+| Boundary operation | Adopted owner | Notes |
+| --- | --- | --- |
+| EPUB parse/admission (ZIP, OPF, spine, TOC, resources) | Dart engine | Bounded by the same admission/limit policy; no second parser in Flutter widgets. |
+| Chapter normalization and canonical text | Dart engine | Must match the retained canonical stream (Rust `search_text()` order) for offsets that Rust still stores; the prototype's display-block MathML deviation is fixed, not carried forward. |
+| Chapter layout, pagination and continuous windows | Flutter, over the Dart layout | `TextPainter` layout; one layout produces pixels, hit zones, carets and selection rects. |
+| Rendered chapter pixels and selection geometry | Flutter | Delivered to the reader through the controller, not by a widget-owned effect. |
+| Durable `(spine, scalar)` locations | Dart engine computes and maps them; Rust persists | The anchor schema, quote/context recovery, annotation resolution and reading-state records stay Rust-owned and unchanged. |
+| Bookmarks, annotations, reading state, search | Rust | Unchanged stores; Rust remains the only database writer while the slice is integrated. |
+| PDF/CBZ parsing, rendering, geometry | Rust | Untouched by this decision. |
+
+The boundary is deliberately at the document-content level rather than the
+whole reader service: it is the smallest seam that removes the EPUB bridge
+round-trip while keeping every retained capability's storage and records intact.
+A later slice may move search, or the durable anchor store and annotation
+resolution, into the engine, but that is a separate decision with its own parity
+evidence.
+
+### Production integration sequence
+
+Each slice is one commit and one reviewable PR; later slices stack on the
+previous branch. Slices report which production gates they close and which
+remain open.
+
+| Slice | Deliverable | Gates it owns |
+| --- | --- | --- |
+| 1. Architecture and gates (docs only) | This decision, the amended architecture rules, RFD amendments, restoration-plan disposition of 5B, and the boundary above | None. Recording the decision closes no gate; no package is accepted. |
+| 2. Production Dart EPUB engine | `shosai_epub` as an app-owned pure-Dart package: archive/OPF/spine/TOC, bounded CSS subset, XHTML normalization, canonical text and scalar checkpoints, durable addresses, MathML fallback, limits. Ported Rust-derived expectations plus canonical parity with the retained stream. No reader routing change. | Engine-level correctness and canonical parity only. No user-visible capability changes, so no interaction/visual gate is claimed. |
+| 3. EPUB content service behind the retained UI | The Flutter layout module and the controller-owned adapter that serves EPUB chapters from the engine; PDF/CBZ untouched; selection, navigation and restoration keep working through the retained UI. | Fixture-level rich/JA/bidi/images/tables rendering and selection/navigation/restoration coverage, plus a measured responsiveness and memory check for the slice. Real-corpus, tall-row, font-coverage and retained-heap attribution gates remain open and are named in the slice report. |
+| 4+ | Remaining parity: over-tall rows, font admission/fallback coverage, continuous/spread modes, real TOC/sessions, retained-memory attribution, presented-frame measurement, licensed real-book corpus | Per package, with owner acceptance; not authorized by this decision. |
+
+The prototype application shell is not transplanted: `lib/main.dart`,
+`lib/fixtures.dart`, `lib/measure_main.dart` and the prototype's own
+controller/view stay evaluation artifacts. Only engine and layout code that the
+production boundary needs is carried over, adapted to the retained model/message/
+effect contracts rather than copied.
 
 
 ## Proposed gated work, not an automatic rewrite
@@ -191,14 +309,16 @@ chooses adoption separately; no phase changes parity acceptance automatically.
 | --- | --- | --- |
 | A. PDF reading experience | Both candidates behind the same existing-UI-shaped adapter; continuous and paginated navigation, fit/zoom, selection/copy/search and accessible controls | Inspect licensed real-world PDFs as well as fixtures on unlocked Linux/macOS sessions. Verify long-document behavior, CJK, links, passwords, malformed-input errors and replacement/disposal. Record unsupported cases. Choose pdfrx, pure Dart, or retain Rust. |
 | B. SQLite packaged-app spike | Direct sqlite3 worker-isolate service; Drift comparison only if it resolves a concrete tooling need | Offline release apps load SQLite on Linux and macOS without accidental dev-shell paths. Verify transactions, concurrent/stale writes, rollback, close-before-delete, reopen and signing/packaging. Choose dependency and provisioning strategy. |
-| C. EPUB vertical slice | One rich chapter through each promising boundary, using existing UI | Demonstrate pagination/continuous flow, images, lists/basic tables, selection across fragments, relayout and stable new-session locations; inspect CJK/bidi and typography. Explicitly list CSS/math limits and compare complexity before choosing a full engine. |
-| D. Adoption decision | Scope, architecture amendments, estimated work and accepted limitations | Owner selects language/engine boundaries and retained product requirements. Update architecture/RFD/parity records before production migration. |
-| E. Incremental implementation | Replace services behind controller-owned adapters, one bounded responsibility at a time | Relevant behavior tests, native checks and visual approvals pass. Remove bridge calls/dependencies only after their final consumers are gone. |
+| C. EPUB vertical slice | One rich chapter through each promising boundary, using existing UI | Demonstrate pagination/continuous flow, images, lists/basic tables, selection across fragments, relayout and stable new-session locations; inspect CJK/bidi and typography. Explicitly list CSS/math limits and compare complexity before choosing a full engine. Delivered as a **standalone full-Dart prototype** ([PR #135](https://github.com/chaba-dev/shosai/pull/135) plus the progressive-layout follow-up in [PR #136](https://github.com/chaba-dev/shosai/pull/136)) that is **not wired into the application**; the hybrid comparison and retained-UI evaluation of the original deliverable remain open, so Phase C is not claimed complete. Prototype evidence is not production acceptance. |
+| D. Adoption decision | Scope, architecture amendments, estimated work and accepted limitations | Owner selects language/engine boundaries and retained product requirements. Update architecture/RFD/parity records before production migration. **Recorded 2026-09-28 for EPUB only**: Dart-owned parsing/normalization with Flutter layout; PDF and SQLite remain unselected. |
+| E. Incremental implementation | Replace services behind controller-owned adapters, one bounded responsibility at a time | Relevant behavior tests, native checks and visual approvals pass. Remove bridge calls/dependencies only after their final consumers are gone. In progress: the production EPUB engine module and its boundary first, with the production gates above owned per slice. |
 
-A and B can proceed independently when authorized; C need not delay current 4B
-or the parity plan. Before A/C, inventory **implemented behavior separately from
+A and B can proceed independently when authorized; C did not delay current 4B or
+the parity plan. Before A/C, inventory **implemented behavior separately from
 future parity requirements**. A reduced prototype is permissible; shipping fewer
-capabilities requires a product decision, not a silent omission.
+capabilities requires a product decision, not a silent omission. E carries that
+rule into production: the replacement keeps every retained EPUB capability, and
+each slice states which production gates it closes and which remain open.
 
 For A, measure first *displayed content* using a content-aware detector with
 bounded waits, validated against captures and native observation. Report cold
@@ -227,12 +347,21 @@ decision does not force an unrelated database or EPUB rewrite.
 - Is eliminating our Rust PDF bridge sufficient, or is a pure-Dart PDF engine
   itself a product/maintenance goal?
 - Which real documents and interaction budgets define acceptable experience?
+  (For EPUB the direction is fixed; the corpus and budgets still need to be
+  named before the responsiveness gate is closed.)
 - Should copy/print permissions be enforced, and should the tested getter defect
   be patched locally or reported upstream? Shipping license notices remains
   required regardless of that policy.
 - Which Flutter/dependency versions and SQLite/native-asset provisioning path
   will be supported in release packages?
-- Which EPUB boundary and CSS/format/mode capabilities are required at adoption?
+- Which EPUB capabilities are required at adoption? **Boundary decided
+  2026-09-28** (Dart parsing/normalization with Flutter layout). Capability scope
+  remains governed by the retained reader requirements and the production gates:
+  the known prototype gaps — real-world CSS breadth, MathML geometry, WOFF/WOFF2
+  and emoji fonts, over-tall table-row splitting, retained-memory attribution,
+  presented-frame timing, precautionary continuous-scroll guards and limited
+  equivalence fixtures — are open work, not accepted limitations, until the owner
+  accepts a reduced scope explicitly.
 
 Provisional preference: validate pdfrx behind the retained UI first, with
 dart-pdf as the pure-Dart comparison; use direct sqlite3 as the storage starting
@@ -244,6 +373,8 @@ point. These are **evaluation defaults, not selected production dependencies**.
 - [Linux PDF prototype and consolidated corrections](https://ampcode.com/threads/T-01a0dc39-6b2d-70a1-b491-c1dfcdf05eaa).
 - [Independent macOS PDF verification](https://ampcode.com/threads/T-01a0dc79-29a4-7775-a64d-4f3579aa0f79).
 - [Dart SQLite investigation and disposable probes](https://ampcode.com/threads/T-01a0dc3a-5504-758f-91e7-a68cfa1a9f73).
+- [Dart EPUB evaluation and Phase C prototype](https://ampcode.com/threads/T-01a0e6aa-f4df-7480-a439-cebf039d7623) — merged as [PR #135](https://github.com/chaba-dev/shosai/pull/135) and [PR #136](https://github.com/chaba-dev/shosai/pull/136); the thread's own recommendation was "insufficient evidence", so the adoption is an owner decision above that recommendation, not a result the evaluation proved.
+- [EPUB adoption decision thread](https://ampcode.com/threads/T-01a0e675-f4f2-7202-8eef-bdd8ca70b093) — records the owner's `adopt` decision, the delegation rules and the production gates applied to follow-up slices.
 
 Local PDF evidence is retained under `.amp/in/artifacts/pdf-render-comparison/`,
 including `README.md`, `CORRECTIONS.md`, pins/lockfiles, generator, fixture
