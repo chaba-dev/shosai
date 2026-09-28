@@ -5,7 +5,7 @@ useful Flutter capabilities. This is a presentation rebuild and targeted reader
 contract work, not a frontend restart or pixel-identical port.
 
 - Opened: 2026-09-14. Restructured: 2026-09-20.
-- Status: Stages 1–5 IN PROGRESS; Stage 6 TODO; 3/30 delivery packages fully accepted (1A, 1B, 2A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A contract and review are complete locally, acceptance/5B dispatch pending; 3D integration acceptance and earlier gaps remain open.
+- Status: Stages 1–5 IN PROGRESS; Stage 6 TODO; 4/30 delivery packages fully accepted (1A, 1B, 2A, 5A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A was accepted by the owner and merged at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e); the 2026-09-28 [EPUB adoption decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28) supersedes its Rust-specific EPUB portions without erasing that acceptance. 5B is **paused/superseded** by the same decision and is not dispatched. 3D integration acceptance and earlier gaps remain open.
 - Governing documents: [RFD 4](../rfd/0004/README.adoc), its
   [implementation checklist](../rfd/0004/IMPLEMENTATION.org),
   [performance contract](../rfd/0004/PHASE-0.adoc), and
@@ -23,7 +23,7 @@ there. Do not claim the governing records have already been updated.
 
 - [x] Restoration direction and retained Flutter capabilities documented.
 - [x] Six stages, package dependencies and delegation contract written.
-- [ ] Delivery packages accepted: 3/30 (tracked in the stage checklists below).
+- [ ] Delivery packages accepted: 4/30 (tracked in the stage checklists below).
 - [ ] Final restoration exit criteria met and governing records reconciled.
 
 **2026-09-28 handoff:** 2C (#123), 3A (#125), 3B (#126), 4A (#127),
@@ -48,19 +48,55 @@ was content-identical to verified working-copy revision `f991a270`; #133 merged 
 was performed. The owner authorized 5A after #133 merged, without waiving 4D,
 3D integration acceptance or earlier gaps.
 
-**Current work:** 5A [contract and handoff](flutter-renderer-persistence-contract.md)
-and [independent vectors](renderer-contract-fixtures.json) are published for review in
+**5A closeout:** the 5A [contract and handoff](flutter-renderer-persistence-contract.md)
+and [independent vectors](renderer-contract-fixtures.json) were published in
 [PR #134](https://github.com/chaba-dev/shosai/pull/134), from isolated
 `shosai-5a-contract`, based on freshly fetched #133, not stale local `main`.
-Oracle round 2 closed all blockers; explicit acceptance and 5B dispatch remain
-owner decisions. Contract commit [6b77968b](https://github.com/chaba-dev/shosai/commit/6b77968b2b9f22cac6d6cde826c894f2e38ab31e)
+Oracle round 2 closed all blockers. The owner accepted 5A in the
+[parent thread](https://ampcode.com/threads/T-01a0e675-f4f2-7202-8eef-bdd8ca70b093),
+and #134 merged at
+[154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e)
+on 2026-09-28T05:17:09Z, making 5A the fourth accepted package. Contract commit
+[6b77968b](https://github.com/chaba-dev/shosai/commit/6b77968b2b9f22cac6d6cde826c894f2e38ab31e)
 follows the separate closeout/gap commit
 [d42596bc](https://github.com/chaba-dev/shosai/commit/d42596bcf20d2d03e915bfc3d7524a4a4f311b05)
 (`docs(plan): record restoration gaps and merged presentation closeout`).
 Default remains at independent change `uzktlxoq` / `9b23e927` with older on-disk
-work deliberately preserved. The owner authorized PR creation; branch
-`docs/renderer-persistence-contract-5a` is pushed, but 5A is not merged or accepted.
-Its isolated workspace remains available for review. No baseline was installed.
+work deliberately preserved; no baseline was installed. The 2026-09-28 EPUB
+adoption decision supersedes the contract's Rust-specific EPUB portions; the
+acceptance itself is preserved, not reopened.
+
+**2026-09-28 EPUB adoption handoff:** the owner adopted Dart-owned EPUB
+parsing/normalization with Flutter layout, integrated incrementally behind the
+retained reader UI ([decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28)).
+This plan keeps owning package acceptance. Recording the decision accepts no new
+package: the corrected accounting is 4/30 (1A, 1B, 2A and 5A, accepted before the
+decision), and 5B plus every other unchecked item stays unchecked. What the
+decision does change here:
+
+- **5B is paused/superseded** as a Rust pagination/bridge-transport package. Its
+  contract consumers and measurements are retained as reference evidence; its
+  local workspace `shosai-5b-pagination` stays paused and is not resumed. No 5B
+  work is dispatched, and its checklist children stay unchecked because the
+  package was never delivered — supersession is not acceptance.
+- **5A's Rust-ownership statements apply to PDF/CBZ only.** The accepted renderer
+  contract is superseded for EPUB by the amended
+  [architecture rules](flutter-architecture.md#document-ownership-by-format);
+  its durable-location, atomic-publication, bounded-work and persistence rules
+  still govern whatever renders EPUB, and Rust remains the only database writer
+  while the Dart slice is integrated. Superseding those portions does not reopen
+  or reduce the 5A acceptance.
+- **5C–5J are not replaced or reassigned.** Their retained reader capabilities
+  (rich composition, images/tables/math, navigation/sidecars, sessions,
+  paginated and continuous integration, cross-fragment interaction, quality and
+  stress) still have to be delivered, now against the adopted EPUB engine. The
+  bounded adoption slices below report which production gates they close; they
+  do not tick these packages.
+- The first implementation slice is the production Dart EPUB engine module and
+  its boundary (engine package + tests, no routing change), followed by a
+  separate bounded slice that serves EPUB chapter content from it behind the
+  retained UI. Both are recorded in the evaluation plan's sequence and are
+  reviewed per PR before publication.
 
 **Outstanding gaps (acceptance remains open; implementation is not approval):**
 - **4B/5G**: inherited chrome-height offset (4B
@@ -75,16 +111,27 @@ Its isolated workspace remains available for review. No baseline was installed.
 - **5C/FM-22**: CJK document fallback still missing. **5A/5B/5G/5H**: real page
   boxes, spreads and footer remain absent. **5E/5F/5G**: TOC/tabs/progress still use
   declared presentation fixtures; no live capability acceptance is implied.
+- **EPUB adoption gates (owner, 2026-09-28)**: representative real books including
+  Japanese and mixed-direction text, images and tables; over-tall table-row
+  correctness; font admission/fallback; scroll position and reopen; real frame
+  responsiveness and bounded retained-memory verification; and existing reader
+  interaction/selection/navigation/restoration coverage with PDF/CBZ untouched.
+  Prototype timer gaps are not presented-frame timing and prototype RSS is not
+  retained heap; recording the decision closes none of these gates.
 - **2A/2B/6C**: remaining native picker/interaction and platform screen-reader,
   keyboard/accessibility matrix coverage stays open where the checklists say so.
 - **1C/owner**: reference acceptance/rebaseline approvals remain open; no new
   reference or golden is approved by carrying this closeout forward.
 - **3D**: library integration acceptance remains open despite merged 3A–3C delivery.
 
-**Acceptance accounting:** 3/30 remains the number of explicitly checked package
-acceptances (1A, 1B, 2A), not the number of merged implementations. Completed
-delivery/verification children below are checked from their linked records;
-merges and scoped baseline approvals do not waive outstanding package criteria.
+**Acceptance accounting:** 4/30 is the number of explicitly checked package
+acceptances (1A, 1B, 2A, 5A), not the number of merged implementations. The 5A
+acceptance is recorded from the owner's acceptance in the parent thread and the
+[#134 merge](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e);
+the 2026-09-28 adoption decision supersedes only its Rust-specific EPUB portions.
+Completed delivery/verification children below are checked from their linked
+records; merges and scoped baseline approvals do not waive outstanding package
+criteria.
 
 **How to update this plan:** each package has a parent acceptance checkbox and
 child checkboxes for deliverables, verification and specific decisions. Tick children
@@ -140,13 +187,20 @@ The following decisions carry forward from the earlier plan:
 3. **Keep `shadcn_ui` as a behavioral component layer.** Its default appearance
    and layout are not the design specification. Retain Material interoperability
    where needed; map its colors and fonts too.
-4. **Keep the Elm boundary and Rust document ownership.** Widgets render immutable
-   state and dispatch typed messages. Controller-owned effects report guarded
-   completions. Rust owns parsing, layout, durable anchors, persistence and admission.
-5. **Use Rust-produced EPUB rasters with geometry and semantic sidecars.** This is
-   the selected simplest encoding preserving Rust shaping, not the only possible
-   encoding. Flutter must not independently reshape text against Rust hit zones.
-   Font quality and performance must be measured, not inferred from library versions.
+4. **Keep the Elm boundary; document ownership is format-scoped.** Widgets render
+   immutable state and dispatch typed messages. Controller-owned effects report
+   guarded completions. Rust owns parsing, layout, durable anchors, persistence
+   and admission for PDF and CBZ, and still owns storage, records and search for
+   every format. For EPUB the 2026-09-28
+   [adoption decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28)
+   moves parsing, normalization, durable anchors, layout and geometry to the
+   Dart/Flutter boundary; the behavioral rules below are unchanged.
+5. **EPUB pixels and geometry come from one layout.** The retained requirement is
+   that hit zones, carets, selection rects and painted text come from the same
+   layout and are never reshaped independently. For EPUB that layout is now the
+   Flutter layout over the Dart engine; the former "Rust-produced EPUB rasters
+   with sidecars" encoding is superseded for EPUB and retained for PDF/CBZ. Font
+   quality and performance must be measured, not inferred from library versions.
 6. **Multi-tab reading is required; split-document viewing is not.** Sessions
    survive library navigation. Restore per-book durable positions; preserve
    Flutter's restoration of at most the last active book as one tab. Restoring the
@@ -183,11 +237,14 @@ The following decisions carry forward from the earlier plan:
 12. **EPUB spreads fall back automatically for readability.** Owner confirmed on
     2026-09-20: preserve the chosen reading font size; use one page when two columns
     would be too narrow, and restore two pages when space permits. Never shrink text
-    to force a spread. Rust owns this layout choice. Package 5A defines the
-    deterministic minimum usable column-width rule, calibrated with rendered
-    English/Japanese and large-font fixtures in 5B; 5H verifies both sides of the
-    boundary and durable-location preservation. The numeric threshold remains an
-    engineering measurement, not a license to omit two-page support.
+    to force a spread. The layout engine owns this choice — for EPUB the
+    Dart/Flutter layout, for PDF/CBZ Rust. Package 5A defined the deterministic
+    minimum usable column-width rule; the calibration and rendered English/Japanese
+    and large-font fixtures that were assigned to the superseded 5B now belong to
+    the replacement EPUB slices (or a named later package) and are not claimed by
+    this plan; 5H verifies both sides of the boundary and durable-location
+    preservation. The numeric threshold remains an engineering measurement, not a
+    license to omit two-page support.
 13. **Feedback duration follows the required action.** Owner confirmed on
     2026-09-20: successful imports, settings saves and copy actions use brief toasts.
     Failed/partial imports, failed saves, missing files, permission problems and
@@ -256,7 +313,7 @@ package below, not an entire stage. `TODO` means not completed, not ready to dis
 | 2. Safe foundations | Accessible add-books dialog, production-shell harness, theme mappings and retained notices | 2A–2D | 1/4 | IN PROGRESS |
 | 3. Library restoration | Iced-shaped library with working existing actions | 3A–3D | 0/4 | IN PROGRESS |
 | 4. Reader presentation | Verified reader components and typed presentation contract | 4A–4D | 0/4 | IN PROGRESS |
-| 5. Reader capabilities | Real sessions, rich EPUB, navigation, selection and reading modes | 5A–5J | 0/10 | IN PROGRESS |
+| 5. Reader capabilities | Real sessions, rich EPUB, navigation, selection and reading modes | 5A–5J | 1/10 | IN PROGRESS |
 | 6. Workflow closure | Import/settings coverage and cross-format acceptance | 6A–6D | 0/4 | TODO |
 
 Dependencies are **package IDs**, not whole-stage completion. This permits reference
@@ -271,9 +328,15 @@ capture, harness work and contract design to overlap without circular dependenci
   (2C) and their presentation contract (4A). They can use deterministic fixtures.
 - Reader integration waits for real capability packages. Fixture-backed components
   do not count as completed reader functionality.
-- 5A is the renderer contract milestone; 5B is the measured pagination milestone;
-  5C–5E build rich composition; 5G integrates the initial paginated reader; 5H–5I
-  deliver continuous/spread behavior. 5F supplies real tab/session lifecycle.
+- 5A is the accepted renderer contract milestone (owner-accepted and merged at
+  `154088a4`; its Rust-ownership statements are superseded for EPUB by the
+  2026-09-28 adoption decision, while its durability, atomicity, bounded-work
+  and persistence rules remain in force). 5B is
+  paused/superseded and is not a dispatch target; 5C–5E build rich composition;
+  5G integrates the initial paginated reader; 5H–5I deliver continuous/spread
+  behavior. 5F supplies real tab/session lifecycle. The adoption decision adds
+  bounded EPUB engine slices ahead of 5G; those slices report the production
+  gates they close and do not replace any package above.
 - No replacement baseline is accepted before 2B. The package changing a surface
   owns its baseline review and names replacement coverage for anything retired.
 - Concurrent workers must have disjoint write targets. Serialize packages sharing
@@ -460,10 +523,10 @@ do not assign the whole renderer as one task.
 
 ### Delivery checklist
 
-- [ ] **5A accepted — renderer/persistence contract** — IN PROGRESS — stronger-model design published in [PR #134](https://github.com/chaba-dev/shosai/pull/134), [contract thread](https://ampcode.com/threads/T-01a0e64e-c3e6-71fb-bb9b-1a7a40618e26), isolated `shosai-5a-contract` from fetched #133. Explicit acceptance and merge remain pending; 5B consumers may use the reviewed handoff only after dispatch authorization.
-  - [x] Addresses, layout identity, DTOs, extraction/mapping and persistence rules specified in [renderer/persistence contract](flutter-renderer-persistence-contract.md), including atomic publication, bounded viewport discovery, geometry-only PDF projection and typed zoom inheritance without SQL migration. The merged Dart evaluation does not override Rust ownership.
-  - [x] Contract and [independent fixture expectations](renderer-contract-fixtures.json) reviewed before consumer work. Oracle round 1 found three blockers (clear-fit fallback, missing viewport discovery and geometry-only PDF projection); all corrected with discriminating vectors. Round 2 at local revision `553b25af` closed all findings, no blockers; its optional cursor clarification is incorporated. `python3 scripts/check_renderer_contract.py` passes vectors, 12 negative controls, 15 existing conformance hashes, local links and 30-package/3-accepted accounting; rerun after editorial closeout. No renderer, database round-trip, performance or visual pass is claimed. 5B owns the real long-chapter/legacy-store tests, EN/JA readability calibration and measured prototype described in contract §8; inherited gaps and all parent acceptance checks remain open.
-- [ ] **5B accepted — pagination prototype**
+- [x] **5A accepted — renderer/persistence contract** — DONE — owner accepted in the [parent thread](https://ampcode.com/threads/T-01a0e675-f4f2-7202-8eef-bdd8ca70b093); [PR #134](https://github.com/chaba-dev/shosai/pull/134) merged at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e) on 2026-09-28T05:17:09Z, with stronger-model design and [independent vectors](renderer-contract-fixtures.json) from isolated `shosai-5a-contract`. The 2026-09-28 adoption decision supersedes the contract's Rust-specific EPUB renderer/persistence portions (see the adoption handoff above) without erasing this acceptance; its behavioral rules and PDF/CBZ portions remain in force. The superseded 5B package is not a consumer; any later consumer of the reviewed behavioral rules must be named explicitly and may use them only after its own authorization.
+  - [x] Addresses, layout identity, DTOs, extraction/mapping and persistence rules specified in [renderer/persistence contract](flutter-renderer-persistence-contract.md), including atomic publication, bounded viewport discovery, geometry-only PDF projection and typed zoom inheritance without SQL migration. The merged Dart evaluation did not override Rust ownership when this contract was written; the 2026-09-28 EPUB adoption decision now supersedes its Rust-ownership statements for EPUB (see the adoption handoff above), while its durability, atomicity, bounded-work and persistence rules still apply to whatever renders EPUB and remain in force for PDF/CBZ. This supersession does not reopen the 5A acceptance.
+  - [x] Contract and [independent fixture expectations](renderer-contract-fixtures.json) reviewed before consumer work. Oracle round 1 found three blockers (clear-fit fallback, missing viewport discovery and geometry-only PDF projection); all corrected with discriminating vectors. Round 2 at local revision `553b25af` closed all findings, no blockers; its optional cursor clarification is incorporated. `python3 scripts/check_renderer_contract.py` passes vectors, 12 negative controls, 15 existing conformance hashes, local links and the 30-package accounting (3 accepted when this check ran; 4 once the 5A acceptance recorded here is counted); rerun after editorial closeout. No renderer, database round-trip, performance or visual pass is claimed. The real long-chapter/legacy-store tests, EN/JA readability calibration and measured prototype described in contract §8 were 5B's scope; with 5B superseded they belong to the replacement EPUB engine slices (or a named later package), and none of that evidence is claimed here. Inherited gaps and all other still-unchecked package acceptance checks remain open.
+- [ ] **5B accepted — pagination prototype** — SUPERSEDED/PAUSED — the 2026-09-28 EPUB adoption decision replaces the Rust pagination/bridge-transport package with the Dart EPUB engine slices, so 5B is not dispatched and is not resumed. The package was never delivered: both children stay unchecked and no acceptance is recorded. The local `shosai-5b-pagination` workspace is paused reference work; the 5A contract, its independent vectors and the Phase C measurements are retained as historical evidence, not as a 5B pass. Historical context: the package was to own core pagination, bridge transport and the measured prototype described in contract §8.
   - [ ] Bounded pagination, bridge transport and legacy persistence handling implemented.
   - [ ] Long-chapter/round-trip tests pass; prototype measurements recorded against budgets.
 - [ ] **5C accepted — rich text/blocks**
@@ -495,8 +558,8 @@ do not assign the whole renderer as one task.
 | ID | Scope and ownership | Depends on | Acceptance |
 | --- | --- | --- | --- |
 | 5A | Core/bridge renderer and persistence contract | 1A | Freeze addresses, layout identity, atomic publication, bounded extraction, semantic/text mapping, continuous-tile coordinates and mode/zoom persistence. Publish DTOs and independent fixture expectations before consumers start. |
-| 5B | Core pagination, bridge transport and measured prototype | 5A | Long chapters render bounded pages; progress and legacy reading state remain correct. Measure raster production, transfer, decode, warm turns, relayout and retained memory. Generate bindings once under one owner. |
-| 5C | Rich text/block composition | 5B | Computed styles, headings, emphasis, links, code, lists, nested quotes/figures, captions, rules, alignment/direction, bidi and isolated embedded fonts. Reuse existing conformance fixtures. |
+| 5B | Core pagination, bridge transport and measured prototype | 5A | **Superseded 2026-09-28** by the EPUB adoption decision and retained as reference evidence; not dispatched. Historical acceptance: long chapters render bounded pages; progress and legacy reading state remain correct. Measure raster production, transfer, decode, warm turns, relayout and retained memory. Generate bindings once under one owner. |
+| 5C | Rich text/block composition | EPUB engine slices (replaces 5B) | Computed styles, headings, emphasis, links, code, lists, nested quotes/figures, captions, rules, alignment/direction, bidi and isolated embedded fonts. Reuse existing conformance fixtures. |
 | 5D | Image, table and math composition | 5C | Images/fallbacks, tables, inline/display math and page palettes; verify canonical-to-visible text mapping and full-color output. |
 | 5E | Navigation, selection geometry and semantic sidecars | 5D | TOC/internal links resolve to durable positions; restricted external schemes preserved; hit zones, carets, roles, labels/actions and reading order derive from the same layout as pixels. |
 | 5F | Tab/session lifecycle and shell routing | 4A, 5A | Session survives library navigation; per-tab saves/effects/resources; duplicate-open, close, removal, last-tab and restoration behavior explicitly tested. |
@@ -505,10 +568,17 @@ do not assign the whole renderer as one task.
 | 5I | Cross-fragment selection and virtualized accessibility | 5H | Durable ranges and per-tile overlays survive eviction/repagination; chapter/page clamps, quote/copy extraction, semantic focus/order tested through interaction. |
 | 5J | Reader quality and stress acceptance | 5I, 1C | Re-measure rich content, multiple tabs, continuous caches and spreads; inspect matched-scale text and images; verify intended resource rejections separately. |
 
-### Contract requirements for 5A–5B
+### Contract requirements for renderer consumers
+
+The 5A contract's behavioral requirements below were written for the 5A–5B
+renderer pair; 5B is superseded (2026-09-28) and the EPUB consumer is now the
+Dart engine plus Flutter layout. The requirements stay binding for whatever
+renders a format, with the ownership notes inline. PDF/CBZ keep the Rust
+mechanisms named in the [renderer contract](flutter-renderer-persistence-contract.md).
 
 - Separate ephemeral presentation addresses from durable EPUB spine/offset
-  locations, with Rust translation in both directions. Never serialize a layout
+  locations, with translation in both directions at the format's owner (the Dart
+  engine for EPUB, Rust for PDF/CBZ). Never serialize a layout
   page index as a durable chapter or divide chapter index by page count for progress.
 - Layout identity includes document generation, mode, logical width/height, DPR or
   raster scale distinct from document zoom, typography, palette and layout revision.
@@ -536,10 +606,11 @@ do not assign the whole renderer as one task.
 
 ### Continuous layout requirements for 5H–5I
 
-EPUB continuous mode is a distinct Rust layout, not stitched paginated pages.
+EPUB continuous mode is a distinct layout owned by the format's renderer (the
+Dart/Flutter layout for EPUB, Rust for PDF/CBZ), not stitched paginated pages.
 Match Iced's column of chapters: 32px chapter spacing, 20px content padding, no page
 boxes, per-page titles/margins or footers. Shared layout coordinates place bounded
-raster tiles at integral device-pixel boundaries with zero inter-tile gap. Chapter
+fragments at integral device-pixel boundaries with zero inter-fragment gap. Chapter
 spacing belongs to layout and appears exactly once.
 
 Verify seams against an untiled render of the same small continuous fixture:
@@ -689,17 +760,19 @@ Iced/Flutter evidence. Package acceptance does not transfer to another package.
 
 ## First dispatch and historical crosswalk
 
-**Current package: 5A (contract/review published in #134; acceptance pending); 1A/1B/2A fully accepted, 3/30.**
+**Current work: the bounded EPUB engine slices from the 2026-09-28 adoption decision; 1A/1B/2A/5A fully accepted, 4/30.**
 2C, 3A–3C and 4A–4D delivery has merged; explicit acceptance/follow-ups remain
-as checked above. The reviewed 5A contract/independent expectations are ready for
-owner handoff; 5B dispatch is next, not started here. The remaining native macOS picker check stays open and does not
+as checked above. 5A was accepted and merged at
+[154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e);
+the former 5B dispatch is superseded by the adoption decision and will
+not start. The remaining native macOS picker check stays open and does not
 become a pass by advancing the plan.
 
 | Previous plan phase | New owner(s) |
 | --- | --- |
 | 1: tokens | 1A values; 2C implementation |
 | 2: checklist and Iced capture | 1A–1C |
-| 3: pagination/addressing | 5A–5B |
+| 3: pagination/addressing | 5A; 5B superseded → EPUB engine slices |
 | 4: rich EPUB/navigation/semantics | 5C–5E |
 | 5: library | 3A–3D; 6A–6B for full import/settings |
 | 6: reader/model | 4A–4D, 5F–5G |
