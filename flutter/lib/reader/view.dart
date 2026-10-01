@@ -12,6 +12,10 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/reader/controller.dart';
+import 'package:shosai_flutter/reader/epub/content.dart';
+import 'package:shosai_flutter/reader/epub/flow.dart';
+import 'package:shosai_flutter/reader/epub/font_coverage.dart';
+import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
@@ -54,6 +58,10 @@ class ReaderScreen extends StatefulWidget {
     this.documentPicker,
     this.exportSink,
     this.noticeReporter,
+    this.fontCoverageLoader,
+    this.epubImageDecoder,
+    this.epubFontRegistrar,
+    this.debugEpubSessionObserver,
     this.debugPathEntry = false,
   }) : assert(bridge == null || bridgeFactory == null);
 
@@ -83,6 +91,29 @@ class ReaderScreen extends StatefulWidget {
   /// The application notice center's reporter, injected by the composition
   /// root; a reader built without one reports no notices.
   final ReaderNoticeReporter? noticeReporter;
+
+  /// Loads the bundled document faces' coverage for the EPUB routing gate.
+  ///
+  /// Defaults to the reader's own bundled faces; a test can inject a fixed
+  /// coverage so the routing decision is independent of the shipped assets.
+  final EpubFontCoverageLoader? fontCoverageLoader;
+
+  /// Decodes one admitted EPUB image resource; defaults to the engine codec.
+  ///
+  /// A composition root or a test can inject its own decoder, the way the page
+  /// decoder is injected: the reader treats a null result as the retained
+  /// renderer's missing-image fallback.
+  final EpubImageDecoder? epubImageDecoder;
+
+  /// Registers one admitted `@font-face` family; defaults to `FontLoader`.
+  final EpubFontRegistrar? epubFontRegistrar;
+
+  /// Test-only observer for the chapter sessions the reader creates.
+  ///
+  /// Like [debugPathEntry], this exists so a test can assert the layout's
+  /// resource ownership (which session was released, and when) without reaching
+  /// into the controller; production composition leaves it null.
+  final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
 
   /// Renders the retired path entry for tests and development only.
   ///
@@ -257,6 +288,14 @@ class _ReaderScreenState extends State<ReaderScreen>
         documentPickerAdapter: widget.documentPicker,
         exportSink: widget.exportSink ?? _copyExportToClipboard,
         noticeReporter: widget.noticeReporter,
+        // The Dart EPUB renderer's platform adapters: decoding an admitted
+        // image resource, registering an embedded `@font-face` family and
+        // reading the bundled faces' coverage are engine effects, so they stay
+        // on the widget side of the boundary.
+        epubImageDecoder: widget.epubImageDecoder ?? _decodeEpubImage,
+        epubFontRegistrar: widget.epubFontRegistrar ?? _registerEpubFont,
+        debugEpubSessionObserver: widget.debugEpubSessionObserver,
+        epubFontCoverage: widget.fontCoverageLoader ?? _bundledFontCoverage,
         initialTabs: widget.initialTabs,
         frameScheduler: (callback) =>
             WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
@@ -850,8 +889,8 @@ class _ReaderSurface extends StatelessWidget {
           glyph: '‹',
           semanticsLabel: l10n.readerPreviousPage,
           compact: compact,
-          onPressed: showEdges && !busy && model.unit > 0
-              ? () => dispatch(ReaderUnitRequested(model.unit - 1))
+          onPressed: showEdges && !busy && _canStepPage(model, -1, total)
+              ? () => dispatch(pageStepMessage(model, -1))
               : null,
         ),
         Expanded(child: content),
@@ -862,8 +901,8 @@ class _ReaderSurface extends StatelessWidget {
           glyph: '›',
           semanticsLabel: l10n.readerNextPage,
           compact: compact,
-          onPressed: showEdges && !busy && model.unit + 1 < total
-              ? () => dispatch(ReaderUnitRequested(model.unit + 1))
+          onPressed: showEdges && !busy && _canStepPage(model, 1, total)
+              ? () => dispatch(pageStepMessage(model, 1))
               : null,
         ),
       ],
@@ -998,46 +1037,65 @@ class _ReaderContentPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final document = model.document;
-    return Column(
-      children: [
-        Expanded(
-          child: _ReaderLayoutReporter(
-            model: model,
-            dispatch: dispatch,
-            child: model.busy
-                ? _ReaderOpeningView(
-                    title:
-                        document?.title ??
-                        AppLocalizations.of(context).readerFallbackTitle,
-                  )
-                : document == null
-                // The retained welcome body: the no-document state keeps its
-                // guidance until 4C lands the Iced welcome composition (title +
-                // `Open File` picker action, RD-10). Its copy still describes
-                // the retired path entry, which is recorded as a 4C item; the
-                // production composition renders no path field (contract §7.2
-                // item 6).
-                ? WelcomePanel(
-                    color: pageColors(model.typography.theme).foreground,
-                  )
-                : _DocumentView(
-                    document: document,
-                    image: model.pageImage,
-                    model: model,
-                    dispatch: dispatch,
-                    readerFocus: readerFocus,
-                    actionFocus: actionFocus,
-                  ),
+    // The document-level shortcuts cover the document area *and* the
+    // saved-highlight strip below it, so a focused strip control keeps the
+    // reader's page steps, escape and copy behavior.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            dispatch(const ReaderSelectionCancelled()),
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true): () =>
+            dispatch(const ReaderSelectionCopyRequested()),
+        const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () =>
+            dispatch(const ReaderSelectionCopyRequested()),
+        const SingleActivator(LogicalKeyboardKey.pageUp): () =>
+            dispatch(pageStepMessage(model, -1)),
+        const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+            dispatch(pageStepMessage(model, 1)),
+      },
+      child: Column(
+        children: [
+          Expanded(
+            child: _ReaderLayoutReporter(
+              model: model,
+              dispatch: dispatch,
+              child: model.busy
+                  ? _ReaderOpeningView(
+                      title:
+                          document?.title ??
+                          AppLocalizations.of(context).readerFallbackTitle,
+                    )
+                  : document == null
+                  // The retained welcome body: the no-document state keeps its
+                  // guidance until 4C lands the Iced welcome composition (title
+                  // + `Open File` picker action, RD-10). Its copy still
+                  // describes the retired path entry, which is recorded as a 4C
+                  // item; the production composition renders no path field
+                  // (contract §7.2 item 6).
+                  ? WelcomePanel(
+                      color: pageColors(model.typography.theme).foreground,
+                    )
+                  : _DocumentView(
+                      document: document,
+                      image: model.pageImage,
+                      model: model,
+                      dispatch: dispatch,
+                      readerFocus: readerFocus,
+                      actionFocus: actionFocus,
+                    ),
+            ),
           ),
-        ),
-        Semantics(
-          key: const ValueKey('reader-selection-status'),
-          container: true,
-          liveRegion: true,
-          label: model.selectionDescription,
-          child: const SizedBox(width: double.infinity, height: 1),
-        ),
-      ],
+          if (model.annotations.isNotEmpty)
+            ReaderAnnotationStrip(model: model, dispatch: dispatch),
+          Semantics(
+            key: const ValueKey('reader-selection-status'),
+            container: true,
+            liveRegion: true,
+            label: model.selectionDescription,
+            child: const SizedBox(width: double.infinity, height: 1),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1060,6 +1118,7 @@ class _ReaderLayoutReporter extends StatefulWidget {
 class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
   bool _scheduled = false;
   ReaderLayout? _observedLayout;
+  double? _observedHeight;
   ReaderLayout? _pendingLayout;
 
   @override
@@ -1068,6 +1127,11 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
       final availableWidth = constraints.maxWidth.isFinite
           ? math.max(1.0, constraints.maxWidth).roundToDouble()
           : widget.model.layout.width;
+      // The content-box height is reported alongside the width: real EPUB
+      // pagination needs the page height, and the retained renderer ignores it.
+      final availableHeight = constraints.maxHeight.isFinite
+          ? math.max(1.0, constraints.maxHeight).roundToDouble()
+          : null;
       final typography = widget.model.typography;
       final layout = ReaderLayout(
         scale: widget.model.document != null
@@ -1080,8 +1144,10 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
         fontSize: typography.epubFontSize,
         lineSpacing: typography.epubLineSpacing,
       );
-      if (layout != _observedLayout) {
+      final observedHeight = availableHeight;
+      if (layout != _observedLayout || observedHeight != _observedHeight) {
         _observedLayout = layout;
+        _observedHeight = observedHeight;
         _pendingLayout = layout;
       }
       if (_pendingLayout != null && !_scheduled) {
@@ -1089,9 +1155,12 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _scheduled = false;
           final pending = _pendingLayout;
+          final pendingHeight = _observedHeight;
           _pendingLayout = null;
           if (mounted && pending != null) {
-            widget.dispatch(ReaderViewportChanged(pending));
+            widget.dispatch(
+              ReaderViewportChanged(pending, height: pendingHeight),
+            );
           }
         });
       }
@@ -1126,6 +1195,89 @@ bool usesExplicitSelectionAnnouncements(TargetPlatform platform) =>
     platform == TargetPlatform.linux ||
     platform == TargetPlatform.macOS ||
     platform == TargetPlatform.windows;
+
+/// The reader's bundled document faces, parsed once per process.
+///
+/// The parsed *value* is cached rather than the future that produced it: a
+/// settled future belongs to the zone that awaited it, so reusing one across
+/// calls (a second reader, or a later relayout) can leave the caller waiting on
+/// a completion that will never be delivered to it. Every call therefore gets a
+/// fresh future; only the parse is shared.
+EpubFontCoverage? _bundledCoverage;
+bool _bundledCoverageFailed = false;
+Future<EpubFontCoverage?> _bundledFontCoverage() async {
+  final cached = _bundledCoverage;
+  if (cached != null) return cached;
+  if (_bundledCoverageFailed) return null;
+  try {
+    final inter = await rootBundle.load('../assets/fonts/InterVariable.ttf');
+    final noto = await rootBundle.load(
+      '../assets/fonts/NotoSansJP-Variable.ttf',
+    );
+    return _bundledCoverage = EpubFontCoverage.fromFonts([
+      inter.buffer.asUint8List(),
+      noto.buffer.asUint8List(),
+    ]);
+  } catch (_) {
+    // Without the faces' coverage the reader cannot promise the Dart renderer
+    // will draw a chapter, so it keeps the retained renderer instead.
+    _bundledCoverageFailed = true;
+    return null;
+  }
+}
+
+/// Decodes one admitted EPUB image resource.
+///
+/// A resource the engine cannot decode (an SVG, or a corrupt raster) returns
+/// null, and the layout paints the image's alt fallback instead.
+/// The longest side a document image is decoded at.
+///
+/// A page paints an image at most at its content width, so a raster beyond this
+/// is decoded down rather than allocated at its authored size: an encoded
+/// resource below the archive's byte ceiling can otherwise decode into a raster
+/// far past the chapter's decoded-byte budget.
+const int kEpubImageMaxDimension = 4096;
+
+Future<ui.Image?> _decodeEpubImage(Uint8List bytes) async {
+  ui.ImmutableBuffer? buffer;
+  ui.ImageDescriptor? descriptor;
+  ui.Codec? codec;
+  try {
+    // The encoded header reports the intrinsic size, so a small image is never
+    // upscaled and a large one is bounded before the raster is allocated.
+    buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    descriptor = await ui.ImageDescriptor.encoded(buffer);
+    final width = descriptor.width;
+    final height = descriptor.height;
+    final longest = width > height ? width : height;
+    codec = longest > kEpubImageMaxDimension
+        ? await descriptor.instantiateCodec(
+            targetWidth: width >= height ? kEpubImageMaxDimension : null,
+            targetHeight: height > width ? kEpubImageMaxDimension : null,
+          )
+        : await descriptor.instantiateCodec();
+    return (await codec.getNextFrame()).image;
+  } catch (_) {
+    return null;
+  } finally {
+    // The buffer is the caller's to release, and disposing the descriptor does
+    // not release it.
+    codec?.dispose();
+    descriptor?.dispose();
+    buffer?.dispose();
+  }
+}
+
+/// Registers one admitted `@font-face` family under [family].
+///
+/// The family name is synthesized by the controller and namespaced per
+/// resource, so two books cannot collide; Flutter has no font-unload API, so a
+/// family stays registered for the process once loaded.
+Future<void> _registerEpubFont(String family, Uint8List bytes) async {
+  final loader = FontLoader(family);
+  loader.addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
+  await loader.load();
+}
 
 Future<ui.Image> _decodeRgba(
   Uint8List pixels, {

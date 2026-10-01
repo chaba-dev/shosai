@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
@@ -183,7 +184,7 @@ void main() {
       );
 
       final defects = await findRenderDefects(tester);
-      final documentInk = await _documentRasterInk(tester);
+      final documentInk = await _documentBandInk(tester);
       final ourPng = await captureHarnessPng(tester);
       final ourImage = (await tester.runAsync(
         () => decodeHarnessImage(ourPng),
@@ -228,9 +229,12 @@ void main() {
           'chromeComparison': comparison,
           'documentInkPixels': documentInk,
           'documentCapability':
-              'real Rust chapter surface; no page box, spread or footer '
-              '(5A/5B/5G/5H), so the document area is compared by paper '
-              'palette and rendered ink, not by page composition',
+              'the document band is painted by the reader document renderer '
+              '(the Dart EPUB page window for a routed chapter, the retained '
+              'Rust chapter surface otherwise); the reference spread, page box '
+              'and footer are still 5A/5B/5G/5H, so the document area is '
+              'compared by paper palette and rendered ink, not by page '
+              'composition',
           'defects': defects.map((defect) => defect.toMetadata()).toList(),
         },
       );
@@ -242,7 +246,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
 
-      // The document surface has to paint real Rust ink: a placeholder-only
+      // The document surface has to paint real ink: a placeholder-only
       // capture cannot pass as parity evidence.
       expect(
         documentInk,
@@ -1041,53 +1045,43 @@ List<int> _modalColor(
 }
 
 /// Ink pixels in the document raster the reader paints.
-Future<int> _documentRasterInk(WidgetTester tester) async {
-  PagePainter? painter;
-  for (final paint in tester.widgetList<CustomPaint>(
-    find.byType(CustomPaint),
-  )) {
-    final candidate = paint.painter;
-    if (candidate is PagePainter && candidate.image != null) {
-      painter = candidate;
-      break;
-    }
-  }
-  expect(
-    painter,
-    isNotNull,
-    reason: 'the reader paints a document raster (PagePainter with an image)',
+/// Ink pixels in the rendered document area.
+///
+/// The document area is the reader's own page box, painted by whichever
+/// document renderer is active (the Dart EPUB page window for a routed
+/// chapter, the retained Rust chapter surface otherwise); measuring the
+/// captured frame inside that box proves the document itself has content, so a
+/// placeholder-only capture still measures zero.
+/// The document area is the reader's own page box, painted by whichever
+/// document renderer is active (the Dart EPUB page window for a routed
+/// chapter, the retained Rust chapter surface otherwise).
+///
+/// The measurement reads the page box's own repaint boundary rather than the
+/// composed frame: a selection overlay, a panel or a dialog that happens to sit
+/// inside the same rectangle cannot supply ink for a blank document, so the
+/// assertion is about the document's paint, not the screen's.
+Future<int> _documentBandInk(WidgetTester tester) async {
+  final boundary = tester.renderObject<RenderRepaintBoundary>(
+    find.byKey(const ValueKey('reader-page-paint')),
   );
-  final image = painter!.image!;
-  final data = await tester.runAsync(
-    () => image.toByteData(format: ui.ImageByteFormat.rawRgba),
+  final data = await tester.runAsync(() async {
+    final image = await boundary.toImage();
+    try {
+      return await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    } finally {
+      image.dispose();
+    }
+  });
+  final rgba = data!.buffer.asUint8List();
+  return regionInk(
+    HarnessImage(
+      width: boundary.size.width.round(),
+      height: boundary.size.height.round(),
+      rgba: rgba,
+    ),
+    rect: Rect.fromLTWH(0, 0, boundary.size.width, boundary.size.height),
   );
-  return _inkPixels(data!.buffer.asUint8List());
 }
-
-/// Ink pixels in raw (premultiplied) RGBA bytes, composited onto paper first.
-int _inkPixels(Uint8List rgba, {int paper = 255}) {
-  var count = 0;
-  for (var i = 0; i + 3 < rgba.length; i += 4) {
-    final alpha = rgba[i + 3];
-    if (alpha == 0) continue;
-    if (alpha == 255) {
-      if (_isInk(rgba[i], rgba[i + 1], rgba[i + 2])) count += 1;
-      continue;
-    }
-    final uncovered = paper * (255 - alpha) ~/ 255;
-    if (_isInk(
-      rgba[i] + uncovered,
-      rgba[i + 1] + uncovered,
-      rgba[i + 2] + uncovered,
-    )) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-bool _isInk(int r, int g, int b) =>
-    (0.2126 * r + 0.7152 * g + 0.0722 * b) < 170;
 
 Future<({HarnessImage image, int bytes})> _referenceCapture(
   String referenceId,

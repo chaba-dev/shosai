@@ -992,6 +992,36 @@ impl FlutterBridge {
             .map_err(Into::into)
     }
 
+    /// The EPUB archive bytes the open document was read from.
+    ///
+    /// The Dart EPUB content service parses chapters from this source; the
+    /// accessor resolves and reads it in Rust, so storage stays Rust-owned.
+    pub async fn epub_source_bytes(
+        &self,
+        document: FlutterDocumentHandle,
+        cancellation_id: u64,
+    ) -> Result<Vec<u8>, FlutterBridgeError> {
+        let cancellation = self.cancellation(cancellation_id)?;
+        self.bridge
+            .epub_source_bytes(document.into(), cancellation)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// One EPUB chapter's canonical text, in the retained `search_text()` order.
+    pub async fn epub_canonical_text(
+        &self,
+        document: FlutterDocumentHandle,
+        unit: usize,
+        cancellation_id: u64,
+    ) -> Result<String, FlutterBridgeError> {
+        let cancellation = self.cancellation(cancellation_id)?;
+        self.bridge
+            .epub_canonical_text(document.into(), unit, cancellation)
+            .await
+            .map_err(Into::into)
+    }
+
     /// Diagnostic round trip for measuring generated-code DTO transfer and
     /// Dart materialization independently of document layout.
     #[flutter_rust_bridge::frb(sync)]

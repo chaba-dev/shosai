@@ -20,6 +20,10 @@ class FlutterMakefileTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         (self.root / "flutter").mkdir()
+        # `test-flutter` runs the engine package's own suite after the app
+        # suite, so the fixture carries that package directory and a `dart`
+        # stub: the real toolchain must never run inside the fixture.
+        (self.root / "flutter" / "packages" / "shosai_epub").mkdir(parents=True)
         scripts = self.root / "scripts"
         scripts.mkdir()
         shutil.copy2(ROOT / "Makefile", self.root / "Makefile")
@@ -29,6 +33,15 @@ class FlutterMakefileTest(unittest.TestCase):
         self._write_executable(
             self.bin / "flutter",
             'printf "%s\\n" "$SHOSAI_PDFIUM_LIBRARY" "$@" > "$CAPTURE"',
+        )
+        # The engine leg is recorded separately so the app leg's capture stays
+        # exactly the arguments it was invoked with. Each line carries the
+        # invocation's directory and arguments, so the record distinguishes the
+        # recipe's commands rather than a flattened argument stream.
+        self.dart_capture = self.root / "dart-capture"
+        self._write_executable(
+            self.bin / "dart",
+            f'printf "%s|%s\\n" "$PWD" "$*" >> "{self.dart_capture}"',
         )
 
     def tearDown(self):
@@ -63,6 +76,14 @@ class FlutterMakefileTest(unittest.TestCase):
             self.capture.read_text().splitlines(),
             ["/pinned/libpdfium.dylib", "test"],
         )
+        # The engine package leg runs in the same target, from the package
+        # directory, with the pinned library environment still in place for the
+        # app leg it follows.
+        package = self.root / "flutter" / "packages" / "shosai_epub"
+        self.assertEqual(
+            self.dart_capture.read_text().splitlines(),
+            [f"{package}|pub get", f"{package}|test"],
+        )
 
     def test_aggregate_tests_remain_sequential_with_parallel_make(self):
         overlap = self.root / "overlap"
@@ -76,6 +97,13 @@ class FlutterMakefileTest(unittest.TestCase):
         )
         self._write_executable(self.bin / "cargo", guarded_command)
         self._write_executable(self.bin / "flutter", guarded_command)
+        # The engine package leg is guarded like every other aggregate command,
+        # and marked so the test proves it ran rather than merely not failing.
+        dart_marker = self.root / "dart-ran"
+        self._write_executable(
+            self.bin / "dart",
+            f'{guarded_command}\ntouch "{dart_marker}"',
+        )
         self._write_executable(self.bin / "python3", guarded_command)
         self._write_executable(
             self.root / "scripts" / "check-frb-codegen.sh", guarded_command
@@ -106,6 +134,7 @@ class FlutterMakefileTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(overlap.exists(), "aggregate test commands overlapped")
+        self.assertTrue(dart_marker.exists(), "the engine package leg ran")
 
     def test_macos_smoke_rebuilds_and_verifies_the_complete_app_signature(self):
         makefile = (ROOT / "Makefile").read_text()

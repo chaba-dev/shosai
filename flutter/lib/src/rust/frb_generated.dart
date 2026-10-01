@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1241964668;
+  int get rustContentHash => 175597551;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -115,6 +115,19 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiFlutterBridgeDeleteBookmark({
     required FlutterBridge that,
     required PlatformInt64 id,
+  });
+
+  Future<String> crateApiFlutterBridgeEpubCanonicalText({
+    required FlutterBridge that,
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required BigInt cancellationId,
+  });
+
+  Future<Uint8List> crateApiFlutterBridgeEpubSourceBytes({
+    required FlutterBridge that,
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
   });
 
   Future<String> crateApiFlutterBridgeExportBookmarks({
@@ -603,6 +616,87 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "FlutterBridge_delete_bookmark",
         argNames: ["that", "id"],
+      );
+
+  @override
+  Future<String> crateApiFlutterBridgeEpubCanonicalText({
+    required FlutterBridge that,
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_box_autoadd_flutter_document_handle(document);
+          var arg2 = cst_encode_usize(unit);
+          var arg3 = cst_encode_u_64(cancellationId);
+          return wire.wire__crate__api__FlutterBridge_epub_canonical_text(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeEpubCanonicalTextConstMeta,
+        argValues: [that, document, unit, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeEpubCanonicalTextConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_epub_canonical_text",
+        argNames: ["that", "document", "unit", "cancellationId"],
+      );
+
+  @override
+  Future<Uint8List> crateApiFlutterBridgeEpubSourceBytes({
+    required FlutterBridge that,
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_box_autoadd_flutter_document_handle(document);
+          var arg2 = cst_encode_u_64(cancellationId);
+          return wire.wire__crate__api__FlutterBridge_epub_source_bytes(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_list_prim_u_8_strict,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeEpubSourceBytesConstMeta,
+        argValues: [that, document, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeEpubSourceBytesConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_epub_source_bytes",
+        argNames: ["that", "document", "cancellationId"],
       );
 
   @override
@@ -4659,6 +4753,31 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
       .instance
       .api
       .crateApiFlutterBridgeDeleteBookmark(that: this, id: id);
+
+  /// One EPUB chapter's canonical text, in the retained `search_text()` order.
+  Future<String> epubCanonicalText({
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeEpubCanonicalText(
+    that: this,
+    document: document,
+    unit: unit,
+    cancellationId: cancellationId,
+  );
+
+  /// The EPUB archive bytes the open document was read from.
+  ///
+  /// The Dart EPUB content service parses chapters from this source; the
+  /// accessor resolves and reads it in Rust, so storage stays Rust-owned.
+  Future<Uint8List> epubSourceBytes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeEpubSourceBytes(
+    that: this,
+    document: document,
+    cancellationId: cancellationId,
+  );
 
   Future<String> exportBookmarks({required PlatformInt64 bookId}) => RustLib
       .instance

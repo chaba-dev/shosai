@@ -42,6 +42,22 @@ abstract class FlutterBridge implements RustOpaqueInterface {
 
   Future<void> deleteBookmark({required PlatformInt64 id});
 
+  /// One EPUB chapter's canonical text, in the retained `search_text()` order.
+  Future<String> epubCanonicalText({
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required BigInt cancellationId,
+  });
+
+  /// The EPUB archive bytes the open document was read from.
+  ///
+  /// The Dart EPUB content service parses chapters from this source; the
+  /// accessor resolves and reads it in Rust, so storage stays Rust-owned.
+  Future<Uint8List> epubSourceBytes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  });
+
   Future<String> exportBookmarks({required PlatformInt64 bookId});
 
   Future<FlutterImportReport> importDirectory({

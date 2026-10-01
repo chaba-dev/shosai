@@ -156,6 +156,59 @@ final class _RelayoutIntent {
   final bool replaceReadingOffset;
 }
 
+/// The layout identity of one Dart-rendered EPUB chapter.
+///
+/// A session is reused only when every input that changes its measured
+/// geometry is equal: the page box, the typography, and the chapter. The
+/// retained renderer's key stays width-based; the page height is part of this
+/// key because pagination depends on it.
+final class _EpubLayoutKey {
+  const _EpubLayoutKey({
+    required this.generation,
+    required this.unit,
+    required this.width,
+    required this.height,
+    required this.fontSize,
+    required this.lineSpacing,
+    required this.theme,
+  });
+
+  /// The document generation the session belongs to.
+  ///
+  /// The key must carry it: two documents can share a unit ordinal, a width and
+  /// a typography, and a session measured from the first document's blocks
+  /// would otherwise be reused for the second.
+  final int generation;
+  final int unit;
+  final double width;
+  final double height;
+  final double fontSize;
+  final double lineSpacing;
+  final String theme;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _EpubLayoutKey &&
+      other.generation == generation &&
+      other.unit == unit &&
+      other.width == width &&
+      other.height == height &&
+      other.fontSize == fontSize &&
+      other.lineSpacing == lineSpacing &&
+      other.theme == theme;
+
+  @override
+  int get hashCode => Object.hash(
+    generation,
+    unit,
+    width,
+    height,
+    fontSize,
+    lineSpacing,
+    theme,
+  );
+}
+
 typedef SelectionCopier = Future<void> Function(String text);
 typedef ReaderSelectionAnnouncer = Future<void> Function(String description);
 

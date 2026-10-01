@@ -3227,6 +3227,52 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test(
+    'a chrome height jitter does not cancel the layout installing a chapter',
+    () async {
+      // The document box moves by a few pixels while a chapter is being laid
+      // out (the relayout progress bar is 4 logical px, and the loading body is
+      // a different height than the document body). Such a report must not
+      // cancel the relayout that is installing the chapter: the reader would be
+      // left with nothing on screen and no successor to replay it.
+      final bridge = _ControlledBridge(immediateLists: true);
+      final pendingLayout = Completer<FlutterSelectionSurface>();
+      bridge.selectionCompleters.add(pendingLayout);
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+      );
+      // The view reports its box before the document is opened, so the open
+      // lays the chapter out itself (the Dart EPUB path, which falls back to
+      // the retained surface when the archive cannot be read).
+      controller.dispatch(
+        ReaderViewportChanged(controller.model.layout, height: 500),
+      );
+      controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
+      await _waitUntil(() => controller.model.relayoutBusy);
+      final installing = bridge.createdCancellations.last;
+      final layout = controller.model.layout;
+
+      controller.dispatch(ReaderViewportChanged(layout, height: 504));
+      expect(
+        bridge.cancelled,
+        isNot(contains(installing)),
+        reason: 'a chrome jitter is not a layout change',
+      );
+      expect(controller.model.relayoutBusy, isTrue);
+      expect(controller.model.contentState, ReaderContentState.loading);
+
+      pendingLayout.complete(_surface(BigInt.from(1), raster: true));
+      await _waitUntil(
+        () => controller.model.contentState == ReaderContentState.ready,
+      );
+      expect(controller.model.selectionSurface, isNotNull);
+      expect(controller.model.relayoutBusy, isFalse);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
   test('note completion during relayout reports a retryable error', () async {
     final bridge = _ControlledBridge(
       initialAnnotations: [_annotation('one')],
@@ -4396,25 +4442,33 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final displayedScale = tester.view.devicePixelRatio;
-    final selectionCalls = bridge.selectionCalls;
-    final pending = Completer<FlutterSelectionSurface>();
-    bridge.selectionCompleters.add(pending);
+    // Every relayout the transition starts stays in flight: the test is about
+    // what returning to the displayed layout does to pending work, and a
+    // relayout that happened to complete first would leave nothing to cancel.
+    bridge.holdSelectionSurfaces = true;
+    final createdBefore = bridge.createdCancellations.length;
 
     tester.view.devicePixelRatio = displayedScale == 2 ? 3 : 2;
     await tester.pump();
     await tester.pump();
     expect(find.byType(ShadProgress), findsOneWidget);
-    final pendingCancellation = bridge.createdCancellations.last;
+    expect(bridge.heldSelectionSurfaces, isNotEmpty);
+    final created = bridge.createdCancellations.sublist(createdBefore);
+    expect(created, isNotEmpty);
 
     tester.view.devicePixelRatio = displayedScale;
     await tester.pump();
     await tester.pump();
-    expect(bridge.cancelled, contains(pendingCancellation));
+    // Returning to the displayed layout cancels every relayout it superseded,
+    // and none of them installs.
+    expect(bridge.cancelled, containsAll(created));
     expect(find.byType(ShadProgress), findsNothing);
 
-    pending.complete(_surface(BigInt.from(30), raster: true));
+    for (final held in bridge.heldSelectionSurfaces) {
+      held.complete(_surface(BigInt.from(30), raster: true));
+    }
     await tester.pumpAndSettle();
-    expect(bridge.selectionCalls, selectionCalls + 1);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
@@ -7688,6 +7742,11 @@ final class _ControlledBridge implements FlutterBridge {
   final createdRanges = <(BigInt, BigInt)>[];
   final createdScales = <double>[];
   final selectionLayouts = <ReaderLayout>[];
+
+  /// Holds every selection-surface call open until the test completes it.
+  bool holdSelectionSurfaces = false;
+  final heldSelectionSurfaces = <Completer<FlutterSelectionSurface>>[];
+
   final renderScales = <double>[];
   final selectionUnits = <int>[];
   final renderUnits = <int>[];
@@ -7880,6 +7939,13 @@ final class _ControlledBridge implements FlutterBridge {
       ),
     );
     if (selectionFailure) throw StateError('selection failed');
+    if (holdSelectionSurfaces) {
+      // Hold every layout in flight, so a test can observe what a transition
+      // does to the relayouts the reader has already started.
+      final held = Completer<FlutterSelectionSurface>();
+      heldSelectionSurfaces.add(held);
+      return held.future;
+    }
     if (selectionCompleters.isNotEmpty) {
       return selectionCompleters.removeFirst().future;
     }
