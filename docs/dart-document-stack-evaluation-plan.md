@@ -300,6 +300,97 @@ production boundary needs is carried over, adapted to the retained model/message
 effect contracts rather than copied.
 
 
+### Slice 3 report (EPUB content service behind the retained UI, 2026-09-28)
+
+Implementation, not acceptance: this slice routes content and closes the
+gates it names; no package acceptance (5A–5J) is recorded by it, and 5A's
+acceptance, the 4/30 accounting and 5B's paused/superseded status are unchanged
+(see the [restoration plan](flutter-ui-restoration-plan.md#progress-tracking)).
+
+**What the slice delivers.** A paginated EPUB chapter is served by the Dart
+engine behind the retained reader UI:
+
+- `flutter/lib/reader/epub/` carries the layout module (chapter flow, windowed
+  layout session, page windows, selection surface, page painting) ported from
+  the evaluated prototype and adapted to the reader's typography and palette.
+- The controller owns the routing decision, the parsed source, the chapter
+  layout session and every completion: a chapter is served by the engine only
+  after its canonical stream was compared with the retained Rust stream, and a
+  diverging, uncomparable, uncovered-script or oversized chapter stays on the
+  retained renderer. No durable offset is ever written from a stream the store
+  does not share.
+- Page turns are a controller transition over the already-measured window (the
+  durable position is the page's canonical start), the window extends in bounded
+  batches between frames, and a chapter change, resize, typography change or
+  restoration re-paginates through the existing guarded relayout path.
+- Continuous mode, PDF and CBZ are untouched; Rust remains the only database
+  writer, and the engine's own `@font-face` faces and image resources are
+  admitted through controller-injected adapters.
+
+**Known shape of the resident layout.** The chapter session is windowed and
+incremental, not eager: the first page is installed from the window around the
+requested position, and the remaining top-level nodes are measured in bounded
+batches between frames, so the first page does not require laying out the
+remainder of the chapter and a page turn is a transition over the
+already-measured flow rather than a relayout. The window/batch boundary works
+*between* top-level nodes, so a chapter whose single indivisible unit — one
+paragraph, list, table or nested container — exceeds the bounded-work ceilings
+(512 work units or 32 Ki scalars) is refused by the gate and stays on the
+retained renderer instead of being measured in one unbounded call; flattening
+composite containers into resumable work items would lift that refusal (open
+work). Measurement failure handling is transactional. A window that throws
+before adoption releases every painter it created; a forward batch that throws
+releases every painter the call created that the adopted prefix does not own,
+drops the blocks it appended and restores its node index, cursor and overflow
+accounting; a backward batch stages its prepended range aside and commits only
+when the batch completes, so a throw leaves the range exactly as it was and
+releases the painters the batch created. Construction is covered too: every
+painter a context creates is registered, so an interruption *between* a
+painter's allocation and its adoption (a standalone paragraph, a table caption,
+a table cell paragraph) releases that painter deterministically instead of
+leaving it to finalization. Ownership transfers on adoption: a painter the
+session already owns is never released by a later failure. Fault-injection tests
+reach each path (a throw after a successful earlier prepend, and after
+allocating a window/paragraph/caption/cell painter), assert the released set
+exactly, and confirm the retry matches a clean layout. This covers *measurement
+and construction* failures; a failure inside the collection commit itself (an
+allocator failure while a batch's blocks are inserted) is outside it and is not
+promised to be atomic. The ceilings are a *structural* admission bound, not a measured
+latency guarantee: a table whose cells span many grid positions can still cost
+proportional placement work inside one admitted unit (a 64×64 span expansion is
+bounded but not small), so a per-cell occupancy bound belongs with the
+presented-frame work. The initial window and the admission scans are still
+synchronous, and presented-frame timing is not measured (the open gate above). The
+measured flow for the visited chapter is retained for the chapter's lifetime
+(that is what makes the page turn cheap), so resident memory grows with the
+chapter rather than with the page; the prototype's per-line boundary/mapping
+work is what keeps each batch bounded. The long-chapter fixture
+(`prototypes/epub-dart-eval/fixtures/long-chapter.epub`) is exercised in the
+production path, not only in the engine's own tests. Bounding the retained
+flow, and attributing it to a real retained-heap measurement, is the open
+memory gate above.
+
+**Gates this slice closes.** Fixture-level rich/JA/images/tables rendering and
+selection/navigation/restoration coverage through the retained UI, with the
+canonical parity audit over the committed corpus (30 books, 52 chapter streams,
+byte-identical) and the malformed-`mfrac` engine discrepancy fixed by a
+source-derived regression rather than left to the fallback.
+
+**Gates this slice leaves open, named.** Real-book corpus (licensed material not
+available in this environment); over-tall table rows; font admission/fallback
+coverage beyond the bundled faces (a chapter whose text needs another script
+stays on the retained renderer, which preserves the retained host-font
+capability until 5C/FM-22 closes it); retained-memory attribution and
+presented-frame timing (the slice measures layout work and page sizes, not the
+platform's retained heap or presented frames); continuous-mode tiles, spreads,
+TOC/session routing and search ownership; and the parity suite's document-area
+measurement, which now reads the page box's own repaint boundary (the Dart page
+window or the retained raster, whichever painted it) instead of the retained
+raster alone: a selection overlay, panel or dialog inside the same rectangle can
+no longer supply ink for a blank document, so the assertion's intent — the
+document itself painted content — is unchanged and no longer weaker than it.
+
+
 ## Proposed gated work, not an automatic rewrite
 
 Each phase produces a reviewable result. The owner authorizes follow-up work and

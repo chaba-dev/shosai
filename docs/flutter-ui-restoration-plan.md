@@ -98,6 +98,28 @@ decision does change here:
   retained UI. Both are recorded in the evaluation plan's sequence and are
   reviewed per PR before publication.
 
+**Slice 3 delivery (EPUB content service behind the retained UI, 2026-09-28):**
+implementation merged-ready, not acceptance. [#138](https://github.com/chaba-dev/shosai/pull/138)
+(the adoption decision and architecture amendments) and
+[#139](https://github.com/chaba-dev/shosai/pull/139) (the production Dart EPUB
+engine module) merged as `129d9885` and `cac305b1`; the content-service slice
+serves paginated EPUB chapters from the engine behind the retained UI, with
+PDF/CBZ, continuous mode, the stores and the single Rust database writer
+untouched. The controller owns routing, the parsed source and the chapter layout
+session: a chapter is served by the engine only after its canonical stream was
+compared with the retained Rust stream, and a diverging, uncomparable,
+uncovered-script or oversized chapter stays on the retained renderer, so no
+durable offset is written from a stream the store does not share. Page turns,
+resize/font changes and restoration re-paginate through the existing guarded
+relayout path; selection, copy, highlights and reading state keep working
+through the retained UI. The slice report, its named open gates (real-book
+corpus, over-tall rows, font-coverage beyond the bundled faces,
+retained-memory attribution and presented-frame timing) and the parity-suite
+document-area measurement change are recorded in the
+[evaluation plan](dart-document-stack-evaluation-plan.md#slice-3-report-epub-content-service-behind-the-retained-ui-2026-09-28).
+This entry changes no package acceptance: 5A stays accepted, 5B stays
+paused/superseded, the accounting stays 4/30, and 5C–5J stay unchecked.
+
 **Outstanding gaps (acceptance remains open; implementation is not approval):**
 - **4B/5G**: inherited chrome-height offset (4B
   header/tab/document top 61/48/111 versus reference 52/35/90); 4B acceptance open.

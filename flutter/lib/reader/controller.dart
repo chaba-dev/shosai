@@ -4,9 +4,17 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
     show FlutterError, FlutterErrorDetails, Listenable, VoidCallback;
+import 'package:shosai_epub/shosai_epub.dart';
+import 'package:shosai_flutter/app_theme.dart'
+    show shosaiInterfaceFontFamily, shosaiJapaneseInterfaceFontFamily;
 import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
 import 'package:shosai_flutter/notices/reader_notice_text.dart';
+import 'package:shosai_flutter/reader/epub/content.dart';
+import 'package:shosai_flutter/reader/epub/font_coverage.dart';
+import 'package:shosai_flutter/reader/epub/flow.dart';
+import 'package:shosai_flutter/reader/epub/pages.dart';
+import 'package:shosai_flutter/reader/epub/text_style.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 part 'effects.dart';
@@ -35,6 +43,10 @@ final class ReaderController implements Listenable {
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
     ReaderNoticeReporter? noticeReporter,
+    EpubImageDecoder? epubImageDecoder,
+    EpubFontRegistrar? epubFontRegistrar,
+    this.debugEpubSessionObserver,
+    EpubFontCoverageLoader? epubFontCoverage,
     List<ReaderTabPresentation> initialTabs = const [],
     ReaderTypographyPresentation initialTypography =
         const ReaderTypographyPresentation(
@@ -69,6 +81,9 @@ final class ReaderController implements Listenable {
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
+       _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
+       _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
+       _epubFontCoverageLoader = epubFontCoverage,
        _typographyFontSize = initialTypography.epubFontSize,
        _typographyLineSpacing = initialTypography.epubLineSpacing,
        _typographyTheme = initialTypography.theme,
@@ -102,10 +117,57 @@ final class ReaderController implements Listenable {
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
   final ReaderNoticeReporter _reportNotice;
+  final EpubImageDecoder _epubImageDecoder;
+  final EpubFontRegistrar _epubFontRegistrar;
+
+  /// Test-only observer for the chapter sessions this controller creates.
+  ///
+  /// A session's native text painters are the layout's retained resource, so a
+  /// test that asserts ownership (a superseded session is released, a painted
+  /// one is not) needs to reach the session object itself.
+  final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
+  final EpubFontCoverageLoader? _epubFontCoverageLoader;
 
   ReaderModel _model = ReaderModel();
   int _revealRevision = 0;
   double? _lastReportedWidth;
+
+  /// The last content-box height the view reported, or null before the first
+  /// report. The Dart EPUB renderer needs it to paginate; without it a chapter
+  /// stays on the retained renderer.
+  double? _epubViewportHeight;
+
+  /// The Dart-engine content source for the current document generation, and
+  /// the generation it belongs to.
+  EpubContentSource? _epubSource;
+  int? _epubSourceGeneration;
+
+  /// The in-flight load for [_epubSourceGeneration].
+  Future<EpubContentSource?>? _epubSourceLoad;
+
+  /// The bundled faces' coverage, resolved once per reader.
+  EpubFontCoverage? _epubFontCoverage;
+  Future<EpubFontCoverage?>? _epubFontCoverageLoad;
+
+  /// The controller-owned chapter layout session of the Dart EPUB renderer,
+  /// its layout key, and the page height it was laid out for.
+  ChapterLayoutSession? _epubSession;
+  _EpubLayoutKey? _epubSessionKey;
+  double? _epubLayoutHeight;
+
+  /// Whether the Dart path was skipped for this document because no page
+  /// height had been reported yet. The first report then upgrades the chapter
+  /// instead of leaving it on the retained renderer until the next resize.
+  bool _epubHeightPending = false;
+
+  /// Embedded `@font-face` families already registered in this process.
+  ///
+  /// Flutter has no font-unload API, so a family is registered once per
+  /// (declared family, resource) pair and stays available; registering the
+  /// same family again for another book would either duplicate the face or
+  /// collide with it.
+  static final Set<String> _registeredEpubFonts = {};
+
   BigInt? _activeCancellation;
   final Set<BigInt> _relayoutCancellations = {};
   final Set<BigInt> _annotationCancellations = {};
@@ -267,13 +329,15 @@ final class ReaderController implements Listenable {
       case ReaderLayoutChanged():
         _layoutChanged(message.layout);
       case ReaderViewportChanged():
-        _viewportChanged(message.layout);
+        _viewportChanged(message.layout, height: message.height);
       case ReaderUnitRequested():
         _unitRequested(
           message.unit,
           offset: message.offset,
           length: message.length,
         );
+      case ReaderPageStepRequested():
+        _pageStepRequested(message.delta);
       case ReaderSearchRequested():
         _searchRequested(message.query);
       case ReaderBookmarkToggled():
@@ -662,16 +726,47 @@ final class ReaderController implements Listenable {
         }
       case _ReaderRelayoutCompleted():
         _relayoutCompleted(message);
+      case _ReaderEpubPageLoaded():
+        if (_isCurrentLayout(message.generation, message.revision) &&
+            _relayoutCancellations.contains(message.cancellation)) {
+          _activeRelayoutIntent = null;
+          _applyEpubPage(
+            generation: message.generation,
+            revision: message.revision,
+            unit: message.unit,
+            scalar: message.scalar,
+            layout: message.layout,
+            height: message.height,
+            annotations: message.annotations,
+            offset: message.offset,
+            length: message.length,
+            replaceReadingOffset: message.replaceReadingOffset,
+            annotationError: message.annotationError,
+            session: message.session,
+            sessionKey: message.sessionKey,
+          );
+        }
       case _ReaderRelayoutFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _layoutRevision) {
           _activeRelayoutIntent = null;
           _failedLayout = message.layout;
+          // A failed layout with nothing installed yet is the open's failure,
+          // not a transient relayout failure over visible content: it keeps the
+          // error surface the retained open path used to publish.
+          final nothingInstalled =
+              _model.selectionSurface == null &&
+              _model.pageImage == null &&
+              _model.epubPage == null;
           _emit(
             _model.copyWith(
               relayoutBusy: false,
               relayoutPending: false,
               relayoutError: 'Layout failed: ${message.error}',
+              contentState: nothingInstalled
+                  ? ReaderContentState.failed
+                  : _model.contentState,
+              error: nothingInstalled ? message.error : _unchanged,
             ),
           );
         }
@@ -680,6 +775,7 @@ final class ReaderController implements Listenable {
         _bridge.releaseCancellation(id: message.cancellation);
         _activeBridgeOperations -= 1;
         _recoverIfIdle();
+        _startRequestedRelayoutIfReady();
         _disposeBridgeIfIdle();
       case _ReaderAnnotationListFailed():
         if (_isCurrent(message.generation) &&
@@ -817,6 +913,7 @@ final class ReaderController implements Listenable {
         unit: 0,
         readingOffset: null,
         pageImage: null,
+        epubPage: null,
         error: null,
         selectionSurface: null,
         selectionPhase: ReaderSelectionPhase.idle,
@@ -936,7 +1033,29 @@ final class ReaderController implements Listenable {
       opened = null;
       if (!_isCurrent(generation)) return;
 
-      if (document.format != FlutterBookFormat.cbz) {
+      // A paginated EPUB chapter with a reported content-box height is served
+      // by the Dart engine: the same guarded relayout path the retained
+      // renderer uses, with the restored position as its target. Everything
+      // else (continuous EPUB, no height yet, PDF, CBZ) keeps the retained
+      // surface path below.
+      final dartEpub =
+          document.format == FlutterBookFormat.epub &&
+          _epubPageHeight(null) != null;
+      if (document.format == FlutterBookFormat.epub && !dartEpub) {
+        // No reported page height yet (an open that ran before the first
+        // layout report): upgrade the chapter once the height arrives.
+        _epubHeightPending = !_typographyContinuous;
+      }
+      if (document.format != FlutterBookFormat.cbz && dartEpub) {
+        if (!_isCurrent(generation)) return;
+        _startRelayout(
+          document,
+          restoredLayout,
+          unit: unit,
+          offset: restored?.offset?.toInt(),
+          height: _epubViewportHeight,
+        );
+      } else if (document.format != FlutterBookFormat.cbz) {
         FlutterSelectionSurface? effectSurface;
         try {
           final surface = await _bridge.selectionSurface(
@@ -1131,8 +1250,9 @@ final class ReaderController implements Listenable {
     );
   }
 
-  void _layoutChanged(ReaderLayout layout) {
+  void _layoutChanged(ReaderLayout layout, {double? height}) {
     if (!layout.isValid || _closing) return;
+    final epubHeight = _epubPageHeight(height);
     if (_suspended || _recovering) {
       _requestedLayout = layout;
       _failedLayout = null;
@@ -1151,7 +1271,16 @@ final class ReaderController implements Listenable {
       _emit(_model.copyWith(layout: layout, relayoutPending: false));
       return;
     }
-    if (layout == _model.layout && _relayoutCancellations.isNotEmpty) {
+    // The reader returned to the layout it is already displaying while a
+    // relayout for a *different* layout is in flight: the pending result is no
+    // longer wanted, and the displayed content is still correct, so it is
+    // cancelled. A relayout that targets the displayed layout itself (a page
+    // height refresh, or a navigation inside the current chapter) must be left
+    // to finish: cancelling it would strand the chapter with nothing installed
+    // and no successor to replay it.
+    if (layout == _model.layout &&
+        _relayoutCancellations.isNotEmpty &&
+        _requestedLayout != _model.layout) {
       _requestedLayout = layout;
       _activeRelayoutIntent = null;
       _failedLayout = null;
@@ -1181,18 +1310,71 @@ final class ReaderController implements Listenable {
       _setRelayoutPending(false);
       return;
     }
-    if (layout == _requestedLayout || layout == _failedLayout) {
+    // A height-only change (a window resize that keeps the width, or the first
+    // report after an open that had no height yet) must re-paginate the Dart
+    // EPUB page: its page breaks depend on the page height. The retained
+    // renderer's own key stays width-based, so nothing else relayouts for it.
+    final epubHeightChanged = _epubHeightNeedsLayout(
+      document,
+      layout,
+      epubHeight,
+    );
+    if (!epubHeightChanged &&
+        (layout == _requestedLayout || layout == _failedLayout)) {
       return;
     }
-    _startRelayout(document, layout);
+    _startRelayout(document, layout, height: epubHeight);
   }
 
-  void _viewportChanged(ReaderLayout observed) {
+  /// Whether the reported page height requires a new Dart EPUB layout.
+  ///
+  /// Chrome jitter smaller than one line (the relayout progress bar alone moves
+  /// the box by 4 px) is absorbed by the fit transform; a real resize, or the
+  /// first report after an open that had no height yet, re-paginates.
+  bool _epubHeightNeedsLayout(
+    FlutterDocumentSummary document,
+    ReaderLayout layout,
+    double? epubHeight,
+  ) {
+    if (document.format != FlutterBookFormat.epub || epubHeight == null) {
+      return false;
+    }
+    final installed = _epubLayoutHeight;
+    if (installed == null) return _epubHeightPending;
+    if (!_epubHeightPending && _epubSessionKey == null) return false;
+    return (epubHeight - installed).abs() > _epubPageHeightTolerance(layout);
+  }
+
+  /// The page-height change that counts as a resize rather than chrome jitter.
+  ///
+  /// The relayout progress bar is 4 logical px tall and appears while a layout
+  /// is in flight, and a chrome row can differ by a few px; a change smaller
+  /// than one line is absorbed by the fit transform instead of re-paginating
+  /// (and, during a relayout, restarting or cancelling it).
+  double _epubPageHeightTolerance(ReaderLayout layout) =>
+      layout.fontSize * layout.lineSpacing;
+
+  /// The page height the Dart EPUB renderer should use for [height].
+  ///
+  /// Returns null when the view has not reported a usable height yet or the
+  /// document is not on the Dart path, which keeps the chapter on the retained
+  /// renderer instead of paginating for a guessed box.
+  double? _epubPageHeight(double? height) {
+    final observed = height ?? _epubViewportHeight;
+    if (observed == null || !observed.isFinite || observed <= 0) return null;
+    if (_typographyContinuous) return null;
+    return observed;
+  }
+
+  void _viewportChanged(ReaderLayout observed, {double? height}) {
     // The strip re-reveals the active tab after a resize as well as after its
     // initial layout; both arrive as a changed reported width.
     if (_lastReportedWidth != observed.width) {
       _lastReportedWidth = observed.width;
       _scheduleTabReveal();
+    }
+    if (height != null && height.isFinite && height > 0) {
+      _epubViewportHeight = height;
     }
     final layout = _model.document == null && !_model.busy
         ? observed
@@ -1214,7 +1396,7 @@ final class ReaderController implements Listenable {
         _model.relayoutBusy &&
         !isNavigation &&
         layout == _model.layout) {
-      _layoutChanged(layout);
+      _layoutChanged(layout, height: height);
       return;
     }
     if (document != null && _model.relayoutBusy && intent != null) {
@@ -1225,10 +1407,11 @@ final class ReaderController implements Listenable {
         offset: intent.offset,
         length: intent.length,
         replaceReadingOffset: intent.replaceReadingOffset,
+        height: height,
       );
       return;
     }
-    _layoutChanged(layout);
+    _layoutChanged(layout, height: height);
   }
 
   void _setRelayoutPending(bool pending) {
@@ -1244,10 +1427,18 @@ final class ReaderController implements Listenable {
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
+    double? height,
   }) {
     final generation = _model.generation;
     final targetUnit = unit ?? _model.unit;
     _requestedLayout = layout;
+    if (height != null &&
+        document.format == FlutterBookFormat.epub &&
+        height.isFinite &&
+        height > 0) {
+      _epubLayoutHeight = height;
+      _epubHeightPending = false;
+    }
     late final BigInt cancellation;
     try {
       cancellation = _bridge.createCancellation();
@@ -1300,8 +1491,244 @@ final class ReaderController implements Listenable {
         offset: offset,
         length: length,
         replaceReadingOffset: replaceReadingOffset,
+        height: height,
       ),
     );
+  }
+
+  /// Turns a page by [delta] on the Dart EPUB path (RD-06 edge navigation).
+  ///
+  /// The durable position is the page's canonical start, and the page itself is
+  /// derived from the controller-owned layout session, so a page turn costs one
+  /// pagination pass over the measured window instead of a relayout. At a
+  /// window edge the session is extended by one bounded batch; when the chapter
+  /// is genuinely over the step becomes a chapter change through the normal
+  /// guarded relayout path.
+  void _pageStepRequested(int delta) {
+    final page = _model.epubPage;
+    final session = _epubSession;
+    final document = _model.document;
+    if (page == null || session == null || document == null || delta == 0) {
+      // No Dart page is installed: keep the retained logical-unit semantics.
+      _unitRequested(_model.unit + delta);
+      return;
+    }
+    if (_model.busy ||
+        _model.relayoutBusy ||
+        _model.annotationOperations.isNotEmpty ||
+        _closing ||
+        _suspended) {
+      return;
+    }
+    final layout = _model.layout;
+    final height = _epubLayoutHeight;
+    if (height == null) return;
+    final step = delta < 0
+        ? _epubPageBefore(session, page.canonicalStart)
+        : _epubPageAfter(session, page.canonicalStart);
+    final target = step.scalar;
+    if (target == null) {
+      if (step.complete) {
+        // The window measured the whole chapter and has no further page: this
+        // is a chapter edge.
+        _unitRequested(_model.unit + delta);
+      }
+      // Otherwise the window simply does not reach that page yet; the step is
+      // dropped rather than turned into a chapter change.
+      return;
+    }
+    if (target == page.canonicalStart) return;
+    // The page the selection addresses is leaving the screen: invalidate it the
+    // way a relayout does, without moving focus into the document (the turn is
+    // not an explicit selection cancellation).
+    _selectionCancelled(requestSurfaceFocus: false);
+    _applyEpubPage(
+      generation: _model.generation,
+      revision: _layoutRevision,
+      unit: _model.unit,
+      scalar: target,
+      layout: layout,
+      height: height,
+      annotations: _model.annotations,
+      offset: target,
+      replaceReadingOffset: true,
+    );
+  }
+
+  /// The canonical start of the page before [scalar], extending the session by
+  /// bounded batches when the window does not reach it yet.
+  ///
+  /// [complete] distinguishes the chapter's first page (no further content)
+  /// from a window that has not been extended far enough yet.
+  ({int? scalar, bool complete}) _epubPageBefore(
+    ChapterLayoutSession session,
+    int scalar,
+  ) {
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      final paginated = _paginatedWindow(session);
+      final index = paginated?.pageOfCanonical(scalar);
+      if (paginated != null && index != null && index > 0) {
+        return (
+          scalar: paginated.pages[index - 1].canonicalStart,
+          complete: true,
+        );
+      }
+      if (session.firstNodeIndex == 0 ||
+          session.layoutBackward(maxNodes: 12, maxMicros: 6000) == 0) {
+        return (scalar: null, complete: session.firstNodeIndex == 0);
+      }
+    }
+    return (scalar: null, complete: session.firstNodeIndex == 0);
+  }
+
+  /// The canonical start of the page after [scalar], extending the session by
+  /// bounded batches when the window does not reach it yet.
+  ({int? scalar, bool complete}) _epubPageAfter(
+    ChapterLayoutSession session,
+    int scalar,
+  ) {
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      final paginated = _paginatedWindow(session);
+      if (paginated != null) {
+        final index = paginated.pageOfCanonical(scalar);
+        if (index + 1 < paginated.pages.length) {
+          return (
+            scalar: paginated.pages[index + 1].canonicalStart,
+            complete: true,
+          );
+        }
+      }
+      if (session.complete) return (scalar: null, complete: true);
+      if (session.layoutForward(maxNodes: 12, maxMicros: 6000) == 0) {
+        return (scalar: null, complete: session.complete);
+      }
+    }
+    return (scalar: null, complete: session.complete);
+  }
+
+  PaginatedChapter? _paginatedWindow(ChapterLayoutSession session) {
+    final key = _epubSessionKey;
+    if (key == null) return null;
+    final box = epubPageBoxFor(ui.Size(key.width, key.height));
+    return paginateFlow(
+      flow: session.snapshot(),
+      pageHeight: box.contentHeight,
+      pageWidth: box.contentWidth,
+    );
+  }
+
+  /// Derives the page window containing [scalar] and publishes it.
+  ///
+  /// Shared by the guarded layout effect and a page turn, so both transitions
+  /// produce the same model state: the durable offset is the page's canonical
+  /// start, the surface is the page's own geometry, and the reading state is
+  /// queued for the page the reader is looking at.
+  void _applyEpubPage({
+    required int generation,
+    required int revision,
+    required int unit,
+    required int scalar,
+    required ReaderLayout layout,
+    required double height,
+    required List<FlutterAnnotation> annotations,
+    int? offset,
+    int? length,
+    bool replaceReadingOffset = false,
+    String? annotationError,
+    String? selectionError,
+    ChapterLayoutSession? session,
+    _EpubLayoutKey? sessionKey,
+  }) {
+    final installed = _epubSession;
+    final document = _model.document;
+    if ((installed == null && session == null) || document == null) return;
+    final previousSession = installed;
+    final page = pageWindowFor(
+      session: session ?? installed!,
+      scalar: scalar,
+      unit: unit,
+      chapterCount: document.logicalUnitCount.toInt(),
+      windowSize: ui.Size(layout.width, height),
+    );
+    final oldImage = _model.pageImage;
+    final oldSurface = _model.selectionSurface;
+    final oldWasRetained = _model.epubPage == null;
+    final changedLocation =
+        unit != _model.unit || offset != null || replaceReadingOffset;
+    if (changedLocation) _readingStatePersistenceBlocked = false;
+    final readingOffset = changedLocation ? offset : _model.readingOffset;
+    // The ownership transfer is the commit, and it happens after the next model
+    // is derived but before it is published: a failure in the injected progress
+    // source, or while releasing the previous page, must not leave a published
+    // page whose session this effect still thinks it owns (and would then
+    // release), nor an installed session whose page the model does not show.
+    final next = _deriveModel(
+      _model.copyWith(
+        unit: unit,
+        readingOffset: readingOffset,
+        // The more panel's page input follows the reader's location, the way
+        // the pinned reference syncs `page_input` on navigation (RD-10).
+        pageInput: changedLocation
+            ? ReaderPageInputPresentation(draft: '${unit + 1}')
+            : _model.pageInput,
+        pageImage: null,
+        epubPage: page,
+        selectionSurface: _freezeSurface(page.surface),
+        annotations: annotations,
+        savedSelections: _savedSelections(annotations, unit),
+        anchor: offset ?? _model.anchor,
+        focus: offset == null ? _model.focus : offset + (length ?? 0),
+        selectionPhase: length == null
+            ? _model.selectionPhase
+            : ReaderSelectionPhase.selected,
+        relayoutError: null,
+        annotationsReady: annotationError == null,
+        annotationError:
+            annotationError ??
+            (_model.annotationsReady ? _model.annotationError : null),
+        layout: layout,
+        relayoutBusy: false,
+        relayoutPending: false,
+        selectionError: selectionError,
+        contentState: ReaderContentState.ready,
+        selectionVisualLine: null,
+        selectionPreferredX: null,
+      ),
+    );
+    final adopting = session != null && !identical(session, previousSession);
+    if (adopting) {
+      _epubSession = session;
+      _epubSessionKey = sessionKey;
+    }
+    _publish(next);
+    oldImage?.dispose();
+    // The previous surface belongs to the bridge only when the retained
+    // renderer produced it; a Dart page's surface is owned by its session.
+    if (oldWasRetained && oldSurface != null) _releaseSurface(oldSurface);
+    // The page carried its own session, adopted above before publication; the
+    // session the model painted until this frame is retired after it. A
+    // document's first page has no predecessor, and `_retireEpubSession` with no
+    // argument retires the *current* session, so it is only called with one.
+    if (adopting && previousSession != null) {
+      _retireEpubSession(previousSession);
+    }
+    if (length != null) {
+      _frameScheduler(
+        () => dispatch(_ReaderSurfaceFocusReady(generation, revision)),
+      );
+    }
+    final bookId = _model.document?.bookId;
+    if (bookId != null) {
+      _queueReadingStateSave(
+        bookId,
+        _model.document!.logicalUnitCount,
+        FlutterReadingState(
+          unit: BigInt.from(unit),
+          offset: readingOffset == null ? null : BigInt.from(readingOffset),
+          zoom: layout.scale,
+        ),
+      );
+    }
   }
 
   void _unitRequested(
@@ -1528,12 +1955,20 @@ final class ReaderController implements Listenable {
     }
     _emit(_model);
     final after = _model.typography;
+    // A theme change re-palettes a Dart EPUB page: its text is styled with the
+    // palette captured when the page was laid out, unlike the retained raster,
+    // which is recolored from current model state at paint time.
+    final themeChanged =
+        document != null &&
+        document.format == FlutterBookFormat.epub &&
+        before.theme != after.theme;
     if (document == null ||
         _model.busy ||
         _model.contentState != ReaderContentState.ready ||
-        before.epubFontSize == after.epubFontSize &&
+        (before.epubFontSize == after.epubFontSize &&
             before.epubLineSpacing == after.epubLineSpacing &&
-            before.rasterZoom == after.rasterZoom) {
+            before.rasterZoom == after.rasterZoom &&
+            !themeChanged)) {
       return;
     }
     _startRelayout(
@@ -1976,6 +2411,416 @@ final class ReaderController implements Listenable {
     }());
   }
 
+  /// Serves one EPUB chapter from the Dart engine, or reports that the chapter
+  /// must stay on the retained renderer.
+  ///
+  /// Returns true when the Dart path installed at least one page window. A
+  /// chapter is routed only after its canonical stream was compared with the
+  /// retained one *and* its text is covered by the bundled document faces; a
+  /// mismatch, an unavailable comparison (for example a chapter above the
+  /// retained stream's ceiling), an uncovered script, a missing page height,
+  /// continuous mode, or a source failure leaves the chapter to the retained
+  /// renderer, so the reader never renders a stream its durable offsets do not
+  /// belong to and never paints a script it cannot draw.
+  Future<bool> _epubRelayout(
+    FlutterDocumentSummary document,
+    int generation,
+    int revision,
+    BigInt cancellation,
+    int unit,
+    ReaderLayout layout, {
+    double? height,
+    int? offset,
+    int? length,
+    bool replaceReadingOffset = false,
+  }) async {
+    final pageHeight = _epubPageHeight(height);
+    if (pageHeight == null) return false;
+    if (unit < 0 || unit >= document.logicalUnitCount.toInt()) return false;
+    final source = await _ensureEpubSource(document, generation, cancellation);
+    if (source == null || !_isCurrentLayout(generation, revision)) return false;
+    final matches = await _epubUnitMatchesRetained(
+      source,
+      document,
+      unit,
+      cancellation,
+      generation,
+      revision,
+    );
+    if (!_isCurrentLayout(generation, revision)) return false;
+    if (!matches) return false;
+    final coverage = await _ensureEpubFontCoverage();
+    if (!_isCurrentLayout(generation, revision)) return false;
+    if (!source.fontCovered(unit, coverage)) return false;
+    if (!source.indivisibleUnitsBounded(unit)) return false;
+    final chapter = source.book.chapters[unit];
+    try {
+      await source.ensureImages(chapter, _epubImageDecoder);
+    } catch (_) {
+      // A decode failure is not fatal: the layout paints the alt fallback.
+    }
+    if (!_isCurrentLayout(generation, revision)) return false;
+    final spec = ChapterLayoutSpec(
+      width: epubPageBoxFor(ui.Size(layout.width, pageHeight)).contentWidth,
+      height: epubPageBoxFor(ui.Size(layout.width, pageHeight)).contentHeight,
+      typography: _epubTypography(layout, source),
+    );
+    final key = _EpubLayoutKey(
+      generation: generation,
+      unit: unit,
+      width: layout.width,
+      height: pageHeight,
+      fontSize: layout.fontSize,
+      lineSpacing: layout.lineSpacing,
+      theme: _typographyTheme,
+    );
+    final target =
+        (offset ?? (unit == _model.unit ? _model.readingOffset : null) ?? 0)
+            .clamp(0, chapter.scalarCount);
+    var session = _epubSession;
+    final reusable =
+        session != null &&
+        _epubSessionKey == key &&
+        (session.complete || !session.started || session.covers(target));
+    // A replacement session belongs to *this effect* until its page is
+    // accepted: the model still paints the installed session's page, and a
+    // superseding relayout must not be able to dispose the session that page
+    // belongs to. Only [_applyEpubPage] adopts it, together with the page.
+    final replacement = reusable
+        ? null
+        : ChapterLayoutSession(
+            chapter: chapter,
+            spec: spec,
+            images: source.images,
+          );
+    final active = replacement ?? session!;
+    if (replacement != null) debugEpubSessionObserver?.call(replacement);
+    // A replacement is this effect's to release until the page that carries it
+    // is accepted; the `finally` covers every exit between here and adoption —
+    // the first window measurement, a supersession, a suspension or a close
+    // that invalidates the operation while its annotations are still in flight.
+    var adopted = replacement == null;
+    try {
+      if (!active.started) active.layoutWindowAt(target);
+      List<FlutterAnnotation> annotations = const [];
+      String? annotationError;
+      try {
+        annotations = await _bridge.listAnnotations(
+          document: document.handle,
+          scale: layout.scale,
+          cancellationId: cancellation,
+        );
+      } catch (error) {
+        annotationError = _describeError(error);
+      }
+      if (!_isCurrentLayout(generation, revision)) return true;
+      // The page is installed once, from the window around the requested
+      // location. The remaining batches only *measure*: republishing on every
+      // batch would overwrite a page turn, a selection or an annotation
+      // snapshot the reader has since changed, and the model's own page turn
+      // extends the session on demand (see [_epubPageAfter]).
+      try {
+        dispatch(
+          _ReaderEpubPageLoaded(
+            generation: generation,
+            revision: revision,
+            cancellation: cancellation,
+            unit: unit,
+            scalar: target,
+            layout: layout,
+            height: pageHeight,
+            annotations: annotations,
+            offset: offset,
+            length: length,
+            replaceReadingOffset: replaceReadingOffset,
+            annotationError: annotationError,
+            session: replacement,
+            sessionKey: replacement == null ? null : key,
+          ),
+        );
+      } finally {
+        // The handler adopts the session before it publishes the page, so the
+        // ownership transfer is settled even when publication unwinds: this
+        // effect must never release a session the controller now owns.
+        adopted = replacement == null || identical(_epubSession, replacement);
+      }
+      if (!adopted) return true;
+      while (!active.complete) {
+        // A real event-loop turn: frames and input run between batches.
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+        if (!_isCurrentLayout(generation, revision)) return true;
+        final progressed = active.lastNodeIndex + 1 < active.totalNodes
+            ? active.layoutForward(maxNodes: 24, maxMicros: 8000)
+            : active.layoutBackward(maxNodes: 24, maxMicros: 8000);
+        if (progressed == 0) return true;
+      }
+      return true;
+    } finally {
+      if (!adopted && replacement != null) {
+        // The page never installed (or the handler rejected it), so nothing
+        // paints this session: its owner releases it here. It is not deferred
+        // to a frame, because no frame references it.
+        replacement.dispose();
+      }
+    }
+  }
+
+  /// The parsed Dart-engine source for [document], opened once per generation.
+  ///
+  /// Opening is single-flight per generation: concurrent relayouts await the
+  /// same load instead of racing to adopt two sources (the loser's decoded
+  /// images would be released under the winner's session). Returns null when
+  /// the archive cannot be read or parsed; the caller then keeps the document
+  /// on the retained renderer.
+  Future<EpubContentSource?> _ensureEpubSource(
+    FlutterDocumentSummary document,
+    int generation,
+    BigInt cancellation,
+  ) {
+    final existing = _epubSource;
+    if (existing != null && _epubSourceGeneration == generation) {
+      return Future<EpubContentSource?>.value(existing);
+    }
+    if (_epubSourceGeneration == generation) {
+      final load = _epubSourceLoad;
+      if (load != null) return load;
+    } else {
+      _epubSourceGeneration = generation;
+    }
+    final load = _openEpubSource(document, generation, cancellation);
+    _epubSourceLoad = load;
+    // A refused load is not remembered: the next relayout retries it instead of
+    // awaiting the settled refusal, which would also pin the caller to the zone
+    // the first attempt ran in. Concurrent callers already hold this future, so
+    // the single-flight guarantee is preserved for them.
+    unawaited(
+      load.then(
+        (source) {
+          if (source == null && identical(_epubSourceLoad, load)) {
+            _epubSourceLoad = null;
+          }
+        },
+        onError: (_) {
+          if (identical(_epubSourceLoad, load)) _epubSourceLoad = null;
+        },
+      ),
+    );
+    return load;
+  }
+
+  /// Loads, parses and adopts one document's source.
+  Future<EpubContentSource?> _openEpubSource(
+    FlutterDocumentSummary document,
+    int generation,
+    BigInt cancellation,
+  ) async {
+    final Uint8List bytes;
+    try {
+      bytes = await _bridge.epubSourceBytes(
+        document: document.handle,
+        cancellationId: cancellation,
+      );
+    } catch (_) {
+      return null;
+    }
+    if (!_isCurrent(generation)) return null;
+    final EpubBook book;
+    try {
+      book = await parseEpubBytes(bytes);
+    } catch (_) {
+      return null;
+    }
+    if (!_isCurrent(generation)) return null;
+    final families = <String, String>{};
+    for (final entry in book.embeddedFonts.entries) {
+      final resource = book.resources[entry.value];
+      if (resource == null) continue;
+      final family = _epubFontFamily(entry.key, entry.value, resource.bytes);
+      if (_registeredEpubFonts.add(family)) {
+        try {
+          await _epubFontRegistrar(family, Uint8List.fromList(resource.bytes));
+        } catch (_) {
+          _registeredEpubFonts.remove(family);
+          continue;
+        }
+      }
+      families[entry.key] = family;
+    }
+    if (!_isCurrent(generation) || _epubSourceGeneration != generation) {
+      return null;
+    }
+    final source = EpubContentSource(
+      book: book,
+      embeddedFamilies: families,
+      bytes: bytes,
+    );
+    // Adoption replaces the source without touching the generation/load
+    // bookkeeping, so a concurrent relayout for the same document keeps sharing
+    // this one load instead of starting a second.
+    final previous = _epubSource;
+    _epubSource = source;
+    _epubSourceLoad = null;
+    if (previous != null) _frameScheduler(previous.dispose);
+    return source;
+  }
+
+  /// Compares the engine's canonical stream of [unit] with the retained one.
+  ///
+  /// The result is cached per unit for the document's lifetime: the streams are
+  /// immutable, so the gate is paid once per chapter. Only a *decided*
+  /// comparison is cached — a call that failed because the layout was
+  /// superseded (a resize or navigation cancelled it) must be retried by the
+  /// successor rather than remembered as a permanent mismatch.
+  Future<bool> _epubUnitMatchesRetained(
+    EpubContentSource source,
+    FlutterDocumentSummary document,
+    int unit,
+    BigInt cancellation,
+    int generation,
+    int revision,
+  ) async {
+    final cached = source.canonicalMatch(unit);
+    if (cached != null) return cached;
+    var matches = false;
+    var decided = false;
+    try {
+      final retained = await _bridge.epubCanonicalText(
+        document: document.handle,
+        unit: BigInt.from(unit),
+        cancellationId: cancellation,
+      );
+      matches = retained == source.book.chapters[unit].canonicalText;
+      decided = true;
+    } catch (_) {
+      // A chapter the retained implementation cannot produce (above its
+      // stream ceiling, or an invalid unit) is a decided refusal; a call
+      // cancelled by a superseding layout is not.
+      decided = _isCurrentLayout(generation, revision);
+      matches = false;
+    }
+    if (decided) source.recordCanonicalMatch(unit, matches);
+    return matches;
+  }
+
+  /// The bundled faces' coverage, resolved once per reader.
+  ///
+  /// A reader without an injected loader (a bare controller, or a host whose
+  /// assets are unavailable) reports no coverage, and the gate then refuses to
+  /// route: promising drawable text is what the check is for.
+  Future<EpubFontCoverage?> _ensureEpubFontCoverage() {
+    final loaded = _epubFontCoverage;
+    if (loaded != null) return Future<EpubFontCoverage?>.value(loaded);
+    final loader = _epubFontCoverageLoader;
+    if (loader == null) return Future<EpubFontCoverage?>.value(null);
+    final pending = _epubFontCoverageLoad;
+    if (pending != null) return pending;
+    final load = loader().then((coverage) {
+      _epubFontCoverage = coverage;
+      return coverage;
+    });
+    _epubFontCoverageLoad = load;
+    // The in-flight load is shared, but the settled future is not kept: a
+    // relayout that starts later must await a future created in its own zone.
+    unawaited(
+      load.then(
+        (_) {
+          if (identical(_epubFontCoverageLoad, load)) {
+            _epubFontCoverageLoad = null;
+          }
+        },
+        onError: (_) {
+          if (identical(_epubFontCoverageLoad, load)) {
+            _epubFontCoverageLoad = null;
+          }
+        },
+      ),
+    );
+    return load;
+  }
+
+  /// The Dart layout typography for [layout].
+  ReaderEpubTypography _epubTypography(
+    ReaderLayout layout,
+    EpubContentSource source,
+  ) => ReaderEpubTypography(
+    fontFamily: shosaiInterfaceFontFamily,
+    fontFamilyFallback: const [shosaiJapaneseInterfaceFontFamily],
+    fontSize: layout.fontSize,
+    lineHeight: layout.lineSpacing,
+    palette: ReaderEpubPalette.of(_typographyTheme),
+    embeddedFamilies: source.embeddedFamilies,
+  );
+
+  /// A process-stable family name for one `@font-face` declaration.
+  ///
+  /// The identity is the *content*: the declared name is namespaced by a hash of
+  /// the resource path and the face's own bytes, so two books that declare the
+  /// same family at the same path with different faces cannot collide, and the
+  /// same book reopened reuses its registration instead of adding a second face.
+  static String _epubFontFamily(
+    String declared,
+    String resource,
+    List<int> bytes,
+  ) {
+    var hash = 0x811c9dc5;
+    for (final unit in resource.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0x7fffffff;
+    }
+    for (final byte in bytes) {
+      hash ^= byte;
+      hash = (hash * 0x01000193) & 0x7fffffff;
+    }
+    final safe = declared.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '_').trim();
+    return 'shosai-epub-$hash-${safe.isEmpty ? 'face' : safe}';
+  }
+
+  /// Retires the active chapter session after the current frame.
+  ///
+  /// Deferred through the injected frame scheduler, so a page the model still
+  /// renders in this frame keeps its measured paragraphs.
+  void _retireEpubSession([
+    ChapterLayoutSession? session,
+    bool immediate = false,
+  ]) {
+    final retired = session ?? _epubSession;
+    if (identical(retired, _epubSession)) {
+      _epubSession = null;
+      _epubSessionKey = null;
+    }
+    if (retired == null) return;
+    // A replacement defers to the next frame, because the page the model still
+    // renders in this frame keeps its measured paragraphs; a close disposes at
+    // once, because no frame is coming and the painters must not be left to the
+    // platform's finalizers.
+    if (immediate) {
+      retired.dispose();
+      return;
+    }
+    try {
+      _frameScheduler(retired.dispose);
+    } catch (_) {
+      // A scheduler that refuses the callback must not orphan the session: the
+      // owner disposes it here instead, even though the current frame may still
+      // paint it (a refused schedule is not an ordinary frame).
+      retired.dispose();
+    }
+  }
+
+  /// Retires the current document's parsed source and its decoded images.
+  void _retireEpubSource({bool immediate = false}) {
+    final retired = _epubSource;
+    _epubSource = null;
+    _epubSourceGeneration = null;
+    _epubSourceLoad = null;
+    if (retired == null) return;
+    if (immediate) {
+      retired.dispose();
+    } else {
+      _frameScheduler(retired.dispose);
+    }
+  }
+
   Future<void> _relayoutEffect(
     FlutterDocumentSummary document,
     int generation,
@@ -1986,11 +2831,28 @@ final class ReaderController implements Listenable {
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
+    double? height,
   }) async {
     FlutterSelectionSurface? ownedSurface;
     FlutterBufferHandle? ownedRaster;
     ui.Image? ownedImage;
     try {
+      if (document.format == FlutterBookFormat.epub) {
+        final routed = await _epubRelayout(
+          document,
+          generation,
+          revision,
+          cancellation,
+          unit,
+          layout,
+          height: height,
+          offset: offset,
+          length: length,
+          replaceReadingOffset: replaceReadingOffset,
+        );
+        if (routed) return;
+        if (!_isCurrentLayout(generation, revision)) return;
+      }
       FlutterSelectionSurface? surface;
       String? selectionError;
       if (document.format != FlutterBookFormat.cbz) {
@@ -2121,6 +2983,9 @@ final class ReaderController implements Listenable {
     }
     final oldImage = _model.pageImage;
     final oldSurface = _model.selectionSurface;
+    // The installed page is the retained renderer's raster: a Dart page that
+    // was showing before it is retired with its session.
+    final oldWasDart = _model.epubPage != null;
     _activeRelayoutIntent = null;
     final changedLocation =
         message.unit != _model.unit ||
@@ -2140,6 +3005,7 @@ final class ReaderController implements Listenable {
             ? ReaderPageInputPresentation(draft: '${message.unit + 1}')
             : _model.pageInput,
         pageImage: message.pageImage,
+        epubPage: null,
         selectionSurface: message.surface == null
             ? null
             : _freezeSurface(message.surface!),
@@ -2160,13 +3026,15 @@ final class ReaderController implements Listenable {
         layout: message.layout,
         relayoutBusy: false,
         relayoutPending: false,
+        contentState: ReaderContentState.ready,
         selectionError: message.selectionError,
         selectionVisualLine: null,
         selectionPreferredX: null,
       ),
     );
     oldImage?.dispose();
-    if (oldSurface != null) _releaseSurface(oldSurface);
+    if (!oldWasDart && oldSurface != null) _releaseSurface(oldSurface);
+    if (oldWasDart) _retireEpubSession();
     if (message.length != null) {
       _frameScheduler(
         () => dispatch(
@@ -3041,15 +3909,25 @@ final class ReaderController implements Listenable {
 
   void _startRequestedRelayoutIfReady() {
     final document = _model.document;
-    if (document != null &&
-        !_model.busy &&
-        !_model.relayoutBusy &&
-        _model.annotationOperations.isEmpty &&
-        _model.contentState == ReaderContentState.ready &&
-        document.format != FlutterBookFormat.cbz &&
-        _requestedLayout != _model.layout &&
+    if (document == null ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _model.annotationOperations.isNotEmpty ||
+        _model.contentState != ReaderContentState.ready ||
+        document.format == FlutterBookFormat.cbz) {
+      return;
+    }
+    if (_requestedLayout != _model.layout &&
         _requestedLayout != _failedLayout) {
       _startRelayout(document, _requestedLayout);
+      return;
+    }
+    // A page-height change that arrived while the reader was busy is replayed
+    // here: the reporter has already observed the new height, so nothing else
+    // would ask for it.
+    final height = _epubViewportHeight;
+    if (_epubHeightNeedsLayout(document, _model.layout, height)) {
+      _startRelayout(document, _model.layout, height: height);
     }
   }
 
@@ -3063,6 +3941,23 @@ final class ReaderController implements Listenable {
         unit,
         offset: range?.start.toInt(),
         length: range == null ? null : range.end.toInt() - range.start.toInt(),
+      );
+      return;
+    }
+    // On the Dart path the annotation can sit on another page of the same
+    // chapter: the guarded relayout resolves the offset to its page (and
+    // rewindow the session when the current window does not reach it), instead
+    // of leaving the reader on the page it was showing.
+    if (_model.epubPage != null && range != null && unit == _model.unit) {
+      final document = _model.document;
+      if (document == null || _model.busy || _model.relayoutBusy) return;
+      _startRelayout(
+        document,
+        _model.layout,
+        unit: unit,
+        offset: range.start.toInt(),
+        length: range.end.toInt() - range.start.toInt(),
+        height: _epubViewportHeight,
       );
       return;
     }
@@ -3634,16 +4529,26 @@ final class ReaderController implements Listenable {
     return !_closing && generation == _model.generation;
   }
 
-  void _emit(ReaderModel model, {bool notifyListeners = true}) {
+  void _emit(ReaderModel model, {bool notifyListeners = true}) =>
+      _publish(_deriveModel(model), notifyListeners: notifyListeners);
+
+  /// Completes [model] with the state the controller derives for it.
+  ///
+  /// Separate from [_publish] because a derivation can fail (the progress
+  /// source is injected): a caller that also transfers resource ownership must
+  /// derive *before* it commits, so a failing derivation leaves the published
+  /// page and the installed session paired.
+  ReaderModel _deriveModel(ReaderModel model) => model.copyWith(
+    progress: _deriveProgress(model),
+    contents: _deriveContents(model),
+    typography: _deriveTypography(model),
+    search: _deriveSearch(model),
+    modalEffect: _deriveModalEffect(),
+  );
+
+  void _publish(ReaderModel derived, {bool notifyListeners = true}) {
     final selectionChanged =
-        _model.selectionDescription != model.selectionDescription;
-    final derived = model.copyWith(
-      progress: _deriveProgress(model),
-      contents: _deriveContents(model),
-      typography: _deriveTypography(model),
-      search: _deriveSearch(model),
-      modalEffect: _deriveModalEffect(),
-    );
+        _model.selectionDescription != derived.selectionDescription;
     _model = derived;
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
       unawaited(_announceSelection(derived.selectionDescription));
@@ -3784,9 +4689,11 @@ final class ReaderController implements Listenable {
     final pageImage = _model.pageImage;
     final document = _model.document;
     final surface = _model.selectionSurface;
+    final dartSurface = _model.epubPage != null;
     final released = _model.copyWith(
       document: null,
       pageImage: null,
+      epubPage: null,
       selectionSurface: null,
       selectionPhase: ReaderSelectionPhase.idle,
       anchor: null,
@@ -3809,7 +4716,11 @@ final class ReaderController implements Listenable {
       _model = released;
     }
     pageImage?.dispose();
-    if (surface != null) _releaseSurface(surface);
+    if (!dartSurface && surface != null) _releaseSurface(surface);
+    _retireEpubSession(null, _closing);
+    _retireEpubSource(immediate: _closing);
+    _epubLayoutHeight = null;
+    _epubHeightPending = false;
     if (document != null) {
       _bridge.releaseDocument(handle: document.handle);
     }
@@ -4193,3 +5104,11 @@ Uint8List premultiplyRgba(Uint8List pixels) {
   }
   return pixels;
 }
+
+/// The default EPUB image decoder: none, so a reader built without one paints
+/// the missing-image alt fallback instead of failing the layout.
+Future<ui.Image?> _noEpubImage(Uint8List bytes) async => null;
+
+/// The default embedded-font registrar: none, so an embedded family falls back
+/// to the reader's base family.
+Future<void> _noEpubFont(String family, Uint8List bytes) async {}

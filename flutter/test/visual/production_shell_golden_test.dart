@@ -276,7 +276,12 @@ void main() {
           'state': 'epub-page',
           'format': 'epub',
         },
-        ready: () => harnessReaderPageReady(tester),
+        ready: () => harnessReaderPageReady(
+          tester,
+          surfaceWidth: bridge.selectionLayouts.isEmpty
+              ? null
+              : bridge.selectionLayouts.last.width,
+        ),
       );
     });
   });

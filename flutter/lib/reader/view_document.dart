@@ -79,9 +79,9 @@ class _DocumentViewState extends State<_DocumentView> {
       return CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.pageUp): () =>
-              dispatch(ReaderUnitRequested(model.unit - 1)),
+              dispatch(pageStepMessage(model, -1)),
           const SingleActivator(LogicalKeyboardKey.pageDown): () =>
-              dispatch(ReaderUnitRequested(model.unit + 1)),
+              dispatch(pageStepMessage(model, 1)),
         },
         child: Focus(
           focusNode: readerFocus,
@@ -109,295 +109,259 @@ class _DocumentViewState extends State<_DocumentView> {
         !model.relayoutPending &&
         surface.graphemeBoundaries.length >= 2 &&
         surface.graphemeBoundaries.first != surface.graphemeBoundaries.last;
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            dispatch(const ReaderSelectionCancelled()),
-        const SingleActivator(LogicalKeyboardKey.keyC, control: true): () =>
-            dispatch(const ReaderSelectionCopyRequested()),
-        const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () =>
-            dispatch(const ReaderSelectionCopyRequested()),
-        const SingleActivator(LogicalKeyboardKey.pageUp): () =>
-            dispatch(ReaderUnitRequested(model.unit - 1)),
-        const SingleActivator(LogicalKeyboardKey.pageDown): () =>
-            dispatch(ReaderUnitRequested(model.unit + 1)),
-      },
-      child: Column(
-        children: [
-          Expanded(
-            child: Semantics(
-              key: const ValueKey('reader-document-semantics'),
-              container: true,
-              explicitChildNodes: true,
-              label: document.format == FlutterBookFormat.epub
-                  ? '$title, EPUB chapter ${model.unit + 1} of ${document.logicalUnitCount}. Selectable text.'
-                  : '$title, page ${model.unit + 1} of ${document.logicalUnitCount}. Selectable text.',
-              child: TapRegion(
-                onTapOutside: (event) => dispatch(
-                  ReaderSelectionPointerPressedOutside(event.pointer),
-                ),
-                child: LayoutBuilder(
-                  builder: (context, constraints) => NotificationListener<Notification>(
-                    // A scroll (or a clamped scroll offset after a resize)
-                    // changes the content transform without rebuilding this
-                    // widget, so the overlay is told to re-read it. The
-                    // listener is typed for `Notification` because
-                    // `ScrollMetricsNotification` is not a
-                    // `ScrollNotification` in this Flutter version. It is a
-                    // proxy: the Stack's coordinate space is unchanged.
-                    onNotification: (notification) {
-                      if (notification is ScrollUpdateNotification ||
-                          notification is ScrollMetricsNotification) {
-                        _bumpContentGeometry();
-                      }
-                      return false;
-                    },
-                    child: Stack(
-                      key: _overlayKey,
-                      children: [
-                        Positioned.fill(
-                          child: CallbackShortcuts(
-                            bindings: {
-                              const SingleActivator(
-                                LogicalKeyboardKey.escape,
-                              ): () =>
-                                  dispatch(const ReaderSelectionCancelled()),
-                              const SingleActivator(
-                                LogicalKeyboardKey.enter,
-                              ): () =>
-                                  dispatch(const ReaderSelectionCommitted()),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowLeft,
-                                shift: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.visualLeft,
-                                ),
+    // The document-level shortcuts (escape, copy, page steps) are installed by
+    // [_ReaderContentPane], above the document area and the saved-highlight
+    // strip: the strip is outside this widget, and a shortcut that stopped at
+    // the document edge would drop PageUp/PageDown from a focused strip control.
+    return Column(
+      children: [
+        Expanded(
+          child: Semantics(
+            key: const ValueKey('reader-document-semantics'),
+            container: true,
+            explicitChildNodes: true,
+            label: document.format == FlutterBookFormat.epub
+                ? '$title, EPUB chapter ${model.unit + 1} of ${document.logicalUnitCount}. Selectable text.'
+                : '$title, page ${model.unit + 1} of ${document.logicalUnitCount}. Selectable text.',
+            child: TapRegion(
+              onTapOutside: (event) =>
+                  dispatch(ReaderSelectionPointerPressedOutside(event.pointer)),
+              child: LayoutBuilder(
+                builder: (context, constraints) => NotificationListener<Notification>(
+                  // A scroll (or a clamped scroll offset after a resize)
+                  // changes the content transform without rebuilding this
+                  // widget, so the overlay is told to re-read it. The
+                  // listener is typed for `Notification` because
+                  // `ScrollMetricsNotification` is not a
+                  // `ScrollNotification` in this Flutter version. It is a
+                  // proxy: the Stack's coordinate space is unchanged.
+                  onNotification: (notification) {
+                    if (notification is ScrollUpdateNotification ||
+                        notification is ScrollMetricsNotification) {
+                      _bumpContentGeometry();
+                    }
+                    return false;
+                  },
+                  child: Stack(
+                    key: _overlayKey,
+                    children: [
+                      Positioned.fill(
+                        child: CallbackShortcuts(
+                          bindings: {
+                            const SingleActivator(
+                              LogicalKeyboardKey.escape,
+                            ): () =>
+                                dispatch(const ReaderSelectionCancelled()),
+                            const SingleActivator(
+                              LogicalKeyboardKey.enter,
+                            ): () =>
+                                dispatch(const ReaderSelectionCommitted()),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowLeft,
+                              shift: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.visualLeft,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowRight,
-                                shift: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.visualRight,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowRight,
+                              shift: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.visualRight,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowLeft,
-                                shift: true,
-                                control: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.previousWord,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowLeft,
+                              shift: true,
+                              control: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.previousWord,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowRight,
-                                shift: true,
-                                control: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.nextWord,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowRight,
+                              shift: true,
+                              control: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.nextWord,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowLeft,
-                                shift: true,
-                                alt: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.previousWord,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowLeft,
+                              shift: true,
+                              alt: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.previousWord,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowRight,
-                                shift: true,
-                                alt: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.nextWord,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowRight,
+                              shift: true,
+                              alt: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.nextWord,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowUp,
-                                shift: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.previousLine,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowUp,
+                              shift: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.previousLine,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowDown,
-                                shift: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.nextLine,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowDown,
+                              shift: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.nextLine,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.home,
-                                shift: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.lineStart,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.home,
+                              shift: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.lineStart,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.end,
-                                shift: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.lineEnd,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.end,
+                              shift: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.lineEnd,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowLeft,
-                                shift: true,
-                                meta: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.lineStart,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowLeft,
+                              shift: true,
+                              meta: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.lineStart,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.arrowRight,
-                                shift: true,
-                                meta: true,
-                              ): () => dispatch(
-                                const ReaderSelectionKeyboardExtended(
-                                  ReaderSelectionMovement.lineEnd,
-                                ),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.arrowRight,
+                              shift: true,
+                              meta: true,
+                            ): () => dispatch(
+                              const ReaderSelectionKeyboardExtended(
+                                ReaderSelectionMovement.lineEnd,
                               ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.contextMenu,
-                              ): () => dispatch(
-                                const ReaderSelectionActionsRequested(),
-                              ),
-                              const SingleActivator(
-                                LogicalKeyboardKey.f10,
-                                shift: true,
-                              ): () => dispatch(
-                                const ReaderSelectionActionsRequested(),
-                              ),
-                            },
-                            child: Focus(
-                              key: const ValueKey('reader-selection-focus'),
-                              focusNode: readerFocus,
-                              autofocus: true,
-                              child: AnimatedBuilder(
-                                animation: readerFocus,
-                                builder: (context, child) => Semantics(
-                                  key: const ValueKey(
-                                    'reader-content-semantics',
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.contextMenu,
+                            ): () => dispatch(
+                              const ReaderSelectionActionsRequested(),
+                            ),
+                            const SingleActivator(
+                              LogicalKeyboardKey.f10,
+                              shift: true,
+                            ): () => dispatch(
+                              const ReaderSelectionActionsRequested(),
+                            ),
+                          },
+                          child: Focus(
+                            key: const ValueKey('reader-selection-focus'),
+                            focusNode: readerFocus,
+                            autofocus: true,
+                            child: AnimatedBuilder(
+                              animation: readerFocus,
+                              builder: (context, child) => Semantics(
+                                key: const ValueKey('reader-content-semantics'),
+                                readOnly: true,
+                                label: 'Document text: ${surface.text}',
+                                hint: screenReaderSelectionAvailable
+                                    ? 'Selects this text and shows selection actions.'
+                                    : null,
+                                onTap: screenReaderSelectionAvailable
+                                    ? () => dispatch(
+                                        const ReaderSelectionAllRequested(),
+                                      )
+                                    : null,
+                                child: DecoratedBox(
+                                  key: const ValueKey('reader-focus-indicator'),
+                                  position: DecorationPosition.foreground,
+                                  decoration: BoxDecoration(
+                                    border: readerFocus.hasFocus
+                                        ? Border.all(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.primary,
+                                            width: 3,
+                                          )
+                                        : null,
                                   ),
-                                  readOnly: true,
-                                  label: 'Document text: ${surface.text}',
-                                  hint: screenReaderSelectionAvailable
-                                      ? 'Selects this text and shows selection actions.'
-                                      : null,
-                                  onTap: screenReaderSelectionAvailable
-                                      ? () => dispatch(
-                                          const ReaderSelectionAllRequested(),
-                                        )
-                                      : null,
-                                  child: DecoratedBox(
-                                    key: const ValueKey(
-                                      'reader-focus-indicator',
-                                    ),
-                                    position: DecorationPosition.foreground,
-                                    decoration: BoxDecoration(
-                                      border: readerFocus.hasFocus
-                                          ? Border.all(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.primary,
-                                              width: 3,
-                                            )
-                                          : null,
-                                    ),
-                                    child: child,
-                                  ),
+                                  child: child,
                                 ),
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  excludeFromSemantics: true,
-                                  onTap: readerFocus.requestFocus,
-                                  child: _ReachableSelectableSurface(
-                                    contentKey: _contentKey,
-                                    onContentGeometryChanged:
-                                        _bumpContentGeometry,
-                                    presentationKey: ValueKey(
-                                      model.typography.continuous
-                                          ? 'reader-continuous-presentation'
-                                          : 'reader-paginated-presentation',
-                                    ),
-                                    document: document,
-                                    surface: surface,
-                                    image: page,
-                                    model: model,
-                                    dispatch: dispatch,
+                              ),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                excludeFromSemantics: true,
+                                onTap: readerFocus.requestFocus,
+                                child: _ReachableSelectableSurface(
+                                  contentKey: _contentKey,
+                                  onContentGeometryChanged:
+                                      _bumpContentGeometry,
+                                  presentationKey: ValueKey(
+                                    model.typography.continuous
+                                        ? 'reader-continuous-presentation'
+                                        : 'reader-paginated-presentation',
                                   ),
+                                  document: document,
+                                  surface: surface,
+                                  image: page,
+                                  epubPage: model.epubPage,
+                                  model: model,
+                                  dispatch: dispatch,
                                 ),
                               ),
                             ),
                           ),
                         ),
-                        if (model.selectionPhase ==
-                            ReaderSelectionPhase.selected)
-                          Positioned.fill(
-                            child: ValueListenableBuilder<int>(
-                              // Re-reads the content transform after a scroll or a
-                              // content resize, so the surface follows the range
-                              // instead of staying where it was first placed.
-                              valueListenable: _contentGeometry,
-                              builder: (context, revision, child) =>
-                                  CustomSingleChildLayout(
-                                    delegate: _SelectionActionsLayout(
-                                      target: _selectionActionsTarget(
-                                        surface,
-                                        model,
-                                        constraints.biggest,
-                                      ),
+                      ),
+                      if (model.selectionPhase == ReaderSelectionPhase.selected)
+                        Positioned.fill(
+                          child: ValueListenableBuilder<int>(
+                            // Re-reads the content transform after a scroll or a
+                            // content resize, so the surface follows the range
+                            // instead of staying where it was first placed.
+                            valueListenable: _contentGeometry,
+                            builder: (context, revision, child) =>
+                                CustomSingleChildLayout(
+                                  delegate: _SelectionActionsLayout(
+                                    target: _selectionActionsTarget(
+                                      surface,
+                                      model,
+                                      constraints.biggest,
                                     ),
-                                    child: child,
                                   ),
-                              child: _SelectionActions(
-                                model: model,
-                                dispatch: dispatch,
-                                focusNode: actionFocus,
-                              ),
+                                  child: child,
+                                ),
+                            child: _SelectionActions(
+                              model: model,
+                              dispatch: dispatch,
+                              focusNode: actionFocus,
                             ),
                           ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
                 ),
               ),
             ),
           ),
-          if (model.annotations.isNotEmpty)
-            SizedBox(
-              height: 64,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: model.annotations
-                    .map(
-                      (annotation) => _AnnotationCard(
-                        // The card owns its menu controller, so its identity
-                        // must follow the annotation: an unkeyed card would
-                        // hand an open menu to whichever annotation lands in
-                        // its list position after a delete.
-                        key: ValueKey(annotation.id),
-                        annotation: annotation,
-                        model: model,
-                        dispatch: dispatch,
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -443,6 +407,44 @@ class _DocumentViewState extends State<_DocumentView> {
       viewport,
     ).toDestinationRect(selection);
   }
+}
+
+/// The reader's saved-highlight strip below the document area.
+///
+/// The strip is a sibling of the document surface, not a child of it: the
+/// reader's reported document box must be the box the page is rendered in, and
+/// a strip inside that box would silently shrink the page (and, on the Dart
+/// renderer, paginate it for a height it does not get).
+class ReaderAnnotationStrip extends StatelessWidget {
+  const ReaderAnnotationStrip({
+    super.key,
+    required this.model,
+    required this.dispatch,
+  });
+
+  final ReaderModel model;
+  final void Function(ReaderMessage) dispatch;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 64,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      children: model.annotations
+          .map(
+            (annotation) => _AnnotationCard(
+              // The card owns its menu controller, so its identity must follow
+              // the annotation: an unkeyed card would hand an open menu to
+              // whichever annotation lands in its list position after a delete.
+              key: ValueKey(annotation.id),
+              annotation: annotation,
+              model: model,
+              dispatch: dispatch,
+            ),
+          )
+          .toList(),
+    ),
+  );
 }
 
 /// One saved highlight's actions: the retained inline controls plus the
@@ -591,6 +593,29 @@ class _AnnotationCardState extends State<_AnnotationCard> {
       ),
     );
   }
+}
+
+/// The page-step message for [delta] (±1).
+///
+/// On the Dart EPUB path a step turns a page inside the chapter; every other
+/// document and the retained EPUB path keep the logical-unit semantics, which
+/// is what the edge columns and PageUp/PageDown have always dispatched.
+ReaderMessage pageStepMessage(ReaderModel model, int delta) =>
+    model.epubPage == null
+    ? ReaderUnitRequested(model.unit + delta)
+    : ReaderPageStepRequested(delta);
+
+/// Whether a page step in [delta]'s direction can move the reader.
+///
+/// The Dart page window answers for itself (its window may still be filling,
+/// in which case a step can extend it); the retained path keeps the unit-count
+/// bound.
+bool _canStepPage(ReaderModel model, int delta, int total) {
+  final page = model.epubPage;
+  if (page != null) {
+    return delta < 0 ? page.canGoBackward : page.canGoForward;
+  }
+  return delta < 0 ? model.unit > 0 : model.unit + 1 < total;
 }
 
 BoxFit _readerFit(ReaderTypographyPresentation typography) {

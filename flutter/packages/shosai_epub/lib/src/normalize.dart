@@ -1567,12 +1567,24 @@ const int _mathMaxNodes = 64;
 const int _mathMaxVisibleTextBytes = 1024;
 
 /// Bounded Presentation MathML parse, ported from the production `math` module.
+///
+/// The parse mirrors the production rules arm for arm: a node that fails
+/// preflight reports `[math expression omitted]`, and a node whose construct is
+/// unsupported reports either its source-order children text or
+/// `[unsupported math]`. The readable fallback is the canonical stream's math
+/// text, so these rules are offset-bearing, not presentation details.
 EpubMath parseMath(XmlElement root, EpubLimits limits) {
   final display = root.getAttribute('display') == 'block'
       ? EpubMathDisplay.block
       : EpubMathDisplay.inline;
   final budget = _MathBudget();
-  if (!_mathPreflight(root, 0, budget)) {
+  if (!_mathPreflight(
+    root,
+    0,
+    allowForeign: false,
+    suppressText: false,
+    budget: budget,
+  )) {
     return EpubMath(display: display, fallback: '[math expression omitted]');
   }
   final fallback = _mathFallback(root, 0) ?? '[unsupported math]';
@@ -1585,48 +1597,149 @@ class _MathBudget {
   int visibleTextBytes = 0;
 }
 
-bool _mathPreflight(XmlElement node, int depth, _MathBudget budget) {
+/// Ports the production `preflight` bounds: depth, node count, namespace
+/// admission, the `semantics` shape and the visible-text budget.
+bool _mathPreflight(
+  XmlElement node,
+  int depth, {
+  required bool allowForeign,
+  required bool suppressText,
+  required _MathBudget budget,
+}) {
   if (depth > _mathMaxDepth) return false;
-  budget.nodes++;
-  if (budget.nodes > _mathMaxNodes) return false;
-  for (final child in node.children) {
-    if (child is XmlText) {
-      budget.visibleTextBytes += child.value.length;
-      if (budget.visibleTextBytes > _mathMaxVisibleTextBytes) return false;
-    } else if (child is XmlElement) {
-      if (!_mathPreflight(child, depth + 1, budget)) return false;
+  budget.nodes += 1;
+  final isMathml = _mathNamespaceOf(node) == _mathmlNamespace;
+  if (budget.nodes > _mathMaxNodes || (!allowForeign && !isMathml)) {
+    return false;
+  }
+  final name = node.name.local;
+  if (!suppressText && isMathml && name == 'semantics') {
+    final children = _mathElements(node);
+    if (children.isEmpty ||
+        _isMathAnnotation(children.first) ||
+        children.skip(1).any((child) => !_isMathAnnotation(child)) ||
+        _hasNonWhitespaceDirectText(node)) {
+      return false;
+    }
+  }
+  final suppressed = suppressText || _isMathAnnotation(node);
+  if (!suppressed) {
+    if (!_addVisibleBytes(_trimmedDirectTextBytes(node), budget)) return false;
+    if (isMathml && name == 'mfenced') {
+      // The production budget adds the fence bytes as authored; a missing
+      // attribute defaults to the parenthesis the renderer would draw.
+      if (!_addVisibleBytes(
+        _utf8ByteLength(node.getAttribute('open') ?? '('),
+        budget,
+      )) {
+        return false;
+      }
+      if (!_addVisibleBytes(
+        _utf8ByteLength(node.getAttribute('close') ?? ')'),
+        budget,
+      )) {
+        return false;
+      }
+    }
+  }
+  final allow = allowForeign || _isAnnotationXml(node);
+  for (final child in _mathElements(node)) {
+    if (!_mathPreflight(
+      child,
+      depth + 1,
+      allowForeign: allow,
+      suppressText: suppressed,
+      budget: budget,
+    )) {
+      return false;
     }
   }
   return true;
 }
 
+bool _addVisibleBytes(int bytes, _MathBudget budget) {
+  budget.visibleTextBytes += bytes;
+  return budget.visibleTextBytes <= _mathMaxVisibleTextBytes;
+}
+
+/// Ports the production `trimmed_direct_text_bytes`: whitespace runs that never
+/// preceded visible text carry no bytes.
+///
+/// The budget counts UTF-8 bytes of code points, not UTF-16 units, so a
+/// character outside the BMP costs what the production counter charges it
+/// (four bytes rather than two).
+int _trimmedDirectTextBytes(XmlElement node) {
+  var bytes = 0;
+  var pendingWhitespace = 0;
+  var visible = false;
+  for (final child in node.children) {
+    final text = _mathText(child);
+    if (text == null) continue;
+    for (final rune in text.runes) {
+      final length = _utf8Length(rune);
+      if (String.fromCharCode(rune).trim().isEmpty) {
+        if (visible) pendingWhitespace += length;
+      } else {
+        bytes += pendingWhitespace + length;
+        pendingWhitespace = 0;
+        visible = true;
+      }
+    }
+  }
+  return bytes;
+}
+
+/// The UTF-8 byte length of one code point.
+int _utf8Length(int rune) => rune < 0x80
+    ? 1
+    : rune < 0x800
+    ? 2
+    : rune < 0x10000
+    ? 3
+    : 4;
+
+/// The UTF-8 byte length of [value].
+int _utf8ByteLength(String value) {
+  var bytes = 0;
+  for (final rune in value.runes) {
+    bytes += _utf8Length(rune);
+  }
+  return bytes;
+}
+
+/// Ports the production `fallback`: the readable source-order text of a math
+/// node, or null when no bounded fallback exists.
 String? _mathFallback(XmlElement node, int depth) {
   if (depth > _mathMaxDepth) return null;
   final tag = node.name.local;
   switch (tag) {
-    case 'math':
-    case 'mrow':
-      return _mathFallbackChildren(node, depth);
-    case 'semantics':
-      final child = node.children.whereType<XmlElement>().firstOrNull;
-      return child == null ? null : _mathFallback(child, depth + 1);
-    case 'annotation':
-    case 'annotation-xml':
-      return '';
+    case 'mi':
+    case 'mn':
+    case 'mo':
+    case 'mtext':
+      return _mathToken(node) ?? _mathFallbackChildren(node, depth);
     case 'mfrac':
-      final children = node.children.whereType<XmlElement>().toList();
-      if (children.length != 2) return null;
+      if (!_hasSupportedMathExpression(node)) {
+        return _mathFallbackChildren(node, depth);
+      }
+      final children = _mathElements(node);
+      if (children.length != 2) return _mathFallbackChildren(node, depth);
       final numerator = _mathFallback(children[0], depth + 1);
       final denominator = _mathFallback(children[1], depth + 1);
       if (numerator == null || denominator == null) return null;
       return '($numerator)/($denominator)';
     case 'msqrt':
+      if (!_hasSupportedMathExpression(node)) {
+        return _mathFallbackChildren(node, depth);
+      }
       final inner = _mathFallbackChildren(node, depth);
-      if (inner == null) return null;
-      return 'sqrt($inner)';
+      return inner == null ? null : 'sqrt($inner)';
     case 'mroot':
-      final children = node.children.whereType<XmlElement>().toList();
-      if (children.length != 2) return null;
+      if (!_hasSupportedMathExpression(node)) {
+        return _mathFallbackChildren(node, depth);
+      }
+      final children = _mathElements(node);
+      if (children.length != 2) return _mathFallbackChildren(node, depth);
       final radicand = _mathFallback(children[0], depth + 1);
       final index = _mathFallback(children[1], depth + 1);
       if (radicand == null || index == null) return null;
@@ -1634,62 +1747,56 @@ String? _mathFallback(XmlElement node, int depth) {
     case 'msub':
     case 'msup':
     case 'msubsup':
-      final children = node.children.whereType<XmlElement>().toList();
-      final base = children.isEmpty
-          ? null
-          : _mathFallback(children[0], depth + 1);
-      if (base == null) return null;
-      final sub = children.length > 1 && tag != 'msup'
-          ? _mathFallback(children[1], depth + 1)
-          : null;
-      final sup = tag == 'msup'
-          ? (children.length > 1 ? _mathFallback(children[1], depth + 1) : null)
-          : (children.length > 2
-                ? _mathFallback(children[2], depth + 1)
-                : null);
-      if (tag == 'msubsup' && (sub == null || sup == null)) return null;
-      if (tag == 'msub' && sub == null) return null;
-      if (tag == 'msup' && sup == null) return null;
-      return tag == 'msup'
-          ? '$base^$sup'
-          : '${base}_$sub${sup == null ? '' : '^$sup'}';
-    case 'mtext':
-    case 'mi':
-    case 'mn':
-    case 'mo':
-      return node.innerText;
-    case 'mtable':
-      final rows = <String>[];
-      for (final row in node.children.whereType<XmlElement>()) {
-        if (row.name.local != 'mtr') continue;
-        final cells = <String>[];
-        for (final cell in row.children.whereType<XmlElement>()) {
-          final part = _mathFallback(cell, depth + 1);
-          if (part == null) return null;
-          cells.add(part);
-        }
-        rows.add(cells.join(' '));
+      if (!_hasSupportedMathExpression(node)) {
+        return _mathFallbackChildren(node, depth);
       }
-      return rows.join('; ');
-    case 'mover':
-    case 'munder':
-      final children = node.children.whereType<XmlElement>().toList();
-      if (children.isEmpty) return null;
-      return _mathFallback(children.first, depth + 1);
+      final children = _mathElements(node);
+      if (tag == 'msubsup') {
+        if (children.length != 3) return _mathFallbackChildren(node, depth);
+        final base = _mathFallback(children[0], depth + 1);
+        final sub = _mathFallback(children[1], depth + 1);
+        final sup = _mathFallback(children[2], depth + 1);
+        if (base == null || sub == null || sup == null) return null;
+        return '${base}_$sub^$sup';
+      }
+      if (children.length != 2) return _mathFallbackChildren(node, depth);
+      final base = _mathFallback(children[0], depth + 1);
+      final script = _mathFallback(children[1], depth + 1);
+      if (base == null || script == null) return null;
+      return tag == 'msub' ? '${base}_$script' : '$base^$script';
+    case 'annotation':
+    case 'annotation-xml':
+      return '';
+    case 'mfenced':
+      if (!_hasSupportedMathExpression(node)) {
+        return _mathFallbackChildren(node, depth);
+      }
+      final inner = _mathFallbackChildren(node, depth);
+      if (inner == null) return null;
+      return '${node.getAttribute('open') ?? '('}$inner'
+          '${node.getAttribute('close') ?? ')'}';
+    case 'semantics':
+      final first = _mathElements(node).firstOrNull;
+      return first == null ? null : _mathFallback(first, depth + 1);
     default:
       return _mathFallbackChildren(node, depth);
   }
 }
 
 /// Ports the production `fallback_children`: element children and trimmed text
-/// nodes, joined with one space, with empty parts removed.
+/// nodes in source order, joined with one space, with empty parts removed and
+/// annotations suppressed.
 String? _mathFallbackChildren(XmlElement node, int depth) {
   final parts = <String>[];
   for (final child in node.children) {
-    if (child is XmlText) {
-      final text = child.value.trim();
-      if (text.isNotEmpty) parts.add(text);
-    } else if (child is XmlElement) {
+    final text = _mathText(child);
+    if (text != null) {
+      final trimmed = text.trim();
+      if (trimmed.isNotEmpty) parts.add(trimmed);
+      continue;
+    }
+    if (child is XmlElement) {
+      if (_isMathAnnotation(child)) continue;
       final part = _mathFallback(child, depth + 1);
       if (part == null) return null;
       if (part.isNotEmpty) parts.add(part);
@@ -1698,24 +1805,72 @@ String? _mathFallbackChildren(XmlElement node, int depth) {
   return parts.join(' ');
 }
 
+/// Ports the production `token`: direct text only, trimmed, non-empty and free
+/// of line breaks.
+String? _mathToken(XmlElement node) {
+  final buffer = StringBuffer();
+  for (final child in node.children) {
+    final text = _mathText(child);
+    if (text != null) {
+      buffer.write(text);
+      continue;
+    }
+    if (child is XmlComment) continue;
+    return null;
+  }
+  final text = buffer.toString().trim();
+  if (text.isEmpty || text.contains('\n') || text.contains('\r')) return null;
+  return text;
+}
+
+bool _hasSupportedMathExpression(XmlElement node) =>
+    _mathExpression(node, 0) != null;
+
+bool _hasNonWhitespaceDirectText(XmlElement node) => node.children
+    .map(_mathText)
+    .whereType<String>()
+    .any((text) => text.trim().isNotEmpty);
+
+String? _mathNamespaceOf(XmlElement node) => node.name.namespaceUri;
+
+bool _isMathAnnotation(XmlElement node) =>
+    _mathNamespaceOf(node) == _mathmlNamespace &&
+    (node.name.local == 'annotation' || node.name.local == 'annotation-xml');
+
+bool _isAnnotationXml(XmlElement node) =>
+    _mathNamespaceOf(node) == _mathmlNamespace &&
+    node.name.local == 'annotation-xml';
+
+/// The production `elements`: element children only.
+List<XmlElement> _mathElements(XmlElement node) =>
+    node.children.whereType<XmlElement>().toList(growable: false);
+
+/// Text content of a child node, mirroring the production tree's text nodes.
+String? _mathText(XmlNode child) => switch (child) {
+  XmlText() => child.value,
+  XmlCDATA() => child.value,
+  _ => null,
+};
+
 EpubMathExpression? _mathExpression(XmlElement node, int depth) {
   if (depth > _mathMaxDepth) return null;
   final tag = node.name.local;
-  final children = node.children.whereType<XmlElement>().toList();
+  if (!_mathTokenTags.contains(tag) && _hasNonWhitespaceDirectText(node)) {
+    return null;
+  }
+  final children = _mathElements(node);
   switch (tag) {
     case 'math':
     case 'mrow':
-    case 'semantics':
-      final expressions = children
-          .map((child) => _mathExpression(child, depth + 1))
-          .whereType<EpubMathExpression>()
-          .toList();
-      return EpubMathRow(expressions);
+    case 'mstyle':
+    case 'mtd':
+      return _mathRow(children, depth);
     case 'mi':
     case 'mn':
     case 'mo':
     case 'mtext':
-      return EpubMathToken(node.innerText);
+      final token = _mathToken(node);
+      return token == null ? null : EpubMathToken(token);
     case 'mfrac':
       if (children.length != 2) return null;
       final numerator = _mathExpression(children[0], depth + 1);
@@ -1723,11 +1878,8 @@ EpubMathExpression? _mathExpression(XmlElement node, int depth) {
       if (numerator == null || denominator == null) return null;
       return EpubMathFraction(numerator, denominator);
     case 'msqrt':
-      final expressions = children
-          .map((child) => _mathExpression(child, depth + 1))
-          .whereType<EpubMathExpression>()
-          .toList();
-      return EpubMathRadical(radicand: EpubMathRow(expressions));
+      final radicand = _mathRow(children, depth);
+      return radicand == null ? null : EpubMathRadical(radicand: radicand);
     case 'mroot':
       if (children.length != 2) return null;
       final radicand = _mathExpression(children[0], depth + 1);
@@ -1736,38 +1888,66 @@ EpubMathExpression? _mathExpression(XmlElement node, int depth) {
       return EpubMathRadical(radicand: radicand, index: index);
     case 'msub':
     case 'msup':
-    case 'msubsup':
-      if (children.isEmpty) return null;
+      if (children.length != 2) return null;
       final base = _mathExpression(children[0], depth + 1);
-      if (base == null) return null;
-      final sub = children.length > 1 && tag != 'msup'
-          ? _mathExpression(children[1], depth + 1)
-          : null;
-      final sup = tag == 'msup'
-          ? (children.length > 1
-                ? _mathExpression(children[1], depth + 1)
-                : null)
-          : (children.length > 2
-                ? _mathExpression(children[2], depth + 1)
-                : null);
+      final script = _mathExpression(children[1], depth + 1);
+      if (base == null || script == null) return null;
+      return EpubMathScript(
+        base: base,
+        sub: tag == 'msub' ? script : null,
+        sup: tag == 'msup' ? script : null,
+      );
+    case 'msubsup':
+      if (children.length != 3) return null;
+      final base = _mathExpression(children[0], depth + 1);
+      final sub = _mathExpression(children[1], depth + 1);
+      final sup = _mathExpression(children[2], depth + 1);
+      if (base == null || sub == null || sup == null) return null;
       return EpubMathScript(base: base, sub: sub, sup: sup);
+    case 'mfenced':
+      final content = _mathRow(children, depth);
+      if (content == null) return null;
+      return EpubMathFenced(
+        open: node.getAttribute('open') ?? '(',
+        close: node.getAttribute('close') ?? ')',
+        content: content is EpubMathRow
+            ? content.children
+            : <EpubMathExpression>[content],
+      );
     case 'mtable':
       final rows = <List<EpubMathExpression>>[];
       for (final row in children) {
-        if (row.name.local != 'mtr') continue;
-        final cells = row.children
-            .whereType<XmlElement>()
-            .map((cell) => _mathExpression(cell, depth + 1))
-            .whereType<EpubMathExpression>()
-            .toList();
+        if (row.name.local != 'mtr' || _hasNonWhitespaceDirectText(row)) {
+          return null;
+        }
+        final cells = <EpubMathExpression>[];
+        for (final cell in _mathElements(row)) {
+          if (cell.name.local != 'mtd') return null;
+          final cellExpression = _mathExpression(cell, depth + 2);
+          if (cellExpression == null) return null;
+          cells.add(cellExpression);
+        }
         rows.add(cells);
       }
       return EpubMathTable(rows);
+    case 'semantics':
+      final first = children.firstOrNull;
+      return first == null ? null : _mathExpression(first, depth + 1);
     default:
-      final expressions = children
-          .map((child) => _mathExpression(child, depth + 1))
-          .whereType<EpubMathExpression>()
-          .toList();
-      return expressions.isEmpty ? null : EpubMathRow(expressions);
+      return null;
   }
+}
+
+const Set<String> _mathTokenTags = {'mi', 'mn', 'mo', 'mtext'};
+
+/// Ports the production `row_expression`: every element child must be a
+/// supported expression, or the row is unsupported.
+EpubMathExpression? _mathRow(List<XmlElement> children, int depth) {
+  final expressions = <EpubMathExpression>[];
+  for (final child in children) {
+    final expression = _mathExpression(child, depth + 1);
+    if (expression == null) return null;
+    expressions.add(expression);
+  }
+  return EpubMathRow(expressions);
 }
