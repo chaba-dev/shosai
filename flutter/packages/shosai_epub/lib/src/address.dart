@@ -81,9 +81,11 @@ int clampScalar(int scalar, int scalarCount) =>
 
 /// Resolve an internal link target (resource + fragment) to a durable point.
 ///
-/// Returns `null` when the target resource is not a spine item or the fragment
-/// is unknown. The reader then falls back to the chapter start, matching the
-/// production internal-link policy of never inventing a position.
+/// Returns `null` when the target resource is not a spine item, or when the
+/// target names a fragment that does not resolve in the chapter (including an
+/// empty fragment). A fragment-less reference resolves to the chapter start.
+/// Nothing else is invented: the production internal-link policy never
+/// fabricates a position for an unknown anchor.
 EpubDurablePoint? resolveInternalLink({
   required EpubBook book,
   required String resource,
@@ -91,10 +93,129 @@ EpubDurablePoint? resolveInternalLink({
 }) {
   final spine = book.spine.indexOf(resource);
   if (spine < 0) return null;
-  final chapter = book.chapters[spine];
-  var scalar = 0;
-  if (fragment != null && fragment.isNotEmpty) {
-    scalar = chapter.anchors[fragment] ?? 0;
+  if (fragment == null) {
+    return EpubDurablePoint(spine: spine, resource: resource, scalar: 0);
   }
+  // An empty fragment is not an anchor even if the anchor map somehow carries
+  // an empty key: the production parser never records an empty name, and `#`
+  // must not resolve to a position.
+  if (fragment.isEmpty) return null;
+  final scalar = book.chapters[spine].anchors[fragment];
+  if (scalar == null) return null;
   return EpubDurablePoint(spine: spine, resource: resource, scalar: scalar);
+}
+
+/// A resolved internal link: the durable point plus whether the reference named
+/// a fragment, whose scalar is an anchor offset rather than a chapter start.
+class EpubLinkTarget {
+  const EpubLinkTarget({required this.point, required this.hasFragment});
+
+  final EpubDurablePoint point;
+
+  /// Whether the reference carried a fragment. A fragment offset is only
+  /// meaningful in a canonical stream the caller shares with its store; a
+  /// chapter start is stream-independent.
+  final bool hasFragment;
+}
+
+/// Resolve an internal link href found in [fromResource].
+///
+/// `#fragment` stays in the current document; any other reference resolves
+/// against that document's directory. Returns `null` for a foreign origin, an
+/// escape above the archive root, a target that is not a spine item, or a
+/// fragment that does not resolve in the target chapter.
+EpubLinkTarget? resolveBookLink({
+  required EpubBook book,
+  required String fromResource,
+  required String href,
+}) {
+  final String resource;
+  final String? fragment;
+  try {
+    if (href.startsWith('#')) {
+      resource = fromResource;
+      fragment = decodeEpubFragment(href.substring(1));
+    } else {
+      final resolved = resolveEpubReference(directoryOf(fromResource), href);
+      resource = resolved.path;
+      fragment = resolved.fragment;
+    }
+  } on EpubPathError {
+    return null;
+  }
+  final point = resolveInternalLink(
+    book: book,
+    resource: resource,
+    fragment: fragment,
+  );
+  if (point == null) return null;
+  return EpubLinkTarget(point: point, hasFragment: fragment != null);
+}
+
+/// One resolved table-of-contents row.
+///
+/// [offset] is the named fragment's canonical scalar, or null when the entry
+/// names only a chapter; [depth] is the authored nesting depth, which is
+/// retained even when a parent entry itself does not resolve.
+class EpubTocLocation {
+  const EpubTocLocation({
+    required this.depth,
+    required this.title,
+    required this.spine,
+    this.offset,
+  });
+
+  final int depth;
+  final String title;
+  final int spine;
+  final int? offset;
+
+  @override
+  bool operator ==(Object other) =>
+      other is EpubTocLocation &&
+      other.depth == depth &&
+      other.title == title &&
+      other.spine == spine &&
+      other.offset == offset;
+
+  @override
+  int get hashCode => Object.hash(depth, title, spine, offset);
+
+  @override
+  String toString() =>
+      'EpubTocLocation(depth: $depth, title: $title, spine: $spine, '
+      'offset: $offset)';
+}
+
+/// Every table-of-contents entry of [book] that resolves to a durable location.
+///
+/// Entries that do not resolve (a target outside the spine, or a fragment the
+/// target chapter does not carry) are omitted — the production contents policy
+/// never invents a position — while their children are still collected at their
+/// authored depth.
+List<EpubTocLocation> resolveTocLocations(EpubBook book) {
+  final locations = <EpubTocLocation>[];
+  void collect(List<EpubTocEntry> entries, int depth) {
+    for (final entry in entries) {
+      final point = resolveInternalLink(
+        book: book,
+        resource: entry.resource,
+        fragment: entry.fragment,
+      );
+      if (point != null) {
+        locations.add(
+          EpubTocLocation(
+            depth: depth,
+            title: entry.title,
+            spine: point.spine,
+            offset: entry.fragment == null ? null : point.scalar,
+          ),
+        );
+      }
+      collect(entry.children, depth + 1);
+    }
+  }
+
+  collect(book.toc, 0);
+  return locations;
 }

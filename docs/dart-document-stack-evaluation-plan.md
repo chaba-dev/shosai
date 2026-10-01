@@ -390,6 +390,179 @@ raster alone: a selection overlay, panel or dialog inside the same rectangle can
 no longer supply ink for a blank document, so the assertion's intent — the
 document itself painted content — is unchanged and no longer weaker than it.
 
+Slice 3 merged as [PR #141](https://github.com/chaba-dev/shosai/pull/141) at
+`b6001998` on 2026-09-30 (`feat(reader): serve paginated EPUB chapters from the
+Dart engine`). Merge is delivery, not acceptance: the named gates above stay
+open and no package is accepted by it.
+
+### Slice 4 report (EPUB navigation: real table of contents and fragment links, 2026-10-01)
+
+Implementation, not acceptance: this slice routes navigation and closes the
+gates it names; no package acceptance (5A–5J) is recorded by it, and 5A's
+acceptance, the 4/30 accounting and 5B's paused/superseded status are unchanged
+(see the [restoration plan](flutter-ui-restoration-plan.md#progress-tracking)).
+
+**What the slice delivers.** Behind the retained reader UI:
+
+- The Contents panel is served by the book's **real table of contents**. The
+  controller resolves the engine's `EpubBook.toc` into durable `(spine, scalar)`
+  rows with the retained reference's own rules: a title-only part keeps its
+  children at their authored depth but is not a row, an entry whose fragment the
+  target chapter does not carry is not a row, and a fragment is decoded once
+  before it is looked up. The panel renders those rows with the 4C composition
+  (per-level indent, truncation, chapter-number fallback, current entry); the
+  current entry is now exactly one row — the last row of the current chapter at
+  or before the durable offset — because a real TOC can name one chapter more
+  than once and the panel's reveal target is a single key.
+- An entry's **fragment offset is published only for a chapter whose canonical
+  stream was verified identical to the retained one** (the same comparison the
+  content-service slice gates routing on). An entry whose chapter is not
+  verified keeps its title and loses its offset, so activating it addresses the
+  chapter without a position rather than a scalar the store does not share. A
+  structural mismatch between the engine's chapter list and the retained logical
+  units (`book.chapters.length != logicalUnitCount`) keeps the whole panel on
+  the retained chapter fallback, and a document the engine cannot parse (or a
+  non-EPUB document) keeps it too. Qualifying costs one retained-stream
+  comparison per distinct chapter a fragment entry names, paid on the panel's
+  first open for the chapters the reader has not visited yet and cached for the
+  document's lifetime afterwards; the load is bounded by the TOC size, not by
+  the page count.
+- **Internal links painted on a Dart-rendered page activate** through a typed
+  intent (`ReaderLinkActivated`): `#fragment` stays in the current document, any
+  other reference resolves against that document's directory, and the target is
+  navigated through the existing guarded relayout path with the verified anchor
+  offset as the durable position. An unknown or empty fragment navigates
+  nowhere; a fragment whose chapter is not verified degrades to the chapter-level
+  target; a structural mismatch refuses the link. A press that travels past the
+  tap slop is a selection gesture and never activates a link. A newer accepted
+  layout, page turn or navigation supersedes a link whose comparison is still
+  pending, so an older completion can never move the reader back; a link that
+  has no position to go to (a chapter-level row on the chapter already being
+  read) targets the chapter start instead of keeping the page while clearing
+  the stored position.
+- **External links keep the retained restricted policy**: a reference without a
+  scheme is internal, `http`/`https`/`mailto` are the only external schemes and
+  go to an injected platform opener (no-op when the composition root injects
+  none), and every other scheme (`file`, `data`, `javascript`, `custom`, …) is
+  refused. The reader never launches a refused scheme and never fetches a book
+  resource.
+- Engine resolution was aligned with the retained implementation where it
+  differed: `resolveEpubReference` now rejects empty segments, a trailing slash,
+  encoded separators and encoded dot segments, a query, multiple fragments and
+  invalid escapes, decodes the fragment exactly once, rejects control characters
+  and validates its base directory; the nav/NCX TOC parse keeps a title-only
+  part with its children and reads a title from the link's own text child;
+  `resolveInternalLink` returns null for an unknown or empty fragment instead of
+  falling back to the chapter start, and an empty or unsafe anchor name never
+  becomes an anchor. Anchor offsets were corrected where equal canonical text
+  still hid a wrong target: a trailing marker in a heading, an inline block, a
+  list item, a blockquote, a table caption, an inline-display container or a
+  figure caption now resolves at that block's end rather than its start; a
+  collapsed figure records the caption element's own anchor at the caption
+  start, and the image's and the image ancestors' anchors at the image start; a
+  table row or cell anchor resolves at its own start even when the cell emits
+  nothing; a cell's trailing marker follows the production per-block accounting
+  (the cell text end for an inline cell, one scalar past it for a cell with
+  emitted block children); a caption is collected as the production
+  `collect_caption_runs` does (each visible block child is its own run, empty
+  runs are discarded with the anchors they recorded, and non-empty runs are
+  joined by a generated newline), and a non-collapsed figure leaves its trailing
+  markers pending instead of moving them to the figure's start; and a composite
+  that the parser does not emit (an empty blockquote, an empty or marker-only
+  figure caption or standalone `figcaption`, a table with no caption text and no
+  rows, a row with no visible cells, a list item with no text) drops its content
+  anchors instead of leaking them onto the next position. Those discards restore
+  a snapshot of the pending list rather than truncating by length, because the
+  whitespace collapse can re-append a removed span's anchors after a later
+  marker. `<nav>` moved from the block-container walk to the production inline
+  path (which the canonical comparison did not catch: `<nav><p>A</p><a
+  id="x"/></nav><p>After</p>` has the same canonical text in both parsers but a
+  trailing marker at 1 there and 2 here). Anchor positions now also follow the
+  production raw-to-normalized boundary mapping: when the collapse removes the
+  trailing space of the last normal span, an anchor recorded at or after it
+  keeps the production offset (one scalar to the right of its collapsed
+  position, clamped to the collapsed length, materialized by splitting a span
+  when the position falls inside one) instead of sliding left with the
+  following preserved-whitespace span; such a mapped end anchor survives span
+  merging and joins a later trailing marker instead of being replaced by it,
+  and an anchor that was already pending when the walk began keeps its own
+  provenance against a descendant duplicate. The production computed-style
+  code-block branch is ported too: in the block walker only (never the inline,
+  list-item or caption collectors), an element whose computed style is
+  monospace plus preserved whitespace is a code block whatever its tag and
+  drops its descendants' anchors, while a MathML `math` element and
+  whitespace-only content keep their ordinary handling and an inline-only table
+  cell keeps the production inline collector's semantics (the conversion never
+  applies there). The cascade now derives preservation and the monospace role
+  like the retained one: `pre`/`pre-wrap`/`break-spaces` preserve,
+  `pre-line`/`normal`/`nowrap` do not, and a `font-family` naming a monospace
+  family counts with CSS escapes decoded and `!`-separated `important`
+  recognized (a comment is never family text, and a quoted value stops at a raw
+  newline in a `style` attribute where the retained stylesheet parser continues
+  the line). An inline-only cell now takes the production inline collector for
+  its content and anchors (so the block walker's code-block and list-item rules
+  do not apply there), and an inline-only cell that mixes an image or MathML
+  with an anchor drops that cell's descendant anchors instead of publishing an
+  offset it cannot verify. Anchor admission now matches the production rules
+  exactly: a name is limited to 1,024 UTF-8 bytes (not UTF-16 units), C1
+  controls are refused like C0, and the 4,096-anchor ceiling also bounds the
+  unresolved-marker fallback. The shared EPUB source load now owns
+  its own bridge cancellation instead of borrowing the requesting panel's or
+  relayout's token, so a superseded Contents request (or relayout) can no longer
+  cancel a read that a concurrent current one shares; the token is released by
+  its own completion and cancelled only when the document is replaced,
+  suspended, disposed or released. Every correction is pinned by a test that
+  asserts the production parser's own literal offset, and each was
+  mutation-checked. The display
+  default was aligned while fixing this: the production UA stylesheet assigns a
+  display role per tag instead of inheriting it, which the cell's block-child
+  decision depends on.
+
+**Gates this slice closes.** Fixture-level TOC and link navigation through the
+retained UI: the real TOC panel (EN wide and JA compact renders inspected, no
+render defects), same- and cross-chapter fragment navigation (touch tap, primary
+mouse click, and drags and long presses that select instead), encoded and
+relative references, unknown and empty anchors, structural-mismatch and
+unverified or uncomparable-chapter fallbacks, a refused cancellation, a failed
+comparison and a failing external opener, supersession by a newer link, page
+turn, suspension and document replacement, disposal, cancellation ownership
+(each token released exactly once), a Contents request superseded while the
+shared source read is still held (the reopened panel keeps the real table of
+contents instead of publishing fallback rows), selection still working after
+navigation, restoration selecting the matching row (including several rows per
+chapter and duplicate offsets), and the restricted external-scheme policy.
+Through the **real Rust bridge**, the committed `sample.epub` resolves to the
+retained app's own pinned `epub_toc_locations` values, the committed
+`links.epub` resolves an encoded cross-chapter fragment to its literal scalar
+offset (13) in a chapter whose canonical stream matches the retained one, so the
+TOC and link mapping this slice serves is checked against the retained
+implementation, not only against the engine's own fixtures.
+
+**Gates this slice leaves open, named.** Real-book corpus (licensed material not
+available in this environment); over-tall table rows; font admission/fallback
+coverage beyond the bundled faces; retained-memory attribution and
+presented-frame timing; continuous-mode tiles and spreads; tabs (5F), progress
+ordinals (5G) and search ownership; and engine differences this slice retains
+and discloses rather than silently absorbs: the EPUB 3 nav document is
+preferred over an NCX where the retained reader tries the NCX first, a nav
+entry with an unusable href is skipped individually where the retained parser
+discards the whole table of contents, and two canonical-stream differences
+found and pinned while verifying the anchor work — `<br/>` emits a newline here
+and nothing in the retained collector, and an inline-only table cell keeps its
+source's raw whitespace runs there where this port collapses them. Each of the
+two makes a chapter that contains it fail the routing comparison and stay on the
+retained renderer; they are named in the engine README with the rest of the open
+parity work. An inline-only table cell that mixes an image or MathML with an
+anchor cannot have that cell's anchors reproduced from the rendered content, so
+they are dropped rather than published at an unverifiable offset: a link to such
+a name resolves to nothing and a Contents row that targets it is not offered,
+which is the reader's established unknown-anchor policy rather than a wrong
+target. A name a suppressed walk saw is dropped chapter-wide, including an
+occurrence elsewhere in the chapter whose offset this port could verify; the
+trade is a missing target rather than a possibly unverifiable one. The platform
+opener for allowed external links is an injected adapter;
+this slice provides the policy and the seam, not a platform integration, so a
+composition root that injects no opener opens nothing.
 
 ## Proposed gated work, not an automatic rewrite
 

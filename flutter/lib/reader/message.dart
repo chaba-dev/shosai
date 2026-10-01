@@ -119,9 +119,11 @@ final class ReaderPanelFocusRequested extends ReaderMessage {
 
 /// Loads or retries the Contents entries (RD-07).
 ///
-/// The controller owns the guarded effect: the injected loader is
-/// fixture-provided in 4C, and the default loader renders the EPUB chapter
-/// fallback because the bridge exposes no TOC DTO (contract §4.6).
+/// The controller owns the guarded effect. An injected loader is the test
+/// fixture seam; the default loader resolves the document's real table of
+/// contents from the Dart EPUB engine, and falls back to the EPUB chapter
+/// fallback when no TOC is available (a non-EPUB document, an unparseable
+/// source, or a source whose chapters are not the retained logical units).
 final class ReaderContentsRequested extends ReaderMessage {
   const ReaderContentsRequested();
 }
@@ -130,11 +132,23 @@ final class ReaderContentsRequested extends ReaderMessage {
 ///
 /// Same handler semantics as [ReaderBookmarkNavigated] — the durable offset is
 /// replaced when the entry has none — with the neutral name that keeps TOC
-/// navigation from being modeled as a bookmark. TOC-to-durable mapping is 5E.
+/// navigation from being modeled as a bookmark.
 final class ReaderLocationNavigated extends ReaderMessage {
   const ReaderLocationNavigated(this.unit, {this.offset});
   final int unit;
   final int? offset;
+}
+
+/// Activates a link painted on a Dart-engine EPUB page.
+///
+/// Only the Dart page produces this intent: the retained raster exposes no link
+/// geometry. [href] is the link's raw source attribute; the controller
+/// classifies it and resolves internal references against the document's parsed
+/// source. An external reference never reaches the platform unless its scheme
+/// is one of the allowed ones, and the reader never fetches a book resource.
+final class ReaderLinkActivated extends ReaderMessage {
+  const ReaderLinkActivated(this.href);
+  final String href;
 }
 
 /// Updates the more panel's page-input draft (RD-10).
@@ -801,6 +815,46 @@ final class _ReaderContentsFailed extends ReaderMessage {
   final int generation;
   final int revision;
   final String error;
+}
+
+/// Releases the bridge cancellation one Contents load owned.
+final class _ReaderContentsFinished extends ReaderMessage {
+  const _ReaderContentsFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
+/// Releases the bridge cancellation one shared EPUB source load owned.
+///
+/// The load is shared by concurrent relayouts and Contents requests, so its
+/// token is owned by the controller rather than by one request.
+final class _ReaderEpubSourceFinished extends ReaderMessage {
+  const _ReaderEpubSourceFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
+/// A resolved internal link whose target chapter still had to be compared with
+/// the retained stream before its anchor offset could be navigated.
+final class _ReaderLinkResolved extends ReaderMessage {
+  const _ReaderLinkResolved(
+    this.generation,
+    this.revision,
+    this.unit, {
+    this.offset,
+  });
+
+  final int generation;
+  final int revision;
+  final int unit;
+
+  /// The verified anchor offset, or null when the target chapter's stream is
+  /// not the retained one and only the chapter-level target may be used.
+  final int? offset;
+}
+
+/// Releases the bridge cancellation one link activation owned.
+final class _ReaderLinkFinished extends ReaderMessage {
+  const _ReaderLinkFinished(this.cancellation);
+  final BigInt cancellation;
 }
 
 final class _ReaderBookmarkExportFinished extends ReaderMessage {

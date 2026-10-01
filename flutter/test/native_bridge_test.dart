@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
 
@@ -449,6 +450,153 @@ void main() {
     skip: supported
         ? false
         : 'native bridge association test supports desktop hosts',
+  );
+
+  test(
+    'resolves the committed sample TOC against the retained stream',
+    () async {
+      final bridge = FlutterBridge();
+      final cancellation = bridge.createCancellation();
+      FlutterDocumentHandle? document;
+      try {
+        final summary = await bridge.openDocument(
+          request: const FlutterOpenRequest(
+            localId: 'native-epub-toc-test',
+            pathKey: '../crates/shosai-core/tests/fixtures/sample.epub',
+          ),
+          cancellationId: cancellation,
+        );
+        document = summary.handle;
+        expect(summary.format, FlutterBookFormat.epub);
+
+        final bytes = await bridge.epubSourceBytes(
+          document: summary.handle,
+          cancellationId: cancellation,
+        );
+        final book = openEpubBytes(bytes);
+        expect(
+          book.chapters,
+          hasLength(summary.logicalUnitCount.toInt()),
+          reason: 'the engine loads the retained logical units',
+        );
+
+        // Every chapter's canonical stream matches the retained one, which is
+        // the routing gate the reader applies before serving a chapter.
+        for (var unit = 0; unit < book.chapters.length; unit += 1) {
+          final retained = await bridge.epubCanonicalText(
+            document: summary.handle,
+            unit: BigInt.from(unit),
+            cancellationId: cancellation,
+          );
+          expect(
+            retained,
+            book.chapters[unit].canonicalText,
+            reason: 'unit $unit shares the retained canonical stream',
+          );
+        }
+
+        // The retained app pins `epub_toc_locations(&sample.epub)` to
+        // `[(0, "Chapter 1: Introduction", 0, 0), (0, "Chapter 2: Getting
+        // Started", 1, 0)]`; a fragment-less entry's offset is the chapter
+        // start.
+        expect(resolveTocLocations(book), const [
+          EpubTocLocation(depth: 0, title: 'Chapter 1: Introduction', spine: 0),
+          EpubTocLocation(
+            depth: 0,
+            title: 'Chapter 2: Getting Started',
+            spine: 1,
+          ),
+        ]);
+
+        // A cross-chapter internal link resolves to a durable point in the
+        // shared stream, and an unknown anchor resolves to nothing.
+        final target = resolveBookLink(
+          book: book,
+          fromResource: book.chapters[0].resource,
+          href: 'chapter2.xhtml',
+        );
+        expect(target?.point.spine, 1);
+        expect(target?.point.scalar, 0);
+        expect(
+          resolveBookLink(
+            book: book,
+            fromResource: book.chapters[0].resource,
+            href: '#missing',
+          ),
+          isNull,
+        );
+      } finally {
+        if (document != null) bridge.releaseDocument(handle: document);
+        bridge.releaseCancellation(id: cancellation);
+        bridge.dispose();
+      }
+    },
+    skip: supported ? false : 'native bridge smoke test supports desktop hosts',
+  );
+
+  test(
+    'resolves encoded cross-chapter fragments against the retained stream',
+    () async {
+      final bridge = FlutterBridge();
+      final cancellation = bridge.createCancellation();
+      FlutterDocumentHandle? document;
+      try {
+        final summary = await bridge.openDocument(
+          request: const FlutterOpenRequest(
+            localId: 'native-epub-links-test',
+            pathKey:
+                '../crates/shosai-core/tests/fixtures/epub-conformance/'
+                'links.epub',
+          ),
+          cancellationId: cancellation,
+        );
+        document = summary.handle;
+        expect(summary.format, FlutterBookFormat.epub);
+
+        final bytes = await bridge.epubSourceBytes(
+          document: summary.handle,
+          cancellationId: cancellation,
+        );
+        final book = openEpubBytes(bytes);
+        final retained = await bridge.epubCanonicalText(
+          document: summary.handle,
+          unit: BigInt.one,
+          cancellationId: cancellation,
+        );
+        // The link-target chapter's canonical stream is the retained one, so
+        // its anchor offsets are the store's offsets.
+        expect(retained, book.chapters[1].canonicalText);
+
+        // Source-derived: chapter two's canonical text is
+        // "Cross target\nPercent target\n", so the encoded fragment lands 13
+        // scalars in — not at the chapter start and not on the heading.
+        for (final href in [
+          'chapter-2.xhtml#percent-target',
+          'chapter%2D2.xhtml#percent%2Dtarget',
+        ]) {
+          final target = resolveBookLink(
+            book: book,
+            fromResource: 'OEBPS/Text/chapter-1.xhtml',
+            href: href,
+          );
+          expect(target?.point.spine, 1, reason: '$href targets chapter two');
+          expect(target?.point.scalar, 13, reason: '$href decodes once');
+        }
+        expect(
+          resolveBookLink(
+            book: book,
+            fromResource: 'OEBPS/Text/chapter-1.xhtml',
+            href: 'chapter-2.xhtml#missing',
+          ),
+          isNull,
+        );
+      } finally {
+        if (document != null) bridge.releaseDocument(handle: document);
+        bridge.releaseCancellation(id: cancellation);
+        bridge.dispose();
+      }
+    },
+    skip: supported ? false : 'native bridge smoke test supports desktop hosts',
   );
 
   test(
