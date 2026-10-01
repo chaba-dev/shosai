@@ -55,6 +55,7 @@ class ReaderScreen extends StatefulWidget {
     this.initialTabs = const [],
     this.progressSource,
     this.contentsLoader,
+    this.externalLinkOpener,
     this.documentPicker,
     this.exportSink,
     this.noticeReporter,
@@ -79,8 +80,15 @@ class ReaderScreen extends StatefulWidget {
   /// Fixture-supplied progress ordinals (RD-05); 5G supplies real values.
   final ReaderProgressSource? progressSource;
 
-  /// Fixture-supplied Contents entries (RD-07); 5E supplies the real TOC.
+  /// Test-supplied Contents entries (RD-07); production resolves the real TOC.
   final ReaderContentsLoader? contentsLoader;
+
+  /// The shell's platform opener for allowed external links.
+  ///
+  /// The reader classifies a rendered link's scheme and calls this adapter only
+  /// for `http`, `https` and `mailto`; without one, allowed external links open
+  /// nothing (the reader never launches or fetches anything itself).
+  final ReaderExternalLinkOpener? externalLinkOpener;
 
   /// The shell's platform document picker for the more panel (RD-10).
   final ReaderDocumentPickerAdapter? documentPicker;
@@ -285,6 +293,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         tabRevealAdapter: _revealTab,
         progressSource: widget.progressSource,
         contentsLoader: widget.contentsLoader,
+        externalLinkOpener: widget.externalLinkOpener,
         documentPickerAdapter: widget.documentPicker,
         exportSink: widget.exportSink ?? _copyExportToClipboard,
         noticeReporter: widget.noticeReporter,

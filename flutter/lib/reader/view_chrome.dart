@@ -1046,15 +1046,38 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
         ),
       ),
     ],
-    ReaderContentsStatus.ready => [
-      for (final entry in contents.entries) ...[
-        // The pinned panel column spaces every child by 10 px, including
-        // consecutive chapter rows.
-        if (entry != contents.entries.first)
-          const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing),
+    ReaderContentsStatus.ready => _chapterRows(l10n, contents, dispatch),
+  };
+
+  /// The ready-state chapter rows.
+  ///
+  /// A real table of contents can name one chapter several times, so the row
+  /// key carries the entry's occurrence within its unit: the first row of a
+  /// unit keeps the historical `reader-contents-entry-<unit>` key, and later
+  /// rows are suffixed. Duplicate sibling keys are a widget error, and the
+  /// reveal key must stay unique as well.
+  List<Widget> _chapterRows(
+    AppLocalizations l10n,
+    ReaderContentsPresentation contents,
+    void Function(ReaderMessage) dispatch,
+  ) {
+    final occurrences = <int, int>{};
+    final rows = <Widget>[];
+    for (final entry in contents.entries) {
+      final occurrence = (occurrences[entry.unit] ?? 0) + 1;
+      occurrences[entry.unit] = occurrence;
+      // The pinned panel column spaces every child by 10 px, including
+      // consecutive chapter rows.
+      if (rows.isNotEmpty) {
+        rows.add(const SizedBox(height: ShosaiTokens.layoutReaderPanelSpacing));
+      }
+      rows.add(
         KeyedSubtree(
           key: entry.current ? _currentEntryKey : null,
           child: _ReaderChapterRow(
+            entryKey: occurrence == 1
+                ? 'reader-contents-entry-${entry.unit}'
+                : 'reader-contents-entry-${entry.unit}-$occurrence',
             entry: entry,
             label: entry.title.trim().isEmpty
                 ? l10n.readerChapterNumber(entry.unit + 1)
@@ -1062,9 +1085,10 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
             dispatch: dispatch,
           ),
         ),
-      ],
-    ],
-  };
+      );
+    }
+    return rows;
+  }
 
   /// The saved places list and the Markdown export action (RD-08).
   List<Widget> _savedPlacesSection(
@@ -1156,11 +1180,14 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
 /// link styling, and a selected treatment for the current entry.
 class _ReaderChapterRow extends StatelessWidget {
   const _ReaderChapterRow({
+    required this.entryKey,
     required this.entry,
     required this.label,
     required this.dispatch,
   });
 
+  /// The row's unique key within the chapter list.
+  final String entryKey;
   final ReaderContentsEntry entry;
   final String label;
   final void Function(ReaderMessage) dispatch;
@@ -1193,7 +1220,7 @@ class _ReaderChapterRow extends StatelessWidget {
         left: entry.depth * ShosaiTokens.layoutReaderPanelEntryIndent,
       ),
       child: _readerSemanticButton(
-        key: ValueKey('reader-contents-entry-${entry.unit}'),
+        key: ValueKey(entryKey),
         enabled: true,
         selected: entry.current,
         label: label,

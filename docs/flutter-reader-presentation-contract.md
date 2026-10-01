@@ -265,8 +265,9 @@ intents are added only for the restored composition. All are sealed
 | `ReaderSearchResultStepRequested({required int delta})` | **proposed** | Moves the current search result by `delta` (±1) without re-querying; ignored when there are no results |
 | `ReaderTabActivated(String tabId)` | **proposed**, presentation only in 4B | 4B fixture state; 5F maps it to session activation |
 | `ReaderTabCloseRequested(String tabId)` | **proposed**, presentation only in 4B | 4B fixture state; 5F owns close semantics (duplicate-open, adjacent selection, last-tab return, pending saves, resource release) |
-| `ReaderLocationNavigated(unit, {offset})` | **proposed** | Contents entry activation. Same handler semantics as `ReaderBookmarkNavigated` (offset replacement); the neutral name keeps TOC navigation from being modeled as a bookmark. TOC-to-durable mapping is 5E |
+| `ReaderLocationNavigated(unit, {offset})` | **proposed** | Contents entry activation. Same handler semantics as `ReaderBookmarkNavigated` (offset replacement); the neutral name keeps TOC navigation from being modeled as a bookmark |
 | `ReaderContentsRequested()` | **proposed** | Contents load and retry; the controller owns the guarded effect |
+| `ReaderLinkActivated(href)` | **added** (navigation slice, 2026-10-01) | A link painted on a Dart-engine EPUB page. The controller classifies the href (internal fragment, allowed external scheme, refused) and resolves internal references against the parsed source; the retained raster produces no link geometry and never dispatches it |
 | `ReaderPageInputChanged(String draft)` / `ReaderPageInputSubmitted()` | **proposed** | More-panel page input draft and submission; the controller validates and converts the 1-based display ordinal to the 0-based unit |
 | `ReaderBookmarkExportRequested()` | **proposed** | Controller effect calls `exportBookmarks`; completion carries the Markdown text and an export state |
 | `ReaderTypographyChanged({fontSize, lineSpacing, theme, rasterFit, zoom})` | **proposed** | Reader-local presentation change; persistence mapping is 5A/6B (§9.2) |
@@ -485,11 +486,13 @@ palette via `pageColors`; components never introduce literal colors
   (document without chapters), failed with the error payload and a retry that
   dispatches `ReaderContentsRequested()`. The current entry is visually distinct
   and scrolled into view when the panel opens.
-- Fixture/live: **entries are fixture-provided in 4C.** The bridge exposes no
-  TOC DTO; the EPUB chapter-title source exists only inside the core
-  (`document.content().chapters`) and is not transferred. The real source is a
-  5A/5E deliverable (§9.1). 4C may render the chapter fallback (localized
-  chapter number for unit `i`) without inventing titles.
+- Fixture/live: 4C rendered fixture entries and the chapter fallback because the
+  bridge exposed no TOC DTO. The navigation slice (2026-10-01) serves the real
+  table of contents from the Dart EPUB engine's `EpubBook.toc`, resolved to
+  durable `(unit, offset)` rows and qualified against the retained canonical
+  stream, with the chapter fallback retained for a document the engine cannot
+  serve; an injected loader remains the test seam. The remaining 5E work
+  (durable ranges, semantic sidecars) is unchanged (§9.1).
 - Tests: `WT` for entry activation, indent/depth, truncation, current-entry
   state, empty/loading/failed; `WT` through rendered controls for 200% text;
   render inspection at `W1280`, `JA`, `T200`.

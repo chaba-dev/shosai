@@ -98,6 +98,38 @@ FlutterSelectionSurface buildPageSelectionSurface({
   );
 }
 
+/// The link href at [position] in the page window's coordinates, or null.
+///
+/// The hit test walks the same [placedPageText] geometry the page painter and
+/// the selection surface use, so a link is activated exactly where its glyphs
+/// are painted. A text slice is bounded by its own visible line window rather
+/// than the whole measured block, so a line that belongs to the next page
+/// cannot be hit from this one.
+String? pageLinkAt(FlowPage page, EpubPageBox box, Offset position) {
+  for (final slice in page.slices) {
+    for (final placed in placedPageText(slice, box)) {
+      final block = placed.block;
+      final local = position - placed.origin;
+      if (local.dx < 0 ||
+          local.dy < 0 ||
+          local.dx > block.width ||
+          local.dy > block.height) {
+        continue;
+      }
+      if (slice is TextPageSlice) {
+        final firstLine = block.lines[placed.lineStart].top;
+        final lastLine = block.lines[placed.lineEnd - 1];
+        if (local.dy < firstLine || local.dy > lastLine.top + lastLine.height) {
+          continue;
+        }
+      }
+      final href = block.linkAtLocal(local);
+      if (href != null) return href;
+    }
+  }
+  return null;
+}
+
 /// One text block placed on a page, with the page coordinates it paints at.
 class PlacedPageText {
   const PlacedPageText({

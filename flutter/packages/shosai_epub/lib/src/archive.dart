@@ -216,7 +216,11 @@ EpubBook openEpubBytes(
   final tocTitles = <String, String>{};
   void collectTitles(List<EpubTocEntry> entries) {
     for (final entry in entries) {
-      tocTitles.putIfAbsent(entry.resource, () => entry.title);
+      // A title-only entry (a part heading with no target) contributes no
+      // chapter title; an empty resource is not a chapter path.
+      if (entry.resource.isNotEmpty) {
+        tocTitles.putIfAbsent(entry.resource, () => entry.title);
+      }
       collectTitles(entry.children);
     }
   }
@@ -674,6 +678,13 @@ List<EpubTocEntry> _parseNavDocument(
   return _parseNavList(list, directory, warnings);
 }
 
+/// One level of an EPUB 3 nav list.
+///
+/// The shape follows the production `parse_nav_ol`: a part heading keeps its
+/// own entry (a `<span>` title with no `<a>`, an empty target) and its nested
+/// list becomes its children, so the authored depth survives into the contents
+/// rows. The title is the link's own first text child, falling back to the
+/// list item's `<span>`, matching the production extraction.
 List<EpubTocEntry> _parseNavList(
   XmlElement list,
   String directory,
@@ -693,32 +704,50 @@ List<EpubTocEntry> _parseNavList(
     final children = nested == null
         ? const <EpubTocEntry>[]
         : _parseNavList(nested, directory, warnings);
-    if (anchor == null) {
-      entries.addAll(children);
-      continue;
+    final span = item.children
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'span')
+        .firstOrNull;
+    final title = (_firstTextChild(anchor) ?? _firstTextChild(span) ?? '')
+        .trim();
+    final href = anchor?.getAttribute('href');
+    var resource = '';
+    String? fragment;
+    if (href != null) {
+      try {
+        final resolved = resolveEpubReference(directory, href);
+        resource = resolved.path;
+        fragment = resolved.fragment;
+      } on EpubPathError {
+        warnings.add('nav entry has an unusable href: $href');
+      }
     }
-    final href = anchor.getAttribute('href');
-    final title = anchor.innerText.trim();
-    if (href == null) {
-      entries.addAll(children);
-      continue;
-    }
-    try {
-      final resolved = resolveEpubReference(directory, href);
-      entries.add(
-        EpubTocEntry(
-          title: title,
-          resource: resolved.path,
-          fragment: resolved.fragment,
-          children: children,
-        ),
-      );
-    } on EpubPathError {
-      warnings.add('nav entry has an unusable href: $href');
-      entries.addAll(children);
-    }
+    if (title.isEmpty && resource.isEmpty && children.isEmpty) continue;
+    entries.add(
+      EpubTocEntry(
+        title: title,
+        resource: resource,
+        fragment: fragment,
+        children: children,
+      ),
+    );
   }
   return entries;
+}
+
+/// The first text child of [element], or null.
+///
+/// The production parser reads a nav entry's title from its link's own text
+/// child (not the concatenated descendant text), so a nested element inside the
+/// link does not contribute to the title. A CDATA section is text to the
+/// production parser, so it counts here too.
+String? _firstTextChild(XmlElement? element) {
+  if (element == null) return null;
+  for (final child in element.children) {
+    if (child is XmlText) return child.value;
+    if (child is XmlCDATA) return child.value;
+  }
+  return null;
 }
 
 List<EpubTocEntry> _parseNcx(
@@ -743,36 +772,37 @@ List<EpubTocEntry> _parseNcx(
     final entries = <EpubTocEntry>[];
     for (final point in parent.children.whereType<XmlElement>()) {
       if (point.name.local != 'navPoint') continue;
-      final label = point.children
+      // The production parser reads the first `<text>` descendant's own text
+      // child; the label element's nesting is not part of the contract.
+      final label = point.descendants
           .whereType<XmlElement>()
-          .where((element) => element.name.local == 'navLabel')
-          .expand((element) => element.children.whereType<XmlElement>())
           .where((element) => element.name.local == 'text')
-          .map((element) => element.innerText.trim())
           .firstOrNull;
-      final content = point.children
+      final content = point.descendants
           .whereType<XmlElement>()
           .where((element) => element.name.local == 'content')
           .firstOrNull;
       final src = content?.getAttribute('src');
       final children = parsePoints(point);
-      if (src == null) {
-        entries.addAll(children);
-        continue;
+      var resource = '';
+      String? fragment;
+      if (src != null) {
+        try {
+          final resolved = resolveEpubReference(directory, src);
+          resource = resolved.path;
+          fragment = resolved.fragment;
+        } on EpubPathError {
+          warnings.add('NCX entry has an unusable src: $src');
+        }
       }
-      try {
-        final resolved = resolveEpubReference(directory, src);
-        entries.add(
-          EpubTocEntry(
-            title: label ?? '',
-            resource: resolved.path,
-            fragment: resolved.fragment,
-            children: children,
-          ),
-        );
-      } on EpubPathError {
-        warnings.add('NCX entry has an unusable src: $src');
-      }
+      entries.add(
+        EpubTocEntry(
+          title: (_firstTextChild(label) ?? '').trim(),
+          resource: resource,
+          fragment: fragment,
+          children: children,
+        ),
+      );
     }
     return entries;
   }

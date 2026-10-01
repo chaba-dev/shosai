@@ -135,6 +135,10 @@ class EpubTextSpan {
   /// Element ids/legacy anchor names that resolve to this span's start.
   List<String> anchorIds = const [];
 
+  /// Anchors recorded after this span's text, for example a marker that ends a
+  /// list item; they resolve to the span's end scalar, not the item's start.
+  List<String> endAnchorIds = const [];
+
   /// Whether this span's canonical text is selectable by the reader.
   ///
   /// Hidden fallbacks (a successfully rendered image's alt text, a rendered
@@ -266,6 +270,9 @@ class EpubTableCell {
     required this.children,
     this.blockStarts = const [],
     this.style = const EpubNodeStyle(),
+    this.blockChildren = false,
+    this.startAnchorIds = const [],
+    this.endAnchorIds = const [],
   });
 
   final String? id;
@@ -282,6 +289,23 @@ class EpubTableCell {
   /// generated newline before them in the canonical stream.
   final List<int> blockStarts;
   final EpubNodeStyle style;
+
+  /// Whether the source cell has a visible block-level child.
+  ///
+  /// The production parser's per-block offset accounting counts one generated
+  /// newline per block, so a trailing cell-level marker resolves one scalar
+  /// past the cell text when this is true (and exactly at the cell text end
+  /// for an inline-only cell).
+  final bool blockChildren;
+
+  /// Anchors recorded before the cell's content (its own id, its row's id, or
+  /// a marker an earlier empty cell left pending); they resolve at the cell's
+  /// start, where the production `table_anchor_offsets` records them.
+  final List<String> startAnchorIds;
+
+  /// Anchors recorded after the cell's content; they resolve at the cell's
+  /// text end, offset by one scalar for a block cell (see [blockChildren]).
+  final List<String> endAnchorIds;
 }
 
 /// A content node in the simplified document model.
@@ -470,6 +494,10 @@ class EpubTocEntry {
   final String title;
 
   /// Canonical archive path of the target content document.
+  ///
+  /// Empty for a part heading that carries only a title (a nav `<li>` with a
+  /// `<span>` and no link) or a malformed target; such an entry names no
+  /// location and is not navigable, but its children remain under it.
   final String resource;
 
   /// Fragment identifier within the target document, if any.
