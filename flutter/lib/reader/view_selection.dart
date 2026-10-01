@@ -352,7 +352,66 @@ class _SelectableSurface extends StatefulWidget {
 }
 
 class _SelectableSurfaceState extends State<_SelectableSurface> {
+  /// Movement past this many logical pixels turns a press into a drag.
+  ///
+  /// A press that never travels further is a tap, and a tap on a painted link
+  /// activates it (the evaluated prototype's policy). A drag is a selection
+  /// gesture and never activates a link.
+  static const double _tapSlop = 6;
+
   int? _touchPointer;
+
+  /// The pointer that may still become a tap, and where it went down.
+  int? _tapPointer;
+  Offset? _tapOrigin;
+
+  /// Starts a tap candidate for a primary press.
+  void _beginTapCandidate(PointerDownEvent event) {
+    final primary =
+        event.kind != ui.PointerDeviceKind.mouse || (event.buttons & 1) != 0;
+    if (!primary) return;
+    _tapPointer = event.pointer;
+    _tapOrigin = event.localPosition;
+  }
+
+  /// Drops the candidate once the press travels past [_tapSlop].
+  void _moveTapCandidate(PointerMoveEvent event) {
+    if (_tapPointer != event.pointer) return;
+    final origin = _tapOrigin;
+    if (origin == null || (event.localPosition - origin).distance > _tapSlop) {
+      _tapPointer = null;
+      _tapOrigin = null;
+    }
+  }
+
+  void _cancelTapCandidate(int pointer) {
+    if (_tapPointer == pointer) _clearTapCandidate();
+  }
+
+  void _clearTapCandidate() {
+    _tapPointer = null;
+    _tapOrigin = null;
+  }
+
+  /// Activates a painted link under a completed tap, if there is one.
+  ///
+  /// The retained renderer exposes no link geometry, so only a Dart page
+  /// produces the intent; the controller owns classification and resolution.
+  void _endTapCandidate(PointerUpEvent event, SurfaceTransform transform) {
+    final origin = _tapOrigin;
+    final isTap =
+        _tapPointer == event.pointer &&
+        origin != null &&
+        (event.localPosition - origin).distance <= _tapSlop;
+    _tapPointer = null;
+    _tapOrigin = null;
+    if (!isTap) return;
+    final page = widget.epubPage;
+    if (page == null) return;
+    final source = transform.toSource(event.localPosition);
+    final href = pageLinkAt(page.page, page.box, source);
+    if (href != null) widget.dispatch(ReaderLinkActivated(href));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -418,6 +477,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
           key: const ValueKey('reader-selection-surface'),
           behavior: HitTestBehavior.opaque,
           onPointerDown: (event) {
+            _beginTapCandidate(event);
             if (event.kind == ui.PointerDeviceKind.touch) {
               _touchPointer ??= event.pointer;
               return;
@@ -446,6 +506,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             }
           },
           onPointerMove: (event) {
+            _moveTapCandidate(event);
             if (event.kind == ui.PointerDeviceKind.touch) return;
             final value = endpoint(event.localPosition, nearest: true);
             if (value != null) {
@@ -464,11 +525,13 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             }
           },
           onPointerUp: (event) {
+            _endTapCandidate(event, transform);
             if (event.kind != ui.PointerDeviceKind.touch) {
               widget.dispatch(ReaderSelectionPointerEnded(event.pointer));
             }
           },
           onPointerCancel: (event) {
+            _cancelTapCandidate(event.pointer);
             if (event.kind != ui.PointerDeviceKind.touch ||
                 _touchPointer == event.pointer) {
               widget.dispatch(ReaderSelectionPointerCancelled(event.pointer));
@@ -478,6 +541,8 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onLongPressStart: (details) {
+              // A long press is a selection gesture, never a link tap.
+              _clearTapCandidate();
               final pointer = _touchPointer;
               final value = endpoint(details.localPosition);
               if (pointer == null || value == null) return;

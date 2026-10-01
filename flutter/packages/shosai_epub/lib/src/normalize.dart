@@ -83,9 +83,19 @@ NormalizedChapter normalizeChapter({
   final nodes = context.parseBlocks(body, 0);
   context.flushPendingAnchors();
   final builder = CanonicalTextBuilder(maxScalars: limits.maxCanonicalScalars);
-  final canonical = builder.build(nodes);
+  builder.build(nodes);
   for (final name in context.unresolvedAnchors) {
-    builder.anchors.putIfAbsent(name, () => canonical.scalarCount);
+    // The unresolved fallback is an anchor like any other: an empty, over-long
+    // or unsafe name must not become a target, and the chapter's anchor
+    // ceiling applies (the production parser never records such a name).
+    builder.recordEndAnchor(name);
+  }
+  // A name only a suppressed (media-cell) walk saw is not published: the
+  // chapter drops it instead of letting a later duplicate become a target.
+  // This runs last, after the unresolved fallback, so a duplicate that emits
+  // no content cannot republish it at the chapter end either.
+  for (final name in context.suppressedAnchorNames) {
+    builder.anchors.remove(name);
   }
   return NormalizedChapter(
     nodes: nodes,
@@ -382,18 +392,20 @@ EpubComputedStyle _computeElementStyle(
 
 List<CssDeclaration> parseInlineDeclarations(String source) {
   final declarations = <CssDeclaration>[];
-  for (final raw in source.split(';')) {
+  for (final raw in splitCssDeclarations(stripCssComments(source))) {
     final colon = raw.indexOf(':');
     if (colon <= 0) continue;
     final property = raw.substring(0, colon).trim().toLowerCase();
-    var value = raw.substring(colon + 1).trim();
-    if (property.isEmpty || value.isEmpty) continue;
-    var important = false;
-    if (value.toLowerCase().endsWith('!important')) {
-      important = true;
-      value = value.substring(0, value.length - '!important'.length).trim();
-    }
-    declarations.add(CssDeclaration(property, value, important: important));
+    final parsed = splitCssImportant(raw.substring(colon + 1));
+    if (property.isEmpty || parsed.value.isEmpty) continue;
+    declarations.add(
+      CssDeclaration(
+        property,
+        parsed.value,
+        important: parsed.important,
+        inline: true,
+      ),
+    );
   }
   return declarations;
 }
@@ -456,7 +468,10 @@ bool _selectorMatches(
 }
 
 EpubComputedStyle _applyUaDefaults(EpubComputedStyle style, String tag) {
-  var display = style.display;
+  // The production UA stylesheet assigns a display role per tag (every tag
+  // outside the block list is inline); the value is not inherited. A specified
+  // rule or inline style overrides it afterwards.
+  var display = EpubDisplay.inline;
   switch (tag) {
     case 'html':
     case 'body':
@@ -573,8 +588,15 @@ EpubComputedStyle _applyDeclaration(
       if (resolved == null || resolved < 0) return style;
       return _copyWith(style, fontSizePx: resolved);
     case 'font-family':
-      final families = _splitFontFamilies(value);
-      return _copyWith(style, fontFamilies: families);
+      final parsed = parseFontFamilies(value, inline: declaration.inline);
+      // The production cascade derives the monospace role from the declared
+      // families, so `font-family: monospace` (or a family whose name contains
+      // "mono") turns a non-monospace element into a code block candidate.
+      return _copyWith(
+        style,
+        fontFamilies: parsed.families,
+        monospace: parsed.monospace,
+      );
     case 'font-weight':
       if (lower == 'bold' || lower == 'bolder') {
         return _copyWith(style, bold: true);
@@ -592,10 +614,13 @@ EpubComputedStyle _applyDeclaration(
       if (lower == 'normal') return _copyWith(style, italic: false);
       return style;
     case 'white-space':
-      if (lower == 'pre' || lower == 'pre-wrap' || lower == 'pre-line') {
+      // The production cascade preserves whitespace for `pre`, `pre-wrap` and
+      // `break-spaces`, and turns preservation off for `pre-line` as well as
+      // the normal keywords; an unrecognized value leaves the inherited role.
+      if (lower == 'pre' || lower == 'pre-wrap' || lower == 'break-spaces') {
         return _copyWith(style, preserveWhitespace: true);
       }
-      if (lower == 'normal' || lower == 'nowrap') {
+      if (lower == 'normal' || lower == 'nowrap' || lower == 'pre-line') {
         return _copyWith(style, preserveWhitespace: false);
       }
       return style;
@@ -740,27 +765,6 @@ EpubLength? _resolveCssLength(String value) {
   return EpubPixelLength(pixels);
 }
 
-List<String> _splitFontFamilies(String value) {
-  final families = <String>[];
-  for (final raw in value.split(',')) {
-    var family = raw.trim();
-    if (family.isEmpty) continue;
-    family = family.replaceAll(RegExp('^["\']|["\']\$'), '');
-    if (family.isEmpty) continue;
-    final lower = family.toLowerCase();
-    if (lower == 'serif' ||
-        lower == 'sans-serif' ||
-        lower == 'monospace' ||
-        lower == 'cursive' ||
-        lower == 'fantasy' ||
-        lower == 'system-ui') {
-      continue;
-    }
-    families.add(family);
-  }
-  return families;
-}
-
 EpubComputedStyle _copyWith(
   EpubComputedStyle style, {
   EpubDisplay? display,
@@ -824,6 +828,50 @@ class _NormalizeContext {
   /// chapter end.
   final List<String> unresolvedAnchors = [];
 
+  /// Raw (pre-collapse) offset of each anchor recorded during the inline walk
+  /// in progress, by name.
+  ///
+  /// The production boundary map resolves anchors through these positions, not
+  /// through the collapsed span they are attached to; first occurrence wins,
+  /// like `record_anchor_name`.
+  final Map<String, int> _inlineAnchorOffsets = {};
+
+  /// Whether an inline walk is collecting spans, and the raw offset reached.
+  bool _inlineWalking = false;
+  int _inlineRawOffset = 0;
+
+  /// Whether the walk in progress records anchors at all.
+  ///
+  /// An inline-only table cell that mixes images or MathML with anchors cannot
+  /// reproduce the retained anchor stream from its rendered content, so its
+  /// descendant anchors are dropped rather than published at an unverifiable
+  /// offset.
+  bool _suppressAnchors = false;
+
+  /// Anchor names a suppressed walk saw.
+  ///
+  /// The chapter drops them from its anchor map, so a later duplicate cannot
+  /// become a target the retained parser would not have chosen.
+  final Set<String> suppressedAnchorNames = {};
+
+  void _beginInlineWalk() {
+    _inlineWalking = true;
+    _inlineRawOffset = 0;
+    _inlineAnchorOffsets.clear();
+    // Names already pending when the walk begins (the owner's own anchors and
+    // earlier markers) were recorded before its content; the production
+    // `record_anchor_name` keeps their first occurrence, so a later duplicate
+    // must not redefine their provenance.
+    for (final name in _pendingAnchors) {
+      _inlineAnchorOffsets.putIfAbsent(name, () => 0);
+    }
+  }
+
+  void _endInlineWalk() {
+    _inlineWalking = false;
+    _inlineAnchorOffsets.clear();
+  }
+
   void flushPendingAnchors() {
     unresolvedAnchors.addAll(_pendingAnchors);
     _pendingAnchors.clear();
@@ -851,12 +899,47 @@ class _NormalizeContext {
     _pendingAnchors.clear();
   }
 
+  /// Restores the pending anchors to [snapshot], dropping everything a walk
+  /// that emitted no content recorded.
+  ///
+  /// A length-based rollback is not enough: the whitespace collapse re-appends
+  /// a removed span's anchors *after* the anchors a later empty marker added,
+  /// so the list can end up reordered.
+  void _restorePending(List<String> snapshot) {
+    _pendingAnchors
+      ..clear()
+      ..addAll(snapshot);
+  }
+
+  /// Anchors recorded after the last content of a list item resolve at the
+  /// item's end, before the generated item newline: the production
+  /// `parse_list_items` records them at the item's own text offset.
+  void _takeTrailingPendingSpan(EpubTextSpan span) {
+    if (_pendingAnchors.isEmpty) return;
+    span.endAnchorIds = [...span.endAnchorIds, ..._pendingAnchors];
+    _pendingAnchors.clear();
+  }
+
   void _noteAnchor(XmlElement element) {
     final id = element.getAttribute('id');
-    if (id != null) _pendingAnchors.add(id);
+    if (id != null) _noteAnchorName(id);
     if (element.name.local == 'a') {
       final name = element.getAttribute('name');
-      if (name != null) _pendingAnchors.add(name);
+      if (name != null) _noteAnchorName(name);
+    }
+  }
+
+  void _noteAnchorName(String name) {
+    if (_suppressAnchors) {
+      // The name must not become a later duplicate's target: it is reserved so
+      // the chapter drops it instead of publishing an offset the engine cannot
+      // verify.
+      suppressedAnchorNames.add(name);
+      return;
+    }
+    _pendingAnchors.add(name);
+    if (_inlineWalking) {
+      _inlineAnchorOffsets.putIfAbsent(name, () => _inlineRawOffset);
     }
   }
 
@@ -866,7 +949,11 @@ class _NormalizeContext {
   EpubComputedStyle styleOf(XmlElement element) =>
       styles[element] ?? _initialStyle();
 
-  List<EpubContentNode> parseBlocks(XmlElement parent, int depth) {
+  List<EpubContentNode> parseBlocks(
+    XmlElement parent,
+    int depth, {
+    bool codeBlocks = true,
+  }) {
     final nodes = <EpubContentNode>[];
     if (depth > _maxDepth) return nodes;
     for (final child in parent.children) {
@@ -885,7 +972,7 @@ class _NormalizeContext {
       final style = styleOf(child);
       if (style.display == EpubDisplay.none) continue;
       _noteAnchor(child);
-      final produced = _parseElement(child, style, depth);
+      final produced = _parseElement(child, style, depth, codeBlocks);
       nodes.addAll(produced);
     }
     return nodes;
@@ -895,8 +982,26 @@ class _NormalizeContext {
     XmlElement element,
     EpubComputedStyle style,
     int depth,
+    bool codeBlocks,
   ) {
     final tag = element.name.local.toLowerCase();
+    // The production block walker treats any element whose computed style is
+    // monospace + preserve-whitespace as a code block, whatever its tag
+    // (Calibre-generated classes), and never collects its descendants'
+    // anchors; only the element's own anchors stay recorded at its start.
+    if (codeBlocks &&
+        tag != 'pre' &&
+        tag != 'code' &&
+        style.monospace &&
+        style.preserveWhitespace &&
+        !_isMathElement(element)) {
+      final code = _collectVisibleText(element);
+      if (code.trim().isNotEmpty) {
+        final node = EpubCodeBlock(code: code.trim(), language: null);
+        _takePending(node);
+        return [node];
+      }
+    }
     switch (tag) {
       case 'h1':
       case 'h2':
@@ -911,7 +1016,10 @@ class _NormalizeContext {
           spans: spans,
           nodeStyle: _nodeStyle(style),
         );
-        _takePending(node);
+        // A heading's leading anchors were consumed by its first span; what is
+        // still pending is a trailing marker, which the production parser
+        // resolves at the heading's end, not its start.
+        _takeTrailingPending(node);
         return [node];
       case 'p':
         final spans = _inlineSpans(element, style.fontSizePx, null);
@@ -924,13 +1032,26 @@ class _NormalizeContext {
         }
         return promoted;
       case 'blockquote':
-        final children = parseBlocks(element, depth + 1);
-        if (children.isEmpty) return const [];
+        final pendingBefore = List<String>.of(_pendingAnchors);
+        final children = parseBlocks(
+          element,
+          depth + 1,
+          codeBlocks: codeBlocks,
+        );
+        if (children.isEmpty) {
+          // The production parser drops the content anchors of a blockquote it
+          // does not emit; the blockquote's own anchors stay recorded at its
+          // start (the parent already noted them).
+          _restorePending(pendingBefore);
+          return const [];
+        }
         final node = EpubBlockQuote(
           children: children,
           nodeStyle: _nodeStyle(style),
         );
-        _takePending(node);
+        // A marker after the last child resolves at the blockquote's end, not
+        // its start.
+        _takeTrailingPending(node);
         return [node];
       case 'table':
         final table = _parseTable(element, style, depth);
@@ -1015,16 +1136,25 @@ class _NormalizeContext {
       case 'figure':
         final figure = _parseFigure(element, style, depth);
         if (figure != null) return [figure];
-        final inner = parseBlocks(element, depth + 1);
+        final inner = parseBlocks(element, depth + 1, codeBlocks: codeBlocks);
         if (inner.isEmpty) return const [];
-        final node = EpubFigure(children: inner, nodeStyle: _nodeStyle(style));
-        _takePending(node);
-        return [node];
+        // A marker after the last child stays pending: the production figure
+        // arm keeps the child walk's offsets, and the figure's own separator
+        // means the next content position is one past the node's end.
+        return [EpubFigure(children: inner, nodeStyle: _nodeStyle(style))];
       case 'figcaption':
+        final pendingBefore = List<String>.of(_pendingAnchors);
         final spans = _captionSpans(element, style.fontSizePx);
-        if (spans.isEmpty) return const [];
+        if (spans.isEmpty) {
+          // The production caption-run collector discards the anchors of a run
+          // that emits nothing; the caption element's own anchors stay at its
+          // start.
+          _restorePending(pendingBefore);
+          return const [];
+        }
         final node = EpubParagraph(spans, _nodeStyle(style));
-        _takePending(node);
+        // Trailing markers in a caption resolve at the caption's end.
+        _takeTrailingPending(node);
         return [node];
       case 'div':
       case 'section':
@@ -1033,22 +1163,20 @@ class _NormalizeContext {
       case 'aside':
       case 'header':
       case 'footer':
-      case 'nav':
-        final inner = parseBlocks(element, depth + 1);
-        if (inner.isEmpty) return const [];
-        if (style.display == EpubDisplay.inline) {
-          final spans = _inlineSpans(element, style.fontSizePx, null);
-          if (spans.isEmpty) return inner;
-          final node = EpubParagraph(spans, _nodeStyle(style));
-          _takePending(node);
-          return [node];
-        }
-        return inner;
+        // The production parser always walks these containers as block
+        // children, even when their computed display is inline; their own
+        // anchors stay pending until the first emitted content, and a trailing
+        // marker flows to whatever content follows (or to the chapter end).
+        //
+        // `nav` is deliberately not in this list: the production parser falls
+        // through to its inline collector for it, and a block walk would change
+        // both the canonical stream and a trailing marker's offset.
+        return parseBlocks(element, depth + 1, codeBlocks: codeBlocks);
       default:
         final spans = _inlineSpans(element, style.fontSizePx, null);
         if (spans.isEmpty) return const [];
         final node = EpubParagraph(spans, _nodeStyle(style));
-        _takePending(node);
+        _takeTrailingPending(node);
         return [node];
     }
   }
@@ -1078,9 +1206,11 @@ class _NormalizeContext {
     String? link,
   ) {
     final spans = <EpubTextSpan>[];
+    _beginInlineWalk();
     _collectInline(element, baseFontSize, link, spans, 0);
     _collapseWhitespace(spans);
     _mergeSpans(spans);
+    _endInlineWalk();
     return spans;
   }
 
@@ -1126,6 +1256,31 @@ class _NormalizeContext {
     return nodes;
   }
 
+  bool _isMathElement(XmlElement element) =>
+      element.name.local == 'math' &&
+      element.name.namespaceUri == _mathmlNamespace;
+
+  /// A text span carrying [owner]'s computed style, the production
+  /// `text_span_for_node`.
+  EpubTextSpan _textSpanFor(
+    XmlElement owner,
+    String text,
+    double baseFontSize,
+    String? link,
+  ) {
+    final style = styleOf(owner);
+    return EpubTextSpan(
+      text: text,
+      bold: style.bold,
+      italic: style.italic,
+      monospace: style.monospace,
+      fontFamily: style.fontFamilies.isEmpty ? null : style.fontFamilies.first,
+      fontSizeMultiplier: style.fontSizePx / baseFontSize,
+      preserveWhitespace: style.preserveWhitespace,
+      link: link,
+    );
+  }
+
   void _collectInline(
     XmlElement element,
     double baseFontSize,
@@ -1134,32 +1289,20 @@ class _NormalizeContext {
     int depth,
   ) {
     if (depth > _maxDepth) return;
-    final style = styleOf(element);
     for (final child in element.children) {
       if (child is XmlText) {
         if (child.value.isEmpty) continue;
-        final span = EpubTextSpan(
-          text: child.value,
-          bold: style.bold,
-          italic: style.italic,
-          monospace: style.monospace,
-          fontFamily: style.fontFamilies.isEmpty
-              ? null
-              : style.fontFamilies.first,
-          fontSizeMultiplier: style.fontSizePx / baseFontSize,
-          preserveWhitespace: style.preserveWhitespace,
-          link: link,
-        );
+        final span = _textSpanFor(element, child.value, baseFontSize, link);
         _takePendingSpan(span);
         spans.add(span);
+        _inlineRawOffset += child.value.runes.length;
         continue;
       }
       if (child is! XmlElement) continue;
       final childStyle = styleOf(child);
       if (childStyle.display == EpubDisplay.none) continue;
       _noteAnchor(child);
-      if (child.name.local == 'math' &&
-          child.name.namespaceUri == _mathmlNamespace) {
+      if (_isMathElement(child)) {
         final content = parseMath(child, limits);
         final span = EpubTextSpan(
           text: content.fallback,
@@ -1174,6 +1317,7 @@ class _NormalizeContext {
         );
         _takePendingSpan(span);
         spans.add(span);
+        _inlineRawOffset += content.fallback.runes.length;
         continue;
       }
       if (child.name.local == 'br') {
@@ -1182,6 +1326,7 @@ class _NormalizeContext {
         final span = EpubTextSpan(text: '\n', preserveWhitespace: true);
         _takePendingSpan(span);
         spans.add(span);
+        _inlineRawOffset += 1;
         continue;
       }
       _collectInline(
@@ -1195,6 +1340,14 @@ class _NormalizeContext {
   }
 
   void _collapseWhitespace(List<EpubTextSpan> spans) {
+    // Raw positions are what the production boundary map resolves anchors
+    // through, so remember them before the text is rewritten.
+    final rawEnds = <int>[];
+    var raw = 0;
+    for (final span in spans) {
+      raw += span.text.runes.length;
+      rawEnds.add(raw);
+    }
     var atStartOrWhitespace = true;
     for (final span in spans) {
       if (span.math != null || span.preserveWhitespace) {
@@ -1216,11 +1369,13 @@ class _NormalizeContext {
       }
       span.text = normalized.toString();
     }
+    int? trimRawEnd;
     for (var index = spans.length - 1; index >= 0; index--) {
       final span = spans[index];
       if (span.text.isEmpty || span.preserveWhitespace) continue;
       if (span.text.endsWith(' ')) {
         span.text = span.text.substring(0, span.text.length - 1);
+        trimRawEnd = rawEnds[index];
       }
       break;
     }
@@ -1245,6 +1400,113 @@ class _NormalizeContext {
     spans
       ..clear()
       ..addAll(retained);
+    _resolveInlineAnchors(spans, trimRawEnd);
+  }
+
+  /// Re-places anchors recorded during the inline walk through the production
+  /// raw-to-normalized boundary mapping.
+  ///
+  /// The collapse only removes an already-normalized character at the trailing
+  /// space, and the production boundary table keeps the raw positions of the
+  /// anchors recorded at or after it, clamped to the collapsed length: such an
+  /// anchor stays one scalar to the right of its collapsed position (or at the
+  /// end), even when that falls inside a surviving span.
+  void _resolveInlineAnchors(List<EpubTextSpan> spans, int? trimRawEnd) {
+    if (trimRawEnd == null || _inlineAnchorOffsets.isEmpty) return;
+    final starts = <int>[];
+    var total = 0;
+    for (final span in spans) {
+      starts.add(total);
+      total += span.text.runes.length;
+    }
+    final moved = <(String, int)>[];
+    for (var index = 0; index < spans.length; index++) {
+      final span = spans[index];
+      if (span.anchorIds.isEmpty) continue;
+      final kept = <String>[];
+      for (final name in span.anchorIds) {
+        final raw = _inlineAnchorOffsets[name];
+        if (raw == null || raw < trimRawEnd) {
+          kept.add(name);
+          continue;
+        }
+        final target = starts[index] + 1;
+        moved.add((name, target < total ? target : total));
+      }
+      span.anchorIds = kept;
+    }
+    if (moved.isEmpty) return;
+    final byTarget = <int, List<String>>{};
+    for (final (name, target) in moved) {
+      byTarget.putIfAbsent(target, () => []).add(name);
+    }
+    if (spans.isEmpty) return;
+    final rebuilt = <EpubTextSpan>[];
+    var position = 0;
+    for (final span in spans) {
+      final text = span.text;
+      final length = text.runes.length;
+      final end = position + length;
+      if (length == 0) {
+        rebuilt.add(span);
+        continue;
+      }
+      final endAnchors = span.endAnchorIds;
+      final splits =
+          byTarget.keys
+              .where((target) => target > position && target < end)
+              .toList()
+            ..sort();
+      if (splits.isEmpty) {
+        rebuilt.add(span);
+        position = end;
+        continue;
+      }
+      var pieceStart = position;
+      var piece = span..endAnchorIds = const [];
+      for (final target in splits) {
+        piece.text = String.fromCharCodes(text.runes.take(target - position));
+        rebuilt.add(piece);
+        piece = span.copy()
+          ..text = String.fromCharCodes(text.runes.skip(target - position))
+          ..anchorIds = const [];
+        pieceStart = target;
+      }
+      piece.text = String.fromCharCodes(text.runes.skip(pieceStart - position));
+      piece.endAnchorIds = endAnchors;
+      rebuilt.add(piece);
+      position = end;
+    }
+    for (final entry in byTarget.entries) {
+      final target = entry.key;
+      final names = entry.value;
+      if (target >= total) {
+        final last = rebuilt.lastWhere(
+          (span) => span.text.isNotEmpty,
+          orElse: () => rebuilt.last,
+        );
+        last.endAnchorIds = [...last.endAnchorIds, ...names];
+        continue;
+      }
+      var offset = 0;
+      var placed = false;
+      for (final span in rebuilt) {
+        final length = span.text.runes.length;
+        if (offset == target) {
+          span.anchorIds = [...span.anchorIds, ...names];
+          placed = true;
+          break;
+        }
+        offset += length;
+      }
+      if (!placed) {
+        // A target can only fall inside a span that was split above.
+        rebuilt.last.endAnchorIds = [...rebuilt.last.endAnchorIds, ...names];
+      }
+    }
+    spans
+      ..clear()
+      ..addAll(rebuilt);
   }
 
   void _mergeSpans(List<EpubTextSpan> spans) {
@@ -1253,8 +1515,12 @@ class _NormalizeContext {
       final current = spans[index];
       final next = spans[index + 1];
       // A span that carries anchors must not merge into its predecessor: the
-      // anchor points at that span's own start, not at the merged start.
+      // anchor points at that span's own start, not at the merged start. The
+      // same holds for a span end that carries anchors, which would move to the
+      // merged end.
       if (next.anchorIds.isEmpty &&
+          next.endAnchorIds.isEmpty &&
+          current.endAnchorIds.isEmpty &&
           current.bold == next.bold &&
           current.math == null &&
           next.math == null &&
@@ -1319,9 +1585,17 @@ class _NormalizeContext {
       if (child.name.local != 'li') continue;
       final style = styleOf(child);
       if (style.display == EpubDisplay.none) continue;
+      // The production `parse_list_items` records an item's own and nested
+      // anchors only when the item produced spans; an item that emits nothing
+      // contributes no anchor at all.
+      final pendingBefore = List<String>.of(_pendingAnchors);
       _noteAnchor(child);
       final spans = _inlineSpans(child, 16.0, null);
-      if (spans.isEmpty) continue;
+      if (spans.isEmpty) {
+        _restorePending(pendingBefore);
+        continue;
+      }
+      _takeTrailingPendingSpan(spans.last);
       items.add(spans);
     }
     return items;
@@ -1389,9 +1663,37 @@ class _NormalizeContext {
       }
     }
     final imageStyle = _nodeStyle(styleOf(image));
+    // The image's own id and its ancestors' ids below the figure resolve at
+    // the image's start, like the production collapsed-figure path; the
+    // figure's own anchors are already pending from the block walk.
+    for (final ancestor in image.ancestors.whereType<XmlElement>()) {
+      if (ancestor == figure) break;
+      _noteAnchor(ancestor);
+    }
+    _noteAnchor(image);
+    // Everything pending now belongs to the image's start; a marker the
+    // caption walk leaves pending is a trailing caption marker and resolves at
+    // the caption's end (the node's end), like the production caption
+    // collector.
+    final leadingAnchors = List<String>.of(_pendingAnchors);
+    _pendingAnchors.clear();
+    // The caption element's own id resolves at the caption's start, after the
+    // alt text and its separator, like `record_element_anchors(caption_node,
+    // caption_offset)` in the production collapsed-figure path. An empty
+    // caption leaves it pending, so it lands on the node's end (the alt end).
+    if (captionElement != null) _noteAnchor(captionElement);
+    // The caption element's own anchors stay pending across the walk; anchors
+    // the walk adds are kept only when it emits spans.
+    final captionAnchors = List<String>.of(_pendingAnchors);
     final captionSpans = captionElement == null
         ? <EpubTextSpan>[]
         : _captionSpans(captionElement, styleOf(captionElement).fontSizePx);
+    if (captionElement != null && captionSpans.isEmpty) {
+      // The production caption-run collector discards the anchors of a run that
+      // emits nothing, so a nested marker in an empty caption is not a target;
+      // the caption element's own anchor still resolves at the alt end.
+      _restorePending(captionAnchors);
+    }
     final node = EpubImage(
       src: resolved,
       alt: image.getAttribute('alt') ?? '',
@@ -1401,13 +1703,88 @@ class _NormalizeContext {
           ? null
           : _nodeStyle(styleOf(captionElement)),
     );
-    _takePending(node);
+    node.anchorIds = leadingAnchors;
+    _takeTrailingPending(node);
     return node;
   }
 
+  /// Collects a caption's runs the way the production `collect_caption_runs`
+  /// does.
+  ///
+  /// Each visible block child flushes an independent run; a run that emits
+  /// nothing is discarded together with the anchors it recorded (the caption
+  /// element's own anchors are recorded separately by the caller), and
+  /// non-empty runs are joined by a generated newline separator.
   List<EpubTextSpan> _captionSpans(XmlElement caption, double baseFontSize) {
-    final spans = _inlineSpans(caption, baseFontSize, null);
-    return spans;
+    final output = <EpubTextSpan>[];
+    var run = <EpubTextSpan>[];
+    var runStarted = false;
+    var runPending = <String>[];
+
+    void ensureRun() {
+      if (runStarted) return;
+      runPending = List<String>.of(_pendingAnchors);
+      _beginInlineWalk();
+      runStarted = true;
+    }
+
+    void flushRun() {
+      if (!runStarted) return;
+      if (run.isNotEmpty) {
+        _collapseWhitespace(run);
+        _mergeSpans(run);
+      }
+      _endInlineWalk();
+      if (run.isEmpty) {
+        // The production run collector clears an empty run's anchors; the
+        // anchors that were already pending stay for the next content.
+        _restorePending(runPending);
+      } else {
+        // Anchors left pending after the run's content resolve at the run's
+        // end, before any generated separator.
+        _takeTrailingPendingSpan(run.last);
+        if (output.isNotEmpty) {
+          output.add(
+            run.first.copy()
+              ..text = '\n'
+              ..math = null,
+          );
+        }
+        output.addAll(run);
+      }
+      run = <EpubTextSpan>[];
+      runStarted = false;
+    }
+
+    for (final child in caption.children) {
+      if (child is XmlText) {
+        if (child.value.isEmpty) continue;
+        ensureRun();
+        run.add(_textSpanFor(caption, child.value, baseFontSize, null));
+        _takePendingSpan(run.last);
+        _inlineRawOffset += child.value.runes.length;
+        continue;
+      }
+      if (child is! XmlElement) continue;
+      final childStyle = styleOf(child);
+      if (childStyle.display == EpubDisplay.none) continue;
+      final isBlock = childStyle.display != EpubDisplay.inline;
+      if (isBlock) flushRun();
+      // The snapshot is taken before the child's own anchors: an empty run
+      // discards them, a non-empty run keeps them at the child's position.
+      ensureRun();
+      _noteAnchor(child);
+      _collectInline(
+        child,
+        baseFontSize,
+        child.name.local == 'a' ? child.getAttribute('href') : null,
+        run,
+        0,
+      );
+      if (isBlock) flushRun();
+    }
+    flushRun();
+    return output;
   }
 
   EpubContentNode? _parseTable(
@@ -1416,6 +1793,7 @@ class _NormalizeContext {
     int depth,
   ) {
     if (depth > _maxDepth) return null;
+    final pendingBefore = List<String>.of(_pendingAnchors);
     final captionElement = table.children
         .whereType<XmlElement>()
         .where(
@@ -1432,6 +1810,10 @@ class _NormalizeContext {
             styleOf(captionElement).fontSizePx,
             null,
           );
+    // A marker after the caption's text resolves at the caption's end, before
+    // the caption's generated separator: the production `table_anchor_offsets`
+    // records the caption's own inline offsets before it advances past them.
+    if (caption.isNotEmpty) _takeTrailingPendingSpan(caption.last);
     final rowGroups = <EpubTableRowGroup>[];
     final implicitBody = <EpubTableRow>[];
     void flushImplicit() {
@@ -1472,7 +1854,13 @@ class _NormalizeContext {
       }
     }
     flushImplicit();
-    if (caption.isEmpty && rowGroups.isEmpty) return null;
+    if (caption.isEmpty && rowGroups.isEmpty) {
+      // The production parser only computes table anchors for a table it
+      // emits, so an unemitted table's caption anchors are dropped (the
+      // table's own anchors stay pending at its start).
+      _restorePending(pendingBefore);
+      return null;
+    }
     final node = EpubTable(
       caption: caption,
       captionStyle: captionElement == null
@@ -1487,6 +1875,7 @@ class _NormalizeContext {
 
   EpubTableRow? _parseTableRow(XmlElement row) {
     if (styleOf(row).display == EpubDisplay.none) return null;
+    final pendingBefore = List<String>.of(_pendingAnchors);
     _noteAnchor(row);
     final cells = <EpubTableCell>[];
     for (final cell in row.children.whereType<XmlElement>()) {
@@ -1494,15 +1883,50 @@ class _NormalizeContext {
       final parsed = _parseTableCell(cell);
       if (parsed != null) cells.add(parsed);
     }
-    return cells.isEmpty ? null : EpubTableRow(cells: cells);
+    if (cells.isEmpty) {
+      // A row with no visible cells is not emitted and its anchors are
+      // dropped, like the production `visible_table_rows` filter.
+      _restorePending(pendingBefore);
+      return null;
+    }
+    return EpubTableRow(cells: cells);
   }
 
   EpubTableCell? _parseTableCell(XmlElement cell) {
     final style = styleOf(cell);
     if (style.display == EpubDisplay.none) return null;
     _noteAnchor(cell);
+    // Anchors pending when the cell begins resolve at the cell's start: the
+    // cell's own id, its row's id, and any marker an earlier empty cell left
+    // behind. The production `table_anchor_offsets` records each of them at the
+    // offset where it appears, not at the next emitted content.
+    final startAnchors = List<String>.of(_pendingAnchors);
+    _pendingAnchors.clear();
     final cellStyle = _nodeStyle(style);
-    final blocks = parseBlocks(cell, 0);
+    final blockChildren = _hasBlockChildren(cell);
+    final List<EpubContentNode> blocks;
+    if (blockChildren) {
+      // A cell with block children keeps the block walk, which the production
+      // anchor pass does use (including its computed-style code-block
+      // conversion).
+      blocks = parseBlocks(cell, 0);
+    } else if (_cellHasMedia(cell)) {
+      // The retained inline-cell anchor stream ignores image alt text and
+      // treats MathML as spans, so it cannot be reproduced from the rendered
+      // content: the cell keeps its content and drops the descendant anchors
+      // rather than publishing an offset it cannot verify.
+      _suppressAnchors = true;
+      try {
+        blocks = parseBlocks(cell, 0, codeBlocks: false);
+      } finally {
+        _suppressAnchors = false;
+      }
+    } else {
+      // An inline-only cell's content and anchors come from the production
+      // inline collector: one paragraph, and none of the block walker's
+      // code-block or list-item rules apply.
+      blocks = _inlineCellBlocks(cell, cellStyle);
+    }
     final children = <EpubContentNode>[];
     final blockStarts = <int>[];
     for (final block in blocks) {
@@ -1513,6 +1937,11 @@ class _NormalizeContext {
       ..sort()
       ..toSet()
       ..removeWhere((start) => start >= children.length);
+    // A marker left pending after the cell's content resolves at the cell's
+    // text end (the production per-block accounting adds one scalar for a cell
+    // with emitted block children; the canonical builder applies it).
+    final endAnchors = List<String>.of(_pendingAnchors);
+    _pendingAnchors.clear();
     return EpubTableCell(
       id: cell.getAttribute('id'),
       header: cell.name.local == 'th',
@@ -1526,7 +1955,46 @@ class _NormalizeContext {
       children: children,
       blockStarts: blockStarts,
       style: cellStyle,
+      blockChildren: blockChildren,
+      startAnchorIds: startAnchors,
+      endAnchorIds: endAnchors,
     );
+  }
+
+  /// An inline-only cell's content, the production inline collector: the cell's
+  /// text and inline children join into one paragraph, and every descendant
+  /// anchor is recorded at its own position.
+  List<EpubContentNode> _inlineCellBlocks(
+    XmlElement cell,
+    EpubNodeStyle style,
+  ) {
+    final spans = _inlineSpans(cell, styleOf(cell).fontSizePx, null);
+    if (spans.isEmpty) return const [];
+    return [EpubParagraph(spans, style)];
+  }
+
+  /// Whether the cell contains an image or MathML element.
+  ///
+  /// The retained inline-cell anchor stream treats MathML as inline spans and
+  /// image alt text as invisible, so a cell mixing either with anchors cannot
+  /// have its anchors reproduced from the rendered content.
+  bool _cellHasMedia(XmlElement cell) {
+    for (final node in cell.descendants.whereType<XmlElement>()) {
+      if (node.name.local == 'img' || _isMathElement(node)) return true;
+    }
+    return false;
+  }
+
+  /// Whether the cell has a visible child element whose display is neither
+  /// none nor inline, the production `has_block_children` decision.
+  bool _hasBlockChildren(XmlElement cell) {
+    for (final child in cell.children.whereType<XmlElement>()) {
+      final display = styleOf(child).display;
+      if (display != EpubDisplay.none && display != EpubDisplay.inline) {
+        return true;
+      }
+    }
+    return false;
   }
 
   int _spanValue(String? raw, int fallback) {

@@ -22,6 +22,10 @@ dependencies:
     path: rust_builder
 
 dev_dependencies:
+  # Reader tests build small in-memory EPUB archives (nested tables of
+  # contents, fragment targets, painted links) instead of extending the shared
+  # conformance corpus; the engine already depends on `archive`.
+  archive: ^4.3.0
   ffigen: ^20.1.1
   flutter_lints: ^6.0.0
   flutter_test:

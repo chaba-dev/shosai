@@ -105,6 +105,29 @@ void _extractSpansText(List<EpubTextSpan> spans, StringBuffer out) {
   }
 }
 
+/// Whether [name] is an anchor the parser admits.
+///
+/// The production `record_anchor_name` skips an empty name, a name longer than
+/// 1,024 UTF-8 bytes and any control character (Unicode category Cc, which
+/// includes C1), so such an `id`/`name` attribute never becomes an anchor and
+/// its fragment can never resolve to a position.
+bool admitsAnchorName(String name) {
+  if (name.isEmpty) return false;
+  var bytes = 0;
+  for (final rune in name.runes) {
+    bytes += rune < 0x80
+        ? 1
+        : rune < 0x800
+        ? 2
+        : rune < 0x10000
+        ? 3
+        : 4;
+    if (bytes > 1024) return false;
+    if (rune < 0x20 || (rune >= 0x7F && rune <= 0x9F)) return false;
+  }
+  return true;
+}
+
 /// Builds the canonical stream while annotating every span, node, image alt
 /// and generated separator with its scalar range.
 ///
@@ -120,19 +143,30 @@ class CanonicalTextBuilder {
 
   int get scalarCount => _scalar;
 
+  void _recordAnchor(String name, int offset) {
+    if (!admitsAnchorName(name)) return;
+    if (anchors.length >= 4096) return;
+    anchors.putIfAbsent(name, () => offset);
+  }
+
   void _recordAnchors(List<String> ids, int offset) {
     for (final id in ids) {
-      if (id.isEmpty || id.length > 1024) continue;
-      if (anchors.length >= 4096) return;
-      anchors.putIfAbsent(id, () => offset);
+      _recordAnchor(id, offset);
     }
   }
+
+  /// Records an anchor that resolves at the current end of the stream.
+  ///
+  /// Unresolved markers go through the same admission rules and the same
+  /// 4,096-anchor ceiling as every other anchor.
+  void recordEndAnchor(String name) => _recordAnchor(name, _scalar);
 
   void _write(String text, {EpubTextSpan? span}) {
     if (text.isEmpty) {
       final range = EpubCanonicalSpan(_scalar, _scalar);
       span?.canonical = range;
       _recordAnchors(span?.anchorIds ?? const [], _scalar);
+      _recordAnchors(span?.endAnchorIds ?? const [], _scalar);
       return;
     }
     final start = _scalar;
@@ -144,6 +178,7 @@ class CanonicalTextBuilder {
     final range = EpubCanonicalSpan(start, _scalar);
     span?.canonical = range;
     _recordAnchors(span?.anchorIds ?? const [], start);
+    _recordAnchors(span?.endAnchorIds ?? const [], _scalar);
   }
 
   void _writeSeparator(String text) {
@@ -187,6 +222,10 @@ class CanonicalTextBuilder {
           for (final row in group.rows) {
             for (var index = 0; index < row.cells.length; index++) {
               final cell = row.cells[index];
+              // The cell's own and inherited anchors resolve at its start; a
+              // trailing marker resolves at the cell text end, one scalar
+              // further for a block cell (the generated separator).
+              _recordAnchors(cell.startAnchorIds, _scalar);
               for (
                 var childIndex = 0;
                 childIndex < cell.children.length;
@@ -197,6 +236,13 @@ class CanonicalTextBuilder {
                 }
                 _node(cell.children[childIndex]);
               }
+              // A block cell's trailing marker sits one scalar past its last
+              // emitted child (the production parser counts one generated
+              // newline per emitted block); an inline cell's sits exactly at
+              // the cell text end.
+              final trailingOffset =
+                  cell.blockChildren && cell.children.isNotEmpty ? 1 : 0;
+              _recordAnchors(cell.endAnchorIds, _scalar + trailingOffset);
               if (index + 1 < row.cells.length) _writeSeparator('\t');
             }
             _writeSeparator('\n');

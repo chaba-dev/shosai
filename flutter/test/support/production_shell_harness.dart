@@ -417,6 +417,12 @@ class HarnessBridge implements FlutterBridge {
   final Map<BigInt, FlutterBookFormat> _documentFormats =
       <BigInt, FlutterBookFormat>{};
   BigInt _nextCancellation = BigInt.one;
+
+  /// Cancellation ids the bridge was asked to cancel.
+  ///
+  /// The retained bridge refuses a read whose token was cancelled while it was
+  /// held; the harness models that for a held source read.
+  final Set<BigInt> cancelledIds = <BigInt>{};
   BigInt _nextBuffer = BigInt.one;
   bool _disposed = false;
 
@@ -511,6 +517,7 @@ class HarnessBridge implements FlutterBridge {
   @override
   bool cancel({required BigInt id}) {
     events.add('cancel');
+    cancelledIds.add(id);
     return true;
   }
 
@@ -622,6 +629,17 @@ class HarnessBridge implements FlutterBridge {
   /// path asks for the comparison.
   Map<int, String> canonicalTexts = const {};
 
+  /// Pending source-read answers, consumed before [epubBytes].
+  ///
+  /// A test uses one to hold the archive read open while it supersedes the
+  /// request that started it; a read whose token is cancelled while it is held
+  /// then fails like the retained bridge's.
+  final List<Completer<Uint8List>> epubSourceCompleters =
+      <Completer<Uint8List>>[];
+
+  /// The cancellation id of every source read, in call order.
+  final List<BigInt> epubSourceCancellations = <BigInt>[];
+
   int epubSourceCalls = 0;
   int epubCanonicalCalls = 0;
 
@@ -638,6 +656,20 @@ class HarnessBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     epubSourceCalls += 1;
+    epubSourceCancellations.add(cancellationId);
+    if (epubSourceCompleters.isNotEmpty) {
+      final bytes = await epubSourceCompleters.removeAt(0).future;
+      // A read whose token was cancelled while it was held fails, like the
+      // retained bridge; the caller then retries or keeps the retained
+      // renderer.
+      if (cancelledIds.contains(cancellationId)) {
+        throw const FlutterBridgeError(
+          kind: FlutterBridgeErrorKind.cancelled,
+          message: 'the harness source read was cancelled',
+        );
+      }
+      return bytes;
+    }
     if (epubBytes.isEmpty) {
       throw FlutterBridgeError(
         kind: FlutterBridgeErrorKind.limitExceeded,

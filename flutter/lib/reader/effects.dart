@@ -40,11 +40,23 @@ typedef ReaderProgressSource =
 
 /// Supplies the Contents entries for a loaded document (RD-07).
 ///
-/// The fixture supplies them in 4C because the bridge exposes no TOC DTO; the
-/// default loader renders the EPUB chapter fallback (contract §4.6). The
-/// controller owns the guarded effect and rejects stale completions.
+/// The injected loader is the fixture seam the panel tests use; production
+/// leaves it null and the controller resolves the document's real table of
+/// contents from the Dart EPUB engine (falling back to the EPUB chapter
+/// fallback). The controller owns the guarded effect and rejects stale
+/// completions.
 typedef ReaderContentsLoader =
     Future<List<ReaderContentsEntry>> Function(FlutterDocumentSummary document);
+
+/// Opens one allowed external link through the platform.
+///
+/// The controller classifies a rendered link's href and calls this adapter only
+/// for the allowed schemes (`http`, `https`, `mailto`); `file`, `data`,
+/// `javascript` and every other scheme never reach it, and the reader itself
+/// never fetches a remote resource or resolves a book reference against the
+/// network. The composition root injects the platform opener; a reader built
+/// without one opens nothing.
+typedef ReaderExternalLinkOpener = Future<void> Function(String url);
 
 /// A document the more panel's open-book picker returned (RD-10).
 final class ReaderPickedDocument {

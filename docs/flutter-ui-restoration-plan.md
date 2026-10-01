@@ -99,10 +99,12 @@ decision does change here:
   reviewed per PR before publication.
 
 **Slice 3 delivery (EPUB content service behind the retained UI, 2026-09-28):**
-implementation merged-ready, not acceptance. [#138](https://github.com/chaba-dev/shosai/pull/138)
+delivery, not acceptance. [#138](https://github.com/chaba-dev/shosai/pull/138)
 (the adoption decision and architecture amendments) and
 [#139](https://github.com/chaba-dev/shosai/pull/139) (the production Dart EPUB
-engine module) merged as `129d9885` and `cac305b1`; the content-service slice
+engine module) merged as `129d9885` and `cac305b1`, and the content-service
+slice itself merged as [#141](https://github.com/chaba-dev/shosai/pull/141) at
+`b6001998` on 2026-09-30. The slice
 serves paginated EPUB chapters from the engine behind the retained UI, with
 PDF/CBZ, continuous mode, the stores and the single Rust database writer
 untouched. The controller owns routing, the parsed source and the chapter layout
@@ -120,6 +122,29 @@ document-area measurement change are recorded in the
 This entry changes no package acceptance: 5A stays accepted, 5B stays
 paused/superseded, the accounting stays 4/30, and 5C–5J stay unchecked.
 
+**Slice 4 delivery (EPUB navigation: real Contents/TOC and fragment links,
+2026-10-01):** delivery, not acceptance. The retained Contents panel is served
+by the book's real table of contents, and links painted on a Dart-rendered page
+activate: same- and cross-chapter fragments navigate through the guarded
+relayout path, with an anchor offset published only for a chapter whose
+canonical stream was verified identical to the retained one. An unverified
+anchor degrades to the chapter-level target, an unknown or empty anchor
+navigates nowhere, and a structural mismatch between the engine's chapters and
+the retained logical units keeps the retained chapter fallback. Anchor offsets
+were aligned with the retained parser's literal per-block accounting (list
+items, blockquotes, inline-display containers, table rows and cells, figure
+captions and the anchor-admission limits), each pinned by a regression that was
+mutation-checked. External links keep the retained restricted scheme policy:
+`http`/`https`/`mailto` go to an injected platform opener, and
+`file`/`data`/`javascript` and every other scheme are refused and never fetched.
+The slice report, its inspected EN/JA renders and its named open gates
+(real-book corpus, continuous/spread modes, progress and sessions, and the
+disclosed nav-vs-NCX, per-entry-skip and canonical-stream engine differences)
+are recorded in the
+[evaluation plan](dart-document-stack-evaluation-plan.md#slice-4-report-epub-navigation-real-table-of-contents-and-fragment-links-2026-10-01).
+This entry changes no package acceptance: 5A stays accepted, 5B stays
+paused/superseded, the accounting stays 4/30, and 5C–5J stay unchecked.
+
 **Outstanding gaps (acceptance remains open; implementation is not approval):**
 - **4B/5G**: inherited chrome-height offset (4B
   header/tab/document top 61/48/111 versus reference 52/35/90); 4B acceptance open.
@@ -131,8 +156,11 @@ paused/superseded, the accounting stays 4/30, and 5C–5J stay unchecked.
   compact row heights and text line box. Search token 420 versus reference-rendered
   557 px remains a token-owner discrepancy, not an approved permanent difference.
 - **5C/FM-22**: CJK document fallback still missing. **5A/5B/5G/5H**: real page
-  boxes, spreads and footer remain absent. **5E/5F/5G**: TOC/tabs/progress still use
-  declared presentation fixtures; no live capability acceptance is implied.
+  boxes, spreads and footer remain absent. **5E/5F/5G**: the EPUB Contents panel
+  is now served by the real table of contents on the Dart path (slice 4,
+  delivery only), while tabs and progress still use declared presentation
+  fixtures and the remaining 5E capabilities (durable ranges, semantic
+  sidecars) stay open; no live capability acceptance is implied.
 - **EPUB adoption gates (owner, 2026-09-28)**: representative real books including
   Japanese and mixed-direction text, images and tables; over-tall table-row
   correctness; font admission/fallback; scroll position and reopen; real frame

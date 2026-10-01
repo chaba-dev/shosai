@@ -2,9 +2,10 @@
 /// addresses for the Shōsai reader.
 ///
 /// This is the production engine module adopted on 2026-09-28
-/// (`docs/dart-document-stack-evaluation-plan.md`). It is not yet wired into
-/// the reader: the content-service slice that serves EPUB chapters from this
-/// engine is separate, and the API is frozen only when that slice lands.
+/// (`docs/dart-document-stack-evaluation-plan.md`). The reader serves paginated
+/// EPUB chapters, the Contents panel and painted internal links from it behind
+/// the retained UI; PDF/CBZ and the Rust-owned stores are separate and
+/// unchanged.
 library;
 
 export 'src/address.dart';

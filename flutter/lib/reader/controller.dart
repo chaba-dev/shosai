@@ -40,6 +40,7 @@ final class ReaderController implements Listenable {
     ReaderTabRevealAdapter? tabRevealAdapter,
     ReaderProgressSource? progressSource,
     ReaderContentsLoader? contentsLoader,
+    ReaderExternalLinkOpener? externalLinkOpener,
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
     ReaderNoticeReporter? noticeReporter,
@@ -78,6 +79,7 @@ final class ReaderController implements Listenable {
        _tabRevealAdapter = tabRevealAdapter ?? ((_) async {}),
        _progressSource = progressSource,
        _contentsLoader = contentsLoader,
+       _externalLinkOpener = externalLinkOpener ?? ((_) async {}),
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
@@ -114,6 +116,7 @@ final class ReaderController implements Listenable {
   final ReaderTabRevealAdapter _tabRevealAdapter;
   final ReaderProgressSource? _progressSource;
   final ReaderContentsLoader? _contentsLoader;
+  final ReaderExternalLinkOpener _externalLinkOpener;
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
   final ReaderNoticeReporter _reportNotice;
@@ -145,6 +148,14 @@ final class ReaderController implements Listenable {
   /// The in-flight load for [_epubSourceGeneration].
   Future<EpubContentSource?>? _epubSourceLoad;
 
+  /// The bridge cancellation owned by the in-flight source load.
+  ///
+  /// The load is shared by concurrent relayouts and Contents requests, so an
+  /// individual request's supersession must not cancel it: its token belongs to
+  /// the controller and is cancelled only when the document is replaced,
+  /// suspended or released.
+  BigInt? _epubSourceCancellation;
+
   /// The bundled faces' coverage, resolved once per reader.
   EpubFontCoverage? _epubFontCoverage;
   Future<EpubFontCoverage?>? _epubFontCoverageLoad;
@@ -170,6 +181,8 @@ final class ReaderController implements Listenable {
 
   BigInt? _activeCancellation;
   final Set<BigInt> _relayoutCancellations = {};
+  final Set<BigInt> _contentsCancellations = {};
+  final Set<BigInt> _linkCancellations = {};
   final Set<BigInt> _annotationCancellations = {};
   final Set<BigInt> _noteCreateCancellations = {};
   final Set<BigInt> _interruptedNoteCreates = {};
@@ -189,6 +202,7 @@ final class ReaderController implements Listenable {
   String? _searchError;
   int _searchCurrentIndex = 0;
   int _contentsRevision = 0;
+  int _linkRevision = 0;
   int _exportRevision = 0;
   int _documentPickerRevision = 0;
   bool _documentPickerActive = false;
@@ -362,6 +376,8 @@ final class ReaderController implements Listenable {
         }
       case ReaderContentsRequested():
         _contentsRequested();
+      case ReaderLinkActivated():
+        _linkActivated(message.href);
       case ReaderLocationNavigated():
         _unitRequested(
           message.unit,
@@ -406,6 +422,35 @@ final class ReaderController implements Listenable {
             ),
           );
         }
+      case _ReaderContentsFinished():
+        _contentsCancellations.remove(message.cancellation);
+        _bridge.releaseCancellation(id: message.cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
+      case _ReaderEpubSourceFinished():
+        if (_epubSourceCancellation == message.cancellation) {
+          _epubSourceCancellation = null;
+        }
+        _bridge.releaseCancellation(id: message.cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
+      case _ReaderLinkResolved():
+        if (_isCurrent(message.generation) &&
+            message.revision == _linkRevision) {
+          _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          );
+        }
+      case _ReaderLinkFinished():
+        _linkCancellations.remove(message.cancellation);
+        _bridge.releaseCancellation(id: message.cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
       case _ReaderBookmarkExportCompleted():
         if (_isCurrent(message.generation) &&
             message.revision == _exportRevision) {
@@ -863,6 +908,8 @@ final class ReaderController implements Listenable {
     for (final cancellation in _toolCancellations) {
       _bridge.cancel(id: cancellation);
     }
+    _cancelContentsEffects();
+    _cancelLinkEffects();
     _layoutRevision += 1;
     _activeRelayoutIntent = null;
     final openLayout = _requestedLayout;
@@ -902,7 +949,6 @@ final class ReaderController implements Listenable {
     _searchQuery = '';
     _searchError = null;
     _searchCurrentIndex = 0;
-    _contentsRevision += 1;
     _exportRevision += 1;
     _retireDocumentPicker();
     _emit(
@@ -1431,6 +1477,9 @@ final class ReaderController implements Listenable {
   }) {
     final generation = _model.generation;
     final targetUnit = unit ?? _model.unit;
+    // A newer accepted layout/navigation supersedes any link resolution still
+    // deciding its target: its completion must not move the reader back.
+    _cancelLinkEffects();
     _requestedLayout = layout;
     if (height != null &&
         document.format == FlutterBookFormat.epub &&
@@ -1538,6 +1587,9 @@ final class ReaderController implements Listenable {
       return;
     }
     if (target == page.canonicalStart) return;
+    // A page turn is a newer navigation: a link still deciding its target must
+    // not move the reader back when its comparison completes.
+    _cancelLinkEffects();
     // The page the selection addresses is leaving the screen: invalidate it the
     // way a relayout does, without moving focus into the document (the turn is
     // not an explicit selection cancellation).
@@ -1842,15 +1894,19 @@ final class ReaderController implements Listenable {
 
   /// Loads or retries the Contents entries through a guarded effect (RD-07).
   ///
-  /// The effect is controller-owned: the injected loader is fixture-provided
-  /// and the default loader renders the EPUB chapter fallback, because the
-  /// bridge exposes no TOC DTO (contract §4.6). A stale completion cannot
-  /// publish entries for a newer document generation or load.
+  /// The effect is controller-owned. An injected loader is the fixture seam;
+  /// otherwise the document's real table of contents is resolved from the Dart
+  /// EPUB engine, qualified against the retained canonical stream, with the
+  /// EPUB chapter fallback for a document the engine cannot serve. A stale
+  /// completion cannot publish entries for a newer document generation or load.
   void _contentsRequested() {
     final document = _model.document;
     if (document == null || _model.busy || _closing || _suspended) return;
     final generation = _model.generation;
-    final revision = ++_contentsRevision;
+    // Cancelling first invalidates the superseded load; the new load then owns
+    // the current revision, so a later cancel can invalidate it the same way.
+    _cancelContentsEffects();
+    final revision = _contentsRevision;
     _emit(
       _model.copyWith(
         contents: ReaderContentsPresentation(
@@ -1859,20 +1915,234 @@ final class ReaderController implements Listenable {
         ),
       ),
     );
+    final loader = _contentsLoader;
+    if (loader != null) {
+      unawaited(() async {
+        try {
+          final entries = await loader(document);
+          dispatch(_ReaderContentsLoaded(generation, revision, entries));
+        } catch (error) {
+          dispatch(
+            _ReaderContentsFailed(generation, revision, _describeError(error)),
+          );
+        }
+      }());
+      return;
+    }
+    if (document.format != FlutterBookFormat.epub) {
+      dispatch(
+        _ReaderContentsLoaded(generation, revision, _chapterFallback(document)),
+      );
+      return;
+    }
+    final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      dispatch(
+        _ReaderContentsFailed(generation, revision, _describeError(error)),
+      );
+      return;
+    }
+    _contentsCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
     unawaited(() async {
       try {
-        final entries =
-            await (_contentsLoader?.call(document) ??
-                Future<List<ReaderContentsEntry>>.value(
-                  _chapterFallback(document),
-                ));
+        final entries = await _defaultContents(
+          document,
+          generation,
+          revision,
+          cancellation,
+        );
+        if (!_isCurrent(generation) || revision != _contentsRevision) return;
         dispatch(_ReaderContentsLoaded(generation, revision, entries));
       } catch (error) {
         dispatch(
           _ReaderContentsFailed(generation, revision, _describeError(error)),
         );
+      } finally {
+        dispatch(_ReaderContentsFinished(cancellation));
       }
     }());
+  }
+
+  /// The default Contents source: the real EPUB table of contents, or the
+  /// chapter fallback when the engine cannot be trusted for this document.
+  ///
+  /// The engine's spine ordinals are the retained logical units only when both
+  /// implementations loaded the same chapters; a structural mismatch keeps the
+  /// whole panel on the retained fallback rather than offering rows that could
+  /// address another chapter. An entry whose fragment resolves in a chapter
+  /// whose canonical stream was not verified identical to the retained one
+  /// keeps its title but loses its offset: the row then addresses the chapter,
+  /// never an offset the store does not share.
+  Future<List<ReaderContentsEntry>> _defaultContents(
+    FlutterDocumentSummary document,
+    int generation,
+    int revision,
+    BigInt cancellation,
+  ) async {
+    final source = await _ensureEpubSource(document, generation);
+    if (source == null) return _chapterFallback(document);
+    if (!_isCurrent(generation) || revision != _contentsRevision) {
+      return _chapterFallback(document);
+    }
+    if (source.book.chapters.length != document.logicalUnitCount.toInt()) {
+      return _chapterFallback(document);
+    }
+    final locations = resolveTocLocations(source.book);
+    if (locations.isEmpty) return _chapterFallback(document);
+    final verified = <int, bool>{};
+    for (final spine in {
+      for (final location in locations)
+        if (location.offset != null) location.spine,
+    }) {
+      final matches = await _epubUnitMatchesRetained(
+        source,
+        document,
+        spine,
+        cancellation,
+        () => _isCurrent(generation) && revision == _contentsRevision,
+      );
+      if (!_isCurrent(generation) || revision != _contentsRevision) {
+        return _chapterFallback(document);
+      }
+      verified[spine] = matches;
+    }
+    return [
+      for (final location in locations)
+        ReaderContentsEntry(
+          depth: location.depth,
+          title: location.title,
+          unit: location.spine,
+          offset: location.offset != null && verified[location.spine] == true
+              ? location.offset
+              : null,
+        ),
+    ];
+  }
+
+  /// Cancels every in-flight Contents load and drops its completion.
+  void _cancelContentsEffects() {
+    _contentsRevision += 1;
+    for (final cancellation in _contentsCancellations) {
+      _bridge.cancel(id: cancellation);
+    }
+    _contentsCancellations.clear();
+  }
+
+  /// Cancels every in-flight link activation and drops its completion.
+  void _cancelLinkEffects() {
+    _linkRevision += 1;
+    for (final cancellation in _linkCancellations) {
+      _bridge.cancel(id: cancellation);
+    }
+    _linkCancellations.clear();
+  }
+
+  /// Activates a link painted on a Dart-engine EPUB page.
+  ///
+  /// Classification follows the retained reader: a reference without a scheme
+  /// is internal and is resolved against the current chapter; `http`, `https`
+  /// and `mailto` are the only external schemes and go to the injected platform
+  /// opener; every other scheme is refused, and the reader never fetches a book
+  /// resource. An internal fragment is navigated only when its chapter's
+  /// canonical stream was verified identical to the retained one; otherwise the
+  /// link degrades to the chapter-level target instead of persisting an offset
+  /// the store does not share. A structural mismatch between the engine's
+  /// chapters and the retained logical units refuses the link entirely.
+  void _linkActivated(String href) {
+    final document = _model.document;
+    if (document == null || document.format != FlutterBookFormat.epub) return;
+    if (_model.busy ||
+        _model.relayoutBusy ||
+        _model.annotationOperations.isNotEmpty ||
+        _closing ||
+        _suspended) {
+      return;
+    }
+    final kind = classifyEpubLink(href);
+    if (kind == EpubLinkKind.external) {
+      unawaited(_openExternalLink(href));
+      return;
+    }
+    if (kind == EpubLinkKind.unsupported) return;
+    final source = _epubSource;
+    if (source == null || _epubSourceGeneration != _model.generation) return;
+    final unit = _model.unit;
+    if (unit < 0 || unit >= source.book.chapters.length) return;
+    if (source.book.chapters.length != document.logicalUnitCount.toInt()) {
+      return;
+    }
+    final target = resolveBookLink(
+      book: source.book,
+      fromResource: source.book.chapters[unit].resource,
+      href: href,
+    );
+    if (target == null) return;
+    final spine = target.point.spine;
+    if (!target.hasFragment) {
+      _unitRequested(spine, offset: 0, replaceReadingOffset: true);
+      return;
+    }
+    final cached = source.canonicalMatch(spine);
+    if (cached == true) {
+      _unitRequested(
+        spine,
+        offset: target.point.scalar,
+        replaceReadingOffset: true,
+      );
+      return;
+    }
+    if (cached == false) {
+      _unitRequested(spine, replaceReadingOffset: true);
+      return;
+    }
+    final generation = _model.generation;
+    final revision = ++_linkRevision;
+    final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (_) {
+      return;
+    }
+    _linkCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    unawaited(() async {
+      try {
+        final matches = await _epubUnitMatchesRetained(
+          source,
+          document,
+          spine,
+          cancellation,
+          () => _isCurrent(generation) && revision == _linkRevision,
+        );
+        if (!_isCurrent(generation) || revision != _linkRevision) return;
+        dispatch(
+          _ReaderLinkResolved(
+            generation,
+            revision,
+            spine,
+            offset: matches ? target.point.scalar : null,
+          ),
+        );
+      } finally {
+        dispatch(_ReaderLinkFinished(cancellation));
+      }
+    }());
+  }
+
+  /// Opens an allowed external link through the injected platform opener.
+  ///
+  /// The opener is a platform adapter with no reader error surface: the
+  /// retained reference only warns when the platform refuses a URL, so a
+  /// failure here is not turned into a reader error.
+  Future<void> _openExternalLink(String url) async {
+    try {
+      await _externalLinkOpener(url);
+    } catch (_) {
+      // See above: a refused platform open is not a reader error.
+    }
   }
 
   /// The EPUB chapter fallback: one untitled entry per logical unit.
@@ -2437,15 +2707,14 @@ final class ReaderController implements Listenable {
     final pageHeight = _epubPageHeight(height);
     if (pageHeight == null) return false;
     if (unit < 0 || unit >= document.logicalUnitCount.toInt()) return false;
-    final source = await _ensureEpubSource(document, generation, cancellation);
+    final source = await _ensureEpubSource(document, generation);
     if (source == null || !_isCurrentLayout(generation, revision)) return false;
     final matches = await _epubUnitMatchesRetained(
       source,
       document,
       unit,
       cancellation,
-      generation,
-      revision,
+      () => _isCurrentLayout(generation, revision),
     );
     if (!_isCurrentLayout(generation, revision)) return false;
     if (!matches) return false;
@@ -2474,8 +2743,17 @@ final class ReaderController implements Listenable {
       lineSpacing: layout.lineSpacing,
       theme: _typographyTheme,
     );
+    // An explicit replacement with no offset is a chapter-level target: the
+    // caller is replacing the durable position, so the reader goes to the
+    // chapter start instead of keeping the stale offset the replacement is
+    // meant to discard. A relayout without replacement keeps the reader's
+    // position when it stays in the chapter.
     final target =
-        (offset ?? (unit == _model.unit ? _model.readingOffset : null) ?? 0)
+        (offset ??
+                (replaceReadingOffset
+                    ? null
+                    : (unit == _model.unit ? _model.readingOffset : null)) ??
+                0)
             .clamp(0, chapter.scalarCount);
     var session = _epubSession;
     final reusable =
@@ -2575,7 +2853,6 @@ final class ReaderController implements Listenable {
   Future<EpubContentSource?> _ensureEpubSource(
     FlutterDocumentSummary document,
     int generation,
-    BigInt cancellation,
   ) {
     final existing = _epubSource;
     if (existing != null && _epubSourceGeneration == generation) {
@@ -2585,8 +2862,18 @@ final class ReaderController implements Listenable {
       final load = _epubSourceLoad;
       if (load != null) return load;
     } else {
+      // A load for another generation belongs to a document that is gone.
+      _cancelEpubSourceLoad();
       _epubSourceGeneration = generation;
     }
+    final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (_) {
+      return Future<EpubContentSource?>.value(null);
+    }
+    _epubSourceCancellation = cancellation;
+    _activeBridgeOperations += 1;
     final load = _openEpubSource(document, generation, cancellation);
     _epubSourceLoad = load;
     // A refused load is not remembered: the next relayout retries it instead of
@@ -2599,13 +2886,23 @@ final class ReaderController implements Listenable {
           if (source == null && identical(_epubSourceLoad, load)) {
             _epubSourceLoad = null;
           }
+          dispatch(_ReaderEpubSourceFinished(cancellation));
         },
         onError: (_) {
           if (identical(_epubSourceLoad, load)) _epubSourceLoad = null;
+          dispatch(_ReaderEpubSourceFinished(cancellation));
         },
       ),
     );
     return load;
+  }
+
+  /// Cancels the in-flight source load, if any.
+  void _cancelEpubSourceLoad() {
+    final cancellation = _epubSourceCancellation;
+    if (cancellation == null) return;
+    _epubSourceCancellation = null;
+    _bridge.cancel(id: cancellation);
   }
 
   /// Loads, parses and adopts one document's source.
@@ -2668,16 +2965,16 @@ final class ReaderController implements Listenable {
   ///
   /// The result is cached per unit for the document's lifetime: the streams are
   /// immutable, so the gate is paid once per chapter. Only a *decided*
-  /// comparison is cached — a call that failed because the layout was
-  /// superseded (a resize or navigation cancelled it) must be retried by the
-  /// successor rather than remembered as a permanent mismatch.
+  /// comparison is cached — a call that failed because the work that started it
+  /// was superseded (a resize, a navigation or a new Contents load cancelled
+  /// it) must be retried by the successor rather than remembered as a permanent
+  /// mismatch. [stillCurrent] answers whether that work still owns the result.
   Future<bool> _epubUnitMatchesRetained(
     EpubContentSource source,
     FlutterDocumentSummary document,
     int unit,
     BigInt cancellation,
-    int generation,
-    int revision,
+    bool Function() stillCurrent,
   ) async {
     final cached = source.canonicalMatch(unit);
     if (cached != null) return cached;
@@ -2694,8 +2991,8 @@ final class ReaderController implements Listenable {
     } catch (_) {
       // A chapter the retained implementation cannot produce (above its
       // stream ceiling, or an invalid unit) is a decided refusal; a call
-      // cancelled by a superseding layout is not.
-      decided = _isCurrentLayout(generation, revision);
+      // cancelled by a superseding operation is not.
+      decided = stillCurrent();
       matches = false;
     }
     if (decided) source.recordCanonicalMatch(unit, matches);
@@ -2813,6 +3110,7 @@ final class ReaderController implements Listenable {
     _epubSource = null;
     _epubSourceGeneration = null;
     _epubSourceLoad = null;
+    _cancelEpubSourceLoad();
     if (retired == null) return;
     if (immediate) {
       retired.dispose();
@@ -4445,6 +4743,9 @@ final class ReaderController implements Listenable {
     for (final cancellation in _toolCancellations) {
       _bridge.cancel(id: cancellation);
     }
+    _cancelContentsEffects();
+    _cancelLinkEffects();
+    _cancelEpubSourceLoad();
     _layoutRevision += 1;
     _annotationRevision += 1;
     _selectionRevision += 1;
@@ -4623,7 +4924,12 @@ final class ReaderController implements Listenable {
   ///
   /// `loading` wins while an open is in flight or before a load starts, and
   /// the stored entries gain their `current` flag from the live unit; the
-  /// entries themselves come from the guarded load effect.
+  /// entries themselves come from the guarded load effect. A real table of
+  /// contents can name the same chapter several times, so exactly one entry is
+  /// current: the last entry of the current chapter at or before the reader's
+  /// durable offset (the chapter's first entry when the reader is before all of
+  /// them, and none when the chapter has no row). The panel's reveal target is
+  /// a single key, and marking every row of a chapter would duplicate it.
   ReaderContentsPresentation _deriveContents(ReaderModel model) {
     final contents = model.contents;
     if (model.busy || model.document == null) {
@@ -4632,11 +4938,23 @@ final class ReaderController implements Listenable {
         entries: contents.entries,
       );
     }
+    final readingOffset = model.readingOffset ?? 0;
+    var current = -1;
+    for (var index = 0; index < contents.entries.length; index += 1) {
+      final entry = contents.entries[index];
+      if (entry.unit != model.unit) continue;
+      if ((entry.offset ?? 0) <= readingOffset) current = index;
+    }
+    if (current < 0) {
+      current = contents.entries.indexWhere(
+        (entry) => entry.unit == model.unit,
+      );
+    }
     return ReaderContentsPresentation(
       status: contents.status,
       entries: [
-        for (final entry in contents.entries)
-          entry.copyWith(current: entry.unit == model.unit),
+        for (var index = 0; index < contents.entries.length; index += 1)
+          contents.entries[index].copyWith(current: index == current),
       ],
       error: contents.error,
     );
@@ -4748,6 +5066,9 @@ final class ReaderController implements Listenable {
     for (final cancellation in _toolCancellations) {
       _bridge.cancel(id: cancellation);
     }
+    _cancelContentsEffects();
+    _cancelLinkEffects();
+    _cancelEpubSourceLoad();
     _searchRevision += 1;
     _bookmarkRevision += 1;
     _retireDocumentPicker();

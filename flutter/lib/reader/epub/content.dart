@@ -25,6 +25,71 @@ import 'pages.dart';
 import 'surface.dart';
 import 'text_style.dart';
 
+/// How a rendered link's href is handled.
+enum EpubLinkKind {
+  /// A same-book reference: resolved against the document's parsed source and
+  /// navigated through the guarded layout path.
+  internal,
+
+  /// An allowed external scheme (`http`, `https`, `mailto`): handed to the
+  /// injected platform opener, never fetched by the reader.
+  external,
+
+  /// Anything else (`file`, `data`, `javascript`, an unknown scheme): refused.
+  /// The reader never launches it and never fetches it.
+  unsupported,
+}
+
+/// Classifies [href] with the retained reader's link policy.
+///
+/// A reference without a scheme is internal; the allowed external schemes are
+/// exactly `http`, `https` and `mailto` (case-insensitive); everything else is
+/// unsupported. The scheme detection mirrors the retained `link_scheme`: a
+/// colon only starts a scheme when the text before it contains no `/`, `?` or
+/// `#`, so `Text/foo:bar.xhtml` stays an internal path.
+EpubLinkKind classifyEpubLink(String href) {
+  final colon = href.indexOf(':');
+  if (colon < 0) return EpubLinkKind.internal;
+  final prefix = href.substring(0, colon);
+  if (prefix.isEmpty ||
+      prefix.contains('/') ||
+      prefix.contains('?') ||
+      prefix.contains('#')) {
+    return EpubLinkKind.internal;
+  }
+  // Text before the colon that is not a valid scheme is a path character to
+  // the retained classifier (`Text/foo:bar.xhtml` and `1abc:foo` both stay
+  // internal); reference resolution then refuses the colon, so neither is
+  // ever launched or fetched.
+  if (!_isScheme(prefix)) return EpubLinkKind.internal;
+  return switch (prefix.toLowerCase()) {
+    'http' || 'https' || 'mailto' => EpubLinkKind.external,
+    _ => EpubLinkKind.unsupported,
+  };
+}
+
+/// The retained `link_scheme` syntax: a leading ASCII letter followed by
+/// letters, digits, `+`, `-` or `.`.
+bool _isScheme(String prefix) {
+  if (prefix.isEmpty) return false;
+  if (!_isSchemeCharacter(prefix.codeUnitAt(0), first: true)) return false;
+  for (var index = 1; index < prefix.length; index += 1) {
+    if (!_isSchemeCharacter(prefix.codeUnitAt(index), first: false)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _isSchemeCharacter(int unit, {required bool first}) {
+  final isAsciiAlpha =
+      (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A);
+  if (isAsciiAlpha) return true;
+  if (first) return false;
+  final isAsciiDigit = unit >= 0x30 && unit <= 0x39;
+  return isAsciiDigit || unit == 0x2B || unit == 0x2D || unit == 0x2E;
+}
+
 /// The page margin inside a page window.
 const double kEpubPageMargin = 24.0;
 

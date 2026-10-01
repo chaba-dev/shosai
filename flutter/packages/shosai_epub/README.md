@@ -24,9 +24,33 @@ services.
 - XHTML normalization into the content model;
 - canonical text stream, scalar checkpoints and anchor offsets matching the
   retained Rust `search_text()` order, including display-block MathML promotion;
-- durable `(spine, scalar)` addresses and TOC entries;
+- durable `(spine, scalar)` addresses, resolved TOC locations
+  (`resolveTocLocations`) and internal-link resolution (`resolveBookLink`);
 - bounded MathML fallback and embedded-font admission (TTF/OTF; WOFF/WOFF2 are
   reported unsupported rather than applied).
+
+## Navigation resolution
+
+The reader serves its Contents panel and its painted internal links from this
+package's resolution, so the rules follow the retained implementation:
+
+- `resolveEpubReference` is the production `CanonicalEpubPath::resolve` rule
+  set: it rejects a query, multiple fragments, a foreign origin (`//` or a
+  scheme), an empty segment, a trailing slash, an encoded separator or dot
+  segment, an escape above the archive root and a reference that resolves to the
+  archive root, and it decodes the fragment exactly once.
+- `resolveTocLocations` returns the entries that resolve to a durable location,
+  with the authored depth retained even when a parent entry itself does not
+  resolve (a title-only part heading).
+- `resolveBookLink` resolves a painted href against the current document
+  (`#fragment` stays in the document) and returns `null` for an unknown or empty
+  fragment instead of falling back to the chapter start.
+- Anchor admission follows the production `record_anchor_name`: an empty or
+  over-long name and a name with control characters never become anchors, so
+  `#` can never resolve to a position. A trailing marker inside a heading, an
+  inline block or a figure caption resolves at that block's end, and a collapsed
+  figure records its image's and the image ancestors' anchors, matching the
+  production parser's own offsets.
 
 ## Known differences from the Rust implementation
 
@@ -52,6 +76,28 @@ are byte-identical.
   `display-block math inside a cell keeps this port whitespace`. A chapter
   containing this construct fails the routing comparison and stays on the
   retained renderer.
+- **Inline-only table cells.** An inline-only cell's content and anchors are
+  collected by the inline collector (text and inline children join into one
+  paragraph, and the block walker's code-block and list-item rules do not
+  apply). Two limits remain: the retained cell content collector keeps the
+  source's raw whitespace runs where this port collapses them, so a cell whose
+  text contains a run of whitespace fails the routing comparison; and a cell
+  that mixes an image or MathML with an anchor cannot have its anchors
+  reproduced from the rendered content (the retained anchor stream ignores
+  image alt text and treats MathML as spans), so this port drops that cell's
+  descendant anchors instead of publishing an offset it cannot verify. A name
+  dropped this way is not offered anywhere in the chapter — even when another
+  element carries it — so a fragment link to it resolves to nothing and a
+  Contents row that targets it is not offered: the reader's unknown-anchor
+  policy, not a wrong target.
+- **`<br/>` line breaks.** The production inline collector emits no content for
+  `<br/>`; this port emits a preserved newline span so the layout can render the
+  break. A chapter containing a line break therefore fails the routing
+  comparison and stays on the retained renderer. The existing
+  `pending anchors before a line break stay at the paragraph start` test pins
+  the anchors and states that the break's own canonical text is a separate
+  difference; the canonical streams were probed against the production parser
+  when this was recorded.
 - **MathML fallback breadth.** The fallback arms were rewritten arm-for-arm from
   `crates/shosai-core/src/epub/math.rs` (including the malformed-construct and
   multi-row `mtable` rules, which regression tests pin from that source), so the
@@ -64,6 +110,15 @@ are byte-identical.
   Rust cascade is more complete.
 - **Nested lists.** Nested lists flatten into the parent item (the Rust parser
   also flattens them, but the whitespace-collapse unit differs slightly).
+- **TOC source preference.** This package prefers an EPUB 3 nav document
+  (`properties="nav"`) and falls back to an NCX; the retained parser tries an
+  NCX first and finds a nav document by an id heuristic. A book whose two
+  navigation documents disagree can therefore show a different table of
+  contents here. Disclosed by the navigation slice rather than absorbed.
+- **TOC error handling.** A nav/NCX entry whose href is unusable is skipped
+  individually with a warning; the retained parser discards the whole table of
+  contents when any entry fails to resolve. A book with one malformed entry can
+  therefore show more rows here than the retained reader shows.
 
 The prototype's remaining notes are in `prototypes/epub-dart-eval/README.md`;
 its display-block MathML promotion omission is fixed here and no longer applies.

@@ -4460,8 +4460,14 @@ void main() {
     await tester.pump();
     await tester.pump();
     // Returning to the displayed layout cancels every relayout it superseded,
-    // and none of them installs.
-    expect(bridge.cancelled, containsAll(created));
+    // and none of them installs. The shared EPUB source load owns its own
+    // cancellation, so its tokens are not relayout tokens and are not expected
+    // to be cancelled here.
+    final relayoutTokens = created
+        .where((id) => !bridge.epubSourceCancellations.contains(id))
+        .toList();
+    expect(relayoutTokens, isNotEmpty);
+    expect(bridge.cancelled, containsAll(relayoutTokens));
     expect(find.byType(ShadProgress), findsNothing);
 
     for (final held in bridge.heldSelectionSurfaces) {
@@ -7783,6 +7789,26 @@ final class _ControlledBridge implements FlutterBridge {
 
   @override
   bool get isDisposed => disposeCount != 0;
+
+  /// Cancellation ids the EPUB source read was asked to use.
+  ///
+  /// The shared source load owns its own token, so a relayout superseding
+  /// another does not cancel it; tests exclude these from the relayout tokens
+  /// they expect to be cancelled.
+  final List<BigInt> epubSourceCancellations = <BigInt>[];
+
+  @override
+  Future<Uint8List> epubSourceBytes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) async {
+    _alive();
+    epubSourceCancellations.add(cancellationId);
+    throw const FlutterBridgeError(
+      kind: FlutterBridgeErrorKind.limitExceeded,
+      message: 'the controlled bridge serves no EPUB archive',
+    );
+  }
 
   @override
   FlutterSelectionSurface roundTripVisibleScene({
