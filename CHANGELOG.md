@@ -60,6 +60,7 @@ All notable changes to this project will be documented in this file.
 - *(eval)* Progressive EPUB layout with bounded batches and reuse (#136)
 - *(epub)* Add the production Dart EPUB engine module (#139)
 - *(reader)* Serve paginated EPUB chapters from the Dart engine (#141)
+- *(reader)* Serve EPUB contents and fragment navigation from the Dart engine (#142)
 
 ### 🐛 Bug Fixes
 
