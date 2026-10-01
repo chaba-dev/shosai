@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-28
+## [0.1.0] - 2026-10-01
 
 ### 🚀 Features
 
@@ -59,6 +59,7 @@ All notable changes to this project will be documented in this file.
 - *(eval)* Add Dart EPUB vertical slice prototype (#135)
 - *(eval)* Progressive EPUB layout with bounded batches and reuse (#136)
 - *(epub)* Add the production Dart EPUB engine module (#139)
+- *(reader)* Serve paginated EPUB chapters from the Dart engine (#141)
 
 ### 🐛 Bug Fixes
 
