@@ -136,6 +136,35 @@ Uint8List admissionEpub({required int spanNesting}) {
   );
 }
 
+/// A CRLF-in-code-block EPUB built in memory.
+///
+/// The book exists for the routing gate's canonical-parity closure: authors
+/// (and common toolchains) write preformatted code blocks with CRLF line
+/// endings, and the retained parser's canonical stream normalizes each CRLF to
+/// U+000A while the Dart engine's canonical stream keeps U+000D U+000A inside
+/// `<pre>`/`<code>` content. The whole chapter then fails the gate's
+/// canonical-parity comparison and stays on the retained renderer. The prose is
+/// this fixture's own; the structure is the minimal form observed in real
+/// books. Building it here keeps the shared corpus untouched.
+Uint8List crlfPreEpub() {
+  const body =
+      '<main>'
+      '<p>Opening paragraph with a <em>short emphasis</em> span.</p>'
+      '<pre><code>first command --flag\n'
+      'second command --other-flag\n'
+      'third command</code></pre>'
+      '<p>Closing paragraph after the block.</p>'
+      '</main>';
+  // Insert the CRLF pairs the preformatted block is about: the Dart string
+  // above carries plain LF joins for readability; the real-world form has a
+  // CRLF-terminated every line inside the code block.
+  final crlfBody = body.replaceAll('\n', '\r\n');
+  return _epub(
+    chapters: {'OPS/Text/chapter-1.xhtml': crlfBody},
+    nav: '<ol><li><a href="../Text/chapter-1.xhtml">CRLF</a></li></ol>',
+  );
+}
+
 Uint8List _epub({
   required Map<String, String> chapters,
   required String nav,
