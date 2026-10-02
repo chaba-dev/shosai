@@ -32,6 +32,9 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  # The opt-in real-book corpus pass reads Dart retained heap through the VM
+  # service (`getAllocationProfile`); the version is pinned by pubspec.lock.
+  vm_service: ^15.3.0
 
 flutter:
   uses-material-design: true
