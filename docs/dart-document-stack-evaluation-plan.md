@@ -578,6 +578,11 @@ paused/superseded status are unchanged (see the
 [restoration plan](flutter-ui-restoration-plan.md#progress-tracking)). Rust 5B
 remains paused reference work, not an implementation path.
 
+Delivered as
+[PR #143](https://github.com/chaba-dev/shosai/pull/143)
+(`fix(epub): match retained canonical text and TOC source for br, cells and
+nav`) on top of slice 4's `4457ac74`; open, not merged by this record.
+
 **What the slice closes, exactly.**
 
 - **`<br/>` line breaks.** The engine's inline collector emitted a preserved
@@ -796,7 +801,7 @@ point. These are **evaluation defaults, not selected production dependencies**.
 - [Dart EPUB evaluation and Phase C prototype](https://ampcode.com/threads/T-01a0e6aa-f4df-7480-a439-cebf039d7623) — merged as [PR #135](https://github.com/chaba-dev/shosai/pull/135) and [PR #136](https://github.com/chaba-dev/shosai/pull/136); the thread's own recommendation was "insufficient evidence", so the adoption is an owner decision above that recommendation, not a result the evaluation proved.
 - [EPUB adoption decision thread](https://ampcode.com/threads/T-01a0e675-f4f2-7202-8eef-bdd8ca70b093) — records the owner's `adopt` decision, the delegation rules and the production gates applied to follow-up slices.
 - [EPUB navigation slice (real TOC and fragment links)](https://ampcode.com/threads/T-01a0f4ce-cac4-7188-8b8e-7f2ea18745a5) — evidence for slice 4's anchor corrections and the TOC differences it disclosed.
-- [EPUB canonical/TOC parity slice](https://ampcode.com/threads/T-01a0fbda-440f-73dc-9bed-5f302161952f) — slice 5's probe comparison and review record for the `<br/>`, inline-only cell, cell display-math and NCX-first TOC closures.
+- [EPUB canonical/TOC parity slice](https://ampcode.com/threads/T-01a0fbda-440f-73dc-9bed-5f302161952f) — slice 5's probe comparison and review record for the `<br/>`, inline-only cell, cell display-math and NCX-first TOC closures; delivered as [PR #143](https://github.com/chaba-dev/shosai/pull/143).
 
 Local PDF evidence is retained under `.amp/in/artifacts/pdf-render-comparison/`,
 including `README.md`, `CORRECTIONS.md`, pins/lockfiles, generator, fixture
