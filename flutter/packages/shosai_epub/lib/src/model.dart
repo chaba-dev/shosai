@@ -270,9 +270,8 @@ class EpubTableCell {
     required this.children,
     this.blockStarts = const [],
     this.style = const EpubNodeStyle(),
-    this.blockChildren = false,
     this.startAnchorIds = const [],
-    this.endAnchorIds = const [],
+    this.anchorOffsets = const {},
   });
 
   final String? id;
@@ -290,22 +289,21 @@ class EpubTableCell {
   final List<int> blockStarts;
   final EpubNodeStyle style;
 
-  /// Whether the source cell has a visible block-level child.
-  ///
-  /// The production parser's per-block offset accounting counts one generated
-  /// newline per block, so a trailing cell-level marker resolves one scalar
-  /// past the cell text when this is true (and exactly at the cell text end
-  /// for an inline-only cell).
-  final bool blockChildren;
-
   /// Anchors recorded before the cell's content (its own id, its row's id, or
   /// a marker an earlier empty cell left pending); they resolve at the cell's
   /// start, where the production `table_anchor_offsets` records them.
   final List<String> startAnchorIds;
 
-  /// Anchors recorded after the cell's content; they resolve at the cell's
-  /// text end, offset by one scalar for a block cell (see [blockChildren]).
-  final List<String> endAnchorIds;
+  /// Cell-local canonical offsets for the cell's descendant anchors.
+  ///
+  /// The production `table_anchor_offsets` resolves a cell's descendant
+  /// anchors through a separate anchor stream — a full block walk for a cell
+  /// with block children, the inline collector otherwise — whose coordinates
+  /// may deliberately misalign with the flattened cell content (the retained
+  /// parser keeps both streams as they are). The offsets here are those walk
+  /// coordinates relative to the cell's start; the canonical builder applies
+  /// them at `cell start + offset`, first occurrence winning.
+  final Map<String, int> anchorOffsets;
 }
 
 /// A content node in the simplified document model.

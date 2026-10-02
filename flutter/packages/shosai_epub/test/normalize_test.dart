@@ -224,12 +224,62 @@ void main() {
       final parsed = parse(
         '<html><body><p id="lead"><a id="marker"></a><br/></p></body></html>',
       );
-      // Rust records the paragraph id and the empty marker at their own
-      // source offsets (0), not at the end of the emitted newline. The
-      // canonical text of `<br/>` itself is a separate, pre-existing
-      // difference and is not asserted here.
+      // Production emits nothing for `<br/>`, so this paragraph has no text
+      // and is dropped entirely; Rust records the paragraph id and the empty
+      // marker at their own source offsets (0) at the chapter end.
+      expect(extractCanonicalText(parsed.nodes), '');
       expect(parsed.anchors['lead'], 0);
       expect(parsed.anchors['marker'], 0);
+    });
+
+    test('a line break contributes no scalar to the canonical text', () {
+      // Production drops `<br/>` entirely — including inside headings, lists,
+      // captions, and between inlines — so adjacent runs join without a
+      // separator and a trailing marker resolves at the text end.
+      final betweenInlines = parse(
+        '<html><body><p>a <em>mid<br/>dle</em> tail</p></body></html>',
+      );
+      // Rust: the `<br/>` is dropped, so "mid" and "dle" join: 'a middle tail'.
+      expect(extractCanonicalText(betweenInlines.nodes), 'a middle tail\n');
+
+      final spaceAfter = parse('<html><body><p>word<br/> b</p></body></html>');
+      // Rust: 'word b' — the leading space of the next run is the separator.
+      expect(extractCanonicalText(spaceAfter.nodes), 'word b\n');
+
+      final double = parse('<html><body><p>a<br/><br/>b</p></body></html>');
+      expect(extractCanonicalText(double.nodes), 'ab\n');
+
+      final inPre = parse('<html><body><pre>a<br/>b</pre></body></html>');
+      // Rust: `<br/>` contributes nothing even inside a pre; 'ab' joins.
+      expect(extractCanonicalText(inPre.nodes), 'ab\n');
+
+      final inHeading = parse('<html><body><h1>a<br/>b</h1></body></html>');
+      expect(extractCanonicalText(inHeading.nodes), 'ab\n');
+
+      final inList = parse(
+        '<html><body><ul><li>a<br/>b</li><li>c</li></ul></body></html>',
+      );
+      expect(extractCanonicalText(inList.nodes), 'ab\nc\n\n');
+
+      final inCaption = parse(
+        '<html><body><table><caption>a<br/>b</caption><tr><td>c</td></tr>'
+        '</table></body></html>',
+      );
+      expect(extractCanonicalText(inCaption.nodes), 'ab\nc\n\n');
+
+      final inFigCaption = parse(
+        '<html><body><figure><img src="i.png" alt="X"/>'
+        '<figcaption>a<br/>b</figcaption></figure></body></html>',
+      );
+      expect(extractCanonicalText(inFigCaption.nodes), 'X\nab\n');
+
+      final trailingAnchor = parse(
+        '<html><body><p>a<br/><a id="x"/></p></body></html>',
+      );
+      // The paragraph keeps its source text offset (1), not the end of an
+      // emitted newline that production never emits.
+      expect(extractCanonicalText(trailingAnchor.nodes), 'a\n');
+      expect(trailingAnchor.anchors['x'], 1);
     });
 
     test('inline math stays inside its paragraph', () {
@@ -1421,8 +1471,8 @@ void main() {
         '<html><body><table><tr><td><p>Text</p><a id="x"/></td></tr></table>'
         '</body></html>',
       );
-      // Rust's per-block accounting counts one generated newline per emitted
-      // block, so the marker is one scalar past the cell text (5).
+      // The anchor walk's block accounting ends after the last block's
+      // generated newline ("Text\n", 5 scalars), so the marker lands at 5.
       expect(extractCanonicalText(single.nodes), 'Text\n\n');
       expect(single.anchors['x'], 5);
 
@@ -1456,6 +1506,179 @@ void main() {
         '<a id="x"/></td></tr></table></body></html>',
       );
       expect(hiddenBlock.anchors['x'], 2);
+    });
+
+    test('a trailing marker resolves at the anchor walk end', () {
+      // The walk's own accounting, not the flattened cell text, fixes a
+      // marker left pending after the walk: the block walk ends after the
+      // last emitted block's generated newline, and the inline walk ends at
+      // the collapsed run with no newline.
+      final list = parse(
+        '<html><body><table><tr><td><ul><li>a</li><li>b</li></ul><a id="t"/>'
+        '</td><td>y</td></tr></table></body></html>',
+      );
+      // Rust: the walk renders the list as "a\nb\n\n" (5 scalars) though the
+      // flattened cell text is "ab" (2 scalars).
+      expect(extractCanonicalText(list.nodes), 'ab\ty\n\n');
+      expect(list.anchors['t'], 5);
+
+      final composed = parse(
+        '<html><body><table><tr><td><p>z</p>'
+        '<math display="block"><mi>w</mi></math>'
+        '<ul><li>q</li></ul><a id="t"/></td><td>y</td></tr></table>'
+        '</body></html>',
+      );
+      // Rust: the walk is "z\nw\nq\n\n" (7 scalars) though the flattened cell
+      // text is "z\nw\nq" (5 scalars); the earlier per-cell-text formula
+      // would have published 6.
+      expect(extractCanonicalText(composed.nodes), 'z\nw\nq\ty\n\n');
+      expect(composed.anchors['t'], 7);
+
+      final emptyBlock = parse(
+        '<html><body><table><tr><td><a id="t"/></td><td>x</td></tr>'
+        '</table></body></html>',
+      );
+      // An anchor-only cell's inline walk is empty, so the walk end is the
+      // cell start (scalar count 0, no newline).
+      expect(extractCanonicalText(emptyBlock.nodes), '\tx\n\n');
+      expect(emptyBlock.anchors['t'], 0);
+
+      final whitespaceCell = parse(
+        '<html><body><table><tr><td> <a id="t"/> </td><td>x</td></tr>'
+        '</table></body></html>',
+      );
+      // A whitespace-only run collapses away and the walk end stays at 0.
+      expect(extractCanonicalText(whitespaceCell.nodes), '\tx\n\n');
+      expect(whitespaceCell.anchors['t'], 0);
+
+      final duplicate = parse(
+        '<html><body><table><tr><td><a id="t"/>x<a id="t"/></td><td>y</td>'
+        '</tr></table></body></html>',
+      );
+      // The walk's own record wins over a trailing republication.
+      expect(duplicate.anchors['t'], 0);
+
+      final insideParagraph = parse(
+        '<html><body><table><tr><td><p><a id="t"/></p><p>b</p></td>'
+        '<td>y</td></tr></table></body></html>',
+      );
+      // A marker pending inside an empty paragraph rides to the walk's next
+      // content, not the flattened paragraph end.
+      expect(extractCanonicalText(insideParagraph.nodes), 'b\ty\n\n');
+      expect(insideParagraph.anchors['t'], 0);
+    });
+
+    test(
+      'a math element outside the MathML namespace follows the default arm',
+      () {
+        // Rust guards its block-walk math arm with `is_math`, which requires
+        // the MathML namespace; an un-namespaced `<math>` falls through to the
+        // inline collector and is not parsed as MathML in either pass. Its
+        // `display="block"` attribute alone does not make it CSS-block; the
+        // content pass separates the text because of the preceding `<p>`
+        // block. The walk ends at "z\nw\n" (4 scalars).
+        final parsed = parse(
+          '<html><body><table><tr><td><p>z</p>'
+          '<math display="block"><mi>w</mi></math><a id="t"/></td>'
+          '<td>y</td></tr></table></body></html>',
+        );
+        expect(extractCanonicalText(parsed.nodes), 'z\nw\ty\n\n');
+        expect(parsed.anchors['t'], 4);
+      },
+    );
+
+    test(
+      'a cell whose anchor walk exceeds the canonical ceiling rejects the chapter',
+      () {
+        // The walk's list accounting ("a\nb\n\n", 5 scalars) exceeds a
+        // ceiling the chapter's own stream ("ab\n\n", 4 scalars) fits, so
+        // only the anchor walk overruns it, and the EpubLimitError
+        // propagates like the production strict read instead of silently
+        // dropping the walk's first-occurrence anchors.
+        expect(
+          () => normalizeChapter(
+            xhtml:
+                '<html><body><table><tr><td><ul><li>a</li><li>b</li></ul>'
+                '<a id="t"/></td></tr></table></body></html>',
+            chapterPath: 'OPS/chapter.xhtml',
+            stylesheets: const [],
+            limits: const EpubLimits(maxCanonicalScalars: 4),
+          ),
+          throwsA(isA<EpubLimitError>()),
+        );
+      },
+    );
+
+    test('cell nesting at the depth boundary stays fully consistent', () {
+      // Sixty-four nested divs put the innermost text exactly at the walk
+      // ceiling: nothing truncates, so the content pass, the anchor walk and
+      // the trailing marker all agree.
+      var deep = 'deep';
+      for (var level = 64; level >= 1; level -= 1) {
+        deep = '<div>d$level$deep</div>';
+      }
+      final parsed = parse(
+        '<html><body><table><tr><td>$deep<a id="t"/></td><td>y</td></tr>'
+        '</table></body></html>',
+      );
+      final text = extractCanonicalText(parsed.nodes);
+      expect(text, contains('d1'), reason: 'the outermost level survives');
+      expect(text, contains('deep'), reason: 'the ceiling level survives');
+      expect(parsed.anchors['t'], isNotNull);
+      // One more level truncates the anchor walk and rejects the chapter
+      // (see the truncation test below) rather than publishing a partial map.
+      var deeper = '<a id="u"/>deep';
+      for (var level = 65; level >= 1; level -= 1) {
+        deeper = '<div>d$level$deeper</div>';
+      }
+      expect(
+        () => parse(
+          '<html><body><table><tr><td>$deeper</td><td>y</td></tr></table>'
+          '</body></html>',
+        ),
+        throwsA(isA<EpubLimitError>()),
+      );
+    });
+
+    test('a truncated cell anchor walk rejects the chapter', () {
+      // A textless subtree past the depth ceiling leaves the canonical text
+      // unchanged, so the routing gate cannot catch the difference; and a
+      // partial walk map cannot prove it resolved the first occurrence of
+      // every name (a duplicate inside the same cell would still claim a
+      // wrong offset). The walk therefore fails admission, like the
+      // canonical ceiling, and the book stays on the retained renderer whose
+      // walkers have no such ceiling.
+      var nested = '<a id="t"/>';
+      for (var i = 0; i < 65; i += 1) {
+        nested = '<span>$nested</span>';
+      }
+      expect(
+        () => parse(
+          '<html><body><table><tr><td>$nested<img src="i.png"/></td></tr>'
+          '</table><p>z<a id="t"/></p></body></html>',
+        ),
+        throwsA(isA<EpubLimitError>()),
+      );
+      expect(
+        () => parse(
+          '<html><body><table><tr><td>$nested</td></tr></table>'
+          '<p>z<a id="t"/></p></body></html>',
+        ),
+        throwsA(isA<EpubLimitError>()),
+        reason: 'the rejection comes from the walk truncation, not media',
+      );
+
+      // A hidden name in a shallow media cell stays out of the suppression:
+      // the production walk skips `display: none` subtrees too, so the first
+      // publication is the later visible occurrence (Rust: text "\n\nz\n",
+      // "h" = 3).
+      final hidden = parse(
+        '<html><body><table><tr><td><span style="display:none"><a id="h"/>'
+        '</span><img src="i.png"/></td></tr></table><p>z<a id="h"/></p>'
+        '</body></html>',
+      );
+      expect(extractCanonicalText(hidden.nodes), '\n\nz\n');
+      expect(hidden.anchors['h'], 3);
     });
 
     test('a table caption trailing marker resolves at the caption end', () {
@@ -1536,24 +1759,216 @@ void main() {
       expect(hiddenCell.anchors.containsKey('h'), isFalse);
     });
 
-    test('display-block math inside a cell keeps this port whitespace', () {
+    test('display-block math inside a cell splits and collapses like Rust', () {
       final parsed = parse(
         '<html xmlns:m="http://www.w3.org/1998/Math/MathML"><body><table><tr>'
         '<td><p>before <m:math display="block"><m:mfrac><m:mi>a</m:mi>'
         '<m:mi>b</m:mi></m:mfrac></m:math> after</p></td></tr></table>'
         '</body></html>',
       );
-      // Known remaining difference, tracked in the package README: Rust's
-      // table collector collapses each text run around display math
-      // separately, so it produces "before\n(a)/(b)\nafter\n\n". This port
-      // parses the cell paragraph with the chapter rules and keeps the
-      // spaces. The separators and the surrounding blocks agree; the run
-      // whitespace does not yet. Not accepted parity: the EPUB
-      // content-service slice must resolve it before it routes reader content.
-      expect(
-        extractCanonicalText(parsed.nodes),
-        'before \n(a)/(b)\n after\n\n',
+      // The production cell collector collapses each text run around display
+      // math separately: the run before the math flushes as its own
+      // paragraph, the math becomes a node, and the run after starts a new
+      // one — `before\n(a)/(b)\nafter\n\n`, matching the retained stream.
+      expect(extractCanonicalText(parsed.nodes), 'before\n(a)/(b)\nafter\n\n');
+    });
+
+    test('inline-only cells collapse whitespace like the chapter rules', () {
+      // Rust: the production cell collector reuses the inline collapse rules,
+      // so an inline-only cell is one collapsed run, and a whitespace-only
+      // cell contributes nothing but still separates from its neighbour.
+      final inlineOnly = parse(
+        '<html><body><table><tr><td>a <b> b </b> c</td><td>d</td></tr>'
+        '</table></body></html>',
       );
+      expect(extractCanonicalText(inlineOnly.nodes), 'a b c\td\n\n');
+
+      final whitespaceOnly = parse(
+        '<html><body><table><tr><td>   </td><td>d</td></tr></table>'
+        '</body></html>',
+      );
+      expect(extractCanonicalText(whitespaceOnly.nodes), '\td\n\n');
+    });
+
+    test('nested tables and lists flatten inside a cell', () {
+      // Rust: a nested table's cells each become blocks, and `li` keeps its
+      // inline UA role inside a cell, so list items join into one run.
+      final nested = parse(
+        '<html><body><table><tr><td><table><tr><td>x</td><td>y</td></tr>'
+        '<tr><td>z</td></tr></table>tail</td></tr></table></body></html>',
+      );
+      expect(extractCanonicalText(nested.nodes), 'x\ny\nz\ntail\n\n');
+
+      final list = parse(
+        '<html><body><table><tr><td><ul><li>a</li><li>b</li></ul>tail</td>'
+        '</tr></table></body></html>',
+      );
+      expect(extractCanonicalText(list.nodes), 'ab\ntail\n\n');
+    });
+
+    test('nested table cell anchors follow the walk map', () {
+      final parsed = parse(
+        '<html><body><table><tr><td id="outer"><table><tr id="r">'
+        '<td id="c">x</td><td>y</td></tr></table><a id="t"/>tail</td>'
+        '</tr></table></body></html>',
+      );
+      // Rust: the outer cell id and the nested row/cell ids all resolve at
+      // the cell start; the marker before the cell's remaining text resolves
+      // after the nested table's walk prefix ("x\ty\n\n", 5 scalars) though
+      // the flattened content renders "x\ny".
+      expect(extractCanonicalText(parsed.nodes), 'x\ny\ntail\n\n');
+      expect(parsed.anchors['outer'], 0);
+      expect(parsed.anchors['r'], 0);
+      expect(parsed.anchors['c'], 0);
+      expect(parsed.anchors['t'], 5);
+    });
+
+    test('cell display keywords branch exactly like the production walker', () {
+      // Rust treats list-item, inline-block, flex, contents, and flow-root as
+      // inline (the run joins); table-caption, inline-table, and table-row
+      // open blocks.
+      final inlineKeywords = parse(
+        '<html><body><table><tr><td>a<span style="display:list-item">b</span>'
+        '<span style="display:inline-block">c</span>'
+        '<span style="display:flex">d</span>'
+        '<span style="display:contents">e</span>'
+        '<span style="display:flow-root">f</span></td></tr></table>'
+        '</body></html>',
+      );
+      expect(extractCanonicalText(inlineKeywords.nodes), 'abcdef\n\n');
+
+      final blockKeywords = parse(
+        '<html><body><table><tr><td>a<span style="display:table-caption">b'
+        '</span><span style="display:inline-table">c</span>'
+        '<span style="display:table-row">d</span></td></tr></table>'
+        '</body></html>',
+      );
+      expect(extractCanonicalText(blockKeywords.nodes), 'a\nb\nc\nd\n\n');
+
+      final blockSpan = parse(
+        '<html><body><table><tr><td>a<span style="display:block">b</span>c'
+        '</td></tr></table></body></html>',
+      );
+      expect(extractCanonicalText(blockSpan.nodes), 'a\nb\nc\n\n');
+
+      final inlineDiv = parse(
+        '<html><body><table><tr><td><div style="display:inline">a</div>b</td>'
+        '</tr></table></body></html>',
+      );
+      expect(extractCanonicalText(inlineDiv.nodes), 'ab\n\n');
+    });
+
+    test('cell advancement matches the production stream', () {
+      final twoCells = parse(
+        '<html><body><table><tr><td>ab</td><td><a id="x"/>cd</td></tr>'
+        '</table></body></html>',
+      );
+      expect(extractCanonicalText(twoCells.nodes), 'ab\tcd\n\n');
+      expect(twoCells.anchors['x'], 3);
+
+      final twoRows = parse(
+        '<html><body><table><tr><td>ab</td></tr><tr><td><a id="y"/>cd</td>'
+        '</tr></table></body></html>',
+      );
+      expect(extractCanonicalText(twoRows.nodes), 'ab\ncd\n\n');
+      expect(twoRows.anchors['y'], 3);
+
+      final blockCells = parse(
+        '<html><body><table><tr><td><p>a</p><p>b</p></td><td><a id="x"/>cd'
+        '</td></tr></table></body></html>',
+      );
+      expect(extractCanonicalText(blockCells.nodes), 'a\nb\tcd\n\n');
+      expect(blockCells.anchors['x'], 4);
+
+      final withCaption = parse(
+        '<html><body><table><caption>cap</caption><tr><td><a id="x"/>cd</td>'
+        '</tr></table></body></html>',
+      );
+      expect(extractCanonicalText(withCaption.nodes), 'cap\ncd\n\n');
+      expect(withCaption.anchors['x'], 4);
+    });
+
+    test('images with missing or unresolvable sources join the cell run', () {
+      // Rust: a cell image whose src is missing or unresolvable contributes
+      // its alt span to the inline run; an image with an alt and a src in a
+      // block context opens its own block.
+      final missing = parse(
+        '<html><body><table><tr><td><img/>B</td></tr></table></body></html>',
+      );
+      expect(extractCanonicalText(missing.nodes), 'B\n\n');
+
+      final badSrc = parse(
+        '<html><body><table><tr><td><img src="../bad.png" alt="Alt"/>B</td>'
+        '</tr></table></body></html>',
+      );
+      expect(extractCanonicalText(badSrc.nodes), 'AltB\n\n');
+
+      final emptyAlt = parse(
+        '<html><body><table><tr><td><img src="i.png"/>B</td></tr></table>'
+        '</body></html>',
+      );
+      expect(extractCanonicalText(emptyAlt.nodes), 'B\n\n');
+
+      final blockContext = parse(
+        '<html><body><table><tr><td><p>a</p><img src="i.png" alt="X"/>'
+        '<p>b</p></td></tr></table></body></html>',
+      );
+      expect(extractCanonicalText(blockContext.nodes), 'a\nX\nb\n\n');
+    });
+
+    test('media inside an inline cell stays suppressed in this port', () {
+      // Documented residual: production publishes the walk-map anchors even
+      // for cells whose content contains media; this port suppresses them
+      // because the cell text cannot carry the image offsets. The display
+      // math contributes its own block separators ("a\n…\npost").
+      final mathCell = parse(
+        '<html xmlns:m="http://www.w3.org/1998/Math/MathML"><body><table><tr>'
+        '<td><a id="h"></a><m:math display="block"><m:mi>a</m:mi></m:math>'
+        '<a id="t"></a>post</td></tr></table></body></html>',
+      );
+      // Rust publishes h=0 and t=1 here; this port suppresses both.
+      expect(extractCanonicalText(mathCell.nodes), 'a\npost\n\n');
+      expect(mathCell.anchors['h'], isNull);
+      expect(mathCell.anchors['t'], isNull);
+
+      final imgCell = parse(
+        '<html><body><table><tr><td><a id="c"/>text<img src="i.png" alt="Alt"/>'
+        '<a id="t"/>more</td></tr></table></body></html>',
+      );
+      // Rust publishes c=0 and t=4; this port suppresses both.
+      expect(extractCanonicalText(imgCell.nodes), 'textAltmore\n\n');
+      expect(imgCell.anchors['c'], isNull);
+      expect(imgCell.anchors['t'], isNull);
+
+      final nonMediaCell = parse(
+        '<html><body><table><tr><td>pre<a id="c"/>mid<a id="t"/>post</td>'
+        '</tr></table></body></html>',
+      );
+      // Without media the same marker layout resolves normally.
+      expect(extractCanonicalText(nonMediaCell.nodes), 'premidpost\n\n');
+      expect(nonMediaCell.anchors['c'], 3);
+      expect(nonMediaCell.anchors['t'], 6);
+    });
+
+    test('a br-only cell still separates from its neighbour', () {
+      final parsed = parse(
+        '<html><body><table><tr><td><a id="x"/><br/></td><td>b</td></tr>'
+        '</table></body></html>',
+      );
+      // Rust: the br contributes nothing, the empty cell keeps its tab
+      // separator, and the cell-start marker resolves at 0.
+      expect(extractCanonicalText(parsed.nodes), '\tb\n\n');
+      expect(parsed.anchors['x'], 0);
+    });
+
+    test('br anchors inside a cell resolve on the collapsed run', () {
+      final parsed = parse(
+        '<html><body><table><tr><td>a<a id="x"/><br/>b</td></tr></table>'
+        '</body></html>',
+      );
+      // Rust: the marker keeps its source offset (1) on the joined run.
+      expect(extractCanonicalText(parsed.nodes), 'ab\n\n');
+      expect(parsed.anchors['x'], 1);
     });
   });
 
