@@ -1,0 +1,1 @@
+../../assets/fonts/LICENSE-NotoSansJP.txt

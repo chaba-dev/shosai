@@ -187,6 +187,8 @@ jobs:
             ${{ runner.os }}-flutter-host-cargo-
             ${{ runner.os }}-cargo-
       - run: nix develop --command make flutter-linux-debug
+      - name: Verify the Linux bundle carries the declared fonts
+        run: nix develop --command make flutter-bundle-check-linux
 
   flutter-macos-host:
     name: Flutter macOS host
@@ -207,6 +209,10 @@ jobs:
             ${{ runner.os }}-flutter-host-cargo-
             ${{ runner.os }}-cargo-
       - run: nix develop --command make flutter-macos-smoke
+      - name: Verify the macOS bundle carries the declared fonts
+        run: |
+          nix develop --command python3 scripts/check_flutter_bundle.py \
+            "flutter/build/macos/Build/Products/Debug/shosai_flutter.app"
 
   test-windows:
     name: Rust tests (Windows)
