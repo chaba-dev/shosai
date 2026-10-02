@@ -43,9 +43,28 @@ flutter:
   # AppLocalizations sources are written into lib/l10n and committed.
   generate: true
   fonts:
+    # The faces' source of truth is the repository's `assets/fonts/` (used by
+    # the Rust app, the website and the packaging licenses); the `flutter/fonts`
+    # symlinks keep those files *inside* this project so the bundler places
+    # them in `flutter_assets/fonts/`. A path that escapes the project
+    # (`../assets/fonts/...`) is recorded in the manifests but never copied
+    # into a built bundle: `rootBundle.load` then fails, the bundled EPUB
+    # font-coverage gate reads null and every chapter stays on the retained
+    # renderer (2026-10-02 corpus pass, finding 1). A checkout that does not
+    # support symlinks (e.g. Windows with symlink creation disabled) must not
+    # be used to build or develop the Flutter host: the bundler would package
+    # the link's target path as the font's bytes. No Windows Flutter host
+    # exists today; keep it that way until a symlinked checkout is guaranteed.
     - family: Inter
       fonts:
-        - asset: ../assets/fonts/InterVariable.ttf
+        - asset: fonts/InterVariable.ttf
     - family: Noto Sans JP
       fonts:
-        - asset: ../assets/fonts/NotoSansJP-Variable.ttf
+        - asset: fonts/NotoSansJP-Variable.ttf
+  # Both faces' licenses require the copyright notice and license text to
+  # accompany redistribution; Flutter collects `licenses:` entries into the
+  # bundle's NOTICES.Z (`fonts/` is also where the symlinked license files
+  # live, and the bundle check verifies the notices carry both texts).
+  licenses:
+    - fonts/LICENSE-Inter
+    - fonts/LICENSE-NotoSansJP.txt
