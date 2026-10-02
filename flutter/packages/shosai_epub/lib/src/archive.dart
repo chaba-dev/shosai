@@ -616,10 +616,10 @@ List<EpubTocEntry> _parseToc({
     final path = _tryResolve(opfDirectory, ncxItem.href);
     final file = path == null ? null : entries[path];
     if (path != null && file != null) {
-      // Non-null means the NCX is usable XML with a `<navMap>`, even when it
-      // has no points: the production `parse_ncx_toc` returns its (possibly
-      // empty) entries and never falls back. `null` — unparseable XML here,
-      // or a missing `<navMap>` — falls through to the nav document, like the
+      // Non-null means the NCX is usable: parseable XML with a `<navMap>` and
+      // every entry's src resolved, even when it has no points. `null` —
+      // unparseable XML here, a missing `<navMap>`, or any entry whose src
+      // fails to resolve — falls through to the nav document, like the
       // production `if let Ok(entries)` guard. (The retained TOC reader
       // validates a selected NCX's UTF-8 and lexically inspectable XML — a
       // tolerant shape walk under byte/depth/text limits — and fails the whole
@@ -679,7 +679,17 @@ List<EpubTocEntry> _parseNavDocument(
       .where((element) => element.name.local == 'ol')
       .firstOrNull;
   if (list == null) return const [];
-  return _parseNavList(list, directory, warnings);
+  // One unusable href abandons this candidate's whole table of contents (the
+  // production `parse_nav_ol` propagates the resolution error through `?`),
+  // and the nav document is the last candidate, so the book keeps no table of
+  // contents. The warning keeps the divergence visible; the production parser
+  // falls through silently.
+  try {
+    return _parseNavList(list, directory, warnings);
+  } on _UnusableTocEntry catch (error) {
+    warnings.add('nav entry has an unusable href: ${error.source}');
+    return const [];
+  }
 }
 
 /// One level of an EPUB 3 nav list.
@@ -689,6 +699,13 @@ List<EpubTocEntry> _parseNavDocument(
 /// list becomes its children, so the authored depth survives into the contents
 /// rows. The title is the link's own first text child, falling back to the
 /// list item's `<span>`, matching the production extraction.
+///
+/// A link whose href fails to resolve aborts the whole candidate — the
+/// production `parse_nav_ol` propagates the error through `?` before pushing
+/// any entry, so already-parsed siblings are discarded too. A missing href
+/// attribute is not an error: the entry keeps its empty target like the
+/// production `unwrap_or_default`, and only a link element's own attribute is
+/// resolved.
 List<EpubTocEntry> _parseNavList(
   XmlElement list,
   String directory,
@@ -701,20 +718,15 @@ List<EpubTocEntry> _parseNavList(
         .whereType<XmlElement>()
         .where((element) => element.name.local == 'a')
         .firstOrNull;
-    final nested = item.children
-        .whereType<XmlElement>()
-        .where((element) => element.name.local == 'ol')
-        .firstOrNull;
-    final children = nested == null
-        ? const <EpubTocEntry>[]
-        : _parseNavList(nested, directory, warnings);
     final span = item.children
         .whereType<XmlElement>()
         .where((element) => element.name.local == 'span')
         .firstOrNull;
     final title = (_firstTextChild(anchor) ?? _firstTextChild(span) ?? '')
         .trim();
-    final href = anchor?.getAttribute('href');
+    // The production parser resolves the href before the nested list, so one
+    // bad href is reported even when a child also fails.
+    final href = anchor == null ? null : _attributeByLocalName(anchor, 'href');
     var resource = '';
     String? fragment;
     if (href != null) {
@@ -722,10 +734,17 @@ List<EpubTocEntry> _parseNavList(
         final resolved = resolveEpubReference(directory, href);
         resource = resolved.path;
         fragment = resolved.fragment;
-      } on EpubPathError {
-        warnings.add('nav entry has an unusable href: $href');
+      } on EpubPathError catch (error) {
+        throw _UnusableTocEntry(href, error);
       }
     }
+    final nested = item.children
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == 'ol')
+        .firstOrNull;
+    final children = nested == null
+        ? const <EpubTocEntry>[]
+        : _parseNavList(nested, directory, warnings);
     if (title.isEmpty && resource.isEmpty && children.isEmpty) continue;
     entries.add(
       EpubTocEntry(
@@ -739,17 +758,63 @@ List<EpubTocEntry> _parseNavList(
   return entries;
 }
 
-/// The first text child of [element], or null.
+/// A table-of-contents entry whose href the reference resolver rejected.
 ///
-/// The production parser reads a nav entry's title from its link's own text
-/// child (not the concatenated descendant text), so a nested element inside the
-/// link does not contribute to the title. A CDATA section is text to the
-/// production parser, so it counts here too.
+/// The production `parse_ncx_toc`/`parse_nav_ol` propagate such a resolution
+/// error through `?`, abandoning that candidate's whole table of contents so
+/// the caller falls to the next navigation document; the port raises this
+/// instead of keeping the entry with an empty target.
+class _UnusableTocEntry implements Exception {
+  const _UnusableTocEntry(this.source, this.error);
+
+  /// The unresolved href or src attribute value.
+  final String source;
+
+  final EpubPathError error;
+}
+
+/// The element's own text: its leading text run, when it starts with text.
+///
+/// The production `Node::text` returns an element's text only when the first
+/// child node is text (a later text child after an element or comment does not
+/// count), and the production parser coalesces the adjacent text and CDATA
+/// chunks of that leading run into one node, so `A<![CDATA[B]]>C` is `ABC`
+/// while `<em/>Later` is no text at all. A CDATA section is text to the
+/// production parser, so it counts here too. An existing run is returned even
+/// when it is empty — the production link text is `Some("")` there, so the
+/// list item's `<span>` fallback does not trigger; `null` means the element
+/// starts with a non-text node.
 String? _firstTextChild(XmlElement? element) {
   if (element == null) return null;
+  final run = StringBuffer();
+  var found = false;
   for (final child in element.children) {
-    if (child is XmlText) return child.value;
-    if (child is XmlCDATA) return child.value;
+    if (child is XmlText) {
+      found = true;
+      run.write(child.value);
+    } else if (child is XmlCDATA) {
+      found = true;
+      run.write(child.value);
+    } else {
+      break;
+    }
+  }
+  return found ? run.toString() : null;
+}
+
+/// The element's first attribute whose local name is [local], ignoring
+/// namespace declarations.
+///
+/// The production `Node::attribute` matches by local name when called without
+/// a namespace (the roxmltree 0.21 `attribute_node` rule), so a declared-prefix
+/// attribute like `x:href` is the entry's target too, taken in attribute order.
+/// Namespace declarations are not attributes to the production parser, so
+/// `xmlns:href` never matches; this port skips the `xmlns:` prefix the Dart XML
+/// reader reports them with.
+String? _attributeByLocalName(XmlElement element, String local) {
+  for (final attribute in element.attributes) {
+    if (attribute.name.prefix == 'xmlns') continue;
+    if (attribute.name.local == local) return attribute.value;
   }
   return null;
 }
@@ -757,13 +822,14 @@ String? _firstTextChild(XmlElement? element) {
 /// Parses an NCX table of contents.
 ///
 /// Returns `null` — never a non-null empty list — when the NCX is unusable and
-/// the caller must fall back to a nav document: XML this package cannot parse
-/// or a document without a `<navMap>`. (The retained parser reaches this state
-/// differently: structural mismatches that pass its tolerant shape inspection
-/// fail only the candidate's own `roxmltree` parse and fall through, while a
-/// read its inspection rejects — non-UTF-8 bytes, lexical errors or limit
-/// violations — fails the whole book before any TOC parse. This package has
-/// no such read gate.) A `<navMap>` with no
+/// the caller must fall back to a nav document: XML this package cannot parse,
+/// a document without a `<navMap>`, or any entry whose src fails to resolve.
+/// (The retained parser reaches the fall-through differently: structural
+/// mismatches that pass its tolerant shape inspection fail only the
+/// candidate's own `roxmltree` parse and fall through, while a read its
+/// inspection rejects — non-UTF-8 bytes, lexical errors or limit violations —
+/// fails the whole book before any TOC parse. This package has no such read
+/// gate.) A `<navMap>` with no
 /// points parses to an empty list on purpose: the production `parse_ncx_toc`
 /// succeeds there and no
 /// nav fallback happens.
@@ -799,8 +865,14 @@ List<EpubTocEntry>? _parseNcx(
           .whereType<XmlElement>()
           .where((element) => element.name.local == 'content')
           .firstOrNull;
-      final src = content?.getAttribute('src');
-      final children = parsePoints(point);
+      final title = (_firstTextChild(label) ?? '').trim();
+      // The production parser resolves the src before the nested points, so
+      // one bad src is reported even when a child also fails. A missing
+      // `<content>` element or src attribute keeps the entry with an empty
+      // target, like the production `unwrap_or_default`.
+      final src = content == null
+          ? null
+          : _attributeByLocalName(content, 'src');
       var resource = '';
       String? fragment;
       if (src != null) {
@@ -808,13 +880,14 @@ List<EpubTocEntry>? _parseNcx(
           final resolved = resolveEpubReference(directory, src);
           resource = resolved.path;
           fragment = resolved.fragment;
-        } on EpubPathError {
-          warnings.add('NCX entry has an unusable src: $src');
+        } on EpubPathError catch (error) {
+          throw _UnusableTocEntry(src, error);
         }
       }
+      final children = parsePoints(point);
       entries.add(
         EpubTocEntry(
-          title: (_firstTextChild(label) ?? '').trim(),
+          title: title,
           resource: resource,
           fragment: fragment,
           children: children,
@@ -824,5 +897,15 @@ List<EpubTocEntry>? _parseNcx(
     return entries;
   }
 
-  return parsePoints(map);
+  // One unusable src abandons this candidate's whole table of contents (the
+  // production `parse_navpoints` propagates the resolution error through `?`
+  // before pushing any entry, so already-parsed siblings are discarded too),
+  // and the caller falls to the nav document. The warning keeps the
+  // divergence visible; the production parser falls through silently.
+  try {
+    return parsePoints(map);
+  } on _UnusableTocEntry catch (error) {
+    warnings.add('NCX entry has an unusable src: ${error.source}');
+    return null;
+  }
 }
