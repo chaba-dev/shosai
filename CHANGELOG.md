@@ -89,6 +89,7 @@ All notable changes to this project will be documented in this file.
 - *(dev)* Avoid copying JJ workspace build outputs into Nix store (#121)
 - *(flutter)* Use macOS-compatible System Events geometry in the picker smoke (#124)
 - *(epub)* Match retained canonical text and TOC source for br, cells and nav (#143)
+- *(epub)* Abandon a TOC candidate on one unusable entry like the retained parser (#144)
 
 ### 🚜 Refactor
 
