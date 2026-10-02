@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-01
+## [0.1.0] - 2026-10-02
 
 ### 🚀 Features
 
@@ -88,6 +88,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Restore accessible activation for add-books dialog choices (#118)
 - *(dev)* Avoid copying JJ workspace build outputs into Nix store (#121)
 - *(flutter)* Use macOS-compatible System Events geometry in the picker smoke (#124)
+- *(epub)* Match retained canonical text and TOC source for br, cells and nav (#143)
 
 ### 🚜 Refactor
 
