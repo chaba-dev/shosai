@@ -134,6 +134,7 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Verify macOS Wry visual restoration (#46)
 - *(epub)* Add conformance fixture matrix (#47)
 - *(flutter)* Add production-shell render harness and native picker smoke (#120)
+- *(epub)* Add opt-in real-book corpus harness and measurement evidence (#145)
 
 ### ⚙️ Miscellaneous Tasks
 
