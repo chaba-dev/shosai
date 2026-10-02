@@ -447,6 +447,267 @@ void main() {
       ]);
     });
 
+    test('an NCX beats a valid nav document when both are present', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml#section">'
+              'Nav Second</a></li></ol></nav>',
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>NCX First</text>'
+              '</navLabel><content src="Text/chapter-1.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+        ),
+      );
+      // The production parser tries the NCX first: a book whose two navigation
+      // documents disagree shows the NCX's table of contents. Production
+      // resolves the NCX src as a plain relative reference from its own
+      // directory, and so does this port.
+      expect(book.toc.single.title, 'NCX First');
+      expect(book.toc.single.resource, 'OPS/Text/chapter-1.xhtml');
+      expect(book.toc.single.fragment, isNull);
+    });
+
+    test('a navMap with no points suppresses the nav fallback', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+              'Nav Second</a></li></ol></nav>',
+          ncx: '<ncx><navMap></navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      // Production `parse_ncx_toc` succeeds on an empty navMap and its caller
+      // never falls back: an intentionally empty NCX must stay empty.
+      expect(book.toc, isEmpty);
+    });
+
+    test('an NCX without a navMap falls back to the nav document', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+              'Nav Second</a></li></ol></nav>',
+          ncx: '<ncx><head/><docTitle><text>x</text></docTitle></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(book.toc.single.title, 'Nav Second');
+    });
+
+    test(
+      'an unparseable NCX falls back to the nav document with a warning',
+      () {
+        final book = openEpubBytes(
+          _book(
+            nav:
+                '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+                'Nav Second</a></li></ol></nav>',
+            ncx: '<not-ncx',
+            chapters: const {
+              'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+            },
+          ),
+        );
+        // This port reads the NCX without the retained parser's strict UTF-8
+        // and lexically-inspectable-XML gate, so a broken one opens with a
+        // warning and the nav fallback (non-UTF-8 bytes that still parse stay
+        // selected silently with replacement characters). The retained TOC
+        // reader fails the whole book on that read instead; structural
+        // mismatches that pass the inspection only fail the candidate's own
+        // parse and fall through — a documented residual, tracked in the
+        // package README.
+        expect(book.toc.single.title, 'Nav Second');
+        expect(
+          book.warnings.any(
+            (warning) => warning.contains('failed to parse EPUB NCX'),
+          ),
+          isTrue,
+        );
+      },
+    );
+
+    test('an NCX missing from the archive falls back to the nav document', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+              'Nav Second</a></li></ol></nav>',
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>NCX First</text>'
+              '</navLabel><content src="Text/chapter-1.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          ncxHref: 'Text/missing.ncx',
+          writeNcxFile: false,
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(book.toc.single.title, 'Nav Second');
+    });
+
+    test('an NCX with a foreign media type is ignored', () {
+      // Production has no `.ncx` suffix rule: only the media type selects the
+      // NCX. With the type changed and no nav-id item, both documents are
+      // unused even though the NCX file parses.
+      final withoutNav = openEpubBytes(
+        _book(
+          nav: null,
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>NCX First</text>'
+              '</navLabel><content src="Text/chapter-1.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          ncxMediaType: 'application/xml',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(withoutNav.toc, isEmpty);
+
+      final wrongNavId = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+              'Nav Second</a></li></ol></nav>',
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>NCX First</text>'
+              '</navLabel><content src="Text/chapter-1.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          navId: 'tocdoc',
+          navProperties: 'nav',
+          ncxMediaType: 'application/xml',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      // The nav id must contain the substring "nav"; "tocdoc" does not.
+      expect(wrongNavId.toc, isEmpty);
+    });
+
+    test('the nav heuristic is the manifest id containing "nav"', () {
+      // Production ignores `properties="nav"`; the case-sensitive substring
+      // match on the id is the selector, in both directions.
+      final idContainsNav = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+              'Nav Second</a></li></ol></nav>',
+          navId: 'the-nav-doc',
+          navProperties: '',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(idContainsNav.toc.single.title, 'Nav Second');
+
+      final idSubstring = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+              'Nav Second</a></li></ol></nav>',
+          navId: 'xnavx',
+          navProperties: '',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(idSubstring.toc.single.title, 'Nav Second');
+    });
+
+    test('a broken nav document next to a valid NCX never overrides it', () {
+      final book = openEpubBytes(
+        _book(
+          nav: '<broken',
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>NCX First</text>'
+              '</navLabel><content src="Text/chapter-1.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      // The NCX is tried first and succeeds, so the nav document is never
+      // parsed.
+      expect(book.toc.single.title, 'NCX First');
+    });
+
+    test('the first nav element in document order supplies the entries', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav epub:type="landmarks"><ol>'
+              '<li><a href="../Text/chapter-1.xhtml#land">Landmarks</a></li>'
+              '</ol></nav>'
+              '<nav epub:type="toc"><ol>'
+              '<li><a href="../Text/chapter-1.xhtml#toc">Real Toc</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      // Production does not prefer a nav by `epub:type`; it takes the first
+      // one in document order, so a landmarks nav ahead of the toc nav wins.
+      expect(book.toc.single.title, 'Landmarks');
+      expect(book.toc.single.fragment, 'land');
+    });
+
+    test('a nav ol nested in a wrapper element is still found', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><div><ol><li><a href="../Text/chapter-1.xhtml#deep">'
+              'Deep</a></li></ol></div></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(book.toc.single.title, 'Deep');
+      expect(book.toc.single.fragment, 'deep');
+    });
+
+    test('a nav document without an ol resolves to nothing', () {
+      final book = openEpubBytes(
+        _book(
+          nav: '<nav><div>nothing</div></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(book.toc, isEmpty);
+    });
+
+    test('a book with neither candidate resolves to nothing', () {
+      final book = openEpubBytes(
+        _book(
+          nav: null,
+          ncx: null,
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(book.toc, isEmpty);
+    });
+
     test('the committed sample resolves to the retained locations', () {
       // `crates/shosai-app` pins `epub_toc_locations(&sample.epub)` to
       // `[(0, "Chapter 1: Introduction", 0, 0), (0, "Chapter 2: Getting
@@ -499,10 +760,20 @@ const _nestedNav =
     '</ol></nav>';
 
 /// One small EPUB archive with the supplied nav and/or NCX documents.
+///
+/// The extra knobs exist to pin the production TOC-source preference: the NCX
+/// is selected by media type alone (no `.ncx` suffix rule) and the nav document
+/// by the manifest id containing "nav" (case-sensitive substring), not by
+/// `properties="nav"`.
 Uint8List _book({
-  required String? nav,
+  String? nav,
   required Map<String, String> chapters,
-  required String? ncx,
+  String? ncx,
+  String navId = 'nav',
+  String navProperties = 'nav',
+  String ncxMediaType = 'application/x-dtbncx+xml',
+  String ncxHref = 'toc.ncx',
+  bool writeNcxFile = true,
 }) {
   final files = <String, String>{
     'mimetype': 'application/epub+zip',
@@ -514,11 +785,12 @@ Uint8List _book({
   };
   final manifest = <String>[
     if (nav != null)
-      '<item id="nav" href="Nav/toc.xhtml" '
-          'media-type="application/xhtml+xml" properties="nav"/>',
+      '<item id="$navId" href="Nav/toc.xhtml" '
+          'media-type="application/xhtml+xml"'
+          '${navProperties.isEmpty ? '' : ' properties="$navProperties"'}/>',
     if (ncx != null)
-      '<item id="ncx" href="toc.ncx" '
-          'media-type="application/x-dtbncx+xml"/>',
+      '<item id="ncx" href="$ncxHref" '
+          'media-type="$ncxMediaType"/>',
   ];
   final spine = <String>[];
   var index = 1;
@@ -552,8 +824,8 @@ Uint8List _book({
         '${nav.replaceFirst('<nav>', '<nav epub:type="toc">')}'
         '</body></html>';
   }
-  if (ncx != null) {
-    files['OPS/toc.ncx'] = '<?xml version="1.0"?>$ncx';
+  if (ncx != null && writeNcxFile) {
+    files['OPS/$ncxHref'] = '<?xml version="1.0"?>$ncx';
   }
 
   final archive = Archive();

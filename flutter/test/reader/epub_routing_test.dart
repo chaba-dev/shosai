@@ -11,6 +11,7 @@ import 'package:shosai_flutter/reader/epub/font_coverage.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
+import '../support/epub_navigation_fixture.dart';
 import '../support/production_shell_harness.dart';
 import '../support/selection_surface_fixture.dart';
 
@@ -176,6 +177,66 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await _drainHarness(tester);
   });
+
+  test('the admission fixture differs only in span depth', () {
+    // The routing gate compares canonical text, and the fixture's span
+    // nesting carries no text, so the engine's own stream for a shallow
+    // variant is a valid retained stream for the over-deep book: nesting
+    // depth is the only difference between the control and the fallback.
+    final shallowBytes = admissionEpub(spanNesting: 2);
+    final shallowBook = openEpubBytes(shallowBytes);
+    expect(
+      () => openEpubBytes(admissionEpub(spanNesting: 65)),
+      throwsA(isA<EpubLimitError>()),
+    );
+    expect(
+      openEpubBytes(
+        admissionEpub(spanNesting: 40),
+      ).chapters.single.canonicalText,
+      shallowBook.chapters.single.canonicalText,
+      reason: 'span nesting does not change the canonical stream',
+    );
+  });
+
+  testWidgets(
+    'a chapter past the cell-walk admission ceiling keeps the retained renderer',
+    (tester) async {
+      // The shallow control routes; the over-deep book — identical but for
+      // the span depth — is refused at admission and stays on the retained
+      // renderer, whose anchor walkers have no such ceiling.
+      final shallowBook = openEpubBytes(admissionEpub(spanNesting: 2));
+
+      final control = bridge(
+        bytes: admissionEpub(spanNesting: 2),
+        unitCount: 1,
+        canonicalTexts: {0: shallowBook.chapters.single.canonicalText},
+      );
+      await openReader(tester, control);
+      expect(
+        dartPage(tester),
+        isNotNull,
+        reason: 'the identical book inside the ceiling routes to the engine',
+      );
+      await tester.pumpWidget(const SizedBox());
+      await _drainHarness(tester);
+
+      final fallback = bridge(
+        bytes: admissionEpub(spanNesting: 65),
+        unitCount: 1,
+        canonicalTexts: {0: shallowBook.chapters.single.canonicalText},
+      );
+      await openReader(tester, fallback);
+      expect(
+        dartPage(tester),
+        isNull,
+        reason: 'an over-deep cell anchor walk is refused at admission',
+      );
+      expect(retainedPage(tester), isNotNull);
+
+      await tester.pumpWidget(const SizedBox());
+      await _drainHarness(tester);
+    },
+  );
 
   testWidgets('a refused chapter falls back and the next one routes again', (
     tester,
