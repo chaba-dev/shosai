@@ -120,11 +120,31 @@ are byte-identical.
   the same plain relative-reference rule as production (including its quirk of
   joining the NCX's own directory to a relative src); and the admission
   difference below.
-- **TOC error handling.** A nav/NCX entry whose href is unusable is skipped
-  individually with a warning; the retained parser abandons that candidate's
-  table of contents and falls to the next navigation document when any entry
-  fails to resolve. A book with one malformed entry can therefore show more
-  rows here than the retained reader shows.
+- **TOC error handling (aligned 2026-10-02).** A nav/NCX entry whose href or
+  src fails to resolve abandons that candidate's whole table of contents, like
+  the retained parser's `?` propagation: the NCX falls to the nav document and
+  the nav document (the last candidate) leaves the book with no table of
+  contents, and entries parsed before the failing one are discarded with it. A
+  warning names the rejected reference. An absent target is not an error: a
+  navPoint without a `<content>` element or src attribute, and a nav link
+  without an href attribute, keep their empty target like the production
+  `unwrap_or_default`, and a reference that resolves but names no spine item
+  only loses its Contents row. Entry target lookups follow the production
+  `Node::attribute` rule (matched by local name when called without a
+  namespace, so a declared-prefix `x:href`/`y:src` is the target, taken in
+  attribute order; a namespace declaration never is), and entry titles are the
+  link's own first child only when that child is text (the production
+  `Node::text` rule, with the leading text/CDATA run coalesced the way the
+  production parser merges it, an empty leading run still counting as link
+  text so the `<span>` fallback does not trigger). Title normalization keeps
+  two existing residuals: the port trims Dart's whitespace set (which includes
+  U+FEFF) where the production `str::trim` uses the Unicode `White_Space`
+  property (which excludes it), and the port's XML reader keeps literal CR/LF
+  in text where the production parser normalizes line endings (a `&#13;`
+  character reference is preserved by both). Malformed namespace admission stays with the
+  read-gate residual above: the production parser rejects a document whose
+  attribute prefix is not declared before any lookup, where this port's XML
+  reader admits it and resolves the attribute by local name.
 - **Broken navigation XML at read time (residual).** The retained TOC reader
   (`read_archive_entry_cancellable`) validates a selected NCX's UTF-8 and
   lexically inspectable XML — a tolerant shape walk (`check_end_names=false`,

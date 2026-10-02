@@ -352,7 +352,7 @@ void main() {
         );
 
         // The authored tree keeps the part heading and its nested list.
-        expect(book.toc, hasLength(6));
+        expect(book.toc, hasLength(5));
         final part = book.toc.first;
         expect(part.title, 'Part One');
         expect(part.resource, isEmpty);
@@ -361,10 +361,6 @@ void main() {
         expect(part.children.first.resource, 'OPS/Text/chapter-1.xhtml');
         expect(part.children.first.fragment, 'section');
         expect(part.children.last.title, 'Missing anchor');
-        expect(
-          book.warnings.any((warning) => warning.contains('outside.xhtml')),
-          isTrue,
-        );
 
         // Only entries that resolve to a durable location become rows; a part
         // heading without a target is skipped while its child keeps depth 1.
@@ -379,6 +375,531 @@ void main() {
         );
       },
     );
+
+    test('an unusable nav href abandons the nav table of contents', () {
+      // The production `parse_nav_ol` propagates one entry's resolution error
+      // through `?`, so already-parsed siblings are discarded with it, and the
+      // nav document is the last candidate: the book keeps no table of
+      // contents. Skipping only the bad entry would keep the good siblings
+      // where the retained reader shows none.
+      final escape = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a href="../Text/chapter-1.xhtml#section">Good</a></li>'
+              '<li><a href="../../../outside.xhtml">Escape</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(escape.toc, isEmpty);
+      expect(
+        escape.warnings.any((warning) => warning.contains('outside.xhtml')),
+        isTrue,
+      );
+
+      final foreign = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a href="../Text/chapter-1.xhtml#section">Good</a></li>'
+              '<li><a href="https://example.invalid/book.xhtml">Foreign</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(foreign.toc, isEmpty);
+    });
+
+    test('a reference that climbs inside the archive is not an error', () {
+      // `../outside.xhtml` from the nav's own directory stays inside the
+      // archive (`OPS/outside.xhtml`), so it resolves like any reference; the
+      // entry survives and only its row is unoffered because the target is not
+      // a spine item. Only a resolution error abandons the candidate.
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a href="../outside.xhtml">Climbs</a></li>'
+              '<li><a href="../Text/chapter-1.xhtml#section">Good</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(book.toc, hasLength(2));
+      expect(book.toc.first.resource, 'OPS/outside.xhtml');
+      expect(resolveTocLocations(book).single.title, 'Good');
+    });
+
+    test('an unusable nav href in a nested child abandons the whole nav', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><span>Part</span><ol>'
+              '<li><a href="../Text/chapter-1.xhtml#section">Good</a></li>'
+              '<li><a href="../Text/ch%2.xhtml">Bad escape</a></li>'
+              '</ol></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(book.toc, isEmpty);
+    });
+
+    test('an unusable NCX src abandons the NCX and falls back to the nav', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml#section">'
+              'Nav Second</a></li></ol></nav>',
+          ncx:
+              '<ncx><navMap>'
+              '<navPoint><navLabel><text>Good NCX</text></navLabel>'
+              '<content src="Text/chapter-1.xhtml"/></navPoint>'
+              '<navPoint><navLabel><text>Bad NCX</text></navLabel>'
+              '<content src="../../outside.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+        ),
+      );
+      // The NCX candidate is abandoned whole — the parsed "Good NCX" point is
+      // discarded with it — and the nav document supplies the entries.
+      expect(book.toc.single.title, 'Nav Second');
+      expect(
+        book.warnings.any(
+          (warning) =>
+              warning.contains('unusable src') &&
+              warning.contains('../outside.xhtml'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('an unusable NCX src without a nav document empties the TOC', () {
+      final book = openEpubBytes(
+        _book(
+          nav: null,
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>Bad NCX</text>'
+              '</navLabel><content src="Text//chapter-1.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(book.toc, isEmpty);
+    });
+
+    test('an unusable NCX src in a nested point abandons the whole NCX', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml#section">'
+              'Nav Second</a></li></ol></nav>',
+          ncx:
+              '<ncx><navMap>'
+              '<navPoint><navLabel><text>Part</text></navLabel>'
+              '<content src="Text/chapter-1.xhtml"/>'
+              '<navPoint><navLabel><text>Bad</text></navLabel>'
+              '<content src="%2e%2e/outside.xhtml"/></navPoint>'
+              '</navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+        ),
+      );
+      expect(book.toc.single.title, 'Nav Second');
+    });
+
+    test('missing content, src or href keeps an entry with an empty target', () {
+      // The production `unwrap_or_default` keeps a navPoint without a
+      // `<content>` element or src attribute, and a nav link without an href
+      // attribute: an absent target is not a resolution error, so the entry
+      // survives and only its Contents row is unoffered.
+      final ncx = openEpubBytes(
+        _book(
+          nav: null,
+          ncx:
+              '<ncx><navMap>'
+              '<navPoint><navLabel><text>No content</text></navLabel></navPoint>'
+              '<navPoint><navLabel><text>No src</text></navLabel><content/>'
+              '</navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(ncx.toc, hasLength(2));
+      expect(ncx.toc.first.title, 'No content');
+      expect(ncx.toc.first.resource, isEmpty);
+      expect(ncx.toc.last.title, 'No src');
+      expect(ncx.toc.last.resource, isEmpty);
+      expect(resolveTocLocations(ncx), isEmpty);
+
+      final nav = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a>No href</a></li>'
+              '<li><span>Span only</span></li>'
+              '<li><a/></li>'
+              '<li></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+          ncx: null,
+        ),
+      );
+      // A titled link without an href attribute and a `<span>` heading keep
+      // their empty targets; a link with neither a title nor a target, and an
+      // empty `<li>`, are dropped by the production filter.
+      expect(nav.toc, hasLength(2));
+      expect(nav.toc.every((entry) => entry.resource.isEmpty), isTrue);
+      expect(nav.toc.map((entry) => entry.title), ['No href', 'Span only']);
+      expect(resolveTocLocations(nav), isEmpty);
+    });
+
+    test('bad entries in both candidates leave no table of contents', () {
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../../../outside.xhtml">Bad nav</a></li>'
+              '</ol></nav>',
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>Bad ncx</text>'
+              '</navLabel><content src="../../outside.xhtml"/></navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      // The NCX is tried first, so its warning precedes the nav document's:
+      // one warning per rejected candidate, in candidate order.
+      expect(book.toc, isEmpty);
+      expect(book.warnings.where((warning) => warning.contains('unusable')), [
+        'NCX entry has an unusable src: ../../outside.xhtml',
+        'nav entry has an unusable href: ../../../outside.xhtml',
+      ]);
+    });
+
+    test('a nav title is the link text only when the first child is text', () {
+      // The production `Node::text` returns an element's text only when the
+      // first child node is text: a leading element or comment yields no link
+      // title, so an otherwise empty entry is dropped by the production
+      // filter instead of surviving on later text.
+      final leading = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a href="../Text/chapter-1.xhtml#section">'
+              '<em>One</em> Chapter</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(leading.toc.single.title, isEmpty);
+
+      final coalesced = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a href="../Text/chapter-1.xhtml#section">'
+              'A<![CDATA[B]]>C</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+          ncx: null,
+        ),
+      );
+      // The production parser coalesces the leading text/CDATA run into one
+      // node, so the title is the whole run, not just its first chunk.
+      expect(coalesced.toc.single.title, 'ABC');
+
+      // The production link text exists when the element starts with a text
+      // node even if that run is empty: the `<span>` fallback does not
+      // trigger, so an otherwise empty entry is dropped, and a valid href
+      // keeps the coalesced run as the title.
+      final emptyRun = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a><![CDATA[]]></a><span>Fallback</span></li>'
+              '<li><a href="../Text/chapter-1.xhtml#section">'
+              '<![CDATA[]]>Fallback</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(emptyRun.toc, hasLength(1));
+      expect(emptyRun.toc.single.title, 'Fallback');
+      expect(emptyRun.toc.single.resource, 'OPS/Text/chapter-1.xhtml');
+
+      final comment = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a><!--note-->Later</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+          ncx: null,
+        ),
+      );
+      // No title, no target and no children: the production filter drops it.
+      expect(comment.toc, isEmpty);
+    });
+
+    test('a prefixed href or src attribute is the entry target', () {
+      // The production `Node::attribute` matches by local name when called
+      // without a namespace URI (the roxmltree 0.21 `attribute_node` rule), so
+      // a declared-prefix attribute is the entry's target: a valid one
+      // navigates, an unusable one abandons the candidate, and a namespace
+      // declaration never is a target.
+      final book = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a xmlns:x="urn:test" x:href="../Text/chapter-1.xhtml#section">'
+              'Prefixed nav</a></li>'
+              '</ol></nav>',
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>Prefixed ncx</text>'
+              '</navLabel><content xmlns:y="urn:test" y:src="Text/chapter-1.xhtml"/>'
+              '</navPoint></navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+        ),
+      );
+      // The NCX wins and its prefixed src resolved like a plain one.
+      expect(book.toc.single.title, 'Prefixed ncx');
+      expect(book.toc.single.resource, 'OPS/Text/chapter-1.xhtml');
+      expect(resolveTocLocations(book).single.title, 'Prefixed ncx');
+      expect(book.warnings, isEmpty);
+
+      final abort = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a xmlns:x="urn:test" '
+              'x:href="../../../outside.xhtml">Prefixed</a></li></ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(abort.toc, isEmpty);
+      expect(
+        abort.warnings.any((warning) => warning.contains('outside.xhtml')),
+        isTrue,
+      );
+
+      final declaration = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a xmlns:href="urn:test">Decl only</a></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(declaration.toc.single.title, 'Decl only');
+      expect(declaration.toc.single.resource, isEmpty);
+      expect(declaration.warnings, isEmpty);
+
+      // A nav-only book exercises the nav's own prefixed lookup.
+      final navOnly = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a xmlns:x="urn:test" '
+              'x:href="../Text/chapter-1.xhtml#section">Prefixed nav</a></li>'
+              '</ol></nav>',
+          ncx: null,
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+          },
+        ),
+      );
+      expect(navOnly.toc.single.title, 'Prefixed nav');
+      expect(navOnly.toc.single.resource, 'OPS/Text/chapter-1.xhtml');
+      expect(navOnly.toc.single.fragment, 'section');
+
+      // Two attributes with the same local name: the production `find` takes
+      // the first in attribute order, whatever its prefix.
+      final unprefixedFirst = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-2.xhtml" '
+              'xmlns:x="urn:test" '
+              'x:href="../Text/chapter-1.xhtml#section">Both</a></li></ol></nav>',
+          ncx: null,
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+            'OPS/Text/chapter-2.xhtml': '<main><p>Second chapter.</p></main>',
+          },
+        ),
+      );
+      expect(unprefixedFirst.toc.single.resource, 'OPS/Text/chapter-2.xhtml');
+
+      final prefixedFirst = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a xmlns:x="urn:test" '
+              'x:href="../Text/chapter-1.xhtml#section" '
+              'href="../Text/chapter-2.xhtml">Both</a></li></ol></nav>',
+          ncx: null,
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml':
+                '<main><p>First chapter body.</p>'
+                '<h2 id="section">Section one</h2></main>',
+            'OPS/Text/chapter-2.xhtml': '<main><p>Second chapter.</p></main>',
+          },
+        ),
+      );
+      expect(prefixedFirst.toc.single.resource, 'OPS/Text/chapter-1.xhtml');
+    });
+
+    test('an empty href or src value is a resolution error, not an absence', () {
+      // The production reads the attribute value and resolves it; only a
+      // missing attribute takes the `unwrap_or_default` path. An empty value
+      // fails resolution and abandons the candidate.
+      final nav = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="">Good title</a></li>'
+              '<li><a href="../Text/chapter-1.xhtml">Good</a></li></ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(nav.toc, isEmpty);
+
+      final ncx = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol><li><a href="../Text/chapter-1.xhtml">'
+              'Nav Second</a></li></ol></nav>',
+          ncx:
+              '<ncx><navMap><navPoint><navLabel><text>Empty src</text>'
+              '</navLabel><content src=""/></navPoint></navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(ncx.toc.single.title, 'Nav Second');
+    });
+
+    test('a parent entry error is reported before a nested child error', () {
+      // The production resolves the href/src before recursing into the nested
+      // list, so the parent's rejected reference is the one that abandons the
+      // candidate; the child is never parsed.
+      final nav = openEpubBytes(
+        _book(
+          nav:
+              '<nav><ol>'
+              '<li><a href="../../../outside.xhtml">Bad parent</a><ol>'
+              '<li><a href="../Text/ch%2.xhtml">Bad child</a></li>'
+              '</ol></li>'
+              '</ol></nav>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+          ncx: null,
+        ),
+      );
+      expect(nav.toc, isEmpty);
+      expect(
+        nav.warnings.where((warning) => warning.contains('unusable href')),
+        hasLength(1),
+      );
+      expect(
+        nav.warnings.any((warning) => warning.contains('../../../outside')),
+        isTrue,
+      );
+
+      final ncx = openEpubBytes(
+        _book(
+          nav: null,
+          ncx:
+              '<ncx><navMap>'
+              '<navPoint><navLabel><text>Bad parent</text></navLabel>'
+              '<content src="../../outside.xhtml"/>'
+              '<navPoint><navLabel><text>Bad child</text></navLabel>'
+              '<content src="%2e%2e/outside.xhtml"/></navPoint>'
+              '</navPoint>'
+              '</navMap></ncx>',
+          chapters: const {
+            'OPS/Text/chapter-1.xhtml': '<main><p>Body.</p></main>',
+          },
+        ),
+      );
+      expect(ncx.toc, isEmpty);
+      expect(
+        ncx.warnings.where((warning) => warning.contains('unusable src')),
+        hasLength(1),
+      );
+      expect(
+        ncx.warnings.any((warning) => warning.contains('../../outside')),
+        isTrue,
+      );
+    });
 
     test('a nav title takes the link text, not a nested element', () {
       final book = openEpubBytes(
@@ -756,7 +1277,6 @@ const _nestedNav =
     '<li><a href="../Text/chapter-2.xhtml#">Empty fragment</a></li>'
     '<li><a href="../Text/chapter-2.xhtml">No fragment</a></li>'
     '<li><a href="../Text/%63hapter-1.xhtml#section">Encoded path</a></li>'
-    '<li><a href="../../../outside.xhtml">Escape</a></li>'
     '</ol></nav>';
 
 /// One small EPUB archive with the supplied nav and/or NCX documents.
