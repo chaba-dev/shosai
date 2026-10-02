@@ -165,6 +165,60 @@ Uint8List crlfPreEpub() {
   );
 }
 
+/// A page-anchor EPUB built in memory.
+///
+/// The book exists for the reader-level page-step contract over table rows
+/// whose cells carry no mapped canonical content (empty cells are common in
+/// real books' layout tables): the chapter puts such a table mid-way, after
+/// nonzero text, and keeps filler on both sides so it spans several pages.
+/// The shapes are the ones the anchored fix must discriminate: a leading
+/// empty cell, an interior empty cell, a trailing empty cell, a fully empty
+/// row, a cell-less row, and a run of empty rows. Building it here keeps the
+/// shared corpus untouched.
+Uint8List pageAnchorEpub() {
+  final filler = <String>[
+    for (var index = 0; index < 40; index += 1)
+      '<p>Leading filler paragraph $index for the anchor fixture.</p>',
+  ].join();
+  final trailing = <String>[
+    for (var index = 0; index < 40; index += 1)
+      '<p>Trailing filler paragraph $index for the anchor fixture.</p>',
+  ].join();
+  final emptyRows = <String>[
+    // Enough rows that a page break falls inside the run, so a page's
+    // canonical start is owned by a fully empty row — the anchor the durable
+    // restore contract is about.
+    for (var index = 0; index < 60; index += 1) '<tr><td></td></tr>',
+  ].join();
+  final body =
+      '<main>'
+      '$filler'
+      '<table>'
+      '<tr><td></td><td>Leading empty cell row.</td></tr>'
+      '<tr><td>Interior left.</td><td></td><td>Interior right.</td></tr>'
+      '<tr><td>Trailing text.</td><td></td></tr>'
+      '<tr><td></td><td></td></tr>'
+      '<tr></tr>'
+      '<tr><td>After the empty shapes.</td><td>More after.</td></tr>'
+      '$emptyRows'
+      '<tr><td>Final row of the table.</td></tr>'
+      '</table>'
+      '$trailing'
+      '</main>';
+  return _epub(
+    chapters: {
+      'OPS/Text/chapter-1.xhtml': body,
+      'OPS/Text/chapter-2.xhtml':
+          '<main><p>Second chapter body for the anchor fixture.</p></main>',
+    },
+    nav:
+        '<ol>'
+        '<li><a href="../Text/chapter-1.xhtml">Anchor chapter</a></li>'
+        '<li><a href="../Text/chapter-2.xhtml">Second chapter</a></li>'
+        '</ol>',
+  );
+}
+
 Uint8List _epub({
   required Map<String, String> chapters,
   required String nav,
