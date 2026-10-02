@@ -564,6 +564,167 @@ opener for allowed external links is an injected adapter;
 this slice provides the policy and the seam, not a platform integration, so a
 composition root that injects no opener opens nothing.
 
+Slice 4 merged as [PR #142](https://github.com/chaba-dev/shosai/pull/142) at
+`4457ac74` on 2026-10-02 (`feat(reader): serve EPUB contents and fragment
+navigation from the Dart engine`). Merge is delivery, not acceptance: the named
+gates above stay open and no package is accepted by it.
+
+### Slice 5 report (EPUB canonical/TOC parity gaps, 2026-10-02)
+
+Implementation, not acceptance: this slice closes the four named canonical-text
+and TOC-source differences left open by slices 3–4; no package acceptance
+(5A–5J) is recorded by it, and 5A's acceptance, the 4/30 accounting and 5B's
+paused/superseded status are unchanged (see the
+[restoration plan](flutter-ui-restoration-plan.md#progress-tracking)). Rust 5B
+remains paused reference work, not an implementation path.
+
+Delivered as
+[PR #143](https://github.com/chaba-dev/shosai/pull/143)
+(`fix(epub): match retained canonical text and TOC source for br, cells and
+nav`) on top of slice 4's `4457ac74`; open, not merged by this record.
+
+**What the slice closes, exactly.**
+
+- **`<br/>` line breaks.** The engine's inline collector emitted a preserved
+  newline span for `<br/>` where the retained collector emits nothing. The
+  span is gone: production drops `<br/>` entirely, so adjacent runs join
+  (`a <em>mid<br/>dle</em> tail` → `a middle tail`), a paragraph whose only
+  content is a break is dropped like any empty block, and a trailing marker
+  after a break resolves at the paragraph's own text end (`a<br/><a id="x"/>`
+  → `x` = 1, not 2). Pinned across paragraphs, `pre`, headings, list items,
+  captions, figure captions, and break-adjacent anchors, with the literal
+  offsets.
+- **Inline-only table-cell whitespace.** The engine parsed an inline-only
+  cell's content with the chapter rules and kept source whitespace runs; the
+  production cell collector collapses each text run separately (an
+  inline-only cell is one collapsed run; a whitespace-only cell contributes
+  nothing but keeps its tab separator). Ported the production cell collectors
+  (`collect_cell_blocks`/`collect_cell_inline` equivalents) into the
+  normalizer, so block/inline classification inside a cell, `li`'s inline UA
+  role, nested-table flattening, `pre` preservation, and image alt fallback
+  for missing or unresolvable sources now follow the retained stream.
+- **Table-cell display-math whitespace.** The same collector port fixes
+  `<td><p>before <math display="block">…</math> after</p></td>` to
+  `before\n(a)/(b)\nafter\n\n`: each text run around the promoted math
+  collapses separately instead of keeping the chapter rules' run spaces.
+- **TOC source preference.** The engine preferred an EPUB 3 nav document
+  (`properties="nav"`) over the NCX; the retained parser tries the NCX first
+  (media type `application/x-dtbncx+xml` alone, no `.ncx` suffix rule) and
+  finds a nav document by the manifest id containing "nav" (case-sensitive
+  substring), not `properties`. The engine now matches: NCX first, nav second,
+  a usable NCX (parseable with `<navMap>`, even with no points) suppressing
+  the fallback, an unparseable NCX or one without `<navMap>` falling through,
+  the first `<nav>` in document order (no `epub:type` preference) and its
+  first descendant `<ol>`.
+
+**How the expectations were derived.** Asymmetric, source-derived: every
+canonical-text and anchor expectation above is the retained Rust stream
+(`crates/shosai-core/src/epub/render.rs`, `parser.rs`), compared via a
+temporary 57-case Rust probe and a 50-case Dart probe over the same
+hand-written chapter and TOC inputs (break/inline boundaries, empty and
+trailing markers, whitespace-only and inline-only cells, nested blocks and
+display math inside cells, cell advancement, and 14 nav/NCX combinations
+including different content, invalid and missing sources). The probes were
+byte-compared and then removed from both trees before publication; the
+production expectations are pinned by the package's own regressions
+(`normalize_test.dart`, `address_test.dart`), each carrying the production
+literal. Deliberately *not* blessed: the three cases where the retained
+collector publishes anchor offsets a suppressed cell walk cannot support
+remain the documented suppression residual below, and no Rust file changed.
+
+**Review rounds.** The authorized review found code defects in the first two
+diffs; each is fixed with a regression whose literal was re-derived from a
+temporary Rust probe (8 trailing-anchor cases, then 1 hidden-name case) before
+the probes were removed:
+
+- A cell's trailing marker published at the flattened content end where the
+  retained parser publishes it at the anchor walk's own end (a list inside a
+  cell renders `a\nb\n\n` on the walk but `ab` in content, so the marker
+  moves 3→5; a composed paragraph/display-math/list cell moves 6→7). The
+  markers now ride the same first-wins walk map as every other cell anchor,
+  and the `EpubTableCell.endAnchorIds` field is gone.
+- A limit-error catch around the cell walk silently dropped the walk's
+  first-occurrence anchors and let a later duplicate republish; the
+  `EpubLimitError` now propagates like the main builder's ceiling.
+- The new cell collectors recursed without a depth bound; both now stop
+  contributing past the same 64-element ceiling the chapter walkers and the
+  anchor walk use.
+- The block walk lacked the production `is_math` namespace guard, so an
+  un-namespaced `<math>` was parsed as MathML on the walk
+  (`[math expression omitted]`) while the content pass rendered its text;
+  the walk now falls through to the default inline arm like production.
+- The review's second round found that the cell collectors' new depth ceiling
+  let a name past the ceiling be republished by a later duplicate at its own
+  offset (the routing gate cannot see a textless truncation), where the
+  production walkers — which have no ceiling — publish the cell's first
+  occurrence. A chapter-wide reservation of the names the walk's map lacked
+  was tried first and rejected in the review's third round: it reserved names
+  production deliberately never publishes (MathML descendants, code-block
+  descendants, anchors of runs that emit nothing), treated any resolved
+  occurrence as the first one, and leaked an inner cell's content-pass
+  truncation into its parent's walk flag. The accepted fix is the simplest
+  safe one: the cell's anchor walk carries a truncation flag set only by the
+  anchor walkers (the content collectors are anchor-free), and a truncated
+  walk fails admission (`EpubLimitError`, mutation-checked) instead of
+  publishing a partial map — the book stays on the retained renderer, whose
+  walkers have no such ceiling. Hidden (`display: none`) subtrees stay outside
+  the media suppression, like the production walk's own skipping (pinned to
+  the retained literal). The reader-level consequence of the rejection is
+  pinned end to end as well: the routing suite's admission test opens a book
+  whose only difference from a routing control is the fixture's span depth
+  (the spans carry no text, so the harness's retained stream is the shallow
+  variant's own engine stream), shows the control routed and the over-deep
+  book kept on the retained renderer, and fails at its routing assertion if
+  the admission throw is removed (the over-deep book then parses, matches the
+  gate and routes). No supported-input capability is removed by the rejection: the
+  retained renderer is the full-fidelity path for such books, where the
+  alternative was routing a stream whose textless anchor divergence the gate
+  cannot see.
+
+Every fix is mutation-checked (reverting it fails its regression; the
+limit-error regression needed its markup narrowed so only the walk, not the
+chapter stream, overruns the ceiling), as is the reader-level admission test
+(disabling the throw routes the over-deep book and fails it). The review's
+fourth and fifth rounds returned no blockers and signed off on the functional
+resolution; two nonblocking cleanups between them — a dangling README
+referent and two pieces of dead plumbing (an always-true mode parameter and
+an unread table-cell field) — are applied.
+
+**Residuals kept and named (unchanged).** An inline-only cell that mixes an
+image or MathML with an anchor drops that cell's descendant anchors (the
+retained stream's walk-map offsets cannot be reproduced from the rendered
+content; production publishes them, this port suppresses them — pinned per
+case). An NCX or nav entry with an unusable href is skipped individually with
+a warning where the retained parser abandons that candidate's table of
+contents and falls to the next navigation document. The
+production manifest is a `HashMap` (arbitrary candidate) where this port takes
+the first in manifest order (deterministic superset). Read gate: production
+reads a selected NCX (and a nav document it falls back to) through a strict
+UTF-8 and lexically-inspectable-XML reader (a tolerant shape walk under
+byte/depth/text limits) whose failure fails the book, while structural
+mismatches that pass the inspection only fail the candidate's own parse and
+fall to the next navigation document; this port decodes TOC bytes with
+malformed-UTF-8 replacement, so non-UTF-8 bytes that still yield parseable XML
+stay selected silently, and lexically malformed navigation XML opens with a
+warning and the nav fallback. Residual visibility differs by class: a
+canonical-text divergence in a chapter routes it to the retained renderer;
+suppressed media-cell anchors leave the affected links unresolvable and their
+Contents rows unoffered; a TOC-source or entry difference changes what the
+Contents panel shows — none of them is hidden, and none is a wrong stored
+offset for text this port renders.
+
+**Gates this slice closes.** Engine-level canonical parity for the four named
+differences: chapters whose only divergence was one of them now compare
+byte-identically and route to the Dart renderer. No user-visible routing or
+render change beyond that; no package accepted.
+
+**Gates this slice leaves open, named.** All residual gates from slices 3–4:
+real-book corpus, over-tall table rows, font admission/fallback coverage,
+retained-memory attribution, presented-frame timing, continuous-mode tiles and
+spreads, tabs (5F), progress ordinals (5G), search ownership, the media-cell
+anchor suppression, per-entry TOC error skipping, the manifest-HashMap
+determinism note and the NCX admission difference above.
+
 ## Proposed gated work, not an automatic rewrite
 
 Each phase produces a reviewable result. The owner authorizes follow-up work and
@@ -639,6 +800,8 @@ point. These are **evaluation defaults, not selected production dependencies**.
 - [Dart SQLite investigation and disposable probes](https://ampcode.com/threads/T-01a0dc3a-5504-758f-91e7-a68cfa1a9f73).
 - [Dart EPUB evaluation and Phase C prototype](https://ampcode.com/threads/T-01a0e6aa-f4df-7480-a439-cebf039d7623) — merged as [PR #135](https://github.com/chaba-dev/shosai/pull/135) and [PR #136](https://github.com/chaba-dev/shosai/pull/136); the thread's own recommendation was "insufficient evidence", so the adoption is an owner decision above that recommendation, not a result the evaluation proved.
 - [EPUB adoption decision thread](https://ampcode.com/threads/T-01a0e675-f4f2-7202-8eef-bdd8ca70b093) — records the owner's `adopt` decision, the delegation rules and the production gates applied to follow-up slices.
+- [EPUB navigation slice (real TOC and fragment links)](https://ampcode.com/threads/T-01a0f4ce-cac4-7188-8b8e-7f2ea18745a5) — evidence for slice 4's anchor corrections and the TOC differences it disclosed.
+- [EPUB canonical/TOC parity slice](https://ampcode.com/threads/T-01a0fbda-440f-73dc-9bed-5f302161952f) — slice 5's probe comparison and review record for the `<br/>`, inline-only cell, cell display-math and NCX-first TOC closures; delivered as [PR #143](https://github.com/chaba-dev/shosai/pull/143).
 
 Local PDF evidence is retained under `.amp/in/artifacts/pdf-render-comparison/`,
 including `README.md`, `CORRECTIONS.md`, pins/lockfiles, generator, fixture

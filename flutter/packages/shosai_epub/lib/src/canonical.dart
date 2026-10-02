@@ -222,10 +222,9 @@ class CanonicalTextBuilder {
           for (final row in group.rows) {
             for (var index = 0; index < row.cells.length; index++) {
               final cell = row.cells[index];
-              // The cell's own and inherited anchors resolve at its start; a
-              // trailing marker resolves at the cell text end, one scalar
-              // further for a block cell (the generated separator).
-              _recordAnchors(cell.startAnchorIds, _scalar);
+              // The cell's own and inherited anchors resolve at its start.
+              final cellStart = _scalar;
+              _recordAnchors(cell.startAnchorIds, cellStart);
               for (
                 var childIndex = 0;
                 childIndex < cell.children.length;
@@ -236,13 +235,15 @@ class CanonicalTextBuilder {
                 }
                 _node(cell.children[childIndex]);
               }
-              // A block cell's trailing marker sits one scalar past its last
-              // emitted child (the production parser counts one generated
-              // newline per emitted block); an inline cell's sits exactly at
-              // the cell text end.
-              final trailingOffset =
-                  cell.blockChildren && cell.children.isNotEmpty ? 1 : 0;
-              _recordAnchors(cell.endAnchorIds, _scalar + trailingOffset);
+              // The cell's descendant anchors come from the production anchor
+              // streams (a block walk or the inline collector over the cell's
+              // source), so they are applied cell-locally here: within one
+              // cell the stream's own first occurrence must win, like
+              // `record_anchor_name`. A marker left pending after the walk
+              // resolves at the walk's own end and arrives in this same map.
+              for (final entry in cell.anchorOffsets.entries) {
+                _recordAnchor(entry.key, cellStart + entry.value);
+              }
               if (index + 1 < row.cells.length) _writeSeparator('\t');
             }
             _writeSeparator('\n');

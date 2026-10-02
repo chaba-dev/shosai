@@ -507,8 +507,11 @@ EpubComputedStyle _applyUaDefaults(EpubComputedStyle style, String tag) {
     case 'th':
     case 'caption':
       display = EpubDisplay.block;
-    case 'li':
-      display = EpubDisplay.block;
+    // `li` is deliberately absent: the production `ua_display` has no arm for
+    // it, so a list item computes as inline. That only differs from the block
+    // role inside table cells (the chapter list walker matches `li` by tag,
+    // not by display), where the production cell collector joins the items
+    // into one run.
   }
   var bold = style.bold;
   var italic = style.italic;
@@ -566,18 +569,31 @@ EpubComputedStyle _applyDeclaration(
   final lower = value.toLowerCase();
   switch (declaration.property) {
     case 'display':
-      if (lower == 'none') return _copyWith(style, display: EpubDisplay.none);
-      if (lower == 'inline') {
-        return _copyWith(style, display: EpubDisplay.inline);
+      // The production `css_display` offers only the keywords it can map
+      // losslessly: `none`, `inline`, `block`, the table keyword family
+      // (`table`/`inline-table` are a pair with a table inside; the group and
+      // row keywords arrive as their own kinds). Every other keyword —
+      // `list-item`, `inline-block`, `flex`, `grid`, `contents`, `flow-root`,
+      // `run-in`, `ruby` — keeps the UA role: the production cascade returns
+      // no role for it, so the element's tag default stands.
+      switch (lower) {
+        case 'none':
+          return _copyWith(style, display: EpubDisplay.none);
+        case 'inline':
+          return _copyWith(style, display: EpubDisplay.inline);
+        case 'block':
+        case 'table':
+        case 'inline-table':
+        case 'table-row-group':
+        case 'table-header-group':
+        case 'table-footer-group':
+        case 'table-row':
+        case 'table-cell':
+        case 'table-caption':
+          return _copyWith(style, display: EpubDisplay.block);
+        default:
+          return style;
       }
-      if (lower == 'block' ||
-          lower == 'table' ||
-          lower == 'table-row' ||
-          lower == 'table-cell' ||
-          lower == 'list-item') {
-        return _copyWith(style, display: EpubDisplay.block);
-      }
-      return style;
     case 'font-size':
       final resolved = _resolveLength(
         value,
@@ -848,6 +864,17 @@ class _NormalizeContext {
   /// offset.
   bool _suppressAnchors = false;
 
+  /// Whether an anchor walk's depth ceiling truncated a subtree since the
+  /// flag was last cleared.
+  ///
+  /// The cell anchor pass reads it after its walk: a cell whose walk
+  /// truncated cannot claim to have resolved every anchor name in its visible
+  /// subtree, and the production walkers — which have no such ceiling —
+  /// publish the first occurrence of each, so a partial map would let a later
+  /// duplicate claim a wrong offset the routing gate cannot see. The walk
+  /// fails admission instead (`EpubLimitError`).
+  bool _walkHitDepthCeiling = false;
+
   /// Anchor names a suppressed walk saw.
   ///
   /// The chapter drops them from its anchor map, so a later duplicate cannot
@@ -949,13 +976,12 @@ class _NormalizeContext {
   EpubComputedStyle styleOf(XmlElement element) =>
       styles[element] ?? _initialStyle();
 
-  List<EpubContentNode> parseBlocks(
-    XmlElement parent,
-    int depth, {
-    bool codeBlocks = true,
-  }) {
+  List<EpubContentNode> parseBlocks(XmlElement parent, int depth) {
     final nodes = <EpubContentNode>[];
-    if (depth > _maxDepth) return nodes;
+    if (depth > _maxDepth) {
+      _walkHitDepthCeiling = true;
+      return nodes;
+    }
     for (final child in parent.children) {
       if (child is XmlText) {
         final text = child.value.trim();
@@ -972,7 +998,7 @@ class _NormalizeContext {
       final style = styleOf(child);
       if (style.display == EpubDisplay.none) continue;
       _noteAnchor(child);
-      final produced = _parseElement(child, style, depth, codeBlocks);
+      final produced = _parseElement(child, style, depth);
       nodes.addAll(produced);
     }
     return nodes;
@@ -982,15 +1008,13 @@ class _NormalizeContext {
     XmlElement element,
     EpubComputedStyle style,
     int depth,
-    bool codeBlocks,
   ) {
     final tag = element.name.local.toLowerCase();
     // The production block walker treats any element whose computed style is
     // monospace + preserve-whitespace as a code block, whatever its tag
     // (Calibre-generated classes), and never collects its descendants'
     // anchors; only the element's own anchors stay recorded at its start.
-    if (codeBlocks &&
-        tag != 'pre' &&
+    if (tag != 'pre' &&
         tag != 'code' &&
         style.monospace &&
         style.preserveWhitespace &&
@@ -1033,11 +1057,7 @@ class _NormalizeContext {
         return promoted;
       case 'blockquote':
         final pendingBefore = List<String>.of(_pendingAnchors);
-        final children = parseBlocks(
-          element,
-          depth + 1,
-          codeBlocks: codeBlocks,
-        );
+        final children = parseBlocks(element, depth + 1);
         if (children.isEmpty) {
           // The production parser drops the content anchors of a blockquote it
           // does not emit; the blockquote's own anchors stay recorded at its
@@ -1056,7 +1076,7 @@ class _NormalizeContext {
       case 'table':
         final table = _parseTable(element, style, depth);
         return table == null ? const [] : [table];
-      case 'math':
+      case 'math' when _isMathElement(element):
         final content = parseMath(element, limits);
         final node = EpubMathNode(
           content: content,
@@ -1136,7 +1156,7 @@ class _NormalizeContext {
       case 'figure':
         final figure = _parseFigure(element, style, depth);
         if (figure != null) return [figure];
-        final inner = parseBlocks(element, depth + 1, codeBlocks: codeBlocks);
+        final inner = parseBlocks(element, depth + 1);
         if (inner.isEmpty) return const [];
         // A marker after the last child stays pending: the production figure
         // arm keeps the child walk's offsets, and the figure's own separator
@@ -1171,7 +1191,7 @@ class _NormalizeContext {
         // `nav` is deliberately not in this list: the production parser falls
         // through to its inline collector for it, and a block walk would change
         // both the canonical stream and a trailing marker's offset.
-        return parseBlocks(element, depth + 1, codeBlocks: codeBlocks);
+        return parseBlocks(element, depth + 1);
       default:
         final spans = _inlineSpans(element, style.fontSizePx, null);
         if (spans.isEmpty) return const [];
@@ -1288,7 +1308,10 @@ class _NormalizeContext {
     List<EpubTextSpan> spans,
     int depth,
   ) {
-    if (depth > _maxDepth) return;
+    if (depth > _maxDepth) {
+      _walkHitDepthCeiling = true;
+      return;
+    }
     for (final child in element.children) {
       if (child is XmlText) {
         if (child.value.isEmpty) continue;
@@ -1320,15 +1343,10 @@ class _NormalizeContext {
         _inlineRawOffset += content.fallback.runes.length;
         continue;
       }
-      if (child.name.local == 'br') {
-        // A preserved newline is still emitted content: pending anchors
-        // recorded before it belong to its start, not to the block end.
-        final span = EpubTextSpan(text: '\n', preserveWhitespace: true);
-        _takePendingSpan(span);
-        spans.add(span);
-        _inlineRawOffset += 1;
-        continue;
-      }
+      // `<br/>` emits no content in the production collector (the retained
+      // parser has no br arm anywhere, and its renderer inserts nothing for
+      // one either), so it falls through to the default recursion below and
+      // does not advance the raw offset either.
       _collectInline(
         child,
         baseFontSize,
@@ -1580,7 +1598,10 @@ class _NormalizeContext {
 
   List<List<EpubTextSpan>> _parseListItems(XmlElement list, int depth) {
     final items = <List<EpubTextSpan>>[];
-    if (depth > _maxDepth) return items;
+    if (depth > _maxDepth) {
+      _walkHitDepthCeiling = true;
+      return items;
+    }
     for (final child in list.children.whereType<XmlElement>()) {
       if (child.name.local != 'li') continue;
       final style = styleOf(child);
@@ -1792,7 +1813,10 @@ class _NormalizeContext {
     EpubComputedStyle style,
     int depth,
   ) {
-    if (depth > _maxDepth) return null;
+    if (depth > _maxDepth) {
+      _walkHitDepthCeiling = true;
+      return null;
+    }
     final pendingBefore = List<String>.of(_pendingAnchors);
     final captionElement = table.children
         .whereType<XmlElement>()
@@ -1903,45 +1927,133 @@ class _NormalizeContext {
     final startAnchors = List<String>.of(_pendingAnchors);
     _pendingAnchors.clear();
     final cellStyle = _nodeStyle(style);
-    final blockChildren = _hasBlockChildren(cell);
-    final List<EpubContentNode> blocks;
-    if (blockChildren) {
-      // A cell with block children keeps the block walk, which the production
-      // anchor pass does use (including its computed-style code-block
-      // conversion).
-      blocks = parseBlocks(cell, 0);
-    } else if (_cellHasMedia(cell)) {
-      // The retained inline-cell anchor stream ignores image alt text and
-      // treats MathML as spans, so it cannot be reproduced from the rendered
-      // content: the cell keeps its content and drops the descendant anchors
-      // rather than publishing an offset it cannot verify.
-      _suppressAnchors = true;
-      try {
-        blocks = parseBlocks(cell, 0, codeBlocks: false);
-      } finally {
-        _suppressAnchors = false;
-      }
-    } else {
-      // An inline-only cell's content and anchors come from the production
-      // inline collector: one paragraph, and none of the block walker's
-      // code-block or list-item rules apply.
-      blocks = _inlineCellBlocks(cell, cellStyle);
-    }
+
+    // Content pass: the production cell collectors (`collect_table_cell_blocks`
+    // and `collect_table_cell_inline`), anchor-free. They are a separate walk
+    // from the chapter rules: every visible block child flushes an independent
+    // collapsed run, nested block elements flatten into sibling paragraphs,
+    // display-block MathML becomes its own node, and images become nodes.
+    final cellBlocks = _collectTableCellBlocks(
+      cell,
+      cellStyle,
+      style.fontSizePx,
+      null,
+      0,
+    );
+    // Flatten the collected blocks the way the production `parse_table_cell`
+    // does: one block start before each block after the first, and block
+    // starts immediately before and after every display-math node.
     final children = <EpubContentNode>[];
     final blockStarts = <int>[];
-    for (final block in blocks) {
+    for (final block in cellBlocks) {
       if (children.isNotEmpty) blockStarts.add(children.length);
-      children.add(block);
+      for (final node in block) {
+        final isMath = node is EpubMathNode;
+        if (isMath && children.isNotEmpty) blockStarts.add(children.length);
+        children.add(node);
+        if (isMath) blockStarts.add(children.length);
+      }
     }
-    blockStarts
-      ..sort()
-      ..toSet()
-      ..removeWhere((start) => start >= children.length);
-    // A marker left pending after the cell's content resolves at the cell's
-    // text end (the production per-block accounting adds one scalar for a cell
-    // with emitted block children; the canonical builder applies it).
-    final endAnchors = List<String>.of(_pendingAnchors);
+    blockStarts.sort();
+    final dedupedBlockStarts = <int>[];
+    for (final start in blockStarts) {
+      if (dedupedBlockStarts.isEmpty || dedupedBlockStarts.last != start) {
+        dedupedBlockStarts.add(start);
+      }
+    }
+    dedupedBlockStarts.removeWhere((start) => start >= children.length);
+    final blockChildren = _hasBlockChildren(cell);
+
+    // Anchor pass. The production `table_anchor_offsets` computes a cell's
+    // descendant anchors from a separate anchor stream — a full block walk for
+    // a cell with block children, the inline collector otherwise — whose
+    // coordinates can deliberately misalign with the flattened content (the
+    // retained parser keeps both streams as they are). Reproduce that: run the
+    // walk, build its canonical coordinates with a throwaway builder, and
+    // publish the offsets cell-locally.
+    //
+    // The shared walk state is saved and restored because the walk must not
+    // leak anchors, offsets or suppression into the surrounding chapter pass.
+    final savedPending = List<String>.of(_pendingAnchors);
+    final savedSuppressAnchors = _suppressAnchors;
+    final savedWalkHitDepthCeiling = _walkHitDepthCeiling;
+    final savedInlineWalking = _inlineWalking;
+    final savedInlineRawOffset = _inlineRawOffset;
+    final savedInlineAnchorOffsets = Map<String, int>.of(_inlineAnchorOffsets);
     _pendingAnchors.clear();
+    _inlineAnchorOffsets.clear();
+    _suppressAnchors = false;
+    _inlineWalking = false;
+    Map<String, int> anchorOffsets = const {};
+    var endAnchors = const <String>[];
+    try {
+      // A cell that mixes an image or MathML with an anchor keeps the
+      // documented suppression: the retained anchor stream ignores image alt
+      // text and treats MathML as spans, so this port reserves the names
+      // chapter-wide instead of publishing an offset it cannot verify.
+      final mediaCell = !blockChildren && _cellHasMedia(cell);
+      final List<EpubContentNode> walkNodes;
+      if (mediaCell) _suppressAnchors = true;
+      // Truncation during the walk itself, not during the content pass,
+      // decides whether the walk's map can be trusted as complete; the flag
+      // is cleared so the anchor-free content collectors cannot trigger it.
+      _walkHitDepthCeiling = false;
+      try {
+        walkNodes = blockChildren
+            ? parseBlocks(cell, 0)
+            : [
+                EpubParagraph(
+                  _inlineSpans(cell, style.fontSizePx, null),
+                  cellStyle,
+                ),
+              ];
+      } finally {
+        _suppressAnchors = savedSuppressAnchors;
+      }
+      if (_walkHitDepthCeiling) {
+        // The walk dropped a subtree past the port's depth ceiling, so its
+        // map cannot claim to have resolved every anchor name in the cell's
+        // visible subtree — and the production walkers, which have no such
+        // ceiling, publish the first occurrence of each. A partial map lets
+        // a later duplicate claim a wrong offset (the routing gate compares
+        // text only, and a textless truncation hides the difference), so the
+        // walk fails admission instead, like the canonical ceiling.
+        throw const EpubLimitError('cell anchor walk depth', _maxDepth);
+      }
+      // A marker left pending after the walk resolves at the walk's own end:
+      // the production block walk's accounting ends after its last emitted
+      // block's generated newline (`extract_text_from_nodes` counts one per
+      // node), and the inline collector's ends at the collapsed run with no
+      // newline. These are walk coordinates, not flattened content
+      // coordinates, so publishing from the walk is the retained behaviour.
+      endAnchors = List.of(_pendingAnchors);
+      _pendingAnchors.clear();
+      final builder = CanonicalTextBuilder(
+        maxScalars: limits.maxCanonicalScalars,
+      );
+      builder.build(walkNodes);
+      anchorOffsets = builder.anchors;
+      if (endAnchors.isNotEmpty) {
+        // First occurrence wins, so a name the walk already published keeps
+        // its walk offset and the trailing record is ignored.
+        final walkEnd = blockChildren
+            ? builder.scalarCount
+            : builder.scalarCount - 1;
+        for (final name in endAnchors) {
+          anchorOffsets.putIfAbsent(name, () => walkEnd);
+        }
+      }
+    } finally {
+      _pendingAnchors
+        ..clear()
+        ..addAll(savedPending);
+      _inlineAnchorOffsets
+        ..clear()
+        ..addAll(savedInlineAnchorOffsets);
+      _inlineWalking = savedInlineWalking;
+      _inlineRawOffset = savedInlineRawOffset;
+      _walkHitDepthCeiling = savedWalkHitDepthCeiling;
+    }
     return EpubTableCell(
       id: cell.getAttribute('id'),
       header: cell.name.local == 'th',
@@ -1953,24 +2065,202 @@ class _NormalizeContext {
       rowSpan: _spanValue(cell.getAttribute('rowspan'), 1),
       columnSpan: _spanValue(cell.getAttribute('colspan'), 1),
       children: children,
-      blockStarts: blockStarts,
+      blockStarts: dedupedBlockStarts,
       style: cellStyle,
-      blockChildren: blockChildren,
       startAnchorIds: startAnchors,
-      endAnchorIds: endAnchors,
+      anchorOffsets: anchorOffsets,
     );
   }
 
-  /// An inline-only cell's content, the production inline collector: the cell's
-  /// text and inline children join into one paragraph, and every descendant
-  /// anchor is recorded at its own position.
-  List<EpubContentNode> _inlineCellBlocks(
-    XmlElement cell,
+  /// The production `collect_table_cell_blocks`: the cell's content as a list
+  /// of blocks, each a list of content nodes.
+  ///
+  /// A child element whose computed display is neither `none` nor `inline`
+  /// (the production block-role set — block, table, row group, row, cell and
+  /// caption, which are the only roles the cascade offers beyond inline/none)
+  /// flushes the pending run, starts a new block, and its own children are
+  /// collected recursively. Everything else goes through the inline
+  /// collector, which contributes spans and media nodes to the current run.
+  ///
+  /// This collector records no anchors: anchors come from the separate anchor
+  /// walk (see `_parseTableCell`), like the production `table_anchor_offsets`.
+  List<List<EpubContentNode>> _collectTableCellBlocks(
+    XmlElement parent,
+    EpubNodeStyle blockStyle,
+    double baseFontSize,
+    String? link,
+    int depth,
+  ) {
+    // Like the chapter walkers, element nesting past [_maxDepth] contributes
+    // nothing. These collectors are anchor-free, so their truncation does not
+    // touch the anchor walk's completeness flag; text they drop diverges the
+    // canonical stream and the routing gate handles it.
+    if (depth > _maxDepth) return const [];
+    final blocks = <List<EpubContentNode>>[];
+    var children = <EpubContentNode>[];
+    final spans = <EpubTextSpan>[];
+    void flush() {
+      _flushTableCellSpans(spans, children, blockStyle);
+      if (children.isNotEmpty) {
+        blocks.add(children);
+        children = <EpubContentNode>[];
+      }
+    }
+
+    for (final child in parent.children) {
+      if (child is XmlText) {
+        _collectTableCellText(child, parent, baseFontSize, link, spans);
+        continue;
+      }
+      if (child is! XmlElement) continue;
+      final childStyle = styleOf(child);
+      if (childStyle.display == EpubDisplay.none) continue;
+      if (childStyle.display == EpubDisplay.inline) {
+        _collectTableCellInline(
+          child,
+          blockStyle,
+          baseFontSize,
+          link,
+          spans,
+          children,
+          depth + 1,
+        );
+        continue;
+      }
+      flush();
+      blocks.addAll(
+        _collectTableCellBlocks(
+          child,
+          _nodeStyle(childStyle),
+          childStyle.fontSizePx,
+          link,
+          depth + 1,
+        ),
+      );
+    }
+    flush();
+    return blocks;
+  }
+
+  /// The production `collect_table_cell_inline` for one non-block child.
+  ///
+  /// Text nodes become spans styled by their parent element, display-block
+  /// MathML flushes the run and becomes its own node, inline MathML becomes a
+  /// span, and an image flushes the run and becomes an image node (or an alt
+  /// span when its source is missing or unusable). Everything else —
+  /// including `br`, which emits nothing — recurses.
+  void _collectTableCellInline(
+    XmlElement element,
+    EpubNodeStyle blockStyle,
+    double baseFontSize,
+    String? link,
+    List<EpubTextSpan> spans,
+    List<EpubContentNode> children,
+    int depth,
+  ) {
+    if (depth > _maxDepth) return;
+    if (_isMathElement(element)) {
+      final content = parseMath(element, limits);
+      final childStyle = styleOf(element);
+      if (content.display == EpubMathDisplay.block) {
+        _flushTableCellSpans(spans, children, blockStyle);
+        children.add(
+          EpubMathNode(
+            content: content,
+            nodeStyle: blockStyle.copyWith(
+              fontSizeMultiplier: childStyle.fontSizePx / baseFontSize,
+            ),
+            link: link,
+          ),
+        );
+      } else {
+        spans.add(
+          EpubTextSpan(
+            text: content.fallback,
+            math: content,
+            bold: childStyle.bold,
+            italic: childStyle.italic,
+            fontFamily: childStyle.fontFamilies.isEmpty
+                ? null
+                : childStyle.fontFamilies.first,
+            fontSizeMultiplier: childStyle.fontSizePx / baseFontSize,
+            link: link,
+          ),
+        );
+      }
+      return;
+    }
+    if (element.name.local == 'img') {
+      final alt = element.getAttribute('alt') ?? '';
+      final rawSrc = element.getAttribute('src');
+      final resolved = rawSrc == null
+          ? null
+          : _resolveRelative(basePath, rawSrc);
+      if (resolved == null) {
+        if (alt.isNotEmpty) {
+          spans.add(_textSpanFor(element, alt, baseFontSize, link));
+        }
+        return;
+      }
+      _flushTableCellSpans(spans, children, blockStyle);
+      children.add(
+        EpubImage(
+          src: resolved,
+          alt: alt,
+          nodeStyle: _nodeStyle(styleOf(element)),
+        ),
+      );
+      return;
+    }
+    final nestedLink = element.name.local == 'a'
+        ? element.getAttribute('href')
+        : link;
+    for (final child in element.children) {
+      if (child is XmlText) {
+        _collectTableCellText(child, element, baseFontSize, nestedLink, spans);
+      } else if (child is XmlElement) {
+        if (styleOf(child).display == EpubDisplay.none) continue;
+        _collectTableCellInline(
+          child,
+          blockStyle,
+          baseFontSize,
+          nestedLink,
+          spans,
+          children,
+          depth + 1,
+        );
+      }
+    }
+  }
+
+  void _collectTableCellText(
+    XmlText text,
+    XmlElement owner,
+    double baseFontSize,
+    String? link,
+    List<EpubTextSpan> spans,
+  ) {
+    if (text.value.isEmpty) return;
+    spans.add(_textSpanFor(owner, text.value, baseFontSize, link));
+  }
+
+  /// The production `flush_table_cell_spans`: collapse and merge the pending
+  /// spans and, when any survive, emit them as one paragraph of [style].
+  ///
+  /// The spans here never carry anchors, so the collapse's anchor-carrying
+  /// logic is inert and the shared walk state is untouched.
+  void _flushTableCellSpans(
+    List<EpubTextSpan> spans,
+    List<EpubContentNode> children,
     EpubNodeStyle style,
   ) {
-    final spans = _inlineSpans(cell, styleOf(cell).fontSizePx, null);
-    if (spans.isEmpty) return const [];
-    return [EpubParagraph(spans, style)];
+    if (spans.isEmpty) return;
+    _collapseWhitespace(spans);
+    _mergeSpans(spans);
+    if (spans.isNotEmpty) {
+      children.add(EpubParagraph(List.of(spans), style));
+      spans.clear();
+    }
   }
 
   /// Whether the cell contains an image or MathML element.

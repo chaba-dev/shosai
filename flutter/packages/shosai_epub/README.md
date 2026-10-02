@@ -67,37 +67,32 @@ state is in the slice report (`docs/dart-document-stack-evaluation-plan.md`);
 over the committed fixture corpus (30 books, 52 chapter streams) the two streams
 are byte-identical.
 
-- **Table-cell display math whitespace.** The production table collector
-  collapses each text run around display math separately, so
-  `<td><p>before <math display="block">…</math> after</p></td>` yields
-  `before\n(a)/(b)\nafter\n\n`. This port parses the cell paragraph with the
-  chapter rules and yields `before \n(a)/(b)\n after\n\n`; the separators and
-  the surrounding blocks agree, the run whitespace does not yet. Pinned by
-  `display-block math inside a cell keeps this port whitespace`. A chapter
-  containing this construct fails the routing comparison and stays on the
-  retained renderer.
-- **Inline-only table cells.** An inline-only cell's content and anchors are
-  collected by the inline collector (text and inline children join into one
-  paragraph, and the block walker's code-block and list-item rules do not
-  apply). Two limits remain: the retained cell content collector keeps the
-  source's raw whitespace runs where this port collapses them, so a cell whose
-  text contains a run of whitespace fails the routing comparison; and a cell
-  that mixes an image or MathML with an anchor cannot have its anchors
-  reproduced from the rendered content (the retained anchor stream ignores
-  image alt text and treats MathML as spans), so this port drops that cell's
-  descendant anchors instead of publishing an offset it cannot verify. A name
+- **Aligned 2026-10-02 (`<br/>`, table-cell whitespace, TOC source).** The
+  engine now reproduces the retained canonical text for `<br/>` (the
+  production collector emits nothing for it), for inline-only table cells
+  (one collapsed run through the ported production cell collectors) and for
+  text runs around display math inside cells, and the TOC source preference
+  below is aligned; chapters whose only divergence was one of these route to
+  the Dart renderer now.
+- **Suppressed anchors in media-bearing inline cells (residual).** A cell
+  whose inline content mixes an image or MathML with an anchor cannot have its
+  anchors reproduced from the rendered content (the retained anchor stream
+  ignores image alt text and treats MathML as spans), so this port drops that
+  cell's descendant anchors instead of publishing an offset it cannot verify.
+  The canonical *text* of such cells matches the retained stream. A name
   dropped this way is not offered anywhere in the chapter — even when another
   element carries it — so a fragment link to it resolves to nothing and a
   Contents row that targets it is not offered: the reader's unknown-anchor
-  policy, not a wrong target.
-- **`<br/>` line breaks.** The production inline collector emits no content for
-  `<br/>`; this port emits a preserved newline span so the layout can render the
-  break. A chapter containing a line break therefore fails the routing
-  comparison and stays on the retained renderer. The existing
-  `pending anchors before a line break stay at the paragraph start` test pins
-  the anchors and states that the break's own canonical text is a separate
-  difference; the canonical streams were probed against the production parser
-  when this was recorded.
+  policy, not a wrong target. Separately, a cell whose anchor walk truncated
+  at this port's 64-element depth ceiling — a textless truncation is invisible
+  to the routing gate, and a partial walk map cannot prove it resolved the
+  first occurrence of every name — fails admission (`EpubLimitError`) instead
+  of publishing that map; the book stays on the retained renderer, whose
+  walkers have no such ceiling. The reader routes by comparing this port's
+  canonical stream with the retained one, and the routing suite pins the
+  consequence end to end: a book whose only difference from a routing control
+  is the span depth is refused at admission and stays retained, while the
+  control routes.
 - **MathML fallback breadth.** The fallback arms were rewritten arm-for-arm from
   `crates/shosai-core/src/epub/math.rs` (including the malformed-construct and
   multi-row `mtable` rules, which regression tests pin from that source), so the
@@ -110,15 +105,41 @@ are byte-identical.
   Rust cascade is more complete.
 - **Nested lists.** Nested lists flatten into the parent item (the Rust parser
   also flattens them, but the whitespace-collapse unit differs slightly).
-- **TOC source preference.** This package prefers an EPUB 3 nav document
-  (`properties="nav"`) and falls back to an NCX; the retained parser tries an
-  NCX first and finds a nav document by an id heuristic. A book whose two
-  navigation documents disagree can therefore show a different table of
-  contents here. Disclosed by the navigation slice rather than absorbed.
+- **TOC source preference (aligned 2026-10-02).** The TOC source is chosen
+  exactly like the retained parser now: the NCX first — the manifest item whose
+  media type is `application/x-dtbncx+xml`, with no `.ncx` suffix rule — and
+  only then an EPUB 3 nav document, found by the manifest id containing "nav"
+  (case-sensitive substring), not by `properties="nav"`. A usable NCX (parseable
+  XML with a `<navMap>`, even with no points) suppresses the nav fallback; an
+  unparseable NCX or one without a `<navMap>` falls through to the nav
+  document. Within a nav document the first `<nav>` in document order is used
+  (no `epub:type` preference) and its first descendant `<ol>`. Remaining
+  residuals: the production manifest is a `HashMap`, so its NCX candidate is an
+  arbitrary one where this port takes the first in manifest order (a documented
+  deterministic superset); an NCX entry with an unusable src is resolved with
+  the same plain relative-reference rule as production (including its quirk of
+  joining the NCX's own directory to a relative src); and the admission
+  difference below.
 - **TOC error handling.** A nav/NCX entry whose href is unusable is skipped
-  individually with a warning; the retained parser discards the whole table of
-  contents when any entry fails to resolve. A book with one malformed entry can
-  therefore show more rows here than the retained reader shows.
+  individually with a warning; the retained parser abandons that candidate's
+  table of contents and falls to the next navigation document when any entry
+  fails to resolve. A book with one malformed entry can therefore show more
+  rows here than the retained reader shows.
+- **Broken navigation XML at read time (residual).** The retained TOC reader
+  (`read_archive_entry_cancellable`) validates a selected NCX's UTF-8 and
+  lexically inspectable XML — a tolerant shape walk (`check_end_names=false`,
+  `allow_unmatched_ends=true`) under byte/depth/text limits — and propagates a
+  failure to the whole book (a missing NCX file is skipped before that read);
+  it validates a nav document the same way whenever it reads one. Structural
+  mismatches that pass that inspection only fail the candidate's own
+  `roxmltree` parse, abandoning that candidate for the next navigation
+  document, so when the NCX wins, a broken nav document never fails the book
+  (verified). This port decodes every TOC byte sequence with malformed-UTF-8
+  replacement and no strict read: non-UTF-8 bytes that still yield parseable
+  XML stay selected with replacement characters and no warning, and lexically
+  malformed XML opens with a warning and the nav fallback (or no table of
+  contents) where production fails the book. Disclosed rather than absorbed;
+  aligning it is a read/admission change, not a TOC-preference one.
 
 The prototype's remaining notes are in `prototypes/epub-dart-eval/README.md`;
 its display-block MathML promotion omission is fixed here and no longer applies.

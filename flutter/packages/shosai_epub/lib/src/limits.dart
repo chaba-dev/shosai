@@ -45,9 +45,11 @@ class EpubLimits {
 }
 
 /// A typed admission failure for an admitted limit that was exceeded.
-/// Some bounded traversals stop early at their depth bound instead of failing
+/// Most bounded traversals stop early at their depth bound instead of failing
 /// (for example inline and block nesting); those bounds are not enforced by
-/// this error.
+/// this error. The table-cell anchor walk is the exception: a truncated walk
+/// cannot prove its anchor map complete, so it fails admission instead of
+/// publishing a partial map.
 class EpubLimitError implements Exception {
   const EpubLimitError(this.kind, this.limit, [this.actual]);
 

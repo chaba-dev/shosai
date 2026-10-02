@@ -69,10 +69,78 @@ const navigationFixturePartTitle = 'Part One';
 /// The unresolvable table-of-contents entry the fixture never shows.
 const navigationFixtureMissingTitle = 'Missing anchor';
 
+/// The canonical-parity chapter the slice-5 render checks display.
+///
+/// Its stream is pinned against the retained parser by the probe run recorded
+/// with slice 5: `a middle tail.\nbefore\nCell link to the cell.\n\tAlpha bold
+/// tail\nbefore\n(a)/(b)\nafter\tAnchor cell\n\nAfter the table.\n`, with
+/// `x`=21, `lead`=22, `empty-cell`=45 and `cell-anchor`=83.
+const canonicalParityChapterBody =
+    '<main>\n'
+    '<p>a <em>mid<br/>dle</em> tail.</p>\n'
+    '<p>before<br/><a id="x"/></p>\n'
+    '<p id="lead">Cell <a href="#cell-anchor">link</a> to the cell.</p>\n'
+    '<table>\n'
+    '<tr><td id="empty-cell">   </td><td>Alpha <b>  bold  </b> tail</td></tr>\n'
+    '<tr><td>before <m:math display="block"><m:mfrac><m:mi>a</m:mi>'
+    '<m:mi>b</m:mi></m:mfrac></m:math> after</td>'
+    '<td id="cell-anchor">Anchor cell</td></tr>\n'
+    '</table>\n'
+    '<p>After the table.</p>\n'
+    '</main>';
+
+/// A canonical-parity EPUB built in memory.
+///
+/// The book exists for reader-level checks of the slice-5 canonical closures:
+/// a `<br/>` paragraph, a whitespace-only and an inline-only cell, display
+/// math inside an inline cell, and — deliberately — an NCX whose entries
+/// disagree with the nav document's, so the Contents panel's source is
+/// observable. Building it here keeps the shared corpus untouched.
+Uint8List canonicalParityEpub() {
+  return _epub(
+    chapters: const {'OPS/Text/chapter-1.xhtml': canonicalParityChapterBody},
+    nav: '<ol><li><a href="../Text/chapter-1.xhtml">Nav One</a></li></ol>',
+    ncx:
+        '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
+        '<navMap>'
+        '<navPoint id="n1"><navLabel><text>NCX One</text></navLabel>'
+        '<content src="Text/chapter-1.xhtml"/></navPoint>'
+        '<navPoint id="n2"><navLabel><text>NCX Two</text></navLabel>'
+        '<content src="Text/chapter-1.xhtml#cell-anchor"/></navPoint>'
+        '</navMap></ncx>',
+    chapterNamespaces: const {'m': 'http://www.w3.org/1998/Math/MathML'},
+  );
+}
+
+/// An admission-boundary EPUB built in memory.
+///
+/// The book exists for the reader-level check that a chapter the engine
+/// refuses at admission — a cell anchor walk nested past the port's depth
+/// ceiling — keeps the whole book on the retained renderer. The spans carry no
+/// text, so the canonical stream is the same at every nesting depth the engine
+/// accepts: a shallow variant's engine stream is a valid retained stream for
+/// the deep variant, and the only difference between the routing control and
+/// the fallback case is the depth overrun. Building it here keeps the shared
+/// corpus untouched.
+Uint8List admissionEpub({required int spanNesting}) {
+  var nested = '<a id="t"/>';
+  for (var i = 0; i < spanNesting; i += 1) {
+    nested = '<span>$nested</span>';
+  }
+  return _epub(
+    chapters: {
+      'OPS/Text/chapter-1.xhtml':
+          '<table><tr><td>$nested</td></tr></table><p>After the cell.</p>',
+    },
+    nav: '<ol><li><a href="../Text/chapter-1.xhtml">Admission</a></li></ol>',
+  );
+}
+
 Uint8List _epub({
   required Map<String, String> chapters,
   required String nav,
   String? ncx,
+  Map<String, String> chapterNamespaces = const {},
 }) {
   final files = <String, String>{
     'mimetype': 'application/epub+zip',
@@ -99,7 +167,9 @@ Uint8List _epub({
     spine.add('<itemref idref="chapter-$index"/>');
     files[path] =
         '<?xml version="1.0"?>'
-        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        '<html xmlns="http://www.w3.org/1999/xhtml"'
+        '${chapterNamespaces.entries.map((entry) => ' xmlns:${entry.key}="${entry.value}"').join()}'
+        '><body>'
         '${chapters[path]}</body></html>';
     index += 1;
   }

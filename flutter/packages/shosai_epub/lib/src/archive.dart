@@ -124,15 +124,10 @@ EpubBook openEpubBytes(
       final id = item.getAttribute('id');
       final href = item.getAttribute('href');
       if (id == null || href == null) continue;
-      final properties = (item.getAttribute('properties') ?? '')
-          .split(RegExp(r'\s+'))
-          .where((value) => value.isNotEmpty)
-          .toSet();
       manifestItems[id] = _ManifestItem(
         id: id,
         href: href,
         mediaType: item.getAttribute('media-type') ?? '',
-        properties: properties,
       );
     }
   }
@@ -405,13 +400,11 @@ class _ManifestItem {
     required this.id,
     required this.href,
     required this.mediaType,
-    required this.properties,
   });
 
   final String id;
   final String href;
   final String mediaType;
-  final Set<String> properties;
 }
 
 String? _tryResolve(String baseDirectory, String reference) {
@@ -609,29 +602,49 @@ List<EpubTocEntry> _parseToc({
   required String opfDirectory,
   required List<String> warnings,
 }) {
-  final navItem = manifestItems.values
-      .where((item) => item.properties.contains('nav'))
-      .firstOrNull;
-  if (navItem != null) {
-    final path = _tryResolve(opfDirectory, navItem.href);
-    final file = path == null ? null : entries[path];
-    if (file != null && path != null) {
-      final toc = _parseNavDocument(file.content, path, warnings);
-      if (toc.isNotEmpty) return toc;
-    }
-  }
+  // The production parser tries an NCX first (EPUB 2): the manifest item whose
+  // media type is the NCX type — there is no `.ncx` suffix rule — and only
+  // then an EPUB 3 nav document. A book whose two navigation documents
+  // disagree therefore shows the NCX's table of contents, like the retained
+  // reader. The production manifest is a HashMap, so its candidate is an
+  // arbitrary one; this port takes the first in manifest order, a documented
+  // deterministic superset of that behaviour.
   final ncxItem = manifestItems.values
-      .where(
-        (item) =>
-            item.mediaType == 'application/x-dtbncx+xml' ||
-            item.href.toLowerCase().endsWith('.ncx'),
-      )
+      .where((item) => item.mediaType == 'application/x-dtbncx+xml')
       .firstOrNull;
   if (ncxItem != null) {
     final path = _tryResolve(opfDirectory, ncxItem.href);
     final file = path == null ? null : entries[path];
-    if (file != null && path != null) {
-      return _parseNcx(file.content, path, warnings);
+    if (path != null && file != null) {
+      // Non-null means the NCX is usable XML with a `<navMap>`, even when it
+      // has no points: the production `parse_ncx_toc` returns its (possibly
+      // empty) entries and never falls back. `null` — unparseable XML here,
+      // or a missing `<navMap>` — falls through to the nav document, like the
+      // production `if let Ok(entries)` guard. (The retained TOC reader
+      // validates a selected NCX's UTF-8 and lexically inspectable XML — a
+      // tolerant shape walk under byte/depth/text limits — and fails the whole
+      // book on that read; structural mismatches that pass the inspection only
+      // fail the candidate's own parse and fall through. This package reads
+      // the NCX without that gate, so an unparseable one reaches this fallback
+      // with a warning instead.)
+      final toc = _parseNcx(file.content, path, warnings);
+      if (toc != null) return toc;
+    }
+  }
+  // The production nav heuristic is the manifest id containing "nav"
+  // (case-sensitive substring), not the `properties="nav"` attribute.
+  final navItem = manifestItems.values
+      .where(
+        (item) =>
+            item.mediaType == 'application/xhtml+xml' &&
+            item.id.contains('nav'),
+      )
+      .firstOrNull;
+  if (navItem != null) {
+    final path = _tryResolve(opfDirectory, navItem.href);
+    final file = path == null ? null : entries[path];
+    if (path != null && file != null) {
+      return _parseNavDocument(file.content, path, warnings);
     }
   }
   return const [];
@@ -652,25 +665,16 @@ List<EpubTocEntry> _parseNavDocument(
     return const [];
   }
   final directory = directoryOf(path);
-  XmlElement? tocNav;
-  for (final nav in document.descendants.whereType<XmlElement>().where(
-    (element) => element.name.local == 'nav',
-  )) {
-    final type =
-        nav.getAttribute('epub:type') ??
-        nav.getAttribute('type') ??
-        nav.getAttribute('role');
-    if (type != null && type.split(RegExp(r'\s+')).contains('toc')) {
-      tocNav = nav;
-      break;
-    }
-  }
-  tocNav ??= document.descendants
+  // The production parser takes the first `<nav>` element in document order;
+  // it does not prefer one by `epub:type`, `type` or `role`.
+  final tocNav = document.descendants
       .whereType<XmlElement>()
       .where((element) => element.name.local == 'nav')
       .firstOrNull;
   if (tocNav == null) return const [];
-  final list = tocNav.children
+  // The `<ol>` is the first one among the nav's descendants, not only its
+  // direct children.
+  final list = tocNav.descendants
       .whereType<XmlElement>()
       .where((element) => element.name.local == 'ol')
       .firstOrNull;
@@ -750,7 +754,20 @@ String? _firstTextChild(XmlElement? element) {
   return null;
 }
 
-List<EpubTocEntry> _parseNcx(
+/// Parses an NCX table of contents.
+///
+/// Returns `null` — never a non-null empty list — when the NCX is unusable and
+/// the caller must fall back to a nav document: XML this package cannot parse
+/// or a document without a `<navMap>`. (The retained parser reaches this state
+/// differently: structural mismatches that pass its tolerant shape inspection
+/// fail only the candidate's own `roxmltree` parse and fall through, while a
+/// read its inspection rejects — non-UTF-8 bytes, lexical errors or limit
+/// violations — fails the whole book before any TOC parse. This package has
+/// no such read gate.) A `<navMap>` with no
+/// points parses to an empty list on purpose: the production `parse_ncx_toc`
+/// succeeds there and no
+/// nav fallback happens.
+List<EpubTocEntry>? _parseNcx(
   List<int> bytes,
   String path,
   List<String> warnings,
@@ -760,14 +777,14 @@ List<EpubTocEntry> _parseNcx(
     document = XmlDocument.parse(utf8.decode(bytes, allowMalformed: true));
   } on XmlException catch (error) {
     warnings.add('failed to parse EPUB NCX at $path: ${error.message}');
-    return const [];
+    return null;
   }
   final directory = directoryOf(path);
   final map = document.descendants
       .whereType<XmlElement>()
       .where((element) => element.name.local == 'navMap')
       .firstOrNull;
-  if (map == null) return const [];
+  if (map == null) return null;
   List<EpubTocEntry> parsePoints(XmlElement parent) {
     final entries = <EpubTocEntry>[];
     for (final point in parent.children.whereType<XmlElement>()) {
