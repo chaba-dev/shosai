@@ -1,0 +1,46 @@
+#+TITLE: RFD 0007 implementation checklist
+#+STARTUP: showall
+
+Implements [[file:README.adoc][RFD 7: MVP: one reading experience across formats and devices]].
+
+The checklist follows the five outcomes. Each item is done when its "done
+when" criterion in the RFD holds on desktop, tablet, and phone, for both EPUB
+and PDF where the item touches the reader.
+
+* Alignment
+
+- [ ] Review the design mock and settle the RFD's open questions.
+- [ ] Move the RFD to ~published~.
+
+* 1. Every device
+
+- [ ] Adaptive shell: tab strip on desktop and tablet, tab switcher on phone.
+- [ ] Notes surface as docked panel, slide-over panel, and bottom sheet.
+- [ ] Search as palette and as full screen.
+- [ ] Platform acceptance runs on Linux, macOS, Windows, iPad, Android
+  tablet, iPhone, and Android phone.
+
+* 2. Any medium
+
+- [ ] One location model (section, percent, page) for EPUB and PDF.
+- [ ] Shared progress bar and location line.
+- [ ] Shared themes, including a night theme for PDF pages.
+- [ ] One size control: EPUB text size and PDF zoom.
+- [ ] RFD 6 selection and highlights in both formats.
+- [ ] EPUB writing direction, including vertical Japanese text.
+
+* 3. Notes and annotations
+
+- [ ] Page notes and book notes alongside RFD 6 highlights.
+- [ ] Notes surface scoped to this book or all books; open a note at its anchor.
+- [ ] Library-wide search over book text and notes, available from every screen.
+
+* 4. Tabs
+
+- [ ] Open, focus, switch, and close tabs; library as the pinned first tab.
+- [ ] Restore open tabs and positions on start.
+
+* 5. Jumpable references
+
+- [ ] Peek for EPUB hyperlinks and PDF link annotations and destinations.
+- [ ] Go to and a back stack shared by references, search results, and notes.

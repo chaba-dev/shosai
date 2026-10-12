@@ -12,6 +12,7 @@ authoritative merely because it exists; its `state` says how it should be read.
 | [4: Cross-platform Flutter frontend](0004/README.adoc) | One Flutter UI, shared Rust boundaries, mobile/desktop/web feasibility, notifications, and migration |
 | [5: Distribution and packaging](0005/README.adoc) | Linux, Windows, macOS, Android, and iOS artifacts, signing, and shared release assets |
 | [6: Cross-format text highlighting](0006/README.adoc) | Shared selection UX, EPUB/PDF anchors, persistence, and recovery |
+| [7: MVP reading experience](0007/README.adoc) | First-release outcomes: devices, EPUB/PDF parity, notes and search, tabs, and jumpable references |
 
 ## Source format
 
