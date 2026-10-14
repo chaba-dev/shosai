@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens test-epub-prototype epub-prototype-fixtures measure-epub-prototype
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens design-system design-system-css check-design-system-css test-epub-prototype epub-prototype-fixtures measure-epub-prototype
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -77,6 +77,23 @@ theme-tokens:
 ## Verify the generated token modules still match the token source
 check-theme-tokens:
 	python3 scripts/generate-theme-tokens.py --check
+
+DESIGN_SYSTEM_PORT ?= 8765
+
+## Serve the design system viewer (docs/design-system.md) on localhost
+## The repository root is served so the viewer can load assets/fonts and the
+## app icon from their single tracked copies.
+design-system:
+	@echo "Shōsai design system: http://127.0.0.1:$(DESIGN_SYSTEM_PORT)/docs/design-system/"
+	python3 -m http.server --bind 127.0.0.1 --directory "$(CURDIR)" $(DESIGN_SYSTEM_PORT)
+
+## Regenerate docs/design-system/tokens.css from docs/design-system/tokens.json
+design-system-css:
+	python3 scripts/generate-design-system-css.py
+
+## Verify docs/design-system/tokens.css still matches its token source
+check-design-system-css:
+	python3 scripts/generate-design-system-css.py --check
 
 ## Run all Rust, script, bridge, and Flutter tests
 test:

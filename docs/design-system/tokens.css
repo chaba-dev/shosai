@@ -1,0 +1,132 @@
+/* Shōsai design system tokens. Generated from docs/design-system/tokens.json
+   by scripts/generate-design-system-css.py; do not edit by hand. */
+:root, [data-theme="light"] {
+  --canvas: #f4f2ed;
+  --surface: #fffefb;
+  --surface-sunken: #ece9e1;
+  --control-raised: var(--surface);
+  --chrome: #eeebe4;
+  --tabstrip: #e7e3da;
+  --hover: #e9e6de;
+  --line: #d9d5cb;
+  --line-strong: #8f897d;
+  --ink: #282724;
+  --ink-muted: #625f57;
+  --accent: #4d5e86;
+  --accent-hover: #3f4f76;
+  --accent-soft: #e2e6f0;
+  --on-accent: #ffffff;
+  --on-accent-soft: #2f3d5e;
+  --inverse: #282724;
+  --on-inverse: #fffefb;
+  --vermilion: #b23c1b;
+  --success: #4e755d;
+  --warning: #a77036;
+  --danger: #a54343;
+  --danger-soft: #f6e5e2;
+  --scrim: rgba(33, 32, 30, 0.42);
+  --brand-navy: #2d3848;
+  --brand-charcoal: #313030;
+  --brand-cream: #f3e4cc;
+  --brand-gold: #a18969;
+  --page-paper: #ffffff;
+  --page-paper-ink: #1a1a1a;
+  --page-paper-link: #174ea6;
+  --page-sepia: #f5ebd6;
+  --page-sepia-ink: #4d331a;
+  --page-sepia-link: #683d00;
+  --page-night: #1f1f24;
+  --page-night-ink: #d9d9d9;
+  --page-night-link: #8ab4f8;
+  --hl-yellow: rgba(226, 189, 84, 0.4);
+  --hl-green: rgba(112, 183, 126, 0.4);
+  --hl-blue: rgba(106, 169, 233, 0.4);
+  --hl-pink: rgba(220, 124, 165, 0.4);
+  --hl-purple: rgba(136, 118, 197, 0.4);
+  --swatch-yellow: #e2bd54;
+  --swatch-green: #70b77e;
+  --swatch-blue: #6aa9e9;
+  --swatch-pink: #dc7ca5;
+  --swatch-purple: #8876c5;
+  --selection: rgba(144, 202, 249, 0.4);
+  --search-hit: rgba(255, 243, 163, 0.5);
+  --search-current: rgba(255, 224, 102, 0.45);
+  --mark: #fbeea0;
+  --shadow-page: 0 1px 2px rgba(33, 32, 30, 0.08), 0 6px 20px rgba(33, 32, 30, 0.10);
+  --shadow-cover: 0 4px 12px rgba(33, 32, 30, 0.16);
+  --shadow-menu: 0 3px 10px rgba(33, 32, 30, 0.18);
+  --shadow-modal: 0 5px 18px rgba(33, 32, 30, 0.24);
+}
+[data-theme="dark"] {
+  --canvas: #151413;
+  --surface: #1d1c1a;
+  --surface-sunken: #100f0e;
+  --control-raised: #2f2d2a;
+  --chrome: #1a1917;
+  --tabstrip: #121110;
+  --hover: #2a2826;
+  --line: #33302c;
+  --line-strong: #77726a;
+  --ink: #f1eee8;
+  --ink-muted: #aba69c;
+  --accent: #9db0da;
+  --accent-hover: #b6c6ea;
+  --accent-soft: #262e42;
+  --on-accent: #141a28;
+  --on-accent-soft: #c9d5f0;
+  --inverse: #45423d;
+  --on-inverse: #f7f4ee;
+  --vermilion: #e0704f;
+  --success: #8db89b;
+  --warning: #d9a066;
+  --danger: #e58a80;
+  --danger-soft: #3a2220;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --mark: #5a4f22;
+  --shadow-page: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-cover: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-menu: 0 3px 10px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 5px 18px rgba(0, 0, 0, 0.6);
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --control-height: 32px;
+  --touch-target: 44px;
+  --tabstrip-height: 44px;
+  --toolbar-height: 48px;
+  --statusbar-height: 36px;
+  --panel-width: 360px;
+  --spread-min-width: 720px;
+  --measure: 36em;
+  --font-ui: Inter, "Noto Sans JP", system-ui, sans-serif;
+  --font-editorial: "Source Serif 4", "Noto Serif JP", Georgia, serif;
+  --font-book: "Source Serif 4", "Noto Serif JP", Georgia, serif;
+}
+@font-face { font-family: "Inter"; src: url("../../assets/fonts/InterVariable.ttf"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Sans JP"; src: url("../../assets/fonts/NotoSansJP-Variable.ttf"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Source Serif 4"; src: url("../../assets/fonts/SourceSerif4Variable-Roman.ttf"); font-weight: 200 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif JP"; src: url("../../assets/fonts/NotoSerifJP-ShosaiMark-Regular.ttf"); font-weight: 400; font-style: normal; font-display: swap; unicode-range: U+66F8; }
+.ui-title { font-family: var(--font-ui); font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.ui-heading { font-family: var(--font-ui); font-size: 16px; line-height: 22px; font-weight: 600; }
+.ui-body { font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 400; }
+.ui-control { font-family: var(--font-ui); font-size: 13px; line-height: 18px; font-weight: 500; }
+.ui-caption { font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 400; }
+.ui-label { font-family: var(--font-ui); font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.08em; }
+.ui-badge { font-family: var(--font-ui); font-size: 10px; line-height: 12px; font-weight: 600; letter-spacing: 0.04em; }
+.ed-display { font-family: var(--font-editorial); font-size: 32px; line-height: 38px; font-weight: 600; letter-spacing: -0.01em; }
+.ed-wordmark { font-family: var(--font-editorial); font-size: 20px; line-height: 24px; font-weight: 600; }
+.ed-quote { font-family: var(--font-editorial); font-size: 15px; line-height: 23px; font-weight: 400; }
+.book-body { font-family: var(--font-book); font-size: 19px; line-height: 31px; font-weight: 400; }
+.book-body-ja { font-family: var(--font-book); font-size: 20px; line-height: 38px; font-weight: 400; }
+.book-chapter { font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.14em; }
+.book-folio { font-family: var(--font-ui); font-size: 11px; line-height: 14px; font-weight: 400; }
