@@ -81,6 +81,8 @@ exist or where they are.
   PDF in night theme is shown with inverted luminance; its layout never changes.
 * *Size.* One control sets text size for EPUB and zoom for PDF, labeled for
   what it does in the current book.
+* *Pages.* One setting chooses one or two pages for both formats, defaulting
+  to two.
 * *Selection and highlights.* One selection and highlight model, as defined by
   link:../0006/README.adoc[RFD 6].
 * *The book keeps its voice.* EPUB fonts and writing direction, including
@@ -174,6 +176,11 @@ Recorded from owner review on 2026-10-14.
 
 * *EPUB defaults to paginated reading.* Continuous scrolling may follow as an
   option but is not the default.
+* *Two-page spreads are the default for EPUB and PDF.* Readers can switch
+  between one and two pages. Spreads follow the book's page progression, so a
+  right-to-left book places its first page on the right. Where two pages would
+  not be readable side by side, such as a phone in portrait, the reader shows
+  one page.
 * *CBZ is not part of the MVP.* Revisit once there is a concrete need; the
   current CBZ support is reference only.
 * *Tabs across devices is a possible follow-up to RFD 3*, decided by how much

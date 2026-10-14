@@ -26,6 +26,8 @@ and PDF where the item touches the reader.
 - [ ] Shared progress bar and location line.
 - [ ] Shared themes, including a night theme for PDF pages.
 - [ ] One size control: EPUB text size and PDF zoom.
+- [ ] Two-page spreads by default for EPUB and PDF, with a one or two page
+  setting; one page where two do not fit.
 - [ ] RFD 6 selection and highlights in both formats.
 - [ ] EPUB writing direction from the spine's page progression and CSS
   ~writing-mode~, including vertical Japanese text; horizontal when undeclared.
