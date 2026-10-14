@@ -488,6 +488,99 @@ void main() {
     await _drainHarness(tester);
   });
 
+  testWidgets('the routing observer reports settled attempts and their width', (
+    tester,
+  ) async {
+    // The observer is the test surface for *final* routing decisions: an
+    // attempt held mid-routing is not reported until it settles, a
+    // superseded attempt's stale outcome is never reported, and each record
+    // carries the attempted page width so a wait can identify its viewport.
+    final attempts =
+        <({int generation, int revision, double width, bool routed})>[];
+    final harness = bridge();
+    await renderHarnessState(
+      tester,
+      productionShell(
+        home: ReaderScreen(
+          bridge: harness,
+          initialPath: '/books/conformance.epub',
+          fontCoverageLoader: () async => coverage,
+          epubImageDecoder: (bytes) async => null,
+          debugEpubRoutingObserver: (generation, revision, width, routed) =>
+              attempts.add((
+                generation: generation,
+                revision: revision,
+                width: width,
+                routed: routed,
+              )),
+        ),
+      ),
+      ready: () => harnessReaderPageReady(tester),
+      maxRounds: 16,
+    );
+    await settleEpubPage(tester);
+    expect(dartPage(tester), isNotNull);
+    expect(
+      attempts.where((attempt) => attempt.routed),
+      isNotEmpty,
+      reason: 'the routed chapter is reported as a settled decision',
+    );
+    final baseline = attempts.length;
+    final openWidth = attempts.last.width;
+
+    // Hold the next relayout mid-routing (its annotations are pending, after
+    // its gate evaluation) and supersede it with a wider relayout.
+    final held = Completer<List<FlutterAnnotation>>();
+    harness.annotationListCompleters.add(held);
+    tester.view.physicalSize = const Size(1400, 2200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpHarnessFrames(tester, frames: 8);
+    await settleNative(tester);
+    expect(
+      harness.annotationListCompleters,
+      isEmpty,
+      reason: 'the held relayout is mid-routing',
+    );
+    expect(
+      attempts.length,
+      baseline,
+      reason: 'a held attempt is not reported before it settles',
+    );
+
+    tester.view.physicalSize = const Size(1500, 2300);
+    await pumpHarnessFrames(tester, frames: 8);
+    await settleNative(tester);
+    expect(dartPage(tester), isNotNull);
+    expect(
+      attempts.length,
+      baseline + 1,
+      reason: 'the superseding relayout is reported once settled',
+    );
+    expect(attempts.last.routed, isTrue);
+    expect(
+      attempts.last.width,
+      greaterThan(openWidth),
+      reason: 'the record carries the attempted page width',
+    );
+
+    // Resuming the superseded attempt must not add a record: its outcome is
+    // stale work, not a decision.
+    held.complete(const []);
+    await pumpHarnessFrames(tester, frames: 8);
+    await settleNative(tester);
+    expect(
+      attempts.length,
+      baseline + 1,
+      reason: 'the superseded attempt is not reported',
+    );
+    expect(attempts.map((attempt) => attempt.routed), everyElement(isTrue));
+
+    await tester.pumpWidget(const SizedBox());
+    await _drainHarness(tester);
+  });
+
   testWidgets('a refused archive is retried by the next relayout', (
     tester,
   ) async {

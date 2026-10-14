@@ -176,6 +176,7 @@ class FlowTableRowLayout {
     required this.height,
     required this.cells,
     required this.rowSpanGroup,
+    this.canonicalSpan,
   });
 
   final int groupIndex;
@@ -187,10 +188,24 @@ class FlowTableRowLayout {
   /// Number of rows this row's span group covers (1 when no rowspans).
   final int rowSpanGroup;
 
-  int get canonicalStart => cells.isEmpty
+  /// The row's own canonical range from the engine's canonical builder
+  /// (`EpubTableRow.canonical`).
+  ///
+  /// A row whose cells all lack mapped text (empty cells are common in real
+  /// books' layout tables) has no cell block to read an anchor from; without
+  /// this range it would fall back to scalar 0 and anchor a mid-chapter page
+  /// to the chapter start, misdirecting page lookup and page steps. The range
+  /// covers the row's separators, so it is nonempty even for an entirely
+  /// empty row, and consecutive rows partition the table's body.
+  final EpubCanonicalSpan? canonicalSpan;
+
+  int get canonicalStart => canonicalSpan?.start ?? _cellsFallbackStart;
+  int get canonicalEnd => canonicalSpan?.end ?? _cellsFallbackEnd;
+
+  int get _cellsFallbackStart => cells.isEmpty
       ? 0
       : cells.map((cell) => cell.canonicalStart).reduce(math.min);
-  int get canonicalEnd => cells.isEmpty
+  int get _cellsFallbackEnd => cells.isEmpty
       ? 0
       : cells.map((cell) => cell.canonicalEnd).reduce(math.max);
 }
@@ -1238,6 +1253,7 @@ class _FlowContext {
             height: height,
             cells: cells,
             rowSpanGroup: rowSpanGroup,
+            canonicalSpan: row.canonical,
           ),
         );
         cursorWithinTable += height;

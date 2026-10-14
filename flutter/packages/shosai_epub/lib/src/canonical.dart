@@ -220,6 +220,12 @@ class CanonicalTextBuilder {
         if (caption.isNotEmpty) _writeSeparator('\n');
         for (final group in rowGroups) {
           for (final row in group.rows) {
+            // The row's range opens before its first cell's content and
+            // closes after its trailing row separator, so it covers every
+            // scalar the row contributes — including a row whose cells are
+            // all empty, which still owns its separators. Rows partition the
+            // table's body: one row's end is the next row's start.
+            final rowStart = _scalar;
             for (var index = 0; index < row.cells.length; index++) {
               final cell = row.cells[index];
               // The cell's own and inherited anchors resolve at its start.
@@ -247,6 +253,7 @@ class CanonicalTextBuilder {
               if (index + 1 < row.cells.length) _writeSeparator('\t');
             }
             _writeSeparator('\n');
+            row.canonical = EpubCanonicalSpan(rowStart, _scalar);
           }
         }
       case EpubMathNode(:final content):

@@ -257,6 +257,14 @@ class EpubTableRow {
   EpubTableRow({required this.cells});
 
   final List<EpubTableCell> cells;
+
+  /// Canonical scalar range of the row's own content, assigned by the
+  /// canonical builder: every cell's content plus the separators the row
+  /// itself contributes (the tab between cells and the newline that ends the
+  /// row). A row whose cells are all empty still owns its separators, so its
+  /// range is nonempty and the row anchors a page at its own position instead
+  /// of collapsing to scalar 0 mid-chapter.
+  EpubCanonicalSpan? canonical;
 }
 
 class EpubTableCell {
