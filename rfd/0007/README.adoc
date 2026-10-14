@@ -178,14 +178,14 @@ Recorded from owner review on 2026-10-14.
   current CBZ support is reference only.
 * *Tabs across devices is a possible follow-up to RFD 3*, decided by how much
   complexity it adds to synchronization. Tabs are per device in the MVP.
-
-== Open questions
-
-. On phones, are fit-width PDF pages enough, or does the MVP also need a
-  reflowed text view for PDFs? Either way, PDF pages must be re-rendered at the
-  current zoom and display density so they never show an enlarged bitmap.
-. Vertical text is honored as the book declares it. Should a reader be able to
-  force horizontal layout?
+* *Phone PDFs show fit-width pages, not a reflowed text view.* Pages are
+  re-rendered at the current zoom and display density, so text never shows as
+  an enlarged bitmap. A reflowed view may follow after the MVP.
+* *EPUB writing direction is honored with no override.* The direction comes
+  from the book: the spine's `page-progression-direction` and the content's CSS
+  `writing-mode` (including the `-epub-writing-mode` alias). A book that
+  declares neither reads horizontally, left to right. Readers cannot force a
+  horizontal layout in the MVP.
 
 == Relationship to other RFDs
 

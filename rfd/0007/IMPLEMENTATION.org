@@ -9,7 +9,7 @@ and PDF where the item touches the reader.
 
 * Alignment
 
-- [ ] Review the design mock and settle the RFD's open questions.
+- [X] Review the design mock and settle the RFD's open questions.
 - [ ] Move the RFD to ~published~.
 
 * 1. Every device
@@ -27,7 +27,9 @@ and PDF where the item touches the reader.
 - [ ] Shared themes, including a night theme for PDF pages.
 - [ ] One size control: EPUB text size and PDF zoom.
 - [ ] RFD 6 selection and highlights in both formats.
-- [ ] EPUB writing direction, including vertical Japanese text.
+- [ ] EPUB writing direction from the spine's page progression and CSS
+  ~writing-mode~, including vertical Japanese text; horizontal when undeclared.
+- [ ] PDF pages re-rendered at the current zoom and display density.
 
 * 3. Notes and annotations
 
