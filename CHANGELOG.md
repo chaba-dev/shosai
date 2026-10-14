@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-02
+## [0.1.0] - 2026-10-14
 
 ### 🚀 Features
 
@@ -90,6 +90,8 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Use macOS-compatible System Events geometry in the picker smoke (#124)
 - *(epub)* Match retained canonical text and TOC source for br, cells and nav (#143)
 - *(epub)* Abandon a TOC candidate on one unusable entry like the retained parser (#144)
+- *(epub)* Anchor table rows at their own canonical position (#146)
+- *(flutter)* Package the declared fonts inside the host bundle (#147)
 
 ### 🚜 Refactor
 
