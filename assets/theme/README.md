@@ -14,6 +14,11 @@ reference and nothing else may define a theme color.
 | `flutter/lib/theme_tokens.dart` | Generated Dart token class, consumed by `flutter/lib/app_theme.dart` and the reader paint path. |
 | `scripts/generate-theme-tokens.py` | Generates both files and checks them (`--check`). |
 
+The design system (`docs/design-system.md`, tokens in
+`docs/design-system/tokens.json`) is the design target for the MVP and is not
+read by either frontend. Values move from it into this file, through the
+generator and both sides' tests, as the MVP implementation adopts them.
+
 ```sh
 make theme-tokens          # regenerate both files after editing the JSON
 make check-theme-tokens    # verify the committed files still match the source
