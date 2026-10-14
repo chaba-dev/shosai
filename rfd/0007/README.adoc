@@ -166,19 +166,26 @@ Footnotes whose text is already in the peek need no jump.
 * Writing highlights back into PDF files (RFD 6 interoperability phases).
 * A web build, which RFD 4 keeps as a feasibility target.
 * Collections or shelves beyond a single library list.
+* CBZ comics, which the current application supports.
+
+== Decisions
+
+Recorded from owner review on 2026-10-14.
+
+* *EPUB defaults to paginated reading.* Continuous scrolling may follow as an
+  option but is not the default.
+* *CBZ is not part of the MVP.* Revisit once there is a concrete need; the
+  current CBZ support is reference only.
+* *Tabs across devices is a possible follow-up to RFD 3*, decided by how much
+  complexity it adds to synchronization. Tabs are per device in the MVP.
 
 == Open questions
 
-. On phones, are fit-width PDF pages with pinch zoom enough, or does the MVP
-  need a reflowed text view for PDFs?
-. Should EPUB default to paginated or continuous reading? The mock shows a
-  single page column.
-. Does CBZ stay in the MVP? The current application supports it, but the goals
-  name ebooks and PDFs.
-. Once synchronization exists, do open tabs follow a person across devices or
-  stay per device?
-. Vertical text is honored as written. Should a reader be able to force
-  horizontal layout?
+. On phones, are fit-width PDF pages enough, or does the MVP also need a
+  reflowed text view for PDFs? Either way, PDF pages must be re-rendered at the
+  current zoom and display density so they never show an enlarged bitmap.
+. Vertical text is honored as the book declares it. Should a reader be able to
+  force horizontal layout?
 
 == Relationship to other RFDs
 
