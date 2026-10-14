@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ReferencePeek · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 24px; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; background: var(--surface-sunken); min-height: 430px; box-sizing: border-box; }
+.sh-peek { width: 430px; }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="sh-peek" role="dialog" aria-label="Footnote 1">
+    <div class="sh-peek__kicker">Footnote 1 · page 2</div>
+    <div class="sh-peek__body">Nyquist, H., “Certain Factors Affecting Telegraph Speed,” Bell System Technical Journal, April 1924, p. 324; “Certain Topics in Telegraph Transmission Theory,” A.I.E.E. Trans., v. 47, April 1928, p. 617.</div>
+    <div class="sh-peek__actions"><button class="sh-btn">Close</button><button class="sh-btn sh-btn--secondary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>Go to footnote</button></div>
+  </div>
+  <div class="sh-peek" role="dialog" aria-label="Chapter IV">
+    <div class="sh-peek__kicker">Contents link · page 104</div>
+    <div class="sh-peek__title">Chapter IV · Natural Selection</div>
+    <div class="sh-peek__body">How will the struggle for existence, discussed too briefly in the last chapter, act in regard to variation? Can the principle of selection, which we have seen is so potent in the hands of man, apply in nature? I think we shall see that it can act most effectually.</div>
+    <div class="sh-peek__actions"><button class="sh-btn sh-btn--secondary">Close</button><button class="sh-btn sh-btn--primary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>Go to</button></div>
+  </div>
+</div>
+</body>
+</html>

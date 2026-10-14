@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LibraryBook · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600&amp;text=%E5%90%BE%E8%BC%A9%E3%81%AF%E7%8C%AB%E3%81%A7%E3%81%82%E3%82%8B%E5%A4%8F%E7%9B%AE%E6%BC%B1%E7%9F%B3&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 24px; display: grid; grid-template-columns: repeat(5, 152px); gap: 24px; background: var(--canvas); min-height: 420px; box-sizing: border-box; align-items: start; }
+.cov-navy { background: var(--brand-navy); }
+.cov-charcoal { background: var(--brand-charcoal); }
+.cov-vermilion { background: #b23c1b; }
+.cov-slate { background: #4d5e86; }
+.cov-green { background: #4e755d; }
+.sh-cover { border-top: 3px solid var(--brand-gold); }
+.ja { font-family: var(--font-editorial); }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <button class="sh-book"><span class="sh-cover cov-navy"><span>On the Origin of Species</span><small>Charles Darwin</small></span><span class="sh-book__title">On the Origin of Species</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>21%</span><div class="sh-progress" aria-label="21% read"><div class="sh-progress__fill" style="width:21%"></div></div></button>
+  <button class="sh-book"><span class="sh-cover cov-charcoal"><span>A Mathematical Theory of Communication</span><small>C. E. Shannon</small></span><span class="sh-book__title">A Mathematical Theory of Communication</span><span class="sh-book__meta"><span class="sh-badge">PDF</span>5%</span><div class="sh-progress" aria-label="5% read"><div class="sh-progress__fill" style="width:5%"></div></div></button>
+  <button class="sh-book"><span class="sh-cover cov-vermilion ja"><span>吾輩は猫である</span><small>夏目漱石</small></span><span class="sh-book__title">吾輩は猫である</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>4%</span><div class="sh-progress" aria-label="4% read"><div class="sh-progress__fill" style="width:4%"></div></div></button>
+  <button class="sh-book"><span class="sh-cover cov-slate"><span>The Elements of Euclid</span><small>Euclid</small></span><span class="sh-book__title">The Elements of Euclid</span><span class="sh-book__meta"><span class="sh-badge">PDF</span>Not started</span></button>
+  <button class="sh-book"><span class="sh-cover cov-green"><span>Pride and Prejudice</span><small>Jane Austen</small></span><span class="sh-book__title">Pride and Prejudice</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>Finished</span></button>
+</div>
+</body>
+</html>

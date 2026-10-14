@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PageSpread · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: var(--canvas); }
+.cap { padding: 20px 32px 0; font-size: 12px; line-height: 16px; color: var(--ink-muted); background: var(--surface-sunken); }
+.sh-stage { padding: 20px 32px 40px; }
+.pg { width: 540px; height: 760px; padding: 48px 60px 32px; }
+.pg .sh-page__head { height: 14px; margin-bottom: 26px; }
+.pg .sh-page__folio { margin-top: 18px; }
+.ja { width: 500px; height: 720px; padding: 48px 60px 32px; }
+.ja .sh-page__body { font-family: var(--font-book); }
+</style>
+</head>
+<body>
+<div class="sh">
+  <div class="cap">Two-page spread · EPUB · Paper · left to right</div>
+  <div class="sh-stage">
+    <div class="sh-spread" id="en">
+      <div class="sh-page pg"><div class="sh-page__head"><span></span></div><div class="sh-page__body book-body"></div><div class="sh-page__folio">104</div></div>
+      <div class="sh-page pg"><div class="sh-page__head"><span>Chapter IV</span><span>Natural Selection</span></div><div class="sh-page__body book-body"></div><div class="sh-page__folio">105</div></div>
+    </div>
+  </div>
+  <div class="cap">Two-page spread · EPUB · Sepia · vertical, right to left, first page on the right</div>
+  <div class="sh-stage">
+    <div class="sh-spread sh-spread--rtl" id="ja">
+      <div class="sh-page sh-page--sepia sh-page--vertical pg ja"><div class="sh-page__head"><span></span></div><div class="sh-page__body book-body-ja"></div><div class="sh-page__folio">3</div></div>
+      <div class="sh-page sh-page--sepia sh-page--vertical pg ja"><div class="sh-page__head"><span>吾輩は猫である</span></div><div class="sh-page__body book-body-ja"></div><div class="sh-page__folio">4</div></div>
+    </div>
+  </div>
+</div>
+<script>
+/* Shōsai pagination: flows block HTML through page bodies, splitting paragraphs at real line starts so no line is ever clipped. */
+function shPaginate(bodies, html) {
+  var tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  var blocks = Array.prototype.slice.call(tmp.children);
+  var bi = 0;
+  function vertical(b) { return getComputedStyle(b).writingMode.indexOf('vertical') === 0; }
+  function overflows(b) { return vertical(b) ? b.scrollWidth > b.clientWidth + 1 : b.scrollHeight > b.clientHeight + 1; }
+  function findCut(body, block) {
+    var v = vertical(body), box = body.getBoundingClientRect();
+    var walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT), node, prev = null, prevCh = ' ';
+    var r = document.createRange();
+    while ((node = walker.nextNode())) {
+      var t = node.data;
+      for (var i = 0; i < t.length; i++) {
+        var ch = t[i];
+        if (/\s/.test(ch)) { prevCh = ch; continue; }
+        r.setStart(node, i); r.setEnd(node, i + 1);
+        var rect = r.getClientRects()[0];
+        if (rect && (v ? rect.left < box.left - 1 : rect.bottom > box.bottom + 1)) {
+          var cn = node, ci = i;
+          if (/[A-Za-z]/.test(ch) && /[A-Za-z\-]/.test(prevCh)) {
+            while (ci > 0 && !/\s/.test(cn.data[ci - 1])) ci--;
+          }
+          r.setStart(block, 0); r.setEnd(cn, ci);
+          if (!/\S/.test(r.toString())) return null;
+          return { node: cn, offset: ci };
+        }
+        prevCh = ch;
+      }
+    }
+    return null;
+  }
+  for (var k = 0; k < blocks.length; k++) {
+    var block = blocks[k];
+    while (block) {
+      var body = bodies[bi];
+      if (!body) return;
+      body.appendChild(block);
+      if (!overflows(body)) break;
+      var cut = block.tagName === 'P' ? findCut(body, block) : null;
+      if (!cut) {
+        if (body.firstElementChild === block) break;
+        block.remove(); bi++; continue;
+      }
+      var r = document.createRange();
+      r.setStart(cut.node, cut.offset); r.setEnd(block, block.childNodes.length);
+      var next = block.cloneNode(false);
+      next.appendChild(r.extractContents());
+      next.classList.add('sh-cont');
+      block.classList.add('sh-split');
+      bi++; block = next;
+    }
+  }
+}
+
+var EN = "<div class=\"sh-chapter\">Chapter IV</div><h2 class=\"sh-chapter-title\">Natural Selection</h2><p>How will the struggle for existence, discussed too briefly in the last chapter, act in regard to variation? Can the principle of selection, which we have seen is so potent in the hands of man, apply in nature? I think we shall see that it can act most effectually. Let it be borne in mind in what an endless number of strange peculiarities our domestic productions, and, in a lesser degree, those under nature, vary; and how strong the hereditary tendency is. Under domestication, it may be truly said that the whole organisation becomes in some degree plastic. Let it be borne in mind how infinitely complex and close-fitting are the mutual relations of all organic beings to each other and to their physical conditions of life. Can it, then, be thought improbable, seeing that variations useful to man have undoubtedly occurred, that other variations useful in some way to each being in the great and complex battle of life, should sometimes occur in the course of thousands of generations? If such do occur, can we doubt (remembering that many more individuals are born than can possibly survive) that individuals having any advantage, however slight, over others, would have the best chance of surviving and of procreating their kind? On the other hand, we may feel sure that any variation in the least degree injurious would be rigidly destroyed. <a href=\"#\" class=\"sh-hl sh-hl--yellow sh-hl--noted\">This preservation of favourable variations and the rejection of injurious variations, I call Natural Selection.</a> Variations neither useful nor injurious would not be affected by natural selection, and would be left a fluctuating element, as perhaps we see in the species called polymorphic.</p><p>We shall best understand the probable course of natural selection by taking the case of a country undergoing some physical change, for instance, of climate. The proportional numbers of its inhabitants would almost immediately undergo a change, and some species might become extinct. We may conclude, from what we have seen of the intimate and complex manner in which the inhabitants of each country are bound together, that any change in the numerical proportions of some of the inhabitants, independently of the change of climate itself, would most seriously affect many of the others. If the country were open on its borders, new forms would certainly immigrate, and this also would seriously disturb the relations of some of the former inhabitants. Let it be remembered how powerful the influence of a single introduced tree or mammal has been shown to be. But in the case of an island, or of a country partly surrounded by barriers, into which new and better adapted forms could not freely enter, we should then have places in the economy of nature which would assuredly be better filled up, if some of the original inhabitants were in some manner modified; for, had the area been open to immigration, these same places would have been seized on by intruders.</p><p>We have reason to believe, as stated in <a href=\"#\" class=\"sh-ref\">the first chapter</a>, that a change in the conditions of life, by specially acting on the reproductive system, causes or increases variability; and in the foregoing case the conditions of life are supposed to have undergone a change, and this would manifestly be favourable to natural selection, by giving a better chance of profitable variations occurring; and unless profitable variations do occur, natural selection can do nothing.</p>";
+var JA = "<h2 class=\"sh-chapter-title\">一</h2><p>吾輩は猫である。名前はまだ無い。</p><p>どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。吾輩はここで始めて人間というものを見た。しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。この書生というのは時々我々を捕えて煮て食うという話である。しかしその当時は何という考もなかったから別段恐しいとも思わなかった。ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。掌の上で少し落ちついて書生の顔を見たのがいわゆる人間というものの見始であろう。この時妙なものだと思った感じが今でも残っている。第一毛をもって装飾されべきはずの顔がつるつるしてまるで薬缶だ。その後猫にもだいぶ逢ったがこんな片輪には一度も出会わした事がない。のみならず顔の真中があまりに突起している。そうしてその穴の中から時々ぷうぷうと煙を吹く。どうも咽せぽくて実に弱った。これが人間の飲む煙草というものである事はようやくこの頃知った。</p><p>この書生の掌の裏でしばらくはよい心持に坐っておったが、しばらくすると非常な速力で運転し始めた。書生が動くのか自分だけが動くのか分らないが無暗に眼が廻る。胸が悪くなる。到底助からないと思っていると、どさりと音がして眼から火が出た。それまでは記憶しているがあとは何の事やらいくら考え出そうとしても分らない。</p>";
+function run() {
+  document.querySelectorAll('.sh-page__body').forEach(function (b) { b.innerHTML = ''; });
+  shPaginate(document.querySelectorAll('#en .sh-page__body'), EN);
+  shPaginate(document.querySelectorAll('#ja .sh-page__body'), JA);
+}
+var jaText = JA.replace(/<[^>]+>/g, '');
+Promise.all([document.fonts.load('400 19px "Source Serif 4"'), document.fonts.load('600 19px "Source Serif 4"'), document.fonts.load('400 20px "Noto Serif JP"', jaText), document.fonts.load('600 20px "Noto Serif JP"', '一'), document.fonts.load('600 12px Inter')]).catch(function () {}).then(function () {
+  run();
+  document.fonts.addEventListener('loadingdone', run);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NotesPanel · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.wrap { display: flex; justify-content: flex-end; height: 700px; background: var(--surface-sunken); }
+.panel { width: var(--panel-width); }
+.scope { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-4) var(--space-2); }
+.sum { font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="sh wrap">
+  <aside class="sh-panel panel" aria-label="Notes">
+    <div class="sh-panel__head"><span class="sh-panel__title">Notes</span><button class="sh-btn sh-btn--icon" aria-label="Search notes"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button><button class="sh-btn sh-btn--icon" aria-label="Close notes"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+    <div class="scope"><div class="sh-seg" role="group" aria-label="Scope"><button aria-pressed="true">This book</button><button aria-pressed="false">All books</button></div><span class="sum">12 notes</span></div>
+    <div class="sh-panel__body">
+      <button class="sh-note"><div class="sh-note__meta"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></svg><span>Book note</span></div><div class="sh-note__text">Reading alongside Shannon for the seminar on 21 October. Focus on selection as a filter on variation.</div></button>
+      <div class="sh-panel__group">Chapter III · Struggle for Existence</div>
+      <button class="sh-note"><div class="sh-note__meta"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg><span>Page note · page 61</span></div><div class="sh-note__text">Chapter III sets up the struggle for existence; read again before Chapter IV.</div></button>
+      <div class="sh-panel__group">Chapter IV · Natural Selection</div>
+      <button class="sh-note" aria-current="true"><div class="sh-note__meta"><span class="sh-dot sh-dot--yellow"></span><span>Chapter IV · page 104</span></div><div class="sh-note__quote">This preservation of favourable variations and the rejection of injurious variations, I call Natural Selection.</div><div class="sh-note__text">The definition everything else hangs on. Compare with Shannon’s “selected from a set of possible messages”.</div></button><button class="sh-note"><div class="sh-note__meta"><span class="sh-dot sh-dot--green"></span><span>Chapter IV · page 106</span></div><div class="sh-note__quote">Let it be remembered how powerful the influence of a single introduced tree or mammal has been shown to be.</div></button>
+    </div>
+    <div class="sh-panel__foot"><button class="sh-btn sh-btn--secondary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>Page note</button><button class="sh-btn sh-btn--secondary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></svg>Book note</button></div>
+  </aside>
+</div>
+</body>
+</html>

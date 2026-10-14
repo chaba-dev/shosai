@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BackPill · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.stage { position: relative; height: 230px; display: flex; justify-content: center; padding-top: 24px; background: var(--surface-sunken); }
+.frag { width: 560px; padding: 32px 48px; box-shadow: var(--shadow-page); }
+.frag-body p { margin: 0; text-align: justify; }
+.sh-backpill { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: var(--on-inverse); }
+</style>
+</head>
+<body>
+<div class="sh stage">
+  <div class="sh-page frag">
+    <div class="frag-body book-body"><p>we shall best understand the probable course of natural selection by taking the case of a country undergoing some physical change, for instance, of climate. The proportional numbers of its inhabitants would almost immediately undergo a change.</p></div>
+  </div>
+  <button class="sh-btn sh-capsule sh-backpill"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></svg>Back to page 61</button>
+</div>
+</body>
+</html>
