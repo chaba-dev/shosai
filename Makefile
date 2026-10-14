@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens test-epub-prototype epub-prototype-fixtures measure-epub-prototype
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens test-epub-prototype epub-prototype-fixtures measure-epub-prototype flutter-bundle-check-linux
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -154,6 +154,12 @@ flutter-dev: flutter-codegen
 ## Build the Linux Flutter host in debug mode
 flutter-linux-debug:
 	cd flutter && flutter build linux --debug
+
+## Verify the built Linux Flutter host's bundle carries the declared fonts
+## (the packaged-font regression; needs `flutter-linux-debug` first)
+flutter-bundle-check-linux:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_flutter_bundle.py \
+		flutter/build/linux/x64/debug/bundle
 
 ## Build the Android arm64 Flutter host in profile mode
 flutter-android-profile:
