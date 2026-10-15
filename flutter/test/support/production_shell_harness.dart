@@ -135,13 +135,14 @@ Map<String, Object?> harnessPlatformMetrics() => <String, Object?>{
 /// Loads the bundled interface and icon fonts into the test engine.
 ///
 /// Renders then depend on the repository's own font binaries instead of
-/// whichever fonts the host provides.
+/// whichever fonts the host provides. The faces are read with the same
+/// project-relative keys the production loader uses (`fonts/…`, see
+/// `pubspec.yaml`), so a test render uses the bytes the bundler ships.
 Future<void> loadHarnessFonts() async {
   final loaders = <FontLoader>[
-    FontLoader('Inter')
-      ..addFont(rootBundle.load('../assets/fonts/InterVariable.ttf')),
+    FontLoader('Inter')..addFont(rootBundle.load('fonts/InterVariable.ttf')),
     FontLoader('Noto Sans JP')
-      ..addFont(rootBundle.load('../assets/fonts/NotoSansJP-Variable.ttf')),
+      ..addFont(rootBundle.load('fonts/NotoSansJP-Variable.ttf')),
     FontLoader('MaterialIcons')
       ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')),
     FontLoader('packages/lucide_icons_flutter/Lucide')..addFont(

@@ -47,6 +47,7 @@ final class ReaderController implements Listenable {
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
     this.debugEpubSessionObserver,
+    this.debugEpubRoutingObserver,
     EpubFontCoverageLoader? epubFontCoverage,
     List<ReaderTabPresentation> initialTabs = const [],
     ReaderTypographyPresentation initialTypography =
@@ -130,6 +131,20 @@ final class ReaderController implements Listenable {
   /// one is not) needs to reach the session object itself.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
   final EpubFontCoverageLoader? _epubFontCoverageLoader;
+
+  /// Test-only observer for the outcome of each EPUB routing attempt.
+  ///
+  /// Every relayout of an EPUB document evaluates the Dart routing gate once
+  /// and either routes the chapter or leaves it to the retained renderer; a
+  /// test that asserts the *final* routing decision (a refusal observed as a
+  /// completed attempt, not merely as "nothing painted yet") needs the
+  /// attempt's generation- and revision-qualified outcome. Only attempts that
+  /// are still current when their gate evaluation returns are reported — a
+  /// superseded attempt's outcome is stale work, not a decision — and the
+  /// attempted page width identifies the viewport the decision belongs to.
+  /// Production composition leaves it null.
+  final void Function(int generation, int revision, double width, bool routed)?
+  debugEpubRoutingObserver;
 
   ReaderModel _model = ReaderModel();
   int _revealRevision = 0;
@@ -3148,6 +3163,17 @@ final class ReaderController implements Listenable {
           length: length,
           replaceReadingOffset: replaceReadingOffset,
         );
+        // A superseded attempt's outcome is not a decision: the observer
+        // reports only attempts that are still current, so a test waiting on
+        // a record observes a settled gate outcome, not stale work.
+        if (_isCurrentLayout(generation, revision)) {
+          debugEpubRoutingObserver?.call(
+            generation,
+            revision,
+            layout.width,
+            routed,
+          );
+        }
         if (routed) return;
         if (!_isCurrentLayout(generation, revision)) return;
       }

@@ -63,6 +63,7 @@ class ReaderScreen extends StatefulWidget {
     this.epubImageDecoder,
     this.epubFontRegistrar,
     this.debugEpubSessionObserver,
+    this.debugEpubRoutingObserver,
     this.debugPathEntry = false,
   }) : assert(bridge == null || bridgeFactory == null);
 
@@ -122,6 +123,11 @@ class ReaderScreen extends StatefulWidget {
   /// resource ownership (which session was released, and when) without reaching
   /// into the controller; production composition leaves it null.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
+
+  /// Test-only observer for the outcome of each EPUB routing attempt
+  /// (see [ReaderController.debugEpubRoutingObserver]).
+  final void Function(int generation, int revision, double width, bool routed)?
+  debugEpubRoutingObserver;
 
   /// Renders the retired path entry for tests and development only.
   ///
@@ -304,6 +310,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         epubImageDecoder: widget.epubImageDecoder ?? _decodeEpubImage,
         epubFontRegistrar: widget.epubFontRegistrar ?? _registerEpubFont,
         debugEpubSessionObserver: widget.debugEpubSessionObserver,
+        debugEpubRoutingObserver: widget.debugEpubRoutingObserver,
         epubFontCoverage: widget.fontCoverageLoader ?? _bundledFontCoverage,
         initialTabs: widget.initialTabs,
         frameScheduler: (callback) =>
@@ -1210,8 +1217,15 @@ bool usesExplicitSelectionAnnouncements(TargetPlatform platform) =>
 /// The parsed *value* is cached rather than the future that produced it: a
 /// settled future belongs to the zone that awaited it, so reusing one across
 /// calls (a second reader, or a later relayout) can leave the caller waiting on
-/// a completion that will never be delivered to it. Every call therefore gets a
-/// fresh future; only the parse is shared.
+/// a completion that will never be delivered to it. Every call therefore gets
+/// a fresh future; only the parse is shared.
+///
+/// The keys must be paths *inside* the Flutter project, so the bundler copies
+/// the files into the platform bundle (`flutter_assets/fonts/`): the fonts are
+/// symlinked from `assets/fonts/` into `flutter/fonts/` (see `pubspec.yaml`).
+/// A key that escapes the project is recorded in the manifests but never
+/// bundled, so loading it fails in a built desktop app and the gate would
+/// refuse every chapter.
 EpubFontCoverage? _bundledCoverage;
 bool _bundledCoverageFailed = false;
 Future<EpubFontCoverage?> _bundledFontCoverage() async {
@@ -1219,10 +1233,8 @@ Future<EpubFontCoverage?> _bundledFontCoverage() async {
   if (cached != null) return cached;
   if (_bundledCoverageFailed) return null;
   try {
-    final inter = await rootBundle.load('../assets/fonts/InterVariable.ttf');
-    final noto = await rootBundle.load(
-      '../assets/fonts/NotoSansJP-Variable.ttf',
-    );
+    final inter = await rootBundle.load('fonts/InterVariable.ttf');
+    final noto = await rootBundle.load('fonts/NotoSansJP-Variable.ttf');
     return _bundledCoverage = EpubFontCoverage.fromFonts([
       inter.buffer.asUint8List(),
       noto.buffer.asUint8List(),
