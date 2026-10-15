@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FormatBadge · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; align-items: center; gap: 8px; }
+.ctx { font-size: 13px; line-height: 18px; font-weight: 500; }
+.muted { color: var(--ink-muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="row"><span class="sh-badge">EPUB</span><span class="sh-badge">PDF</span></div>
+  <div class="row ctx"><span class="sh-badge">EPUB</span><span>On the Origin of Species</span><span class="muted">· Charles Darwin · 21%</span></div>
+  <div class="row ctx"><span class="sh-badge">PDF</span><span>A Mathematical Theory of Communication</span><span class="muted">· C. E. Shannon · p. 3 of 55</span></div>
+</div>
+</body>
+</html>

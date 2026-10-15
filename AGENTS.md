@@ -15,6 +15,7 @@
 # Design system
 
 - Follow `docs/typography.md` when adding, replacing, or applying fonts in the application or website.
+- Follow `docs/design-system.md` when designing or building Shōsai interface: its tokens, components, words and reading-surface rules. Preview it with `make design-system`; regenerate `docs/design-system/tokens.css` with `make design-system-css` after editing its `tokens.json`.
 
 # Flutter architecture
 

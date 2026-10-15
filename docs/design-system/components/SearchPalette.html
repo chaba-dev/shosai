@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SearchPalette · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.wrap { display: flex; justify-content: center; align-items: flex-start; padding: 32px 0; height: 690px; box-sizing: border-box; background: var(--scrim); }
+.sh-search__scopes { justify-content: space-between; }
+.foot { display: flex; gap: var(--space-4); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--line); font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="sh wrap">
+  <div class="sh-search" role="dialog" aria-label="Search">
+    <div class="sh-search__field"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:20px;height:20px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input value="selection" aria-label="Search books and notes"><span class="sh-kbd">Esc</span></div>
+    <div class="sh-search__scopes"><div class="sh-seg" role="group" aria-label="Scope"><button aria-pressed="false">This book</button><button aria-pressed="true">All books</button></div><div class="sh-seg" role="group" aria-label="Show"><button aria-pressed="true">Everything</button><button aria-pressed="false">Text</button><button aria-pressed="false">Notes</button></div></div>
+    <div class="sh-search__results" role="listbox">
+      <div class="sh-search__group"><span>Notes</span><span>3</span></div>
+      <button class="sh-hit" role="option" aria-selected="true"><span class="sh-hit__meta"><span class="sh-dot sh-dot--yellow"></span><span class="sh-badge">EPUB</span><span>On the Origin of Species · Chapter IV · page 104</span></span><span class="sh-hit__text">…and the rejection of injurious variations, I call Natural <mark>Selection</mark>.</span></button>
+      <button class="sh-hit" role="option" aria-selected="false"><span class="sh-hit__meta"><span class="sh-dot sh-dot--blue"></span><span class="sh-badge">PDF</span><span>A Mathematical Theory of Communication · page 3</span></span><span class="sh-hit__text">Compare with Darwin: a message <mark>selected</mark> from a set of possible messages.</span></button>
+      <div class="sh-search__group"><span>On the Origin of Species</span><span>41 matches</span></div>
+      <button class="sh-hit" role="option" aria-selected="false"><span class="sh-hit__meta"><span>Chapter IV · page 104</span></span><span class="sh-hit__text">How will the struggle for existence… Can the principle of <mark>selection</mark>, which we have seen is so potent in the hands of man, apply in nature?</span></button>
+      <button class="sh-hit" role="option" aria-selected="false"><span class="sh-hit__meta"><span>Chapter IV · page 107</span></span><span class="sh-hit__text">…by giving a better chance of profitable variations occurring; and unless profitable variations do occur, natural <mark>selection</mark> can do nothing.</span></button>
+      <div class="sh-search__group"><span>A Mathematical Theory of Communication</span><span>2 matches</span></div>
+      <button class="sh-hit" role="option" aria-selected="false"><span class="sh-hit__meta"><span>1. Discrete Noiseless Systems · page 3</span></span><span class="sh-hit__text">The significant aspect is that the actual message is one <mark>selected</mark> from a set of possible messages.</span></button>
+    </div>
+    <div class="foot"><span><span class="sh-kbd">↑</span> <span class="sh-kbd">↓</span> to move</span><span><span class="sh-kbd">↵</span> to open</span><span><span class="sh-kbd">Ctrl</span> <span class="sh-kbd">↵</span> to open in a new tab</span></div>
+  </div>
+</div>
+</body>
+</html>

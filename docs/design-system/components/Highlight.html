@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Highlight · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.stage { position: relative; display: flex; justify-content: center; padding: 64px 0 32px; background: var(--surface-sunken); }
+.pg { width: 640px; padding: 48px 64px 40px; box-shadow: var(--shadow-page); }
+.body { overflow: visible; }
+.tools { position: absolute; }
+</style>
+</head>
+<body>
+<div class="sh stage">
+  <div class="sh-page pg">
+    <div class="sh-page__body book-body body">
+      <p class="sh-cont"><span class="sh-selection" id="sel">If such do occur, can we doubt (remembering that many more individuals are born than can possibly survive) that individuals having any advantage, however slight, over others, would have the best chance of surviving and of procreating their kind?</span> On the other hand, we may feel sure that any variation in the least degree injurious would be rigidly destroyed. <a href="#" class="sh-hl sh-hl--yellow sh-hl--noted sh-hl--focus">This preservation of favourable variations and the rejection of injurious variations, I call Natural Selection.</a> Variations neither useful nor injurious would not be affected by natural selection, and would be left a fluctuating element, as perhaps we see in the species called polymorphic.</p>
+      <p><a href="#" class="sh-hl sh-hl--green">We shall best understand the probable course of natural selection by taking the case of a country undergoing some physical change, for instance, of climate.</a> The proportional numbers of its inhabitants would almost immediately undergo a change.</p>
+    </div>
+  </div>
+  <div class="sh-capsule tools" id="tools" role="toolbar" aria-label="Selection">
+    <button class="sh-swatch sh-swatch--yellow" aria-label="Yellow highlight"></button>
+    <button class="sh-swatch sh-swatch--green" aria-label="Green highlight"></button>
+    <button class="sh-swatch sh-swatch--blue" aria-label="Blue highlight"></button>
+    <button class="sh-swatch sh-swatch--pink" aria-label="Pink highlight"></button>
+    <button class="sh-swatch sh-swatch--purple" aria-label="Purple highlight"></button>
+    <span class="sh-capsule__sep"></span>
+    <button class="sh-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg>Note</button>
+    <button class="sh-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>Copy</button>
+    <button class="sh-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search</button>
+  </div>
+</div>
+<script>
+Promise.all([document.fonts.load('400 19px "Source Serif 4"'), document.fonts.load('500 13px Inter')]).catch(function () {}).then(function () {
+  var sel = document.getElementById('sel'), tools = document.getElementById('tools'), stage = document.querySelector('.stage');
+  var r = sel.getClientRects()[0], s = stage.getBoundingClientRect();
+  tools.style.left = Math.max(16, r.left - s.left) + 'px';
+  tools.style.top = Math.max(8, r.top - s.top - tools.offsetHeight - 12) + 'px';
+});
+</script>
+</body>
+</html>

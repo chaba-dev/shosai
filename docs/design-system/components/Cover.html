@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cover · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.cover { position: relative; width: 960px; height: 288px; overflow: hidden; background: var(--canvas); }
+.cover svg { position: absolute; inset: 0; }
+.navy { fill: var(--brand-navy); }
+.charcoal { fill: var(--brand-charcoal); }
+.vermilion { fill: var(--vermilion); }
+.slate { fill: var(--accent); }
+.gold { fill: var(--brand-gold); }
+.spine { rx: var(--radius-xs); }
+.band { stroke: var(--brand-cream); stroke-width: 2; }
+.shelf { stroke: var(--line-strong); stroke-width: 1; }
+.words { position: absolute; left: 48px; bottom: 40px; width: 440px; }
+.name { margin: 0; font-family: var(--font-editorial); font-size: 112px; line-height: .95; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.tagline { margin: 16px 0 0; font-family: var(--font-ui); font-size: 14px; line-height: 20px; color: var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+  <!--
+    blocks: brand-navy 96x232, brand-charcoal 64x200, vermilion 48x248, accent 80x216, brand-gold 56x176 (widths space-7x2, space-6x2, space-7, space-4x5, space-7+space-2)
+    arrangement: five unequal spines standing on one shelf right of x=480, tops staggered like the app icon's stack, gaps space-2
+    pattern: hairline rules (editorial serif, "borders not shadows"): brand-cream spine bands across three spines and one line-strong shelf, four rules in all
+    scales: gaps space-2 (8px), shelf at 264 = 288 - space-5, corners radius-xs
+  -->
+  <svg width="960" height="288" viewBox="0 0 960 288" aria-hidden="true">
+    <rect class="spine navy" x="560" y="32" width="96" height="232"/>
+    <rect class="spine charcoal" x="664" y="64" width="64" height="200"/>
+    <rect class="spine vermilion" x="736" y="16" width="48" height="248"/>
+    <rect class="spine slate" x="792" y="48" width="80" height="216"/>
+    <rect class="spine gold" x="880" y="88" width="56" height="176"/>
+    <line class="band" x1="560" y1="56" x2="656" y2="56"/>
+    <line class="band" x1="664" y1="240" x2="728" y2="240"/>
+    <line class="band" x1="792" y1="72" x2="872" y2="72"/>
+    <line class="shelf" x1="520" y1="264.5" x2="960" y2="264.5"/>
+  </svg>
+  <div class="words">
+    <h1 class="name">Shōsai</h1>
+    <p class="tagline">One reader for every book, on every screen.</p>
+  </div>
+</div>
+</body>
+</html>

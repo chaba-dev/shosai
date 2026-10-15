@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TabStrip · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.new { margin: 0 0 4px 2px; align-self: center; }
+.below { height: 96px; background: var(--surface); }
+</style>
+</head>
+<body>
+<div class="sh">
+  <div class="sh-tabstrip" role="tablist">
+    <button class="sh-tab sh-tab--pin" role="tab" aria-selected="false" aria-label="Library"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg></button>
+    <div class="sh-tab" role="tab" aria-selected="true"><button class="sh-tab__main"><span class="sh-badge">EPUB</span><span class="sh-tab__title">On the Origin of Species</span></button><button class="sh-tab__close" aria-label="Close On the Origin of Species"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+    <div class="sh-tab" role="tab" aria-selected="false"><button class="sh-tab__main"><span class="sh-badge">PDF</span><span class="sh-tab__title">A Mathematical Theory of Communication</span></button><button class="sh-tab__close" aria-label="Close A Mathematical Theory of Communication"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+    <div class="sh-tab" role="tab" aria-selected="false"><button class="sh-tab__main"><span class="sh-badge">EPUB</span><span class="sh-tab__title">吾輩は猫である</span></button><button class="sh-tab__close" aria-label="Close 吾輩は猫である"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+    <button class="sh-btn sh-btn--icon new" aria-label="Open a book"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+  </div>
+  <div class="below"></div>
+</div>
+</body>
+</html>
