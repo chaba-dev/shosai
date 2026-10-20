@@ -1,23 +1,24 @@
 /* Shōsai design system tokens. Generated from docs/design-system/tokens.json
    by scripts/generate-design-system-css.py; do not edit by hand. */
 :root, [data-theme="light"] {
-  --canvas: #f4f2ed;
-  --surface: #fffefb;
-  --surface-sunken: #ece9e1;
+  --canvas: #efe9dc;
+  --surface: #fcf9f2;
+  --surface-sunken: #e4dccb;
+  --stage-edge: #d8cfbb;
   --control-raised: var(--surface);
-  --chrome: #eeebe4;
-  --tabstrip: #e7e3da;
-  --hover: #e9e6de;
-  --line: #d9d5cb;
-  --line-strong: #8f897d;
-  --ink: #282724;
-  --ink-muted: #625f57;
-  --accent: #4d5e86;
-  --accent-hover: #3f4f76;
-  --accent-soft: #e2e6f0;
+  --chrome: #f5f0e5;
+  --tabstrip: #e3dbca;
+  --hover: #e8e1d2;
+  --line: #d7cdb9;
+  --line-strong: #7d7364;
+  --ink: #221d18;
+  --ink-muted: #645a4c;
+  --accent: #2b3a5c;
+  --accent-hover: #1e2b47;
+  --accent-soft: #dde2ec;
   --on-accent: #ffffff;
-  --on-accent-soft: #2f3d5e;
-  --inverse: #282724;
+  --on-accent-soft: #1e2b47;
+  --inverse: #221d18;
   --on-inverse: #fffefb;
   --vermilion: #b23c1b;
   --success: #4e755d;
@@ -29,7 +30,7 @@
   --brand-charcoal: #313030;
   --brand-cream: #f3e4cc;
   --brand-gold: #a18969;
-  --page-paper: #ffffff;
+  --page-paper: #fffdf8;
   --page-paper-ink: #1a1a1a;
   --page-paper-link: #174ea6;
   --page-sepia: #f5ebd6;
@@ -52,30 +53,32 @@
   --search-hit: rgba(255, 243, 163, 0.5);
   --search-current: rgba(255, 224, 102, 0.45);
   --mark: #fbeea0;
-  --shadow-page: 0 1px 2px rgba(33, 32, 30, 0.08), 0 6px 20px rgba(33, 32, 30, 0.10);
-  --shadow-cover: 0 4px 12px rgba(33, 32, 30, 0.16);
-  --shadow-menu: 0 3px 10px rgba(33, 32, 30, 0.18);
-  --shadow-modal: 0 5px 18px rgba(33, 32, 30, 0.24);
+  --shadow-page: 0 30px 50px -28px rgba(34, 29, 24, 0.55), 0 10px 20px -12px rgba(34, 29, 24, 0.3), 0 0 0 1px rgba(34, 29, 24, 0.07);
+  --shadow-cover: 0 18px 24px -18px rgba(34, 29, 24, 0.6), 0 4px 10px -6px rgba(34, 29, 24, 0.4);
+  --shadow-menu: 0 8px 24px -10px rgba(34, 29, 24, 0.35), 0 0 0 1px rgba(34, 29, 24, 0.06);
+  --shadow-modal: 0 24px 60px -20px rgba(34, 29, 24, 0.4), 0 0 0 1px rgba(34, 29, 24, 0.08);
+  --shadow-raised: 0 1px 2px rgba(34, 29, 24, 0.12), 0 0 0 1px rgba(34, 29, 24, 0.06);
 }
 [data-theme="dark"] {
-  --canvas: #151413;
-  --surface: #1d1c1a;
-  --surface-sunken: #100f0e;
-  --control-raised: #2f2d2a;
-  --chrome: #1a1917;
-  --tabstrip: #121110;
-  --hover: #2a2826;
-  --line: #33302c;
-  --line-strong: #77726a;
-  --ink: #f1eee8;
-  --ink-muted: #aba69c;
-  --accent: #9db0da;
-  --accent-hover: #b6c6ea;
-  --accent-soft: #262e42;
+  --canvas: #1a1715;
+  --surface: #25201b;
+  --surface-sunken: #141210;
+  --stage-edge: #0e0c0b;
+  --control-raised: #352f28;
+  --chrome: #1f1b18;
+  --tabstrip: #151210;
+  --hover: #2e2823;
+  --line: #39322c;
+  --line-strong: #7f766a;
+  --ink: #f1ebe0;
+  --ink-muted: #aea597;
+  --accent: #a8b8df;
+  --accent-hover: #bdcbea;
+  --accent-soft: #2a3246;
   --on-accent: #141a28;
-  --on-accent-soft: #c9d5f0;
-  --inverse: #45423d;
-  --on-inverse: #f7f4ee;
+  --on-accent-soft: #cdd8f0;
+  --inverse: #4a443d;
+  --on-inverse: #f7f2ea;
   --vermilion: #e0704f;
   --success: #8db89b;
   --warning: #d9a066;
@@ -83,10 +86,11 @@
   --danger-soft: #3a2220;
   --scrim: rgba(0, 0, 0, 0.6);
   --mark: #5a4f22;
-  --shadow-page: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.45);
-  --shadow-cover: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-menu: 0 3px 10px rgba(0, 0, 0, 0.55);
-  --shadow-modal: 0 5px 18px rgba(0, 0, 0, 0.6);
+  --shadow-page: 0 30px 50px -28px rgba(0, 0, 0, 0.9), 0 10px 20px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-cover: 0 18px 24px -18px rgba(0, 0, 0, 0.9), 0 4px 10px -6px rgba(0, 0, 0, 0.7);
+  --shadow-menu: 0 12px 32px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-modal: 0 24px 60px -20px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 :root {
   --space-1: 4px;
@@ -102,8 +106,8 @@
   --radius-lg: 16px;
   --control-height: 32px;
   --touch-target: 44px;
-  --tabstrip-height: 44px;
-  --toolbar-height: 48px;
+  --tabstrip-height: 50px;
+  --toolbar-height: 54px;
   --statusbar-height: 36px;
   --panel-width: 360px;
   --spread-min-width: 720px;
@@ -126,6 +130,8 @@
 .ed-display { font-family: var(--font-editorial); font-size: 32px; line-height: 38px; font-weight: 600; letter-spacing: -0.01em; }
 .ed-wordmark { font-family: var(--font-editorial); font-size: 20px; line-height: 24px; font-weight: 600; }
 .ed-quote { font-family: var(--font-editorial); font-size: 15px; line-height: 23px; font-weight: 400; }
+.ed-title { font-family: var(--font-editorial); font-size: 14px; line-height: 19px; font-weight: 600; }
+.ed-screen { font-family: var(--font-editorial); font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.01em; }
 .book-body { font-family: var(--font-book); font-size: 19px; line-height: 31px; font-weight: 400; }
 .book-body-ja { font-family: var(--font-book); font-size: 20px; line-height: 38px; font-weight: 400; }
 .book-chapter { font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.14em; }
