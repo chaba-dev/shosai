@@ -453,8 +453,8 @@ void main() {
           FlutterLibraryBook(
             bookId: 3,
             title: 'Anonymous Work',
-            format: FlutterBookFormat.cbz,
-            pathKey: '/books/c.cbz',
+            format: FlutterBookFormat.pdf,
+            pathKey: '/books/c.pdf',
             managed: false,
             progress: 0.1,
             dateAdded: '2026-09-10',

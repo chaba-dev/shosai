@@ -36,10 +36,6 @@
   "@filterFormatPdf": {
     "description": "Format names stay Latin in both locales, as in the Iced reference; the value is identical in every catalog on purpose."
   },
-  "filterFormatCbz": "CBZ",
-  "@filterFormatCbz": {
-    "description": "Retained Flutter extension of the Iced All/EPUB/PDF entries (plan decision 9). Latin in both locales on purpose."
-  },
   "addBooksAction": "Add books",
   "@addBooksAction": {
     "description": "Iced reference key: add-books. The Flutter action draws the plus as an icon, so the label carries no plus sign."

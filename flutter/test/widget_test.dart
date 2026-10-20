@@ -391,40 +391,6 @@ void main() {
       await bridge.disposed.future;
     },
   );
-
-  testWidgets('CBZ image-only completion displays instead of spinning', (
-    tester,
-  ) async {
-    final bridge = _FakeBridge()..completeOpen(FlutterBookFormat.cbz);
-    final image = await _testImage();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ReaderScreen(
-          debugPathEntry: true,
-          bridge: bridge,
-          decoder: (pixels, {required width, required height}) async => image,
-        ),
-      ),
-    );
-    await tester.enterText(find.byType(ShadInput), '/tmp/book.cbz');
-    await tester.tap(find.text('Open document'));
-    await bridge.renderStarted.future;
-    bridge.renderCompleter.complete(
-      FlutterRenderedBuffer(
-        handle: _bufferHandle,
-        width: 1,
-        height: 1,
-        byteLen: BigInt.from(4),
-      ),
-    );
-    await bridge.operationFinished.future;
-    await tester.pump();
-    expect(find.byType(RawImage), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.byTooltip('Retry loading highlights'), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-  });
-
   testWidgets('disposal waits for an in-flight open to release its handles', (
     tester,
   ) async {
@@ -456,7 +422,7 @@ void main() {
     tester,
   ) async {
     final bridge = _FakeBridge(pixels: Uint8List.fromList([255, 64, 0, 128]))
-      ..completeOpen(FlutterBookFormat.cbz);
+      ..completeOpen(FlutterBookFormat.pdf);
     var decodeCalls = 0;
     await tester.pumpWidget(
       MaterialApp(
@@ -470,7 +436,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(ShadInput), '/tmp/book.cbz');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pump();
     await bridge.renderStarted.future;
@@ -495,6 +461,7 @@ void main() {
       'cancel',
       'buffer',
       'cancellation',
+      'selection',
       'document',
       'dispose',
     ]);
@@ -3463,32 +3430,6 @@ void main() {
     controller.dispose();
     await bridge.disposed.future;
   });
-
-  test('queued CBZ layout is used by the next EPUB open', () async {
-    final bridge = _ControlledBridge(
-      format: FlutterBookFormat.cbz,
-      immediateLists: true,
-    );
-    final controller = ReaderController(
-      bridge: bridge,
-      decoder: (pixels, {required width, required height}) => _testImage(),
-    );
-    controller.dispatch(const ReaderOpenRequested('/tmp/book.cbz'));
-    await bridge.waitForOp(1);
-    const desired = ReaderLayout(scale: 2, width: 300, fontSize: 20);
-    controller.dispatch(const ReaderLayoutChanged(desired));
-    expect(bridge.selectionCalls, 0);
-    expect(controller.model.selectionError, isNull);
-    expect(controller.model.relayoutBusy, isFalse);
-
-    bridge.format = FlutterBookFormat.epub;
-    controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-    await bridge.waitForOp(2);
-    expect(bridge.selectionLayouts, [desired]);
-    controller.dispose();
-    await bridge.disposed.future;
-  });
-
   test(
     'closing rejects update and delete intents while effects drain',
     () async {
@@ -7459,60 +7400,6 @@ void main() {
     controller.dispose();
     await bridge.disposed.future;
   });
-
-  testWidgets('CBZ exposes keyboard navigation and panel chrome', (
-    tester,
-  ) async {
-    final bridge = _ControlledBridge(
-      format: FlutterBookFormat.cbz,
-      logicalUnitCount: 2,
-      bookId: 7,
-      immediateLists: true,
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ReaderScreen(
-          debugPathEntry: true,
-          bridge: bridge,
-          initialPath: '/books/comic.cbz',
-          initialBookId: 7,
-          decoder: (pixels, {required width, required height}) => _testImage(),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('reader-document-semantics')));
-    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
-    await tester.pumpAndSettle();
-    // RD-05 status wording: `Page {page} · {percentage}%` (the pinned Iced
-    // string), not the retired `2 / 2` form.
-    expect(find.text('Page 2 · 100%'), findsOneWidget);
-    expect(bridge.renderUnits, [0, 1]);
-    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
-    await tester.pumpAndSettle();
-    expect(find.text('Page 1 · 50%'), findsOneWidget);
-    expect(bridge.renderUnits, [0, 1, 0]);
-    final semantics = tester.getSemantics(
-      find.byKey(const ValueKey('reader-document-semantics')),
-    );
-    expect(semantics.label, contains('page 1 of 2'));
-
-    // The tools *surface* is retired (contract §7.2 item 1) but the live
-    // bookmark controls are retained inside the more panel, so a CBZ reader
-    // still reaches its bookmark chrome.
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('reader-panel-more')), findsOneWidget);
-    expect(find.byKey(const ValueKey('reader-more-bookmark')), findsOneWidget);
-    // A CBZ has no text search, so the more panel offers no search control and
-    // the search bar stays absent.
-    expect(find.byKey(const ValueKey('reader-more-search')), findsNothing);
-    expect(find.byKey(const ValueKey('reader-search-input')), findsNothing);
-    await tester.pumpWidget(const SizedBox());
-    await bridge.disposed.future;
-  });
-
   testWidgets('rejected Open reveals the pending bookmark write', (
     tester,
   ) async {
