@@ -1,18 +1,19 @@
 /* Shōsai design system tokens. Generated from docs/design-system/tokens.json
    by scripts/generate-design-system-css.py; do not edit by hand. */
 :root, [data-theme="light"] {
-  --canvas: #efe9dc;
-  --surface: #fcf9f2;
-  --surface-sunken: #e4dccb;
-  --stage-edge: #d8cfbb;
+  --canvas: #f6f1e6;
+  --surface: #fdfaf3;
+  --surface-sunken: #e6dfd0;
+  --stage: #efe8d9;
+  --stage-edge: #d9cfbb;
+  --shelf: #cfc4ad;
   --control-raised: var(--surface);
-  --chrome: #f5f0e5;
-  --tabstrip: #e3dbca;
-  --hover: #e8e1d2;
-  --line: #d7cdb9;
+  --chrome: #ece5d6;
+  --hover: #e7e0d0;
+  --line: #d9d0bd;
   --line-strong: #7d7364;
   --ink: #221d18;
-  --ink-muted: #645a4c;
+  --ink-muted: #675d4f;
   --accent: #2b3a5c;
   --accent-hover: #1e2b47;
   --accent-soft: #dde2ec;
@@ -60,15 +61,16 @@
   --shadow-raised: 0 1px 2px rgba(34, 29, 24, 0.12), 0 0 0 1px rgba(34, 29, 24, 0.06);
 }
 [data-theme="dark"] {
-  --canvas: #1a1715;
-  --surface: #25201b;
-  --surface-sunken: #141210;
-  --stage-edge: #0e0c0b;
+  --canvas: #1d1915;
+  --surface: #2a241e;
+  --surface-sunken: #171411;
+  --stage: #211d19;
+  --stage-edge: #0f0d0b;
+  --shelf: #0d0b0a;
   --control-raised: #352f28;
-  --chrome: #1f1b18;
-  --tabstrip: #151210;
-  --hover: #2e2823;
-  --line: #39322c;
+  --chrome: #171412;
+  --hover: #2e2822;
+  --line: #3a322b;
   --line-strong: #7f766a;
   --ink: #f1ebe0;
   --ink-muted: #aea597;
@@ -106,10 +108,12 @@
   --radius-lg: 16px;
   --control-height: 32px;
   --touch-target: 44px;
-  --tabstrip-height: 50px;
-  --toolbar-height: 54px;
+  --sidebar-width: 240px;
+  --rail-width: 64px;
+  --bottomnav-height: 64px;
+  --toolbar-height: 56px;
   --statusbar-height: 36px;
-  --panel-width: 360px;
+  --panel-width: 340px;
   --spread-min-width: 720px;
   --measure: 36em;
   --font-ui: Inter, "Noto Sans JP", system-ui, sans-serif;
@@ -127,11 +131,12 @@
 .ui-caption { font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 400; }
 .ui-label { font-family: var(--font-ui); font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.08em; }
 .ui-badge { font-family: var(--font-ui); font-size: 10px; line-height: 12px; font-weight: 600; letter-spacing: 0.04em; }
-.ed-display { font-family: var(--font-editorial); font-size: 32px; line-height: 38px; font-weight: 600; letter-spacing: -0.01em; }
+.ed-display { font-family: var(--font-editorial); font-size: 40px; line-height: 44px; font-weight: 600; letter-spacing: -0.01em; }
 .ed-wordmark { font-family: var(--font-editorial); font-size: 20px; line-height: 24px; font-weight: 600; }
 .ed-quote { font-family: var(--font-editorial); font-size: 15px; line-height: 23px; font-weight: 400; }
 .ed-title { font-family: var(--font-editorial); font-size: 14px; line-height: 19px; font-weight: 600; }
-.ed-screen { font-family: var(--font-editorial); font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.01em; }
+.ed-screen { font-family: var(--font-editorial); font-size: 34px; line-height: 40px; font-weight: 600; letter-spacing: -0.01em; }
+.ed-section { font-family: var(--font-editorial); font-size: 22px; line-height: 26px; font-weight: 600; }
 .book-body { font-family: var(--font-book); font-size: 19px; line-height: 31px; font-weight: 400; }
 .book-body-ja { font-family: var(--font-book); font-size: 20px; line-height: 38px; font-weight: 400; }
 .book-chapter { font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.14em; }
