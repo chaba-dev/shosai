@@ -9,9 +9,12 @@ use cosmic_text::{
 };
 
 const INTER: &[u8] = include_bytes!("../../../../assets/fonts/InterVariable.ttf");
-const INTER_ITALIC: &[u8] = include_bytes!("../../tests/fonts/InterVariable-Italic.ttf");
-const NOTO_ARABIC: &[u8] = include_bytes!("../../tests/fonts/NotoSansArabic.ttf");
-const NOTO_HEBREW: &[u8] = include_bytes!("../../tests/fonts/NotoSansHebrew.ttf");
+const INTER_ITALIC: &[u8] =
+    include_bytes!("../../../shosai-core/tests/fixtures/fonts/InterVariable-Italic.ttf");
+const NOTO_ARABIC: &[u8] =
+    include_bytes!("../../../shosai-core/tests/fixtures/fonts/NotoSansArabic.ttf");
+const NOTO_HEBREW: &[u8] =
+    include_bytes!("../../../shosai-core/tests/fixtures/fonts/NotoSansHebrew.ttf");
 
 #[derive(Debug, PartialEq)]
 struct GlyphEvidence {

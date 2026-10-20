@@ -921,14 +921,14 @@ mod tests {
     use super::*;
     use sha2::Digest;
 
-    const BOOK_A_TTF: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-a.ttf");
-    const BOOK_A_OTF: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-a.otf");
-    const BOOK_A_WOFF: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-a.woff");
-    const BOOK_A_WOFF2: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-a.woff2");
-    const BOOK_B_TTF: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-b.ttf");
+    const BOOK_A_TTF: &[u8] = include_bytes!("../../tests/fixtures/fonts/epub/book-a.ttf");
+    const BOOK_A_OTF: &[u8] = include_bytes!("../../tests/fixtures/fonts/epub/book-a.otf");
+    const BOOK_A_WOFF: &[u8] = include_bytes!("../../tests/fixtures/fonts/epub/book-a.woff");
+    const BOOK_A_WOFF2: &[u8] = include_bytes!("../../tests/fixtures/fonts/epub/book-a.woff2");
+    const BOOK_B_TTF: &[u8] = include_bytes!("../../tests/fixtures/fonts/epub/book-b.ttf");
     const INTER: &[u8] = include_bytes!("../../../../assets/fonts/InterVariable.ttf");
     const INTER_ITALIC: &[u8] =
-        include_bytes!("../../../shosai-app/tests/fonts/InterVariable-Italic.ttf");
+        include_bytes!("../../tests/fixtures/fonts/InterVariable-Italic.ttf");
     const FAMILY: &str = "Shosai EPUB Fixture";
 
     fn font_book(
