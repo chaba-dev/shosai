@@ -8,7 +8,6 @@ use anyhow::Context;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::cbz::CbzDoc;
 use crate::document::Document;
 use crate::epub::pagination::content_node_text_len;
 use crate::epub::{EpubDoc, EpubLimits};
@@ -100,13 +99,6 @@ pub fn format_capabilities(format: BookFormat) -> FormatCapabilities {
             searchable: true,
             selectable: true,
         },
-        BookFormat::Cbz => FormatCapabilities {
-            paginated: true,
-            continuous: true,
-            reflowable: false,
-            searchable: false,
-            selectable: false,
-        },
     }
 }
 
@@ -134,7 +126,6 @@ pub(crate) struct ResourceLimitError(pub(crate) String);
 pub enum OpenDocument {
     Pdf(Arc<PdfDoc>),
     Epub(Arc<EpubDoc>),
-    Cbz(Arc<CbzDoc>),
 }
 
 #[derive(Debug)]
@@ -144,13 +135,11 @@ pub struct OpenDocumentPlan {
     file: std::fs::File,
     encoded_byte_len: usize,
     retained_admission_byte_len: usize,
-    title_hint: Option<String>,
 }
 
 pub(crate) struct AdmittedDocumentBytes {
     pub(crate) format: BookFormat,
     pub(crate) data: Vec<u8>,
-    pub(crate) title_hint: Option<String>,
     admission: crate::document_admission::ProvisionalDocumentAdmission,
 }
 
@@ -169,40 +158,12 @@ fn planned_retained_admission_byte_len<R: Read + Seek>(
         );
     }
     let reader = archive_reader.expect("ZIP admission requires its archive reader");
-    let max_entries = match format {
-        BookFormat::Epub => EpubLimits::default().max_archive_entries,
-        BookFormat::Cbz => crate::cbz::CbzLimits::default().max_entries,
-        BookFormat::Pdf => unreachable!(),
-    };
-    let archive_label = match format {
-        BookFormat::Epub => "EPUB",
-        BookFormat::Cbz => "CBZ",
-        BookFormat::Pdf => unreachable!(),
-    };
-    let preflight = crate::zip_preflight::preflight(reader, max_entries, is_cancelled)
-        .context("invalid ZIP archive")
-        .with_context(|| format!("{archive_label} archive is corrupt"))
-        .map_err(|error| classify_open_error(format, error))?;
-    if format == BookFormat::Cbz {
-        let metadata =
-            crate::zip_preflight::metadata_allocation_ceiling(preflight).ok_or_else(|| {
-                OpenDocumentError::LimitExceeded {
-                    format,
-                    detail: "archive metadata admission cannot be represented".to_owned(),
-                }
-            })?;
-        return crate::document_admission::cbz_retained_ceiling(
-            encoded_byte_len,
-            max_entries,
-            metadata,
-            preflight.copied_filename_ceiling,
-        )
-        .ok_or_else(|| OpenDocumentError::LimitExceeded {
-            format,
-            detail: "retained-memory admission cannot be represented".to_owned(),
-        });
-    }
     let limits = EpubLimits::default();
+    let preflight =
+        crate::zip_preflight::preflight(reader, limits.max_archive_entries, is_cancelled)
+            .context("invalid ZIP archive")
+            .context("EPUB archive is corrupt")
+            .map_err(|error| classify_open_error(format, error))?;
     if preflight.declared_uncompressed_bytes > limits.max_total_uncompressed_bytes {
         return Err(OpenDocumentError::LimitExceeded {
             format,
@@ -627,10 +588,6 @@ impl OpenDocumentPlan {
             file,
             encoded_byte_len,
             retained_admission_byte_len,
-            title_hint: locator
-                .path()
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned()),
         })
     }
 
@@ -714,7 +671,6 @@ impl OpenDocumentPlan {
         Ok(AdmittedDocumentBytes {
             format: self.format,
             data,
-            title_hint: self.title_hint,
             admission,
         })
     }
@@ -790,20 +746,6 @@ impl OpenDocument {
                     .checked_add(EPUB_CONTAINER_OVERHEAD_BYTES)?
             }
             BookFormat::Pdf => PDF_RETAINED_OVERHEAD_BYTES,
-            BookFormat::Cbz => {
-                let limits = crate::cbz::CbzLimits::default();
-                encoded_byte_len
-                    .checked_mul(16)?
-                    .checked_add(limits.max_entries.checked_mul(512)?)?
-                    .checked_add(64 * 1024)?
-                    .checked_add(limits.max_entries.checked_mul(
-                        std::mem::size_of::<String>()
-                            + std::mem::size_of::<usize>()
-                            + std::mem::size_of::<Option<(u32, u32)>>()
-                            + std::mem::size_of::<Option<usize>>(),
-                    )?)?
-                    .checked_add(4 * 1024)?
-            }
         };
         encoded_byte_len.checked_add(expansion)
     }
@@ -814,7 +756,6 @@ impl OpenDocument {
         match self {
             Self::Pdf(document) => document.retained_byte_len(),
             Self::Epub(document) => document.retained_byte_len(),
-            Self::Cbz(document) => document.retained_byte_len(),
         }
     }
 
@@ -827,20 +768,13 @@ impl OpenDocument {
     }
 
     #[cfg(test)]
-    pub(crate) fn from_bytes(
-        format: BookFormat,
-        data: Vec<u8>,
-        title_hint: Option<String>,
-    ) -> Result<Self, OpenDocumentError> {
+    pub(crate) fn from_bytes(format: BookFormat, data: Vec<u8>) -> Result<Self, OpenDocumentError> {
         match format {
             BookFormat::Pdf => PdfDoc::from_bytes(data)
                 .map(|document| Self::Pdf(Arc::new(document)))
                 .map_err(|error| classify_open_error(format, error)),
             BookFormat::Epub => EpubDoc::from_bytes(data)
                 .map(|document| Self::Epub(Arc::new(document)))
-                .map_err(|error| classify_open_error(format, error)),
-            BookFormat::Cbz => CbzDoc::from_bytes_with_title_hint(data, title_hint)
-                .map(|document| Self::Cbz(Arc::new(document)))
                 .map_err(|error| classify_open_error(format, error)),
         }
     }
@@ -865,7 +799,6 @@ impl OpenDocument {
         let AdmittedDocumentBytes {
             format,
             data,
-            title_hint,
             admission,
         } = admitted;
         match format {
@@ -879,14 +812,6 @@ impl OpenDocument {
                     .map(|document| Self::Epub(Arc::new(document)))
                     .map_err(|error| classify_open_error(format, error))
             }
-            BookFormat::Cbz => CbzDoc::from_bytes_with_title_hint_admitted_cancellable(
-                data,
-                title_hint,
-                admission,
-                is_cancelled,
-            )
-            .map(|document| Self::Cbz(Arc::new(document)))
-            .map_err(|error| classify_open_error(format, error)),
         }
     }
 
@@ -894,7 +819,6 @@ impl OpenDocument {
         match self {
             Self::Pdf(_) => BookFormat::Pdf,
             Self::Epub(_) => BookFormat::Epub,
-            Self::Cbz(_) => BookFormat::Cbz,
         }
     }
 
@@ -906,7 +830,6 @@ impl OpenDocument {
         match self {
             Self::Pdf(document) => document.page_count(),
             Self::Epub(document) => document.chapter_count(),
-            Self::Cbz(document) => document.page_count(),
         }
     }
 
@@ -914,7 +837,6 @@ impl OpenDocument {
         match self {
             Self::Pdf(document) => document.title(),
             Self::Epub(document) => document.metadata().title,
-            Self::Cbz(document) => document.metadata().title,
         }
     }
 
@@ -959,7 +881,6 @@ fn classify_open_error(format: BookFormat, error: anyhow::Error) -> OpenDocument
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cbz::CbzLimits;
     use crate::pdf::MAX_PDF_INPUT_BYTES;
     use std::io::Write;
 
@@ -975,7 +896,7 @@ mod tests {
     fn format_capabilities_are_centralized() {
         assert!(format_capabilities(BookFormat::Epub).reflowable);
         assert!(format_capabilities(BookFormat::Pdf).selectable);
-        assert!(!format_capabilities(BookFormat::Cbz).searchable);
+        assert!(!format_capabilities(BookFormat::Pdf).reflowable);
     }
 
     #[test]
@@ -991,8 +912,8 @@ mod tests {
     #[test]
     fn prepared_document_open_honors_preexisting_cancellation() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("book.cbz");
-        std::fs::write(&path, include_bytes!("../tests/fixtures/sample.cbz")).unwrap();
+        let path = directory.path().join("book.epub");
+        std::fs::write(&path, include_bytes!("../tests/fixtures/sample.epub")).unwrap();
         let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(path)).unwrap();
         let cancellation = crate::bridge::Cancellation::new();
         cancellation.cancel();
@@ -1137,10 +1058,6 @@ mod tests {
                 "book.epub",
                 include_bytes!("../tests/fixtures/sample.epub").as_slice(),
             ),
-            (
-                "book.cbz",
-                include_bytes!("../tests/fixtures/sample.cbz").as_slice(),
-            ),
         ] {
             let path = directory.path().join(name);
             std::fs::write(&path, fixture).unwrap();
@@ -1192,20 +1109,20 @@ mod tests {
 
     #[test]
     fn parser_limits_have_a_structural_limit_category() {
-        let limits = CbzLimits {
-            max_entries: 0,
-            ..CbzLimits::default()
+        let limits = EpubLimits {
+            max_archive_entries: 0,
+            ..EpubLimits::default()
         };
-        let error = CbzDoc::from_bytes_with_limits(
-            include_bytes!("../tests/fixtures/sample.cbz").to_vec(),
+        let error = EpubDoc::from_bytes_with_limits(
+            include_bytes!("../tests/fixtures/sample.epub").to_vec(),
             limits,
         )
         .unwrap_err();
 
         assert!(matches!(
-            classify_open_error(BookFormat::Cbz, error),
+            classify_open_error(BookFormat::Epub, error),
             OpenDocumentError::LimitExceeded {
-                format: BookFormat::Cbz,
+                format: BookFormat::Epub,
                 ..
             }
         ));
@@ -1228,14 +1145,13 @@ mod tests {
     }
 
     #[test]
-    fn malformed_cbz_bytes_have_a_structural_open_category() {
-        let error =
-            OpenDocument::from_bytes(BookFormat::Cbz, b"not a zip".to_vec(), None).unwrap_err();
+    fn malformed_epub_bytes_have_a_structural_open_category() {
+        let error = OpenDocument::from_bytes(BookFormat::Epub, b"not a zip".to_vec()).unwrap_err();
 
         assert!(matches!(
             error,
             OpenDocumentError::Open {
-                format: BookFormat::Cbz,
+                format: BookFormat::Epub,
                 ..
             }
         ));
@@ -1243,8 +1159,7 @@ mod tests {
 
     #[test]
     fn malformed_pdf_bytes_have_a_structural_open_category() {
-        let error =
-            OpenDocument::from_bytes(BookFormat::Pdf, b"not a pdf".to_vec(), None).unwrap_err();
+        let error = OpenDocument::from_bytes(BookFormat::Pdf, b"not a pdf".to_vec()).unwrap_err();
 
         assert!(matches!(
             error,

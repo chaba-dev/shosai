@@ -21,7 +21,6 @@ use unicode_normalization::UnicodeNormalization;
 use crate::annotations::{AnnotationDocumentFormat, AnnotationStore, DocumentFingerprint};
 use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentPlan};
 use crate::bookmarks::{BookmarkCountLimit, MAX_BOOKMARKS_PER_BOOK};
-use crate::cbz::{CbzDoc, CbzLimits};
 use crate::document::Document;
 use crate::epub::{EpubDoc, EpubLimits};
 use crate::path_key::{canonical_path_key, path_from_key};
@@ -275,7 +274,6 @@ where
 pub enum BookFormat {
     Pdf,
     Epub,
-    Cbz,
 }
 
 /// Where Shosai expects a book's bytes to live.
@@ -307,7 +305,6 @@ impl BookFormat {
         match ext.to_lowercase().as_str() {
             "pdf" => Some(Self::Pdf),
             "epub" => Some(Self::Epub),
-            "cbz" => Some(Self::Cbz),
             _ => None,
         }
     }
@@ -316,7 +313,6 @@ impl BookFormat {
         match self {
             Self::Pdf => "pdf",
             Self::Epub => "epub",
-            Self::Cbz => "cbz",
         }
     }
 
@@ -324,7 +320,6 @@ impl BookFormat {
         match self {
             Self::Pdf => "PDF",
             Self::Epub => "EPUB",
-            Self::Cbz => "CBZ",
         }
     }
 
@@ -332,7 +327,6 @@ impl BookFormat {
         match self {
             Self::Pdf => MAX_PDF_INPUT_BYTES,
             Self::Epub => EpubLimits::default().max_input_bytes,
-            Self::Cbz => CbzLimits::default().max_archive_bytes,
         }
     }
 
@@ -340,7 +334,6 @@ impl BookFormat {
         match s {
             "pdf" => Some(Self::Pdf),
             "epub" => Some(Self::Epub),
-            "cbz" => Some(Self::Cbz),
             _ => None,
         }
     }
@@ -364,7 +357,6 @@ fn book_format_for_path(
     let size = file.metadata()?.len();
     let max_input_bytes = EpubLimits::default()
         .max_input_bytes
-        .max(CbzLimits::default().max_archive_bytes)
         .max(MAX_PDF_INPUT_BYTES);
     if size > max_input_bytes {
         bail!("book exceeds its input byte limit");
@@ -378,9 +370,7 @@ fn book_format_for_path(
         return Ok(None);
     }
 
-    let max_entries = EpubLimits::default()
-        .max_archive_entries
-        .max(CbzLimits::default().max_entries);
+    let max_entries = EpubLimits::default().max_archive_entries;
     let cancelled = || cancellation.is_some_and(ImportCancellation::is_cancelled);
     let preflight = crate::zip_preflight::preflight(&file, max_entries, Some(&cancelled))
         .context("failed to preflight selected ZIP archive")?;
@@ -391,9 +381,6 @@ fn book_format_for_path(
     check_import_cancelled(cancellation)?;
     if preflight.has_epub_mimetype && preflight.has_epub_container {
         return Ok(Some(BookFormat::Epub));
-    }
-    if preflight.has_comic_image {
-        return Ok(Some(BookFormat::Cbz));
     }
     Ok(None)
 }
@@ -3152,7 +3139,6 @@ async fn reconcile_identity_inner(
     let annotation_format = match BookFormat::from_db(&format) {
         Some(BookFormat::Epub) => Some(AnnotationDocumentFormat::Epub),
         Some(BookFormat::Pdf) => Some(AnnotationDocumentFormat::Pdf),
-        Some(BookFormat::Cbz) => None,
         None => bail!("stored book format is invalid"),
     };
     record_book_path_alias(transaction, book_id, old_path, &content_hash).await?;
@@ -3467,7 +3453,6 @@ fn extract_metadata_and_cover(
     match format {
         BookFormat::Pdf => extract_pdf_metadata(path, title_path, cancellation),
         BookFormat::Epub => extract_epub_metadata(path, title_path, cancellation),
-        BookFormat::Cbz => extract_cbz_metadata(path, title_path, cancellation),
     }
 }
 
@@ -4395,45 +4380,6 @@ fn extract_epub_metadata(
     Ok((title, author, cover))
 }
 
-fn extract_cbz_metadata(
-    path: &Path,
-    title_path: &Path,
-    cancellation: Option<&ImportCancellation>,
-) -> Result<(String, Option<String>, Option<Vec<u8>>)> {
-    let is_cancelled = || cancellation.is_some_and(ImportCancellation::is_cancelled);
-    let doc = if cancellation.is_some() {
-        CbzDoc::open_with_limits_cancellable(path, CbzLimits::default(), &is_cancelled)?
-    } else {
-        CbzDoc::open(path)?
-    };
-    check_import_cancelled(cancellation)?;
-    let title = filename_title(title_path);
-
-    // Use first page as cover.
-    let _pipeline = acquire_cover_pipeline(cancellation).context("import cancelled")?;
-    // Reserve the complete job ceiling before extracting the source. The job
-    // can only shrink this reservation, so it never waits while holding a
-    // partial permit that blocks another cover producer.
-    let Some(cover_permit) = reserve_cover_decode(COVER_DECODE_BYTE_CAPACITY, cancellation) else {
-        bail!("import cancelled");
-    };
-    let cover_source = if cancellation.is_some() {
-        doc.page_image_bytes_cancellable(0, &is_cancelled)
-    } else {
-        doc.page_image_bytes(0)
-    }
-    .ok();
-    let cover = cover_source.and_then(|data| {
-        check_import_cancelled(cancellation).ok().and_then(|()| {
-            let source_capacity = data.capacity();
-            resize_cover_image_replacing(&data, source_capacity, cover_permit, cancellation)
-        })
-    });
-    check_import_cancelled(cancellation)?;
-
-    Ok((title, None, cover))
-}
-
 fn filename_title(path: &Path) -> String {
     path.file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -4562,9 +4508,9 @@ mod tests {
     }
 
     #[test]
-    fn content_detection_admits_extensionless_bmp_only_cbz() {
+    fn content_detection_rejects_extensionless_image_only_archives() {
         let directory = tempfile::tempdir().unwrap();
-        let selected = directory.path().join("comic.document");
+        let selected = directory.path().join("images.document");
         let file = std::fs::File::create(&selected).unwrap();
         let mut archive = zip::ZipWriter::new(file);
         archive
@@ -4573,10 +4519,7 @@ mod tests {
         archive.write_all(b"BM").unwrap();
         archive.finish().unwrap();
 
-        assert_eq!(
-            book_format_for_path(&selected, None).unwrap(),
-            Some(BookFormat::Cbz)
-        );
+        assert_eq!(book_format_for_path(&selected, None).unwrap(), None);
     }
 
     #[tokio::test]
