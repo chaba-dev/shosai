@@ -189,7 +189,8 @@ pub fn managed_library_folder_name() -> &'static str {
 /// Claim a user-selected managed-library directory for the current profile.
 ///
 /// Development refuses to adopt a non-empty directory without its matching
-/// marker so `make reset` can never infer ownership from a folder name alone.
+/// marker so a development reset can never infer ownership from a folder name
+/// alone.
 pub fn prepare_managed_library_directory(path: &Path) -> Result<()> {
     if !is_development_profile() {
         std::fs::create_dir_all(path)

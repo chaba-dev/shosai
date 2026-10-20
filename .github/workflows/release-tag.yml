@@ -16,8 +16,6 @@ jobs:
     if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'release/next' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch
     runs-on: ubuntu-latest
     environment: RELEASE
-    outputs:
-      release_tag: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Create chaba2-bot token
         id: app-token
@@ -77,13 +75,3 @@ jobs:
         run: |
           git tag "${{ steps.release.outputs.tag_name }}"
           git push origin "${{ steps.release.outputs.tag_name }}"
-
-  # Publish directly after tagging so the automatic release remains one
-  # observable, retryable workflow. release.yml handles manually pushed tags.
-  publish-release:
-    needs: tag-release
-    uses: ./.github/workflows/publish-release.yml
-    secrets: inherit
-    with:
-      release_tag: ${{ needs.tag-release.outputs.release_tag }}
-      checkout_ref: ${{ github.event.pull_request.merge_commit_sha }}
