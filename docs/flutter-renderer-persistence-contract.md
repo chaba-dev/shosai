@@ -1,5 +1,11 @@
 # 5A renderer and persistence contract
 
+> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and CBZ
+> support were removed on 2026-10-20 (RFD 4, "The first release"; RFD 2 returns
+> CBZ as a later format package). Where this contract says PDF/CBZ, only the PDF
+> portion is live code; the CBZ rules are retained as the record for that
+> package.
+
 Status: **accepted by the owner; merged in [PR #134](https://github.com/chaba-dev/shosai/pull/134)
 at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e)
 on 2026-09-28T05:17:09Z. Its Rust-specific EPUB renderer/persistence portions

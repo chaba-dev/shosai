@@ -1,5 +1,12 @@
 # Flutter UI reference specification
 
+> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
+> on 2026-10-20 (RFD 4, "The first release"); its source citations below refer
+> to the pinned reference revision in the repository history, and the captures
+> under `rfd/0004/evidence/` are the frozen reference. CBZ support was removed
+> the same day and returns as a later format package (RFD 2); the CBZ rows are
+> retained as the record of that reference.
+
 Token and acceptance specification for the Flutter restoration described by
 [the restoration plan](flutter-ui-restoration-plan.md). Owned by package 1A; it
 freezes design values, states and acceptance rows so later packages implement and
