@@ -1,6 +1,6 @@
 # Design system
 
-Shōsai (書斎, "the study") is a reader for EPUB and PDF on desktop, tablet and phone. This document is how it looks and speaks: one reading experience whatever the format or the screen. It serves [RFD 7](../rfd/0007/README.adoc), the MVP proposal, and follows [typography.md](typography.md) for fonts.
+Shōsai (書斎, "the study") is a reader for EPUB and PDF on desktop, tablet and phone. This document is how it looks and speaks: one reading experience whatever the format or the screen. It serves the first release defined in [RFD 4](../rfd/0004/README.adoc) and follows [typography.md](typography.md) for fonts.
 
 ## Where it lives
 
