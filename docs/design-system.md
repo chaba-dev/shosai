@@ -35,22 +35,23 @@ The page-spread preview loads the full Noto Serif JP from Google Fonts for its J
 Recorded 2026-10-14:
 
 - The accent stays the application's slate (`#4d5e86`). The app icon's vermilion marks only the reader's own bookmarks. The website's green (`#275A47`) is a separate decision.
-- `ink-muted` darkens to `#625F57`. The repository's `#726F67` falls to 3.9:1 on the tab strip; the new value holds 4.5:1 on every chrome ground.
+- `ink-muted` darkens to `#625F57`. The repository's `#726F67` fell to 3.9:1 on the darkest chrome; the new value holds 4.5:1 on every chrome ground.
 - Phones in portrait show one page; desktop and tablet in landscape show two by default.
 
-Recorded 2026-10-20, the **reading room** look, chosen over a cooler stone grey and a lamp-lit dark chrome:
+Recorded 2026-10-20, the **Bookshelf** look (D1, paper), chosen over colour-only variants of the first draft and then over a study (walnut and brass) and a desk (flat, vermilion) iteration of the same layout:
 
-- Chrome is warm paper in both themes (`canvas` `#efe9dc` light, `#1a1715` dark); no pure grey anywhere. `ink` becomes a warm black (`#221d18`) and `ink-muted` `#645a4c`, which holds 4.5:1 on every chrome ground.
-- Book titles are set in the editorial serif wherever they name a book, and the library and panel titles with them. Controls, labels and meta lines stay in Inter.
+- A **sidebar** replaces the tab strip on desktop and tablet: the places (Library, Notes, Bookmarks, Search) and the open books as a **Reading now** list, each keeping its place. While reading it collapses to a 64 px **rail** of icons and the open books' covers. Phones get a **bottom bar** for the places and keep the tab switcher for open books.
+- The library is a **shelf**: a Continue reading hero, then the covers in a grid resting on a thin shelf edge under the last row. The hero carries no recent list; the sidebar does.
+- Chrome is warm paper in both themes, and the sidebar, rail, toolbar, status line and panels sit on `chrome` (`#ece5d6`), a shade deeper than the library's `canvas` (`#f6f1e6`); no pure grey anywhere. `ink` is a warm black (`#221d18`) and `ink-muted` `#675d4f`, which holds 4.5:1 on every chrome ground.
+- Book titles are set in the editorial serif wherever they name a book, and the screen, section and panel titles with them: the library title at 40 px. Controls, labels and meta lines stay in Inter.
 - The accent deepens to `#2b3a5c` on light chrome and lifts to `#a8b8df` in dark; the application's `#4d5e86` remains the brand slate for covers and the website.
-- Tabs are 36 px pills in a 50 px strip; the selected tab, note cards and the library hero are lifted by a new `shadow-raised` instead of a border. The reading stage is a radial gradient to a new `stage-edge`.
-- The library opens on the book you were in: a new **ContinueReading** hero above the grid.
+- The current sidebar entry, note cards, phone tab cards and the library hero are lifted by `shadow-raised` instead of a border; popovers and peeks carry their hairline in their shadow. The reading stage is a radial gradient from `stage` to `stage-edge`.
 
 ## Principles
 
 1. **The page is the product.** Chrome is quiet, warm and out of the way. Colour lives on the page (highlights, links) and in one accent; the chrome itself is paper, not plastic.
 2. **Format is metadata, not a mode.** EPUB and PDF get the same controls in the same places. A small badge is the only sign of the format.
-3. **Layout adapts, behaviour does not.** Panels become sheets and the tab strip becomes a switcher; gestures, words and outcomes stay the same.
+3. **Layout adapts, behaviour does not.** Panels become sheets, the sidebar becomes a rail and then a bottom bar, and the open books move from the sidebar to a switcher; gestures, words and outcomes stay the same.
 4. **The book keeps its voice.** EPUB fonts and writing direction are honoured; PDF pages keep their appearance. Shōsai never restyles a book's words with its own fonts.
 5. **Peek before you jump, and always a way back.** Every jump records where it left from.
 
@@ -82,13 +83,13 @@ Three layers, each with its own tokens. Never mix their roles. Every value, with
 
 ### Chrome
 
-The app frame in light and dark themes: `canvas` (window ground), `surface` (toolbar, cards, menus), `surface-sunken` (the reading stage), `stage-edge` (the stage's darkened rim), `chrome` (panels and sheets), `tabstrip`, `hover`, `line`, `line-strong`, `ink` and `ink-muted`.
+The app frame in light and dark themes: `canvas` (the library's ground), `chrome` (the sidebar and rail, the reader toolbar and status line, panels and sheets), `surface` (cards, menus, the current sidebar entry), `surface-sunken` (progress tracks, skeletons), `stage` and `stage-edge` (the reading stage, centre and rim), `shelf` (the edge under the library's covers), `hover`, `line`, `line-strong`, `ink` and `ink-muted`.
 
-- Light chrome is warm paper (`canvas` `#efe9dc`, `surface` `#fcf9f2`, `tabstrip` `#e3dbca`); dark chrome is the same paper by lamplight, a warm near-black rather than grey (`canvas` `#1a1715`, `surface` `#25201b`). Neither theme uses a pure grey.
+- Light chrome is warm paper, and the frame is a shade deeper than the room: `canvas` `#f6f1e6`, `chrome` `#ece5d6`, `surface` `#fdfaf3`. Dark chrome is the same paper by lamplight, a warm near-black rather than grey: `canvas` `#1d1915`, `chrome` `#171412`, `surface` `#2a241e`. Neither theme uses a pure grey.
 - Text is `ink` (a warm black), or `ink-muted` for secondary text. Both hold 4.5:1 on every chrome ground in both themes.
 - `line` is decorative. A control that must be seen (inputs, secondary buttons) uses `line-strong`, which holds 3:1 on every chrome ground except a raised segment, which is lifted by its shadow instead.
 - `control-raised` lifts the chosen segment of a segmented control; in dark it is lighter than `surface` so the choice still reads.
-- The reading stage is a radial gradient from `surface-sunken` at the centre to `stage-edge` at the rim, so the pages sit in light. It is the only gradient in the system.
+- The reading stage is a radial gradient from `stage` at the centre to `stage-edge` at the rim, so the pages sit in light. The shelf edge under the library's covers runs from `line` through `shelf` to `surface-sunken`. These are the only gradients in the system.
 - `scrim` dims the page behind slide-over panels and sheets.
 
 ### Accent and brand
@@ -118,11 +119,11 @@ Follow [typography.md](typography.md). Three roles, never interchanged:
 | Role | Family token | Faces | Use |
 | --- | --- | --- | --- |
 | Interface | `--font-ui` | Inter, Noto Sans JP | Every control, label, list, meta line and panel body |
-| Editorial | `--font-editorial` | Source Serif 4, Noto Serif JP | Book titles wherever they name a book (tabs, toolbar, library cards, hero, tab cards), screen and panel titles, the wordmark, empty-state headlines, generated covers, and quoted book text in notes, peeks and search |
+| Editorial | `--font-editorial` | Source Serif 4, Noto Serif JP | Book titles wherever they name a book (the sidebar's Reading now list, toolbar, library cards, hero, tab cards), screen, section and panel titles, the wordmark, empty-state headlines, generated covers, and quoted book text in notes, peeks and search |
 | Book | `--font-book` | The book's own fonts, else Source Serif 4 and Noto Serif JP | EPUB content only. PDFs keep their embedded fonts |
 
 - Interface styles: `ui-title` 20/26, `ui-heading` 16/22, `ui-body` 14/20, `ui-control` 13/18, `ui-caption` 12/16, `ui-label` 11/14 uppercase, `ui-badge` 10/12. Weights 400, 500 and 600 only.
-- Editorial styles: `ed-display` 32/38, `ed-screen` 30/36 (the library title and the Continue reading hero), `ed-wordmark` 20/24, `ed-title` 14/19 (book titles in tabs, cards and lists), `ed-quote` 15/23. The serif is reserved for what names or quotes a book and for the titles of screens and panels; a serif on a button, a label or a meta line is wrong.
+- Editorial styles: `ed-display` 40/44 (the library and other screen titles; 34/38 on tablet, 30/34 on phone), `ed-screen` 34/40 (the Continue reading hero's title), `ed-section` 22/26 (section heads such as *All books*, and panel titles at 20/24), `ed-wordmark` 22/26, `ed-title` 14/19 (book titles in the sidebar, cards and lists; 17/21 in the reader toolbar), `ed-quote` 15/23 (18/27 in the hero). The serif is reserved for what names or quotes a book and for the titles of screens, sections and panels; a serif on a button, a label or a meta line is wrong.
 - Book styles: `book-body` 19/31 and `book-body-ja` 20/38 are the defaults when a book sets none; the text-size control scales them from 70% to 160%. `book-chapter` is the fallback chapter label; `book-folio` sets running heads and folios at 60% of the page ink.
 - Never synthesize bold or italic. Set figures in places and counts with `font-variant-numeric: tabular-nums`.
 - `ui-label` is for Latin text. Japanese labels use `ui-caption` without letter spacing.
@@ -135,18 +136,20 @@ Spacing runs on a 4 px base: `space-1` 4, `space-2` 8, `space-3` 12, `space-4` 1
 | --- | --- | --- |
 | `control-height` | 32 px | Buttons and fields with a pointer |
 | `touch-target` | 44 px | Every control on tablet and phone |
-| `tabstrip-height` | 50 px | Desktop and tablet tab strip; its 36 px tabs sit centred in it |
-| `toolbar-height` | 54 px | Reader toolbar (56 px with touch targets) |
+| `sidebar-width` | 240 px | The library sidebar on desktop; 220 px on tablet |
+| `rail-width` | 64 px | The rail the sidebar collapses to while reading; 56 px on tablet |
+| `bottomnav-height` | 64 px | The phone's bottom bar |
+| `toolbar-height` | 56 px | Reader toolbar, on every layout |
 | `statusbar-height` | 36 px | Status line under the page |
-| `panel-width` | 360 px | Docked notes panel |
+| `panel-width` | 340 px | Docked notes panel; 360 px as a slide-over on tablet |
 | `spread-min-width` | 720 px | Narrowest stage that shows two pages |
 | `measure` | 36em | Widest EPUB text column |
 
-Layouts by width: **phone** below 600 px (one page, sheets, tab switcher), **tablet** 600–1199 px (tab strip, slide-over panels, two pages in landscape), **desktop** 1200 px and up (docked panels, two pages).
+Layouts by width: **phone** below 600 px (one page, sheets, bottom bar, tab switcher), **tablet** 600–1199 px (sidebar and rail, slide-over panels, two pages in landscape), **desktop** 1200 px and up (sidebar and rail, docked panels, two pages).
 
-Radii: `radius-xs` 2 (highlights), 3 px for pages and covers, `radius-sm` 6 (buttons), 8 px for tabs, `radius-md` 10 (cards, popovers, peeks), 14 px for the library hero, `radius-lg` 16 (sheet tops). Capsules are fully round.
+Radii: `radius-xs` 2 (highlights), 3 px for pages and covers, `radius-sm` 6 (buttons), 8 px for sidebar rows and the search field, `radius-md` 10 (cards, popovers, peeks), 12 px for dialogs and phone Reading now cards, 16 px for the library hero, `radius-lg` 16 (sheet tops). Capsules are fully round.
 
-Elevation is five layered shadows per theme, each a tight contact shadow under a soft ambient one: `shadow-raised` for the selected tab, note cards and the library hero (a card lifted a millimetre off the paper), `shadow-page` for pages on the stage, `shadow-cover` for library covers, `shadow-menu` for popovers and capsules, `shadow-modal` for search, peeks and sheets. Cards that carry `shadow-raised` have no border; borders separate everything else.
+Elevation is five layered shadows per theme, each a tight contact shadow under a soft ambient one: `shadow-raised` for the current sidebar entry, note cards, phone tab cards and the library hero (a card lifted a millimetre off the paper), `shadow-page` for pages on the stage, `shadow-cover` for library covers, `shadow-menu` for capsules, `shadow-modal` for search, popovers, peeks, dialogs and sheets. Cards that carry `shadow-raised` have no border, and popovers and peeks carry their hairline inside `shadow-modal`; borders separate everything else.
 
 ## Reading surfaces
 
@@ -184,29 +187,32 @@ Each component has a preview in `docs/design-system/components/` and its referen
 
 **SegmentedControl.** Two to four exclusive views of the same content: scope (**This book** / **All books**), pages (**One** / **Two**), search filters (**Everything** / **Text** / **Notes**). Options are short nouns; an icon may lead when it carries the meaning. The chosen option is raised on `control-raised` with `shadow-menu`. Each option is a `button` with `aria-pressed` inside a `role="group"` with an `aria-label`. Never put an action in a segmented control.
 
-**FormatBadge.** The format in capitals (`EPUB`, `PDF`) in `ui-badge` on `surface-sunken`, beside a title in tabs, library rows, search results and note cards. It never sits next to a control, is never colour-coded, and is left out where one book is in view and the title already identifies it.
+**FormatBadge.** The format in capitals (`EPUB`, `PDF`) in `ui-badge` on `surface-sunken`, beside a title in the sidebar's Reading now list, library rows, search results and note cards. It never sits next to a control, is never colour-coded, and is left out where one book is in view and the title already identifies it.
 
 ### Navigation
 
-**TabStrip** (desktop and tablet). The Iced app's tab model carried forward.
+**Sidebar** (desktop and tablet). The study's left wall: the places you can go and the books you have open. It replaces the tab strip.
 
-1. The library tab is pinned first, icon only, and cannot be closed or moved.
-2. Book tabs show the format badge, the title in `ed-title` truncated with an ellipsis, and a close button. Tabs are 220 px and shrink evenly to 120 px; past that the strip scrolls.
-3. **Open a book** (`plus`) follows the last tab.
+1. The 書 mark and the wordmark, then a field-shaped **Search** button with its shortcut (desktop only).
+2. The places **Library**, **Notes**, **Bookmarks** and **Search** as 34 px rows with 8 px corners. The current place is a `surface` card lifted by `shadow-raised`, its icon in `accent`; the others sit flat on `chrome` in `ink` and take `hover` under the pointer. Notes and Bookmarks open the library-side lists across all books.
+3. **Reading now**: every open book in the order opened, a 34 px cover, the title in `ed-title` at 13/17, the place in `ui-caption` and a 3 px progress bar. The current book is lifted like the current place. The close button shows on hover and always on touch; closing the current book selects the one below it, else above, and with none left the library shows. Rows reorder by dragging and survive relaunch, as tabs did.
+4. **Add books** at the foot opens the file picker.
 
-Tabs are 36 px pills with 8 px corners, centred in the strip. The selected tab is a `surface` card lifted by `shadow-raised`, in `ink`; unselected tabs sit flat on `tabstrip` in `ink-muted` and take `hover` under the pointer. A `line` hairline separates the strip from the toolbar. The close button shows on hover and on the selected tab, and always on touch. Middle-click closes; closing the selected tab selects the one to its right, else its left. Tabs reorder by dragging and survive relaunch.
+While reading the sidebar collapses to the **rail** (`sh-sidebar--rail`, `rail-width`): the mark, the four places as icon buttons with tooltips, then the open books as 30 px covers under a hairline, the current one outlined in `accent`. The rail never hides; the reader toolbar sits beside it. Width is `sidebar-width`; the sidebar does not resize.
 
-**TabSwitcher** (phone). The same tabs in the same order, as a grid of cards behind the tab-count button. Each card shows the title (`ed-title`, two lines), a miniature of the open page in the book's face (whole lines only, ending in an ellipsis), the format badge, the place and a progress bar; the current tab has an `accent` outline. The library card comes last. **Done** returns to the current book.
+**BottomNav** (phone). The sidebar's four places as icons over 10 px labels in a `bottomnav-height` bar on `chrome`; the current place is `accent`. It shows on the library-side screens only; the reader keeps its own bottom bar and reaches the library through the toolbar's back chevron. On the phone's library the open books appear as **Reading now** cards above the grid instead of a hero.
+
+**TabSwitcher** (phone). The open books, in the sidebar's order, as a grid of cards behind the tab-count button in the reader toolbar. Each card shows the title (`ed-title`, two lines), a miniature of the open page in the book's face (whole lines only, ending in an ellipsis), the format badge, the place and a progress bar; cards are `surface` lifted by `shadow-raised`, and the current one is outlined in `accent`. The library card comes last. **Done** returns to the current book.
 
 **ReaderToolbar.** Title, current place and every reader action.
 
 | Position | Desktop and tablet | Phone |
 | --- | --- | --- |
-| Leading | Contents (`list`), Search (`search`) | Back to the library (`chevron-left`) |
-| Centre | Book title in the editorial serif (16/20), then the current section in `ui-caption` `ink-muted` | Title, then the section |
-| Trailing | Display settings (**Aa**), Bookmark (`bookmark`), Notes toggle with count | Search, tab count |
+| Leading | Contents (`list`) | Back to the library (`chevron-left`) |
+| Centre | Book title in the editorial serif (17/21), then the current section in `ui-caption` `ink-muted` | Title, then the section |
+| Trailing | Display settings (**Aa**), Bookmark (`bookmark`), Notes toggle with count | Search, open-book count |
 
-On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears with a tap on the page. The same controls appear for EPUB and PDF. The bookmark fills with `vermilion` when the page is bookmarked. The toolbar hides while reading on phone and tablet and returns with a tap.
+On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears with a tap on the page. Search lives in the rail on desktop and tablet, so the toolbar leads with Contents alone. The same controls appear for EPUB and PDF. The bookmark fills with `vermilion` when the page is bookmarked. The toolbar sits on `chrome`, is `toolbar-height` tall on every layout, and hides while reading on phone and tablet, returning with a tap.
 
 **StatusBar.** Section title, progress track, then `percent · pages a–b of n` in tabular figures; one page in view reads `page 104 of 502`. The fill is `accent`; bookmarks are `vermilion` ticks. Clicking or dragging the track jumps, and the jump is recorded for Back. On phones it shrinks to the percentage and a page number.
 
@@ -267,19 +273,18 @@ Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. 
 
 ### Library
 
-**ContinueReading.** The library opens on the book you were in: a `surface` hero with 14 px corners and `shadow-raised`, the one lifted card on the library canvas.
+**ContinueReading.** The library opens on the book you were in: a `surface` hero with 16 px corners, lifted by `shadow-raised` and a soft ambient shadow, the one lifted card on the library canvas.
 
-- Cover at 150 px, the kicker *Continue reading* in `ui-label`, the title in `ed-screen`, author and format badge, then the book's latest highlight or note quoted in `ed-quote` at 16/24 (hidden when there is none, never a placeholder), the place in the reader's terms over a 4 px progress bar, and **Continue** (primary) beside **Notes** with its count.
-- **Recently opened** on the right lists the next three books by last-opened time: a 40 px cover, the title in `ed-title` and the place in `ui-caption`.
-- It shows the book last opened for reading, not the last added. The compact form (`sh-hero--compact`) for phones drops the quote and the recent list and puts the cover at 72 px.
-- The library screen above it is titled *Library* in `ed-screen` with the book count beside it; the grid below sits under an **All books** section head.
+- Cover at 168 px under a deep cover shadow, the kicker *Continue reading* in `ui-label`, the title in `ed-screen`, author and format badge, then the book's latest highlight or note quoted in the editorial face at 18/27 (hidden when there is none, never a placeholder), the place in the reader's terms over a 4 px progress bar at most 480 px wide, and **Continue** (primary) beside **Notes** with its count.
+- It shows the book last opened for reading, not the last added, and carries no recent list: the other open books are in the sidebar's Reading now. The compact form (`sh-hero--compact`) for narrow tablets drops the quote and puts the cover at 72 px; phones replace the hero with Reading now cards.
+- The library screen is titled *Library* in `ed-display` with the book and open counts beside it and the sort control at the right; the shelf below sits under an **All books** section head (`ed-section`) that runs a `line` rule to the right edge.
 
-**LibraryBook.** Cover, title, format, place and progress.
+**LibraryBook.** Cover, title, format, place and progress, on the shelf.
 
-- The book's own cover at 2:3, or a typographic cover: title in `ed-quote` weight 600 and author in `ui-label` on one of five fixed grounds chosen by a hash of the title (`brand-navy`, `brand-charcoal`, and the light-theme `vermilion`, `accent` and `success`), with a `brand-gold` band at the top. Generated covers never change with the app theme.
+- The book's own cover at 2:3, or a typographic cover: title in `ed-quote` weight 600 and author in `ui-label` on one of five fixed grounds chosen by a hash of the title (`brand-navy`, `brand-charcoal`, and the light-theme `vermilion`, `accent` and `success`), with a `brand-gold` band at the top. Generated covers never change with the app theme, carry a faint sheen (`sh-cover::after`) and stand off the paper under `shadow-cover`.
 - Title in `ed-title`, two lines at most; the meta line is the format badge then `21%`, `Not started` or `Finished`; a 3 px progress bar hides when not started or finished.
-- Click opens the book in a new tab, or switches to its tab. The context menu holds **Open in new tab**, **Book note**, **Show file** and **Remove from library**.
-- 128 px columns on desktop and tablet, three on phones. Covers carry a faint sheen (`sh-cover::after`) so flat colour reads as a bound book.
+- Click opens the book, or switches to it if it is already open. The context menu holds **Open**, **Book note**, **Show file** and **Remove from library**.
+- The shelf (`sh-shelf`) fills with columns of at least 118 px at a 28 px gap (seven across at 1440 px, six on a tablet) and three columns on phones. A thin shelf edge (`sh-shelf__edge`) runs under the bottom row on desktop and tablet, bleeding to the screen's edges, so the covers rest on something.
 
 ## Iconography
 
@@ -287,13 +292,13 @@ Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. 
 
 | Glyph | Meaning |
 | --- | --- |
-| `library` | The library tab and Back to library |
-| `plus`, `minus` | Open a book, make larger; make smaller |
-| `x` | Close a tab, panel or peek |
+| `library` | The Library place in the sidebar, rail and bottom bar |
+| `plus`, `minus` | Add books, make larger; make smaller |
+| `x` | Close an open book, panel or peek |
 | `list` | Contents |
 | `search` | Search books and notes |
-| `bookmark` | Bookmark this page (filled in `vermilion` when set) |
-| `message-square-text` | Notes panel; add a note to a highlight |
+| `bookmark` | Bookmarks in the sidebar; bookmark this page (filled in `vermilion` when set) |
+| `message-square-text` | Notes: the place in the sidebar, the reader's panel, a note on a highlight |
 | `notebook-pen` | Edit a note |
 | `file`, `book` | Page note, book note |
 | `highlighter` | Highlight, in menus |
@@ -307,7 +312,7 @@ Add a glyph only from Lucide, at the same stroke, with a row here and its SVG in
 
 ## Logo
 
-The app icon (`assets/shosai-icon.png`) is the mark: a stack of book spines on cream. In the interface the mark is the character 書 in Noto Serif JP, cream on a `brand-navy` disc (`sh-mark`), beside the wordmark *Shōsai* in `ed-wordmark` (`sh-wordmark`). Always write the name with its macron: Shōsai. Never recolour or redraw the icon.
+The app icon (`assets/shosai-icon.png`) is the mark: a stack of book spines on cream. In the interface the mark is the character 書 in Noto Serif JP, cream on a 30 px `brand-navy` disc (`sh-mark`), beside the wordmark *Shōsai* in `ed-wordmark` (`sh-wordmark`), at the head of the sidebar; the rail keeps the mark alone. Always write the name with its macron: Shōsai. Never recolour or redraw the icon.
 
 ## Motion
 
