@@ -38,9 +38,17 @@ Recorded 2026-10-14:
 - `ink-muted` darkens to `#625F57`. The repository's `#726F67` falls to 3.9:1 on the tab strip; the new value holds 4.5:1 on every chrome ground.
 - Phones in portrait show one page; desktop and tablet in landscape show two by default.
 
+Recorded 2026-10-20, the **reading room** look, chosen over a cooler stone grey and a lamp-lit dark chrome:
+
+- Chrome is warm paper in both themes (`canvas` `#efe9dc` light, `#1a1715` dark); no pure grey anywhere. `ink` becomes a warm black (`#221d18`) and `ink-muted` `#645a4c`, which holds 4.5:1 on every chrome ground.
+- Book titles are set in the editorial serif wherever they name a book, and the library and panel titles with them. Controls, labels and meta lines stay in Inter.
+- The accent deepens to `#2b3a5c` on light chrome and lifts to `#a8b8df` in dark; the application's `#4d5e86` remains the brand slate for covers and the website.
+- Tabs are 36 px pills in a 50 px strip; the selected tab, note cards and the library hero are lifted by a new `shadow-raised` instead of a border. The reading stage is a radial gradient to a new `stage-edge`.
+- The library opens on the book you were in: a new **ContinueReading** hero above the grid.
+
 ## Principles
 
-1. **The page is the product.** Chrome is quiet, neutral and out of the way. Colour lives on the page (highlights, links) and in one accent.
+1. **The page is the product.** Chrome is quiet, warm and out of the way. Colour lives on the page (highlights, links) and in one accent; the chrome itself is paper, not plastic.
 2. **Format is metadata, not a mode.** EPUB and PDF get the same controls in the same places. A small badge is the only sign of the format.
 3. **Layout adapts, behaviour does not.** Panels become sheets and the tab strip becomes a switcher; gestures, words and outcomes stay the same.
 4. **The book keeps its voice.** EPUB fonts and writing direction are honoured; PDF pages keep their appearance. Shōsai never restyles a book's words with its own fonts.
@@ -74,16 +82,18 @@ Three layers, each with its own tokens. Never mix their roles. Every value, with
 
 ### Chrome
 
-The app frame in light and dark themes: `canvas` (window ground), `surface` (toolbar, cards, menus), `surface-sunken` (the reading stage), `chrome` (panels and sheets), `tabstrip`, `hover`, `line`, `line-strong`, `ink` and `ink-muted`.
+The app frame in light and dark themes: `canvas` (window ground), `surface` (toolbar, cards, menus), `surface-sunken` (the reading stage), `stage-edge` (the stage's darkened rim), `chrome` (panels and sheets), `tabstrip`, `hover`, `line`, `line-strong`, `ink` and `ink-muted`.
 
-- Text is `ink`, or `ink-muted` for secondary text. Both hold 4.5:1 on every chrome ground in both themes.
-- `line` is decorative. A control that must be seen (inputs, secondary buttons) uses `line-strong`, which holds 3:1.
+- Light chrome is warm paper (`canvas` `#efe9dc`, `surface` `#fcf9f2`, `tabstrip` `#e3dbca`); dark chrome is the same paper by lamplight, a warm near-black rather than grey (`canvas` `#1a1715`, `surface` `#25201b`). Neither theme uses a pure grey.
+- Text is `ink` (a warm black), or `ink-muted` for secondary text. Both hold 4.5:1 on every chrome ground in both themes.
+- `line` is decorative. A control that must be seen (inputs, secondary buttons) uses `line-strong`, which holds 3:1 on every chrome ground except a raised segment, which is lifted by its shadow instead.
 - `control-raised` lifts the chosen segment of a segmented control; in dark it is lighter than `surface` so the choice still reads.
+- The reading stage is a radial gradient from `surface-sunken` at the centre to `stage-edge` at the rim, so the pages sit in light. It is the only gradient in the system.
 - `scrim` dims the page behind slide-over panels and sheets.
 
 ### Accent and brand
 
-- `accent` is Shōsai slate, the one interactive colour: primary buttons, selected states (`accent-soft` with `on-accent-soft`), focus rings, progress, the current note. One primary button per surface.
+- `accent` is Shōsai slate, the one interactive colour: primary buttons, selected states (`accent-soft` with `on-accent-soft`), focus rings, progress, the current note. One primary button per surface. On light paper the slate deepens to `#2b3a5c` so it reads as ink rather than paint; in dark it lifts to `#a8b8df`. The application's `#4d5e86` remains the brand slate for generated covers and the website.
 - `vermilion` is the red of the app icon's spine. It marks only the reader's own marks: a filled bookmark and bookmark ticks on the progress track. Never a button, never an error.
 - `brand-navy`, `brand-charcoal`, `brand-cream` and `brand-gold` come from the app icon. They appear in the 書 mark, generated covers and marketing, never in controls.
 - `success`, `warning` and `danger` always come with a word or an icon. `warning` is 4.1:1 on `surface` in light, so warning text is set in `ink` beside a `warning` icon.
@@ -107,12 +117,12 @@ Follow [typography.md](typography.md). Three roles, never interchanged:
 
 | Role | Family token | Faces | Use |
 | --- | --- | --- | --- |
-| Interface | `--font-ui` | Inter, Noto Sans JP | Every control, label, panel, list and screen title |
-| Editorial | `--font-editorial` | Source Serif 4, Noto Serif JP | The wordmark, empty-state headlines, generated covers, and quoted book text in notes, peeks and search |
+| Interface | `--font-ui` | Inter, Noto Sans JP | Every control, label, list, meta line and panel body |
+| Editorial | `--font-editorial` | Source Serif 4, Noto Serif JP | Book titles wherever they name a book (tabs, toolbar, library cards, hero, tab cards), screen and panel titles, the wordmark, empty-state headlines, generated covers, and quoted book text in notes, peeks and search |
 | Book | `--font-book` | The book's own fonts, else Source Serif 4 and Noto Serif JP | EPUB content only. PDFs keep their embedded fonts |
 
 - Interface styles: `ui-title` 20/26, `ui-heading` 16/22, `ui-body` 14/20, `ui-control` 13/18, `ui-caption` 12/16, `ui-label` 11/14 uppercase, `ui-badge` 10/12. Weights 400, 500 and 600 only.
-- Editorial styles: `ed-display` 32/38, `ed-wordmark` 20/24, `ed-quote` 15/23.
+- Editorial styles: `ed-display` 32/38, `ed-screen` 30/36 (the library title and the Continue reading hero), `ed-wordmark` 20/24, `ed-title` 14/19 (book titles in tabs, cards and lists), `ed-quote` 15/23. The serif is reserved for what names or quotes a book and for the titles of screens and panels; a serif on a button, a label or a meta line is wrong.
 - Book styles: `book-body` 19/31 and `book-body-ja` 20/38 are the defaults when a book sets none; the text-size control scales them from 70% to 160%. `book-chapter` is the fallback chapter label; `book-folio` sets running heads and folios at 60% of the page ink.
 - Never synthesize bold or italic. Set figures in places and counts with `font-variant-numeric: tabular-nums`.
 - `ui-label` is for Latin text. Japanese labels use `ui-caption` without letter spacing.
@@ -125,8 +135,8 @@ Spacing runs on a 4 px base: `space-1` 4, `space-2` 8, `space-3` 12, `space-4` 1
 | --- | --- | --- |
 | `control-height` | 32 px | Buttons and fields with a pointer |
 | `touch-target` | 44 px | Every control on tablet and phone |
-| `tabstrip-height` | 44 px | Desktop and tablet tab strip |
-| `toolbar-height` | 48 px | Reader toolbar (56 px with touch targets) |
+| `tabstrip-height` | 50 px | Desktop and tablet tab strip; its 36 px tabs sit centred in it |
+| `toolbar-height` | 54 px | Reader toolbar (56 px with touch targets) |
 | `statusbar-height` | 36 px | Status line under the page |
 | `panel-width` | 360 px | Docked notes panel |
 | `spread-min-width` | 720 px | Narrowest stage that shows two pages |
@@ -134,13 +144,13 @@ Spacing runs on a 4 px base: `space-1` 4, `space-2` 8, `space-3` 12, `space-4` 1
 
 Layouts by width: **phone** below 600 px (one page, sheets, tab switcher), **tablet** 600–1199 px (tab strip, slide-over panels, two pages in landscape), **desktop** 1200 px and up (docked panels, two pages).
 
-Radii: `radius-xs` 2 (pages, highlights, covers), `radius-sm` 6 (buttons, tabs), `radius-md` 10 (cards, popovers, peeks), `radius-lg` 16 (sheet tops). Capsules are fully round.
+Radii: `radius-xs` 2 (highlights), 3 px for pages and covers, `radius-sm` 6 (buttons), 8 px for tabs, `radius-md` 10 (cards, popovers, peeks), 14 px for the library hero, `radius-lg` 16 (sheet tops). Capsules are fully round.
 
-Elevation is four shadows per theme: `shadow-page` for pages on the stage, `shadow-cover` for library covers, `shadow-menu` for popovers and capsules, `shadow-modal` for search, peeks and sheets. Borders separate everything else.
+Elevation is five layered shadows per theme, each a tight contact shadow under a soft ambient one: `shadow-raised` for the selected tab, note cards and the library hero (a card lifted a millimetre off the paper), `shadow-page` for pages on the stage, `shadow-cover` for library covers, `shadow-menu` for popovers and capsules, `shadow-modal` for search, peeks and sheets. Cards that carry `shadow-raised` have no border; borders separate everything else.
 
 ## Reading surfaces
 
-The page is set like print.
+The page is set like print, on a stage lit from the centre.
 
 - **Two pages by default** on desktop and tablet in landscape whenever the stage is at least `spread-min-width` wide; **one page** on phones and in portrait. The reader can choose one or two in Display settings, for EPUB and PDF alike.
 - **No clipped lines.** Text flows from page to page and breaks at real line starts, so a page holds whole lines only and leftover space at the foot is less than one line. A paragraph that crosses a page continues without an indent, and its last line on the earlier page is justified.
@@ -181,19 +191,19 @@ Each component has a preview in `docs/design-system/components/` and its referen
 **TabStrip** (desktop and tablet). The Iced app's tab model carried forward.
 
 1. The library tab is pinned first, icon only, and cannot be closed or moved.
-2. Book tabs show the format badge, the title truncated with an ellipsis, and a close button. Tabs are 220 px and shrink evenly to 120 px; past that the strip scrolls.
+2. Book tabs show the format badge, the title in `ed-title` truncated with an ellipsis, and a close button. Tabs are 220 px and shrink evenly to 120 px; past that the strip scrolls.
 3. **Open a book** (`plus`) follows the last tab.
 
-The selected tab joins the toolbar below it; unselected tabs sit on `tabstrip` in `ink-muted`. The close button shows on hover and on the selected tab, and always on touch. Middle-click closes; closing the selected tab selects the one to its right, else its left. Tabs reorder by dragging and survive relaunch.
+Tabs are 36 px pills with 8 px corners, centred in the strip. The selected tab is a `surface` card lifted by `shadow-raised`, in `ink`; unselected tabs sit flat on `tabstrip` in `ink-muted` and take `hover` under the pointer. A `line` hairline separates the strip from the toolbar. The close button shows on hover and on the selected tab, and always on touch. Middle-click closes; closing the selected tab selects the one to its right, else its left. Tabs reorder by dragging and survive relaunch.
 
-**TabSwitcher** (phone). The same tabs in the same order, as a grid of cards behind the tab-count button. Each card shows the title (two lines), a miniature of the open page in the book's face (whole lines only, ending in an ellipsis), the format badge, the place and a progress bar; the current tab has an `accent` outline. The library card comes last. **Done** returns to the current book.
+**TabSwitcher** (phone). The same tabs in the same order, as a grid of cards behind the tab-count button. Each card shows the title (`ed-title`, two lines), a miniature of the open page in the book's face (whole lines only, ending in an ellipsis), the format badge, the place and a progress bar; the current tab has an `accent` outline. The library card comes last. **Done** returns to the current book.
 
 **ReaderToolbar.** Title, current place and every reader action.
 
 | Position | Desktop and tablet | Phone |
 | --- | --- | --- |
 | Leading | Contents (`list`), Search (`search`) | Back to the library (`chevron-left`) |
-| Centre | Book title, then the current section in `ink-muted` | Title, then the section |
+| Centre | Book title in the editorial serif (16/20), then the current section in `ui-caption` `ink-muted` | Title, then the section |
 | Trailing | Display settings (**Aa**), Bookmark (`bookmark`), Notes toggle with count | Search, tab count |
 
 On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears with a tap on the page. The same controls appear for EPUB and PDF. The bookmark fills with `vermilion` when the page is bookmarked. The toolbar hides while reading on phone and tablet and returns with a tap.
@@ -228,7 +238,7 @@ On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears 
 | Page note | `file` icon, **Page note · page 61** | The note |
 | Book note | `book` icon, **Book note** | The note |
 
-In **All books** the meta line leads with the format badge and the book title. The card for the highlight in view or just opened takes `aria-current="true"`. Selecting a card jumps to its place; editing happens in place with **Save** and **Cancel**. A highlight without a note shows only its quote.
+In **All books** the meta line leads with the format badge and the book title. Cards are `surface` lifted by `shadow-raised`, with no border; under the pointer they take a `line-strong` ring, and the card for the highlight in view or just opened takes `aria-current="true"`, a 2 px `accent` ring. Selecting a card jumps to its place; editing happens in place with **Save** and **Cancel**. A highlight without a note shows only its quote.
 
 **NotesPanel.** Every note and highlight for this book or all books, grouped by where they sit.
 
@@ -257,12 +267,19 @@ Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. 
 
 ### Library
 
+**ContinueReading.** The library opens on the book you were in: a `surface` hero with 14 px corners and `shadow-raised`, the one lifted card on the library canvas.
+
+- Cover at 150 px, the kicker *Continue reading* in `ui-label`, the title in `ed-screen`, author and format badge, then the book's latest highlight or note quoted in `ed-quote` at 16/24 (hidden when there is none, never a placeholder), the place in the reader's terms over a 4 px progress bar, and **Continue** (primary) beside **Notes** with its count.
+- **Recently opened** on the right lists the next three books by last-opened time: a 40 px cover, the title in `ed-title` and the place in `ui-caption`.
+- It shows the book last opened for reading, not the last added. The compact form (`sh-hero--compact`) for phones drops the quote and the recent list and puts the cover at 72 px.
+- The library screen above it is titled *Library* in `ed-screen` with the book count beside it; the grid below sits under an **All books** section head.
+
 **LibraryBook.** Cover, title, format, place and progress.
 
 - The book's own cover at 2:3, or a typographic cover: title in `ed-quote` weight 600 and author in `ui-label` on one of five fixed grounds chosen by a hash of the title (`brand-navy`, `brand-charcoal`, and the light-theme `vermilion`, `accent` and `success`), with a `brand-gold` band at the top. Generated covers never change with the app theme.
-- Title in two lines at most; the meta line is the format badge then `21%`, `Not started` or `Finished`; a 3 px progress bar hides when not started or finished.
+- Title in `ed-title`, two lines at most; the meta line is the format badge then `21%`, `Not started` or `Finished`; a 3 px progress bar hides when not started or finished.
 - Click opens the book in a new tab, or switches to its tab. The context menu holds **Open in new tab**, **Book note**, **Show file** and **Remove from library**.
-- 152 px columns on desktop and two columns on phones. The library screen title is `ui-title`, never the editorial face.
+- 128 px columns on desktop and tablet, three on phones. Covers carry a faint sheen (`sh-cover::after`) so flat colour reads as a bound book.
 
 ## Iconography
 

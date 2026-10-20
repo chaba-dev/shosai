@@ -7,10 +7,10 @@ Shōsai uses a small, deliberate type system shared by the desktop application a
 | Role | Latin | Japanese | Use |
 | --- | --- | --- | --- |
 | Interface sans | Inter | Noto Sans JP | Application chrome, controls, settings, navigation, labels, metadata, and website body copy |
-| Editorial serif | Source Serif 4 | Noto Serif JP | Brand wordmark, marketing headings, and other intentionally editorial surfaces |
+| Editorial serif | Source Serif 4 | Noto Serif JP | Brand wordmark, marketing headings, book titles wherever the application names a book, screen and panel titles, quoted book text, and other intentionally editorial surfaces |
 | Book content | Document font or reader preference | Document font or reader preference | EPUB content only; PDF pages retain their embedded appearance |
 
-The interface and editorial roles are distinct. Do not use the serif pair for ordinary controls, and do not force application fonts onto book content.
+The interface and editorial roles are distinct. Do not use the serif pair for ordinary controls, labels or meta lines, and do not force application fonts onto book content. [design-system.md](design-system.md) lists the editorial text styles and where each is used.
 
 ## Application rules
 
