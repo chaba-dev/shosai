@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidebar · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600&amp;text=%E5%90%BE%E8%BC%A9%E3%81%AF%E7%8C%AB%E3%81%A7%E3%81%82%E3%82%8B%E5%A4%8F%E7%9B%AE%E6%BC%B1%E7%9F%B3%E3%81%93%E3%81%93%E3%82%8D&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { display: flex; height: 600px; background: var(--canvas); }
+.navs, .opens { display: flex; flex-direction: column; gap: 2px; }
+.room { flex: 1; padding: 24px 32px; font-size: 13px; line-height: 20px; color: var(--ink-muted); }
+.room p { margin: 0; max-width: 36em; }
+code { font-family: ui-monospace, monospace; font-size: 12px; }
+.cov-navy { background: var(--brand-navy); }
+.cov-charcoal { background: var(--brand-charcoal); }
+.cov-vermilion { background: #b23c1b; }
+.cov-slate { background: #4d5e86; }
+.cov-green { background: #4e755d; }
+.ja { font-family: var(--font-editorial); }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <aside class="sh-sidebar" aria-label="Library">
+    <div class="sh-sidebar__brand"><span class="sh-mark">書</span><span class="sh-wordmark">Shōsai</span></div>
+    <button class="sh-sidebar__search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span>Search</span><kbd class="sh-kbd">⌘K</kbd></button>
+    <nav class="navs">
+      <button class="sh-nav" aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg><span>Library</span></button>
+      <button class="sh-nav"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg><span>Notes</span></button>
+      <button class="sh-nav"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg><span>Bookmarks</span></button>
+      <button class="sh-nav"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span>Search</span></button>
+    </nav>
+    <div class="sh-sidebar__head"><span>Reading now</span><span>3</span></div>
+    <div class="opens">
+      <div class="sh-open" aria-current="true"><button class="sh-open__main"><span class="sh-cover cov-navy"><span>On the Origin of Species</span></span><span class="sh-open__text"><span class="sh-open__title">On the Origin of Species</span><span class="sh-open__meta">Introduction · page 18</span><span class="sh-progress"><span class="sh-progress__fill" style="width:4%"></span></span></span></button><button class="sh-open__close" aria-label="Close On the Origin of Species"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+      <div class="sh-open"><button class="sh-open__main"><span class="sh-cover cov-charcoal"><span>A Mathematical Theory of Communication</span></span><span class="sh-open__text"><span class="sh-open__title">A Mathematical Theory of Communication</span><span class="sh-open__meta">Introduction · page 1</span><span class="sh-progress"><span class="sh-progress__fill" style="width:2%"></span></span></span></button><button class="sh-open__close" aria-label="Close A Mathematical Theory of Communication"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+      <div class="sh-open"><button class="sh-open__main"><span class="sh-cover cov-vermilion"><span>吾輩は猫である</span></span><span class="sh-open__text"><span class="sh-open__title ja">吾輩は猫である</span><span class="sh-open__meta">Not started</span></span></button><button class="sh-open__close" aria-label="Close 吾輩は猫である"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+    </div>
+    <button class="sh-nav sh-sidebar__foot"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add books</span></button>
+  </aside>
+  <aside class="sh-sidebar sh-sidebar--rail" aria-label="Library">
+    <div class="sh-sidebar__brand"><span class="sh-mark">書</span></div>
+    <button class="sh-nav"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg><span>Library</span></button>
+    <button class="sh-nav"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg><span>Notes</span></button>
+    <button class="sh-nav"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg><span>Bookmarks</span></button>
+    <button class="sh-nav"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span>Search</span></button>
+    <div class="sh-rail__open">
+      <button class="sh-rail__book" aria-current="true" aria-label="On the Origin of Species"><span class="sh-cover cov-navy"><span>On the Origin of Species</span></span></button>
+      <button class="sh-rail__book" aria-label="A Mathematical Theory of Communication"><span class="sh-cover cov-charcoal"><span>A Mathematical Theory of Communication</span></span></button>
+      <button class="sh-rail__book" aria-label="吾輩は猫である"><span class="sh-cover cov-vermilion"><span>吾輩は猫である</span></span></button>
+    </div>
+    <button class="sh-nav sh-sidebar__foot" aria-label="Add books"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+  </aside>
+  <div class="room"><p>The sidebar on the library (left) and the rail it collapses to while reading (right). Both sit on <code>chrome</code>, a shade deeper than the library’s <code>canvas</code>.</p></div>
+</div>
+</body>
+</html>

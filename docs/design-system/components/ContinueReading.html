@@ -5,16 +5,16 @@
 <title>ContinueReading · Shōsai design system</title>
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="../components.css">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600&amp;text=%E5%90%BE%E8%BC%A9%E3%81%AF%E7%8C%AB%E3%81%A7%E3%81%82%E3%82%8B&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600&amp;text=%E5%90%BE%E8%BC%A9%E3%81%AF%E7%8C%AB%E3%81%A7%E3%81%82%E3%82%8B%E5%A4%8F%E7%9B%AE%E6%BC%B1%E7%9F%B3%E3%81%93%E3%81%93%E3%82%8D&amp;display=swap" rel="stylesheet">
 <style>
 body { margin: 0; background: var(--canvas); }
-.demo { display: flex; flex-direction: column; gap: 32px; padding: 24px; background: var(--canvas); min-height: 560px; box-sizing: border-box; }
+.demo { display: flex; flex-direction: column; gap: 32px; padding: 24px 48px; background: var(--canvas); min-height: 420px; box-sizing: border-box; }
 .narrow { width: 342px; }
 .cov-navy { background: var(--brand-navy); }
 .cov-charcoal { background: var(--brand-charcoal); }
 .cov-vermilion { background: #b23c1b; }
-.cov-green { background: #275a47; }
-.sh-cover { border-top: 3px solid var(--brand-gold); position: relative; }
+.cov-slate { background: #4d5e86; }
+.cov-green { background: #4e755d; }
 .ja { font-family: var(--font-editorial); }
 </style>
 </head>
@@ -27,18 +27,11 @@ body { margin: 0; background: var(--canvas); }
       <h2 class="sh-hero__title">On the Origin of Species</h2>
       <div class="sh-hero__meta">Charles Darwin · <span class="sh-badge">EPUB</span></div>
       <p class="sh-hero__quote">“that mystery of mysteries, as it has been called by one of our greatest philosophers”</p>
-      <div class="sh-hero__place">Introduction · page 18 · 4%</div>
-      <div class="sh-progress" aria-label="4% read"><div class="sh-progress__fill" style="width:4%"></div></div>
+      <div class="sh-hero__place"><span>Introduction · page 18 · 4%</span><div class="sh-progress" aria-label="4% read"><div class="sh-progress__fill" style="width:4%"></div></div></div>
       <div class="sh-hero__actions">
         <button class="sh-btn sh-btn--primary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>Continue</button>
-        <button class="sh-btn sh-btn--secondary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 10h8"/><path d="M8 14h4"/></svg>Notes<span class="sh-count">3</span></button>
+        <button class="sh-btn sh-btn--secondary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg>Notes<span class="sh-count">3</span></button>
       </div>
-    </div>
-    <div class="sh-hero__recent">
-      <div class="sh-kicker">Recently opened</div>
-      <button class="sh-recent"><span class="sh-cover cov-charcoal"><span>A Mathematical Theory of Communication</span></span><span class="sh-recent__text"><span class="sh-recent__title">A Mathematical Theory of Communication</span><span class="sh-recent__meta">Introduction · page 1</span></span></button>
-      <button class="sh-recent"><span class="sh-cover cov-vermilion"><span>吾輩は猫である</span></span><span class="sh-recent__text"><span class="sh-recent__title ja">吾輩は猫である</span><span class="sh-recent__meta">Not started</span></span></button>
-      <button class="sh-recent"><span class="sh-cover cov-green"><span>Pride and Prejudice</span></span><span class="sh-recent__text"><span class="sh-recent__title">Pride and Prejudice</span><span class="sh-recent__meta">Chapter 43 · page 318</span></span></button>
     </div>
   </section>
   <section class="sh-hero sh-hero--compact narrow" aria-label="Continue reading, compact">
@@ -47,8 +40,7 @@ body { margin: 0; background: var(--canvas); }
       <div class="sh-kicker">Continue reading</div>
       <h2 class="sh-hero__title">On the Origin of Species</h2>
       <div class="sh-hero__meta">Charles Darwin · <span class="sh-badge">EPUB</span></div>
-      <div class="sh-hero__place">Introduction · page 18 · 4%</div>
-      <div class="sh-progress" aria-label="4% read"><div class="sh-progress__fill" style="width:4%"></div></div>
+      <div class="sh-hero__place"><span>Introduction · page 18 · 4%</span><div class="sh-progress" aria-label="4% read"><div class="sh-progress__fill" style="width:4%"></div></div></div>
       <div class="sh-hero__actions"><button class="sh-btn sh-btn--primary sh-btn--touch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>Continue</button></div>
     </div>
   </section>
