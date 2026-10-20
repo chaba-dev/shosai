@@ -5,8 +5,9 @@ Implements [[file:README.adoc][RFD 2: Additional ebook formats]].
 
 * Objective
 
-Add plain text/Markdown, DjVu, FB2, unencrypted MOBI/AZW3, and CBR through a
-small format-extensibility seam.  Each format is an independently shippable work
+Add plain text/Markdown, DjVu, FB2, unencrypted MOBI/AZW3, and comic archives
+(CBZ, which leaves the first release, and CBR) through a small
+format-extensibility seam.  Each format is an independently shippable work
 package with dependency/license approval, bounded parsing, fixtures, reader and
 library integration, and explicit acceptance criteria.  DRM circumvention is
 outside the project.

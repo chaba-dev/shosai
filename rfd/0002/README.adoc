@@ -7,8 +7,11 @@
 
 == Goal
 
-Add plain text and Markdown, DjVu, FB2, unencrypted MOBI/AZW3, and CBR through a
-small format-extensibility seam. Each format remains independently shippable and
+Add plain text and Markdown, DjVu, FB2, unencrypted MOBI/AZW3, and comic
+archives (CBZ and CBR) through a small format-extensibility seam. CBZ was read
+by the Iced application; it is not part of the first release (decided
+2026-10-14, link:../0004/README.adoc[RFD 4]) and returns here as a format
+package beside CBR. Each format remains independently shippable and
 must pass dependency, license, bounded-parsing, fixture, reader, library, and
 packaging gates.
 

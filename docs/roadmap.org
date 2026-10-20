@@ -6,15 +6,15 @@
 
 * Overview
 
-Shōsai (書斎, "study/reading room") is an ebook reader supporting EPUB, PDF, and
-CBZ formats. The current executable is a Rust/Iced desktop application. The
+Shōsai (書斎, "study/reading room") is an ebook reader for EPUB and PDF, with
+comic archives planned after the first release (RFD 2). The current executable is a Rust/Iced desktop application. The
 target architecture in RFD 4 retains the Rust document/application core and
 replaces Iced with one Flutter frontend for desktop, phone, and tablet.
 
 ** Goals
 
 - Fast ebook reader across desktop, phone, and tablet
-- Support for EPUB, PDF, and CBZ/CBR formats
+- Support for EPUB and PDF first; CBZ/CBR after the first release (RFD 2)
 - Clean library management for book collections
 - Customizable reading experience (fonts, themes, layout)
 - Permissively licensed (Apache-2.0)
