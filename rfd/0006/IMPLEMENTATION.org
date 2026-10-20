@@ -1,7 +1,7 @@
 #+TITLE: RFD 0006 implementation checklist
 #+STARTUP: showall
 
-Implements [[file:README.adoc][RFD 6: Cross-format text highlighting]].
+Implements [[file:README.adoc][RFD 6: Cross-format highlighting, notes and search]].
 
 Phases 0 through 4 deliver the first release.  Phase 0 closes contracts and
 technical risk before the database schema becomes durable.  Phases 1 through 3
@@ -129,6 +129,12 @@ and geometry, but production highlighting continues in core and Flutter.
   formats.
 - [ ] Add an annotation list with navigate, recolor, note edit, and delete
   behavior alongside, but independent from, bookmarks.
+- [ ] Page notes and book notes in the annotation store: a location anchor or
+  none, same identity, timestamps, tombstones and provenance as highlights.
+- [ ] Notes surface scoped to this book or all books, grouped by place; open a
+  note at its anchor.
+- [ ] Library-wide search over book text and notes from every screen, scoped
+  and filtered as the RFD describes, with a return point for Back.
 - [ ] Keep bookmarks and highlights as independent domain records without
   compatibility adapters for the unreleased Iced UI or development schema.
 - [ ] Reopen unchanged documents and verify exact anchors survive restart,

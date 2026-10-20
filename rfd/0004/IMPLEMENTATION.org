@@ -30,8 +30,8 @@ assuming native FFI works in a browser.
 - Preserve behavior while extracting core responsibilities, then change the
   frontend.  Do not simultaneously redesign a domain contract and its Flutter
   presentation without executable core tests.
-- Keep Iced runnable as a reference until Flutter satisfies the parity gate, but
-  do not build complete new production features in both frontends.
+- Iced is historical reference only; build nothing new in it. Its removal is
+  its own change (RFD 4, Proposal).
 - Move policy and domain behavior into core; leave widgets, gestures, navigation,
   lifecycle, and platform capabilities in Flutter adapters.
 - Every native dependency must pass build, packaging, lifecycle, memory, and
@@ -41,6 +41,50 @@ assuming native FFI works in a browser.
 - Set a phase ~STATUS~ to ~IN-PROGRESS~ when its first task begins and ~DONE~
   only after every task and its ~Exit~ gate are satisfied.  Later phases may
   start early only where the dependency notes in the RFD permit overlap.
+
+* First-release outcomes
+
+The outcomes in the RFD's "The first release" section (folded in from the
+former RFD 7 on 2026-10-20). Each item is done when its "done when" criterion
+holds on desktop, tablet, and phone, for both EPUB and PDF where the item
+touches the reader. The milestones below deliver them.
+
+** 1. Every device
+
+- [ ] Adaptive shell: sidebar and rail on desktop and tablet; bottom bar and
+  switcher on phone.
+- [ ] Notes surface as docked panel, slide-over panel, and bottom sheet.
+- [ ] Search as palette and as full screen.
+- [ ] Platform acceptance runs on Linux, macOS, Windows, iPad, Android
+  tablet, iPhone, and Android phone.
+
+** 2. Any medium
+
+- [ ] One location model (section, percent, page) for EPUB and PDF.
+- [ ] Shared progress bar and location line.
+- [ ] Shared themes, including a night theme for PDF pages.
+- [ ] One size control: EPUB text size and PDF zoom.
+- [ ] Two-page spreads by default for EPUB and PDF, with a one or two page
+  setting; one page where two do not fit.
+- [ ] RFD 6 selection, highlights and notes in both formats.
+- [ ] EPUB writing direction from the spine's page progression and CSS
+  ~writing-mode~, including vertical Japanese text; horizontal when undeclared.
+- [ ] PDF pages re-rendered at the current zoom and display density.
+
+** 3. Notes and search
+
+Tracked in [[file:../0006/IMPLEMENTATION.org][RFD 6's checklist]], phase 4.
+
+** 4. Open books
+
+- [ ] Open, focus, switch, and close books from the sidebar, the phone cards
+  and the switcher.
+- [ ] Restore open books and positions on start.
+
+** 5. Jumpable references
+
+- [ ] Peek for EPUB hyperlinks and PDF link annotations and destinations.
+- [ ] Go to and a back stack shared by references, search results, and notes.
 
 * M0 — Freeze the boundary and migration slice
 :PROPERTIES:
@@ -199,8 +243,8 @@ rather than inferred away.
 :END:
 
 Phase 3 is split into independently reviewable vertical sub-milestones.  A
-sub-milestone may ship without implying parity for the remaining reader,
-platform, data, or retirement work.
+sub-milestone may ship without implying the remaining reader, platform, or
+data work is done.
 
 ** M3.1 — Library and import vertical slice
 :PROPERTIES:
@@ -218,17 +262,17 @@ platform, data, or retirement work.
 books through coarse core APIs with bounded resource ownership and targeted
 regressions for failure and cancellation paths.
 
-** M3.2 — Reader parity by format
+** M3.2 — Reader by format (first-release outcomes 1 and 2)
 :PROPERTIES:
 :STATUS: IN-PROGRESS
 :END:
 
 - [X] Establish replacement-safe reader sessions, durable write draining,
   responsive tool presentation, and reachable PDF navigation geometry.
-- [ ] Complete PDF reader parity for search, bookmarks, annotations, progress,
+- [ ] Complete the PDF reader for search, bookmarks, annotations, progress,
   themes, zoom, continuous/paginated modes, document navigation, keyboard
   shortcuts, and touch interactions.
-- [ ] Complete EPUB reader parity for the same applicable feature matrix.
+- [ ] Complete the EPUB reader for the same applicable feature matrix.
   - EPUB ownership was amended on 2026-09-28: the owner adopted Dart-owned EPUB
     parsing/normalization with Flutter layout
     ([[file:../../docs/dart-document-stack-evaluation-plan.md][decision
@@ -238,10 +282,11 @@ regressions for failure and cancellation paths.
     including Japanese and mixed-direction text, tall table rows, fonts, scroll
     position, responsiveness, bounded retained memory and existing interaction
     coverage) remain open until a slice closes them with evidence.
-- [ ] Complete CBZ reader parity for the same applicable feature matrix.
+- CBZ is not part of the first release; it returns as a format package under
+  [[file:../0002/README.adoc][RFD 2]].
 
-*Exit*: each format passes its own reader behavior and regression matrix; work
-on one format does not block review of another.
+*Exit*: each first-release format passes its own reader behavior and regression
+matrix; work on one format does not block review of another.
 
 ** M3.3 — Platform document-provider lifecycle
 :PROPERTIES:
@@ -267,20 +312,18 @@ does not infer support from Android or ordinary filesystem paths.
 - [ ] Add diagnostics redaction and user-data deletion/export behavior.
 
 *Exit*: application-owned configuration and data lifecycle behavior is complete
-and covered independently of reader-format parity.
+and covered independently of the reader work by format.
 
-** M3.5 — Accessibility, visual baselines, and Iced retirement
+** M3.5 — Accessibility and visual baselines
 :PROPERTIES:
 :STATUS: TODO
 :END:
 
 - [ ] Add golden tests for controlled renderer/font configurations and semantic
   widget/integration tests for responsive states and accessibility.
-- [ ] Compare required behavior against the Iced reference and delete each old
-  implementation only after its Flutter replacement passes targeted tests.
 
-*Exit*: Flutter satisfies the agreed desktop feature and regression matrix; the
-Iced binary is no longer needed to operate or test the product.
+*Exit*: Flutter satisfies the first-release feature and regression matrix on
+desktop with golden and semantic coverage.
 
 * M4 — Platform services and notifications
 :PROPERTIES:
@@ -321,15 +364,15 @@ cannot affect synchronization convergence or local reading.
 - [ ] Measure and pass every applicable Phase 0 performance and resource budget
   in release builds on each claimed target, including startup, installed size,
   representative large-document RSS, navigation/relayout, bridge and drag
-  latency, resource cycles, and the same-hardware Iced comparison.
+  latency, and resource cycles.
 - [ ] Preserve independently releasable Linux, macOS, Windows, Android, and iOS
   jobs; one deferred target must not suppress validated artifacts.
-- [ ] Remove ~crates/shosai-app~ and its Iced-only dependencies after parity,
-  packaging, and recovery gates pass.
+- Removing ~crates/shosai-app~ and its Iced-only dependencies is its own change
+  and does not wait for this milestone (see Delivery rules).
 
 *Exit*: every claimed platform has an independently releasable, signed where
 required, installable artifact that launches, opens each supported format, loads
-native dependencies, and passes recovery smoke tests; only then is Iced removed.
+native dependencies, and passes recovery smoke tests.
 
 * M6 — Web feasibility, independent
 :PROPERTIES:
