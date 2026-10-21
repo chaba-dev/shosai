@@ -10,7 +10,7 @@ books is included.
 Regenerate deterministically from the repository root:
 
 ```sh
-python3 crates/shosai-core/tests/fixtures/epub-conformance/generate.py
+python3 fixtures/epub-conformance/generate.py
 ```
 
 Every checked-in entry is stored without compression and has a fixed timestamp

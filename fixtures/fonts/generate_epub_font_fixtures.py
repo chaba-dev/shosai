@@ -2,7 +2,7 @@
 """Generate tiny, redistribution-safe EPUB font-loading fixtures.
 
 Requires fonttools with its woff and woff2 dependencies:
-    python -m pip install -r crates/shosai-core/tests/fixtures/fonts/requirements-epub-font-fixtures.txt
+    python -m pip install -r fixtures/fonts/requirements-epub-font-fixtures.txt
 """
 
 from pathlib import Path
