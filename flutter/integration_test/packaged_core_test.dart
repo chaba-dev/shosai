@@ -29,7 +29,7 @@ void main() {
     final bridge = await createApplicationBridge(
       applicationSupportDirectory: () async => directory,
     );
-    addTearDown(bridge.dispose);
+    addTearDown(closeApplicationCores);
 
     final report = await bridge.importPaths(
       pathKeys: [pdf.path],
@@ -57,7 +57,9 @@ void main() {
     expect(summary.logicalUnitCount, BigInt.one);
 
     final engine = PdfrxPdfEngine();
-    final document = await engine.open(pdf.path);
+    // The reader's own engine document reads the bridge's verified snapshot.
+    expect(summary.contentPath, isNotNull);
+    final document = await engine.open(summary.contentPath!);
     addTearDown(document.dispose);
     final rendered = await document.render(0, 1);
     expect(rendered.width, greaterThan(0));
@@ -71,6 +73,57 @@ void main() {
       hasLength(1),
     );
     expect(bridge.releaseDocument(handle: summary.handle), isTrue);
+  });
+
+  testWidgets('a highlight on a file opened directly survives closing the '
+      'core and reopening the file', (tester) async {
+    final directory = Directory.systemTemp.createTempSync('shosai-packaged-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    addTearDown(closeApplicationCores);
+    final pdf = File('${directory.path}/hello.pdf')
+      ..writeAsBytesSync(_helloPdf());
+    final request = FlutterOpenRequest(localId: pdf.path, pathKey: pdf.path);
+    Future<FlutterBridge> open() => createApplicationBridge(
+      applicationSupportDirectory: () async => directory,
+    );
+
+    final bridge = await open();
+    final document = await bridge.openDocument(
+      request: request,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(document.bookId, isNull);
+    final created = await bridge.createAnnotation(
+      document: document.handle,
+      unit: BigInt.zero,
+      start: BigInt.zero,
+      end: BigInt.from(5),
+      displayScale: 1,
+      color: FlutterHighlightColor.yellow,
+      body: 'packaged slice',
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(created.quote, 'Hello');
+    expect(bridge.releaseDocument(handle: document.handle), isTrue);
+    bridge.dispose();
+    // Drains the bridges and closes the store; the next bridge reopens it.
+    await closeApplicationCores();
+
+    final reopenedBridge = await open();
+    final reopened = await reopenedBridge.openDocument(
+      request: request,
+      cancellationId: reopenedBridge.createCancellation(),
+    );
+    final annotations = await reopenedBridge.listAnnotations(
+      document: reopened.handle,
+      scale: 1,
+      cancellationId: reopenedBridge.createCancellation(),
+    );
+    expect(annotations, hasLength(1));
+    expect(annotations.single.id, created.id);
+    expect(annotations.single.resolution, FlutterAnnotationResolution.exact);
+    expect(annotations.single.body, 'packaged slice');
+    expect(reopenedBridge.releaseDocument(handle: reopened.handle), isTrue);
   });
 }
 

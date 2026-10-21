@@ -413,21 +413,25 @@ class FlutterDocumentSummary {
   final String? title;
   final BigInt logicalUnitCount;
 
+  /// The file the document's engines read while it is open, when that is
+  /// not the path it was opened from: the private, verified snapshot of a
+  /// PDF, which stays until the document is released. Null when the
+  /// document needs no file after opening (an EPUB) or its opener reads the
+  /// opened path (test fakes).
+  final String? contentPath;
+
   const FlutterDocumentSummary({
     required this.handle,
     this.bookId,
     required this.format,
     this.title,
     required this.logicalUnitCount,
+    this.contentPath,
   });
 
   @override
   int get hashCode =>
-      handle.hashCode ^
-      bookId.hashCode ^
-      format.hashCode ^
-      title.hashCode ^
-      logicalUnitCount.hashCode;
+      Object.hash(handle, bookId, format, title, logicalUnitCount, contentPath);
 
   @override
   bool operator ==(Object other) =>
@@ -438,7 +442,8 @@ class FlutterDocumentSummary {
           bookId == other.bookId &&
           format == other.format &&
           title == other.title &&
-          logicalUnitCount == other.logicalUnitCount;
+          logicalUnitCount == other.logicalUnitCount &&
+          contentPath == other.contentPath;
 }
 
 enum FlutterHighlightColor { yellow, green, blue, pink, purple }

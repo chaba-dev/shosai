@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -100,30 +101,62 @@ export 'package:shosai_flutter/reader/controller.dart'
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final directory = await getApplicationSupportDirectory();
-  final core = await ShosaiCore.open(
-    directory.path,
-    pdfEngine: PdfrxPdfEngine(),
+  final owner = await applicationCoreOwner();
+  // The core outlives every reader and library bridge; it closes once, when
+  // the application exits, after the bridges have drained.
+  AppLifecycleListener(
+    onExitRequested: () async {
+      await closeApplicationCores();
+      return AppExitResponse.exit;
+    },
   );
-  runApp(ShosaiApp(productBridgeFactory: () => ApplicationBridge(core)));
+  runApp(ShosaiApp(productBridgeFactory: owner.bridge));
 }
 
-/// The Dart core opened in each application-support directory: one store
-/// owner per database, however many bridges share it.
-final Map<String, Future<ShosaiCore>> _cores = {};
+/// The owner of the Dart core opened in each application-support directory:
+/// one store owner per database, however many bridges share it.
+final Map<String, Future<CoreOwner>> _cores = {};
+
+/// The owner of the Dart core in [applicationSupportDirectory] (the
+/// platform's application-support directory by default), opened on first
+/// use and shared until [closeApplicationCores].
+Future<CoreOwner> applicationCoreOwner({
+  Future<Directory> Function()? applicationSupportDirectory,
+}) async {
+  final directory =
+      await (applicationSupportDirectory ?? getApplicationSupportDirectory)();
+  final pending = _cores[directory.path] ??= ShosaiCore.open(
+    directory.path,
+    pdfEngine: PdfrxPdfEngine(),
+  ).then(CoreOwner.new);
+  try {
+    return await pending;
+  } catch (_) {
+    if (identical(_cores[directory.path], pending)) {
+      _cores.remove(directory.path);
+    }
+    rethrow;
+  }
+}
 
 /// An application bridge over the Dart core in the application-support
 /// directory, for tools that build their own bridges.
 Future<FlutterBridge> createApplicationBridge({
   Future<Directory> Function()? applicationSupportDirectory,
-}) async {
-  final directory =
-      await (applicationSupportDirectory ?? getApplicationSupportDirectory)();
-  final core = await (_cores[directory.path] ??= ShosaiCore.open(
-    directory.path,
-    pdfEngine: PdfrxPdfEngine(),
-  ));
-  return ApplicationBridge(core);
+}) async => (await applicationCoreOwner(
+  applicationSupportDirectory: applicationSupportDirectory,
+)).bridge();
+
+/// Dispose every bridge over the cores [applicationCoreOwner] opened, wait
+/// for them to drain and close the cores. A later bridge opens its core
+/// again, so a test can check what a fresh store reads back.
+Future<void> closeApplicationCores() async {
+  final owners = List.of(_cores.values);
+  _cores.clear();
+  await Future.wait([
+    for (final owner in owners)
+      owner.then((owner) => owner.close(), onError: (_) {}),
+  ]);
 }
 
 /// The production application composition: Shad and Material themes, the

@@ -995,10 +995,12 @@ final class ReaderController implements Listenable {
               cancellationId: cancellation,
             );
       final document = opened;
-      // The PDF engine serves every PDF page operation.
+      // The PDF engine serves every PDF page operation, over the verified
+      // snapshot the bridge opened rather than the path, whose file may
+      // have been replaced since.
       final PdfEngineDocument? pdf;
       if (document.format == FlutterBookFormat.pdf) {
-        pdf = await _pdfEngine.open(path);
+        pdf = await _pdfEngine.open(document.contentPath ?? path);
         ownedPdf = pdf;
       } else {
         pdf = null;

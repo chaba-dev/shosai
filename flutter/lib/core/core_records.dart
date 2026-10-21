@@ -2,6 +2,7 @@
 /// application bridge that serves them beside the documents it opens.
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart';
@@ -13,17 +14,19 @@ import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 
 /// The application's records: one store, opened once per process and shared
-/// by every bridge the shell creates.
+/// by every bridge the shell creates. Its [CoreOwner] closes it.
 final class ShosaiCore {
-  ShosaiCore._(this.store, this.library, this.pdfEngine)
-    : readingState = ReadingState(store),
+  ShosaiCore._(this.store, this.library, this.pdfEngine, String dataDirectory)
+    : snapshots = DocumentSnapshots('$dataDirectory/snapshots'),
+      readingState = ReadingState(store),
       bookmarks = Bookmarks(store),
       settings = ReaderSettingsStore(store),
       annotations = Annotations(store);
 
   /// Open the store `library.sqlite3` and the managed directory `books`
   /// under [dataDirectory], reading PDF metadata through [pdfEngine], and
-  /// retry deleting private copies an earlier run could not delete.
+  /// retry deleting private copies and PDF snapshots (`snapshots`) an
+  /// earlier run could not delete.
   static Future<ShosaiCore> open(
     String dataDirectory, {
     required PdfEngine pdfEngine,
@@ -37,12 +40,13 @@ final class ShosaiCore {
         BookFormat.pdf: PdfEngineInspector(pdfEngine),
       },
     );
-    final core = ShosaiCore._(store, library, pdfEngine);
+    final core = ShosaiCore._(store, library, pdfEngine, dataDirectory);
     try {
       await library.retryManagedFileDeletions();
     } on CoreException {
       // Deletion stays recorded and is retried on the next start.
     }
+    await core.snapshots.sweep();
     return core;
   }
 
@@ -57,7 +61,64 @@ final class ShosaiCore {
   final ReaderSettingsStore settings;
   final Annotations annotations;
 
-  Future<void> close() => store.close();
+  /// The private copies open PDFs are read from, shared by every bridge.
+  final DocumentSnapshots snapshots;
+
+  /// Close the store and delete the snapshot directory. Call it once no
+  /// bridge uses the core: [CoreOwner.close] does, after its bridges drain.
+  Future<void> close() async {
+    try {
+      await snapshots.close();
+    } finally {
+      await store.close();
+    }
+  }
+}
+
+/// The one owner of a [ShosaiCore]: it hands out the bridges that share the
+/// core and, when the application or a test is done with it, closes the
+/// core after every bridge has drained. A single bridge never closes it.
+final class CoreOwner {
+  CoreOwner(this.core);
+
+  final ShosaiCore core;
+  final Set<ApplicationBridge> _bridges = {};
+  Future<void>? _closing;
+
+  /// Whether [close] has started.
+  bool get isClosed => _closing != null;
+
+  /// A new bridge over the core.
+  ApplicationBridge bridge() {
+    if (_closing != null) {
+      throw StateError('The application core is closed.');
+    }
+    final bridge = ApplicationBridge(core);
+    _bridges.add(bridge);
+    // A bridge its reader disposed is forgotten once it has drained.
+    unawaited(
+      bridge._disposedFuture.then((_) async {
+        await bridge.drain();
+        _bridges.remove(bridge);
+      }),
+    );
+    return bridge;
+  }
+
+  /// Dispose every bridge, wait until each has drained, then close the
+  /// core. Idempotent: a second call waits for the first.
+  Future<void> close() => _closing ??= () async {
+    final bridges = List.of(_bridges);
+    for (final bridge in bridges) {
+      bridge.dispose();
+    }
+    try {
+      await Future.wait([for (final bridge in bridges) bridge.drain()]);
+    } finally {
+      _bridges.clear();
+      await core.close();
+    }
+  }();
 }
 
 /// PDF title, author and first-page cover through the reader's PDF engine.
@@ -140,13 +201,59 @@ final class CoreRecords implements ShosaiRecords {
   /// were given, until the id is released.
   final Map<BigInt, CancellationToken> _tokens = {};
 
-  CancellationToken _token(BigInt id) =>
-      _tokens.putIfAbsent(id, CancellationToken.new);
+  /// The operations running, for [drain].
+  final Set<Future<void>> _running = {};
+  var _closed = false;
+
+  CancellationToken _token(BigInt id) {
+    if (_closed) return CancellationToken()..cancel();
+    return _tokens.putIfAbsent(id, CancellationToken.new);
+  }
 
   /// Cancel the records operation running under [id].
   void cancel(BigInt id) => _token(id).cancel();
 
   void release(BigInt id) => _tokens.remove(id);
+
+  /// Cancel every operation and admit no more cancellable work: a later
+  /// cancellation id is cancelled from the start.
+  void _close() {
+    _closed = true;
+    for (final token in _tokens.values) {
+      token.cancel();
+    }
+    _tokens.clear();
+  }
+
+  /// Completes when no operation these records started is running.
+  Future<void> drain() async {
+    while (_running.isNotEmpty) {
+      await Future.wait(List.of(_running));
+    }
+  }
+
+  /// Run [body] as a tracked operation, reporting a core failure as the
+  /// bridge error the controllers present.
+  Future<T> _guard<T>(Future<T> Function() body) {
+    final result = _bridgeErrors(body);
+    late final Future<void> tracked;
+    tracked = result.then<void>((_) {}, onError: (_) {}).whenComplete(() {
+      _running.remove(tracked);
+    });
+    _running.add(tracked);
+    return result;
+  }
+
+  /// The content key of a document opened outside the library: the hash of
+  /// the snapshot it reads, so its annotations follow its bytes.
+  AnnotatedContent _content(FlutterDocumentSummary document) {
+    final opened = _documents[document.handle];
+    return AnnotatedContent(
+      contentHash: opened.contentHash,
+      format: _bookFormat(document.format),
+      title: _contentTitle(document.title, opened.path),
+    );
+  }
 
   @override
   Future<FlutterLibraryPage> libraryPage({
@@ -260,23 +367,34 @@ final class CoreRecords implements ShosaiRecords {
     required int bookId,
     required BigInt cancellationId,
   }) => _guard(() async {
+    if (_documents.isClosed) {
+      throw const CoreException.invalidRequest('The bridge is disposed.');
+    }
     final book = await _core.library.get(bookId);
     if (book == null) {
       throw const CoreException.notFound('The book is not in the library.');
     }
-    final cancellation = _token(cancellationId);
-    final path = await _core.library.verifiedPath(
-      bookId,
-      cancellation: cancellation,
-    );
-    final opened = await _documents.open(
-      path,
-      format: book.format,
-      bookId: bookId,
-      title: book.title,
-      cancellation: cancellation,
-    );
-    return opened.summary;
+    // The document reads one snapshot of the file and checks it against the
+    // book's content hash: what was verified is what is parsed, rendered,
+    // searched and annotated.
+    try {
+      final opened = await _documents.open(
+        book.path,
+        format: book.format,
+        expected: (
+          bookId: bookId,
+          title: book.title,
+          contentHash: book.contentHash,
+        ),
+        cancellation: _token(cancellationId),
+      );
+      return opened.summary;
+    } on CoreException catch (error) {
+      if (error.kind == CoreErrorKind.notFound) {
+        throw CoreException.notFound('The book file is missing: ${book.path}');
+      }
+      rethrow;
+    }
   });
 
   @override
@@ -364,14 +482,20 @@ final class CoreRecords implements ShosaiRecords {
     required BigInt cancellationId,
   }) => _guard(() async {
     final bookId = document.bookId;
-    // Annotations belong to library books; a document opened from a file
-    // has none.
-    if (bookId == null) return const [];
-    final resolved = await _core.annotations.list(
-      bookId,
-      text,
-      cancellation: _token(cancellationId),
-    );
+    final cancellation = _token(cancellationId);
+    // A library book's annotations are its document's; a file opened
+    // directly keeps those of the content it read.
+    final resolved = bookId == null
+        ? await _core.annotations.listInContent(
+            _content(document),
+            text,
+            cancellation: cancellation,
+          )
+        : await _core.annotations.list(
+            bookId,
+            text,
+            cancellation: cancellation,
+          );
     return [for (final item in resolved) _annotation(item, scale)];
   });
 
@@ -387,7 +511,8 @@ final class CoreRecords implements ShosaiRecords {
     String? body,
     required BigInt cancellationId,
   }) => _guard(() async {
-    final bookId = _annotatedBook(document);
+    final bookId = document.bookId;
+    final content = bookId == null ? _content(document) : null;
     if (!displayScale.isFinite || displayScale <= 0) {
       throw const CoreException.invalidRequest(
         'The annotation display scale must be finite and positive.',
@@ -414,12 +539,19 @@ final class CoreRecords implements ShosaiRecords {
         displayScale,
       ),
     };
-    final created = await _core.annotations.create(
-      bookId,
-      selection,
-      color: _highlightColor(color),
-      body: body,
-    );
+    final created = content != null
+        ? await _core.annotations.createInContent(
+            content,
+            selection,
+            color: _highlightColor(color),
+            body: body,
+          )
+        : await _core.annotations.create(
+            bookId!,
+            selection,
+            color: _highlightColor(color),
+            body: body,
+          );
     return _annotation(created, displayScale);
   });
 
@@ -430,19 +562,32 @@ final class CoreRecords implements ShosaiRecords {
     required FlutterHighlightColor color,
     String? body,
   }) => _guard(
-    () => _core.annotations.update(
-      _annotatedBook(document),
-      id,
-      color: _highlightColor(color),
-      body: body,
-    ),
+    () => switch (document.bookId) {
+      null => _core.annotations.updateInContent(
+        _content(document),
+        id,
+        color: _highlightColor(color),
+        body: body,
+      ),
+      final bookId => _core.annotations.update(
+        bookId,
+        id,
+        color: _highlightColor(color),
+        body: body,
+      ),
+    },
   );
 
   @override
   Future<bool> deleteAnnotation({
     required FlutterDocumentSummary document,
     required String id,
-  }) => _guard(() => _core.annotations.delete(_annotatedBook(document), id));
+  }) => _guard(
+    () => switch (document.bookId) {
+      null => _core.annotations.deleteInContent(_content(document), id),
+      final bookId => _core.annotations.delete(bookId, id),
+    },
+  );
 
   @override
   Future<FlutterAnnotationAssociationSourcePage>
@@ -528,10 +673,12 @@ final class CoreRecords implements ShosaiRecords {
 /// The bridge the application hands its controllers: the documents it opens
 /// through the Dart engines, and [records] over the Dart core.
 ///
-/// Disposing it releases its documents; the core outlives every bridge.
+/// Disposing it admits no more documents, cancels its operations and
+/// releases its documents; [drain] completes when that work has finished.
+/// The core outlives every bridge; its [CoreOwner] closes it.
 final class ApplicationBridge implements FlutterBridge, RecordsHost {
   ApplicationBridge(ShosaiCore core)
-    : this._(core, OpenDocuments(core.pdfEngine));
+    : this._(core, OpenDocuments(core.pdfEngine, core.snapshots));
 
   ApplicationBridge._(ShosaiCore core, this._documents)
     : records = CoreRecords(core, _documents);
@@ -544,6 +691,9 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   var _lastCancellation = BigInt.zero;
   final Set<BigInt> _cancellations = {};
   var _disposed = false;
+  final Completer<void> _disposal = Completer<void>();
+
+  Future<void> get _disposedFuture => _disposal.future;
 
   @override
   BigInt createCancellation() {
@@ -567,12 +717,29 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
 
   @override
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
-    _documents.releaseAll();
+    // Admission first: an open still running is rejected and released when
+    // it finishes, instead of publishing a document nobody owns.
+    records._close();
+    _cancellations.clear();
+    _documents.close();
+    _disposal.complete();
   }
 
   @override
   bool get isDisposed => _disposed;
+
+  /// Completes when the operations, opens and releases this bridge started
+  /// have finished. Call it after [dispose] to know its resources are gone.
+  Future<void> drain() async {
+    await Future.wait([records.drain(), _documents.drain()]);
+    // A release a finishing operation started.
+    await _documents.drain();
+  }
+
+  /// How many documents this bridge holds open.
+  int get openDocumentCount => _documents.length;
 
   // Documents.
 
@@ -580,7 +747,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   Future<FlutterDocumentSummary> openDocument({
     required FlutterOpenRequest request,
     required BigInt cancellationId,
-  }) => _guard(() async {
+  }) => records._guard(() async {
     if (_disposed) {
       throw const CoreException.invalidRequest('The bridge is disposed.');
     }
@@ -605,7 +772,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   Future<EpubBook> epubBook({
     required FlutterDocumentHandle document,
     required BigInt cancellationId,
-  }) => _guard(() async {
+  }) => records._guard(() async {
     records._token(cancellationId).throwIfCancelled();
     return _documents[document].epub ??
         (throw const CoreException.invalidRequest(
@@ -748,7 +915,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   }
 
   ReaderText _text(OpenDocument opened) => switch (opened.epub) {
-    null => _LazyPdfText(opened, _documents.pdfEngine),
+    null => _LazyPdfText(opened),
     final book => EpubReaderText(
       unitCount: book.chapters.length,
       text: (unit) async => book.chapters[unit].canonicalText,
@@ -804,9 +971,9 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
         wordBoundaries: Uint32List(0),
       );
     } else {
-      surface = await (await opened.pdf(
-        _documents.pdfEngine,
-      )).selectionSurface(unit.toInt(), displayScale);
+      surface = await opened.withPdf(
+        (pdf) => pdf.selectionSurface(unit.toInt(), displayScale),
+      );
     }
     return records.createAnnotation(
       document: opened.summary,
@@ -882,28 +1049,26 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   }
 }
 
-/// PDF page text from an engine document opened on first use.
+/// PDF page text from an engine document opened on the document's snapshot
+/// on first use.
 final class _LazyPdfText implements ReaderText {
-  const _LazyPdfText(this._opened, this._engine);
+  const _LazyPdfText(this._opened);
 
   final OpenDocument _opened;
-  final PdfEngine _engine;
 
   @override
   int get unitCount => _opened.summary.logicalUnitCount.toInt();
 
   @override
-  Future<UnitText?> unitText(
-    int unit, {
-    CancellationToken? cancellation,
-  }) async => PdfReaderText(
-    await _opened.pdf(_engine),
-  ).unitText(unit, cancellation: cancellation);
+  Future<UnitText?> unitText(int unit, {CancellationToken? cancellation}) =>
+      _opened.withPdf(
+        (pdf) => PdfReaderText(pdf).unitText(unit, cancellation: cancellation),
+      );
 }
 
 /// Run [body], reporting a core failure as the bridge error the controllers
 /// already present.
-Future<T> _guard<T>(Future<T> Function() body) async {
+Future<T> _bridgeErrors<T>(Future<T> Function() body) async {
   try {
     return await body();
   } on CoreException catch (error) {
@@ -924,11 +1089,21 @@ Future<T> _guard<T>(Future<T> Function() body) async {
   }
 }
 
+/// Association moves annotations between library books' documents.
 int _annotatedBook(FlutterDocumentSummary document) =>
     document.bookId ??
     (throw const CoreException.invalidRequest(
-      'Only books in the library keep highlights.',
+      'Only books in the library take annotations from other contents.',
     ));
+
+/// What a directly opened content's annotations are listed under: its
+/// title, else its file name.
+String _contentTitle(String? title, String path) {
+  final name = title?.trim();
+  if (name != null && name.isNotEmpty && name.length <= 1024) return name;
+  final file = path.split(RegExp(r'[/\\]')).last;
+  return file.isEmpty ? 'Untitled' : file;
+}
 
 /// A PDF selection of [start]..[end] on [surface], built at [scale]: the
 /// character boxes it covers in page points and, when the page text maps to
