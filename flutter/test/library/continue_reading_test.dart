@@ -249,7 +249,6 @@ void main() {
         expect(continueTitle('Resumable'), findsOneWidget);
         expect(find.text('42% complete'), findsOneWidget);
         expect(find.text('Continue'), findsOneWidget);
-        expect(find.text('Notes'), findsWidgets);
         // The finished and never-opened books are not the hero.
         expect(continueTitle('Finished'), findsNothing);
         expect(continueTitle('Never opened'), findsNothing);
@@ -281,6 +280,17 @@ void main() {
         );
         expect(bar.height, 4);
         expect(bar.width, lessThanOrEqualTo(LibraryContinueCard.placeMaxWidth));
+
+        // The hero's own Notes button opens the Notes place, not the book.
+        final heroNotes = find.descendant(
+          of: find.byType(LibraryContinueCard),
+          matching: find.text('Notes'),
+        );
+        expect(heroNotes, findsOneWidget);
+        await tester.tap(heroNotes);
+        await tester.pumpAndSettle();
+        expect(find.text('No notes yet'), findsOneWidget);
+        expect(bridge.openedBooks, isEmpty);
       },
     );
 
