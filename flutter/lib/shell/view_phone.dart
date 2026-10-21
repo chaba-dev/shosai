@@ -180,7 +180,7 @@ class _ReadingNowCard extends StatelessWidget {
             color: palette.surface,
             shadow: palette.raised,
             child: Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(12, 12, 40, 12),
+              padding: const EdgeInsetsDirectional.fromSTEB(12, 12, 48, 12),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 spacing: 12,
@@ -232,7 +232,7 @@ class _ReadingNowCard extends StatelessWidget {
             end: 4,
             child: _CloseButton(
               label: l10n.shellCloseBook(book.title),
-              size: 36,
+              size: ShosaiTokens.sizeTouchTarget,
               onPressed: () => actions.closeBook(entry),
             ),
           ),

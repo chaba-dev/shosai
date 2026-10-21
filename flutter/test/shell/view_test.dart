@@ -371,6 +371,64 @@ void main() {
     expect(recorder.closed, [1]);
   });
 
+  testWidgets('every shell control on touch layouts is a touch target', (
+    tester,
+  ) async {
+    // docs/design-system.md: `touch-target` (44 px) for every control on
+    // tablet and phone. The InkWell is each control's pressable bound.
+    void expectTargets(Finder surface, String name) {
+      final wells = find.descendant(
+        of: surface,
+        matching: find.byType(InkWell),
+      );
+      expect(wells, findsWidgets, reason: name);
+      for (final well in wells.evaluate()) {
+        final size = tester.getSize(find.byWidget(well.widget));
+        expect(
+          size.width >= 44 && size.height >= 44,
+          isTrue,
+          reason: '$name control is $size',
+        );
+      }
+    }
+
+    final recorder = _Recorder();
+    for (final reading in [false, true]) {
+      await _pumpFrame(
+        tester,
+        size: const Size(1180, 820),
+        model: _model(reading: reading),
+        recorder: recorder,
+      );
+      expectTargets(
+        find.byType(reading ? ShellRail : ShellSidebar),
+        reading ? 'tablet rail' : 'tablet sidebar',
+      );
+    }
+    expect(tester.getSize(find.byType(ShellRail)).width, 56);
+
+    await _pumpFrame(
+      tester,
+      size: const Size(390, 844),
+      model: _model(),
+      recorder: recorder,
+    );
+    expectTargets(find.byType(ShellBottomNav), 'phone bottom bar');
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: ShellReadingNowCards(
+            model: _model(),
+            covers: const {},
+            actions: recorder.actions,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expectTargets(find.byType(ShellReadingNowCards), 'phone Reading now');
+  });
+
   testWidgets('the Japanese sidebar keeps its labels unspaced', (tester) async {
     await _pumpFrame(
       tester,

@@ -71,6 +71,7 @@ class ShellSidebar extends StatelessWidget {
               _PlaceRow(
                 icon: icon,
                 label: shellPlaceLabel(l10n, place),
+                touch: layout.touch,
                 current: !model.reading && model.place == place,
                 onPressed: () => actions.selectPlace(place),
               ),
@@ -112,6 +113,7 @@ class ShellSidebar extends StatelessWidget {
             _PlaceRow(
               icon: LucideIcons.plus,
               label: l10n.addBooksAction,
+              touch: layout.touch,
               current: false,
               muted: true,
               onPressed: actions.addBooks,
@@ -153,7 +155,11 @@ class ShellRail extends StatelessWidget {
           color: palette.chrome,
           border: BorderDirectional(end: BorderSide(color: palette.line)),
         ),
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+        // A touch-target button fits the tablet rail's 56 px, less its 1 px
+        // end border.
+        padding: layout.touch
+            ? const EdgeInsetsDirectional.fromSTEB(6, 16, 5, 16)
+            : const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         child: Column(
           spacing: 8,
           children: [
@@ -165,6 +171,7 @@ class ShellRail extends StatelessWidget {
               _RailButton(
                 icon: icon,
                 label: shellPlaceLabel(l10n, place),
+                touch: layout.touch,
                 onPressed: () => actions.selectPlace(place),
               ),
             Expanded(
@@ -185,6 +192,7 @@ class ShellRail extends StatelessWidget {
                             entry: entry,
                             cover: covers[entry.id],
                             current: entry.id == model.currentBookId,
+                            touch: layout.touch,
                             actions: actions,
                           ),
                         ),
@@ -196,6 +204,7 @@ class ShellRail extends StatelessWidget {
             _RailButton(
               icon: LucideIcons.plus,
               label: l10n.addBooksAction,
+              touch: layout.touch,
               onPressed: actions.addBooks,
             ),
           ],
@@ -205,12 +214,13 @@ class ShellRail extends StatelessWidget {
   }
 }
 
-/// A 34 px place row; the current one is a `surface` card lifted by
-/// `shadow-raised`, its icon in `accent`.
+/// A 34 px place row (`touch-target` on touch layouts); the current one is a
+/// `surface` card lifted by `shadow-raised`, its icon in `accent`.
 class _PlaceRow extends StatelessWidget {
   const _PlaceRow({
     required this.icon,
     required this.label,
+    required this.touch,
     required this.current,
     required this.onPressed,
     this.muted = false,
@@ -218,6 +228,7 @@ class _PlaceRow extends StatelessWidget {
 
   final IconData icon;
   final String label;
+  final bool touch;
   final bool current;
   final bool muted;
   final VoidCallback? onPressed;
@@ -232,7 +243,9 @@ class _PlaceRow extends StatelessWidget {
       color: current ? palette.surface : null,
       shadow: current ? palette.raised : null,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 34),
+        constraints: BoxConstraints(
+          minHeight: touch ? ShosaiTokens.sizeTouchTarget : 34,
+        ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           child: Row(
@@ -396,6 +409,7 @@ class _OpenBookRowState extends State<_OpenBookRow> {
     final status = shellReadingStatus(l10n, book.progress);
     final started = (book.progress * 100).round() > 0;
     final closeLabel = l10n.shellCloseBook(book.title);
+    final closeSize = widget.touch ? ShosaiTokens.sizeTouchTarget : 24.0;
     // Focus anywhere in the row reveals the close button too, so a keyboard
     // user can see the control and its focus ring before pressing it.
     return Focus(
@@ -413,7 +427,7 @@ class _OpenBookRowState extends State<_OpenBookRow> {
               color: widget.current ? palette.surface : null,
               shadow: widget.current ? palette.raised : null,
               child: Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(8, 6, 30, 6),
+                padding: EdgeInsetsDirectional.fromSTEB(8, 6, closeSize + 6, 6),
                 child: Row(
                   spacing: 10,
                   children: [
@@ -468,7 +482,7 @@ class _OpenBookRowState extends State<_OpenBookRow> {
                   visible: widget.touch || _hovered || _focused,
                   child: _CloseButton(
                     label: closeLabel,
-                    size: widget.touch ? 32 : 24,
+                    size: closeSize,
                     onPressed: () => widget.actions.closeBook(widget.entry),
                   ),
                 ),
@@ -508,16 +522,19 @@ class _CloseButton extends StatelessWidget {
   }
 }
 
-/// A 40 px icon place in the rail, with a tooltip in the same words.
+/// A 40 px icon place in the rail (`touch-target` on touch layouts), with a
+/// tooltip in the same words.
 class _RailButton extends StatelessWidget {
   const _RailButton({
     required this.icon,
     required this.label,
+    required this.touch,
     required this.onPressed,
   });
 
   final IconData icon;
   final String label;
+  final bool touch;
   final VoidCallback? onPressed;
 
   @override
@@ -528,7 +545,7 @@ class _RailButton extends StatelessWidget {
       tooltip: label,
       semanticLabel: label,
       child: SizedBox.square(
-        dimension: 40,
+        dimension: touch ? ShosaiTokens.sizeTouchTarget : 40,
         child: Icon(icon, size: 18, color: palette.inkMuted),
       ),
     );
@@ -536,18 +553,20 @@ class _RailButton extends StatelessWidget {
 }
 
 /// An open book's 30 px cover in the rail; the current one is outlined in
-/// `accent`.
+/// `accent`. On touch layouts its target is `touch-target` wide.
 class _RailBook extends StatelessWidget {
   const _RailBook({
     required this.entry,
     required this.cover,
     required this.current,
+    required this.touch,
     required this.actions,
   });
 
   final OpenBook entry;
   final Uint8List? cover;
   final bool current;
+  final bool touch;
   final ShellActions actions;
 
   @override
@@ -560,7 +579,10 @@ class _RailBook extends StatelessWidget {
       semanticLabel: entry.book.title,
       current: current,
       child: Padding(
-        padding: const EdgeInsets.all(3),
+        padding: EdgeInsets.symmetric(
+          horizontal: touch ? (ShosaiTokens.sizeTouchTarget - 30) / 2 : 3,
+          vertical: 3,
+        ),
         child: DecoratedBox(
           position: DecorationPosition.foreground,
           decoration: BoxDecoration(
