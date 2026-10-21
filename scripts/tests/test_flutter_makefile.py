@@ -20,10 +20,11 @@ class FlutterMakefileTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         (self.root / "flutter").mkdir()
-        # `test-flutter` runs the engine package's own suite after the app
-        # suite, so the fixture carries that package directory and a `dart`
-        # stub: the real toolchain must never run inside the fixture.
-        (self.root / "flutter" / "packages" / "shosai_epub").mkdir(parents=True)
+        # `test-flutter` runs the engine and core packages' own suites after
+        # the app suite, so the fixture carries those package directories and
+        # a `dart` stub: the real toolchain must never run inside the fixture.
+        for package in ("shosai_epub", "shosai_core"):
+            (self.root / "flutter" / "packages" / package).mkdir(parents=True)
         scripts = self.root / "scripts"
         scripts.mkdir()
         shutil.copy2(ROOT / "Makefile", self.root / "Makefile")
@@ -76,13 +77,17 @@ class FlutterMakefileTest(unittest.TestCase):
             self.capture.read_text().splitlines(),
             ["/pinned/libpdfium.dylib", "test"],
         )
-        # The engine package leg runs in the same target, from the package
-        # directory, with the pinned library environment still in place for the
-        # app leg it follows.
-        package = self.root / "flutter" / "packages" / "shosai_epub"
+        # The engine and core package legs run in the same target, each from
+        # its package directory, after the app leg.
+        packages = self.root / "flutter" / "packages"
         self.assertEqual(
             self.dart_capture.read_text().splitlines(),
-            [f"{package}|pub get", f"{package}|test"],
+            [
+                f"{packages / 'shosai_epub'}|pub get",
+                f"{packages / 'shosai_epub'}|test",
+                f"{packages / 'shosai_core'}|pub get",
+                f"{packages / 'shosai_core'}|test",
+            ],
         )
 
     def test_aggregate_tests_remain_sequential_with_parallel_make(self):
