@@ -7,7 +7,12 @@ library;
 
 export 'src/annotations/annotation.dart';
 export 'src/annotations/annotations.dart';
-export 'src/annotations/quote.dart';
+export 'src/annotations/quote.dart'
+    hide
+        NormalizationAllowance,
+        forEachQuoteCluster,
+        nfcCluster,
+        normalizeQuoteText;
 export 'src/annotations/resolution.dart'
     hide forEachBoundedGrapheme, resolveStoredAnchor;
 export 'src/cancellation.dart';

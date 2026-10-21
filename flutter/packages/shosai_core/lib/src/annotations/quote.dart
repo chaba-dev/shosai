@@ -24,20 +24,78 @@ const maxQuoteContextInputScalars = 65536;
 /// its context, in Unicode scalars.
 const quoteContextWindowScalars = 1024;
 
+/// Longest grapheme cluster the quote-v1 profile normalizes, in Unicode
+/// scalars, before and after normalization. NFC's cost grows quadratically
+/// with a cluster's length, so no longer cluster ever reaches it.
+const maxQuoteGraphemeScalars = 1024;
+
+/// Normalization work one [QuoteSelector.of] call, one selector check, one
+/// resolution pass or one annotation listing may spend, in the units
+/// [quoteNormalizationCost] charges.
+///
+/// `unorm_dart` 0.3.2 normalizes a cluster in time quadratic in its length,
+/// about 15 to 25 ns per unit here, so the allowance stops any input within
+/// about half a second: it covers eight clusters at [maxQuoteGraphemeScalars],
+/// or millions of the short clusters ordinary text holds.
+const maxQuoteNormalizationWork = 32 * 1024 * 1024;
+
+/// The work units normalizing one grapheme cluster of [scalars] Unicode
+/// scalars costs: the square of the at most twice as many scalars canonical
+/// decomposition can expand it to.
+int quoteNormalizationCost(int scalars) => 4 * scalars * scalars;
+
+/// The normalization work left to an operation, charged before each grapheme
+/// cluster is normalized. Not exported.
+final class NormalizationAllowance {
+  NormalizationAllowance([this.remaining = maxQuoteNormalizationWork]);
+
+  int remaining;
+
+  /// Whether a charge has failed; every later charge fails too.
+  bool get isExhausted => remaining < 0;
+
+  /// Charge normalizing a cluster of [scalars] Unicode scalars. Throws
+  /// [CoreErrorKind.limitExceeded] when the allowance cannot cover it.
+  void charge(int scalars) {
+    remaining -= quoteNormalizationCost(scalars);
+    if (remaining < 0) {
+      throw const CoreException.limitExceeded(
+        'Normalizing annotation quotes exceeded its work limit.',
+      );
+    }
+  }
+}
+
 /// Normalize [value] by the quote-v1 profile: drop soft hyphens, turn CR
 /// and CRLF into LF, compose each grapheme cluster to NFC, and collapse runs
 /// of whitespace into one space without leading or trailing whitespace.
 ///
+/// Throws [CoreErrorKind.limitExceeded] when a grapheme cluster exceeds
+/// [maxQuoteGraphemeScalars], before normalizing any of it, or when the
+/// clusters need more than [maxQuoteNormalizationWork] to normalize.
+///
 /// The profile pins Unicode 17.0.0. Grapheme clusters come from the
-/// package's own Unicode 17.0.0 segmenter ([graphemeClusters]); NFC comes
+/// package's own Unicode 17.0.0 segmenter ([GraphemeBreaker]); NFC comes
 /// from `unorm_dart` 0.3.2, pinned exactly because it carries Unicode 17.0.0
 /// data (0.3.3 moved to Unicode 18). `test/unicode_test.dart` fails if either
 /// changes version.
-String normalizeQuoteV1(String value) {
+String normalizeQuoteV1(String value) =>
+    normalizeQuoteText(value, allowance: NormalizationAllowance());
+
+/// [normalizeQuoteV1], charging [spend] for every scalar it reads and
+/// writes and [allowance] for every cluster it normalizes. Not exported.
+String normalizeQuoteText(
+  String value, {
+  required NormalizationAllowance allowance,
+  void Function(int units)? spend,
+}) {
+  final input = profileInput(value).runes.toList();
+  spend?.call(input.length);
   final normalized = <int>[];
   var pendingSpace = false;
-  for (final grapheme in graphemeClusters(profileInput(value))) {
-    for (final scalar in nfcGrapheme(grapheme).runes) {
+  forEachQuoteCluster(input, spend: spend, (start, end) {
+    for (final scalar in nfcCluster(input, start, end, allowance)) {
+      spend?.call(1);
       if (isQuoteWhitespace(scalar)) {
         pendingSpace = normalized.isNotEmpty;
       } else {
@@ -48,8 +106,59 @@ String normalizeQuoteV1(String value) {
         normalized.add(scalar);
       }
     }
-  }
+  });
   return String.fromCharCodes(normalized);
+}
+
+/// Call [visit] with the half-open range of every grapheme cluster of
+/// [scalars], each at most [maxQuoteGraphemeScalars] scalars long, charging
+/// [spend] one unit per scalar read. Not exported.
+///
+/// Clusters are found one scalar at a time ([GraphemeBreaker] carries the
+/// ZWJ, regional-indicator and conjunct state across them), so an oversized
+/// cluster is rejected with [CoreErrorKind.limitExceeded] after reading
+/// [maxQuoteGraphemeScalars] + 1 of its scalars, before any of it is
+/// visited.
+void forEachQuoteCluster(
+  List<int> scalars,
+  void Function(int start, int end) visit, {
+  void Function(int units)? spend,
+}) {
+  final breaker = GraphemeBreaker();
+  var start = 0;
+  for (var index = 0; index < scalars.length; index++) {
+    spend?.call(1);
+    if (breaker.next(scalars[index])) {
+      if (index > start) visit(start, index);
+      start = index;
+    } else if (index - start >= maxQuoteGraphemeScalars) {
+      throw const CoreException.limitExceeded(
+        'A grapheme cluster exceeds $maxQuoteGraphemeScalars Unicode scalars.',
+      );
+    }
+  }
+  if (scalars.length > start) visit(start, scalars.length);
+}
+
+/// The NFC form of the grapheme cluster [start]..[end] of [scalars],
+/// charging [allowance] before normalizing it. Not exported.
+///
+/// Every quote-v1 normalization reaches the normalizer through here, so the
+/// allowance bounds it however the cluster was found.
+Iterable<int> nfcCluster(
+  List<int> scalars,
+  int start,
+  int end,
+  NormalizationAllowance allowance,
+) {
+  if (end - start == 1 && scalars[start] < 0x0300) return [scalars[start]];
+  for (var index = start; index < end; index++) {
+    if (!_alreadyComposed(scalars[index])) {
+      allowance.charge(end - start);
+      return unorm.nfc(String.fromCharCodes(scalars, start, end)).runes;
+    }
+  }
+  return scalars.getRange(start, end);
 }
 
 /// [value] with soft hyphens removed and line breaks unified to LF.
@@ -61,22 +170,14 @@ String profileInput(String value) {
       .replaceAll('­', '');
 }
 
-/// The NFC form of one grapheme cluster, skipping the normalizer for text
-/// that is already composed (Latin, kana and CJK ideographs).
-String nfcGrapheme(String grapheme) {
-  for (final unit in grapheme.codeUnits) {
-    if (!_alreadyComposed(unit)) return unorm.nfc(grapheme);
-  }
-  return grapheme;
-}
-
-/// UTF-16 units that are NFC-stable on their own and never combine with a
-/// neighbour.
-bool _alreadyComposed(int unit) =>
-    unit < 0x0300 ||
-    (unit >= 0x3041 && unit <= 0x3096) ||
-    (unit >= 0x30a1 && unit <= 0x30fa) ||
-    (unit >= 0x4e00 && unit <= 0x9fff);
+/// Scalars that are NFC-stable on their own and never combine with a
+/// neighbour (Latin, kana and CJK ideographs), so clusters of them skip the
+/// normalizer.
+bool _alreadyComposed(int scalar) =>
+    scalar < 0x0300 ||
+    (scalar >= 0x3041 && scalar <= 0x3096) ||
+    (scalar >= 0x30a1 && scalar <= 0x30fa) ||
+    (scalar >= 0x4e00 && scalar <= 0x9fff);
 
 /// Whitespace in the quote-v1 profile (the Unicode White_Space property).
 bool isQuoteWhitespace(int scalar) =>
@@ -105,6 +206,11 @@ final class QuoteSelector {
   /// Build a selector from the selected text and the text before and after
   /// it. Only the [maxContextScalars] scalars of context nearest the
   /// selection are kept, cut at grapheme boundaries.
+  ///
+  /// Throws [CoreErrorKind.limitExceeded] when the text exceeds its scalar
+  /// limits, holds a grapheme cluster over [maxQuoteGraphemeScalars] before
+  /// or after normalization, or needs more than [maxQuoteNormalizationWork]
+  /// to normalize.
   factory QuoteSelector.of(String selected, String before, String after) {
     if (_exceeds(selected, maxQuoteScalars)) {
       throw const CoreException.limitExceeded(
@@ -118,7 +224,8 @@ final class QuoteSelector {
         'Unicode scalars.',
       );
     }
-    final exact = normalizeQuoteV1(selected);
+    final allowance = NormalizationAllowance();
+    final exact = normalizeQuoteText(selected, allowance: allowance);
     if (exact.isEmpty) {
       throw const CoreException.invalidRequest(
         'An annotation quote must not be empty.',
@@ -131,11 +238,24 @@ final class QuoteSelector {
         'normalized.',
       );
     }
+    // NFC can lengthen a cluster too: U+0344 decomposes into two marks, so
+    // 513 of them normalize to one cluster of 1026 scalars, which
+    // checkQuoteSelector would reject. The normalized clusters are only
+    // segmented here, never normalized again.
+    try {
+      forEachQuoteCluster(exact.runes.toList(), (_, _) {});
+    } on CoreException catch (error) {
+      if (error.kind != CoreErrorKind.limitExceeded) rethrow;
+      throw const CoreException.limitExceeded(
+        'An annotation quote has a grapheme cluster over '
+        '$maxQuoteGraphemeScalars Unicode scalars once normalized.',
+      );
+    }
     return QuoteSelector(
       original: selected,
       exact: exact,
-      prefix: _context(before, prefix: true),
-      suffix: _context(after, prefix: false),
+      prefix: _context(before, allowance, prefix: true),
+      suffix: _context(after, allowance, prefix: false),
     );
   }
 
@@ -198,12 +318,21 @@ bool _exceeds(String value, int scalars) =>
 /// to the exact one.
 ///
 /// Throws [kind]: [CoreErrorKind.invalidRequest] for a caller's selector,
-/// [CoreErrorKind.malformed] for a stored one. Normalizes every field once,
-/// so call it once per selector, not per candidate.
+/// [CoreErrorKind.malformed] for a stored one, including when a field holds
+/// a grapheme cluster over [maxQuoteGraphemeScalars] (which is never
+/// normalized). Normalizes every field once, so call it once per selector,
+/// not per candidate.
+///
+/// Throws [CoreErrorKind.limitExceeded], whatever [kind] is, when
+/// normalizing the fields needs more than [allowance] has left (a fresh
+/// [maxQuoteNormalizationWork] by default); pass one allowance to check many
+/// selectors within it.
 void checkQuoteSelector(
   QuoteSelector quote, {
   CoreErrorKind kind = CoreErrorKind.invalidRequest,
+  NormalizationAllowance? allowance,
 }) {
+  allowance ??= NormalizationAllowance();
   final original = quote.original;
   if (quote.exact.isEmpty ||
       _exceeds(quote.exact, maxQuoteScalars) ||
@@ -215,15 +344,37 @@ void checkQuoteSelector(
       'The annotation quote selector is empty or exceeds its scalar limit.',
     );
   }
-  if (normalizeQuoteV1(quote.exact) != quote.exact ||
-      normalizeQuoteV1(quote.prefix) != quote.prefix ||
-      normalizeQuoteV1(quote.suffix) != quote.suffix) {
+  final String exact;
+  final String prefix;
+  final String suffix;
+  final String? normalizedOriginal;
+  try {
+    exact = normalizeQuoteText(quote.exact, allowance: allowance);
+    prefix = normalizeQuoteText(quote.prefix, allowance: allowance);
+    suffix = normalizeQuoteText(quote.suffix, allowance: allowance);
+    normalizedOriginal = original == null
+        ? null
+        : normalizeQuoteText(original, allowance: allowance);
+  } on CoreException catch (error) {
+    // Running out of work is not evidence the selector is invalid.
+    if (error.kind != CoreErrorKind.limitExceeded || allowance.isExhausted) {
+      rethrow;
+    }
+    throw CoreException(
+      kind,
+      'The annotation quote selector has a grapheme cluster over '
+      '$maxQuoteGraphemeScalars Unicode scalars.',
+    );
+  }
+  if (exact != quote.exact ||
+      prefix != quote.prefix ||
+      suffix != quote.suffix) {
     throw CoreException(
       kind,
       'The annotation quote selector is not normalized by $quoteProfileV1.',
     );
   }
-  if (original != null && normalizeQuoteV1(original) != quote.exact) {
+  if (original != null && normalizedOriginal != quote.exact) {
     throw CoreException(
       kind,
       'The annotation original and normalized quotes do not match.',
@@ -231,8 +382,14 @@ void checkQuoteSelector(
   }
 }
 
-String _context(String value, {required bool prefix}) {
-  final graphemes = graphemeClusters(normalizeQuoteV1(value));
+String _context(
+  String value,
+  NormalizationAllowance allowance, {
+  required bool prefix,
+}) {
+  final graphemes = graphemeClusters(
+    normalizeQuoteText(value, allowance: allowance),
+  );
   var scalars = 0;
   final kept = <String>[];
   for (final grapheme in prefix ? graphemes.reversed : graphemes) {

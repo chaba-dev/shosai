@@ -28,10 +28,18 @@ final class NewAnnotation {
 
 /// A book's annotations and the content they are resolved against.
 final class BookAnnotations {
-  const BookAnnotations(this.contentHash, this.annotations);
+  const BookAnnotations(
+    this.contentHash,
+    this.annotations, [
+    this.normalization = maxQuoteNormalizationWork,
+  ]);
 
   final String contentHash;
   final List<StoredAnnotation> annotations;
+
+  /// The listing's normalization allowance left once every stored selector
+  /// was checked, for resolving them.
+  final int normalization;
 }
 
 /// Annotation queries over the store. Holds nothing but the [Store], so the
@@ -221,7 +229,10 @@ StoredAnnotation _create(Database db, int bookId, NewAnnotation annotation) {
     ],
   );
   _checkSnapshot(db, version.documentId);
-  return _annotation(db.select('$_select WHERE a.id = ?', [id]).single);
+  return _annotation(
+    db.select('$_select WHERE a.id = ?', [id]).single,
+    NormalizationAllowance(),
+  );
 }
 
 const _select = '''SELECT a.id, v.content_hash, a.format,
@@ -233,7 +244,8 @@ const _select = '''SELECT a.id, v.content_hash, a.format,
   FROM annotations a
   JOIN annotation_document_versions v ON v.id = a.version_id''';
 
-StoredAnnotation _annotation(Row row) {
+/// The annotation [row] holds, its selector checked within [allowance].
+StoredAnnotation _annotation(Row row, NormalizationAllowance allowance) {
   final exact = row.columnAt(4) as String?;
   final system = row.columnAt(9) as String?;
   return StoredAnnotation(
@@ -253,7 +265,7 @@ StoredAnnotation _annotation(Row row) {
         rectangles: decodeRectangles(row.columnAt(18) as Uint8List),
       ),
     },
-    quote: exact == null ? null : _quote(row, exact),
+    quote: exact == null ? null : _quote(row, exact, allowance),
     color: HighlightColor.values.byName(row.columnAt(7) as String),
     body: row.columnAt(8) as String?,
     provenance: system == null
@@ -268,15 +280,21 @@ StoredAnnotation _annotation(Row row) {
 /// [CoreErrorKind.invalidRequest] unless their float32 rounding is valid
 /// (see [checkRectangles]), so no invalid rectangle is ever stored.
 /// The stored selector of [row], checked as [QuoteSelector.of] builds them,
-/// so resolution can trust it.
-QuoteSelector _quote(Row row, String exact) {
+/// so resolution can trust it. Throws [CoreErrorKind.malformed] for an
+/// invalid selector and [CoreErrorKind.limitExceeded] when checking it
+/// needs more than [allowance] has left.
+QuoteSelector _quote(Row row, String exact, NormalizationAllowance allowance) {
   final quote = QuoteSelector(
     original: row.columnAt(3) as String?,
     exact: exact,
     prefix: row.columnAt(5) as String,
     suffix: row.columnAt(6) as String,
   );
-  checkQuoteSelector(quote, kind: CoreErrorKind.malformed);
+  checkQuoteSelector(
+    quote,
+    kind: CoreErrorKind.malformed,
+    allowance: allowance,
+  );
   return quote;
 }
 
@@ -332,7 +350,12 @@ BookAnnotations _list(Database db, int bookId) {
       'The book has more than $maxAnnotationsPerDocument annotations.',
     );
   }
-  return BookAnnotations(book.hash, rows.map(_annotation).toList());
+  // One allowance for every row: normalizing stored selectors runs on the
+  // store's only worker, so a listing may not spend more than one operation.
+  final allowance = NormalizationAllowance();
+  return BookAnnotations(book.hash, [
+    for (final row in rows) _annotation(row, allowance),
+  ], allowance.remaining);
 }
 
 /// The live annotation [id] of the book's document, as an update target.

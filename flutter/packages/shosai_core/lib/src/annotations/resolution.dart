@@ -2,7 +2,6 @@
 library;
 
 import '../errors.dart';
-import 'graphemes.dart';
 import 'quote.dart';
 
 /// Work units one resolution pass may spend (a unit is roughly one scalar
@@ -10,7 +9,7 @@ import 'quote.dart';
 const maxAnchorResolutionWork = 64 * 1024 * 1024;
 
 /// Longest grapheme cluster resolution accepts, in Unicode scalars.
-const maxAnchorGraphemeScalars = 1024;
+const maxAnchorGraphemeScalars = maxQuoteGraphemeScalars;
 
 /// How an annotation's anchor matched the current text.
 enum AnnotationResolution {
@@ -51,13 +50,24 @@ final class ResolvedAnchor {
 }
 
 /// The work left to a resolution pass, shared by every anchor it resolves.
+///
+/// Besides [remaining] work units (roughly one per scalar visited), it
+/// carries the pass's normalization allowance: [normalization] units, as
+/// [quoteNormalizationCost] charges them, for every cluster the pass
+/// normalizes, including when it checks a selector.
 final class ResolutionBudget {
   ResolutionBudget([
     this.remaining = maxAnchorResolutionWork,
     this.isCancelled,
-  ]);
+    int normalization = maxQuoteNormalizationWork,
+  ]) : _normalization = NormalizationAllowance(normalization);
 
   int remaining;
+
+  final NormalizationAllowance _normalization;
+
+  /// The normalization work left.
+  int get normalization => _normalization.remaining;
 
   /// Polled every few thousand work units.
   final bool Function()? isCancelled;
@@ -98,9 +108,11 @@ ResolvedAnchor resolveTextAnchor(
   QuoteSelector quote, {
   ResolutionBudget? budget,
 }) {
-  checkQuoteSelector(quote);
-  final resolver = AnchorText(text, budget: budget);
-  return resolver._resolve(start, end, quote, budget ?? ResolutionBudget());
+  final shared = budget ?? ResolutionBudget();
+  shared.checkCancelled();
+  checkQuoteSelector(quote, allowance: shared._normalization);
+  final resolver = AnchorText(text, budget: shared);
+  return resolver._resolve(start, end, quote, shared);
 }
 
 /// Resolve a stored anchor whose [quote] was validated when it was read
@@ -133,8 +145,10 @@ final class AnchorText {
     QuoteSelector quote, {
     ResolutionBudget? budget,
   }) {
-    checkQuoteSelector(quote);
-    return _resolveExact(start, end, quote, budget ?? ResolutionBudget());
+    final shared = budget ?? ResolutionBudget();
+    shared.checkCancelled();
+    checkQuoteSelector(quote, allowance: shared._normalization);
+    return _resolveExact(start, end, quote, shared);
   }
 
   /// Resolve [quote], stored at [start]..[end]. Pass an empty range for a
@@ -148,8 +162,10 @@ final class AnchorText {
     QuoteSelector quote, {
     ResolutionBudget? budget,
   }) {
-    checkQuoteSelector(quote);
-    return _resolve(start, end, quote, budget ?? ResolutionBudget());
+    final shared = budget ?? ResolutionBudget();
+    shared.checkCancelled();
+    checkQuoteSelector(quote, allowance: shared._normalization);
+    return _resolve(start, end, quote, shared);
   }
 
   ResolvedAnchor? _resolveExact(
@@ -162,7 +178,12 @@ final class AnchorText {
     final selected = String.fromCharCodes(_scalars, start, end);
     budget.spend(end - start);
     if (selected == quote.original ||
-        _boundedNormalize(selected, budget) == quote.exact) {
+        normalizeQuoteText(
+              selected,
+              spend: budget.spend,
+              allowance: budget._normalization,
+            ) ==
+            quote.exact) {
       return ResolvedAnchor(AnnotationResolution.exact, start, end);
     }
     return null;
@@ -192,61 +213,14 @@ List<int> _scalarsOf(String text, ResolutionBudget budget) {
 }
 
 /// Call [visit] with the half-open range of every grapheme cluster of
-/// [scalars], each at most [maxAnchorGraphemeScalars] scalars long.
-///
-/// Clusters are found one scalar at a time ([GraphemeBreaker] carries the
-/// ZWJ, regional-indicator and conjunct state across them), so an oversized
-/// cluster is rejected after reading [maxAnchorGraphemeScalars] + 1 of its
-/// scalars, and every scalar read is charged to [budget], which polls
-/// cancellation.
+/// [scalars], each at most [maxAnchorGraphemeScalars] scalars long, charging
+/// every scalar read to [budget], which polls cancellation (see
+/// [forEachQuoteCluster]).
 void forEachBoundedGrapheme(
   List<int> scalars,
   ResolutionBudget budget,
   void Function(int start, int end) visit,
-) {
-  final breaker = GraphemeBreaker();
-  var start = 0;
-  for (var index = 0; index < scalars.length; index++) {
-    budget.spend(1);
-    if (breaker.next(scalars[index])) {
-      if (index > start) visit(start, index);
-      start = index;
-    } else if (index - start >= maxAnchorGraphemeScalars) {
-      throw const CoreException.limitExceeded(
-        'A grapheme cluster exceeds $maxAnchorGraphemeScalars Unicode scalars.',
-      );
-    }
-  }
-  if (scalars.length > start) visit(start, scalars.length);
-}
-
-/// The NFC form of the grapheme cluster [start]..[end] of [scalars].
-Iterable<int> _nfcCluster(List<int> scalars, int start, int end) {
-  if (end - start == 1 && scalars[start] < 0x0300) return [scalars[start]];
-  return nfcGrapheme(String.fromCharCodes(scalars, start, end)).runes;
-}
-
-String _boundedNormalize(String value, ResolutionBudget budget) {
-  final input = profileInput(value).runes.toList();
-  budget.spend(input.length);
-  final normalized = <int>[];
-  var pendingSpace = false;
-  forEachBoundedGrapheme(input, budget, (start, end) {
-    for (final scalar in _nfcCluster(input, start, end)) {
-      budget.spend(1);
-      if (isQuoteWhitespace(scalar)) {
-        pendingSpace = normalized.isNotEmpty;
-      } else {
-        if (pendingSpace) {
-          normalized.add(0x20);
-          pendingSpace = false;
-        }
-        normalized.add(scalar);
-      }
-    }
-  });
-  return String.fromCharCodes(normalized);
-}
+) => forEachQuoteCluster(scalars, visit, spend: budget.spend);
 
 /// Normalized text with, for every normalized scalar, the source scalar range
 /// (a whole grapheme cluster, or a whole whitespace run) it came from.
@@ -281,7 +255,12 @@ final class _MappedText {
     forEachBoundedGrapheme(input, budget, (start, end) {
       final sourceStart = inputStarts[start];
       final sourceEnd = inputEnds[end - 1];
-      for (final scalar in _nfcCluster(input, start, end)) {
+      for (final scalar in nfcCluster(
+        input,
+        start,
+        end,
+        budget._normalization,
+      )) {
         budget.spend(1);
         if (isQuoteWhitespace(scalar)) {
           if (text.isNotEmpty) {

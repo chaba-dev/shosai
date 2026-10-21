@@ -74,11 +74,17 @@ final class Annotations {
   /// cancelled listing never returns results. Work inside one batch (at most
   /// a few MiB of text, bounded by [maxAnchorResolutionWork]) runs in another
   /// isolate and is not interrupted; its results are discarded.
+  ///
+  /// Checking the stored selectors and resolving them share one
+  /// [maxQuoteNormalizationWork] allowance; a listing that needs more throws
+  /// [CoreErrorKind.limitExceeded].
   Future<List<ResolvedAnnotation>> list(
     int bookId,
     UnitTextSource text, {
     CancellationToken? cancellation,
   }) async {
+    // Reading checks every stored selector, so a cancelled listing skips it.
+    cancellation.throwIfCancelled();
     final book = await _records.list(bookId);
     cancellation.throwIfCancelled();
     return _resolve(book, text, cancellation);
@@ -234,6 +240,8 @@ Future<List<ResolvedAnnotation>> _resolve(
   }
 
   var budget = maxAnchorResolutionWork;
+  // The listing's normalization allowance, left from checking its records.
+  var normalization = book.normalization;
   final batch = <({String text, List<_Pending> anchors})>[];
   var batchUnits = 0;
   Future<void> flush() async {
@@ -242,10 +250,14 @@ Future<List<ResolvedAnnotation>> _resolve(
     batch.clear();
     batchUnits = 0;
     cancellation.throwIfCancelled();
-    final remaining = budget;
-    final (results, left) = await _runBatch(work, remaining);
+    final (results, left, normalizationLeft) = await _runBatch(
+      work,
+      budget,
+      normalization,
+    );
     cancellation.throwIfCancelled();
     budget = left;
+    normalization = normalizationLeft;
     for (final (index, anchor) in results) {
       resolved[index] = ResolvedAnnotation(
         annotation: annotations[index],
@@ -283,19 +295,22 @@ Future<List<ResolvedAnnotation>> _resolve(
 }
 
 /// Resolve [work] in another isolate. Top level so the closure sent there
-/// captures only [work] and [budget], not the caller's context.
-Future<(List<(int, ResolvedAnchor)>, int)> _runBatch(
+/// captures only [work], [budget] and [normalization], not the caller's
+/// context.
+Future<(List<(int, ResolvedAnchor)>, int, int)> _runBatch(
   List<({String text, List<_Pending> anchors})> work,
   int budget,
-) => Isolate.run(() => _resolveBatch(work, budget));
+  int normalization,
+) => Isolate.run(() => _resolveBatch(work, budget, normalization));
 
-/// Resolve every anchor of [work] within [budget] work units. Runs in its
-/// own isolate.
-(List<(int, ResolvedAnchor)>, int) _resolveBatch(
+/// Resolve every anchor of [work] within [budget] work units and
+/// [normalization] normalization units. Runs in its own isolate.
+(List<(int, ResolvedAnchor)>, int, int) _resolveBatch(
   List<({String text, List<_Pending> anchors})> work,
   int budget,
+  int normalization,
 ) {
-  final shared = ResolutionBudget(budget);
+  final shared = ResolutionBudget(budget, null, normalization);
   final results = <(int, ResolvedAnchor)>[];
   for (final unit in work) {
     final text = AnchorText(unit.text, budget: shared);
@@ -311,5 +326,5 @@ Future<(List<(int, ResolvedAnchor)>, int)> _runBatch(
       ));
     }
   }
-  return (results, shared.remaining);
+  return (results, shared.remaining, shared.normalization);
 }

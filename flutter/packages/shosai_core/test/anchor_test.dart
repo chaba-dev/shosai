@@ -1,6 +1,9 @@
 import 'dart:collection';
+import 'dart:math';
 
 import 'package:shosai_core/shosai_core.dart';
+import 'package:shosai_core/src/annotations/graphemes.dart'
+    show graphemeClusters;
 import 'package:shosai_core/src/annotations/resolution.dart'
     show forEachBoundedGrapheme;
 import 'package:test/test.dart';
@@ -36,6 +39,9 @@ const _exact = AnnotationResolution.exact;
 const _recovered = AnnotationResolution.recovered;
 const _ambiguous = AnnotationResolution.ambiguous;
 const _orphaned = AnnotationResolution.orphaned;
+
+/// The message of an exhausted normalization allowance.
+final _workLimit = contains('work limit');
 
 void main() {
   group('quote-v1 profile', () {
@@ -209,6 +215,82 @@ void main() {
       );
     });
 
+    test('oversized clusters are rejected before normalization', () {
+      // Combining marks alone are one cluster, already normalized, and within
+      // the scalar limits; NFC would take quadratic time over them.
+      final marks = '\u0301' * maxQuoteScalars;
+      final watch = Stopwatch()..start();
+      for (final invalid in [
+        selector(exact: marks),
+        selector(original: marks, exact: 'x'),
+        selector(exact: 'x', prefix: '\u0301' * maxContextScalars * 2),
+        selector(exact: 'x', suffix: '\u0301' * maxContextScalars * 2),
+      ]) {
+        expect(
+          () => resolveTextAnchor('x', 0, 1, invalid),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+          reason: '${invalid.exact.length} ${invalid.original?.length}',
+        );
+        expect(
+          () => AnchorText('x').resolve(0, 1, invalid),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+        );
+      }
+      expect(
+        () => QuoteSelector.of(marks, '', ''),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect(
+        () => QuoteSelector.of('x', marks, ''),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect(
+        () => QuoteSelector.of('x', '', 'a$marks'),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 1)));
+
+      // A cluster at the ceiling is still accepted, in a quote, its context
+      // and the text it resolves against.
+      final ceiling = '\u0301' * maxAnchorGraphemeScalars;
+      final text = '$ceiling x';
+      final built = QuoteSelector.of(ceiling, ceiling, '\n$ceiling');
+      expect(built.exact, ceiling);
+      expect(
+        resolveTextAnchor(text, 0, maxAnchorGraphemeScalars, built),
+        const ResolvedAnchor(_exact, 0, maxAnchorGraphemeScalars),
+      );
+      expect(
+        resolveTextAnchor(text, 0, 0, selector(exact: ceiling)),
+        const ResolvedAnchor(_recovered, 0, maxAnchorGraphemeScalars),
+      );
+      expect(
+        () => QuoteSelector.of('$ceiling\u0301', '', ''),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+
+      // Cancellation wins over validating the selector.
+      expect(
+        () => resolveTextAnchor(
+          'x',
+          0,
+          1,
+          selector(exact: marks),
+          budget: ResolutionBudget(maxAnchorResolutionWork, () => true),
+        ),
+        throwsCoreError(CoreErrorKind.cancelled),
+      );
+      expect(
+        () => AnchorText('x').resolveExact(
+          0,
+          1,
+          selector(exact: marks),
+          budget: ResolutionBudget(maxAnchorResolutionWork, () => true),
+        ),
+        throwsCoreError(CoreErrorKind.cancelled),
+      );
+    });
+
     test('supplementary-plane selectors at their limits resolve', () {
       final exact = '😀' * maxQuoteScalars;
       final context = '🇯' * maxContextScalars;
@@ -228,6 +310,174 @@ void main() {
       expect(built.exact, exact);
       expect(built.prefix.runes, hasLength(maxContextScalars));
       expect(built.suffix, '😀' * maxContextScalars);
+    });
+
+    test('NFC expansion is bounded at construction', () {
+      // U+0344 decomposes into U+0308 U+0301: 512 of them normalize to one
+      // cluster at the ceiling, 513 to one over it.
+      final atLimit = QuoteSelector.of('\u0344' * 512, '', '');
+      expect(atLimit.exact, '\u0308\u0301' * 512);
+      expect(graphemeClusters(atLimit.exact).single.runes, hasLength(1024));
+      checkQuoteSelector(atLimit);
+      expect(
+        resolveTextAnchor('\u0344' * 512, 0, 512, atLimit),
+        const ResolvedAnchor(_exact, 0, 512),
+      );
+      for (final over in [
+        '\u0344' * 513,
+        'q${'\u0344' * 512}',
+        '\u0F73' * 1000,
+        '\u0958${'\u0344' * 512}',
+      ]) {
+        expect(
+          () => QuoteSelector.of(over, '', ''),
+          throwsCoreError(CoreErrorKind.limitExceeded),
+          reason: '${over.runes.length}',
+        );
+      }
+      // Context is cut to its 32 scalars, so an expanded cluster there is
+      // dropped rather than kept.
+      final context = QuoteSelector.of('x', '\u0344' * 513, '\u0344' * 513);
+      expect((context.prefix, context.suffix), ('', ''));
+      checkQuoteSelector(context);
+    });
+
+    test('every selector QuoteSelector.of builds passes validation', () {
+      const pieces = [
+        'a',
+        'e\u0301',
+        '\u0301',
+        '\u0316',
+        '\u0344',
+        '\u0F73',
+        '\u0F75',
+        '\u0F81',
+        '\u0958',
+        '\u1F82',
+        '\u212B',
+        '\u1100',
+        '\u1161',
+        '\u11A8',
+        '\uAC00',
+        '\u0915\u094D',
+        '\u200D',
+        '😀',
+        '🇯',
+        '𝒜',
+        '\u{1D15E}',
+        '\u{1611E}',
+        ' ',
+        '\r\n',
+        '\r',
+        '\u00AD',
+        '\u3000',
+        'が',
+        '\u3099',
+      ];
+      final random = Random(158);
+      final mixed = [
+        for (var index = 0; index < 300; index++)
+          [
+            for (var part = random.nextInt(48); part >= 0; part--)
+              pieces[random.nextInt(pieces.length)],
+          ].join(),
+      ];
+      final inputs = <String>[
+        for (final piece in pieces) ...[
+          for (final count in [1, 2, 511, 512, 513, 1024]) piece * count,
+          'a${piece * 512}',
+        ],
+        ...mixed,
+      ];
+      var built = 0;
+      for (var index = 0; index < inputs.length; index++) {
+        final selected = inputs[index];
+        final before = mixed[(index * 7 + 3) % mixed.length];
+        final after = mixed[(index * 13 + 5) % mixed.length];
+        final QuoteSelector quote;
+        try {
+          quote = QuoteSelector.of(selected, before, after);
+        } on CoreException catch (error) {
+          // Only limits, or a quote that normalizes to nothing.
+          final reason = selected.runes.map((r) => r.toRadixString(16));
+          if (error.kind == CoreErrorKind.invalidRequest) {
+            expect(normalizeQuoteV1(selected), isEmpty, reason: '$reason');
+          } else {
+            expect(error.kind, CoreErrorKind.limitExceeded, reason: '$reason');
+          }
+          continue;
+        }
+        built++;
+        expect(
+          () => checkQuoteSelector(quote, kind: CoreErrorKind.malformed),
+          returnsNormally,
+          reason: '$quote',
+        );
+      }
+      expect(built, greaterThan(inputs.length ~/ 2));
+    });
+
+    test('normalization work is bounded across the fields of a selector', () {
+      // Each cluster is within the ceiling (its base composes with none of
+      // its marks, and the spaces stay between clusters); together they need
+      // more NFC work than one operation may spend.
+      final cluster = 'q${'\u0F73' * (maxQuoteGraphemeScalars - 1)}';
+      final clusters = List.filled(6, cluster).join(' ');
+      final marks = 'x${'\u0301' * (maxQuoteGraphemeScalars - 1)}';
+      final normalized = List.filled(16, marks).join(' ');
+      final watch = Stopwatch()..start();
+      expect(
+        () => QuoteSelector.of('x', clusters, clusters),
+        throwsCoreError(CoreErrorKind.limitExceeded, _workLimit),
+      );
+      for (final quote in [
+        QuoteSelector(
+          original: null,
+          exact: normalized,
+          prefix: '',
+          suffix: '',
+        ),
+        QuoteSelector(
+          original: normalized,
+          exact: normalized,
+          prefix: '',
+          suffix: '',
+        ),
+      ]) {
+        // Running out of work is reported as such, never as an invalid or
+        // malformed selector.
+        for (final kind in [
+          CoreErrorKind.invalidRequest,
+          CoreErrorKind.malformed,
+        ]) {
+          expect(
+            () => checkQuoteSelector(quote, kind: kind),
+            throwsCoreError(CoreErrorKind.limitExceeded, _workLimit),
+          );
+        }
+        expect(
+          () => resolveTextAnchor(normalized, 0, 1, quote),
+          throwsCoreError(CoreErrorKind.limitExceeded, _workLimit),
+        );
+        expect(
+          () => AnchorText('x').resolve(0, 1, quote),
+          throwsCoreError(CoreErrorKind.limitExceeded, _workLimit),
+        );
+      }
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+
+      // Resolution charges the text it normalizes to the same allowance.
+      final quote = QuoteSelector.of(marks, '', '');
+      final budget = ResolutionBudget();
+      expect(
+        () => resolveTextAnchor(normalized, 0, 0, quote, budget: budget),
+        throwsCoreError(CoreErrorKind.limitExceeded, _workLimit),
+      );
+      expect(budget.normalization, lessThan(0));
+      expect(
+        resolveTextAnchor('$marks x', 0, 0, quote),
+        const ResolvedAnchor(_recovered, 0, maxQuoteGraphemeScalars),
+      );
     });
   });
 
@@ -441,10 +691,10 @@ void main() {
         _resolve(text, 0, 8, QuoteSelector.of('ordinary', '', '')),
         const ResolvedAnchor(_exact, 0, 8),
       );
-      final oversized = 'e${'́' * 1025}';
+      // A quote holding the oversized cluster is never built.
       expect(
-        _resolve(text, 9, 1035, QuoteSelector.of(oversized, '', '')),
-        const ResolvedAnchor(_exact, 9, 1035),
+        () => QuoteSelector.of('e${'́' * 1025}', '', ''),
+        throwsCoreError(CoreErrorKind.limitExceeded),
       );
     });
 

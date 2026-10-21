@@ -367,6 +367,101 @@ void main() {
       }
     });
 
+    test('stored oversized clusters are malformed without stalling', () async {
+      final epub = await book('epub');
+      await annotations.create(epub, _select(_text, 'lead'));
+      // One cluster of combining marks: already normalized and within the
+      // scalar limits, but quadratic for NFC.
+      final marks = '́' * maxQuoteScalars;
+      final watch = Stopwatch()..start();
+      for (final (original, exact) in [(null, marks), (marks, 'lead')]) {
+        await t.execute(
+          '''UPDATE annotations SET original_quote = ?, normalized_exact = ?
+             WHERE format = 'epub' ''',
+          [original, exact],
+        );
+        await expectLater(
+          annotations.list(epub, _epubText(_text)),
+          throwsCoreError(CoreErrorKind.malformed),
+          reason: '${original?.length} ${exact.length}',
+        );
+        // Cancellation is observed before stored rows are checked.
+        await expectLater(
+          annotations.list(
+            epub,
+            _epubText(_text),
+            cancellation: CancellationToken()..cancel(),
+          ),
+          throwsCoreError(CoreErrorKind.cancelled),
+        );
+      }
+      expect(watch.elapsed, lessThan(const Duration(seconds: 1)));
+
+      // A stored cluster at the ceiling is still read.
+      final ceiling = '́' * maxAnchorGraphemeScalars;
+      await t.execute(
+        '''UPDATE annotations SET original_quote = ?, normalized_exact = ?
+           WHERE format = 'epub' ''',
+        [ceiling, ceiling],
+      );
+      final [listed] = await annotations.list(epub, _epubText(_text));
+      expect(listed.annotation.quote?.exact, ceiling);
+    });
+
+    test('one listing bounds the normalization work of all its rows', () async {
+      // Ordinary text that needs the normalizer: precomposed and decomposed
+      // Latin, Cyrillic and Greek, in a full document of annotations.
+      const text =
+          'Lead. Съешь же ещё этих мягких французских булок, да выпей чаю. '
+          'Tiếng Việt có dấu. Ελληνικά κείμενα. Cafe\u0301 au lait. Tail.';
+      final epub = await book('epub');
+      final first = await annotations.create(
+        epub,
+        _select(text, text.substring(6, text.length - 6)),
+      );
+      await t.executeMany(
+        '''INSERT INTO annotations (id, version_id, format, anchor_version,
+             original_quote, normalization_profile, normalized_exact,
+             normalized_prefix, normalized_suffix, color,
+             epub_spine_index, epub_resource_path, epub_scalar_start,
+             epub_scalar_end)
+           SELECT ?, version_id, format, anchor_version, original_quote,
+             normalization_profile, normalized_exact, normalized_prefix,
+             normalized_suffix, color, epub_spine_index, epub_resource_path,
+             epub_scalar_start, epub_scalar_end
+           FROM annotations WHERE id = ?''',
+        [
+          for (var index = 1; index < maxAnnotationsPerDocument; index++)
+            [
+              '00000000-0000-4000-8000-${index.toString().padLeft(12, '0')}',
+              first.id,
+            ],
+        ],
+      );
+      final listed = await annotations.list(epub, _epubText(text));
+      expect(listed, hasLength(maxAnnotationsPerDocument));
+      expect(listed.map((annotation) => annotation.resolution).toSet(), {
+        AnnotationResolution.exact,
+      });
+
+      // Each row holds one cluster within the ceiling, already normalized;
+      // together they need more NFC work than one listing may spend.
+      await t.execute(
+        'UPDATE annotations SET original_quote = NULL, normalized_exact = ?',
+        ['\u0301' * maxQuoteGraphemeScalars],
+      );
+      final watch = Stopwatch()..start();
+      await expectLater(
+        annotations.list(epub, _epubText(text)),
+        throwsCoreError(CoreErrorKind.limitExceeded, contains('work limit')),
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+
+      // A few such rows are still read.
+      await t.execute('DELETE FROM annotations WHERE rowid > 4');
+      expect(await annotations.list(epub, _epubText(text)), hasLength(4));
+    });
+
     test('geometry resolves only on the content it was drawn on', () async {
       final drawn = await book('pdf');
       final edition = await book('pdf');
