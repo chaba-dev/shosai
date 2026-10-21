@@ -444,11 +444,13 @@ void main() {
         AnnotationResolution.exact,
       });
 
-      // Each row holds one cluster within the ceiling, already normalized;
-      // together they need more NFC work than one listing may spend.
+      // Each row holds one distinct cluster within the ceiling, already
+      // normalized; together they need more NFC work than one listing may
+      // spend.
       await t.execute(
-        'UPDATE annotations SET original_quote = NULL, normalized_exact = ?',
-        ['\u0301' * maxQuoteGraphemeScalars],
+        '''UPDATE annotations SET original_quote = NULL, normalized_exact =
+             replace(hex(zeroblob(? - rowid)), '00', char(0x301))''',
+        [maxQuoteGraphemeScalars + 1],
       );
       final watch = Stopwatch()..start();
       await expectLater(

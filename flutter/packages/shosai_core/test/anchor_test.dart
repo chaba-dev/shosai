@@ -419,15 +419,21 @@ void main() {
 
     test('normalization work is bounded across the fields of a selector', () {
       // Each cluster is within the ceiling (its base composes with none of
-      // its marks, and the spaces stay between clusters); together they need
+      // its marks, and the spaces stay between clusters) and distinct, since
+      // an operation normalizes a repeated cluster once; together they need
       // more NFC work than one operation may spend.
-      final cluster = 'q${'\u0F73' * (maxQuoteGraphemeScalars - 1)}';
-      final clusters = List.filled(6, cluster).join(' ');
+      String clusters(int first) => [
+        for (var index = first; index < first + 6; index++)
+          'q${'\u0F73' * (maxQuoteGraphemeScalars - 1 - index)}',
+      ].join(' ');
       final marks = 'x${'\u0301' * (maxQuoteGraphemeScalars - 1)}';
-      final normalized = List.filled(16, marks).join(' ');
+      final normalized = [
+        for (var index = 0; index < 16; index++)
+          'x${'\u0301' * (maxQuoteGraphemeScalars - 1 - index)}',
+      ].join(' ');
       final watch = Stopwatch()..start();
       expect(
-        () => QuoteSelector.of('x', clusters, clusters),
+        () => QuoteSelector.of('x', clusters(0), clusters(6)),
         throwsCoreError(CoreErrorKind.limitExceeded, _workLimit),
       );
       for (final quote in [
@@ -477,6 +483,48 @@ void main() {
       expect(
         resolveTextAnchor('$marks x', 0, 0, quote),
         const ResolvedAnchor(_recovered, 0, maxQuoteGraphemeScalars),
+      );
+    });
+
+    test('every distinct short cluster is charged; repeats are not', () {
+      // Each scalar is a cluster of its own the normalizer must see, and
+      // each costs a call however short it is.
+      final selected = String.fromCharCodes([
+        for (var index = 0; index < 0x10000; index++) 0x20000 + index,
+      ]);
+      final before = String.fromCharCodes([
+        for (var index = 0; index < 0x10000; index++) 0x30000 + index,
+      ]);
+      expect(
+        0x20000 * quoteNormalizationCost(1),
+        greaterThan(maxQuoteNormalizationWork),
+      );
+      final watch = Stopwatch()..start();
+      expect(
+        () => QuoteSelector.of(selected, before, ''),
+        throwsCoreError(CoreErrorKind.limitExceeded, _workLimit),
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+
+      // Ordinary text repeats its clusters, however long it is: every Hangul
+      // syllable, many times over, is charged once per syllable.
+      final hangul = String.fromCharCodes([
+        for (var index = 0; index < 8 * 11172; index++) 0xac00 + index % 11172,
+      ]);
+      final budget = ResolutionBudget();
+      expect(
+        resolveTextAnchor(
+          hangul,
+          0,
+          0,
+          QuoteSelector.of('x', '', ''),
+          budget: budget,
+        ),
+        const ResolvedAnchor(AnnotationResolution.orphaned),
+      );
+      expect(
+        budget.normalization,
+        maxQuoteNormalizationWork - 11172 * quoteNormalizationCost(1),
       );
     });
   });

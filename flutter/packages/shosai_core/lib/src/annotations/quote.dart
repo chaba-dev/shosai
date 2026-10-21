@@ -34,22 +34,31 @@ const maxQuoteGraphemeScalars = 1024;
 /// [quoteNormalizationCost] charges.
 ///
 /// `unorm_dart` 0.3.2 normalizes a cluster in time quadratic in its length,
-/// about 15 to 25 ns per unit here, so the allowance stops any input within
-/// about half a second: it covers eight clusters at [maxQuoteGraphemeScalars],
-/// or millions of the short clusters ordinary text holds.
+/// about 15 to 25 ns per unit here, after a fixed 1.5 to 2.5 µs per call.
+/// An operation normalizes each distinct cluster once and is charged only
+/// then, so the allowance stops any input within about a third of a second:
+/// it covers seven clusters at [maxQuoteGraphemeScalars] or about 128,000
+/// distinct single-scalar clusters, while ordinary text, whatever its
+/// length, repeats a few thousand distinct clusters at most.
 const maxQuoteNormalizationWork = 32 * 1024 * 1024;
 
-/// The work units normalizing one grapheme cluster of [scalars] Unicode
-/// scalars costs: the square of the at most twice as many scalars canonical
-/// decomposition can expand it to.
-int quoteNormalizationCost(int scalars) => 4 * scalars * scalars;
+/// The work units normalizing one distinct grapheme cluster of [scalars]
+/// Unicode scalars costs: a fixed charge for the call, plus the square of
+/// the at most twice as many scalars canonical decomposition can expand it
+/// to.
+int quoteNormalizationCost(int scalars) => 256 + 4 * scalars * scalars;
 
-/// The normalization work left to an operation, charged before each grapheme
-/// cluster is normalized. Not exported.
+/// The normalization work left to an operation, charged before each distinct
+/// grapheme cluster is normalized, and the clusters it normalized. Not
+/// exported.
 final class NormalizationAllowance {
   NormalizationAllowance([this.remaining = maxQuoteNormalizationWork]);
 
   int remaining;
+
+  /// The NFC form of every cluster normalized so far. Bounded: each entry
+  /// was charged at least [quoteNormalizationCost] of one scalar.
+  final _composed = <String, String>{};
 
   /// Whether a charge has failed; every later charge fails too.
   bool get isExhausted => remaining < 0;
@@ -141,7 +150,8 @@ void forEachQuoteCluster(
 }
 
 /// The NFC form of the grapheme cluster [start]..[end] of [scalars],
-/// charging [allowance] before normalizing it. Not exported.
+/// charging [allowance] before normalizing it unless [allowance] already
+/// holds it. Not exported.
 ///
 /// Every quote-v1 normalization reaches the normalizer through here, so the
 /// allowance bounds it however the cluster was found.
@@ -154,8 +164,11 @@ Iterable<int> nfcCluster(
   if (end - start == 1 && scalars[start] < 0x0300) return [scalars[start]];
   for (var index = start; index < end; index++) {
     if (!_alreadyComposed(scalars[index])) {
+      final cluster = String.fromCharCodes(scalars, start, end);
+      final known = allowance._composed[cluster];
+      if (known != null) return known.runes;
       allowance.charge(end - start);
-      return unorm.nfc(String.fromCharCodes(scalars, start, end)).runes;
+      return (allowance._composed[cluster] = unorm.nfc(cluster)).runes;
     }
   }
   return scalars.getRange(start, end);
