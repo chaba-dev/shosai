@@ -11,7 +11,7 @@ verify against one list.
   policy). Supersedes nothing; the restoration plan remains authoritative for
   sequencing, dependencies and acceptance.
 - Governing documents: [RFD 4](../rfd/0004/README.adoc), its
-  [implementation checklist](../rfd/0004/IMPLEMENTATION.org),
+  [implementation checklist](../rfd/0004/IMPLEMENTATION.adoc),
   [RFD 6](../rfd/0006/README.adoc) for selection/highlighting, and the required
   [Flutter architecture](flutter-architecture.md) and [typography](typography.md)
   guidance.
@@ -72,7 +72,7 @@ remote `main`. These are the revisions this specification refers to.
 
 Observation, not a pin: between local `main` `d1e06f408763` and the pinned base
 `1e54270a6bb2`, the 62-file change is confined to `flutter/`,
-`rfd/0004/IMPLEMENTATION.org`, `Cargo.lock`, `crates/shosai-core`
+`rfd/0004/IMPLEMENTATION.adoc`, `Cargo.lock`, `crates/shosai-core`
 (`bridge.rs`, `library.rs`, `zip_preflight.rs`, `library_tests.rs`, `Cargo.toml`) and
 `crates/shosai-flutter-bridge` (`api.rs`, `frb_generated.rs`). **No file under
 `crates/shosai-app` changed**, so the Iced application sources transcribed in §3 are

@@ -63,7 +63,7 @@ runs. Physical device builds are intentionally unsigned; local development
 signing must be configured in Xcode before installing them.
 
 Architecture and product proposals follow the
-[Requests for Discussion process](rfd/README.md). The
+[Requests for Discussion process](rfd/README.adoc). The
 [project roadmap](docs/roadmap.org) links to the corresponding RFDs.
 
 ## Website
