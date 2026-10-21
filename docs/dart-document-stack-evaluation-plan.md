@@ -1,12 +1,15 @@
 # Dart document stack evaluation plan
 
-Status: **EPUB adoption decision recorded 2026-09-28; PDF and SQLite remain
-unselected.** The owner adopted a Dart-owned EPUB parser/normalizer with Flutter
-layout, integrated incrementally behind the retained reader UI (see
-[Adoption decision](#adoption-decision-2026-09-28)). This document does not select
-a PDF engine, adopt Dart SQLite, authorize a rewrite of retained behavior, or
-approve baselines. Every production gate below is still a gate, and no restoration
-package is accepted because the architecture changed.
+Status: **EPUB adoption decision recorded 2026-09-28; PDF and SQLite
+selected 2026-10-21.** The owner adopted a Dart-owned EPUB parser/normalizer
+with Flutter layout, integrated incrementally behind the retained reader UI
+(see [Adoption decision](#adoption-decision-2026-09-28)), and then decided to
+replace the remaining Rust core and the Dart/Rust bridge with Dart (see
+[Adoption decision (2026-10-21)](#adoption-decision-2026-10-21)): a Dart-owned
+PDFium binding for PDF and a Dart SQLite binding for storage, with the records
+ported. This document does not authorize a rewrite of retained behavior or
+approve baselines. Every production gate below is still a gate, and no
+restoration package is accepted because the architecture changed.
 
 ## Continue the parity work; preserve the Flutter UI
 
@@ -252,6 +255,53 @@ RFD amendments and the restoration plan), then bounded implementation PRs, one
 commit per PR, each stacked on the previous one. Package acceptance stays with
 the [restoration plan](flutter-ui-restoration-plan.md); recording a decision does
 not tick any package checkbox.
+
+### Adoption decision (2026-10-21)
+
+The owner decided, in the project's design thread on 2026-10-21, to **replace
+the Rust core (`crates/shosai-core`) and the `flutter_rust_bridge` boundary
+with Dart before the first-release reader work builds on them**. The decision
+is recorded in [RFD 4](../rfd/0004/README.adoc) (Decisions, Architecture,
+milestone M3.0 in its checklist); this section records what it selects from
+this evaluation.
+
+- **Selected:** a Dart-owned PDFium binding for PDF (`pdfrx`, the candidate
+  evaluated under Phase A, with its PDFium version and checksums pinned per
+  target) and a Dart SQLite binding for storage (direct `sqlite3`, the Phase B
+  starting point; `drift` only if typed queries and migration tooling justify
+  its code generation). Library and import, open books, reading state,
+  bookmarks, annotations and anchors, notes and search are ported to a Dart
+  application core package with the Rust integration tests ported as Dart
+  tests. The Rust crates, the bridge package, the bridge codegen and the Rust
+  CI jobs are deleted when their last consumer is gone.
+- **Why now:** with EPUB already Dart, the Rust core held one PDFium wrapper
+  and the SQLite-backed records (about 17,000 lines of application code plus
+  bridge glue). RFD 4's M3.2 would otherwise build the PDF reader, notes and
+  search on the bridge and then redo them. The costs the bridge carried (a
+  second language and test suite, a codegen pinned to a Rust toolchain and a
+  generator version, a native library to cross-compile and package per
+  target, a WASM project before any web build) bought nothing once the
+  shaping and layout code had left Rust.
+- **Risks carried as gates, not accepted:** the pdfrx permission-bit defect
+  and whether permissions are enforced at all (a product decision M3.0 must
+  record), binding version pinning against the SDK, native asset provisioning
+  per platform (the Phase B loader-path finding), and the fact that Phase A
+  never produced a native interactive pass. The pure-Dart PDF engine
+  (dart-pdf) is not selected; eliminating the bridge, not pure Dart, was the
+  goal.
+- **Sequence:** the same incremental rule as the EPUB decision. Slices land
+  behind the retained UI, one PR each, stacked: the PDF engine behind a
+  controller-owned adapter (deleting the Rust PDF path in the same slice), the
+  store and records (fresh migrations, no development-data conversion, one
+  writer), then removal of the crates and toolchain, then the document
+  updates. Each slice reports the gates it closes and leaves open; merging is
+  delivery, not acceptance.
+- **Not authorized:** deleting development data without a reset decision,
+  two writers to the same database at any point, or reducing retained reader
+  capabilities without a product decision.
+
+The "Decisions still required" list below is updated in place; the remaining
+open items there are the ones M3.0 must answer with evidence.
 
 ### The adopted module boundary
 
@@ -735,7 +785,7 @@ chooses adoption separately; no phase changes parity acceptance automatically.
 | A. PDF reading experience | Both candidates behind the same existing-UI-shaped adapter; continuous and paginated navigation, fit/zoom, selection/copy/search and accessible controls | Inspect licensed real-world PDFs as well as fixtures on unlocked Linux/macOS sessions. Verify long-document behavior, CJK, links, passwords, malformed-input errors and replacement/disposal. Record unsupported cases. Choose pdfrx, pure Dart, or retain Rust. |
 | B. SQLite packaged-app spike | Direct sqlite3 worker-isolate service; Drift comparison only if it resolves a concrete tooling need | Offline release apps load SQLite on Linux and macOS without accidental dev-shell paths. Verify transactions, concurrent/stale writes, rollback, close-before-delete, reopen and signing/packaging. Choose dependency and provisioning strategy. |
 | C. EPUB vertical slice | One rich chapter through each promising boundary, using existing UI | Demonstrate pagination/continuous flow, images, lists/basic tables, selection across fragments, relayout and stable new-session locations; inspect CJK/bidi and typography. Explicitly list CSS/math limits and compare complexity before choosing a full engine. Delivered as a **standalone full-Dart prototype** ([PR #135](https://github.com/chaba-dev/shosai/pull/135) plus the progressive-layout follow-up in [PR #136](https://github.com/chaba-dev/shosai/pull/136)) that is **not wired into the application**; the hybrid comparison and retained-UI evaluation of the original deliverable remain open, so Phase C is not claimed complete. Prototype evidence is not production acceptance. |
-| D. Adoption decision | Scope, architecture amendments, estimated work and accepted limitations | Owner selects language/engine boundaries and retained product requirements. Update architecture/RFD/parity records before production migration. **Recorded 2026-09-28 for EPUB only**: Dart-owned parsing/normalization with Flutter layout; PDF and SQLite remain unselected. |
+| D. Adoption decision | Scope, architecture amendments, estimated work and accepted limitations | Owner selects language/engine boundaries and retained product requirements. Update architecture/RFD/parity records before production migration. **Recorded 2026-09-28 for EPUB** (Dart-owned parsing/normalization with Flutter layout) and **2026-10-21 for PDF and SQLite** (pdfrx and direct sqlite3; the Rust core and bridge are removed, RFD 4 M3.0). |
 | E. Incremental implementation | Replace services behind controller-owned adapters, one bounded responsibility at a time | Relevant behavior tests, native checks and visual approvals pass. Remove bridge calls/dependencies only after their final consumers are gone. In progress: the production EPUB engine module and its boundary first, with the production gates above owned per slice. |
 
 A and B can proceed independently when authorized; C did not delay current 4B or
@@ -769,16 +819,20 @@ decision does not force an unrelated database or EPUB rewrite.
 
 ## Decisions still required
 
-- Is eliminating our Rust PDF bridge sufficient, or is a pure-Dart PDF engine
-  itself a product/maintenance goal?
+- ~~Is eliminating our Rust PDF bridge sufficient, or is a pure-Dart PDF engine
+  itself a product/maintenance goal?~~ **Decided 2026-10-21:** eliminating the
+  bridge is the goal; pdfrx (PDFium) is selected, pure Dart is not.
 - Which real documents and interaction budgets define acceptable experience?
   (For EPUB the direction is fixed; the corpus and budgets still need to be
   named before the responsiveness gate is closed.)
 - Should copy/print permissions be enforced, and should the tested getter defect
   be patched locally or reported upstream? Shipping license notices remains
-  required regardless of that policy.
+  required regardless of that policy. (Open; the M3.0 PDF engine slice must
+  record the answer.)
 - Which Flutter/dependency versions and SQLite/native-asset provisioning path
-  will be supported in release packages?
+  will be supported in release packages? (Open; the M3.0 store and PDF engine
+  slices prove loading from the packaged Linux, macOS and Android hosts, and
+  RFD 5 carries the per-target pinning.)
 - Which EPUB capabilities are required at adoption? **Boundary decided
   2026-09-28** (Dart parsing/normalization with Flutter layout). Capability scope
   remains governed by the retained reader requirements and the production gates:
@@ -788,9 +842,9 @@ decision does not force an unrelated database or EPUB rewrite.
   equivalence fixtures — are open work, not accepted limitations, until the owner
   accepts a reduced scope explicitly.
 
-Provisional preference: validate pdfrx behind the retained UI first, with
-dart-pdf as the pure-Dart comparison; use direct sqlite3 as the storage starting
-point. These are **evaluation defaults, not selected production dependencies**.
+pdfrx and direct sqlite3 were the evaluation defaults and are, since
+2026-10-21, the **selected production dependencies** (RFD 4, M3.0); dart-pdf
+stays a comparison record only.
 
 ## Evidence and reproducibility
 

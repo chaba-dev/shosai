@@ -4,35 +4,51 @@ Implements link:README.adoc[RFD 4: Cross-platform Flutter frontend].
 
 == Purpose
 
-Replace the unreleased Iced presentation layer with one Flutter frontend for
-desktop, phone, and tablet while retaining a platform-neutral Rust application
-core. Keep web viable through an explicit WASM or service adapter rather than
-assuming native FFI works in a browser.
+Build Shōsai as one Dart and Flutter application for desktop, phone, and
+tablet: Dart document engines and a Dart application core under the Flutter
+presentation, with no native bridge of the project's own. Keep web viable
+through the bindings' browser builds or an explicit service adapter rather
+than assuming native libraries work in a browser.
 
 == Current baseline
 
-* `crates/shosai-app` is an Iced desktop application that directly constructs
-core stores and documents and also owns reader sessions, EPUB pagination,
-caches, import orchestration, and platform integration.
-* `crates/shosai-core` owns parsing, PDF/CBZ rendering, EPUB presentation,
-search, library persistence, reading state, and bookmarks, but its public API
-is not yet designed as a Dart bridge or browser boundary. (EPUB presentation
-ownership was amended on 2026-09-28; see M3.2.)
-* RFD 6 Phase 0 has proved cross-format selection endpoints and bounded retained
-geometry with real Iced/PDFium/cosmic-text paths. This evidence is sufficient
-to stop extending the Iced proof and use highlighting as the Flutter slice.
-* The application is unreleased. Development databases and internal APIs may
-be reset or replaced rather than carrying temporary compatibility machinery.
+As of 2026-10-21, after the Iced application and CBZ support were removed:
+
+* `flutter/` is the application. `flutter/packages/shosai_epub` is the Dart
+EPUB engine and serves paginated chapters, navigation and selection behind the
+reader (adopted 2026-09-28, slices 2 to 5 merged). The library, reader chrome,
+PDF reader, annotations, bookmarks, reading state and search reach the Rust
+core through `flutter_rust_bridge` (`flutter/rust_builder`,
+`flutter/lib/src/rust`).
+* `crates/shosai-core` still owns PDF rendering through `pdfium-render`, the
+SQLite store (`sqlx`, eleven tables, ordered migrations), library and import,
+bookmarks, reading state, annotations and anchors, and search; its EPUB
+modules are the retained fallback renderer the Dart engine's routing gate falls
+back to. `crates/shosai-flutter-bridge` is the generated boundary.
+* M0 to M2 are complete and were measured on that Rust boundary; their records
+(link:PHASE-0.adoc[Phase 0], link:PHASE-1.adoc[Phase 1],
+link:PHASE-2.adoc[Phase 2]) stay as evidence. M3.1 delivered the library slice
+on it.
+* The application is unreleased. Development databases, persisted anchors and
+internal APIs may be reset or replaced rather than carrying temporary
+compatibility machinery; no development data is deleted without an explicit
+reset decision.
 
 == Delivery rules
 
-* Preserve behavior while extracting core responsibilities, then change the
-frontend. Do not simultaneously redesign a domain contract and its Flutter
-presentation without executable core tests.
-* Iced is historical reference only; build nothing new in it. Its removal is
-its own change (RFD 4, Proposal).
-* Move policy and domain behavior into core; leave widgets, gestures, navigation,
-lifecycle, and platform capabilities in Flutter adapters.
+* The application is Dart only (RFD 4, Decisions, 2026-10-21). Build nothing
+new in Rust; port behaviour from the Rust core with its tests, then delete the
+crate. A Rust leaf plugin needs its own measured justification.
+* Replace the core behind the retained UI in stacked slices (M3.0) before the
+reader by format (M3.2) builds on it. A slice names the gates it closes and
+the gates it leaves open; merging a slice is delivery, not acceptance.
+* Preserve behavior while replacing a module. Do not simultaneously redesign a
+domain contract and its Flutter presentation without executable core tests.
+* Iced is historical reference only; its removal is its own change (RFD 4,
+Proposal).
+* Keep policy and domain behavior in the application core package; leave
+widgets, gestures, navigation, lifecycle, and platform capabilities in Flutter
+adapters.
 * Every native dependency must pass build, packaging, lifecycle, memory, and
 license gates on each claimed target. Desktop success is not mobile evidence.
 * Do not delay native delivery on web, push notifications, cloud sync, or all
@@ -88,6 +104,10 @@ and the switcher.
 == M0 — Freeze the boundary and migration slice
 
 Status:: DONE
+
+M0 to M2 were planned and measured on the Rust core and the Dart/Rust bridge.
+Their tasks and records are kept as written; the boundary they froze was
+replaced by the 2026-10-21 decision (M3.0).
 
 * [x] Approve RFD 4's single-frontend direction and record the initial supported
 desktop and mobile target matrix.
@@ -241,6 +261,57 @@ Phase 3 is split into independently reviewable vertical sub-milestones. A
 sub-milestone may ship without implying the remaining reader, platform, or
 data work is done.
 
+=== M3.0 — Replace the Rust core with Dart
+
+Status:: TODO
+
+Decided 2026-10-21 (RFD 4, Decisions). Each slice is one reviewable PR
+stacked on the previous one, lands behind the retained library and reader UI,
+and keeps the M2 and M3.1 interaction, lifecycle, restoration and
+accessibility coverage green.
+
+* [ ] *PDF engine.* Add the Dart-owned PDFium binding (`pdfrx` as evaluated,
+with its PDFium version and checksums pinned) behind a controller-owned PDF
+engine adapter: open and admission, page size and count, rendering at the
+active zoom and display density into bounded owned bitmaps with cancellation
+and release, page text with character bounds and mapping status for the RFD 6
+PDF selection adapter, links, outlines and internal destinations for
+outcome 5, encryption and permission state. Record how document permissions
+are enforced, or that they are not. Prove the fixture corpus and the M0 raster
+budgets on Linux, macOS and a physical Android device; the retained Rust PDF
+path is deleted in the same slice.
+* [ ] *Store.* Add the Dart SQLite binding (`sqlite3`; `drift` only if typed
+queries and migration tooling justify its code generation) in the application
+core package, with a single connection owner, ordered migrations written fresh
+for the Dart schema (no migration of development databases), WAL, background
+isolate access where the binding supports it, and process-death recovery.
+Prove that the bundled SQLite library loads from the packaged Linux and macOS
+hosts and the Android build.
+* [ ] *Records.* Port library and import (referenced and private managed
+copies, bounded archive preflight, cover extraction, deferred cleanup,
+duplicate detection by content identity), open books and reading state,
+bookmarks, annotations with layered anchors, resolution states and bounded
+quote recovery, and search over book text, into the Dart core with the Rust
+integration tests ported as Dart tests. Anchor exact, recovered, ambiguous and
+orphaned behaviour across relayout and changed bytes matches the M2 evidence.
+The EPUB engine's canonical-stream parity gate against the Rust stream is
+retired with the Rust stream; the engine's own fixtures become the reference.
+* [ ] *Removal.* Delete `crates/`, `Cargo.toml`, `Cargo.lock`,
+`flutter/rust_builder`, `flutter/lib/src/rust`, the `flutter_rust_bridge`
+and `ffigen` dependencies, the bridge codegen and `check-frb` Makefile
+targets, the Rust format, lint, test and bridge-codegen CI jobs, the Rust
+toolchain and `pdfium-binaries` from the Nix flake and the Windows CI job,
+`scripts/generate-theme-tokens.py`'s Rust authority entries, and the
+retained-renderer routing gate in the EPUB reader. Rewrite the Makefile's
+`test`, `lint` and `fmt` targets around Flutter and the scripts.
+* [ ] *Documents.* Update the Flutter architecture contract, the roadmap, the
+design system's ownership notes, RFD 2, 3, 5 and 6 where they name the Rust
+core, and record the slice reports in the Dart document stack evaluation plan.
+
+*Exit*: the Dart core gate in the RFD passes; no Rust remains in the build,
+the repository's checks or the packaged hosts, and M3.1's library slice and
+M2's highlighting slice run on the Dart core with their coverage intact.
+
 === M3.1 — Library and import vertical slice
 
 Status:: DONE
@@ -256,6 +327,9 @@ deferred managed-file cleanup without making metadata removal ambiguous.
 books through coarse core APIs with bounded resource ownership and targeted
 regressions for failure and cancellation paths.
 
+Delivered on the Rust core; M3.0 re-points it at the Dart core without
+changing its behaviour or coverage.
+
 === M3.2 — Reader by format (first-release outcomes 1 and 2)
 
 Status:: IN-PROGRESS
@@ -268,12 +342,15 @@ shortcuts, and touch interactions.
 * [ ] Complete the EPUB reader for the same applicable feature matrix.
 ** EPUB ownership was amended on 2026-09-28: the owner adopted Dart-owned EPUB
 parsing/normalization with Flutter layout
-(link:../../docs/dart-document-stack-evaluation-plan.md[decision record]). Rust retains PDF/CBZ rendering, library/import, SQLite storage,
-bookmarks, annotations, reading state and search. The Rust pagination
-package 5B is paused/superseded, and the production gates (real corpus
-including Japanese and mixed-direction text, tall table rows, fonts, scroll
-position, responsiveness, bounded retained memory and existing interaction
-coverage) remain open until a slice closes them with evidence.
+(link:../../docs/dart-document-stack-evaluation-plan.md[decision record]).
+The Rust pagination package 5B is superseded, and the production gates (real
+corpus including Japanese and mixed-direction text, tall table rows, fonts,
+scroll position, responsiveness, bounded retained memory and existing
+interaction coverage) remain open until a slice closes them with evidence.
+* Both readers are built on the Dart core (M3.0): the PDF reader on the Dart
+PDF engine, the EPUB reader on `shosai_epub` with no retained-renderer
+fallback. The first task above was delivered on the bridge and is re-pointed
+by M3.0.
 * CBZ is not part of the first release; it returns as a format package under
 link:../0002/README.adoc[RFD 2].
 
@@ -338,8 +415,9 @@ cannot affect synchronization convergence or local reading.
 
 Status:: TODO
 
-* [ ] Update RFD 5 targets to package Flutter hosts, the Rust native library,
-PDFium, assets, notices, and platform manifests as one validated artifact.
+* [ ] Update RFD 5 targets to package Flutter hosts with their pinned PDFium
+and SQLite libraries, assets, notices, and platform manifests as one validated
+artifact.
 * [ ] Add Android and iOS signing, entitlements, privacy declarations, store
 metadata, and physical-device release smoke tests independently.
 * [ ] Run the complete named screen-reader, 200% text, contrast, reduced-motion,
@@ -350,12 +428,10 @@ missing files, and revoked document-provider capabilities on every claimed
 physical desktop and mobile target.
 * [ ] Measure and pass every applicable Phase 0 performance and resource budget
 in release builds on each claimed target, including startup, installed size,
-representative large-document RSS, navigation/relayout, bridge and drag
+representative large-document RSS, navigation/relayout, engine and drag
 latency, and resource cycles.
 * [ ] Preserve independently releasable Linux, macOS, Windows, Android, and iOS
 jobs; one deferred target must not suppress validated artifacts.
-* Removing `crates/shosai-app` and its Iced-only dependencies is its own change
-and does not wait for this milestone (see Delivery rules).
 
 *Exit*: every claimed platform has an independently releasable, signed where
 required, installable artifact that launches, opens each supported format, loads
@@ -365,24 +441,25 @@ native dependencies, and passes recovery smoke tests.
 
 Status:: TODO
 
-* [ ] Classify core modules by WASM portability and identify native filesystem,
-SQLite, PDFium, dynamic-library, threading, and font dependencies.
-* [ ] Compare a local WASM/browser-storage design with a remote application
-service using opening, EPUB, PDF, search, and one annotation as the slice.
-* [ ] Validate browser file capabilities, IndexedDB/OPFS or service persistence,
-PDF adapter fidelity, service-worker lifecycle, accessibility, memory, and
-offline behavior.
-* [ ] Record a separate go/no-go decision. Do not weaken native core ownership
-or security boundaries merely to advertise a web target.
+* [ ] Classify the Dart core and engines by browser portability and identify
+the filesystem, SQLite, PDFium, isolate, and font dependencies that need a
+browser build or an adapter.
+* [ ] Compare the bindings' browser builds (PDFium as WebAssembly, SQLite as
+WebAssembly over IndexedDB or OPFS) with a remote application service using
+opening, EPUB, PDF, search, and one annotation as the slice.
+* [ ] Validate browser file capabilities, persistence, PDF fidelity,
+service-worker lifecycle, accessibility, memory, and offline behavior.
+* [ ] Record a separate go/no-go decision. Do not weaken core ownership or
+security boundaries merely to advertise a web target.
 
-*Exit*: a recorded go/no-go decision compares measured local-WASM and service
-evidence, names unsupported browser capabilities, and leaves native delivery
-unblocked.
+*Exit*: a recorded go/no-go decision compares measured browser-build and
+service evidence, names unsupported browser capabilities, and leaves native
+delivery unblocked.
 
 == Verification and acceptance
 
-* Core behavior and bridge contracts have deterministic Rust tests independent
-of Flutter and Iced.
+* Core behavior and engine contracts have deterministic Dart tests independent
+of Flutter widgets.
 * Flutter integration tests cover representative desktop, phone, and tablet
 states plus mouse, keyboard, touch, lifecycle, and restoration.
 * Every claimed format and platform passes malformed/oversized fixtures, bounded
@@ -397,7 +474,8 @@ crash diagnostics, notification payloads, or lock screens by default.
 == Open questions
 
 * Which Android/iOS platform ships first after physical-device evidence?
-* Which native dependencies require platform adapters or replacement?
+* Which pinned PDFium and SQLite builds ship on each target, and who owns
+updating them?
 * Does web use local WASM/browser storage, a remote service, or remain deferred?
 * Which notification use cases justify interruption, and which are better shown
 as in-app sync or activity state?

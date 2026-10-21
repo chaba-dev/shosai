@@ -6,9 +6,14 @@ Implements link:README.adoc[RFD 3: Cloud synchronization].
 
 Add optional, dependable synchronization of reading progress, bookmarks, and
 annotations without making local reading depend on a network service. This
-plan extends the SQLite-backed APIs in `crates/shosai-core` and exposes
-configuration and status through the cross-platform Flutter frontend proposed
-by RFD 4.
+plan extends the SQLite-backed records of the Dart application core (RFD 4,
+Dart-only since 2026-10-21) and exposes configuration and status through the
+Flutter frontend.
+
+NOTE: The `crates/shosai-core` paths below describe the Rust store this plan
+was written against; RFD 4's milestone M3.0 ports those records to Dart. The
+plan is re-pointed at the Dart core when this RFD leaves ideation; its
+identity, conflict and privacy rules are unchanged.
 
 === Goals
 
