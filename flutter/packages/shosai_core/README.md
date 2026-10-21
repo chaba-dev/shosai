@@ -64,6 +64,7 @@ the one Flutter pins.
 | `ReaderSettingsStore` | reading mode, theme, EPUB font size and line spacing, PDF zoom, over `Preferences` |
 | `Bookmarks` | point bookmarks with an optional title and note (1,024 per book, 4 MiB Markdown export) |
 | `Annotations` | highlights with an optional note, anchored in text and resolved against the open book (below) |
+| `searchBook` | case-insensitive in-document search over the open book's unit texts (below) |
 
 Reading state and bookmarks are keyed by the book's content hash, not its
 library row, so they survive removing and re-importing the same book. The
@@ -174,6 +175,20 @@ PDF rectangles are stored as float32 and checked after rounding, so none is
 stored infinite or empty. A document holds at most 1,024 live
 annotations, 65,536 PDF rectangles and an estimated 8 MiB, and spans at most
 128 versions; deletion leaves a tombstone for synchronization.
+
+### Search
+
+`searchBook` finds every occurrence of a query in the unit texts a
+`UnitTextSource` supplies, in unit order, with offsets and lengths in Unicode
+scalars and up to 40 scalars of context on each side. Matching uses Unicode
+full case folding (`tool/generate_case_fold.py` regenerates the table from
+Python's `str.casefold`), so "STRASSE" finds "Straße", and a match covers
+whole characters only: "s" never matches half of "ß". The search is one
+linear Knuth-Morris-Pratt pass per unit, run in other isolates about 1 MiB of
+text at a time with cancellation checked between runs. A query is at most
+4 KiB, one search covers at most 8 MiB of text and returns at most 10,000
+matches and 8 MiB of results; past a limit it fails with `limitExceeded`
+instead of returning a truncated list.
 
 Errors are `CoreException`s whose `CoreErrorKind` the controllers map to
 their own messages.
