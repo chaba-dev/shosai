@@ -263,7 +263,7 @@ data work is done.
 
 === M3.0 — Replace the Rust core with Dart
 
-Status:: TODO
+Status:: IN-PROGRESS
 
 Decided 2026-10-21 (RFD 4, Decisions). Each slice is one reviewable PR
 stacked on the previous one, lands behind the retained library and reader UI,
@@ -287,6 +287,12 @@ for the Dart schema (no migration of development databases), WAL, background
 isolate access where the binding supports it, and process-death recovery.
 Prove that the bundled SQLite library loads from the packaged Linux and macOS
 hosts and the Android build.
+Started 2026-10-21 in `flutter/packages/shosai_core`: one worker isolate
+owns the only connection; ordered migrations stamp `user_version` and an
+`application_id`, and refuse foreign or newer databases untouched; WAL with a
+killed-writer recovery test. `package:sqlite3` 3.7.1 bundles SQLite 3.54.0
+through its build hook. Open: the packaged-host and Android load proofs, which
+need the app to depend on the package.
 * [ ] *Records.* Port library and import (referenced and private managed
 copies, bounded archive preflight, cover extraction, deferred cleanup,
 duplicate detection by content identity), open books and reading state,
