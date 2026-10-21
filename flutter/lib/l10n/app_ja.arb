@@ -114,7 +114,6 @@
   "readerNextResult": "次の結果",
   "readerCloseSearch": "検索を閉じる",
   "noticeReaderExportSucceeded": "ブックマークをMarkdownとしてコピーしました",
-  "noticeReaderChapterPaginated": "この章は連続スクロールで表示するには長すぎるため、ページ単位で表示します",
   "readerSelectionActions": "選択操作",
   "readerCopy": "コピー",
   "readerSelectionCancel": "キャンセル",
