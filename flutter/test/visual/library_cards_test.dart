@@ -331,12 +331,13 @@ void main() {
             ),
           );
           expect(token.didExceedMaxLines, isTrue);
-          // The Japanese title fills its two whole lines at this width, which
-          // is what the tile's measured reservation accounts for.
+          // The Japanese title fills its two whole lines at this width, the
+          // last keeping the face's own descent, which is what the tile's
+          // measured reservation accounts for.
           final japanese = tester.renderObject<RenderParagraph>(
             cardTitle('海辺の図書館 — 失われた書架をめぐる長い旅路'),
           );
-          expect(japanese.size.height, closeTo(2 * 18, 0.6));
+          expect(japanese.size.height, inInclusiveRange(2 * 18, 2 * 18 + 2));
         },
       );
     });

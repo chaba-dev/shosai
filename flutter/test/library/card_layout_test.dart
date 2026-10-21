@@ -598,8 +598,9 @@ void main() {
       final title = cardTitle('海辺の図書館 — 失われた書架をめぐる長い旅路');
       final paragraph = tester.renderObject<RenderParagraph>(title);
       // Two whole lines in a phone's narrow column, never a line cut
-      // mid-glyph (finding F8).
-      expect(paragraph.size.height, closeTo(2 * 17, 0.6));
+      // mid-glyph (finding F8). The last line keeps the face's own descent, a
+      // pixel or two below its 17 px line.
+      expect(paragraph.size.height, inInclusiveRange(2 * 17, 2 * 17 + 2));
       final card = tester.getRect(cardFor('海辺の図書館 — 失われた書架をめぐる長い旅路'));
       final rect = tester.getRect(title);
       expect(card.contains(rect.topLeft), isTrue);

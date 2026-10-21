@@ -112,9 +112,14 @@ double libraryCardTileExtent(BuildContext context, LibraryShelf shelf) =>
     _cardMetadataBox(context) +
     _cardProgressHeight;
 
-/// The title box: two lines of the card's editorial title.
-double _cardTitleBox(BuildContext context, LibraryShelf shelf) =>
-    _lineHeight(context, _cardTitleStyle(shelf)) * 2;
+/// The title box: two lines of the card's editorial title, the second
+/// keeping the face's own descent ([_cardTitleHeightBehavior]).
+double _cardTitleBox(BuildContext context, LibraryShelf shelf) => _textHeight(
+  context,
+  _cardTitleStyle(shelf),
+  lines: 2,
+  textHeightBehavior: _cardTitleHeightBehavior,
+);
 
 /// Whether the card's meta line wraps into a second run: above 100% text a
 /// format badge and a status no longer share a column's width.
@@ -153,14 +158,24 @@ const double _cardBadgePaddingVertical = 3;
 const double _cardMetadataRunSpacing = 4;
 
 /// The height one line of [style] paints at the ambient text scale.
+double _lineHeight(BuildContext context, TextStyle style) =>
+    _textHeight(context, style);
+
+/// The height [lines] lines of [style] paint at the ambient text scale.
 ///
 /// Measured with a Japanese glyph as well as a Latin one, because a card's
 /// title and status can each be Japanese and the tile has to fit the taller.
-double _lineHeight(BuildContext context, TextStyle style) {
+double _textHeight(
+  BuildContext context,
+  TextStyle style, {
+  int lines = 1,
+  TextHeightBehavior? textHeightBehavior,
+}) {
   final painter = TextPainter(
-    text: TextSpan(text: 'Mあ', style: style),
+    text: TextSpan(text: List.filled(lines, 'Mあ').join('\n'), style: style),
     textScaler: MediaQuery.textScalerOf(context),
     textDirection: TextDirection.ltr,
+    textHeightBehavior: textHeightBehavior,
   )..layout();
   final height = painter.height;
   painter.dispose();
@@ -170,6 +185,15 @@ double _lineHeight(BuildContext context, TextStyle style) {
 /// The card title: `ed-title`, 14/18 on the shelf and 13/17 on a phone's.
 TextStyle _cardTitleStyle(LibraryShelf shelf) =>
     shelf.phone ? shellEditorialStyle(13, 17) : shellEditorialStyle(14, 18);
+
+/// The card title's last line keeps the face's own descent.
+///
+/// `ed-title` leading is tighter than Literata's ascent and descent, so a
+/// descender on the last line reaches past the paragraph, and an ellipsized
+/// title clips it to its box: on macOS the cut is a visible pixel row.
+const _cardTitleHeightBehavior = TextHeightBehavior(
+  applyHeightToLastDescent: false,
+);
 
 /// The card's meta line: `ui-caption` in `ink-muted`, with tabular figures so
 /// percentages line up across the shelf.
@@ -1192,6 +1216,7 @@ class LibraryBookCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.start,
+                      textHeightBehavior: _cardTitleHeightBehavior,
                       style: _cardTitleStyle(
                         shelf,
                       ).copyWith(color: palette.ink),
