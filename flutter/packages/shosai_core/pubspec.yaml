@@ -10,6 +10,7 @@ environment:
   sdk: ^3.11.3
 
 dependencies:
+  characters: ^1.4.1
   crypto: ^3.0.6
   image: ^4.12.0
   path: ^1.9.1
@@ -18,6 +19,7 @@ dependencies:
   # Bundles SQLite through its build hook (no system library); see the
   # package README for the pinned binary and the hosts it was proven on.
   sqlite3: 3.5.2
+  unorm_dart: ^0.3.3
 
 dev_dependencies:
   lints: ^6.0.0
