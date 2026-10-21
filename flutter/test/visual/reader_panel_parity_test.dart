@@ -56,10 +56,7 @@ void main() {
     parityDataDirectory = await Directory.systemTemp.createTemp(
       'shosai-4c-parity-',
     );
-    parityDatabasePath = '${parityDataDirectory.path}/library.sqlite';
-    final bridge = FlutterBridge.withDatabasePath(
-      databasePath: parityDatabasePath,
-    );
+    final bridge = await _parityBridge();
     final cancellation = bridge.createCancellation();
     try {
       final report = await bridge.importPaths(
@@ -157,9 +154,7 @@ void main() {
       final recorder = RenderErrorRecorder.install();
       addTearDown(recorder.dispose);
 
-      final bridge = FlutterBridge.withDatabasePath(
-        databasePath: parityDatabasePath,
-      );
+      final bridge = (await tester.runAsync(_parityBridge))!;
       // The reader disposes this bridge when it is torn down, so it is only
       // released here if the reader never got that far.
       addTearDown(() {
@@ -640,9 +635,7 @@ final _captures = <_Capture>[
 Future<void> _seedReaderState(_Capture capture) async {
   final bookId = bookIdsForTest[capture.fixture];
   expect(bookId, isNotNull, reason: 'the fixture was seeded');
-  final bridge = FlutterBridge.withDatabasePath(
-    databasePath: parityDatabasePath,
-  );
+  final bridge = await _parityBridge();
   final cancellation = bridge.createCancellation();
   try {
     final summary = await bridge.openLibraryBook(
@@ -1304,7 +1297,13 @@ final bookPathsForTest = <String, String>{};
 
 /// The disposable data root and database the suite seeds once.
 late Directory parityDataDirectory;
-late String parityDatabasePath;
+
+/// A bridge over the parity library: the Dart core in the data directory,
+/// shared by every bridge, and the Rust bridge's database beside it.
+Future<FlutterBridge> _parityBridge() => createApplicationBridge(
+  applicationSupportDirectory: () async => parityDataDirectory,
+  databaseName: 'library.sqlite',
+);
 
 /// Crop of one widget for ink inspection (the delete control and similar).
 Future<Uint8List> _cropWidgetPng(

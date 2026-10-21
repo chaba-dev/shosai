@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
 
 /// Native add-books picker smoke test.
@@ -33,8 +32,9 @@ void main() {
     File('${directory.path}/app-pid').writeAsStringSync('$pid');
 
     await RustLib.init(externalLibrary: nativeLibrary());
-    final bridge = FlutterBridge.withDatabasePath(
-      databasePath: '${directory.path}/smoke.sqlite3',
+    final bridge = await createApplicationBridge(
+      applicationSupportDirectory: () async => directory,
+      databaseName: 'smoke.sqlite3',
     );
     addTearDown(bridge.dispose);
 

@@ -93,6 +93,16 @@ void main() {
           'SHOSAI_EPUB_INTERACTIVE_OUT together (or none)',
         );
       }
+      // The disposable library is a copy of the application's
+      // `library.sqlite3`; its directory stands in for the application-support
+      // directory, so every bridge shares the one Dart core over it.
+      if (dbPath.split(Platform.pathSeparator).last != 'library.sqlite3') {
+        fail('SHOSAI_EPUB_INTERACTIVE_DB must name a library.sqlite3 copy');
+      }
+      Future<FlutterBridge> libraryBridge() => createApplicationBridge(
+        applicationSupportDirectory: () async => File(dbPath).parent,
+        databaseName: 'documents.sqlite3',
+      );
       final out = Directory(outDir)..createSync(recursive: true);
       final manifest =
           jsonDecode(File(manifestPath).readAsStringSync())
@@ -459,8 +469,8 @@ void main() {
             // Each book runs against its own bridge, like a fresh production
             // app launch: the reader disposes the bridge it owns when idle
             // after teardown, so a shared bridge would be dead for the next
-            // book. The disposable database file is shared across bridges.
-            bookBridge = FlutterBridge.withDatabasePath(databasePath: dbPath);
+            // book. The disposable library is shared across bridges.
+            bookBridge = await libraryBridge();
             // Locate the book row in the disposable library.
             FlutterLibraryBook? row;
             for (var offset = 0; row == null; offset += 100) {
@@ -843,7 +853,7 @@ void main() {
             await mark(id, 'teardown');
             await tester.pumpWidget(const SizedBox.shrink());
             await settle();
-            reopenBridge = FlutterBridge.withDatabasePath(databasePath: dbPath);
+            reopenBridge = await libraryBridge();
             reopenBridgeHanded = true;
             await tester.pumpWidget(
               ShosaiShell(
