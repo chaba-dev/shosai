@@ -429,6 +429,66 @@ void main() {
     expectTargets(find.byType(ShellReadingNowCards), 'phone Reading now');
   });
 
+  testWidgets(
+    'a short sidebar with open books scrolls instead of overflowing',
+    (tester) async {
+      // 900 x 400 at 200% text: the wordmark, places, Reading now and Add books
+      // need more height than the window has.
+      const HarnessView(size: Size(900, 400), textScale: 2).apply(tester);
+      final recorder = _Recorder();
+      await tester.pumpWidget(
+        productionShell(
+          home: Scaffold(
+            body: ShellFrame(
+              layout: ShellLayout.forWidth(900),
+              model: _model(),
+              covers: const {},
+              actions: recorder.actions,
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expectOnlyKnownDefects(
+        await findRenderDefects(tester),
+        const <KnownRenderDefect>[],
+      );
+
+      // The keyboard reaches the last open book and Add books, and each is
+      // scrolled into the window when it takes focus.
+      final sidebar = tester.getRect(find.byType(ShellSidebar));
+      for (final label in ['吾輩は猫である', 'Add books']) {
+        final target = find.text(label);
+        bool focused() {
+          final context = FocusManager.instance.primaryFocus?.context;
+          return context != null &&
+              find
+                  .ancestor(of: target, matching: find.byWidget(context.widget))
+                  .evaluate()
+                  .isNotEmpty;
+        }
+
+        for (var i = 0; i < 40 && !focused(); i += 1) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pumpAndSettle();
+        }
+        expect(focused(), isTrue, reason: '$label takes focus');
+        final rect = tester.getRect(target);
+        expect(
+          rect.top >= sidebar.top && rect.bottom <= sidebar.bottom,
+          isTrue,
+          reason: '$label at $rect is inside the sidebar $sidebar',
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+      }
+      expect(recorder.opened, [3]);
+      expect(recorder.adds, 1);
+    },
+  );
+
   testWidgets('the Japanese sidebar keeps its labels unspaced', (tester) async {
     await _pumpFrame(
       tester,

@@ -49,41 +49,50 @@ class ShellSidebar extends StatelessWidget {
           border: BorderDirectional(end: BorderSide(color: palette.line)),
         ),
         padding: const EdgeInsets.fromLTRB(14, 20, 14, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          spacing: 6,
-          children: [
-            const Padding(
-              padding: EdgeInsetsDirectional.fromSTEB(6, 0, 6, 14),
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: ShellWordmark(),
+        // One scroll view holds the whole stack, so a short window (or large
+        // text) scrolls to every place, book and Add books instead of
+        // overflowing; while there is room, Add books stays at the foot.
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 6,
+                children: [
+                  const Padding(
+                    padding: EdgeInsetsDirectional.fromSTEB(6, 0, 6, 14),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: ShellWordmark(),
+                    ),
+                  ),
+                  if (layout == ShellLayout.desktop)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _SidebarSearchButton(
+                        onPressed: () => actions.selectPlace(ShellPlace.search),
+                      ),
+                    ),
+                  for (final (place, icon) in _places)
+                    _PlaceRow(
+                      icon: icon,
+                      label: shellPlaceLabel(l10n, place),
+                      touch: layout.touch,
+                      current: !model.reading && model.place == place,
+                      onPressed: () => actions.selectPlace(place),
+                    ),
+                  if (open.isNotEmpty)
+                    _SidebarHead(
+                      label: l10n.shellReadingNow,
+                      count: '${open.length}',
+                    ),
+                ],
               ),
             ),
-            if (layout == ShellLayout.desktop)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _SidebarSearchButton(
-                  onPressed: () => actions.selectPlace(ShellPlace.search),
-                ),
-              ),
-            for (final (place, icon) in _places)
-              _PlaceRow(
-                icon: icon,
-                label: shellPlaceLabel(l10n, place),
-                touch: layout.touch,
-                current: !model.reading && model.place == place,
-                onPressed: () => actions.selectPlace(place),
-              ),
-            if (open.isNotEmpty) ...[
-              _SidebarHead(
-                label: l10n.shellReadingNow,
-                count: '${open.length}',
-              ),
-              Expanded(
-                child: ReorderableListView.builder(
-                  buildDefaultDragHandles: false,
-                  padding: EdgeInsets.zero,
+            if (open.isNotEmpty)
+              SliverPadding(
+                padding: const EdgeInsets.only(top: 6),
+                sliver: SliverReorderableList(
                   itemCount: open.length,
                   onReorder: (from, to) =>
                       actions.moveBook(from, to > from ? to - 1 : to),
@@ -108,15 +117,25 @@ class ShellSidebar extends StatelessWidget {
                   },
                 ),
               ),
-            ] else
-              const Spacer(),
-            _PlaceRow(
-              icon: LucideIcons.plus,
-              label: l10n.addBooksAction,
-              touch: layout.touch,
-              current: false,
-              muted: true,
-              onPressed: actions.addBooks,
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: _PlaceRow(
+                      icon: LucideIcons.plus,
+                      label: l10n.addBooksAction,
+                      touch: layout.touch,
+                      current: false,
+                      muted: true,
+                      onPressed: actions.addBooks,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
