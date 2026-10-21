@@ -10,7 +10,7 @@ authoritative merely because it exists; its `state` says how it should be read.
 |link:0001/README.adoc[1: Enhanced EPUB rendering] |Native EPUB engine decision, fidelity, resource policy, and reader integration
 |link:0002/README.adoc[2: Additional ebook formats] |Format extensibility, plain text/Markdown, DjVu, FB2, MOBI/AZW3, and CBR
 |link:0003/README.adoc[3: Cloud synchronization] |Portable identity, offline-first records, conflict handling, transport, and privacy
-|link:0004/README.adoc[4: Cross-platform Flutter frontend] |One Flutter UI and what it ships first: devices, one reader for EPUB and PDF, open books, references; shared Rust boundaries, web feasibility, notifications
+|link:0004/README.adoc[4: Cross-platform Flutter frontend] |One Dart and Flutter application and what it ships first: devices, one reader for EPUB and PDF, open books, references; document engines and application core, web feasibility, notifications
 |link:0005/README.adoc[5: Distribution and packaging] |Linux, Windows, macOS, Android, and iOS artifacts, signing, and shared release assets
 |link:0006/README.adoc[6: Cross-format highlighting, notes and search] |Shared selection UX, EPUB/PDF anchors, page and book notes, library-wide search, persistence, and recovery
 |===

@@ -8,10 +8,13 @@
 
 Shōsai (書斎, "study/reading room") is an ebook reader for EPUB and PDF, with
 comic archives planned after the first release (RFD 2). The executable is the
-Flutter application over the Rust document/application core described in RFD 4;
-the earlier Rust/Iced desktop application was removed on 2026-10-20 and the
-tree below records the structure as it was. CBZ support left the core the same
-day and returns as a format package after the first release.
+Dart and Flutter application described in RFD 4: Dart document engines and a
+Dart application core under the Flutter presentation. The earlier Rust/Iced
+desktop application was removed on 2026-10-20 and the tree below records the
+structure as it was; CBZ support left the core the same day and returns as a
+format package after the first release. On 2026-10-21 the owner decided to
+replace the remaining Rust core and the Dart/Rust bridge with Dart before the
+first-release reader work builds on them (RFD 4, milestone M3.0).
 
 ** Goals
 
@@ -20,23 +23,24 @@ day and returns as a format package after the first release.
 - Clean library management for book collections
 - Customizable reading experience (fonts, themes, layout)
 - Permissively licensed (Apache-2.0)
-- One responsive Flutter presentation codebase backed by the Rust core
-- An independently evaluated web path through WASM or a service boundary
+- One Dart and Flutter codebase: engines, application core and presentation
+- An independently evaluated web path through the bindings' browser builds or
+  a service boundary
 
 * Technology Stack — Current Baseline and Target
 
 | Component     | Crate/Tool             | License          | Direction                                      |
 |---------------+------------------------+------------------+------------------------------------------------|
-| Core language | Rust (edition 2024)    | —                | Retained; Rust 1.94.0 via Nix flake            |
-| Frontend      | ~iced~ 0.14 → Flutter  | MIT / BSD-3-Clause | Iced reference replaced after Flutter gates  |
-| Bridge        | To be selected         | —                | Measured Dart/Rust FFI spike under RFD 4       |
-| PDF rendering | ~pdfium-render~        | Apache-2.0 / MIT | Retained behind owned Rust buffers             |
-| EPUB parsing  | ~zip~ + ~roxmltree~    | MIT              | Retained custom admitted parser                |
-| EPUB display  | Rust model + Flutter   | —                | Rendering boundary selected by measured spike  |
-| CBZ support   | ~zip~ + ~image~        | MIT / Apache-2.0 | Retained extraction and bounded image handling |
+| Core language | Rust (edition 2024) → Dart | —            | Rust core replaced by Dart (RFD 4 M3.0, 2026-10-21) |
+| Frontend      | ~iced~ 0.14 → Flutter  | MIT / BSD-3-Clause | Iced removed 2026-10-20; Flutter is the app  |
+| Bridge        | ~flutter_rust_bridge~ → none | MIT        | Removed with the Rust core (M3.0)              |
+| PDF rendering | ~pdfium-render~ → ~pdfrx~ | Apache-2.0 / MIT | Dart-owned PDFium binding, pinned per target |
+| EPUB engine   | ~shosai_epub~ (Dart)   | Apache-2.0       | Adopted 2026-09-28; the one EPUB parser        |
+| EPUB display  | Flutter layout         | —                | ~TextPainter~ layout over the Dart engine      |
+| CBZ support   | after the first release | —               | Returns as a Dart format package (RFD 2)       |
 | Platform APIs | Flutter plugins/adapters | Varies         | Files, lifecycle, secure storage, notifications |
-| Database      | ~sqlx~                 | MIT / Apache-2.0 | Native SQLite; web requires a separate adapter |
-| Text shaping  | ~cosmic-text~          | MIT / Apache-2.0 | Retained where renderer-neutral layout needs it |
+| Database      | ~sqlx~ → ~sqlite3~ (Dart) | MIT / Apache-2.0 | Dart SQLite binding; ~drift~ only if justified |
+| Text shaping  | Flutter                | BSD-3-Clause     | Engine-side shaping; ~cosmic-text~ leaves with Rust |
 | Build/Dev     | Nix + Flutter tooling  | —                | Reproducible native builds per target          |
 
 ** Licensing Decisions
@@ -83,26 +87,28 @@ shosai/
 This tree records the executable baseline and historical phase results. It is
 not the target frontend architecture.
 
-** Target Architecture — RFD 4
+** Target Architecture — RFD 4 (revised 2026-10-21)
 
 #+begin_src
 Flutter desktop / mobile hosts
-             │
-             ▼
-owned, coarse Dart/Rust bridge DTOs and handles
-             │
-             ▼
-shosai-core
-├── document admission, parsing, and format capabilities
-├── reader sessions, renderer-neutral layout, caches, and search
-├── library, reading state, bookmarks, annotations, and sync
-└── injected native storage, files, PDFium, and platform adapters
+├── presentation: navigation, layouts, gestures, accessibility, adapters
+│            │ typed commands and effects (Elm-style controller boundary)
+│            ▼
+├── application core (Dart package, no widgets)
+│   ├── library and import, open books, reading state, bookmarks
+│   ├── annotations, anchors, notes, search, notification intents
+│   └── SQLite store (sqlite3 binding; single writer, ordered migrations)
+│            │ canonical text, locations, geometry
+│            ▼
+└── document engines (Dart packages)
+    ├── shosai_epub: parse, normalize, admit; Flutter lays out and paints
+    └── PDF: Dart-owned PDFium binding; render, text, links, outlines
 #+end_src
 
-The Flutter frontend owns responsive presentation, navigation, gestures,
-accessibility, lifecycle, and platform-service adapters. The Rust core remains
-testable without Flutter or Iced. RFD 4 tracks extraction and the Flutter gate;
-RFD 5 tracks independently releasable packages.
+Everything is Dart. Engines never produce geometry for pixels they did not lay
+out; the core is the only database writer; the controller owns every native
+resource. RFD 4 tracks the replacement of the Rust core (M3.0) and the
+first-release outcomes; RFD 5 tracks independently releasable packages.
 
 * Phase 1 — Foundation & PDF Viewer (MVP)
 :PROPERTIES:
@@ -302,15 +308,18 @@ RFD: [[file:../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
 ** TODO Cross-platform Flutter frontend
 RFD: [[file:../rfd/0004/README.adoc][RFD 4: Cross-platform Flutter frontend]]
 
-- [ ] Move coherent application policy, EPUB pagination, reader sessions, and
-  renderer-neutral geometry from the Iced app into the Rust core
+- [X] Move coherent application policy, EPUB pagination, reader sessions, and
+  renderer-neutral geometry from the Iced app into the Rust core (M1)
 - [X] Implement RFD 6's renderer-independent annotation model and SQLite store
-- [ ] Use cross-format highlighting as the first Flutter desktop/mobile slice
-- [ ] Prove the Flutter/Rust boundary on desktop and at least one physical mobile
-  platform, then validate each additional platform before claiming support
-- [ ] Migrate PDF, EPUB, and CBZ readers plus the library shell before retiring
-  the Iced reference frontend
-- [ ] Evaluate Flutter Web separately through WASM or service adapters
+- [X] Use cross-format highlighting as the first Flutter desktop/mobile slice
+  (M2, Linux and a physical Android device)
+- [X] Retire the Iced reference frontend (2026-10-20)
+- [ ] Replace the Rust core and the bridge with the Dart PDF engine, the Dart
+  SQLite store and ported records, then delete the crates (M3.0)
+- [ ] Build the Bookshelf shell and the PDF and EPUB readers on the Dart core
+  (M3), then validate each additional platform before claiming support
+- [ ] Evaluate Flutter Web separately through the bindings' browser builds or
+  a service adapter
 
 ** TODO Distribution & packaging
 RFD: [[file:../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]

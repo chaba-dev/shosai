@@ -16,8 +16,9 @@ Flutter application must preserve.
 
 Treat AppImage, Flatpak, Windows installers, macOS Developer ID
 signing/notarization, Android/iOS store packages, and shared icons/metadata as
-independent work packages. Each native package owns its Flutter host, Rust
-library and bridge, PDFium placement and pinning, architecture validation,
+independent work packages. Each native package owns its Flutter host, the
+pinned PDFium and SQLite libraries its Dart bindings load, architecture
+validation,
 installation and launch smoke tests, licenses, update expectations, and
 platform-specific security boundaries.
 
@@ -30,8 +31,8 @@ RFD 4's Flutter feasibility and parity gates precede new production packaging.
 Nix and existing archives may continue validating the Iced reference during
 migration, but new package recipes must be derived from the Flutter artifact
 rather than preserving Cargo-binary assumptions. Web deployment remains a
-separate feasibility result because it cannot package native FFI or PDFium in
-the same way.
+separate feasibility result because it packages the bindings' browser builds
+rather than native libraries.
 
 == Implementation
 

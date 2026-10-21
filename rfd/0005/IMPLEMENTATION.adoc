@@ -8,7 +8,12 @@ This document plans distribution of the Flutter application proposed by RFD 4.
 Each work package below is independently deliverable: it may be implemented,
 reviewed, and released without waiting for any other package. Existing Iced
 artifacts record validated packaging techniques but do not constrain the
-unreleased Flutter host, Rust library, bridge, or native-library layout.
+unreleased Flutter host or its native-library layout.
+
+NOTE: Package items below that name a Rust library, bridge or Cargo toolchain
+predate RFD 4's 2026-10-21 decision for a Dart-only core (milestone M3.0);
+the artifact for each target is the Flutter host with the pinned PDFium and
+SQLite libraries its Dart bindings load.
 
 == Current Repository State
 
