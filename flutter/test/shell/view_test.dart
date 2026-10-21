@@ -149,6 +149,47 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('labeled shell controls activate through their semantics', (
+    tester,
+  ) async {
+    // The rail's icon places, its covers and the close buttons carry their
+    // own labels; a screen reader must still be able to press them.
+    final handle = tester.ensureSemantics();
+    final recorder = _Recorder();
+    await _pumpFrame(
+      tester,
+      size: const Size(1440, 900),
+      model: _model(reading: true),
+      recorder: recorder,
+    );
+    expect(find.byType(ShellRail), findsOneWidget);
+    for (final label in ['Notes', 'A Mathematical Theory of Communication']) {
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(label)),
+        isSemantics(isButton: true, hasTapAction: true, isFocusable: true),
+        reason: label,
+      );
+    }
+    tester.semantics.tap(find.semantics.byLabel('Notes'));
+    tester.semantics.tap(
+      find.semantics.byLabel('A Mathematical Theory of Communication'),
+    );
+    expect(recorder.places, [ShellPlace.notes]);
+    expect(recorder.opened, [2]);
+
+    await _pumpFrame(
+      tester,
+      size: const Size(1440, 900),
+      model: _model(),
+      recorder: recorder,
+    );
+    tester.semantics.tap(
+      find.semantics.byLabel('Close On the Origin of Species'),
+    );
+    expect(recorder.closed, [1]);
+    handle.dispose();
+  });
+
   testWidgets('an open book closes from the hover button on desktop', (
     tester,
   ) async {

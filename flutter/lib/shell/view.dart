@@ -391,7 +391,11 @@ class _ShellPressableState extends State<_ShellPressable> {
             splashFactory: NoSplash.splashFactory,
             focusColor: palette.hover.withValues(alpha: 0),
             onFocusChange: (focused) => setState(() => _focused = focused),
-            child: widget.child,
+            // A label replaces the child's own text for assistive technology,
+            // while the InkWell keeps its tap and focus semantics.
+            child: widget.semanticLabel == null
+                ? widget.child
+                : ExcludeSemantics(child: widget.child),
           ),
         ),
       ),
@@ -400,7 +404,6 @@ class _ShellPressableState extends State<_ShellPressable> {
       button: true,
       selected: widget.current,
       label: widget.semanticLabel,
-      excludeSemantics: widget.semanticLabel != null,
       child: result,
     );
     if (widget.tooltip case final tooltip?) {
