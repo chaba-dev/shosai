@@ -1215,15 +1215,28 @@ class LibraryBookCard extends StatelessWidget {
                   height: _cardTitleBox(context, shelf),
                   child: Align(
                     alignment: AlignmentDirectional.topStart,
-                    child: Text(
-                      book.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.start,
-                      textHeightBehavior: _cardTitleHeightBehavior,
-                      style: _cardTitleStyle(
-                        shelf,
-                      ).copyWith(color: palette.ink),
+                    // The card prints the author only on a generated cover,
+                    // which is decoration; assistive technology hears it with
+                    // the title. The label sits outside the Text so the title
+                    // stays a plain paragraph.
+                    child: Semantics(
+                      label: book.author == null
+                          ? null
+                          : l10n.cardTitleByAuthorSemantics(
+                              book.title,
+                              book.author!,
+                            ),
+                      excludeSemantics: book.author != null,
+                      child: Text(
+                        book.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.start,
+                        textHeightBehavior: _cardTitleHeightBehavior,
+                        style: _cardTitleStyle(
+                          shelf,
+                        ).copyWith(color: palette.ink),
+                      ),
                     ),
                   ),
                 ),

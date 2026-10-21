@@ -78,6 +78,18 @@
       }
     }
   },
+  "cardTitleByAuthorSemantics": "{title}, by {author}",
+  "@cardTitleByAuthorSemantics": {
+    "description": "Semantics label for a shelf card's title: the title with its author, which the card shows only on a generated cover.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "author": {
+        "type": "String"
+      }
+    }
+  },
   "cardActionsTooltip": "Book actions",
   "@cardActionsTooltip": {
     "description": "Retained Flutter tooltip for the card's overflow action; no Iced counterpart (Iced draws a bare glyph)."

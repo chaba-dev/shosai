@@ -57,9 +57,10 @@ final class ShellCoverType {
 /// by the title, under a `brand-gold` band, with a faint sheen.
 ///
 /// Generated covers never change with the app theme. The text is decoration:
-/// the book's title and author are always printed beside or under the cover,
-/// so it is excluded from semantics and does not scale with the text size,
-/// which would only push it out of the cover.
+/// the surface that shows the cover carries the book's title and author in
+/// its own text or semantics, so the cover is excluded from semantics and
+/// does not scale with the text size, which would only push it out of the
+/// cover.
 class ShellGeneratedCover extends StatelessWidget {
   const ShellGeneratedCover({
     super.key,

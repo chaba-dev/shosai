@@ -17,6 +17,7 @@
   "cardFinished": "読了",
   "cardPercentRead": "{percentage}%",
   "cardCoverSemantics": "{title}の表紙",
+  "cardTitleByAuthorSemantics": "{title}、{author}",
   "cardActionsTooltip": "本の操作",
   "cardRemoveFromLibrary": "ライブラリから削除",
   "cardRemoveManagedCopy": "コピーも削除",

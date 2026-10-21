@@ -492,6 +492,40 @@ void main() {
       );
     });
 
+    testWidgets('a card names its author to assistive technology', (
+      tester,
+    ) async {
+      // The card prints no author row; on a generated cover the author is
+      // decoration, so the card's semantics must carry it.
+      final handle = tester.ensureSemantics();
+      await pumpLibrary(
+        tester,
+        books: const [
+          FlutterLibraryBook(
+            bookId: 5,
+            title: 'Walden',
+            author: 'Henry David Thoreau',
+            format: FlutterBookFormat.epub,
+            pathKey: '/books/walden.epub',
+            managed: true,
+            progress: 0,
+            dateAdded: '2026-09-10',
+          ),
+        ],
+      );
+      final card = find.byType(LibraryBookCard);
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.bySemanticsLabel(
+            RegExp('Walden, by Henry David Thoreau'),
+          ),
+        ),
+        findsOneWidget,
+      );
+      handle.dispose();
+    });
+
     testWidgets('only a book read to the end is finished', (tester) async {
       // Status and bar follow the progress itself; the shown percentage is
       // the only rounded value.

@@ -64,6 +64,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String cardTitleByAuthorSemantics(String title, String author) {
+    return '$title, by $author';
+  }
+
+  @override
   String get cardActionsTooltip => 'Book actions';
 
   @override

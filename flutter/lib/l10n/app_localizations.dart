@@ -200,6 +200,12 @@ abstract class AppLocalizations {
   /// **'Cover of {title}'**
   String cardCoverSemantics(String title);
 
+  /// Semantics label for a shelf card's title: the title with its author, which the card shows only on a generated cover.
+  ///
+  /// In en, this message translates to:
+  /// **'{title}, by {author}'**
+  String cardTitleByAuthorSemantics(String title, String author);
+
   /// Retained Flutter tooltip for the card's overflow action; no Iced counterpart (Iced draws a bare glyph).
   ///
   /// In en, this message translates to:
