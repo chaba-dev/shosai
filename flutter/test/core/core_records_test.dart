@@ -94,6 +94,21 @@ final class _PdfDocument implements PdfEngineDocument {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// A PDF engine that opens documents whose metadata read and disposal fail
+/// the way an initialised-but-broken PDFium does: with plain exceptions.
+final class _FailingPdfEngine implements PdfEngine {
+  @override
+  Future<PdfEngineDocument> open(String path) async => _FailingPdfDocument();
+}
+
+final class _FailingPdfDocument extends _PdfDocument {
+  @override
+  Future<PdfDocumentInfo> info() async => throw Exception('PDFium failed');
+
+  @override
+  Future<void> dispose() async => throw Exception('PDFium failed again');
+}
+
 FlutterSelectionSurface _surface(
   String text, {
   String? resourcePath,
@@ -209,6 +224,36 @@ void main() {
     expect(report.cancelled, isTrue);
     expect(report.imported, BigInt.zero);
     expect(documents.cancelled, {cancellation});
+  });
+
+  test('a PDF engine failure fails only its own import item', () async {
+    final failing = Directory.systemTemp.createTempSync('shosai_records');
+    addTearDown(() => failing.deleteSync(recursive: true));
+    final failingCore = await ShosaiCore.open(
+      failing.path,
+      pdfEngine: _FailingPdfEngine(),
+    );
+    addTearDown(failingCore.close);
+    final failingBridge = ApplicationBridge(failingCore, _Documents());
+    final paths = [
+      for (final (fixture, name) in [
+        (_epubFixture, 'first.epub'),
+        (_pdfFixture, 'broken.pdf'),
+        (_epubFixture, 'second.epub'),
+      ])
+        (File(fixture).copySync('${failing.path}/$name')).path,
+    ];
+
+    final report = await failingBridge.importPaths(
+      pathKeys: paths,
+      managed: false,
+      cancellationId: failingBridge.createCancellation(),
+    );
+
+    expect(report.imported, BigInt.two);
+    expect(report.failed, BigInt.one);
+    expect(report.items[1].error, contains('PDFium failed'));
+    expect(report.items[2].book, isNotNull);
   });
 
   test('reading state, bookmarks and settings round trip', () async {

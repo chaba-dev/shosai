@@ -65,14 +65,35 @@ final class PdfEngineInspector implements BookInspector {
 
   final PdfEngine _engine;
 
+  /// Every engine failure, including one from initialising PDFium, from
+  /// reading metadata or from disposing, becomes a [CoreException], so a bad
+  /// PDF fails only its own import item. A cover that fails to render is
+  /// dropped.
   @override
   Future<BookMetadata> inspect(
     String path, {
     CancellationToken? cancellation,
   }) async {
-    final PdfEngineDocument document;
     try {
-      document = await _engine.open(path);
+      final document = await _engine.open(path);
+      try {
+        cancellation.throwIfCancelled();
+        final info = await document.info();
+        cancellation.throwIfCancelled();
+        return BookMetadata(
+          title: info.title,
+          author: info.author,
+          cover: await _cover(document),
+        );
+      } finally {
+        try {
+          await document.dispose();
+        } on Exception {
+          // The document is unusable either way; inspection's result stands.
+        }
+      }
+    } on CoreException {
+      rethrow;
     } on PdfEnginePasswordException {
       throw const CoreException(
         CoreErrorKind.unsupported,
@@ -82,32 +103,25 @@ final class PdfEngineInspector implements BookInspector {
       throw CoreException.limitExceeded(error.message);
     } on PdfEngineException catch (error) {
       throw CoreException.malformed(error.message);
-    }
-    try {
-      cancellation.throwIfCancelled();
-      final info = await document.info();
-      cancellation.throwIfCancelled();
-      return BookMetadata(
-        title: info.title,
-        author: info.author,
-        cover: await _cover(document),
+    } on Exception catch (error) {
+      throw CoreException(
+        CoreErrorKind.inaccessible,
+        'The PDF engine could not read the file: $error',
       );
-    } finally {
-      await document.dispose();
     }
   }
 
   Future<Uint8List?> _cover(PdfEngineDocument document) async {
-    final size = document.pageSize(0);
-    if (size.width <= 0 || size.height <= 0) return null;
-    final scale = [
-      coverMaxWidth / size.width,
-      coverMaxHeight / size.height,
-    ].reduce((a, b) => a < b ? a : b);
     try {
+      final size = document.pageSize(0);
+      if (size.width <= 0 || size.height <= 0) return null;
+      final scale = [
+        coverMaxWidth / size.width,
+        coverMaxHeight / size.height,
+      ].reduce((a, b) => a < b ? a : b);
       final page = await document.render(0, scale);
       return coverThumbnailFromRgba(page.width, page.height, page.pixels);
-    } on PdfEngineException {
+    } on Exception {
       return null;
     }
   }
