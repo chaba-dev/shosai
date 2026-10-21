@@ -31,6 +31,7 @@
   --brand-charcoal: #313030;
   --brand-cream: #f3e4cc;
   --brand-gold: #a18969;
+  --brand-mark: var(--brand-navy);
   --page-paper: #fffdf8;
   --page-paper-ink: #1a1a1a;
   --page-paper-link: #174ea6;
@@ -87,6 +88,7 @@
   --danger: #e58a80;
   --danger-soft: #3a2220;
   --scrim: rgba(0, 0, 0, 0.6);
+  --brand-mark: var(--brand-cream);
   --mark: #5a4f22;
   --shadow-page: 0 30px 50px -28px rgba(0, 0, 0, 0.9), 0 10px 20px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
   --shadow-cover: 0 18px 24px -18px rgba(0, 0, 0, 0.9), 0 4px 10px -6px rgba(0, 0, 0, 0.7);
@@ -117,13 +119,19 @@
   --spread-min-width: 720px;
   --measure: 36em;
   --font-ui: Inter, "Noto Sans JP", system-ui, sans-serif;
-  --font-editorial: "Source Serif 4", "Noto Serif JP", Georgia, serif;
-  --font-book: "Source Serif 4", "Noto Serif JP", Georgia, serif;
+  --font-editorial: Literata, "Shippori Mincho", Georgia, serif;
+  --font-book: Literata, "Shippori Mincho", Georgia, serif;
 }
 @font-face { font-family: "Inter"; src: url("../../assets/fonts/InterVariable.ttf"); font-weight: 100 900; font-style: normal; font-display: swap; }
 @font-face { font-family: "Noto Sans JP"; src: url("../../assets/fonts/NotoSansJP-Variable.ttf"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Literata"; src: url("../../assets/fonts/Literata[opsz,wght].ttf"); font-weight: 200 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Literata"; src: url("../../assets/fonts/Literata-Italic[opsz,wght].ttf"); font-weight: 200 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-Regular.ttf"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-Medium.ttf"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-SemiBold.ttf"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-Bold.ttf"); font-weight: 700; font-style: normal; font-display: swap; }
 @font-face { font-family: "Source Serif 4"; src: url("../../assets/fonts/SourceSerif4Variable-Roman.ttf"); font-weight: 200 900; font-style: normal; font-display: swap; }
-@font-face { font-family: "Noto Serif JP"; src: url("../../assets/fonts/NotoSerifJP-ShosaiMark-Regular.ttf"); font-weight: 400; font-style: normal; font-display: swap; unicode-range: U+66F8; }
+@font-face { font-family: "Noto Serif JP"; src: url("../../assets/fonts/NotoSerifJP-ShosaiMark-Black.ttf"); font-weight: 900; font-style: normal; font-display: swap; unicode-range: U+66F8; }
 .ui-title { font-family: var(--font-ui); font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; }
 .ui-heading { font-family: var(--font-ui); font-size: 16px; line-height: 22px; font-weight: 600; }
 .ui-body { font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 400; }
