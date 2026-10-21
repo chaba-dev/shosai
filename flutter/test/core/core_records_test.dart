@@ -612,6 +612,13 @@ void main() {
 
     void replace() => file.writeAsStringSync(replacement);
 
+    /// The snapshots left in the process's directory, without its lock file.
+    Future<List<String>> snapshotFiles() async => [
+      for (final entry
+          in (await owner.core.snapshots.directory)?.listSync() ?? const [])
+        if (!entry.path.endsWith('/.lock')) entry.path,
+    ];
+
     test('a library PDF reads the bytes it verified though its file is '
         'replaced as the engine opens it', () async {
       final bookId = await importBook();
@@ -637,6 +644,76 @@ void main() {
         expect(snapshots.statSync().mode & 0x3f, 0, reason: 'owner-only');
       }
     });
+
+    test(
+      'a sweep deletes only snapshot directories no running process holds',
+      () async {
+        final bookId = await importBook();
+        await pdfBridge.openLibraryBook(
+          bookId: bookId,
+          cancellationId: pdfBridge.createCancellation(),
+        );
+        final own = (await owner.core.snapshots.directory)!;
+        final parent = own.parent.path;
+        Directory directory(String name) {
+          final directory = Directory('$parent/$name')..createSync();
+          File('${directory.path}/.lock').createSync();
+          File('${directory.path}/snapshot-1').writeAsStringSync(original);
+          return directory;
+        }
+
+        final live = directory('process-live');
+        final left = directory('process-left');
+        final unlocked = Directory('$parent/process-unlocked')..createSync();
+
+        // Another instance holds its directory's lock until its input closes.
+        final script = File('${data.path}/hold_lock.dart')
+          ..writeAsStringSync("""
+import 'dart:io';
+
+Future<void> main(List<String> arguments) async {
+  final file = await File(arguments.single).open(mode: FileMode.append);
+  await file.lock(FileLock.exclusive);
+  stdout.writeln('locked');
+  await stdin.drain<void>();
+  await file.close();
+}
+""");
+        final holder = await Process.start('dart', [
+          script.path,
+          '${live.path}/.lock',
+        ]);
+        await holder.stdout
+            .transform(const SystemEncoding().decoder)
+            .firstWhere((line) => line.contains('locked'));
+
+        // Every directory looks long untouched; age decides nothing.
+        for (final path in [own.path, live.path, left.path, unlocked.path]) {
+          final touch = await Process.run('touch', ['-d', '2 days ago', path]);
+          expect(touch.exitCode, 0);
+        }
+        await owner.core.snapshots.sweep();
+
+        expect(own.existsSync(), isTrue, reason: 'this process holds it');
+        expect(live.existsSync(), isTrue, reason: 'another process holds it');
+        expect(left.existsSync(), isFalse);
+        expect(unlocked.existsSync(), isFalse);
+
+        await holder.stdin.close();
+        expect(await holder.exitCode, 0);
+        await Process.run('touch', ['-d', '2 days ago', live.path]);
+        await owner.core.snapshots.sweep();
+        expect(live.existsSync(), isFalse);
+        expect(own.existsSync(), isTrue);
+
+        // A directory changed within the grace period may still be in
+        // creation, so it stays even without a lock file.
+        final fresh = Directory('$parent/process-fresh')..createSync();
+        await owner.core.snapshots.sweep();
+        expect(fresh.existsSync(), isTrue);
+      },
+      skip: Platform.isWindows ? 'needs touch and POSIX locks' : false,
+    );
 
     test('a library PDF replaced after it opened keeps the verified text '
         'until it is released, and its snapshot is then deleted', () async {
@@ -685,10 +762,7 @@ void main() {
         ),
         isNull,
       );
-      expect(
-        (await owner.core.snapshots.directory)?.listSync() ?? const [],
-        isEmpty,
-      );
+      expect(await snapshotFiles(), isEmpty);
     });
 
     test('an EPUB is parsed from the bytes its hash was checked on', () async {
@@ -747,7 +821,7 @@ void main() {
       expect(drained, isTrue);
       expect(pdfBridge.openDocumentCount, 0);
       expect(engine.documents.last.disposals, 1);
-      expect((await owner.core.snapshots.directory)!.listSync(), isEmpty);
+      expect(await snapshotFiles(), isEmpty);
       await expectLater(
         pdfBridge.openLibraryBook(
           bookId: bookId,

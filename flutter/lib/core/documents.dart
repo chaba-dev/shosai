@@ -26,7 +26,8 @@ typedef ExpectedBook = ({int bookId, String title, String contentHash});
 
 /// A process's private directory of PDF snapshots under [parent] (the
 /// application's data directory), created on first use, restricted to its
-/// owner, and deleted when closed.
+/// owner, locked by the process while it is in use, and deleted when
+/// closed.
 ///
 /// It lives beside the database rather than in the shared temporary
 /// directory: the data directory is already the application's own (a
@@ -37,7 +38,14 @@ final class DocumentSnapshots {
 
   final String _parent;
   Future<Directory>? _directory;
+  RandomAccessFile? _lock;
   var _closed = false;
+
+  /// The directories this isolate's [DocumentSnapshots] hold. [sweep] skips
+  /// them: POSIX locks belong to the process, so trying a held directory's
+  /// lock from this process would succeed, and closing that descriptor
+  /// would release the lock its owner holds.
+  static final _held = <String>{};
 
   /// The directory, once a snapshot has been taken.
   Future<Directory>? get directory => _directory;
@@ -58,31 +66,49 @@ final class DocumentSnapshots {
     }
   }
 
-  /// Delete the directory and every snapshot left in it.
+  /// Release the directory's lock, then delete the directory and every
+  /// snapshot left in it.
   Future<void> close() async {
     _closed = true;
     final pending = _directory;
     if (pending == null) return;
     try {
-      await (await pending).delete(recursive: true);
+      final directory = await pending;
+      await _lock?.close();
+      _lock = null;
+      _held.remove(directory.path);
+      await directory.delete(recursive: true);
     } on Object {
       // Never created, or already gone; a leftover is swept on a later start.
     }
   }
 
-  /// Delete snapshot directories an earlier process left behind (it did not
-  /// close, or could not delete them). Only those untouched for [age] go,
-  /// so another running process's directory stays.
-  Future<void> sweep({Duration age = const Duration(days: 1)}) async {
+  /// Delete snapshot directories that no running process holds: an earlier
+  /// process left them (it did not close, or could not delete them). A
+  /// process holds its directory's lock file for as long as it uses the
+  /// directory, so a directory is deleted only when its lock can be taken
+  /// without waiting, or when it never got a lock file. Directories changed
+  /// within [grace] are left, so one being created is never taken.
+  Future<void> sweep({Duration grace = const Duration(minutes: 1)}) async {
     final parent = Directory(_parent);
     if (!await parent.exists()) return;
-    final cutoff = DateTime.now().subtract(age);
+    final cutoff = DateTime.now().subtract(grace);
     await for (final entry in parent.list(followLinks: false)) {
-      if (entry is! Directory) continue;
+      if (entry is! Directory || _held.contains(entry.path)) continue;
       try {
-        if ((await entry.stat()).modified.isBefore(cutoff)) {
-          await entry.delete(recursive: true);
+        if (!(await entry.stat()).modified.isBefore(cutoff)) continue;
+        final lockFile = File('${entry.path}/$_lockName');
+        if (await lockFile.exists()) {
+          final lock = await lockFile.open(mode: FileMode.append);
+          try {
+            await lock.lock(FileLock.exclusive);
+          } on FileSystemException {
+            continue; // Held by a running process.
+          } finally {
+            await lock.close();
+          }
         }
+        await entry.delete(recursive: true);
       } on FileSystemException {
         // Retried on the next start.
       }
@@ -104,6 +130,18 @@ final class DocumentSnapshots {
           );
         }
       }
+      final lock = await File(
+        '${directory.path}/$_lockName',
+      ).open(mode: FileMode.append);
+      try {
+        await lock.lock(FileLock.exclusive);
+      } catch (_) {
+        await lock.close();
+        await directory.delete(recursive: true);
+        rethrow;
+      }
+      _lock = lock;
+      _held.add(directory.path);
       return directory;
     } on FileSystemException catch (error) {
       throw CoreException(
@@ -119,6 +157,7 @@ final class DocumentSnapshots {
     }
   }
 
+  static const _lockName = '.lock';
   static const _groupOrOther = 0x3f;
 }
 
