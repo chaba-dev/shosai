@@ -18,6 +18,10 @@ const searchMatchBaseBytes = 48;
 
 /// Text searched in one isolate run, in UTF-16 code units. Cancellation is
 /// checked between runs.
+///
+/// The target is soft: units are never split, so a single unit larger than
+/// this runs whole, and cancellation can wait for one whole unit, up to the
+/// [SearchLimits.maxIndexedTextBytes] (8 MiB) of text one search covers.
 const _batchUnits = 1024 * 1024;
 
 /// Bounds on one search. Each is at most its default, which is the hard
@@ -101,6 +105,12 @@ final class SearchMatch {
 /// a match always covers whole characters of the text: "s" does not match
 /// half of "ß". Matches do not overlap. Exceeding a limit fails with
 /// `limitExceeded` rather than returning a truncated list.
+///
+/// The search runs in other isolates about 1 MiB of text at a time and
+/// observes [cancellation] between those runs and after each unit text is
+/// read; once cancelled it fails with `cancelled`, never returning results.
+/// The 1 MiB is a soft target, since a unit is never split: cancellation can
+/// wait for one whole unit's run, up to the 8 MiB of text one search covers.
 Future<List<SearchMatch>> searchBook(
   UnitTextSource source,
   String query, {
@@ -124,6 +134,7 @@ Future<List<SearchMatch>> searchBook(
       results.length,
       resultBytes,
     );
+    cancellation.throwIfCancelled();
     batch.clear();
     batchUnits = 0;
     results.addAll(matches);
@@ -133,6 +144,7 @@ Future<List<SearchMatch>> searchBook(
   for (var unit = 0; unit < source.unitCount; unit++) {
     cancellation.throwIfCancelled();
     final text = await source.unitText(unit, cancellation: cancellation);
+    cancellation.throwIfCancelled();
     if (text == null) continue;
     indexedBytes += utf8Length(text.text);
     if (indexedBytes > limits.maxIndexedTextBytes) {
@@ -146,6 +158,7 @@ Future<List<SearchMatch>> searchBook(
     batchUnits += text.text.length;
   }
   await flush();
+  cancellation.throwIfCancelled();
   return results;
 }
 

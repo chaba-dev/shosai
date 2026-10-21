@@ -185,10 +185,13 @@ full case folding (`tool/generate_case_fold.py` regenerates the table from
 Python's `str.casefold`), so "STRASSE" finds "Straße", and a match covers
 whole characters only: "s" never matches half of "ß". The search is one
 linear Knuth-Morris-Pratt pass per unit, run in other isolates about 1 MiB of
-text at a time with cancellation checked between runs. A query is at most
-4 KiB, one search covers at most 8 MiB of text and returns at most 10,000
-matches and 8 MiB of results; past a limit it fails with `limitExceeded`
-instead of returning a truncated list.
+text at a time with cancellation checked between runs and after each unit
+is read; a cancelled search fails with `cancelled` rather than returning
+results. The 1 MiB is a soft target: a unit is never split, so cancellation
+can wait for one whole unit, up to the 8 MiB of text a search covers. A query
+is at most 4 KiB, one search covers at most 8 MiB of text and returns at most
+10,000 matches and 8 MiB of results; past a limit it fails with
+`limitExceeded` instead of returning a truncated list.
 
 Errors are `CoreException`s whose `CoreErrorKind` the controllers map to
 their own messages.
