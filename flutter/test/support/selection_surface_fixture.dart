@@ -4,7 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 /// Package 4D's deterministic selectable-surface fixture.
 ///
@@ -14,7 +14,7 @@ import 'package:shosai_flutter/src/rust/api.dart';
 /// cannot lay out a real EPUB chapter with controlled text geometry, so these
 /// helpers reproduce the *shape* the bridge returns — a three-line text box in
 /// the surface's own coordinate space — while the surface under test keeps its
-/// own width, height, raster, handle and copy eligibility.
+/// own width, height and copy eligibility.
 ///
 /// Every geometry value below is a fixture value, not a design value: nothing
 /// here is compared with an Iced reference (RD-12 has none), and the real
@@ -99,7 +99,7 @@ final class SelectionFixtureGeometry {
 
 /// The fixture geometry applied to [base]'s own surface identity.
 ///
-/// The handle, size, raster and copy eligibility come from the surface the
+/// The size and copy eligibility come from the surface the
 /// bridge under test returned, so a non-copy-eligible or non-EPUB surface keeps
 /// its own properties; only the text, endpoints and boundaries are fixture
 /// data.
@@ -118,13 +118,11 @@ FlutterSelectionSurface selectionFixtureSurface(
     graphemes[index] = index;
   }
   return FlutterSelectionSurface(
-    handle: base.handle,
     width: base.width,
     height: base.height,
     text: text,
     copyEligible: copyEligible ?? base.copyEligible,
     resourcePath: base.resourcePath,
-    raster: base.raster,
     endpoints: [
       for (var index = 0; index < scalars; index += 1)
         FlutterSelectionEndpoint(

@@ -8,35 +8,30 @@ import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:shosai_epub/shosai_epub.dart' show openEpubBytes;
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/reader/epub/font_coverage.dart'
-    show EpubFontCoverage;
 import 'package:shosai_flutter/reader/view.dart'
     show ReaderEpubPageContentPainter;
-import 'package:shosai_flutter/src/rust/api.dart';
-import 'package:shosai_flutter/src/rust/frb_generated.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
-/// Packaged-bundle font regression for the EPUB routing gate.
+/// Packaged-bundle font regression for the EPUB reader.
 ///
 /// Finding 1 of the 2026-10-02 corpus pass: the bundled faces were declared in
 /// `pubspec.yaml` with paths that escape the Flutter project
 /// (`../assets/fonts/...`). The tool records those keys in the asset manifest
 /// but never places the files in the built bundle, so in a *built* desktop app
-/// `rootBundle.load` fails, the production bundled coverage comes back null,
-/// and every chapter stays on the retained renderer.
+/// `rootBundle.load` fails and the reader paints every chapter with host
+/// fallback faces.
 ///
 /// This test drives the production reader in the **built** app
 /// (`flutter drive -d linux --profile`): the faces are read through the real
-/// `rootBundle` — no disk files, no repo fallback, no injected coverage — the
-/// engine must have the bundled family registered, an eligible self-authored
-/// chapter must route to the Dart EPUB renderer, and a chapter with a
-/// genuinely uncovered rune must stay on the retained renderer, so the gate is
-/// exercised on both sides of the decision.
+/// `rootBundle`, the engine must have the bundled families registered, and a
+/// self-authored chapter must paint as a Dart EPUB page. A chapter carrying a
+/// rune neither bundled face covers must paint too, with the host's fallback
+/// for that rune.
 ///
 /// This is manually exercised regression coverage: CI runs the structural
 /// bundle check (`scripts/check_flutter_bundle.py`) but does not drive this
-/// test, so the documented pass below is the routing regression's evidence.
+/// test, so the documented pass below is the regression's evidence.
 ///
 /// Run (from `flutter/`, on a display or under Xvfb):
 /// ```sh
@@ -47,17 +42,8 @@ import 'package:shosai_flutter/src/rust/frb_generated.dart';
 /// Optional: `SHOSAI_EPUB_FONT_BUNDLE_ARTIFACTS=<dir>` copies page captures
 /// there for inspection; a capture failure never gates the pass.
 
-/// The prose and the control rune. The covered chapter's routing proves the
-/// fixture's canonical parity with the retained parser, and the uncovered
-/// variant's parity is proven directly in the test, so its refusal is
-/// attributable to the rune alone.
-const _uncoveredRune = 0x10005; // Linear B; neither bundled face carries it.
-
-/// The same prose with one uncovered rune appended.
-final String _uncoveredProseBody =
-    '<p>An uncovered rune must stay on the retained renderer.</p>'
-    '${'<p>Filler paragraph for pagination.</p>' * 12}'
-    '<p>Uncovered rune: ${String.fromCharCode(_uncoveredRune)}.</p>';
+/// A rune neither bundled face carries (Linear B).
+const _uncoveredRune = 0x10005;
 
 final GlobalKey _captureKey = GlobalKey(debugLabel: 'bundled-fonts-capture');
 
@@ -69,33 +55,16 @@ void main() {
   ) async {
     final artifacts = Platform.environment['SHOSAI_EPUB_FONT_BUNDLE_ARTIFACTS'];
 
-    await RustLib.init(externalLibrary: nativeLibrary());
-
     // The bundled bytes must be loadable through the platform asset bundle
-    // itself, and they must be real font binaries whose own `cmap` coverage
-    // covers the interface scripts while leaving the control rune uncovered —
-    // the fallback control's precondition, read from the very bytes the
-    // production loader uses.
+    // itself.
     final inter = await rootBundle.load('fonts/InterVariable.ttf');
     final noto = await rootBundle.load('fonts/NotoSansJP-Variable.ttf');
     expect(inter.lengthInBytes, greaterThan(0));
     expect(noto.lengthInBytes, greaterThan(0));
-    final coverage = EpubFontCoverage.fromFonts([
-      inter.buffer.asUint8List(),
-      noto.buffer.asUint8List(),
-    ]);
-    expect(coverage, isNotNull);
-    expect(coverage!.covers(0x61), isTrue, reason: 'Latin a');
-    expect(coverage.covers(0x3042), isTrue, reason: 'Hiragana a');
-    expect(
-      coverage.covers(_uncoveredRune),
-      isFalse,
-      reason: 'the fallback control must be genuinely uncovered',
-    );
 
     // The engine must also have registered the bundled families themselves
-    // (the whole interface paints with them, and the Dart EPUB renderer
-    // shapes with both): laying out a glyph with each family must produce
+    // (the whole interface paints with them, and the EPUB renderer shapes
+    // with both): laying out a glyph with each family must produce
     // *different* metrics than laying out with a family the engine does not
     // have. If a bundled face were missing, the two would share the host
     // fallback and match. Limitations: a host with the same-named face
@@ -137,192 +106,42 @@ void main() {
       }
     });
 
-    // Covered and uncovered variants of the same prose: the covered chapter's
-    // routing proves the fixture's canonical parity with the retained parser,
-    // so the uncovered chapter's refusal is attributable to the rune alone
-    // (both parsers pass the rune through identically, so its parity matches).
-    final coveredBytes = _epub(
-      chapters: {
-        'OPS/chapter-1.xhtml':
-            '<p>Packaged fonts route this chapter: あいうえお.</p>'
-            '${'<p>Filler paragraph for pagination.</p>' * 12}',
-      },
-    );
-    final coveredPath = '${directory.path}/covered.epub';
-    await File(coveredPath).writeAsBytes(coveredBytes);
-    final uncoveredBytes = _epub(
-      chapters: {'OPS/chapter-1.xhtml': _uncoveredProseBody},
-    );
-    final uncoveredPath = '${directory.path}/uncovered.epub';
-    await File(uncoveredPath).writeAsBytes(uncoveredBytes);
-
-    // An eligible self-authored chapter routes to the Dart EPUB renderer with
-    // the production bundled loader (fontCoverageLoader unset). The routing
-    // observer records each relayout's gate outcome, so the painted page is
-    // confirmed as a gate decision, not just an appearance.
-    final coveredAttempts = <_RoutingAttempt>[];
-    final coveredBridge = await createApplicationBridge(
-      applicationSupportDirectory: () async =>
-          Directory('${directory.path}/covered')..createSync(),
-      databaseName: 'covered.sqlite3',
-    );
-    try {
-      await _openBook(tester, coveredBridge, coveredPath, coveredAttempts);
-      final routed = await _pumpUntil(
-        tester,
-        () =>
-            _dartPage(tester) != null &&
-            coveredAttempts.any((attempt) => attempt.routed),
-        const Duration(minutes: 2),
+    final books = {
+      'covered':
+          '<p>Packaged fonts paint this chapter: あいうえお.</p>'
+          '${'<p>Filler paragraph for pagination.</p>' * 12}',
+      'uncovered':
+          '<p>An uncovered rune paints with the host fallback.</p>'
+          '${'<p>Filler paragraph for pagination.</p>' * 12}'
+          '<p>Uncovered rune: ${String.fromCharCode(_uncoveredRune)}.</p>',
+    };
+    for (final MapEntry(key: name, value: body) in books.entries) {
+      final path = '${directory.path}/$name.epub';
+      await File(
+        path,
+      ).writeAsBytes(_epub(chapters: {'OPS/chapter-1.xhtml': body}));
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async =>
+            Directory('${directory.path}/$name')..createSync(),
       );
-      expect(
-        routed,
-        isTrue,
-        reason:
-            'the covered chapter must route to the Dart renderer: a completed '
-            'gate decision routed it and the page is painted',
-      );
-      final page = _dartPage(tester)!;
-      expect(page.page.unit, 0);
-      expect(page.page.canonicalStart, 0);
-      await _capture(tester, artifacts, 'bundled-fonts-routed-page');
-    } finally {
-      await _closeReader(tester, coveredBridge);
-    }
-
-    // The genuinely uncovered rune keeps the retained renderer: no Dart page
-    // may be painted for that chapter. To attribute the refusal to coverage
-    // alone, first prove this fixture's canonical parity independently: the
-    // real retained canonical stream (the one the routing gate compares) must
-    // equal the engine's, and must carry the rune through both parsers.
-    final uncoveredAttempts = <_RoutingAttempt>[];
-    final uncoveredBridge = await createApplicationBridge(
-      applicationSupportDirectory: () async =>
-          Directory('${directory.path}/uncovered')..createSync(),
-      databaseName: 'uncovered.sqlite3',
-    );
-    try {
-      final cancellation = uncoveredBridge.createCancellation();
-      FlutterDocumentSummary? probeHandle;
       try {
-        final summary = await uncoveredBridge.openDocument(
-          request: FlutterOpenRequest(
-            localId: uncoveredPath,
-            pathKey: uncoveredPath,
-          ),
-          cancellationId: cancellation,
-        );
-        probeHandle = summary;
-        final retained = await uncoveredBridge.epubCanonicalText(
-          document: summary.handle,
-          unit: BigInt.zero,
-          cancellationId: cancellation,
-        );
-        final engine = openEpubBytes(uncoveredBytes).chapters[0].canonicalText;
-        expect(retained, engine, reason: 'canonical parity of the control');
-        expect(engine.runes.contains(_uncoveredRune), isTrue);
-      } finally {
-        if (probeHandle != null) {
-          uncoveredBridge.releaseDocument(handle: probeHandle.handle);
-        }
-        uncoveredBridge.releaseCancellation(id: cancellation);
-      }
-
-      await _openBook(
-        tester,
-        uncoveredBridge,
-        uncoveredPath,
-        uncoveredAttempts,
-      );
-      final ready = await _pumpUntil(
-        tester,
-        () => _readerReady(tester),
-        const Duration(minutes: 2),
-      );
-      expect(ready, isTrue, reason: 'the uncovered chapter must still open');
-      // A refusal must be observed as a *completed* gate attempt, not merely
-      // as "nothing painted yet" (which an in-flight attempt also satisfies).
-      // The observer is attached from the shell's first mount, so it records
-      // the open's own attempts, including the first height report's — the
-      // one that runs the full gate (canonical compare + coverage) — and it
-      // reports only attempts that were still current when their gate
-      // evaluation returned. The settled count drains every open-time attempt
-      // before the baseline.
-      final baseline = await _stableCount(
-        tester,
-        () => uncoveredAttempts.length,
-      );
-      expect(
-        baseline,
-        greaterThan(0),
-        reason: 'the open must complete routing attempts for the chapter',
-      );
-      expect(
-        uncoveredAttempts.map((attempt) => attempt.routed),
-        everyElement(isFalse),
-        reason: 'every open-time gate decision refused the chapter',
-      );
-      // Then force one more gate evaluation and await that identifiable,
-      // non-stale completion: a page-width change dispatches a viewport
-      // relayout (the chapter has no Dart session, so nothing else re-runs
-      // the gate for it). The reader's test surface is ~800x600 logical px
-      // and the shell pads the reader, so the width *shrinks* below the
-      // settled viewport (600 fits the surface); the awaited record is a
-      // strictly narrower attempt's own refusal, not quiet time and not
-      // stale work.
-      final settledWidth = uncoveredAttempts
-          .map((attempt) => attempt.width)
-          .reduce((a, b) => a < b ? a : b);
-      await tester.pumpWidget(
-        _readerShell(
-          uncoveredPath,
-          uncoveredBridge,
-          uncoveredAttempts,
-          width: 600,
-        ),
-      );
-      expect(
-        await _pumpUntil(
+        await tester.pumpWidget(_readerShell(path, bridge));
+        final painted = await _pumpUntil(
           tester,
-          () => uncoveredAttempts.any(
-            (attempt) => !attempt.routed && attempt.width < settledWidth,
-          ),
+          () => _dartPage(tester) != null,
           const Duration(minutes: 2),
-        ),
-        isTrue,
-        reason:
-            'the narrower viewport must complete a refused gate attempt '
-            '(settled width $settledWidth, attempts $uncoveredAttempts)',
-      );
-      // Every reported gate decision for this chapter refused it, and none
-      // routed it after the fact.
-      expect(
-        uncoveredAttempts.map((attempt) => attempt.routed),
-        everyElement(isFalse),
-        reason: 'an uncovered rune must stay on the retained renderer',
-      );
-      expect(
-        _dartPage(tester),
-        isNull,
-        reason: 'an uncovered rune must stay on the retained renderer',
-      );
-      await _capture(tester, artifacts, 'bundled-fonts-retained-fallback');
-    } finally {
-      await _closeReader(tester, uncoveredBridge);
+        );
+        expect(painted, isTrue, reason: 'the $name chapter must paint');
+        final page = _dartPage(tester)!;
+        expect(page.page.unit, 0);
+        expect(page.page.canonicalStart, 0);
+        await _capture(tester, artifacts, 'bundled-fonts-$name-page');
+      } finally {
+        await _closeReader(tester, bridge);
+      }
     }
   });
 }
-
-/// The outcome record of one EPUB routing attempt (one relayout's gate
-/// evaluation), qualified by its generation, layout revision and the
-/// attempted page width; only attempts that were still current when their
-/// gate evaluation returned are reported.
-typedef _RoutingAttempt = ({
-  int generation,
-  int revision,
-  double width,
-  bool routed,
-});
 
 ReaderEpubPageContentPainter? _dartPage(WidgetTester tester) {
   for (final paint in tester.widgetList<CustomPaint>(
@@ -334,63 +153,27 @@ ReaderEpubPageContentPainter? _dartPage(WidgetTester tester) {
   return null;
 }
 
-/// Whether the reader has installed the document surface and stopped its
-/// opening progress indicators (the interactive corpus harness' readiness
-/// signal).
-bool _readerReady(WidgetTester tester) {
-  final document = find.byKey(const ValueKey('reader-document-semantics'));
-  final busy = find.byWidgetPredicate((widget) => widget is ProgressIndicator);
-  return document.evaluate().isNotEmpty && busy.evaluate().isEmpty;
-}
-
-/// The production reader composition for one book path, at [width], recording
-/// every routing attempt's outcome into [attempts].
-Widget _readerShell(
-  String path,
-  FlutterBridge bridge,
-  List<_RoutingAttempt> attempts, {
-  double width = 1000,
-}) => ShosaiShell(
+/// The production reader composition for one book path.
+Widget _readerShell(String path, FlutterBridge bridge) => ShosaiShell(
   home: Align(
     alignment: Alignment.topLeft,
     child: SizedBox(
-      width: width,
+      width: 1000,
       height: 720,
       child: RepaintBoundary(
         key: _captureKey,
-        child: ReaderScreen(
-          bridge: bridge,
-          initialPath: path,
-          debugEpubRoutingObserver: (generation, revision, width, routed) {
-            attempts.add((
-              generation: generation,
-              revision: revision,
-              width: width,
-              routed: routed,
-            ));
-          },
-        ),
+        child: ReaderScreen(bridge: bridge, initialPath: path),
       ),
     ),
   ),
 );
 
-/// Opens one book path through the production reader composition.
-Future<void> _openBook(
-  WidgetTester tester,
-  FlutterBridge bridge,
-  String path,
-  List<_RoutingAttempt> attempts,
-) async {
-  await tester.pumpWidget(_readerShell(path, bridge, attempts));
-}
-
 /// Unmounts the reader and waits for the controller to dispose the bridge it
 /// was handed (the controller disposes it itself once its operations drain).
 /// A run whose drain never completes is a failure: the bridge is disposed
-/// here so a native bridge cannot leak past the test, and the failure is
-/// reported. A bridge the reader never received (an earlier failure during
-/// the parity probe) is disposed directly.
+/// here so a bridge cannot leak past the test, and the failure is reported. A
+/// bridge the reader never received (an earlier failure) is disposed
+/// directly.
 Future<void> _closeReader(WidgetTester tester, FlutterBridge bridge) async {
   if (find.byKey(_captureKey).evaluate().isEmpty) {
     if (!bridge.isDisposed) bridge.dispose();
@@ -409,7 +192,7 @@ Future<void> _closeReader(WidgetTester tester, FlutterBridge bridge) async {
 }
 
 /// Pumps with real event-loop windows until [condition] holds or the deadline
-/// passes (the reader routes asynchronously over the real bridge).
+/// passes (the reader lays out asynchronously).
 Future<bool> _pumpUntil(
   WidgetTester tester,
   bool Function() condition,
@@ -424,34 +207,6 @@ Future<bool> _pumpUntil(
     );
   }
   return condition();
-}
-
-/// Pumps with real event-loop windows until [count] has held one value for a
-/// quiet window, then returns that value (a settled asynchronous effect count
-/// — completions stop arriving once the reader's attempts are done).
-Future<int> _stableCount(
-  WidgetTester tester,
-  int Function() count, {
-  Duration quiet = const Duration(milliseconds: 600),
-  Duration deadline = const Duration(minutes: 2),
-}) async {
-  final end = DateTime.now().add(deadline);
-  var last = count();
-  var changed = DateTime.now();
-  while (DateTime.now().isBefore(end)) {
-    await tester.pump(const Duration(milliseconds: 50));
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 100)),
-    );
-    final current = count();
-    if (current != last) {
-      last = current;
-      changed = DateTime.now();
-      continue;
-    }
-    if (DateTime.now().isAfter(changed.add(quiet))) return last;
-  }
-  return last;
 }
 
 /// Writes a PNG of the capture boundary to [artifacts] when configured.

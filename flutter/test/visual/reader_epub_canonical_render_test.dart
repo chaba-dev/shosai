@@ -1,13 +1,9 @@
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
-import 'package:shosai_flutter/reader/epub/font_coverage.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/epub_navigation_fixture.dart';
 import '../support/production_shell_harness.dart';
@@ -15,8 +11,8 @@ import '../support/production_shell_harness.dart';
 /// Slice 5 canonical-parity renders.
 ///
 /// The page and the Contents panel are served by the real engine over the
-/// canonical-parity fixture, whose stream the retained Rust parser pinned (the
-/// probe run recorded with slice 5). The assertions here are independent
+/// canonical-parity fixture, whose stream was pinned against the former Rust
+/// parser (the probe run recorded with slice 5). The assertions here are independent
 /// content and geometry checks — the rendered block texts, the panel's row
 /// source and the navigation target — not image snapshots; the captures are
 /// candidate renders for owner inspection.
@@ -35,18 +31,10 @@ void main() {
 
   final bytes = canonicalParityEpub();
   final book = openEpubBytes(bytes);
-  final coverage = EpubFontCoverage.fromFonts([
-    Uint8List.fromList(
-      File('../assets/fonts/InterVariable.ttf').readAsBytesSync(),
-    ),
-    Uint8List.fromList(
-      File('../assets/fonts/NotoSansJP-Variable.ttf').readAsBytesSync(),
-    ),
-  ])!;
 
-  // The retained parser's own stream for the fixture chapter (probe run with
-  // slice 5), the baseline the Dart engine must reproduce before rendering.
-  const retainedCanonicalText =
+  // The pinned stream for the fixture chapter (probe run with slice 5): the
+  // engine's durable offsets must not drift from it.
+  const pinnedCanonicalText =
       'a middle tail.\n'
       'before\n'
       'Cell link to the cell.\n'
@@ -55,20 +43,20 @@ void main() {
       '(a)/(b)\n'
       'after\tAnchor cell\n\n'
       'After the table.\n';
-  const retainedAnchors = {
+  const pinnedAnchors = {
     'x': 21,
     'lead': 22,
     'empty-cell': 45,
     'cell-anchor': 83,
   };
 
-  test('the engine reproduces the retained stream for the fixture', () {
-    expect(book.chapters.single.canonicalText, retainedCanonicalText);
-    for (final entry in retainedAnchors.entries) {
+  test('the engine reproduces the pinned stream for the fixture', () {
+    expect(book.chapters.single.canonicalText, pinnedCanonicalText);
+    for (final entry in pinnedAnchors.entries) {
       expect(
         book.chapters.single.anchors[entry.key],
         entry.value,
-        reason: 'anchor ${entry.key} matches the retained parser',
+        reason: 'anchor ${entry.key} matches the pinned offset',
       );
     }
     // The NCX wins over the nav document (slice 5's TOC preference), so the
@@ -102,10 +90,6 @@ void main() {
       ],
     );
     harness.epubBytes = bytes;
-    // The routing gate must compare against the retained parser's own
-    // literal, not the engine's output: feeding the engine's text back would
-    // make the gate self-confirming.
-    harness.canonicalTexts = const {0: retainedCanonicalText};
     return harness;
   }
 
@@ -115,7 +99,6 @@ void main() {
       bridge: harness,
       initialPath: '/books/canonical-parity.epub',
       initialBookId: 1,
-      fontCoverageLoader: () async => coverage,
       epubImageDecoder: (bytes) async => null,
     ),
   );
@@ -244,9 +227,8 @@ void main() {
     );
     expect(
       harness.savedReadingStates.last.offset?.toInt(),
-      retainedAnchors['cell-anchor'],
-      reason:
-          'the durable offset is the retained literal, not the engine output',
+      pinnedAnchors['cell-anchor'],
+      reason: 'the durable offset is the pinned anchor',
     );
 
     final defects = await findRenderDefects(tester);

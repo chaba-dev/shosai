@@ -13,14 +13,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/reader/epub/content.dart'
-    show EpubFontCoverageLoader;
-import 'package:shosai_flutter/reader/epub/font_coverage.dart'
-    show EpubFontCoverage;
 import 'package:shosai_flutter/reader/view.dart'
     show ReaderEpubPageContentPainter;
-import 'package:shosai_flutter/src/rust/api.dart';
-import 'package:shosai_flutter/src/rust/frb_generated.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:vm_service/vm_service.dart' as vms;
 import 'package:vm_service/vm_service_io.dart' as vms_io;
 
@@ -29,7 +24,7 @@ import '../test/support/corpus_interactive_support.dart';
 /// Opt-in real-book EPUB production-reader pass.
 ///
 /// Drives the actual production reader ([ReaderScreen] inside the real
-/// [ShosaiShell] composition, over the real Rust bridge) against books from an
+/// [ShosaiShell] composition, over the application bridge) against books from an
 /// opt-in manifest, and records:
 /// - open-to-first-page timing,
 /// - engine-reported frame timing ([FrameTiming]: vsync → raster completion)
@@ -43,7 +38,7 @@ import '../test/support/corpus_interactive_support.dart';
 /// - Dart retained heap (VM service allocation profile after a requested
 ///   service GC, with the GC confirmed via the service-GC timestamp) at
 ///   checkpoints — labeled as Dart heap only, not process RSS and not native
-///   (Skia/Rust) allocations.
+///   (Skia, PDFium) allocations.
 ///
 /// Everything runs against a disposable database (`SHOSAI_EPUB_INTERACTIVE_DB`)
 /// and books from an opt-in manifest (`SHOSAI_EPUB_INTERACTIVE_MANIFEST`,
@@ -67,21 +62,11 @@ void main() {
   final manifestPath = Platform.environment['SHOSAI_EPUB_INTERACTIVE_MANIFEST'];
   final dbPath = Platform.environment['SHOSAI_EPUB_INTERACTIVE_DB'];
   final outDir = Platform.environment['SHOSAI_EPUB_INTERACTIVE_OUT'];
-  // Optional injected font coverage: the production loader reads
-  // `../assets/fonts/*.ttf` through rootBundle, a key that cannot exist in a
-  // packaged app bundle (see the corpus report); setting this directory points
-  // the existing `fontCoverageLoader` test hook at the same two bundled faces
-  // on disk so the routing gate is exercised as designed.
-  final fontDir = Platform.environment['SHOSAI_EPUB_INTERACTIVE_FONTS'];
-
   testWidgets(
     'real-book EPUB production-reader pass',
     (tester) async {
       final anyConfigured =
-          manifestPath != null ||
-          dbPath != null ||
-          outDir != null ||
-          fontDir != null;
+          manifestPath != null || dbPath != null || outDir != null;
       if (!anyConfigured) {
         // Opt-in: nothing configured, skip.
         return;
@@ -101,7 +86,6 @@ void main() {
       }
       Future<FlutterBridge> libraryBridge() => createApplicationBridge(
         applicationSupportDirectory: () async => File(dbPath).parent,
-        databaseName: 'documents.sqlite3',
       );
       final out = Directory(outDir)..createSync(recursive: true);
       final manifest =
@@ -130,8 +114,6 @@ void main() {
           }
         }
       }
-
-      await RustLib.init(externalLibrary: nativeLibrary());
 
       // Real engine-reported frame timing. FrameTimings arrive in batches
       // (roughly every 100 ms) in profile builds, so samples are attributed by
@@ -259,23 +241,6 @@ void main() {
         }
       }
 
-      // Font coverage: when `SHOSAI_EPUB_INTERACTIVE_FONTS` is set (the
-      // discriminating experiment for the packaged-coverage defect) the
-      // existing `fontCoverageLoader` test hook reads the same two bundled
-      // faces from disk; when unset, `fontCoverageLoader: null` keeps the
-      // production bundled loader unmodified.
-      final EpubFontCoverageLoader? fontCoverage = fontDir == null
-          ? null
-          : () async {
-              final inter = await File(
-                '$fontDir/InterVariable.ttf',
-              ).readAsBytes();
-              final noto = await File(
-                '$fontDir/NotoSansJP-Variable.ttf',
-              ).readAsBytes();
-              return EpubFontCoverage.fromFonts([inter, noto]);
-            };
-
       Widget reader({
         required FlutterBridge bridge,
         required String path,
@@ -292,7 +257,6 @@ void main() {
             stdout.writeln('observer: session spine=${session.chapter.spine}');
             routedSessionSpines.add(session.chapter.spine);
           },
-          fontCoverageLoader: fontCoverage,
         ),
       );
 
@@ -575,9 +539,8 @@ void main() {
             await settle();
             await capture('$id-open.png');
             await mark(id, 'opened spines=${routedSessionSpines.length}');
-            // Routing evidence from the live tree: the Dart layout engine paints
-            // via ReaderEpubPageContentPainter, the retained fallback via
-            // _PageContentPainter (both private, matched by runtime type name).
+            // Paint evidence from the live tree: the Dart layout engine paints
+            // via ReaderEpubPageContentPainter (matched by runtime type name).
             bool hasPainter(String name) => find
                 .byWidgetPredicate(
                   (widget) =>
@@ -589,8 +552,6 @@ void main() {
             record['dartPagePainted'] = hasPainter(
               'ReaderEpubPageContentPainter',
             );
-            record['retainedPagePainted'] = hasPainter('_PageContentPainter');
-            record['fontCoverageInjected'] = fontDir != null;
             record['memoryAfterOpen'] = await retainedHeap();
             await mark(id, 'turns');
 

@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:shosai_flutter/core/records.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 /// Records for a fake bridge: every call answers through the bridge's own
 /// record fakes, so a fixture bridge keeps one seam and its counters,

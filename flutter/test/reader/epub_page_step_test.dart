@@ -1,14 +1,12 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
-import 'package:shosai_flutter/reader/epub/font_coverage.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/epub_navigation_fixture.dart';
 import '../support/production_shell_harness.dart';
@@ -79,11 +77,6 @@ void main() {
 
   // The routing gate asks the reader for the bundled faces' coverage; these
   // tests answer with the shipped faces' own cmap tables, so the decision
-  // under test is the production one.
-  final coverage = EpubFontCoverage.fromFonts([
-    _repoFile('assets/fonts/InterVariable.ttf'),
-    _repoFile('assets/fonts/NotoSansJP-Variable.ttf'),
-  ])!;
 
   _AnchorBridge bridge({FlutterReadingState? readingState}) {
     final harness = _AnchorBridge(
@@ -102,10 +95,6 @@ void main() {
       readingState: readingState,
     );
     harness.epubBytes = bytes;
-    harness.canonicalTexts = {
-      for (var unit = 0; unit < book.chapters.length; unit += 1)
-        unit: book.chapters[unit].canonicalText,
-    };
     return harness;
   }
 
@@ -117,7 +106,6 @@ void main() {
           bridge: harness,
           initialPath: '/books/page-anchor.epub',
           initialBookId: 1,
-          fontCoverageLoader: () async => coverage,
           epubImageDecoder: (bytes) async => null,
         ),
       ),
@@ -375,7 +363,3 @@ bool _pageStartOwnedByEmptyRow(FlowPage page) =>
           slice.block.table!.rows[slice.rowStart].canonicalStart ==
               page.canonicalStart,
     );
-
-/// The bytes of one repository file.
-Uint8List _repoFile(String path) =>
-    Uint8List.fromList(File('../$path').readAsBytesSync());

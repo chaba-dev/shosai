@@ -7,7 +7,6 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
-import 'package:shosai_flutter/reader/epub/font_coverage.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
@@ -274,37 +273,6 @@ void main() {
     final small = epubPageBoxFor(const Size(60, 60));
     expect(small.contentWidth, greaterThanOrEqualTo(40));
     expect(small.contentHeight, greaterThanOrEqualTo(40));
-  });
-
-  test('the bundled-face coverage admits exactly what the faces carry', () {
-    // The coverage is read from the shipped fonts' own cmap tables, so these
-    // expectations are about the faces the reader bundles: Inter carries Latin,
-    // Greek and Cyrillic; Noto Sans JP carries kana and the Japanese
-    // ideographs it covers (the JIS set, not the whole CJK block).
-    final coverage = EpubFontCoverage.fromFonts([
-      _repoFile('assets/fonts/InterVariable.ttf'),
-      _repoFile('assets/fonts/NotoSansJP-Variable.ttf'),
-    ]);
-    expect(coverage, isNotNull);
-    expect(coverage!.coversText('English 123 — Привет'), isTrue);
-    expect(coverage.coversText('湖の記録'), isTrue);
-    expect(coverage.coversText('あいうえお'), isTrue);
-    // Scripts neither face carries.
-    expect(coverage.coversText('שלום'), isFalse);
-    expect(coverage.coversText('مرحبا'), isFalse);
-    expect(coverage.coversText('😀'), isFalse);
-    // A code point inside the CJK block that the bundled face does *not* carry:
-    // the block-level gate this replaced admitted it and painted tofu.
-    expect(coverage.covers(0x4E06), isFalse);
-    expect(coverage.coversText('丆'), isFalse);
-    // The engine's conformance fixtures follow the faces: the Latin chapters
-    // route, the bidi chapter does not.
-    expect(coverage.coversText(conformance.chapters[0].canonicalText), isTrue);
-    expect(coverage.coversText(conformance.chapters[5].canonicalText), isFalse);
-  });
-
-  test('an unreadable font reports unknown coverage', () {
-    expect(EpubFontCoverage.fromFonts([Uint8List(8)]), isNull);
   });
 
   test('chapter image sources are collected in document order', () {
@@ -723,90 +691,10 @@ void main() {
     expect(monospace.fontFamilyFallback, ['Inter', 'Noto Sans JP']);
   });
 
-  test('list items and table structure count toward the indivisible bound', () {
-    // The bound is about the work one layout call does: a list measures every
-    // item and a table places every group/row/cell in one call, so both count
-    // as work units rather than as single leaf nodes.
-    EpubChapter chapter(List<EpubContentNode> blocks) => EpubChapter(
-      spine: 0,
-      resource: 'chapter.xhtml',
-      title: 'Chapter',
-      blocks: blocks,
-      canonicalText: '',
-      anchors: const {},
-      scalarCount: 0,
-    );
-    EpubBook book(List<EpubContentNode> blocks) => EpubBook(
-      title: 'Bound',
-      author: null,
-      language: null,
-      spine: const ['chapter.xhtml'],
-      toc: const [],
-      resources: const {},
-      chapters: [chapter(blocks)],
-      embeddedFonts: const {},
-      warnings: const [],
-    );
-    EpubContentSource source(List<EpubContentNode> blocks) => EpubContentSource(
-      book: book(blocks),
-      embeddedFamilies: const {},
-      bytes: Uint8List(0),
-    );
-
-    final manyItems = source([
-      EpubUnorderedList([
-        for (var index = 0; index < kEpubIndivisibleNodeLimit + 1; index += 1)
-          const <EpubTextSpan>[],
-      ]),
-    ]);
-    expect(manyItems.indivisibleUnitsBounded(0), isFalse);
-
-    final manyRows = source([
-      EpubTable(
-        caption: const [],
-        rowGroups: [
-          EpubTableRowGroup(
-            kind: EpubTableRowGroupKind.body,
-            rows: [
-              for (
-                var index = 0;
-                index < kEpubIndivisibleNodeLimit + 1;
-                index += 1
-              )
-                EpubTableRow(cells: [EpubTableCell(children: const [])]),
-            ],
-          ),
-        ],
-      ),
-    ]);
-    expect(manyRows.indivisibleUnitsBounded(0), isFalse);
-
-    final bounded = source([
-      EpubUnorderedList([
-        for (var index = 0; index < 8; index += 1) const <EpubTextSpan>[],
-      ]),
-      EpubParagraph(const [], const EpubNodeStyle()),
-    ]);
-    expect(bounded.indivisibleUnitsBounded(0), isTrue);
-
-    final hugeText = source([
-      EpubParagraph(const [], const EpubNodeStyle())
-        ..canonical = const EpubCanonicalSpan(
-          0,
-          kEpubIndivisibleScalarLimit + 1,
-        ),
-    ]);
-    expect(hugeText.indivisibleUnitsBounded(0), isFalse);
-  });
-
   test('a decode shared by concurrent callers is adopted once', () async {
     final bytes = _fixture('nested-image.epub');
     final book = openEpubBytes(bytes);
-    final source = EpubContentSource(
-      book: book,
-      embeddedFamilies: const {},
-      bytes: bytes,
-    );
+    final source = EpubContentSource(book: book, embeddedFamilies: const {});
     final chapter = book.chapters[0];
     var calls = 0;
     final pending = Completer<ui.Image>();
@@ -839,7 +727,6 @@ void main() {
     final source = EpubContentSource(
       book: book,
       embeddedFamilies: const {},
-      bytes: bytes,
       imageDecodeTimeout: const Duration(milliseconds: 20),
     );
 
@@ -863,7 +750,6 @@ void main() {
     final source = EpubContentSource(
       book: book,
       embeddedFamilies: const {},
-      bytes: bytes,
       rasterBudgetBytes: 64 * 48 * 4 - 1,
     );
     final image = await _testImage(64, 48);
@@ -888,7 +774,6 @@ void main() {
     final source = EpubContentSource(
       book: book,
       embeddedFamilies: const {},
-      bytes: bytes,
       imageDecodeTimeout: const Duration(milliseconds: 20),
     );
     var calls = 0;
@@ -915,7 +800,6 @@ void main() {
     final source = EpubContentSource(
       book: book,
       embeddedFamilies: const {},
-      bytes: bytes,
       imageDecodeTimeout: const Duration(milliseconds: 20),
     );
     var calls = 0;
@@ -936,11 +820,7 @@ void main() {
   test('a late decode after disposal is released', () async {
     final bytes = _fixture('nested-image.epub');
     final book = openEpubBytes(bytes);
-    final source = EpubContentSource(
-      book: book,
-      embeddedFamilies: const {},
-      bytes: bytes,
-    );
+    final source = EpubContentSource(book: book, embeddedFamilies: const {});
     final pending = Completer<ui.Image?>();
     final admission = source.ensureImages(
       book.chapters[0],
@@ -966,7 +846,6 @@ void main() {
     final source = EpubContentSource(
       book: book,
       embeddedFamilies: const {},
-      bytes: bytes,
       rasterBudgetBytes: 64 * 48 * 4 - 1,
     );
     final image = await _testImage(64, 48);
@@ -994,8 +873,7 @@ Future<ui.Image> _testImage(int width, int height) async {
   return recorder.endRecording().toImage(width, height);
 }
 
-Uint8List _fixture(String name) =>
-    _repoFile('crates/shosai-core/tests/fixtures/epub-conformance/$name');
+Uint8List _fixture(String name) => _repoFile('fixtures/epub-conformance/$name');
 
 Uint8List _repoFile(String path) =>
     Uint8List.fromList(File('../$path').readAsBytesSync());

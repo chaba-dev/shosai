@@ -10,9 +10,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/reader/epub/content.dart' show ReaderEpubPage;
+import 'package:shosai_flutter/reader/epub/pages.dart' show TextPageSlice;
+import 'package:shosai_flutter/reader/view.dart'
+    show ReaderEpubPageContentPainter;
 import 'package:shosai_flutter/theme_tokens.dart';
 
+import '../support/bridge_pdf_engine.dart';
 import '../support/production_shell_harness.dart';
 
 /// Package 4B reader chrome: header, tab strip, progress/status, edge
@@ -33,12 +38,6 @@ class _ChromeBridge extends HarnessBridge {
   final String? title;
   final bool failOpen;
   final bool hangOpen;
-
-  /// Font sizes reported to Rust by the reader layout path.
-  final List<double> reportedFontSizes = [];
-
-  /// Widths reported to Rust by the reader layout path.
-  final List<double> reportedWidths = [];
 
   @override
   Future<FlutterDocumentSummary> openDocument({
@@ -76,9 +75,9 @@ class _ChromeBridge extends HarnessBridge {
   /// real in-flight search.
   final List<Completer<List<FlutterSearchMatch>>> searchCompletions = [];
 
-  /// When set, the next selection-surface call fails with a bridge error, so a
-  /// layout failure can be driven through the rendered chrome.
-  bool failSelectionSurface = false;
+  /// When set, page renders fail with a bridge error, so a layout failure can
+  /// be driven through the rendered chrome.
+  bool failRender = false;
 
   /// Saved places the contents panel renders (fixture-backed; persistence is
   /// live in production).
@@ -109,30 +108,22 @@ class _ChromeBridge extends HarnessBridge {
   }
 
   @override
-  Future<FlutterSelectionSurface> selectionSurface({
+  Future<FlutterRenderedBuffer> renderPage({
     required FlutterDocumentHandle document,
-    required BigInt unit,
+    required BigInt page,
     required double scale,
-    required double width,
-    required double fontSize,
-    required double lineSpacing,
     required BigInt cancellationId,
-  }) async {
-    reportedFontSizes.add(fontSize);
-    reportedWidths.add(width);
-    if (failSelectionSurface) {
+  }) {
+    if (failRender) {
       throw const FlutterBridgeError(
         kind: FlutterBridgeErrorKind.invalidRequest,
-        message: 'chapter layout rejected',
+        message: 'page render rejected',
       );
     }
-    return super.selectionSurface(
+    return super.renderPage(
       document: document,
-      unit: unit,
+      page: page,
       scale: scale,
-      width: width,
-      fontSize: fontSize,
-      lineSpacing: lineSpacing,
       cancellationId: cancellationId,
     );
   }
@@ -186,6 +177,24 @@ Future<void> _open(WidgetTester tester, Widget widget) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 32));
   await tester.pump(const Duration(milliseconds: 32));
+}
+
+/// The document box between the reader's edge columns.
+final _documentArea = find.byKey(const ValueKey('reader-document-semantics'));
+
+/// Pumps until the Dart EPUB page is painted, and returns it.
+Future<ReaderEpubPage> _paintedEpubPage(WidgetTester tester) async {
+  for (var round = 0; round < 16; round += 1) {
+    for (final paint in tester.widgetList<CustomPaint>(
+      find.byType(CustomPaint),
+    )) {
+      if (paint.painter case final ReaderEpubPageContentPainter painter) {
+        return painter.page;
+      }
+    }
+    await tester.pump(const Duration(milliseconds: 32));
+  }
+  fail('no EPUB page was painted');
 }
 
 void _setView(WidgetTester tester, Size size) {
@@ -1129,18 +1138,17 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();
       await _open(tester, _reader(bridge: bridge));
-      final before = bridge.reportedWidths.toList();
+      final before = tester.getSize(_documentArea).width;
 
       await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       await tester.pump(const Duration(milliseconds: 32));
 
-      expect(bridge.reportedWidths.length, greaterThan(before.length));
       expect(
-        bridge.reportedWidths.last,
-        lessThan(before.last),
-        reason: 'the side panel narrows the content the reporter observes',
+        tester.getSize(_documentArea).width,
+        lessThan(before),
+        reason: 'the side panel narrows the document box',
       );
     });
 
@@ -1195,15 +1203,15 @@ void main() {
       await tester.pump(const Duration(milliseconds: 32));
 
       // The pinned composition keeps the reader surface (and its edges) beside
-      // the wide panel; the content the reporter observes loses the panel width
-      // and both edge columns, no more.
+      // the wide panel; the document box loses the panel width and both edge
+      // columns, no more.
       expect(
         find.byKey(const ValueKey('reader-edge-previous')),
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('reader-edge-next')), findsOneWidget);
       expect(
-        bridge.reportedWidths.last,
+        tester.getSize(_documentArea).width,
         closeTo(
           1280 - ShosaiTokens.layoutReaderBookmarksPanelWidth - 2 * edges.width,
           1,
@@ -1389,13 +1397,16 @@ void main() {
     ) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();
-      await _open(tester, _reader(bridge: bridge));
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+      );
 
-      bridge.failSelectionSurface = true;
+      bridge.failRender = true;
       await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
-      bridge.failSelectionSurface = false;
+      bridge.failRender = false;
 
       // The bridge reason is visible (kind and message, not
       // "Instance of 'FlutterBridgeError'") and the entry is not labelled as a
@@ -1403,7 +1414,7 @@ void main() {
       final error = find.byKey(const ValueKey('reader-relayout-error'));
       expect(error, findsOneWidget);
       expect(
-        find.textContaining('chapter layout rejected (invalidRequest)'),
+        find.textContaining('page render rejected (invalidRequest)'),
         findsOneWidget,
       );
       expect(find.textContaining('Selection unavailable'), findsNothing);
@@ -1455,12 +1466,25 @@ void main() {
         ),
       ),
     );
-    await tester.pump(const Duration(milliseconds: 32));
-    expect(bridge.reportedFontSizes, isNotEmpty);
-    // The interface scale must never scale the document font: the reader
-    // preference (24) is reported, never the 200% value (48).
-    expect(bridge.reportedFontSizes.last, 24);
-    expect(bridge.reportedFontSizes, isNot(contains(48)));
+    // The interface scale must never scale the document font: the book text
+    // is set at the reader preference (24), never the 200% value (48).
+    final page = await _paintedEpubPage(tester);
+    final blocks = [
+      for (final slice in page.page.slices.whereType<TextPageSlice>())
+        slice.block.text!,
+    ];
+    expect(blocks, isNotEmpty);
+    final sizes = <double?>{};
+    for (final block in blocks) {
+      expect(block.painter.textScaler, TextScaler.noScaling);
+      block.painter.text!.visitChildren((span) {
+        if (span is TextSpan && span.text != null) {
+          sizes.add(span.style?.fontSize);
+        }
+        return true;
+      });
+    }
+    expect(sizes, {24});
   });
 
   test('a stale editor completion cannot clear a newer editor slot', () async {
@@ -1496,7 +1520,7 @@ void main() {
       noteEditorCanceller: () {},
     );
     addTearDown(controller.dispose);
-    controller.dispatch(const ReaderOpenRequested('/books/x.epub', bookId: 1));
+    controller.dispatch(const ReaderOpenRequested('/books/x.pdf', bookId: 3));
     await pumpEventQueue();
     expect(controller.model.document, isNotNull);
     expect(controller.model.annotations, isNotEmpty);

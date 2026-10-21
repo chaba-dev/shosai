@@ -5,55 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 const _epubFixture = 'packages/shosai_core/test/fixtures/sample.epub';
 const _pdfFixture = 'packages/shosai_core/test/fixtures/sample.pdf';
-
-/// The Rust bridge's document side: opens report the requested path back.
-final class _Documents implements FlutterBridge {
-  final opened = <String>[];
-  var nextCancellation = BigInt.zero;
-  final cancelled = <BigInt>{};
-
-  @override
-  BigInt createCancellation() => nextCancellation += BigInt.one;
-
-  @override
-  bool cancel({required BigInt id}) => cancelled.add(id);
-
-  @override
-  bool releaseCancellation({required BigInt id}) => true;
-
-  @override
-  Future<FlutterDocumentSummary> openDocument({
-    required FlutterOpenRequest request,
-    required BigInt cancellationId,
-  }) async {
-    opened.add(request.pathKey);
-    return FlutterDocumentSummary(
-      handle: FlutterDocumentHandle(
-        registry: BigInt.one,
-        id: BigInt.from(opened.length),
-      ),
-      format: request.formatHint ?? FlutterBookFormat.epub,
-      title: 'Rust title',
-      logicalUnitCount: BigInt.from(3),
-    );
-  }
-
-  @override
-  bool releaseDocument({required FlutterDocumentHandle handle}) => true;
-
-  @override
-  void dispose() {}
-
-  @override
-  bool get isDisposed => false;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
 
 /// A PDF engine whose documents have a title and a one-colour first page.
 final class _PdfEngine implements PdfEngine {
@@ -115,7 +70,6 @@ FlutterSelectionSurface _surface(
   bool copyEligible = true,
   List<FlutterSelectionEndpoint> endpoints = const [],
 }) => FlutterSelectionSurface(
-  handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.one),
   width: 680,
   height: 900,
   text: text,
@@ -130,14 +84,12 @@ FlutterSelectionSurface _surface(
 void main() {
   late Directory directory;
   late ShosaiCore core;
-  late _Documents documents;
   late ApplicationBridge bridge;
 
   setUp(() async {
     directory = Directory.systemTemp.createTempSync('shosai_records');
     core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
-    documents = _Documents();
-    bridge = ApplicationBridge(core, documents);
+    bridge = ApplicationBridge(core);
   });
 
   tearDown(() async {
@@ -190,7 +142,14 @@ void main() {
     );
     expect(opened.bookId, epub.bookId);
     expect(opened.title, epub.title);
-    expect(documents.opened, [epub.pathKey]);
+    expect(opened.format, FlutterBookFormat.epub);
+    final book = await bridge.epubBook(
+      document: opened.handle,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(opened.logicalUnitCount, BigInt.from(book.chapters.length));
+    expect(bridge.releaseDocument(handle: opened.handle), isTrue);
+    expect(bridge.releaseDocument(handle: opened.handle), isFalse);
 
     final removed = await bridge.removeLibraryBook(bookId: epub.bookId);
     expect(removed.removed, isTrue);
@@ -223,7 +182,6 @@ void main() {
 
     expect(report.cancelled, isTrue);
     expect(report.imported, BigInt.zero);
-    expect(documents.cancelled, {cancellation});
   });
 
   test('a PDF engine failure fails only its own import item', () async {
@@ -234,7 +192,7 @@ void main() {
       pdfEngine: _FailingPdfEngine(),
     );
     addTearDown(failingCore.close);
-    final failingBridge = ApplicationBridge(failingCore, _Documents());
+    final failingBridge = ApplicationBridge(failingCore);
     final paths = [
       for (final (fixture, name) in [
         (_epubFixture, 'first.epub'),
@@ -466,7 +424,7 @@ void main() {
 
   test('documents opened from a file keep no annotations', () async {
     final document = await bridge.openDocument(
-      request: const FlutterOpenRequest(localId: 'x', pathKey: '/tmp/x.epub'),
+      request: const FlutterOpenRequest(localId: 'x', pathKey: _epubFixture),
       cancellationId: bridge.createCancellation(),
     );
 
@@ -499,6 +457,77 @@ void main() {
           (error) => error.kind,
           'kind',
           FlutterBridgeErrorKind.invalidRequest,
+        ),
+      ),
+    );
+  });
+
+  test('documents open by extension or content, and release', () async {
+    final pdf = await bridge.openDocument(
+      request: const FlutterOpenRequest(localId: 'p', pathKey: _pdfFixture),
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(pdf.format, FlutterBookFormat.pdf);
+    expect(pdf.title, 'Engine Title');
+    expect(pdf.logicalUnitCount, BigInt.two);
+    await expectLater(
+      bridge.epubBook(
+        document: pdf.handle,
+        cancellationId: bridge.createCancellation(),
+      ),
+      throwsA(isA<FlutterBridgeError>()),
+    );
+
+    // No extension: the leading `mimetype` entry names the EPUB.
+    final bare = '${directory.path}/book';
+    File(_epubFixture).copySync(bare);
+    final epub = await bridge.openDocument(
+      request: FlutterOpenRequest(localId: 'e', pathKey: bare),
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(epub.format, FlutterBookFormat.epub);
+    expect(epub.bookId, isNull);
+
+    bridge.dispose();
+    expect(bridge.isDisposed, isTrue);
+    expect(bridge.releaseDocument(handle: epub.handle), isFalse);
+  });
+
+  test('a document that cannot be opened reports why', () async {
+    Future<FlutterBridgeErrorKind> failure(String path) async {
+      try {
+        await bridge.openDocument(
+          request: FlutterOpenRequest(localId: path, pathKey: path),
+          cancellationId: bridge.createCancellation(),
+        );
+      } on FlutterBridgeError catch (error) {
+        return error.kind;
+      }
+      fail('$path opened');
+    }
+
+    expect(
+      await failure('${directory.path}/missing.epub'),
+      FlutterBridgeErrorKind.notFound,
+    );
+    final broken = File('${directory.path}/broken.epub')
+      ..writeAsStringSync('not a zip');
+    expect(await failure(broken.path), FlutterBridgeErrorKind.malformed);
+    final text = File('${directory.path}/notes')..writeAsStringSync('notes');
+    expect(await failure(text.path), FlutterBridgeErrorKind.unsupported);
+
+    final cancelled = bridge.createCancellation();
+    bridge.cancel(id: cancelled);
+    await expectLater(
+      bridge.openDocument(
+        request: const FlutterOpenRequest(localId: 'e', pathKey: _epubFixture),
+        cancellationId: cancelled,
+      ),
+      throwsA(
+        isA<FlutterBridgeError>().having(
+          (error) => error.kind,
+          'kind',
+          FlutterBridgeErrorKind.cancelled,
         ),
       ),
     );
