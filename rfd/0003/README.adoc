@@ -47,4 +47,4 @@ server-originated event justifies APNs, FCM, or web-push infrastructure.
 == Implementation
 
 The decision gates, migrations, transport milestones, and acceptance tests are
-tracked in link:IMPLEMENTATION.org[RFD 3 implementation checklist].
+tracked in link:IMPLEMENTATION.adoc[RFD 3 implementation checklist].

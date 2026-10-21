@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TypefacePicker · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<!-- The five alternative sets are not bundled yet (docs/typography.md, Type sets); this preview loads them from Google Fonts. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&amp;family=Newsreader:opsz,wght@6..72,400;6..72,600&amp;family=Source+Sans+3:wght@400;600&amp;family=Crimson+Pro:wght@400;600&amp;family=Figtree:wght@400;600&amp;family=Fraunces:opsz,wght@9..144,400;9..144,600&amp;family=Manrope:wght@400;600&amp;family=Spectral:wght@400;600&amp;family=Shippori+Mincho:wght@400&amp;family=Zen+Old+Mincho&amp;family=Noto+Serif+JP&amp;display=swap">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 20px 24px; display: flex; gap: 32px; align-items: flex-start; background: var(--surface-sunken); min-height: 640px; box-sizing: border-box; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.cap { font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="col"><span class="cap">Typeface</span>
+  <div class="sh-typefaces" role="radiogroup" aria-label="Typeface">
+    <button class="sh-typeface" role="radio" aria-checked="true" style="--set-ui: Inter, 'Noto Sans JP', sans-serif; --set-editorial: Literata, 'Shippori Mincho', serif;"><span class="sh-typeface__name">Inter + Literata</span><span class="sh-typeface__faces">Noto Sans JP, Shippori Mincho</span><span class="sh-typeface__sample">The quiet cartographer · 静かな海</span><svg class="i sh-typeface__check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+    <button class="sh-typeface" role="radio" aria-checked="false" style="--set-ui: Inter, 'Noto Sans JP', sans-serif; --set-editorial: 'Source Serif 4', 'Noto Serif JP', serif;"><span class="sh-typeface__name">Inter + Source Serif 4</span><span class="sh-typeface__faces">Noto Sans JP, Noto Serif JP</span><span class="sh-typeface__sample">The quiet cartographer · 静かな海</span><svg class="i sh-typeface__check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+    <button class="sh-typeface" role="radio" aria-checked="false" style="--set-ui: 'IBM Plex Sans', 'IBM Plex Sans JP', sans-serif; --set-editorial: Newsreader, 'Zen Old Mincho', serif;"><span class="sh-typeface__name">IBM Plex Sans + Newsreader</span><span class="sh-typeface__faces">IBM Plex Sans JP, Zen Old Mincho</span><span class="sh-typeface__sample">The quiet cartographer · 静かな海</span><svg class="i sh-typeface__check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+    <button class="sh-typeface" role="radio" aria-checked="false" style="--set-ui: 'Source Sans 3', 'Noto Sans JP', sans-serif; --set-editorial: 'Crimson Pro', 'Noto Serif JP', serif;"><span class="sh-typeface__name">Source Sans 3 + Crimson Pro</span><span class="sh-typeface__faces">Noto Sans JP, Noto Serif JP</span><span class="sh-typeface__sample">The quiet cartographer · 静かな海</span><svg class="i sh-typeface__check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+    <button class="sh-typeface" role="radio" aria-checked="false" style="--set-ui: Figtree, 'M PLUS 1p', sans-serif; --set-editorial: Fraunces, 'Zen Old Mincho', serif;"><span class="sh-typeface__name">Figtree + Fraunces</span><span class="sh-typeface__faces">M PLUS 1p, Zen Old Mincho</span><span class="sh-typeface__sample">The quiet cartographer · 静かな海</span><svg class="i sh-typeface__check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+    <button class="sh-typeface" role="radio" aria-checked="false" style="--set-ui: Manrope, 'Noto Sans JP', sans-serif; --set-editorial: Spectral, 'Shippori Mincho', serif;"><span class="sh-typeface__name">Manrope + Spectral</span><span class="sh-typeface__faces">Noto Sans JP, Shippori Mincho</span><span class="sh-typeface__sample">The quiet cartographer · 静かな海</span><svg class="i sh-typeface__check" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+  </div></div>
+</div>
+</body>
+</html>

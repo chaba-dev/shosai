@@ -24,7 +24,7 @@ make check-design-system-css
 
 The viewer renders the foundations straight from `tokens.json` and shows every component preview, with a switch between the light and dark app themes. It serves the repository root on localhost so fonts and the app icon load from `assets/`. Set `DESIGN_SYSTEM_PORT` to use another port. `make test-scripts` checks that `tokens.css` matches its source and that every preview the viewer lists exists.
 
-The page-spread preview loads the full Noto Serif JP from Google Fonts for its Japanese pages, because the repository bundles only the 書 subset of that family.
+The previews with Japanese text also load Shippori Mincho from Google Fonts, so the copies in the design system artifact, which does not carry the family's 35 MB of binaries, render the same as the repository's.
 
 ### Relationship to the application tokens
 
@@ -95,8 +95,8 @@ The app frame in light and dark themes: `canvas` (the library's ground), `chrome
 ### Accent and brand
 
 - `accent` is Shōsai slate, the one interactive colour: primary buttons, selected states (`accent-soft` with `on-accent-soft`), focus rings, progress, the current note. One primary button per surface. On light paper the slate deepens to `#2b3a5c` so it reads as ink rather than paint; in dark it lifts to `#a8b8df`. The application's `#4d5e86` remains the brand slate for generated covers and the website.
-- `vermilion` is the red of the app icon's spine. It marks only the reader's own marks: a filled bookmark and bookmark ticks on the progress track. Never a button, never an error.
-- `brand-navy`, `brand-charcoal`, `brand-cream` and `brand-gold` come from the app icon. They appear in the 書 mark, generated covers and marketing, never in controls.
+- `vermilion` is a seal red. It marks only the reader's own marks: a filled bookmark and bookmark ticks on the progress track. Never a button, never an error.
+- `brand-navy` and `brand-cream` are the colours of the app icon and the 書 mark; `brand-mark` picks the one the mark takes on the current theme. `brand-charcoal` and `brand-gold` are for generated covers and marketing. None of them appears in a control.
 - `success`, `warning` and `danger` always come with a word or an icon. `warning` is 4.1:1 on `surface` in light, so warning text is set in `ink` beside a `warning` icon.
 - `inverse` capsules (back pill, selection toolbar) stay dark in both app themes so they stand off any page theme.
 
@@ -116,11 +116,13 @@ Highlights use the `hl-*` fills (yellow, green, blue, pink, purple) at 40% so in
 
 Follow [typography.md](typography.md). Three roles, never interchanged:
 
-| Role | Family token | Faces | Use |
+| Role | Family token | Faces (default set) | Use |
 | --- | --- | --- | --- |
 | Interface | `--font-ui` | Inter, Noto Sans JP | Every control, label, list, meta line and panel body |
-| Editorial | `--font-editorial` | Source Serif 4, Noto Serif JP | Book titles wherever they name a book (the sidebar's Reading now list, toolbar, library cards, hero, tab cards), screen, section and panel titles, the wordmark, empty-state headlines, generated covers, and quoted book text in notes, peeks and search |
-| Book | `--font-book` | The book's own fonts, else Source Serif 4 and Noto Serif JP | EPUB content only. PDFs keep their embedded fonts |
+| Editorial | `--font-editorial` | Literata, Shippori Mincho | Book titles wherever they name a book (the sidebar's Reading now list, toolbar, library cards, hero, tab cards), screen, section and panel titles, the wordmark, empty-state headlines, generated covers, and quoted book text in notes, peeks and search |
+| Book | `--font-book` | The book's own fonts, else Literata and Shippori Mincho | EPUB content only. PDFs keep their embedded fonts |
+
+The faces come from a **type set**, chosen in the Typeface setting (decided 2026-10-21). The default set is Inter + Literata, with Noto Sans JP + Shippori Mincho behind them for Japanese; the five alternatives are Inter + Source Serif 4, IBM Plex Sans + Newsreader, Source Sans 3 + Crimson Pro, Figtree + Fraunces and Manrope + Spectral, each with its own Japanese pair (`type.sets` in `tokens.json`). A set fills all three roles at once: its sans is the interface, its serif the editorial face and the reader's **Serif** choice, its sans the reader's **Sans** choice. The styles below keep their sizes whatever the set. Only the default set is bundled today; the others ship with the setting.
 
 - Interface styles: `ui-title` 20/26, `ui-heading` 16/22, `ui-body` 14/20, `ui-control` 13/18, `ui-caption` 12/16, `ui-label` 11/14 uppercase, `ui-badge` 10/12. Weights 400, 500 and 600 only.
 - Editorial styles: `ed-display` 40/44 (the library and other screen titles; 34/38 on tablet, 30/34 on phone), `ed-screen` 34/40 (the Continue reading hero's title), `ed-section` 22/26 (section heads such as *All books*, and panel titles at 20/24), `ed-wordmark` 22/26, `ed-title` 14/19 (book titles in the sidebar, cards and lists; 17/21 in the reader toolbar), `ed-quote` 15/23 (18/27 in the hero). The serif is reserved for what names or quotes a book and for the titles of screens, sections and panels; a serif on a button, a label or a meta line is wrong.
@@ -268,8 +270,11 @@ Head, then scope and count, then the book note and groups per section in reading
 | Size | **Text size**, 70%–160% in 10% steps; pages reflow and the place is kept | **Zoom**: Fit width, Fit page, then 50%–400%; pages re-render sharp |
 | Pages | One or Two; Two by default where the stage is wide enough | Same |
 | Font | **Book’s own** (default), Serif, Sans | Not shown: PDF pages keep their fonts |
+| Typeface | The current type set’s name, opening the TypefacePicker | Same |
 
-Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live and are kept per book. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live and are kept per book, except Typeface, which is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+
+**TypefacePicker.** The six type sets as a radio list (`role="radiogroup"`), each row showing the set’s name in its sans, its faces in `ui-caption` and a one-line specimen in its serif, so the choice is made by looking rather than by name. The current set carries a check in `accent`. Choosing applies at once to the interface, the editorial text and the reader’s Serif and Sans fonts; a book’s own fonts are untouched. Rows never preview with system fallbacks: a set that is not bundled is not listed.
 
 ### Library
 
@@ -312,7 +317,16 @@ Add a glyph only from Lucide, at the same stroke, with a row here and its SVG in
 
 ## Logo
 
-The app icon (`assets/shosai-icon.png`) is the mark: a stack of book spines on cream. In the interface the mark is the character 書 in Noto Serif JP, cream on a 30 px `brand-navy` disc (`sh-mark`), beside the wordmark *Shōsai* in `ed-wordmark` (`sh-wordmark`), at the head of the sidebar; the rail keeps the mark alone. Always write the name with its macron: Shōsai. Never recolour or redraw the icon.
+The mark is 丸に書 (decided 2026-10-21): the character 書, set in Noto Serif JP Black, inside a plain ring, in the manner of a family crest. It is one colour on any ground: `brand-navy` on light grounds, `brand-cream` on dark, which `brand-mark` selects in the interface. The files live in `assets/logo/`:
+
+| File | What it is |
+| --- | --- |
+| `shosai-mark.svg` | The mark alone, outlined, in `currentColor` on a 100-unit box: ring radius 45 at a stroke of 5.5, the character 54 units tall. Use this everywhere the mark is drawn, at any size. |
+| `shosai-icon.svg`, `assets/shosai-icon.png` | The app icon: the mark in `brand-navy` on a full-bleed `brand-cream` square, at 72% of the side. Platforms mask it themselves (iOS, Android). |
+| `shosai-icon-macos.svg` | The macOS icon: the same on a rounded square with the system corner radius and transparent margins. |
+| `website/static/favicon.svg` | The favicon: the mark on a cream rounded square. |
+
+In the interface the mark is `sh-mark`: 30 px, the ring a 2 px border in `brand-mark`, the character in Noto Serif JP at weight 900, beside the wordmark *Shōsai* in `ed-wordmark` (`sh-wordmark`) at the head of the sidebar; the rail keeps the mark alone. Keep clear space of at least a quarter of the mark’s width on every side, and do not set the mark smaller than 16 px. Always write the name with its macron: Shōsai. Never recolour, outline, shade or redraw the mark; the ring and the character always move together.
 
 ## Motion
 

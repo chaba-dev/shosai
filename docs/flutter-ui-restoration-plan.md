@@ -14,7 +14,7 @@ contract work, not a frontend restart or pixel-identical port.
 - Opened: 2026-09-14. Restructured: 2026-09-20.
 - Status: Stages 1–5 IN PROGRESS; Stage 6 TODO; 4/30 delivery packages fully accepted (1A, 1B, 2A, 5A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A was accepted by the owner and merged at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e); the 2026-09-28 [EPUB adoption decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28) supersedes its Rust-specific EPUB portions without erasing that acceptance. 5B is **paused/superseded** by the same decision and is not dispatched. 3D integration acceptance and earlier gaps remain open.
 - Governing documents: [RFD 4](../rfd/0004/README.adoc), its
-  [implementation checklist](../rfd/0004/IMPLEMENTATION.org),
+  [implementation checklist](../rfd/0004/IMPLEMENTATION.adoc),
   [performance contract](../rfd/0004/PHASE-0.adoc), and
   [RFD 6](../rfd/0006/README.adoc) for selection/highlighting.
 - Required guidance: [Flutter architecture](flutter-architecture.md) and

@@ -15,8 +15,8 @@
 }
 
 @font-face {
-  font-family: "Source Serif 4 Variable";
-  src: url("/fonts/SourceSerif4Variable-Roman.ttf") format("truetype");
+  font-family: "Literata";
+  src: url("/fonts/Literata[opsz,wght].ttf") format("truetype");
   font-style: normal;
   font-weight: 200 900;
   font-display: swap;
@@ -24,9 +24,9 @@
 
 @font-face {
   font-family: "Noto Serif JP";
-  src: url("/fonts/NotoSerifJP-ShosaiMark-Regular.ttf") format("truetype");
+  src: url("/fonts/NotoSerifJP-ShosaiMark-Black.ttf") format("truetype");
   font-style: normal;
-  font-weight: 400;
+  font-weight: 900;
   font-display: swap;
   unicode-range: U+66F8;
 }
@@ -39,7 +39,7 @@
   --accent: #275a47;
   --line: #d4d0c5;
   --font-ui: "Inter Variable", "Noto Sans JP", sans-serif;
-  --font-editorial: "Source Serif 4 Variable", "Noto Serif JP", serif;
+  --font-editorial: "Literata", "Noto Serif JP", serif;
   font-family: var(--font-ui);
   color: var(--ink);
   background: var(--paper);
@@ -53,7 +53,7 @@ a { color: inherit; text-decoration: none; }
 .site-header, main, footer { max-width: 1200px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
 .site-header { display: flex; justify-content: space-between; align-items: center; min-height: 88px; border-bottom: 1px solid var(--line); }
 .wordmark { display: inline-flex; align-items: center; gap: 9px; font-family: var(--font-editorial); font-size: 1.3rem; font-weight: bold; }
-.mark, .preview-mark { display: grid; place-items: center; width: 30px; height: 30px; background: var(--accent); color: #f9f8f1; border-radius: 50%; font-family: var(--font-editorial); font-size: 1rem; }
+.mark, .preview-mark { display: grid; place-items: center; box-sizing: border-box; width: 30px; height: 30px; border: 2px solid var(--ink); color: var(--ink); border-radius: 50%; font-family: "Noto Serif JP", serif; font-weight: 900; font-size: 1rem; line-height: 1; padding-top: 1px; }
 nav { display: flex; align-items: center; gap: 26px; font-size: .9rem; }
 nav a:not(.nav-download) { color: var(--muted); }
 .nav-download { padding: 10px 14px; border: 1px solid var(--ink); border-radius: 3px; }
@@ -72,7 +72,7 @@ h1 { margin-bottom: 24px; font-size: clamp(3.7rem, 8vw, 6.7rem); line-height: .9
 
 .reader-preview { overflow: hidden; border: 1px solid #bac1b3; border-radius: 6px; box-shadow: 0 24px 50px rgba(38, 46, 35, .13); background: #f2f1eb; }
 .preview-toolbar { display: flex; justify-content: space-between; align-items: center; height: 50px; padding: 0 18px; border-bottom: 1px solid #d2d5cb; color: #555d54; font-size: .76rem; }
-.preview-brand { display: flex; align-items: center; gap: 7px; color: #293a2f; font-family: var(--font-editorial); font-size: .9rem; font-weight: bold; }.preview-mark { width: 21px; height: 21px; font-size: .7rem; }
+.preview-brand { display: flex; align-items: center; gap: 7px; color: #293a2f; font-family: var(--font-editorial); font-size: .9rem; font-weight: bold; }.preview-mark { width: 21px; height: 21px; border-width: 1.5px; font-size: .7rem; }
 .preview-content { display: grid; grid-template-columns: 155px minmax(360px, 1fr) 155px; min-height: 430px; }
 .preview-library, .preview-notes { padding: 24px 16px; background: #e5e8df; color: #697168; font-size: .7rem; }.preview-library { border-right: 1px solid #d2d5cb; }.preview-notes { display: flex; flex-direction: column; gap: 11px; border-left: 1px solid #d2d5cb; }.preview-notes strong { color: var(--accent); font-size: 1.3rem; }.preview-notes hr { width: 100%; border: 0; border-top: 1px solid #ced3c8; }
 .library-label { display: block; margin-bottom: 20px; font-weight: 700; }.book { display: block; width: 55px; height: 77px; margin: 0 auto 13px; border-radius: 2px; background: #759174; box-shadow: 3px 3px 4px #0001; }.book.warm { background: #bd8569; }.book.dark { background: #3b5043; }.book.selected { outline: 3px solid #486b53; outline-offset: 3px; }

@@ -364,7 +364,7 @@ outcomes in vertical slices. Nothing new is built in Iced.
 
 Migration is tracked as dependency-ordered milestones rather than as one
 frontend rewrite. Each milestone has an explicit exit gate in
-link:IMPLEMENTATION.org[the implementation checklist]. A phase is complete only
+link:IMPLEMENTATION.adoc[the implementation checklist]. A phase is complete only
 when its exit gate is satisfied; checking individual tasks records progress but
 does not waive the gate.
 
@@ -440,7 +440,7 @@ first cross-format interaction and persistence slice.
 == Implementation
 
 The dependency-ordered spike, extraction, migration, web, and packaging work is
-tracked in link:IMPLEMENTATION.org[RFD 4 implementation checklist].
+tracked in link:IMPLEMENTATION.adoc[RFD 4 implementation checklist].
 
 == References
 
