@@ -35,6 +35,27 @@
 
         androidJdk = pkgs.jdk17;
 
+        # The Dart VM in libflutter_linux_gtk.so dlopens native assets (SQLite,
+        # PDFium) by bare name, so it needs its upstream RUNPATH `$ORIGIN` to
+        # find them beside it in the bundle's lib/. The pinned nixpkgs patches
+        # the engine artifacts with auto-patchelf, which drops `$ORIGIN`.
+        # Backport nixpkgs 90cf442 (#574475); drop this once the pin includes it.
+        flutter =
+          if pkgs.stdenv.isLinux then
+            pkgs.flutter.override (prev: {
+              callPackage =
+                path: args:
+                let
+                  package = prev.callPackage path args;
+                in
+                if baseNameOf path == "prepare-artifacts.nix" then
+                  package.overrideAttrs { autoPatchelfFlags = [ "--preserve-origin" ]; }
+                else
+                  package;
+            })
+          else
+            pkgs.flutter;
+
         hostXcrun = pkgs.writeShellScriptBin "xcrun" ''
           exec /usr/bin/xcrun "$@"
         '';
@@ -44,7 +65,7 @@
           # tools
           androidJdk
           androidSdk
-          flutter
+          flutter # the `let` binding above, not pkgs.flutter
           git-cliff
           jujutsu
           hugo
