@@ -244,10 +244,10 @@ void main() {
 
   test('instances racing to create a fresh database all open it', () async {
     final directory = tempDataDirectory();
-    for (var round = 0; round < 40; round++) {
+    for (var round = 0; round < 150; round++) {
       final path = '${directory.path}/race-$round.sqlite3';
       final stores = await Future.wait([
-        for (var i = 0; i < 3; i++) Store.open(path),
+        for (var i = 0; i < 4; i++) Store.open(path),
       ]);
       for (final store in stores) {
         expect(store.schemaVersion, schemaMigrations.last.version);

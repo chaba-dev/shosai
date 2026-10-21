@@ -434,7 +434,7 @@ Object _sendableError(Object error) => switch (error) {
     } finally {
       if (!db.autocommit) db.execute('COMMIT');
     }
-    final mode = db.select('PRAGMA journal_mode = WAL').first.columnAt(0);
+    final mode = _enableWal(db);
     if (mode != 'wal') {
       throw CoreException.storage(
         'The database refused WAL journaling ($mode).',
@@ -452,6 +452,24 @@ Object _sendableError(Object error) => switch (error) {
   } catch (_) {
     db.close();
     rethrow;
+  }
+}
+
+/// Switch [db] to WAL journaling and return the journal mode it took.
+///
+/// Leaving rollback journaling needs an exclusive lock, and SQLite returns
+/// SQLITE_BUSY at once, without the busy handler, when waiting could
+/// deadlock with another instance upgrading its own lock on a fresh file.
+/// Retries until [storeBusyTimeout].
+String _enableWal(Database db) {
+  final deadline = DateTime.now().add(storeBusyTimeout);
+  while (true) {
+    try {
+      return db.select('PRAGMA journal_mode = WAL').first.columnAt(0) as String;
+    } on SqliteException catch (error) {
+      if (error.resultCode != 5 || DateTime.now().isAfter(deadline)) rethrow;
+      sleep(const Duration(milliseconds: 5));
+    }
   }
 }
 
