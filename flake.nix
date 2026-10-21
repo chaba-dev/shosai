@@ -176,6 +176,10 @@
               ])
             );
 
+            # The Flutter PDF engine tests load PDFium from here: `flutter test`
+            # does not link pdfrx's native asset.
+            SHOSAI_PDFIUM_LIBRARY = "${pkgs.pdfium-binaries}/lib/libpdfium.so";
+
             # Clang (in the shell's build deps) links the native Cargo targets
             # directly, matching the toolchain the Flutter host builds use.
             CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang";
