@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../errors.dart';
+import '../library/book.dart';
 import 'quote.dart';
 import 'resolution.dart';
 
@@ -39,6 +40,47 @@ const maxProvenanceSystemBytes = 256;
 const maxProvenanceIdBytes = 4096;
 
 enum HighlightColor { yellow, green, blue, pink, purple }
+
+/// A document's content that is not a library book, known by its content
+/// hash: what a file opened directly keeps its annotations under.
+///
+/// Annotations belong to contents, not paths, so a file's annotations are
+/// the ones made on the same bytes, whether it was opened directly or
+/// imported later.
+final class AnnotatedContent {
+  /// Throws [CoreErrorKind.invalidRequest] unless [contentHash] is a
+  /// lowercase hexadecimal SHA-256 and [title] is 1 to [maxAnnotatedTitleBytes]
+  /// UTF-8 bytes.
+  AnnotatedContent({
+    required this.contentHash,
+    required this.format,
+    required this.title,
+  }) {
+    if (!_sha256Hex.hasMatch(contentHash)) {
+      throw const CoreException.invalidRequest(
+        'A content hash is a lowercase hexadecimal SHA-256.',
+      );
+    }
+    final bytes = utf8.encode(title).length;
+    if (bytes < 1 || bytes > maxAnnotatedTitleBytes) {
+      throw const CoreException.invalidRequest(
+        'An annotated content title is 1 to $maxAnnotatedTitleBytes bytes.',
+      );
+    }
+  }
+
+  /// Lowercase hexadecimal SHA-256 of the content's bytes.
+  final String contentHash;
+  final BookFormat format;
+
+  /// What the person recognizes the content by, kept with its annotations.
+  final String title;
+}
+
+/// Longest title an [AnnotatedContent] keeps, in UTF-8 bytes.
+const maxAnnotatedTitleBytes = 4096;
+
+final _sha256Hex = RegExp(r'^[0-9a-f]{64}$');
 
 /// A rectangle on a PDF page, in the page's coordinate space (points, y
 /// growing downward). Stored as float32 coordinates, so a stored annotation

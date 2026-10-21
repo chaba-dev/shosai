@@ -156,6 +156,29 @@ Future<Uint8List> readBookBytes(
   return builder.takeBytes();
 }
 
+/// The content hash of [bytes]: lowercase hexadecimal SHA-256, as
+/// [FileFingerprint.hash] and a library book's content hash name it.
+///
+/// Hashes in bounded chunks, yielding and observing [cancellation] between
+/// them, so a large book does not hold the calling isolate.
+Future<String> hashBookBytes(
+  Uint8List bytes, {
+  CancellationToken? cancellation,
+}) async {
+  const chunk = 1024 * 1024;
+  final digest = _DigestSink();
+  final hasher = sha256.startChunkedConversion(digest);
+  for (var start = 0; start < bytes.length; start += chunk) {
+    cancellation.throwIfCancelled();
+    final end = start + chunk < bytes.length ? start + chunk : bytes.length;
+    hasher.add(Uint8List.sublistView(bytes, start, end));
+    if (end < bytes.length) await Future<void>.delayed(Duration.zero);
+  }
+  hasher.close();
+  cancellation.throwIfCancelled();
+  return digest.value.toString();
+}
+
 bool _startsWith(Uint8List bytes, String prefix) =>
     bytes.length >= prefix.length &&
     latin1.decode(bytes.sublist(0, prefix.length)) == prefix;

@@ -36,12 +36,42 @@ final class Annotations {
     HighlightColor color = HighlightColor.yellow,
     String? body,
     AnnotationProvenance? provenance,
+  }) => _create(
+    LibraryBookOwner(bookId),
+    selection,
+    color: color,
+    body: body,
+    provenance: provenance,
+  );
+
+  /// Annotate [selection] in [content], a document opened outside the
+  /// library.
+  Future<ResolvedAnnotation> createInContent(
+    AnnotatedContent content,
+    AnnotationSelection selection, {
+    HighlightColor color = HighlightColor.yellow,
+    String? body,
+    AnnotationProvenance? provenance,
+  }) => _create(
+    ContentOwner(content),
+    selection,
+    color: color,
+    body: body,
+    provenance: provenance,
+  );
+
+  Future<ResolvedAnnotation> _create(
+    AnnotationOwner owner,
+    AnnotationSelection selection, {
+    required HighlightColor color,
+    required String? body,
+    required AnnotationProvenance? provenance,
   }) async {
     checkAnnotationBody(body);
     checkProvenance(provenance);
     final (anchor, quote) = _anchorOf(selection);
     final stored = await _records.create(
-      bookId,
+      owner,
       NewAnnotation(
         anchor: anchor,
         quote: quote,
@@ -82,10 +112,23 @@ final class Annotations {
     int bookId,
     UnitTextSource text, {
     CancellationToken? cancellation,
-  }) async {
+  }) => _list(LibraryBookOwner(bookId), text, cancellation);
+
+  /// [content]'s live annotations, as [list] resolves a book's.
+  Future<List<ResolvedAnnotation>> listInContent(
+    AnnotatedContent content,
+    UnitTextSource text, {
+    CancellationToken? cancellation,
+  }) => _list(ContentOwner(content), text, cancellation);
+
+  Future<List<ResolvedAnnotation>> _list(
+    AnnotationOwner owner,
+    UnitTextSource text,
+    CancellationToken? cancellation,
+  ) async {
     // Reading checks every stored selector, so a cancelled listing skips it.
     cancellation.throwIfCancelled();
-    final book = await _records.list(bookId);
+    final book = await _records.list(owner);
     cancellation.throwIfCancelled();
     return _resolve(book, text, cancellation);
   }
@@ -99,12 +142,29 @@ final class Annotations {
     String? body,
   }) async {
     checkAnnotationBody(body);
-    return _records.update(bookId, id, color, body);
+    return _records.update(LibraryBookOwner(bookId), id, color, body);
+  }
+
+  /// Change annotation [id]'s color and body. Returns false when [content]
+  /// has no such live annotation.
+  Future<bool> updateInContent(
+    AnnotatedContent content,
+    String id, {
+    required HighlightColor color,
+    String? body,
+  }) async {
+    checkAnnotationBody(body);
+    return _records.update(ContentOwner(content), id, color, body);
   }
 
   /// Delete annotation [id], leaving a tombstone for synchronization.
   /// Returns false when book [bookId] has no such live annotation.
-  Future<bool> delete(int bookId, String id) => _records.delete(bookId, id);
+  Future<bool> delete(int bookId, String id) =>
+      _records.delete(LibraryBookOwner(bookId), id);
+
+  /// Delete annotation [id] of [content], as [delete] does a book's.
+  Future<bool> deleteInContent(AnnotatedContent content, String id) =>
+      _records.delete(ContentOwner(content), id);
 
   /// Other contents of book [bookId]'s format whose annotations could be
   /// brought to it, a page at a time.
