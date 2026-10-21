@@ -62,6 +62,9 @@ final class BridgePdfDocument implements PdfEngineDocument {
   bool get allowsCopying => true;
 
   @override
+  Future<PdfDocumentInfo> info() async => const PdfDocumentInfo();
+
+  @override
   PdfPageSize pageSize(int page) => const PdfPageSize(612, 792);
 
   @override

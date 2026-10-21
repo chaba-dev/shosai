@@ -74,6 +74,9 @@ abstract interface class PdfEngineDocument {
   /// Searches the whole document for [query], case-insensitively.
   Future<List<FlutterSearchMatch>> search(String query);
 
+  /// The title and author of the document information dictionary.
+  Future<PdfDocumentInfo> info();
+
   /// The document outline, flattened in document order.
   Future<List<PdfOutlineEntry>> outline();
 
@@ -82,6 +85,15 @@ abstract interface class PdfEngineDocument {
 
   /// Releases the document. Later calls fail.
   Future<void> dispose();
+}
+
+/// What the document information dictionary says about the document.
+final class PdfDocumentInfo {
+  const PdfDocumentInfo({this.title, this.author});
+
+  /// Null when absent or blank.
+  final String? title;
+  final String? author;
 }
 
 /// Page size in points.

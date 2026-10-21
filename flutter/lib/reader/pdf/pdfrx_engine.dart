@@ -190,6 +190,16 @@ final class _PdfrxDocument implements PdfEngineDocument {
   }
 
   @override
+  Future<PdfDocumentInfo> info() async {
+    if (_disposed) throw const PdfEngineException('PDF document is closed');
+    final (title, author) = await pdfrx.PdfrxEntryFunctions.instance.compute(
+      _infoOnWorker,
+      _handle.address,
+    );
+    return PdfDocumentInfo(title: title, author: author);
+  }
+
+  @override
   Future<List<PdfOutlineEntry>> outline() async {
     if (_disposed) throw const PdfEngineException('PDF document is closed');
     final nodes = await _document.loadOutline();
@@ -241,17 +251,20 @@ final class _PdfrxDocument implements PdfEngineDocument {
     await _document.dispose();
   }
 
+  // pdfrx keeps the FPDF_DOCUMENT handle on its (private) document class as
+  // a public `document` field; the raw calls below need it. This is the one
+  // place the engine reaches past pdfrx's object model, and the engine tests
+  // fail loudly if a pdfrx upgrade moves it.
+  Pointer<NativeType> get _handle =>
+      (_document as dynamic).document as Pointer<NativeType>;
+
   /// Samples every character of [page] on pdfrx's PDFium worker.
   Future<List<PdfCharacterSample>> _sample(
     int page,
     PdfBitmapSize size, {
     required bool geometry,
   }) {
-    // pdfrx keeps the FPDF_DOCUMENT handle on its (private) document class as
-    // a public `document` field; the raw text calls below need it. This is the
-    // one place the engine reaches past pdfrx's object model, and the engine
-    // tests fail loudly if a pdfrx upgrade moves it.
-    final handle = (_document as dynamic).document as Pointer<NativeType>;
+    final handle = _handle;
     return pdfrx.PdfrxEntryFunctions.instance.compute(
       _sampleOnWorker,
       _SampleRequest(
@@ -287,6 +300,25 @@ pdfium_bindings.PDFium? _workerPdfium;
 
 pdfium_bindings.PDFium get _pdfium => _workerPdfium ??= pdfium_bindings
     .getPdfium(modulePath: pdfrx.Pdfrx.pdfiumModulePath);
+
+/// Runs on pdfrx's worker isolate: the document's title and author.
+(String?, String?) _infoOnWorker(int address) {
+  final pdfium = _pdfium;
+  final document = pdfium_bindings.FPDF_DOCUMENT.fromAddress(address);
+  String? text(String tag) => using((arena) {
+    final key = tag.toNativeUtf8(allocator: arena).cast<Char>();
+    final length = pdfium.FPDF_GetMetaText(document, key, nullptr, 0);
+    // UTF-16LE with a terminator; 2 bytes is an empty value.
+    if (length <= 2 || length > 64 * 1024) return null;
+    final buffer = arena<Uint16>(length ~/ 2);
+    pdfium.FPDF_GetMetaText(document, key, buffer.cast(), length);
+    final value = String.fromCharCodes(
+      buffer.asTypedList(length ~/ 2 - 1),
+    ).trim();
+    return value.isEmpty ? null : value;
+  });
+  return (text('Title'), text('Author'));
+}
 
 /// Runs on pdfrx's worker isolate: samples every character of one page.
 List<PdfCharacterSample> _sampleOnWorker(_SampleRequest request) {
