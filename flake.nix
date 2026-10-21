@@ -105,6 +105,7 @@
 
             # Headless desktop E2E and screenshot verification
             xvfb
+            xvfb-run
             xwininfo
             xdotool
             imagemagick
@@ -150,7 +151,13 @@
               libxrandr
               libxi
               vulkan-loader
+              # libEGL for the Flutter Linux host; it fails to start without one
+              libGL
             ]);
+
+            # Mesa is libglvnd's EGL vendor; this works under Xvfb and on hosts
+            # whose own GL drivers do not match the Nix glibc.
+            __EGL_VENDOR_LIBRARY_FILENAMES = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
 
             # The Flutter PDF engine tests load PDFium from here: `flutter test`
             # does not link pdfrx's native asset. Application bundles carry
