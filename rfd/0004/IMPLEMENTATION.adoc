@@ -355,9 +355,21 @@ PDF page text from the PDF engine. Removal moved the documents too:
 `flutter/lib/core/documents.dart` opens EPUB books through `shosai_epub` and
 PDF documents through the PDF engine, and the reader reads an open EPUB's
 parsed book from the bridge instead of parsing the file again.
-** [ ] Open: documents opened from a file outside the library keep no
-highlights (the Rust store keyed them by path); PDF search is still duplicated
-in `flutter/lib/reader/pdf/search.dart`.
+** [x] Documents (2026-10-21): every document reads one immutable snapshot
+of its file, checked against the content hash before anything is parsed: an
+EPUB's bytes are read once (bounded and cancellable) and parsed from memory; a
+PDF is copied into a private per-process directory beside the database, and
+its metadata, rendering, text and annotations read that copy until the
+document is released. A library book whose file no longer holds its content
+is rejected without a document. Files opened outside the library keep their
+highlights and notes under the content hash of that snapshot, so they survive
+closing and reopening the same bytes and are the library book's own once the
+file is imported. A bridge that is disposed cancels its operations, rejects
+and releases documents that finish opening afterwards, and releases each
+document after the operations using it; the application's `CoreOwner` closes
+the shared core once its bridges have drained.
+** [ ] Open: PDF search is still duplicated in
+`flutter/lib/reader/pdf/search.dart`.
 * [x] *Removal.* Delete `crates/`, `Cargo.toml`, `Cargo.lock`,
 `flutter/rust_builder`, `flutter/lib/src/rust`, the `flutter_rust_bridge`
 and `ffigen` dependencies, the bridge codegen and `check-frb` Makefile
