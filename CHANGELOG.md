@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-14
+## [0.1.0] - 2026-10-21
 
 ### 🚀 Features
 
@@ -98,11 +98,13 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Isolate view construction (#61)
 - *(core)* Extract platform-neutral reader foundations (#78)
 - *(flutter)* Organize the frontend into Elm modules mirroring Iced (#108)
+- Remove the Iced application and CBZ support (#149)
 
 ### 📚 Documentation
 
 - Adopt Requests for Discussion format (#64)
 - *(rfd)* Choose Flutter for mobile (#65)
+- Define the first release in RFDs 4 and 6 and add the Shōsai design system (#148)
 
 ### ⚡ Performance
 
