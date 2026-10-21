@@ -102,6 +102,8 @@
             # Flutter Linux desktop build deps
             gtk3
             ninja
+            # Restores the engine library's $ORIGIN RUNPATH in release bundles
+            patchelf
 
             # Native windowing and GPU development files for the Flutter Linux
             # host and the tools that run under Xvfb below

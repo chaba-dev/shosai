@@ -100,6 +100,25 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
+# Native assets (SQLite, PDFium) are loaded by file name from the engine
+# library, so the bundle finds them only through its `$ORIGIN` RUNPATH.
+# Nixpkgs' Flutter replaces that RUNPATH with store paths; put `$ORIGIN` back.
+find_program(PATCHELF patchelf)
+if(PATCHELF)
+  get_filename_component(FLUTTER_LIBRARY_NAME "${FLUTTER_LIBRARY}" NAME)
+  install(CODE "
+    set(engine \"${INSTALL_BUNDLE_LIB_DIR}/${FLUTTER_LIBRARY_NAME}\")
+    execute_process(COMMAND \"${PATCHELF}\" --print-rpath \"\${engine}\"
+      OUTPUT_VARIABLE runpath OUTPUT_STRIP_TRAILING_WHITESPACE
+      COMMAND_ERROR_IS_FATAL ANY)
+    string(FIND \":\${runpath}:\" \":\$ORIGIN:\" at)
+    if(at EQUAL -1)
+      execute_process(COMMAND \"${PATCHELF}\" --add-rpath \"\$ORIGIN\"
+        \"\${engine}\" COMMAND_ERROR_IS_FATAL ANY)
+    endif()
+  " COMPONENT Runtime)
+endif()
+
 foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
   install(FILES "${bundled_library}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
