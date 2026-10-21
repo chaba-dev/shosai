@@ -426,7 +426,14 @@ Object _sendableError(Object error) => switch (error) {
   }
   try {
     db.execute('PRAGMA busy_timeout = ${storeBusyTimeout.inMilliseconds}');
-    _checkAdmission(db, latest);
+    // One read snapshot, so another instance claiming a fresh file between
+    // these reads cannot make Shōsai's own database look foreign.
+    db.execute('BEGIN');
+    try {
+      _checkAdmission(db, latest);
+    } finally {
+      if (!db.autocommit) db.execute('COMMIT');
+    }
     final mode = db.select('PRAGMA journal_mode = WAL').first.columnAt(0);
     if (mode != 'wal') {
       throw CoreException.storage(
@@ -506,7 +513,7 @@ CoreException _openingError(SqliteException error) =>
       11 || 26 => CoreException.malformed(
         'The file is not a usable database: ${error.message}',
       ),
-      3 || 8 || 10 || 14 || 23 => CoreException(
+      3 || 5 || 6 || 8 || 10 || 14 || 23 => CoreException(
         CoreErrorKind.inaccessible,
         'The database could not be read or written: ${error.message}',
       ),

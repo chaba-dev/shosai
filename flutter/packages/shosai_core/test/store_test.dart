@@ -242,6 +242,86 @@ void main() {
     },
   );
 
+  test('instances racing to create a fresh database all open it', () async {
+    final directory = tempDataDirectory();
+    for (var round = 0; round < 40; round++) {
+      final path = '${directory.path}/race-$round.sqlite3';
+      final stores = await Future.wait([
+        for (var i = 0; i < 3; i++) Store.open(path),
+      ]);
+      for (final store in stores) {
+        expect(store.schemaVersion, schemaMigrations.last.version);
+        await store.close();
+      }
+    }
+  });
+
+  test(
+    'a database locked by another writer is inaccessible, not malformed',
+    () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      await (await Store.open(path)).close();
+      final holder = sqlite3.open(path);
+      addTearDown(holder.close);
+      holder.execute('PRAGMA journal_mode = DELETE');
+      holder.execute('BEGIN EXCLUSIVE');
+      addTearDown(() {
+        if (!holder.autocommit) holder.execute('ROLLBACK');
+      });
+
+      await expectLater(
+        Store.open(path),
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.inaccessible,
+          ),
+        ),
+      );
+    },
+  );
+
+  test('a write whose commit fails reports it and keeps nothing', () async {
+    final directory = tempDataDirectory();
+    final store = await Store.open(
+      '${directory.path}/library.sqlite3',
+      migrations: [
+        ..._testMigrations,
+        const Migration(2, 'links', '''
+          CREATE TABLE links (
+            note_id INTEGER NOT NULL
+              REFERENCES notes (id) DEFERRABLE INITIALLY DEFERRED
+          ) STRICT;
+        '''),
+      ],
+    );
+    addTearDown(store.close);
+
+    // The deferred foreign key fails at COMMIT, after the result was staged.
+    await expectLater(
+      store.transaction((db) {
+        db.execute('INSERT INTO links (note_id) VALUES (42)');
+        return 'staged';
+      }),
+      throwsA(
+        isA<CoreException>().having(
+          (e) => e.kind,
+          'kind',
+          CoreErrorKind.storage,
+        ),
+      ),
+    );
+    expect(
+      await store.read(
+        (db) => db.select('SELECT COUNT(*) FROM links').first.columnAt(0),
+      ),
+      0,
+    );
+    expect(await store.transaction((db) => 'next'), 'next');
+  });
+
   test('a file that is not SQLite is refused', () async {
     final directory = tempDataDirectory();
     final path = '${directory.path}/library.sqlite3';
