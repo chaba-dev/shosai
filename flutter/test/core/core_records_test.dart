@@ -639,7 +639,10 @@ void main() {
       expect(await matches(document, 'replaced'), 0);
       expect(engine.opened.skip(1), everyElement(document.contentPath));
       final snapshots = (await owner.core.snapshots.directory)!;
-      expect(snapshots.parent.path, '${data.path}/snapshots');
+      expect(
+        snapshots.parent.path,
+        await Directory('${data.path}/snapshots').resolveSymbolicLinks(),
+      );
       if (!Platform.isWindows) {
         expect(snapshots.statSync().mode & 0x3f, 0, reason: 'owner-only');
       }
@@ -706,14 +709,39 @@ Future<void> main(List<String> arguments) async {
         expect(live.existsSync(), isFalse);
         expect(own.existsSync(), isTrue);
 
-        // A directory changed within the grace period may still be in
-        // creation, so it stays even without a lock file.
+        // A directory without a lock file is an earlier version's, and goes
+        // only once it is old; one still being set up is never swept.
         final fresh = Directory('$parent/process-fresh')..createSync();
+        final staging = Directory('$parent/staging-old')..createSync();
+        await Process.run('touch', ['-d', '2 days ago', staging.path]);
         await owner.core.snapshots.sweep();
         expect(fresh.existsSync(), isTrue);
+        expect(staging.existsSync(), isTrue);
       },
       skip: Platform.isWindows ? 'needs touch and POSIX locks' : false,
     );
+
+    test('a second instance naming the data directory differently keeps '
+        'the first one\'s snapshots', () async {
+      final bookId = await importBook();
+      final document = await pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      final own = (await owner.core.snapshots.directory)!;
+      final alias = Directory('${data.path}-alias');
+      Link(alias.path).createSync(data.path);
+      addTearDown(() => Link(alias.path).deleteSync());
+      for (final spelling in ['${data.path}/.', alias.path]) {
+        await Process.run('touch', ['-d', '2 days ago', own.path]);
+        // Opening a core sweeps its snapshot parent.
+        final other = await ShosaiCore.open(spelling, pdfEngine: engine);
+        await other.close();
+        expect(own.existsSync(), isTrue, reason: spelling);
+      }
+      expect(File(document.contentPath!).readAsStringSync(), original);
+      expect(await matches(document, 'original'), 1);
+    }, skip: Platform.isWindows ? 'needs touch and links' : false);
 
     test('a library PDF replaced after it opened keeps the verified text '
         'until it is released, and its snapshot is then deleted', () async {

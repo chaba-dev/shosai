@@ -84,19 +84,27 @@ final class DocumentSnapshots {
   }
 
   /// Delete snapshot directories that no running process holds: an earlier
-  /// process left them (it did not close, or could not delete them). A
-  /// process holds its directory's lock file for as long as it uses the
-  /// directory, so a directory is deleted only when its lock can be taken
-  /// without waiting, or when it never got a lock file. Directories changed
-  /// within [grace] are left, so one being created is never taken.
-  Future<void> sweep({Duration grace = const Duration(minutes: 1)}) async {
+  /// process left them (it did not close, or could not delete them).
+  ///
+  /// A directory enters the `process-` names this sweeps only by a rename,
+  /// after its process has locked its lock file, and the process holds that
+  /// lock for as long as it uses the directory. So a directory is deleted
+  /// only when its lock can be taken without waiting. One without a lock
+  /// file was left by an earlier version of the application, and goes once
+  /// untouched for [age]. A directory still being set up keeps its
+  /// `staging-` name, which the sweep never touches.
+  Future<void> sweep({Duration age = const Duration(days: 1)}) async {
     final parent = Directory(_parent);
     if (!await parent.exists()) return;
-    final cutoff = DateTime.now().subtract(grace);
-    await for (final entry in parent.list(followLinks: false)) {
-      if (entry is! Directory || _held.contains(entry.path)) continue;
+    final root = await parent.resolveSymbolicLinks();
+    final cutoff = DateTime.now().subtract(age);
+    await for (final entry in Directory(root).list(followLinks: false)) {
+      if (entry is! Directory ||
+          !_basename(entry.path).startsWith(_published) ||
+          _held.contains(entry.path)) {
+        continue;
+      }
       try {
-        if (!(await entry.stat()).modified.isBefore(cutoff)) continue;
         final lockFile = File('${entry.path}/$_lockName');
         if (await lockFile.exists()) {
           final lock = await lockFile.open(mode: FileMode.append);
@@ -107,6 +115,8 @@ final class DocumentSnapshots {
           } finally {
             await lock.close();
           }
+        } else if (!(await entry.stat()).modified.isBefore(cutoff)) {
+          continue;
         }
         await entry.delete(recursive: true);
       } on FileSystemException {
@@ -118,12 +128,15 @@ final class DocumentSnapshots {
   Future<Directory> _create() async {
     try {
       await Directory(_parent).create(recursive: true);
-      final directory = await Directory(_parent).createTemp('process-');
+      // One spelling of the directory for every instance in this isolate,
+      // so [_held] recognizes it however [_parent] names it.
+      final root = await Directory(_parent).resolveSymbolicLinks();
+      final staging = await Directory(root).createTemp(_staging);
       if (Platform.isLinux || Platform.isMacOS) {
-        final chmod = await Process.run('chmod', ['700', directory.path]);
+        final chmod = await Process.run('chmod', ['700', staging.path]);
         if (chmod.exitCode != 0 ||
-            ((await directory.stat()).mode & _groupOrOther) != 0) {
-          await directory.delete(recursive: true);
+            ((await staging.stat()).mode & _groupOrOther) != 0) {
+          await staging.delete(recursive: true);
           throw const CoreException(
             CoreErrorKind.inaccessible,
             'The document snapshot directory could not be made private.',
@@ -131,18 +144,23 @@ final class DocumentSnapshots {
         }
       }
       final lock = await File(
-        '${directory.path}/$_lockName',
+        '${staging.path}/$_lockName',
       ).open(mode: FileMode.append);
+      final published =
+          '$root/$_published${_basename(staging.path).substring(_staging.length)}';
       try {
         await lock.lock(FileLock.exclusive);
+        // The lock belongs to the file, so it moves with the directory.
+        _held.add(published);
+        final directory = await staging.rename(published);
+        _lock = lock;
+        return directory;
       } catch (_) {
+        _held.remove(published);
         await lock.close();
-        await directory.delete(recursive: true);
+        await staging.delete(recursive: true);
         rethrow;
       }
-      _lock = lock;
-      _held.add(directory.path);
-      return directory;
     } on FileSystemException catch (error) {
       throw CoreException(
         CoreErrorKind.inaccessible,
@@ -157,6 +175,11 @@ final class DocumentSnapshots {
     }
   }
 
+  static String _basename(String path) =>
+      path.substring(path.lastIndexOf(Platform.pathSeparator) + 1);
+
+  static const _staging = 'staging-';
+  static const _published = 'process-';
   static const _lockName = '.lock';
   static const _groupOrOther = 0x3f;
 }
