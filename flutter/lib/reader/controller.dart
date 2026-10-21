@@ -747,6 +747,7 @@ final class ReaderController implements Listenable {
         if (_isCurrentLayout(message.generation, message.revision) &&
             _relayoutCancellations.contains(message.cancellation)) {
           _activeRelayoutIntent = null;
+          final previousPage = _model.epubPage;
           _applyEpubPage(
             generation: message.generation,
             revision: message.revision,
@@ -762,6 +763,23 @@ final class ReaderController implements Listenable {
             session: message.session,
             sessionKey: message.sessionKey,
           );
+          final page = _model.epubPage;
+          if (_typographyContinuous &&
+              page != null &&
+              !page.continuous &&
+              (previousPage == null ||
+                  previousPage.unit != page.unit ||
+                  previousPage.continuous)) {
+            // The chapter is over the continuous ceilings and is shown as
+            // pages: the reader is told once, when it enters the chapter.
+            _reportNotice(
+              const NoticeRequest(
+                text: ReaderChapterPaginatedNotice(),
+                kind: NoticeKind.info,
+                lifetime: NoticeLifetime.brief,
+              ),
+            );
+          }
         }
       case _ReaderRelayoutFailed():
         if (_isCurrent(message.generation) &&
@@ -775,11 +793,18 @@ final class ReaderController implements Listenable {
               _model.selectionSurface == null &&
               _model.pageImage == null &&
               _model.epubPage == null;
+          // A refused chapter is not a transient failure: its typed refusal
+          // names the chapter and the way on (another chapter), and the reader
+          // keeps whatever page it shows.
+          final refusal = message.limit;
           _emit(
             _model.copyWith(
               relayoutBusy: false,
               relayoutPending: false,
-              relayoutError: 'Layout failed: ${message.error}',
+              relayoutError: refusal != null
+                  ? null
+                  : 'Layout failed: ${message.error}',
+              layoutRefusal: refusal ?? _unchanged,
               contentState: nothingInstalled
                   ? ReaderContentState.failed
                   : _model.contentState,
@@ -1063,23 +1088,9 @@ final class ReaderController implements Listenable {
       ownedPdf = null;
       if (!_isCurrent(generation)) return;
 
-      if (pdf == null) {
-        // Every EPUB chapter is laid out by the Dart engine, which paginates
-        // for the reported content-box height: an open that ran before the
-        // first layout report waits for it, and the report starts the layout.
-        if (_epubPageHeight(null) == null) {
-          _epubHeightPending = true;
-          return;
-        }
-        _startRelayout(
-          document,
-          restoredLayout,
-          unit: unit,
-          offset: restored?.offset?.toInt(),
-          height: _epubViewportHeight,
-        );
-        return;
-      }
+      // An EPUB's first layout is started (or deferred to the first page-height
+      // report) by the opened message's handler.
+      if (pdf == null) return;
       try {
         final surface = await pdf.selectionSurface(unit, restoredLayout.scale);
         if (!_isCurrent(generation)) return;
@@ -1194,6 +1205,24 @@ final class ReaderController implements Listenable {
               ],
       ),
     );
+    if (message.pdfDocument == null) {
+      // Every EPUB chapter is laid out by the Dart engine, which paginates for
+      // the reported content-box height: an open that ran before the first
+      // layout report waits for it, and the report starts the layout.
+      if (_epubPageHeight(null) == null) {
+        _epubHeightPending = true;
+        return;
+      }
+      // The first page is laid out for the layout the open committed; a
+      // different requested layout is pending and replays when it finishes.
+      _startRelayout(
+        message.document,
+        message.layout,
+        unit: message.unit,
+        offset: message.offset,
+        height: _epubViewportHeight,
+      );
+    }
   }
 
   void _layoutChanged(ReaderLayout layout, {double? height}) {
@@ -1425,12 +1454,21 @@ final class ReaderController implements Listenable {
     // the surface (see [_selectionCancelled]); otherwise a resize would steal
     // focus from an open panel or the header.
     _selectionCancelled(requestSurfaceFocus: false);
+    final navigation =
+        targetUnit != _model.unit ||
+        offset != null ||
+        length != null ||
+        replaceReadingOffset;
     _emit(
       _model.copyWith(
         relayoutBusy: true,
         relayoutPending: false,
         selectionError: null,
         relayoutError: null,
+        // A chapter refusal outlives a passive relayout of the page still
+        // shown (its own alert changes the page height); a new location
+        // request replaces it.
+        layoutRefusal: navigation ? null : _unchanged,
         selectionActionError: selectionActionError,
       ),
     );
@@ -1568,7 +1606,7 @@ final class ReaderController implements Listenable {
     return paginateWindow(
       session.snapshot(),
       ui.Size(key.width, key.height),
-      continuous: _typographyContinuous,
+      continuous: key.continuous,
     );
   }
 
@@ -1604,7 +1642,8 @@ final class ReaderController implements Listenable {
       unit: unit,
       chapterCount: document.logicalUnitCount.toInt(),
       windowSize: ui.Size(layout.width, height),
-      continuous: _typographyContinuous,
+      continuous:
+          (sessionKey ?? _epubSessionKey)?.continuous ?? _typographyContinuous,
     );
     final oldImage = _model.pageImage;
     final changedLocation =
@@ -1627,6 +1666,9 @@ final class ReaderController implements Listenable {
             : _model.pageInput,
         pageImage: null,
         epubPage: page,
+        locationRequestRevision: changedLocation
+            ? _model.locationRequestRevision + 1
+            : _model.locationRequestRevision,
         selectionSurface: _freezeSurface(page.surface),
         annotations: annotations,
         savedSelections: _savedSelections(annotations, unit),
@@ -1636,6 +1678,7 @@ final class ReaderController implements Listenable {
             ? _model.selectionPhase
             : ReaderSelectionPhase.selected,
         relayoutError: null,
+        layoutRefusal: changedLocation ? null : _model.layoutRefusal,
         annotationsReady: annotationError == null,
         annotationError:
             annotationError ??
@@ -2568,6 +2611,16 @@ final class ReaderController implements Listenable {
     if (unit < 0 || unit >= source.book.chapters.length) {
       throw RangeError.index(unit, source.book.chapters, 'unit');
     }
+    // One block is measured by one synchronous call, so a chapter whose single
+    // paragraph or container is over the bounded-work ceilings is refused
+    // before any layout (or image decode) runs; the relayout effect reports
+    // the typed refusal.
+    final refusal = source.layoutLimitExceeded(unit);
+    if (refusal != null) throw refusal;
+    // A continuous reader scrolls a chapter as one page whose selection
+    // surface covers the whole chapter; a chapter over the continuous ceilings
+    // is shown as pages instead, so that surface stays bounded.
+    final continuous = _typographyContinuous && source.continuousAdmitted(unit);
     final chapter = source.book.chapters[unit];
     try {
       await source.ensureImages(chapter, _epubImageDecoder);
@@ -2588,6 +2641,7 @@ final class ReaderController implements Listenable {
       fontSize: layout.fontSize,
       lineSpacing: layout.lineSpacing,
       theme: _typographyTheme,
+      continuous: continuous,
     );
     // An explicit replacement with no offset is a chapter-level target: the
     // caller is replacing the durable position, so the reader goes to the
@@ -2626,7 +2680,7 @@ final class ReaderController implements Listenable {
     var adopted = replacement == null;
     try {
       if (!active.started) active.layoutWindowAt(target);
-      if (_typographyContinuous) {
+      if (continuous) {
         // A continuous chapter is one scrolled page, so it is installed whole:
         // the rest of the chapter is measured first, in the same bounded,
         // yielding batches the paginated window fills with afterwards.
@@ -3011,6 +3065,16 @@ final class ReaderController implements Listenable {
         ),
       );
       ownedImage = null;
+    } on EpubLayoutLimitExceeded catch (refusal) {
+      dispatch(
+        _ReaderRelayoutFailed(
+          generation: generation,
+          revision: revision,
+          layout: layout,
+          error: refusal.message,
+          limit: refusal,
+        ),
+      );
     } catch (error) {
       dispatch(
         _ReaderRelayoutFailed(
@@ -4781,6 +4845,7 @@ final class ReaderController implements Listenable {
       // layout already matches the committed one never runs a relayout to
       // clear this one).
       relayoutError: null,
+      layoutRefusal: null,
     );
     if (publish) {
       _emit(released, notifyListeners: false);

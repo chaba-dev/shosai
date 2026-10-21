@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
+import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
@@ -153,21 +154,93 @@ void main() {
     await _drainHarness(tester);
   });
 
-  testWidgets('a chapter with one enormous paragraph still lays out', (
-    tester,
-  ) async {
-    // The windowed session measures in bounded batches between top-level
-    // blocks, but one paragraph is measured in a single call; the chapter is
-    // laid out anyway, because there is no other renderer to hand it to.
-    final huge = _repoFile(
-      'prototypes/epub-dart-eval/fixtures/huge-paragraph.epub',
+  testWidgets(
+    'a chapter with one enormous paragraph is refused before layout',
+    (tester) async {
+      // The windowed session measures in bounded batches between top-level
+      // blocks, but one paragraph is measured by a single `TextPainter.layout`:
+      // a paragraph over the ceiling is refused with a typed error naming the
+      // chapter instead of blocking the UI thread on one unbounded call.
+      final huge = _repoFile(
+        'prototypes/epub-dart-eval/fixtures/huge-paragraph.epub',
+      );
+      final hugeBook = openEpubBytes(huge);
+      expect(
+        hugeBook.chapters.first.scalarCount,
+        greaterThan(kEpubIndivisibleScalarLimit),
+      );
+      final harness = bridge(bytes: huge, unitCount: hugeBook.chapters.length);
+      await openReader(tester, harness, failing: true);
+      await settleNative(tester);
+
+      expect(dartPage(tester), isNull, reason: 'nothing was laid out');
+      final error = tester.widget<Text>(
+        find.byKey(const ValueKey('reader-content-error')),
+      );
+      expect(
+        error.data,
+        'Chapter 1 is too large to display: one of its paragraphs is longer '
+        'than $kEpubIndivisibleScalarLimit characters. Choose another chapter '
+        'from Contents.',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await _drainHarness(tester);
+    },
+  );
+
+  testWidgets('a container over the node ceiling is refused and the reader '
+      'can move on', (tester) async {
+    // Wide enough that the contents panel sits beside the chapter.
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bytes = buildTestEpub(
+      chapters: {
+        'OPS/Text/chapter-1.xhtml': '<p>Opening chapter.</p>',
+        // One list is laid out by one call: every item counts.
+        'OPS/Text/chapter-2.xhtml':
+            '<ul>${'<li>Item.</li>' * (kEpubIndivisibleNodeLimit + 8)}</ul>',
+        'OPS/Text/chapter-3.xhtml': '<p>Closing chapter.</p>',
+      },
+      nav:
+          '<ol>'
+          '<li><a href="../Text/chapter-1.xhtml">Opening</a></li>'
+          '<li><a href="../Text/chapter-2.xhtml">Listing</a></li>'
+          '<li><a href="../Text/chapter-3.xhtml">Closing</a></li>'
+          '</ol>',
     );
-    final hugeBook = openEpubBytes(huge);
-    final harness = bridge(bytes: huge, unitCount: hugeBook.chapters.length);
+    final harness = bridge(bytes: bytes, unitCount: 3);
     await openReader(tester, harness);
     await settleEpubPage(tester);
+    expect(dartPage(tester)!.page.unit, 0);
 
-    expect(dartPage(tester), isNotNull);
+    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await settleNative(tester);
+
+    // The refusal is reported over the page the reader still shows.
+    expect(dartPage(tester)!.page.unit, 0);
+    final error = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const ValueKey('reader-layout-refusal')),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(
+      error.data,
+      'Chapter 2 is too large to display: one of its lists, tables or '
+      'sections holds more than $kEpubIndivisibleNodeLimit parts. Choose '
+      'another chapter from Contents.',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+    await tester.pump();
+    await settleNative(tester);
+    await tester.tap(find.text('Closing'));
+    await settleNative(tester);
+
+    expect(dartPage(tester)!.page.unit, 2);
+    expect(find.byKey(const ValueKey('reader-layout-refusal')), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     await _drainHarness(tester);

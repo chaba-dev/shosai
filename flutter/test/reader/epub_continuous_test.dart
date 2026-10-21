@@ -9,6 +9,8 @@ import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/notices/notice.dart';
+import 'package:shosai_flutter/notices/reader_notice_text.dart';
 
 import '../support/epub_navigation_fixture.dart';
 import '../support/production_shell_harness.dart';
@@ -47,7 +49,11 @@ void main() {
   final bytes = navigationEpub();
   final book = openEpubBytes(bytes);
 
-  _ContinuousBridge bridge({FlutterReadingState? readingState}) {
+  _ContinuousBridge bridge({
+    FlutterReadingState? readingState,
+    Uint8List? epub,
+    int? unitCount,
+  }) {
     final harness = _ContinuousBridge(
       books: const [
         FlutterLibraryBook(
@@ -60,14 +66,18 @@ void main() {
           dateAdded: '2026-10-01',
         ),
       ],
-      unitCount: book.chapters.length,
+      unitCount: unitCount ?? book.chapters.length,
       readingState: readingState,
     );
-    harness.epubBytes = bytes;
+    harness.epubBytes = epub ?? bytes;
     return harness;
   }
 
-  Future<void> openReader(WidgetTester tester, HarnessBridge harness) async {
+  Future<void> openReader(
+    WidgetTester tester,
+    HarnessBridge harness, {
+    void Function(NoticeRequest)? noticeReporter,
+  }) async {
     await renderHarnessState(
       tester,
       productionShell(
@@ -77,6 +87,7 @@ void main() {
           initialBookId: 1,
           initialSettings: _continuous,
           epubImageDecoder: (bytes) async => null,
+          noticeReporter: noticeReporter,
         ),
       ),
       ready: () => harnessReaderPageReady(tester),
@@ -228,6 +239,143 @@ void main() {
       closeTo(line.top - kEpubPageMargin, 1),
       reason: 'the anchor line is scrolled to the top of the view',
     );
+
+    await closeReader(tester);
+  });
+
+  /// The canonical top of the line holding [scalar] on [page].
+  double lineTop(ReaderEpubPage page, int scalar) => page.surface.endpoints
+      .where((endpoint) => endpoint.offset >= BigInt.from(scalar))
+      .map((endpoint) => endpoint.rect.top)
+      .first;
+
+  Future<void> openContentsEntry(WidgetTester tester, String title) async {
+    if (find.text(title).evaluate().isEmpty) {
+      await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+      await tester.pump();
+      await settle(tester);
+    }
+    await tester.tap(find.text(title));
+    await settle(tester);
+  }
+
+  testWidgets("choosing the open chapter's start in Contents scrolls back to "
+      'the top', (tester) async {
+    tester.view.physicalSize = const ui.Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await openReader(tester, bridge());
+    await settle(tester);
+
+    await openContentsEntry(tester, 'Chapter one deep');
+    expect(chapterScroll(tester).pixels, greaterThan(0));
+
+    // The chapter start is a location like any other: the target is 0, and
+    // the view must not stay where the deep anchor left it.
+    await openContentsEntry(tester, 'Chapter one');
+    final page = dartPage(tester)!;
+    expect(page.unit, 0);
+    expect(page.targetScalar, 0);
+    expect(chapterScroll(tester).pixels, 0);
+
+    await closeReader(tester);
+  });
+
+  testWidgets('the same location again scrolls back after a manual scroll', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const ui.Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await openReader(tester, bridge());
+    await settle(tester);
+
+    await openContentsEntry(tester, 'Chapter one deep');
+    final anchor = book.chapters.first.anchors['one-deep']!;
+    final revealed = chapterScroll(tester).pixels;
+    expect(
+      revealed,
+      closeTo(lineTop(dartPage(tester)!, anchor) - kEpubPageMargin, 1),
+    );
+
+    // The reader scrolls back to the top by hand.
+    await tester.drag(
+      find.byKey(const ValueKey('reader-continuous-presentation')),
+      const Offset(0, 4000),
+    );
+    await settle(tester);
+    expect(chapterScroll(tester).pixels, 0);
+
+    // The same entry is a new request even though its target is unchanged.
+    await openContentsEntry(tester, 'Chapter one deep');
+    expect(dartPage(tester)!.targetScalar, anchor);
+    expect(chapterScroll(tester).pixels, closeTo(revealed, 1));
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a chapter over the continuous ceiling is shown as pages', (
+    tester,
+  ) async {
+    // Every paragraph is small, so no single block is refused, but the
+    // chapter's text is over the continuous ceiling: a single continuous page
+    // would build a selection surface for the whole chapter at once.
+    const paragraph =
+        '<p>A paragraph of ordinary length in a very long chapter, read '
+        'one page at a time.</p>';
+    final paragraphs = kEpubContinuousScalarLimit ~/ 80 + 16;
+    final epub = buildTestEpub(
+      chapters: {
+        'OPS/Text/chapter-1.xhtml': paragraph * paragraphs,
+        'OPS/Text/chapter-2.xhtml': '<p>A short chapter.</p>',
+      },
+      nav: '<ol></ol>',
+    );
+    final longBook = openEpubBytes(epub);
+    expect(
+      longBook.chapters.first.scalarCount,
+      greaterThan(kEpubContinuousScalarLimit),
+    );
+    final notices = <NoticeRequest>[];
+    await openReader(
+      tester,
+      bridge(epub: epub, unitCount: 2),
+      noticeReporter: notices.add,
+    );
+    await settle(tester);
+
+    final page = dartPage(tester)!;
+    expect(page.unit, 0);
+    expect(page.continuous, isFalse);
+    expect(page.pageCount, greaterThan(1));
+    expect(
+      page.canonicalEnd - page.canonicalStart,
+      lessThan(kEpubContinuousScalarLimit),
+      reason: 'the surface covers one page, not the whole chapter',
+    );
+    expect(
+      find.byKey(const ValueKey('reader-paginated-presentation')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('reader-continuous-presentation')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('reader-edge-next')),
+      findsOneWidget,
+      reason: 'a paginated chapter turns pages',
+    );
+    expect(
+      notices.where((notice) => notice.text is ReaderChapterPaginatedNotice),
+      hasLength(1),
+    );
+
+    // PageDown turns a page inside the chapter instead of leaving it.
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+    await settle(tester);
+    expect(dartPage(tester)!.unit, 0);
+    expect(dartPage(tester)!.canonicalStart, greaterThan(0));
 
     await closeReader(tester);
   });

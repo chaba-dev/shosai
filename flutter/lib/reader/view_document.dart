@@ -314,7 +314,7 @@ class _DocumentViewState extends State<_DocumentView> {
                                   onContentGeometryChanged:
                                       _bumpContentGeometry,
                                   presentationKey: ValueKey(
-                                    model.typography.continuous
+                                    model.continuousPresentation
                                         ? 'reader-continuous-presentation'
                                         : 'reader-paginated-presentation',
                                   ),

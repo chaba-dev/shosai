@@ -868,7 +868,7 @@ class _ReaderSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final document = model.document;
-    final continuous = model.typography.continuous;
+    final continuous = model.continuousPresentation;
     // Edge navigation is hidden entirely in continuous mode and when no
     // document is open (Iced returns the bare content). While no document is
     // open the columns keep their space with the controls invisible, so the

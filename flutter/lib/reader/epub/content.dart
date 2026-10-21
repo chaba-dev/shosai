@@ -110,6 +110,82 @@ const Duration kEpubImageDecodeTimeout = Duration(seconds: 5);
 /// renderer's missing-image fallback) rather than growing without limit.
 const int kEpubDecodedImageBudget = 64 * 1024 * 1024;
 
+/// The most text one *indivisible* layout unit may carry.
+///
+/// The chapter session measures in bounded batches between frames, but a
+/// single unit — one paragraph, one list, one table, or one nested container —
+/// is measured by one call: a paragraph's `TextPainter.layout`, or a
+/// container's whole subtree. A chapter carrying a larger unit is refused
+/// before layout (see [EpubLayoutLimitExceeded]) instead of being measured in
+/// one unbounded call on the UI thread.
+const int kEpubIndivisibleScalarLimit = 32 * 1024;
+
+/// The most work units (see [EpubContentSource.layoutLimitExceeded]) one
+/// indivisible layout unit may contain.
+const int kEpubIndivisibleNodeLimit = 512;
+
+/// The longest chapter, in canonical scalars, read as one continuous page.
+///
+/// A continuous chapter is one page as tall as the chapter, and its selection
+/// surface (two endpoints and two carets per visible grapheme) is built for the
+/// whole chapter at once. A longer chapter is shown as pages instead, where the
+/// surface covers one page at a time.
+const int kEpubContinuousScalarLimit = 64 * 1024;
+
+/// The most top-level blocks a chapter read as one continuous page may carry.
+///
+/// Bounds the continuous page's slices and height (an image-heavy chapter has
+/// few scalars but many tall blocks) the way [kEpubContinuousScalarLimit]
+/// bounds its text.
+const int kEpubContinuousNodeLimit = 2048;
+
+/// Which bounded-work ceiling an indivisible layout unit exceeds.
+enum EpubLayoutLimit {
+  /// The unit carries more than [kEpubIndivisibleScalarLimit] scalars.
+  blockText,
+
+  /// The unit contains more than [kEpubIndivisibleNodeLimit] work units.
+  blockNodes,
+}
+
+/// A chapter the reader refuses to lay out because one of its indivisible
+/// layout units exceeds a bounded-work ceiling.
+///
+/// The refusal is decided from the parsed chapter before any layout runs, and
+/// is reported to the reader as an error naming the chapter, so the reader can
+/// choose another chapter instead of blocking on one unbounded measurement.
+final class EpubLayoutLimitExceeded implements Exception {
+  const EpubLayoutLimitExceeded({
+    required this.unit,
+    required this.block,
+    required this.limit,
+  });
+
+  /// Spine ordinal of the refused chapter.
+  final int unit;
+
+  /// Index of the first top-level block over the ceiling.
+  final int block;
+
+  /// The ceiling it exceeds.
+  final EpubLayoutLimit limit;
+
+  /// The reader-facing explanation.
+  String get message => switch (limit) {
+    EpubLayoutLimit.blockText =>
+      'Chapter ${unit + 1} is too large to display: one of its paragraphs '
+          'is longer than $kEpubIndivisibleScalarLimit characters. '
+          'Choose another chapter from Contents.',
+    EpubLayoutLimit.blockNodes =>
+      'Chapter ${unit + 1} is too large to display: one of its lists, tables '
+          'or sections holds more than $kEpubIndivisibleNodeLimit parts. '
+          'Choose another chapter from Contents.',
+  };
+
+  @override
+  String toString() => message;
+}
+
 /// Decodes one encoded image resource, or null when it cannot be decoded.
 typedef EpubImageDecoder = Future<ui.Image?> Function(Uint8List bytes);
 
@@ -161,6 +237,44 @@ class EpubContentSource {
 
   /// Whether the owner has released this source.
   bool get isDisposed => _disposed;
+
+  final Map<int, EpubLayoutLimitExceeded?> _layoutLimits = {};
+
+  /// The ceiling [unit]'s layout would exceed, or null when every indivisible
+  /// layout unit fits ([kEpubIndivisibleNodeLimit],
+  /// [kEpubIndivisibleScalarLimit]).
+  ///
+  /// The chapter session's batch boundary works between top-level blocks; one
+  /// block is laid out in one call, so a chapter whose single paragraph,
+  /// blockquote, list or table is enormous cannot be measured incrementally.
+  EpubLayoutLimitExceeded? layoutLimitExceeded(int unit) =>
+      _layoutLimits.putIfAbsent(unit, () {
+        final blocks = book.chapters[unit].blocks;
+        for (var index = 0; index < blocks.length; index += 1) {
+          final size = _indivisibleSize(blocks[index]);
+          final limit = size.scalars > kEpubIndivisibleScalarLimit
+              ? EpubLayoutLimit.blockText
+              : size.nodes > kEpubIndivisibleNodeLimit
+              ? EpubLayoutLimit.blockNodes
+              : null;
+          if (limit != null) {
+            return EpubLayoutLimitExceeded(
+              unit: unit,
+              block: index,
+              limit: limit,
+            );
+          }
+        }
+        return null;
+      });
+
+  /// Whether [unit] fits the continuous-page ceilings
+  /// ([kEpubContinuousScalarLimit], [kEpubContinuousNodeLimit]).
+  bool continuousAdmitted(int unit) {
+    final chapter = book.chapters[unit];
+    return chapter.scalarCount <= kEpubContinuousScalarLimit &&
+        chapter.blocks.length <= kEpubContinuousNodeLimit;
+  }
 
   /// Bytes of decoded image rasters currently retained.
   int decodedImageBytes = 0;
@@ -287,6 +401,70 @@ class EpubContentSource {
   }
 }
 
+/// The work units and canonical scalars of one indivisible layout unit.
+///
+/// A *work unit* is one thing the layout measures in a single call: a node, a
+/// list item, or a table's group/row/cell (the table's structure is placed and
+/// sized in one call even though it can paginate between rows). The scalars are
+/// the unit's own canonical range, counted once: the range already spans the
+/// whole subtree, so summing descendants would double-count nested text.
+({int nodes, int scalars}) _indivisibleSize(EpubContentNode root) {
+  final canonical = root.canonical;
+  final scalars = canonical == null ? 0 : canonical.end - canonical.start;
+  var nodes = 0;
+  var exceeded = false;
+  void count() {
+    nodes += 1;
+    if (nodes > kEpubIndivisibleNodeLimit) exceeded = true;
+  }
+
+  void visit(EpubContentNode node) {
+    if (exceeded) return;
+    count();
+    switch (node) {
+      case EpubBlockQuote(:final children):
+      case EpubFigure(:final children):
+        for (final child in children) {
+          if (exceeded) return;
+          visit(child);
+        }
+      case EpubUnorderedList(:final items):
+      case EpubOrderedList(:final items):
+        for (var index = 0; index < items.length; index += 1) {
+          if (exceeded) return;
+          count();
+        }
+      case EpubTable(:final rowGroups):
+        for (final group in rowGroups) {
+          if (exceeded) return;
+          count();
+          for (final row in group.rows) {
+            if (exceeded) return;
+            count();
+            for (final cell in row.cells) {
+              if (exceeded) return;
+              count();
+              for (final child in cell.children) {
+                if (exceeded) return;
+                visit(child);
+              }
+            }
+          }
+        }
+      case EpubHeading():
+      case EpubParagraph():
+      case EpubMathNode():
+      case EpubCodeBlock():
+      case EpubHorizontalRule():
+      case EpubImage():
+        break;
+    }
+  }
+
+  visit(root);
+  return (nodes: nodes, scalars: scalars);
+}
+
 /// Every image resource path a chapter references, in document order.
 List<String> chapterImageSources(EpubChapter chapter) {
   final sources = <String>[];
@@ -337,6 +515,7 @@ class ReaderEpubPage {
   ReaderEpubPage({
     required this.unit,
     required this.targetScalar,
+    this.continuous = false,
     required this.pageIndex,
     required this.pageCount,
     required this.layoutComplete,
@@ -359,6 +538,14 @@ class ReaderEpubPage {
   /// Canonical scalar the window was requested for. A continuous page holds
   /// the whole chapter, so this is the location the view scrolls to.
   final int targetScalar;
+
+  /// Whether this page is a whole chapter read continuously (one page as tall
+  /// as the chapter, which the view scrolls) rather than one paginated page.
+  ///
+  /// A continuous reader shows a chapter over the continuous ceilings
+  /// ([kEpubContinuousScalarLimit], [kEpubContinuousNodeLimit]) as pages, so
+  /// the presentation follows the page, not only the reader setting.
+  final bool continuous;
 
   /// 0-based page ordinal inside the laid-out window.
   final int pageIndex;
@@ -467,6 +654,7 @@ ReaderEpubPage pageWindowFor({
   return ReaderEpubPage(
     unit: unit,
     targetScalar: scalar,
+    continuous: continuous,
     pageIndex: index,
     pageCount: paginated.pages.length,
     layoutComplete: flow.layoutComplete,

@@ -691,6 +691,86 @@ void main() {
     expect(monospace.fontFamilyFallback, ['Inter', 'Noto Sans JP']);
   });
 
+  test('an indivisible unit over a work ceiling refuses the chapter', () {
+    // One block is measured by one synchronous call: a paragraph's text, and
+    // every item of a list or every group/row/cell of a table, count against
+    // the ceilings, so the chapter is refused before any layout runs.
+    EpubContentSource source(List<EpubContentNode> blocks) => EpubContentSource(
+      book: EpubBook(
+        title: 'Bound',
+        author: null,
+        language: null,
+        spine: const ['chapter.xhtml'],
+        toc: const [],
+        resources: const {},
+        chapters: [
+          EpubChapter(
+            spine: 0,
+            resource: 'chapter.xhtml',
+            title: 'Chapter',
+            blocks: blocks,
+            canonicalText: '',
+            anchors: const {},
+            scalarCount: 0,
+          ),
+        ],
+        embeddedFonts: const {},
+        warnings: const [],
+      ),
+      embeddedFamilies: const {},
+    );
+
+    final manyItems = source([
+      EpubParagraph(const [], const EpubNodeStyle()),
+      EpubUnorderedList([
+        for (var index = 0; index < kEpubIndivisibleNodeLimit + 1; index += 1)
+          const <EpubTextSpan>[],
+      ]),
+    ]).layoutLimitExceeded(0);
+    expect(manyItems?.limit, EpubLayoutLimit.blockNodes);
+    expect(manyItems?.unit, 0);
+    expect(manyItems?.block, 1);
+
+    final manyRows = source([
+      EpubTable(
+        caption: const [],
+        rowGroups: [
+          EpubTableRowGroup(
+            kind: EpubTableRowGroupKind.body,
+            rows: [
+              for (
+                var index = 0;
+                index < kEpubIndivisibleNodeLimit + 1;
+                index += 1
+              )
+                EpubTableRow(cells: [EpubTableCell(children: const [])]),
+            ],
+          ),
+        ],
+      ),
+    ]).layoutLimitExceeded(0);
+    expect(manyRows?.limit, EpubLayoutLimit.blockNodes);
+
+    final hugeText = source([
+      EpubParagraph(const [], const EpubNodeStyle())
+        ..canonical = const EpubCanonicalSpan(
+          0,
+          kEpubIndivisibleScalarLimit + 1,
+        ),
+    ]).layoutLimitExceeded(0);
+    expect(hugeText?.limit, EpubLayoutLimit.blockText);
+    expect(hugeText?.message, contains('Chapter 1 is too large to display'));
+
+    final bounded = source([
+      EpubUnorderedList([
+        for (var index = 0; index < 8; index += 1) const <EpubTextSpan>[],
+      ]),
+      EpubParagraph(const [], const EpubNodeStyle())
+        ..canonical = const EpubCanonicalSpan(0, kEpubIndivisibleScalarLimit),
+    ]);
+    expect(bounded.layoutLimitExceeded(0), isNull);
+  });
+
   test('a decode shared by concurrent callers is adopted once', () async {
     final bytes = _fixture('nested-image.epub');
     final book = openEpubBytes(bytes);

@@ -202,7 +202,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
             ),
           ),
         );
-        final continuousPage = model.typography.continuous ? epubPage : null;
+        final continuousPage = model.continuousPresentation ? epubPage : null;
         if (continuousPage != null) {
           // A continuous chapter is one page as tall as the chapter: the view
           // scrolls it, and starts at the location the page was requested for.
@@ -213,6 +213,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
                 'reader-vertical-scroll-${model.generation}-${model.unit}',
               ),
               page: continuousPage,
+              revealRevision: model.locationRequestRevision,
               child: content(
                 Size(
                   constraints.maxWidth,
@@ -263,21 +264,27 @@ class _ReachableSelectableSurface extends StatelessWidget {
   }
 }
 
-/// Scrolls a continuous EPUB chapter, and brings the location each installed
-/// page was requested for into view.
+/// Scrolls a continuous EPUB chapter, and brings the location each explicit
+/// request was for into view.
 ///
-/// A page requested for the chapter start (an open, a relayout at the durable
-/// position) keeps the scroll offset the reader has; a page requested for a
-/// location inside the chapter (a bookmark, a search hit, a link) scrolls its
-/// line to the top of the view.
+/// Every location request (an open, a chapter change, a Contents entry, a
+/// bookmark, a search hit, a link) advances [revealRevision], and its page's
+/// target line is scrolled to the top of the view — the chapter start
+/// included, and the same location again after the reader scrolled away. A
+/// passive relayout (a resize, a height refresh) installs a page with the same
+/// revision and keeps the scroll offset the reader has.
 class _ContinuousEpubScroll extends StatefulWidget {
   const _ContinuousEpubScroll({
     super.key,
     required this.page,
+    required this.revealRevision,
     required this.child,
   });
 
   final ReaderEpubPage page;
+
+  /// The model's [ReaderModel.locationRequestRevision] [page] answers.
+  final int revealRevision;
   final Widget child;
 
   @override
@@ -296,25 +303,28 @@ class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
   @override
   void didUpdateWidget(_ContinuousEpubScroll oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.page, widget.page) &&
-        widget.page.targetScalar != oldWidget.page.targetScalar) {
-      _revealTarget();
-    }
+    if (widget.revealRevision != oldWidget.revealRevision) _revealTarget();
   }
 
   void _revealTarget() {
-    final page = widget.page;
-    if (page.targetScalar <= page.canonicalStart) return;
-    final top = _continuousTargetTop(page);
-    if (top == null) return;
+    final revision = widget.revealRevision;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
+      // A newer request scheduled its own reveal: this one is superseded and
+      // must not move the view back. A passive relayout in between keeps the
+      // revision, so the target is read from the page installed now.
+      if (!mounted ||
+          !_scroll.hasClients ||
+          widget.revealRevision != revision) {
+        return;
+      }
+      final page = widget.page;
+      // The chapter start is a target like any other: it scrolls to the top.
+      final top = page.targetScalar <= page.canonicalStart
+          ? 0.0
+          : (_continuousTargetTop(page) ?? kEpubPageMargin) - kEpubPageMargin;
       final position = _scroll.position;
       _scroll.jumpTo(
-        (top - kEpubPageMargin).clamp(
-          position.minScrollExtent,
-          position.maxScrollExtent,
-        ),
+        top.clamp(position.minScrollExtent, position.maxScrollExtent),
       );
     });
   }

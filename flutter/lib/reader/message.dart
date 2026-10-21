@@ -690,12 +690,17 @@ final class _ReaderRelayoutFailed extends ReaderMessage {
     required this.revision,
     required this.layout,
     required this.error,
+    this.limit,
   });
 
   final int generation;
   final int revision;
   final ReaderLayout layout;
   final String error;
+
+  /// The bounded-work ceiling the refused EPUB chapter exceeds, when the
+  /// failure is a typed refusal rather than an error.
+  final EpubLayoutLimitExceeded? limit;
 }
 
 final class _ReaderRelayoutFinished extends ReaderMessage {

@@ -865,6 +865,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Bookmarks could not be exported'**
   String get noticeReaderExportFailed;
+
+  /// Brief notice in continuous EPUB reading when a chapter is over the continuous-page ceiling and is shown as pages instead.
+  ///
+  /// In en, this message translates to:
+  /// **'This chapter is too long to scroll continuously, so it is shown as pages'**
+  String get noticeReaderChapterPaginated;
 }
 
 class _AppLocalizationsDelegate
