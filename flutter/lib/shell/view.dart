@@ -252,6 +252,8 @@ class _ShellCoverThumbState extends State<ShellCoverThumb> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.book.bookId != widget.book.bookId) {
       _requested = widget.cover != null;
+    } else if (widget.cover != null) {
+      _requested = true;
     }
   }
 
@@ -259,9 +261,12 @@ class _ShellCoverThumbState extends State<ShellCoverThumb> {
   Widget build(BuildContext context) {
     final bytes = widget.cover;
     if (bytes == null && !_requested) {
-      _requested = true;
+      // A request the library does not admit (its cover slots are full) is
+      // asked again on the next build, as the library's own covers do.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.loadCover(widget.book.bookId);
+        if (mounted && !_requested && widget.loadCover(widget.book.bookId)) {
+          setState(() => _requested = true);
+        }
       });
     }
     final palette = ShellPalette.of(context);

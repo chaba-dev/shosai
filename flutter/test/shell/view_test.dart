@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -38,6 +40,9 @@ class _Recorder {
   final covers = <int>[];
   var adds = 0;
 
+  /// Whether the library admits a cover request, as its four slots do.
+  bool Function() admitCover = () => true;
+
   ShellActions get actions => ShellActions(
     selectPlace: places.add,
     openBook: (entry) => opened.add(entry.id),
@@ -45,6 +50,7 @@ class _Recorder {
     moveBook: (from, to) => moves.add((from, to)),
     addBooks: () => adds += 1,
     loadCover: (id) {
+      if (!admitCover()) return false;
       covers.add(id);
       return true;
     },
@@ -57,6 +63,7 @@ Future<void> _pumpFrame(
   required ShellModel model,
   required _Recorder recorder,
   Locale? locale,
+  Map<int, Uint8List> covers = const {},
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -68,7 +75,7 @@ Future<void> _pumpFrame(
         body: ShellFrame(
           layout: ShellLayout.forWidth(size.width),
           model: model,
-          covers: const {},
+          covers: covers,
           actions: recorder.actions,
           child: const SizedBox.expand(key: Key('content')),
         ),
@@ -367,6 +374,32 @@ void main() {
       recorder: recorder,
     );
     await tester.pump();
+    expect(recorder.covers..sort(), [1, 2, 3]);
+  });
+
+  testWidgets('a cover the library turns away is asked for again', (
+    tester,
+  ) async {
+    // The library admits one cover at a time here; each delivered cover
+    // frees the slot and rebuilds the shell with the new cover map.
+    final recorder = _Recorder();
+    var slots = 1;
+    recorder.admitCover = () => slots > 0 && slots-- > 0;
+    final delivered = <int, Uint8List>{};
+    for (var round = 0; round < 3; round += 1) {
+      await _pumpFrame(
+        tester,
+        size: const Size(1440, 900),
+        model: _model(),
+        recorder: recorder,
+        covers: Map.of(delivered),
+      );
+      await tester.pump();
+      for (final id in recorder.covers) {
+        delivered[id] = Uint8List(0);
+      }
+      slots = 1;
+    }
     expect(recorder.covers..sort(), [1, 2, 3]);
   });
 }
