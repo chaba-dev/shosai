@@ -182,6 +182,12 @@ abstract class AppLocalizations {
   /// **'Not started'**
   String get cardNotStarted;
 
+  /// A book's reading status once it is read to the end.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished'**
+  String get cardFinished;
+
   /// Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.
   ///
   /// In en, this message translates to:

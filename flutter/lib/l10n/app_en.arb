@@ -56,6 +56,10 @@
   "@cardNotStarted": {
     "description": "Iced reference key: not-started. The card's reading status at zero progress."
   },
+  "cardFinished": "Finished",
+  "@cardFinished": {
+    "description": "A book's reading status once it is read to the end."
+  },
   "cardPercentRead": "{percentage}%",
   "@cardPercentRead": {
     "description": "Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.",

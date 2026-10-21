@@ -51,6 +51,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cardNotStarted => 'Not started';
 
   @override
+  String get cardFinished => 'Finished';
+
+  @override
   String cardPercentRead(int percentage) {
     return '$percentage%';
   }

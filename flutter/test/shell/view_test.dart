@@ -109,7 +109,7 @@ void main() {
     expect(shellReadingStatus(l10n, .21), '21%');
     expect(shellReadingStatus(l10n, .995), '99%');
     expect(shellReadingStatus(l10n, .999), '99%');
-    expect(shellReadingStatus(l10n, 1), '100%');
+    expect(shellReadingStatus(l10n, 1), 'Finished');
   });
 
   testWidgets('a book barely started shows its bar in the sidebar', (
