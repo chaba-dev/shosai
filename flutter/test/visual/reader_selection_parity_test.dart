@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
 import '../support/selection_surface_fixture.dart';
@@ -35,12 +36,15 @@ import '../support/selection_surface_fixture.dart';
 ///   compared by paper palette and rendered ink, not by page composition;
 /// - the inherited 4B chrome offset (our document area starts above the
 ///   reference's page box) is measured and recorded, not hidden;
-/// - the chrome is the pinned Iced application palette in every reader theme
-///   (owner decision 2026-09-28): the pinned captures recolor only the page, and
-///   the Flutter reader now does the same, so the chrome surface *and* the
-///   header action-label contrast are asserted equal in the light, dark and
-///   sepia captures rather than recorded as a deviation. The reader palette
-///   remains the *document* palette on both sides (the page paper assertion).
+/// - the chrome is the application palette in every reader theme (owner
+///   decision 2026-09-28): the pinned captures recolor only the page, and the
+///   Flutter reader does the same, so the header action-label contrast is
+///   asserted strong in the light, dark and sepia captures. The reader palette
+///   remains the *document* palette on both sides;
+/// - the palette values are the Shōsai design system's since 2026-10-21, not
+///   the pinned Iced ones, so the sampled paper and chrome surface are asserted
+///   against the tokens and their difference from the reference is recorded in
+///   `chromeComparison`, not asserted.
 void main() {
   final supported = Platform.isLinux || Platform.isMacOS;
 
@@ -239,23 +243,35 @@ void main() {
         reason: '${capture.id}: the document area rendered no ink',
       );
 
-      // The palette the 4D surfaces sit on is the reference's own document
-      // palette: the sampled paper must match within one 8-bit step.
+      // The palettes are the Shōsai design system's (2026-10-21), which
+      // replaced the pinned Iced values the reference captures were taken
+      // with, so the sampled paper and chrome surface are asserted against the
+      // tokens within one 8-bit step, and their delta from the reference is
+      // recorded in `chromeComparison` rather than asserted.
       expect(
-        comparison['paperDelta'],
+        _colorDelta(
+          (flutterChrome['paper'] as List).cast<int>(),
+          _rgb(pageColors(capture.theme).background),
+        ),
         lessThanOrEqualTo(1),
         reason:
             '${capture.id}: document paper ${flutterChrome['paper']} vs '
-            'reference ${referenceChrome['paper']}',
+            'the ${capture.theme} page token '
+            '${_rgb(pageColors(capture.theme).background)} (reference '
+            '${referenceChrome['paper']})',
       );
-      // The chrome surface is the pinned application surface in every reader
-      // palette, on both sides.
+      // The chrome surface is the application surface in every reader
+      // palette.
       expect(
-        comparison['chromeSurfaceDelta'],
+        _colorDelta(
+          (flutterChrome['chromeSurface'] as List).cast<int>(),
+          _rgb(ShosaiTokens.appSurface),
+        ),
         lessThanOrEqualTo(1),
         reason:
             '${capture.id}: chrome surface ${flutterChrome['chromeSurface']} '
-            'vs reference ${referenceChrome['chromeSurface']}',
+            'vs the app.surface token ${_rgb(ShosaiTokens.appSurface)} '
+            '(reference ${referenceChrome['chromeSurface']})',
       );
       // The measured chrome rows: the reference's own bands and ours are both
       // recorded, so the inherited 4B chrome offset (4C recorded panel top 108
@@ -906,6 +922,13 @@ Map<String, double> _flutterRows(WidgetTester tester) {
         : tester.getRect(document).top,
   };
 }
+
+/// [color]'s 8-bit RGB channels, in the form the chrome measurement samples.
+List<int> _rgb(Color color) => [
+  (color.r * 255).round(),
+  (color.g * 255).round(),
+  (color.b * 255).round(),
+];
 
 /// The recorded comparison between the reference's and our measured chrome.
 Map<String, Object?> _compare(
