@@ -3,13 +3,17 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:characters/characters.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
+import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
+
+import '../support/epub_navigation_fixture.dart';
 
 /// Layout-level tests for the Dart EPUB renderer: the page window, its
 /// selection surface and the windowed chapter session.
@@ -769,6 +773,87 @@ void main() {
         ..canonical = const EpubCanonicalSpan(0, kEpubIndivisibleScalarLimit),
     ]);
     expect(bounded.layoutLimitExceeded(0), isNull);
+  });
+
+  test('a continuous chapter counts work units inside its containers', () {
+    // Each figure stays under the per-block ceiling, but together they lay
+    // out far more slices than one continuous page admits.
+    final figures =
+        '<figure>${'<hr/>' * (kEpubIndivisibleNodeLimit - 1)}'
+        '</figure>';
+    EpubContentSource chapterOf(int count) => EpubContentSource(
+      book: openEpubBytes(
+        buildTestEpub(
+          chapters: {'OPS/Text/chapter-1.xhtml': figures * count},
+          nav: '<ol></ol>',
+        ),
+      ),
+      embeddedFamilies: const {},
+    );
+
+    final nested = chapterOf(128);
+    expect(nested.book.chapters.single.blocks, hasLength(128));
+    expect(nested.layoutLimitExceeded(0), isNull);
+    expect(nested.continuousAdmitted(0), isFalse);
+    // One figure's units are within the ceiling.
+    expect(chapterOf(1).continuousAdmitted(0), isTrue);
+    expect(chapterOf(4).continuousAdmitted(0), isTrue);
+    expect(chapterOf(5).continuousAdmitted(0), isFalse);
+  });
+
+  test('a selection surface maps a span at the block ceiling in one pass', () {
+    // Supplementary characters make code units and scalars differ, so a
+    // mapping that counts either wrongly lands off the clusters.
+    const unit = 'word\u{1F600} ';
+    final repeats = kEpubIndivisibleScalarLimit ~/ unit.runes.length;
+    final book = openEpubBytes(
+      buildTestEpub(
+        // The fixture writes Latin-1, so the emoji goes in as a reference.
+        chapters: {
+          'OPS/Text/chapter-1.xhtml': '<p>${'word&#x1F600; ' * repeats}</p>',
+        },
+        nav: '<ol></ol>',
+      ),
+    );
+    final chapter = book.chapters.single;
+    final source = EpubContentSource(book: book, embeddedFamilies: const {});
+    expect(source.layoutLimitExceeded(0), isNull);
+    const window = Size(800, 600);
+    final flow = layoutChapterFlow(
+      chapter: chapter,
+      spec: const ChapterLayoutSpec(
+        width: 800 - 2 * kEpubPageMargin,
+        height: 600,
+        typography: typography,
+      ),
+      images: const {},
+    );
+    final page = paginateWindow(flow, window, continuous: true).pages.single;
+
+    final watch = Stopwatch()..start();
+    final surface = buildPageSelectionSurface(
+      page: page,
+      canonicalText: chapter.canonicalText,
+      resourcePath: chapter.resource,
+      box: epubPageBoxFor(window),
+    );
+    final elapsed = watch.elapsed;
+
+    final scalars = chapter.canonicalText.runes.toList();
+    final clusters = <(int, int)>{
+      for (final endpoint in surface.endpoints)
+        (endpoint.rangeStart.toInt(), endpoint.rangeEnd.toInt()),
+    };
+    var emoji = 0;
+    for (final (start, end) in clusters) {
+      final text = String.fromCharCodes(scalars.sublist(start, end));
+      expect(unit.characters, contains(text));
+      if (text == '\u{1F600}') emoji += 1;
+    }
+    expect(emoji, repeats);
+    // About 0.2 s here; mapping each grapheme from its segment start took 3.3 s.
+    expect(elapsed, lessThan(const Duration(milliseconds: 1500)));
+    disposeFlowBlocks(flow.blocks);
   });
 
   test('a decode shared by concurrent callers is adopted once', () async {

@@ -132,11 +132,13 @@ const int kEpubIndivisibleNodeLimit = 512;
 /// surface covers one page at a time.
 const int kEpubContinuousScalarLimit = 64 * 1024;
 
-/// The most top-level blocks a chapter read as one continuous page may carry.
+/// The most work units (see [EpubContentSource.layoutLimitExceeded]) a
+/// chapter read as one continuous page may carry, counted through every
+/// nested container, list and table.
 ///
 /// Bounds the continuous page's slices and height (an image-heavy chapter has
-/// few scalars but many tall blocks) the way [kEpubContinuousScalarLimit]
-/// bounds its text.
+/// few scalars but many tall blocks, and a few containers can hold many) the
+/// way [kEpubContinuousScalarLimit] bounds its text.
 const int kEpubContinuousNodeLimit = 2048;
 
 /// Which bounded-work ceiling an indivisible layout unit exceeds.
@@ -270,11 +272,20 @@ class EpubContentSource {
 
   /// Whether [unit] fits the continuous-page ceilings
   /// ([kEpubContinuousScalarLimit], [kEpubContinuousNodeLimit]).
-  bool continuousAdmitted(int unit) {
+  bool continuousAdmitted(int unit) => _continuous.putIfAbsent(unit, () {
     final chapter = book.chapters[unit];
-    return chapter.scalarCount <= kEpubContinuousScalarLimit &&
-        chapter.blocks.length <= kEpubContinuousNodeLimit;
-  }
+    if (chapter.scalarCount > kEpubContinuousScalarLimit) return false;
+    // Each block's count stops past [kEpubIndivisibleNodeLimit], and the sum
+    // stops past the ceiling, so the check reads a bounded number of nodes.
+    var nodes = 0;
+    for (final block in chapter.blocks) {
+      nodes += _indivisibleSize(block).nodes;
+      if (nodes > kEpubContinuousNodeLimit) return false;
+    }
+    return true;
+  });
+
+  final Map<int, bool> _continuous = {};
 
   /// Bytes of decoded image rasters currently retained.
   int decodedImageBytes = 0;

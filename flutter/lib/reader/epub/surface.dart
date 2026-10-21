@@ -57,6 +57,8 @@ FlutterSelectionSurface buildPageSelectionSurface({
   final visualLines = <FlutterSelectionVisualLine>[];
   for (final slice in page.slices) {
     for (final placed in placedPageText(slice, box)) {
+      // Lines come in text order, so one cursor maps the whole block.
+      final cursor = placed.block.map.cursor();
       for (var line = placed.lineStart; line < placed.lineEnd; line++) {
         // Each line carries its own vertical position: the block origin is the
         // painter's top, and the line's `top` is relative to it.
@@ -67,6 +69,7 @@ FlutterSelectionSurface buildPageSelectionSurface({
           lineTop,
           placed.origin.dx,
           endpoints,
+          cursor,
         );
         if (carets.isEmpty) continue;
         carets.sort((left, right) => left.x.compareTo(right.x));
@@ -245,6 +248,7 @@ List<FlutterSelectionCaret> _lineCarets(
   double lineTop,
   double originX,
   List<FlutterSelectionEndpoint> endpoints,
+  CanonicalCursor cursor,
 ) {
   final map = text.map;
   final painter = text.painter;
@@ -278,8 +282,8 @@ List<FlutterSelectionCaret> _lineCarets(
     if (right <= left) continue;
     final rtl = boxes.first.direction == ui.TextDirection.rtl;
     final mid = (left + right) / 2;
-    final canonicalStart = map.canonicalAt(clusterStart + markerOffset);
-    final canonicalEnd = map.canonicalAt(clusterEnd + markerOffset);
+    final canonicalStart = cursor.at(clusterStart + markerOffset);
+    final canonicalEnd = cursor.at(clusterEnd + markerOffset);
     // Physical halves: the left half always carries the caret at its own edge.
     final leftOffset = rtl ? canonicalEnd : canonicalStart;
     final rightOffset = rtl ? canonicalStart : canonicalEnd;

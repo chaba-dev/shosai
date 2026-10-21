@@ -229,6 +229,13 @@ class BlockTextMap {
     return canonicalEnd;
   }
 
+  /// A [canonicalAt] for code-unit offsets asked in non-decreasing order,
+  /// which reads each code unit of the block at most once in total.
+  ///
+  /// [canonicalAt] counts scalars from the segment's start, so asking it for
+  /// every grapheme of a long span is quadratic in the span's length.
+  CanonicalCursor cursor() => CanonicalCursor._(this);
+
   /// Code-unit offset for a canonical scalar, clamped to the block.
   int codeUnitAt(int canonical) {
     if (segments.isEmpty) return 0;
@@ -294,6 +301,59 @@ class BlockTextMap {
     if (codeUnitLength >= text.length) return text.runes.length;
     return text.substring(0, codeUnitLength).runes.length;
   }
+}
+
+/// [BlockTextMap.canonicalAt] answered in one pass; see
+/// [BlockTextMap.cursor].
+final class CanonicalCursor {
+  CanonicalCursor._(this._map);
+
+  final BlockTextMap _map;
+  var _segment = 0;
+  var _unit = 0;
+  var _scalars = 0;
+  var _last = 0;
+
+  /// The canonical scalar at [codeUnit], as [BlockTextMap.canonicalAt]
+  /// returns it. An offset before the previous one restarts the pass.
+  int at(int codeUnit) {
+    final segments = _map.segments;
+    if (segments.isEmpty) return 0;
+    if (codeUnit < _last) {
+      _segment = 0;
+      _unit = 0;
+      _scalars = 0;
+    }
+    _last = codeUnit;
+    if (codeUnit <= 0) return segments.first.canonicalStart;
+    while (_segment < segments.length &&
+        codeUnit > segments[_segment].codeUnitEnd) {
+      _segment++;
+      _unit = 0;
+      _scalars = 0;
+    }
+    if (_segment == segments.length) return _map.canonicalEnd;
+    final segment = segments[_segment];
+    final text = segment.text;
+    final local = (codeUnit - segment.codeUnitStart).clamp(
+      0,
+      segment.codeUnitLength,
+    );
+    // A prefix's scalar count, as `String.runes` gives it: every code unit
+    // but the low half of a surrogate pair.
+    for (; _unit < local; _unit++) {
+      final unit = text.codeUnitAt(_unit);
+      final secondHalf =
+          unit >= 0xDC00 &&
+          unit <= 0xDFFF &&
+          _unit > 0 &&
+          _isHighSurrogate(text.codeUnitAt(_unit - 1));
+      if (!secondHalf) _scalars++;
+    }
+    return segment.canonicalStart + _scalars;
+  }
+
+  static bool _isHighSurrogate(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
 }
 
 /// Build the Flutter span tree for a list of engine spans.
