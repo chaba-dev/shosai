@@ -158,7 +158,12 @@ void main() {
 
       final title = _paragraph(tester, _latinBook.title, size: 14);
       expect(title.text.style?.fontFamily, shellEditorialFontFamily);
-      final author = _paragraph(tester, _latinBook.author!, size: 10);
+      // A generated cover sets a Latin author in capitals.
+      final author = _paragraph(
+        tester,
+        _latinBook.author!.toUpperCase(),
+        size: 10,
+      );
       expect(author.text.style?.fontFamily, shosaiInterfaceFontFamily);
     });
   });

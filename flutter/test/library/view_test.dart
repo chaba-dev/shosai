@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
-import 'package:shosai_flutter/theme_tokens.dart';
+import 'package:shosai_flutter/shell/view.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -187,18 +187,19 @@ void main() {
       ),
     );
 
-    // The title is the card's own 13 px line; the missing cover's placeholder
-    // carries a second copy of the same string.
+    // The card's own title line; the missing cover's generated cover carries
+    // a second copy of the title and the author in capitals.
     expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Text &&
-            widget.data == 'A Book' &&
-            widget.style?.fontSize == ShosaiTokens.typeSize13,
+      find.byElementPredicate(
+        (element) =>
+            element.widget is Text &&
+            (element.widget as Text).data == 'A Book' &&
+            element.findAncestorWidgetOfExactType<ShellGeneratedCover>() ==
+                null,
       ),
       findsOneWidget,
     );
-    expect(find.text('Ada'), findsOneWidget);
+    expect(find.text('ADA'), findsOneWidget);
     expect(find.text('42%'), findsOneWidget);
 
     await tester.tap(find.byType(LibraryBookCard));

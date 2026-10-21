@@ -204,7 +204,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_cardTitle('A Book'), findsOneWidget);
-    expect(find.text('Ada'), findsOneWidget);
+    expect(find.text('ADA'), findsOneWidget);
     expect(find.text('42%'), findsOneWidget);
     // The card's format label; the sidebar carries the same format name.
     expect(

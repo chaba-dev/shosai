@@ -121,23 +121,7 @@ class ShellGeneratedCover extends StatelessWidget {
                     ),
                   ),
                   if (type.showAuthor && author != null)
-                    Text(
-                      author,
-                      textAlign: TextAlign.start,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: shosaiInterfaceStyleForText(
-                        shellInterfaceStyle(
-                          10,
-                          13,
-                          weight: FontWeight.w500,
-                        ).copyWith(
-                          letterSpacing: .6,
-                          color: ShellPalette.coverInk.withValues(alpha: .85),
-                        ),
-                        author,
-                      ),
-                    ),
+                    _CoverAuthor(author: author),
                 ],
               ),
             ),
@@ -227,6 +211,35 @@ class ShellFormatBadge extends StatelessWidget {
           12,
           weight: FontWeight.w600,
         ).copyWith(letterSpacing: .4, color: palette.inkMuted),
+      ),
+    );
+  }
+}
+
+/// A generated cover's author in `ui-label` capitals; Japanese has no
+/// capitals to set, so it keeps its own form without the tracking.
+class _CoverAuthor extends StatelessWidget {
+  const _CoverAuthor({required this.author});
+
+  final String author;
+
+  @override
+  Widget build(BuildContext context) {
+    final japanese =
+        shosaiInterfaceFontForText(author) == shosaiJapaneseInterfaceFontFamily;
+    final style = shellInterfaceStyle(
+      10,
+      13,
+      weight: FontWeight.w500,
+    ).copyWith(color: ShellPalette.coverInk.withValues(alpha: .85));
+    return Text(
+      japanese ? author : author.toUpperCase(),
+      textAlign: TextAlign.start,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: shosaiInterfaceStyleForText(
+        japanese ? style : style.copyWith(letterSpacing: .6),
+        author,
       ),
     );
   }

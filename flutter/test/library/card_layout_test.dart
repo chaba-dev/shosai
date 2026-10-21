@@ -570,6 +570,33 @@ void main() {
   });
 
   group('covers', () {
+    testWidgets('a generated cover sets a Latin author in capitals', (
+      tester,
+    ) async {
+      for (final (author, shown, tracking) in const [
+        ('Ada Lovelace', 'ADA LOVELACE', .6),
+        ('夏目漱石', '夏目漱石', null),
+      ]) {
+        await tester.pumpWidget(
+          productionShell(
+            home: Center(
+              child: SizedBox(
+                width: 168,
+                height: 252,
+                child: ShellGeneratedCover(
+                  title: 'Notes',
+                  author: author,
+                  type: ShellCoverType.hero,
+                ),
+              ),
+            ),
+          ),
+        );
+        final text = tester.widget<Text>(find.text(shown));
+        expect(text.style?.letterSpacing, tracking, reason: author);
+      }
+    });
+
     testWidgets('a missing cover shows the typographic cover in its box', (
       tester,
     ) async {
