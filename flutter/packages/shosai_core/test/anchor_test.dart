@@ -7,6 +7,7 @@ import 'package:shosai_core/src/annotations/graphemes.dart'
 import 'package:shosai_core/src/annotations/resolution.dart'
     show forEachBoundedGrapheme;
 import 'package:test/test.dart';
+import 'package:unorm_dart/unorm_dart.dart' as unorm;
 
 import 'support/library_fixtures.dart';
 
@@ -53,6 +54,20 @@ void main() {
       expect(normalizeQuoteV1('Résumé'), isNot(normalizeQuoteV1('résumé')));
       expect(normalizeQuoteV1('がな'), 'がな');
       expect(normalizeQuoteV1('﻿word'), '﻿word');
+    });
+
+    test('Hangul syllables skip NFC only where it would not change them', () {
+      for (var syllable = 0xac00; syllable <= 0xd7a3; syllable++) {
+        final text = String.fromCharCode(syllable);
+        expect(unorm.nfc(text), text);
+        expect(normalizeQuoteV1(text), text);
+      }
+      // A syllable composes with conjoining jamo in its cluster.
+      expect(normalizeQuoteV1('\uAC00\u11A8'), '\uAC01');
+      expect(normalizeQuoteV1('\u1100\u1161\u11A8'), '\uAC01');
+      for (final cluster in ['\u1100\uAC00', '\uAC00\u1161']) {
+        expect(normalizeQuoteV1(cluster), unorm.nfc(cluster));
+      }
     });
 
     test('context keeps the nearest 32 scalars at grapheme boundaries', () {
@@ -506,15 +521,15 @@ void main() {
       );
       expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
 
-      // Ordinary text repeats its clusters, however long it is: every Hangul
+      // Ordinary text repeats its clusters, however long it is: every Yi
       // syllable, many times over, is charged once per syllable.
-      final hangul = String.fromCharCodes([
-        for (var index = 0; index < 8 * 11172; index++) 0xac00 + index % 11172,
+      final yi = String.fromCharCodes([
+        for (var index = 0; index < 8 * 1165; index++) 0xa000 + index % 1165,
       ]);
       final budget = ResolutionBudget();
       expect(
         resolveTextAnchor(
-          hangul,
+          yi,
           0,
           0,
           QuoteSelector.of('x', '', ''),
@@ -524,8 +539,69 @@ void main() {
       );
       expect(
         budget.normalization,
-        maxQuoteNormalizationWork - 11172 * quoteNormalizationCost(1),
+        maxQuoteNormalizationWork - 1165 * quoteNormalizationCost(1),
       );
+    });
+
+    test('clusters sharing one hash code do not slow repeated lookups', () {
+      // Twelve pairs of mark sequences, each pair giving `String.hashCode`
+      // the same state, make 4,096 distinct 37-scalar clusters after `q`
+      // that share one hash code. After `r` they do not collide. The
+      // collisions are particular to the Dart VM's string hash (3.11); if an
+      // SDK update breaks the first expectation, rebuild the pairs for it.
+      const pairs = [
+        ['\u0307\u031A\u034F', '\u0307\u0341\u0300'],
+        ['\u0302\u0308\u0353', '\u0302\u031B\u0300'],
+        ['\u030F\u0307\u0300', '\u030F\u032E\u036E'],
+        ['\u030F\u031A\u033B', '\u030F\u034D\u0300'],
+        ['\u0303\u034D\u0300', '\u0303\u034E\u0320'],
+        ['\u0304\u0312\u0337', '\u0304\u034B\u0300'],
+        ['\u0304\u0321\u0300', '\u0304\u033B\u033E'],
+        ['\u0301\u0306\u0300', '\u0301\u031B\u0339'],
+        ['\u030E\u0317\u0300', '\u030E\u0340\u036A'],
+        ['\u030E\u0332\u0339', '\u030E\u0347\u0300'],
+        ['\u031A\u032F\u033F', '\u031A\u033C\u0300'],
+        ['\u0306\u0317\u0360', '\u0306\u0348\u0300'],
+      ];
+      List<String> clusters(String base) {
+        var keys = [base];
+        for (final pair in pairs) {
+          keys = [
+            for (final prefix in keys)
+              for (final suffix in pair) '$prefix$suffix',
+          ];
+        }
+        return keys;
+      }
+
+      final colliding = clusters('q');
+      final control = clusters('r');
+      expect(colliding.map((key) => key.hashCode).toSet(), hasLength(1));
+      expect(control.map((key) => key.hashCode).toSet(), hasLength(4096));
+
+      // Every cluster is normalized and charged once, then the last one is
+      // looked up 100,000 more times, uncharged.
+      Duration time(List<String> keys) {
+        final text = '${keys.join(' ')} ${'${keys.last} ' * 100000}';
+        final watch = Stopwatch()..start();
+        expect(
+          resolveTextAnchor(text, 0, 0, QuoteSelector.of('x', '', '')),
+          const ResolvedAnchor(AnnotationResolution.orphaned),
+        );
+        return watch.elapsed;
+      }
+
+      // Interleaved samples, compared by median, so one pause in either
+      // family does not decide the result.
+      time(control);
+      final controlRuns = <Duration>[];
+      final collidingRuns = <Duration>[];
+      for (var run = 0; run < 3; run++) {
+        controlRuns.add(time(control));
+        collidingRuns.add(time(colliding));
+      }
+      Duration median(List<Duration> runs) => (runs..sort())[1];
+      expect(median(collidingRuns), lessThan(median(controlRuns) * 2));
     });
   });
 

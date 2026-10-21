@@ -2,6 +2,8 @@
 /// text with bounded surrounding context.
 library;
 
+import 'dart:collection';
+
 import 'package:unorm_dart/unorm_dart.dart' as unorm;
 
 import '../errors.dart';
@@ -43,9 +45,9 @@ const maxQuoteGraphemeScalars = 1024;
 const maxQuoteNormalizationWork = 32 * 1024 * 1024;
 
 /// The work units normalizing one distinct grapheme cluster of [scalars]
-/// Unicode scalars costs: a fixed charge for the call, plus the square of
-/// the at most twice as many scalars canonical decomposition can expand it
-/// to.
+/// Unicode scalars costs: a fixed charge for the call plus a quadratic term,
+/// a weighting calibrated against the timings above rather than a bound on
+/// how far decomposition expands a cluster.
 int quoteNormalizationCost(int scalars) => 256 + 4 * scalars * scalars;
 
 /// The normalization work left to an operation, charged before each distinct
@@ -58,7 +60,11 @@ final class NormalizationAllowance {
 
   /// The NFC form of every cluster normalized so far. Bounded: each entry
   /// was charged at least [quoteNormalizationCost] of one scalar.
-  final _composed = <String, String>{};
+  ///
+  /// Looked up by comparison, not by hash: `String.hashCode` is unsalted, so
+  /// crafted clusters sharing one hash would make every uncharged lookup in a
+  /// hash map walk all of them.
+  final _composed = SplayTreeMap<String, String>();
 
   /// Whether a charge has failed; every later charge fails too.
   bool get isExhausted => remaining < 0;
@@ -183,14 +189,16 @@ String profileInput(String value) {
       .replaceAll('­', '');
 }
 
-/// Scalars that are NFC-stable on their own and never combine with a
-/// neighbour (Latin, kana and CJK ideographs), so clusters of them skip the
-/// normalizer.
+/// Scalars that are NFC-stable on their own and compose with no other
+/// scalar of this set (Latin, kana, CJK ideographs and precomposed Hangul
+/// syllables), so clusters of only them skip the normalizer. A syllable
+/// composes only with a following conjoining jamo, which is not in the set.
 bool _alreadyComposed(int scalar) =>
     scalar < 0x0300 ||
     (scalar >= 0x3041 && scalar <= 0x3096) ||
     (scalar >= 0x30a1 && scalar <= 0x30fa) ||
-    (scalar >= 0x4e00 && scalar <= 0x9fff);
+    (scalar >= 0x4e00 && scalar <= 0x9fff) ||
+    (scalar >= 0xac00 && scalar <= 0xd7a3);
 
 /// Whitespace in the quote-v1 profile (the Unicode White_Space property).
 bool isQuoteWhitespace(int scalar) =>
