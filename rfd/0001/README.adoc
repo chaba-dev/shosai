@@ -32,7 +32,7 @@ limits apply before backend allocation, and warm navigation must avoid parsing,
 repagination, decoding, and synchronous storage.
 
 The complete spike, trade-off, benchmark, and platform evidence is retained in
-link:EVIDENCE.md[the EPUB renderer decision evidence].
+link:EVIDENCE.adoc[the EPUB renderer decision evidence].
 
 == Frontend evolution
 
@@ -53,4 +53,4 @@ introducing a second EPUB parser.
 == Implementation
 
 Progress and remaining cross-platform acceptance evidence are tracked in
-link:IMPLEMENTATION.org[RFD 1 implementation checklist].
+link:IMPLEMENTATION.adoc[RFD 1 implementation checklist].

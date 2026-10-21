@@ -1,15 +1,17 @@
 :authors: Darwin D Wu <darwin67@users.noreply.github.com>
 :state: ideation
 :discussion:
-:labels: annotations, epub, pdf, reader, accessibility
+:labels: annotations, notes, search, epub, pdf, reader, accessibility
 
-= RFD 6 Cross-format text highlighting
+= RFD 6 Cross-format highlighting, notes and search
 
 == Goal
 
 Provide the same text-selection and highlighting experience for reflowable EPUB
 and fixed-page PDF documents while preserving anchors across EPUB relayout, PDF
-zoom, application restart, and eventual synchronization.
+zoom, application restart, and eventual synchronization. Extend the same
+model to page notes and book notes, and make every note findable from any
+screen through one search over book text and notes (see <<_notes_and_search>>).
 
 The interaction should feel format-independent: a reader selects visible text,
 previews the range, creates a colored highlight, optionally attaches a note,
@@ -220,6 +222,46 @@ EPUB CFI offsets count UTF-16 code units, while Shōsai's current chapter ranges
 count Unicode scalar values; conversion must be explicit and tested.  Selection
 endpoints snap to grapheme boundaries.
 
+== Notes and search
+
+Folded in from the former RFD 7 on 2026-10-20. Highlights are one of three
+kinds of note, all stored and listed the same way:
+
+[cols="1,2,2",options="header"]
+|===
+|Kind |Attached to |Example
+
+|Highlight
+|A text range, with a color and an optional note
+|A sentence in a chapter or on a PDF page
+
+|Page note
+|A location: an EPUB position or a PDF page, with no text range
+|"Fig. 1 is the model every later section refers back to."
+
+|Book note
+|The whole book
+|"Reading group pick. Chapters III and IV first."
+|===
+
+A single notes surface lists notes for _this book_ or _all books_, grouped by
+where they sit (the whole book, then each section or page in reading order).
+Choosing a note opens its book at its anchor; a page note opens its page and a
+book note opens the book where it was left. Page notes and book notes are
+annotations in the same store as highlights, with the same portable identity,
+timestamps, tombstones and provenance, and an anchor payload that holds a
+location or nothing. Bookmarks stay point locations without a note; a
+bookmark's note becomes a page note.
+
+Search is available from every screen, including the library. One query covers
+book text and notes across every book in the library, scoped to _this book_ or
+_all books_ and filtered to everything, text, or notes. Results group notes
+before book text, then one group per book. Choosing a result opens the book at
+the match and records a return point for *Back* (RFD 4, outcome 5).
+
+*Done when* a note written in one book is found from any open book or the
+library and opens at its exact place, in both formats.
+
 == Standards and interoperability
 
 The W3C Web Annotation Data Model permits multiple selectors for one target and
@@ -300,10 +342,11 @@ the interaction model or existing anchor versions.
 === Annotation product model
 
 A highlight is an independent annotation that may own zero or one textual note.
-Existing bookmark notes remain unchanged and coexist with highlight notes; no
-bookmark migration or paired bookmark record is required.  The reader may
-present both record types in one annotations panel, but creating, updating, or
-deleting one does not implicitly modify the other.
+Page notes and book notes are annotations too (amended 2026-10-20, see
+<<_notes_and_search>>): the same record with a location anchor or no anchor.
+Bookmarks are point locations without a note and stay a separate record; the
+reader lists notes in one surface and bookmarks in another, and creating,
+updating, or deleting one does not implicitly modify the other.
 
 === Initial locator milestone
 
@@ -370,7 +413,7 @@ than copied into the internal schema.
 
 == Implementation
 
-The link:IMPLEMENTATION.org[RFD 6 implementation checklist] is dependency
+The link:IMPLEMENTATION.adoc[RFD 6 implementation checklist] is dependency
 ordered.  Phase 0 closes contracts and selection feasibility, phase 1 adds the
 shared domain and store, phases 2 and 3 deliver PDF and EPUB Flutter vertical
 slices, and phase 4 integrates and gates the first release. Native PDF
@@ -380,5 +423,6 @@ The link:PHASE-0.adoc[Phase 0 contracts and evidence] freeze the interaction,
 anchor, normalization, identity, lifecycle, and resource-budget boundaries that
 must be versioned before the first durable annotation migration.
 
-The cross-platform frontend boundary, platform feasibility gate, and Iced
-retirement sequence are owned by link:../0004/README.adoc[RFD 4].
+The cross-platform frontend boundary, platform feasibility gate, and the
+first-release outcomes that place the notes and search surfaces are owned by
+link:../0004/README.adoc[RFD 4].

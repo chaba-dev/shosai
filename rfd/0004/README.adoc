@@ -1,22 +1,25 @@
 :authors: Shōsai contributors <https://github.com/chaba-dev/shosai>
 :state: discussion
 :discussion: https://github.com/chaba-dev/shosai/pull/76
-:labels: cross-platform, flutter, mobile, desktop, web, architecture, accessibility, packaging
+:labels: cross-platform, flutter, mobile, desktop, web, architecture, accessibility, packaging, product, reader, navigation
 
 = RFD 4 Cross-platform Flutter frontend
 
 == Goal
 
 Use one maintained presentation codebase for desktop, phone, and tablet while
-retaining Shōsai's Rust document and application core. Preserve a credible web
-path without claiming that native Rust dependencies already run in a browser.
+retaining Shōsai's Rust document and application core, and define what that
+frontend ships first: one reading experience across formats and devices (see
+<<_the_first_release>>). Preserve a credible web path without claiming that
+native Rust dependencies already run in a browser.
 
 == Proposal
 
 Replace the unreleased Iced frontend with Flutter across Linux, macOS, Windows,
-Android, and iOS. The existing Iced application remains an executable reference
-during migration, not a second product frontend that must reach feature parity.
-Delete it after the Flutter acceptance gate covers its required behavior.
+Android, and iOS. The Iced application is historical reference, not a baseline
+the Flutter frontend must match: the first release is defined by the outcomes
+in <<_the_first_release>>, and the Iced code is removed in its own change
+rather than kept until a parity gate.
 
 [cols="1,1,2",options="header"]
 |===
@@ -24,7 +27,7 @@ Delete it after the Flutter acceptance gate covers its required behavior.
 
 |Linux, macOS, Windows
 |Flutter desktop
-|Production desktop frontend after parity
+|Production desktop frontend for the first release
 
 |Android phones and tablets
 |Flutter mobile
@@ -43,6 +46,176 @@ The application has not been released. Internal Rust APIs, Dart bridge APIs, and
 the development SQLite schema may change without compatibility wrappers or
 dual-read periods. Once a release or synchronization wire format exists, its
 declared compatibility contract applies normally.
+
+== The first release
+
+The first release is a reader that gives the same reading experience
+regardless of medium: a person reads, marks up, searches, and follows
+references the same way in an EPUB or a PDF, on a desktop, a tablet, or a
+phone. The outcomes below are what the Flutter frontend must deliver first.
+Where the current implementation disagrees with them, the outcomes win.
+(Folded in from the former RFD 7 on 2026-10-20; the product is unreleased, so
+the proposal lives here rather than in a superseding RFD.)
+
+=== Design mock and design system
+
+An interactive mock accompanies this RFD on the project design canvas
+(https://claude.ai/artifact/5BwNtruvTADWsgZHzJ5XiS[Shōsai design canvas],
+"MVP" row): one working prototype laid out for desktop (1440 × 900), tablet
+(1180 × 820), and phone (390 × 844), plus every screen drawn in the chosen
+look. The prototype uses public-domain text from _On the Origin of Species_
+(EPUB), Shannon's _A Mathematical Theory of Communication_ (PDF), and
+_吾輩は猫である_ (EPUB, vertical text).
+
+The mock is the reference for layout and interaction. How it looks and speaks
+is the link:../../docs/design-system.md[design system]: tokens, components,
+words and reading-surface rules, with a development viewer under
+`docs/design-system/`. Its tokens are the design target; the applications keep
+rendering from `assets/theme/tokens.json` until implementation moves the
+values across.
+
+=== 1. Every device
+
+The page, gestures, and controls are the same everywhere; only their
+arrangement adapts to the window:
+
+[cols="1,1,1,1",options="header"]
+|===
+|Surface |Desktop |Tablet |Phone
+
+|Places and open books
+|Sidebar: Library, Notes, Bookmarks, Search and the _Reading now_ list;
+a rail of icons and covers while reading
+|The same sidebar and rail, narrower
+|Bottom bar for the places; open books as cards on the library and in a
+switcher behind a count button
+
+|Notes
+|Panel docked beside the page
+|Panel sliding over the page
+|Bottom sheet
+
+|Reference peek
+|Card above the page
+|Card above the page
+|Bottom sheet
+
+|Search
+|Palette over the window
+|Palette over the window
+|Full screen
+|===
+
+*Done when* the same library, open books, notes, and search work on Linux,
+macOS, Windows, iPad, Android tablets, iPhone, and Android phones.
+
+=== 2. Any medium
+
+EPUB and PDF share one reader. The format appears only as a small badge in the
+sidebar, library entries, and search results; it never changes which controls
+exist or where they are.
+
+* *Location.* Every position reads as a section label, a percentage, and a
+  page number. EPUB page numbers depend on the current layout; PDF page numbers
+  are fixed.
+* *Progress.* One progress bar and one location line in the same place.
+* *Appearance.* One theme set (paper, sepia, night) applies to both formats. A
+  PDF in night theme is shown with inverted luminance; its layout never changes.
+* *Size.* One control sets text size for EPUB and zoom for PDF, labeled for
+  what it does in the current book.
+* *Pages.* One setting chooses one or two pages for both formats, defaulting
+  to two.
+* *Selection, highlights and notes.* One model, as defined by
+  link:../0006/README.adoc[RFD 6].
+* *The book keeps its voice.* EPUB fonts and writing direction, including
+  vertical Japanese text, are honored. PDF pages keep their appearance.
+
+*Done when* every reader action in the mock behaves the same for an EPUB and a
+PDF.
+
+=== 3. Notes and annotations, findable anywhere
+
+Highlights, page notes and book notes are stored and listed the same way, in
+one notes surface for _this book_ or _all books_, and one search covers book
+text and notes across the library from every screen. RFD 6 owns the model and
+the "done when"; this RFD places the surfaces (outcome 1).
+
+=== 4. Open books
+
+Every open book keeps its current position and appears in the sidebar's
+_Reading now_ list (the phone's cards and switcher). Opening a book that is
+already open focuses it instead of opening it twice. Open books and their
+positions are restored when the application starts again. They are per device
+in the first release (see link:../0003/README.adoc[RFD 3]).
+
+*Done when* books open, switch, close, and come back after relaunch with their
+positions kept.
+
+=== 5. Jumpable references
+
+Footnotes, cross-references, figure and table links, and contents entries are
+links in both formats: EPUB hyperlinks and PDF link annotations or internal
+destinations.
+
+. Activating a reference opens a _peek_ with the target's label and a short
+  preview, without leaving the page.
+. *Go to* jumps to the target.
+. Every jump records where it left from. A *Back* control returns there. Jumps
+  from search results and notes record a return point too, including jumps
+  into another open book.
+
+Footnotes whose text is already in the peek need no jump.
+
+*Done when* EPUB links and PDF link annotations both peek, jump, and return.
+
+=== Interaction rules
+
+. *Format is metadata, not a mode.* No control exists for one format only.
+  Where formats need different mechanics, the control keeps its place and
+  meaning.
+. *Peek before you jump, and always a way back.*
+. *Everything you write is findable.* Notes are first-class search results.
+. *Layout adapts, behavior does not.* Panels become sheets, the sidebar
+  becomes a rail and then a bottom bar; outcomes stay the same.
+
+=== Out of scope for the first release
+
+* Synchronization between devices (link:../0003/README.adoc[RFD 3]). Notes
+  stay on the device but use portable identities so synchronization can follow.
+* Additional formats, including the comic archives the Iced application read
+  (link:../0002/README.adoc[RFD 2]).
+* Writing highlights back into PDF files (RFD 6 interoperability phases).
+* A web build, which this RFD keeps as a feasibility target.
+* Collections or shelves beyond a single library list.
+
+=== Decisions
+
+Recorded from owner review on 2026-10-14 and 2026-10-20.
+
+* *EPUB defaults to paginated reading.* Continuous scrolling may follow as an
+  option but is not the default.
+* *Two-page spreads are the default for EPUB and PDF.* Readers can switch
+  between one and two pages. Spreads follow the book's page progression, so a
+  right-to-left book places its first page on the right. Where two pages would
+  not be readable side by side, such as a phone in portrait, the reader shows
+  one page.
+* *CBZ is not part of the first release.* Revisit once there is a concrete
+  need; it returns as a format package in RFD 2.
+* *Open books are per device.* Carrying them across devices is a possible
+  follow-up to RFD 3, decided by how much complexity it adds.
+* *Phone PDFs show fit-width pages, not a reflowed text view.* Pages are
+  re-rendered at the current zoom and display density, so text never shows as
+  an enlarged bitmap. A reflowed view may follow later.
+* *EPUB writing direction is honored with no override.* The direction comes
+  from the book: the spine's `page-progression-direction` and the content's CSS
+  `writing-mode` (including the `-epub-writing-mode` alias). A book that
+  declares neither reads horizontally, left to right. Readers cannot force a
+  horizontal layout in the first release.
+* *The look is the Bookshelf* (2026-10-20): a sidebar with the places and the
+  open books that collapses to a rail while reading, a bottom bar on phones, a
+  shelf of covers under a _Continue reading_ hero, warm paper chrome, book and
+  screen titles in the editorial serif. The design system records the tokens
+  and components; the Iced tab strip is not carried forward.
 
 == Rationale
 
@@ -97,7 +270,7 @@ computed styles, stable offsets, embedded fonts, and MathML were proposed as
 Rust-owned; the 2026-09-28 EPUB adoption decision supersedes that ownership for
 EPUB (note below). The spike decides the granularity of a Rust-laid-out
 renderer-neutral scene and semantic representation that Flutter paints; for
-PDF/CBZ and the bridge decision it must not move document layout, parsing, or
+PDF and the bridge decision it must not move document layout, parsing, or
 resource security policy into Flutter, while EPUB parsing and layout follow the
 amendment below.
 
@@ -184,15 +357,14 @@ installed-size, representative large-document, navigation/relayout, and native
 comparison gates remain mandatory for M5. Web feasibility separately proves the
 chosen WASM or service boundary and does not delay native migration.
 
-After the gate, migrate the library shell and remaining reader behavior in
-vertical slices. Keep Iced runnable for behavioral comparison, but add no new
-production-only Iced feature unless it is needed to settle a core contract.
+After the gate, build the library shell and the remaining first-release
+outcomes in vertical slices. Nothing new is built in Iced.
 
 == Migration phases and tracking
 
 Migration is tracked as dependency-ordered milestones rather than as one
 frontend rewrite. Each milestone has an explicit exit gate in
-link:IMPLEMENTATION.org[the implementation checklist]. A phase is complete only
+link:IMPLEMENTATION.adoc[the implementation checklist]. A phase is complete only
 when its exit gate is satisfied; checking individual tasks records progress but
 does not waive the gate.
 
@@ -217,11 +389,11 @@ and completes selection, persistence, relayout, and accessibility end to end.
 |The measured slice passes on desktop and at least one physical mobile platform;
 otherwise reconsider the bridge, rendering boundary, or Flutter decision.
 
-|M3 — Vertical product migration
-|Replace the library shell and complete PDF, EPUB, and CBZ reader behavior in
-reviewable vertical slices.
-|Flutter passes the required desktop parity and regression matrix, making Iced
-unnecessary for normal operation and testing.
+|M3 — Vertical product delivery
+|Build the library shell and the PDF and EPUB reader behavior the first release
+defines, in reviewable vertical slices.
+|Flutter delivers every first-release outcome with its "done when" criterion
+on desktop, tablet, and phone.
 
 |M4 — Platform services
 |Add only product-required secure storage, deep links, sharing, background work,
@@ -232,8 +404,7 @@ are tested independently of synchronization correctness.
 |M5 — Packaging and release
 |Package, sign, and smoke-test each Flutter host with the Rust library, PDFium,
 assets, manifests, and notices.
-|Every claimed platform has an independently releasable artifact; then remove
-the Iced application and its exclusive dependencies.
+|Every claimed platform has an independently releasable artifact.
 
 |M6 — Web feasibility
 |Evaluate a browser-compatible core subset and adapters against a remote-service
@@ -243,9 +414,8 @@ delivery.
 |===
 
 M0 and M1 may overlap where an extraction is needed to measure a boundary. M2
-is the Flutter go/no-go gate and precedes broad UI migration. M3 precedes final
-Iced removal. M4 is demand-driven and need not block M3. M5 follows proven
-product parity for each platform. M6 is intentionally independent and may run
+is the Flutter go/no-go gate and precedes broad UI work. M4 is demand-driven and need not block M3. M5 follows the
+first-release outcomes on each platform. M6 is intentionally independent and may run
 in parallel once the portable application boundary is stable.
 
 == Alternatives
@@ -260,9 +430,9 @@ native frontends only if the Flutter gate fails a required criterion.
 == Dependencies and consequences
 
 RFD 1's parser, resource-security, stable-location, and bounded-layout decisions
-remain valid; its Iced implementation becomes migration evidence rather than the
-future presentation boundary. RFD 2 format capabilities must drive one Flutter
-reader shell. RFD 3 supplies portable identity and sync semantics independently
+remain valid; its Iced implementation is historical evidence rather than the
+future presentation boundary. RFD 2 format capabilities, including the comic
+archives that leave the first release, must drive one Flutter reader shell. RFD 3 supplies portable identity and sync semantics independently
 of notification delivery. RFD 5 must package Flutter hosts and the Rust native
 library instead of assuming the current Cargo binary layout. RFD 6 supplies the
 first cross-format interaction and persistence slice.
@@ -270,7 +440,7 @@ first cross-format interaction and persistence slice.
 == Implementation
 
 The dependency-ordered spike, extraction, migration, web, and packaging work is
-tracked in link:IMPLEMENTATION.org[RFD 4 implementation checklist].
+tracked in link:IMPLEMENTATION.adoc[RFD 4 implementation checklist].
 
 == References
 
@@ -281,4 +451,5 @@ tracked in link:IMPLEMENTATION.org[RFD 4 implementation checklist].
 * link:../0001/README.adoc[RFD 1: Enhanced EPUB rendering]
 * link:../0003/README.adoc[RFD 3: Cloud synchronization]
 * link:../0005/README.adoc[RFD 5: Distribution and packaging]
-* link:../0006/README.adoc[RFD 6: Cross-format text highlighting]
+* link:../0006/README.adoc[RFD 6: Cross-format highlighting, notes and search]
+* link:../../docs/design-system.md[Shōsai design system]

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BottomNav · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 20px 24px; display: flex; background: var(--canvas); }
+.phone { width: 390px; margin: 0 auto; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.above { height: 44px; background: var(--canvas); }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="phone">
+    <div class="above"></div>
+    <nav class="sh-bottomnav" aria-label="Places">
+      <button aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg>Library</button>
+      <button><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg>Notes</button>
+      <button><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>Bookmarks</button>
+      <button><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search</button>
+    </nav>
+  </div>
+</div>
+</body>
+</html>

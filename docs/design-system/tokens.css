@@ -1,0 +1,151 @@
+/* Shōsai design system tokens. Generated from docs/design-system/tokens.json
+   by scripts/generate-design-system-css.py; do not edit by hand. */
+:root, [data-theme="light"] {
+  --canvas: #f6f1e6;
+  --surface: #fdfaf3;
+  --surface-sunken: #e6dfd0;
+  --stage: #efe8d9;
+  --stage-edge: #d9cfbb;
+  --shelf: #cfc4ad;
+  --control-raised: var(--surface);
+  --chrome: #ece5d6;
+  --hover: #e7e0d0;
+  --line: #d9d0bd;
+  --line-strong: #7d7364;
+  --ink: #221d18;
+  --ink-muted: #675d4f;
+  --accent: #2b3a5c;
+  --accent-hover: #1e2b47;
+  --accent-soft: #dde2ec;
+  --on-accent: #ffffff;
+  --on-accent-soft: #1e2b47;
+  --inverse: #221d18;
+  --on-inverse: #fffefb;
+  --vermilion: #b23c1b;
+  --success: #4e755d;
+  --warning: #a77036;
+  --danger: #a54343;
+  --danger-soft: #f6e5e2;
+  --scrim: rgba(33, 32, 30, 0.42);
+  --brand-navy: #2d3848;
+  --brand-charcoal: #313030;
+  --brand-cream: #f3e4cc;
+  --brand-gold: #a18969;
+  --brand-mark: var(--brand-navy);
+  --page-paper: #fffdf8;
+  --page-paper-ink: #1a1a1a;
+  --page-paper-link: #174ea6;
+  --page-sepia: #f5ebd6;
+  --page-sepia-ink: #4d331a;
+  --page-sepia-link: #683d00;
+  --page-night: #1f1f24;
+  --page-night-ink: #d9d9d9;
+  --page-night-link: #8ab4f8;
+  --hl-yellow: rgba(226, 189, 84, 0.4);
+  --hl-green: rgba(112, 183, 126, 0.4);
+  --hl-blue: rgba(106, 169, 233, 0.4);
+  --hl-pink: rgba(220, 124, 165, 0.4);
+  --hl-purple: rgba(136, 118, 197, 0.4);
+  --swatch-yellow: #e2bd54;
+  --swatch-green: #70b77e;
+  --swatch-blue: #6aa9e9;
+  --swatch-pink: #dc7ca5;
+  --swatch-purple: #8876c5;
+  --selection: rgba(144, 202, 249, 0.4);
+  --search-hit: rgba(255, 243, 163, 0.5);
+  --search-current: rgba(255, 224, 102, 0.45);
+  --mark: #fbeea0;
+  --shadow-page: 0 30px 50px -28px rgba(34, 29, 24, 0.55), 0 10px 20px -12px rgba(34, 29, 24, 0.3), 0 0 0 1px rgba(34, 29, 24, 0.07);
+  --shadow-cover: 0 18px 24px -18px rgba(34, 29, 24, 0.6), 0 4px 10px -6px rgba(34, 29, 24, 0.4);
+  --shadow-menu: 0 8px 24px -10px rgba(34, 29, 24, 0.35), 0 0 0 1px rgba(34, 29, 24, 0.06);
+  --shadow-modal: 0 24px 60px -20px rgba(34, 29, 24, 0.4), 0 0 0 1px rgba(34, 29, 24, 0.08);
+  --shadow-raised: 0 1px 2px rgba(34, 29, 24, 0.12), 0 0 0 1px rgba(34, 29, 24, 0.06);
+}
+[data-theme="dark"] {
+  --canvas: #1d1915;
+  --surface: #2a241e;
+  --surface-sunken: #171411;
+  --stage: #211d19;
+  --stage-edge: #0f0d0b;
+  --shelf: #0d0b0a;
+  --control-raised: #352f28;
+  --chrome: #171412;
+  --hover: #2e2822;
+  --line: #3a322b;
+  --line-strong: #7f766a;
+  --ink: #f1ebe0;
+  --ink-muted: #aea597;
+  --accent: #a8b8df;
+  --accent-hover: #bdcbea;
+  --accent-soft: #2a3246;
+  --on-accent: #141a28;
+  --on-accent-soft: #cdd8f0;
+  --inverse: #4a443d;
+  --on-inverse: #f7f2ea;
+  --vermilion: #e0704f;
+  --success: #8db89b;
+  --warning: #d9a066;
+  --danger: #e58a80;
+  --danger-soft: #3a2220;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --brand-mark: var(--brand-cream);
+  --mark: #5a4f22;
+  --shadow-page: 0 30px 50px -28px rgba(0, 0, 0, 0.9), 0 10px 20px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-cover: 0 18px 24px -18px rgba(0, 0, 0, 0.9), 0 4px 10px -6px rgba(0, 0, 0, 0.7);
+  --shadow-menu: 0 12px 32px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-modal: 0 24px 60px -20px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --control-height: 32px;
+  --touch-target: 44px;
+  --sidebar-width: 240px;
+  --rail-width: 64px;
+  --bottomnav-height: 64px;
+  --toolbar-height: 56px;
+  --statusbar-height: 36px;
+  --panel-width: 340px;
+  --spread-min-width: 720px;
+  --measure: 36em;
+  --font-ui: Inter, "Noto Sans JP", system-ui, sans-serif;
+  --font-editorial: Literata, "Shippori Mincho", Georgia, serif;
+  --font-book: Literata, "Shippori Mincho", Georgia, serif;
+}
+@font-face { font-family: "Inter"; src: url("../../assets/fonts/InterVariable.ttf"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Sans JP"; src: url("../../assets/fonts/NotoSansJP-Variable.ttf"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Literata"; src: url("../../assets/fonts/Literata[opsz,wght].ttf"); font-weight: 200 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Literata"; src: url("../../assets/fonts/Literata-Italic[opsz,wght].ttf"); font-weight: 200 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-Regular.ttf"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-Medium.ttf"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-SemiBold.ttf"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Shippori Mincho"; src: url("../../assets/fonts/ShipporiMincho-Bold.ttf"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Source Serif 4"; src: url("../../assets/fonts/SourceSerif4Variable-Roman.ttf"); font-weight: 200 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif JP"; src: url("../../assets/fonts/NotoSerifJP-ShosaiMark-Black.ttf"); font-weight: 900; font-style: normal; font-display: swap; unicode-range: U+66F8; }
+.ui-title { font-family: var(--font-ui); font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.ui-heading { font-family: var(--font-ui); font-size: 16px; line-height: 22px; font-weight: 600; }
+.ui-body { font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 400; }
+.ui-control { font-family: var(--font-ui); font-size: 13px; line-height: 18px; font-weight: 500; }
+.ui-caption { font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 400; }
+.ui-label { font-family: var(--font-ui); font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.08em; }
+.ui-badge { font-family: var(--font-ui); font-size: 10px; line-height: 12px; font-weight: 600; letter-spacing: 0.04em; }
+.ed-display { font-family: var(--font-editorial); font-size: 40px; line-height: 44px; font-weight: 600; letter-spacing: -0.01em; }
+.ed-wordmark { font-family: var(--font-editorial); font-size: 20px; line-height: 24px; font-weight: 600; }
+.ed-quote { font-family: var(--font-editorial); font-size: 15px; line-height: 23px; font-weight: 400; }
+.ed-title { font-family: var(--font-editorial); font-size: 14px; line-height: 19px; font-weight: 600; }
+.ed-screen { font-family: var(--font-editorial); font-size: 34px; line-height: 40px; font-weight: 600; letter-spacing: -0.01em; }
+.ed-section { font-family: var(--font-editorial); font-size: 22px; line-height: 26px; font-weight: 600; }
+.book-body { font-family: var(--font-book); font-size: 19px; line-height: 31px; font-weight: 400; }
+.book-body-ja { font-family: var(--font-book); font-size: 20px; line-height: 38px; font-weight: 400; }
+.book-chapter { font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.14em; }
+.book-folio { font-family: var(--font-ui); font-size: 11px; line-height: 14px; font-weight: 400; }

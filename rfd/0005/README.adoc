@@ -36,4 +36,4 @@ the same way.
 == Implementation
 
 Completed baseline work and the independent package acceptance criteria are
-tracked in link:IMPLEMENTATION.org[RFD 5 implementation checklist].
+tracked in link:IMPLEMENTATION.adoc[RFD 5 implementation checklist].

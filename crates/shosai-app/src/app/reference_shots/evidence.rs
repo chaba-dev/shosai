@@ -51,7 +51,7 @@ pub(crate) fn multiply_linked(_metadata: &std::fs::Metadata) -> bool {
 
 /// Non-directory files the evidence directory contains.
 pub(crate) const EVIDENCE_FILES: [&str; 4] = [
-    "README.md",
+    "README.adoc",
     "captures.sha256",
     "fixtures.sha256",
     "manifest.json",
@@ -481,16 +481,17 @@ fn parse_checksums(text: &str) -> Vec<(String, String)> {
 
 /// The committed README must be the rendering of the committed manifest.
 fn readme_file(directory: &Path, committed: &Manifest, problems: &mut Vec<String>) {
-    let path = directory.join("README.md");
-    if refuse_to_open(&path, "README.md", problems) {
+    let path = directory.join("README.adoc");
+    if refuse_to_open(&path, "README.adoc", problems) {
         return;
     }
     match std::fs::read_to_string(&path) {
         Ok(text) if text == manifest::readme(committed) => {}
         Ok(_) => problems.push(
-            "README.md is stale: it is not the rendering of the committed manifest.json".to_owned(),
+            "README.adoc is stale: it is not the rendering of the committed manifest.json"
+                .to_owned(),
         ),
-        Err(error) => problems.push(format!("README.md cannot be read: {error}")),
+        Err(error) => problems.push(format!("README.adoc cannot be read: {error}")),
     }
 }
 

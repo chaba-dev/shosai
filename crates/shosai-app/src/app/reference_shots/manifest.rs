@@ -319,7 +319,7 @@ pub(crate) fn fixture_inventory(
     })
 }
 
-/// Writes `manifest.json`, `README.md`, `captures.sha256` and
+/// Writes `manifest.json`, `README.adoc`, `captures.sha256` and
 /// `fixtures.sha256`.
 pub(crate) fn write_all(directory: &Path, manifest: &Manifest) -> Result<()> {
     std::fs::create_dir_all(directory)
@@ -352,7 +352,7 @@ pub(crate) fn write_all(directory: &Path, manifest: &Manifest) -> Result<()> {
     std::fs::write(directory.join("fixtures.sha256"), checksum_file(&fixtures))
         .context("write fixtures.sha256")?;
 
-    std::fs::write(directory.join("README.md"), readme(manifest)).context("write README.md")?;
+    std::fs::write(directory.join("README.adoc"), readme(manifest)).context("write README.adoc")?;
     Ok(())
 }
 
@@ -394,7 +394,7 @@ fn checksum_file(entries: &[(String, String)]) -> String {
 
 /// The README heading of a package's evidence directory.
 pub(crate) fn readme_title(package: &str) -> String {
-    format!("# {package} reference captures (Iced, package {package})")
+    format!("= {package} reference captures (Iced, package {package})")
 }
 
 /// What a package's captures are evidence for, for the README.
@@ -416,30 +416,30 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
     out.push_str(&readme_title(&manifest.package));
     out.push_str("\n\n");
     out.push_str(&format!(
-        "Generated evidence for {}. These images are the **Iced reference**, not\n\
+        "Generated evidence for {}. These images are the *Iced reference*, not\n\
          acceptance evidence for the Flutter restoration: each accepting package still produces\n\
          and inspects its own renders (specification §4.0).\n\n",
         readme_scope(&manifest.package)
     ));
-    out.push_str(&format!("- Entry point: `{}`\n", manifest.entry_point));
-    out.push_str(&format!("- Command: `{}`\n", manifest.command));
+    out.push_str(&format!("* Entry point: `{}`\n", manifest.entry_point));
+    out.push_str(&format!("* Command: `{}`\n", manifest.command));
     out.push_str(&format!(
-        "- Capture-code revision: `{}` (from {}, Jujutsu change `{}`, bookmark `{}`)\n",
+        "* Capture-code revision: `{}` (from {}, Jujutsu change `{}`, bookmark `{}`)\n",
         manifest.capture_code_revision,
         manifest.capture_code_revision_source,
         manifest.capture_code_change_id,
         manifest.capture_code_bookmark
     ));
     out.push_str(&format!(
-        "- Revision note: {}\n",
+        "* Revision note: {}\n",
         manifest.capture_code_note
     ));
     out.push_str(&format!(
-        "- Pinned design base: `{}` — {}\n",
+        "* Pinned design base: `{}` — {}\n",
         manifest.pinned_design_base, manifest.pinned_design_base_subject
     ));
     out.push_str(&format!(
-        "- Preference baseline: {}\n",
+        "* Preference baseline: {}\n",
         manifest
             .preferences
             .iter()
@@ -448,34 +448,34 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
             .join(", ")
     ));
     out.push_str(&format!(
-        "- Renderer: {} · theme {} · default font {} at {} px\n",
+        "* Renderer: {} · theme {} · default font {} at {} px\n",
         manifest.environment.renderer,
         manifest.environment.theme,
         manifest.environment.default_font,
         manifest.environment.default_text_size
     ));
     out.push_str(&format!(
-        "- System language: {}\n",
+        "* System language: {}\n",
         manifest.environment.system_locale
     ));
     out.push_str(&format!(
-        "- Font discovery: {}\n",
+        "* Font discovery: {}\n",
         manifest.environment.font_discovery
     ));
     out.push_str(&format!(
-        "- Why font discovery is pinned: {}\n",
+        "* Why font discovery is pinned: {}\n",
         super::runner::FONT_DISCOVERY_NOTE
     ));
     out.push_str(&format!(
-        "- Native PDFium (run metadata, exempt from comparison): {}\n",
+        "* Native PDFium (run metadata, exempt from comparison): {}\n",
         manifest.environment.pdfium.as_deref().unwrap_or("unknown")
     ));
     out.push_str(&format!(
-        "- Generated: {} · {} (rustc {})\n",
+        "* Generated: {} · {} (rustc {})\n",
         manifest.environment.os, manifest.environment.arch, manifest.environment.rustc
     ));
     out.push_str(&format!(
-        "- Seeded library: {} books (`{}`), page size {}, order `{}`\n",
+        "* Seeded library: {} books (`{}`), page size {}, order `{}`\n",
         manifest.seeded_library.count,
         manifest.seeded_library.profile,
         manifest.seeded_library.page_size,
@@ -483,31 +483,31 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
     ));
     if let Some(reader_seed) = &manifest.reader_seeded_library {
         out.push_str(&format!(
-            "\n## Reader rich-content seed (package 1C)\n\n\
+            "\n== Reader rich-content seed (package 1C)\n\n\
              {} books (`{}`), page size {}, order `{}`.\n\n",
             reader_seed.count, reader_seed.profile, reader_seed.page_size, reader_seed.order
         ));
     }
     if let Some(continue_reading) = &manifest.seeded_library.continue_reading {
-        out.push_str(&format!("- Continue-reading seed: {continue_reading}\n"));
+        out.push_str(&format!("* Continue-reading seed: {continue_reading}\n"));
     }
-    out.push_str(&format!("- Captures: {}\n\n", manifest.captures.len()));
+    out.push_str(&format!("* Captures: {}\n\n", manifest.captures.len()));
 
-    out.push_str("## Files\n\n");
+    out.push_str("== Files\n\n");
     out.push_str(
-        "- `captures/*.png` — one image per capture; `captures.sha256` verifies them\n  (`sha256sum -c captures.sha256` from this directory).\n\
-         - `manifest.json` — machine-readable provenance: revision, base, commands, fixture and\n  font hashes, seeded inventory, per-capture state, sizes, DPR, locale, settings and rows.\n\
-         - `fixtures/` — the generated reference fixture tree, committed so the library/import\n  states can be reproduced without running the generator; `fixtures.sha256` verifies it.\n  The generator remains the source of truth: a test in `crates/shosai-app` regenerates the\n  tree and fails if any byte differs.\n\n",
+        "* `captures/*.png` — one image per capture; `captures.sha256` verifies them\n(`sha256sum -c captures.sha256` from this directory).\n\
+         * `manifest.json` — machine-readable provenance: revision, base, commands, fixture and\nfont hashes, seeded inventory, per-capture state, sizes, DPR, locale, settings and rows.\n\
+         * `fixtures/` — the generated reference fixture tree, committed so the library/import\nstates can be reproduced without running the generator; `fixtures.sha256` verifies it.\nThe generator remains the source of truth: a test in `crates/shosai-app` regenerates the\ntree and fails if any byte differs.\n\n",
     );
 
-    out.push_str("## Captures\n\n");
+    out.push_str("== Captures\n\n");
     out.push_str(
-        "| Evidence id | Family | State | Rows | Client | Image | DPR | Locale | Fixture | SHA-256 (12) |\n\
-         | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
+        "[options=\"header\"]\n|===\n\
+         |Evidence id |Family |State |Rows |Client |Image |DPR |Locale |Fixture |SHA-256 (12)\n",
     );
     for capture in &manifest.captures {
         out.push_str(&format!(
-            "| `{}` | {} | {} | {} | {}×{} | {}×{} | {} | {} | {} | `{}` |\n",
+            "|`{}` |{} |{} |{} |{}×{} |{}×{} |{} |{} |{} |`{}`\n",
             capture.id,
             capture.family,
             capture.state,
@@ -523,16 +523,16 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
         ));
     }
 
-    out.push_str("\n## State derivation and settings\n\n");
+    out.push_str("|===\n\n== State derivation and settings\n\n");
     for capture in &manifest.captures {
-        out.push_str(&format!("### `{}`\n\n", capture.id));
+        out.push_str(&format!("=== `{}`\n\n", capture.id));
         out.push_str(&format!(
-            "- Family: {} · state: {}\n",
+            "* Family: {} · state: {}\n",
             capture.family, capture.state
         ));
-        out.push_str(&format!("- State: {}\n", capture.state_derivation));
+        out.push_str(&format!("* State: {}\n", capture.state_derivation));
         out.push_str(&format!(
-            "- Settings: {}\n",
+            "* Settings: {}\n",
             if capture.settings.is_empty() {
                 "harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)".to_owned()
             } else {
@@ -541,13 +541,13 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
         ));
         if let Some((x, y)) = capture.hover {
             out.push_str(&format!(
-                "- Pointer: delivered at ({x}, {y}) logical pixels, so the control under it shows \
+                "* Pointer: delivered at ({x}, {y}) logical pixels, so the control under it shows \
                  its hover state\n"
             ));
         }
         if let Some(reader) = &capture.reader {
             out.push_str(&format!(
-                "- Reader: {} `{}` · {} · palette {} · page {} of {} · visible {} · spread {} · \
+                "* Reader: {} `{}` · {} · palette {} · page {} of {} · visible {} · spread {} · \
                  available {}×{} logical · book font {} px at line spacing {} · panels [{}] · saved \
                  places {} · search matches {} · tabs {}\n",
                 reader.format,
@@ -580,17 +580,17 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
             ));
         }
         for note in &capture.notes {
-            out.push_str(&format!("- Note: {note}\n"));
+            out.push_str(&format!("* Note: {note}\n"));
         }
         out.push('\n');
     }
 
-    out.push_str("## Matrix coverage\n\n");
+    out.push_str("== Matrix coverage\n\n");
     out.push_str("Covered by a capture in this set:\n\n");
-    out.push_str("| Row | Captures |\n| --- | --- |\n");
+    out.push_str("[options=\"header\"]\n|===\n|Row |Captures\n");
     for row in &manifest.matrix.captured {
         out.push_str(&format!(
-            "| {} | {} |\n",
+            "|{} |{}\n",
             row.row,
             row.captures
                 .iter()
@@ -599,11 +599,11 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
                 .join(" ")
         ));
     }
-    out.push_str("\nCovered by the manifest itself (provenance, no image):\n\n");
-    out.push_str("| Row | Satisfied by |\n| --- | --- |\n");
+    out.push_str("|===\n\nCovered by the manifest itself (provenance, no image):\n\n");
+    out.push_str("[options=\"header\"]\n|===\n|Row |Satisfied by\n");
     for row in &manifest.matrix.manifest {
         out.push_str(&format!(
-            "| {} | {} |\n",
+            "|{} |{}\n",
             row.row,
             if row.reason.is_empty() {
                 "manifest.json".to_owned()
@@ -612,32 +612,30 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
             }
         ));
     }
-    out.push_str("\nPending, not covered by Iced captures (with owner and reason):\n\n");
-    out.push_str("| Row | Owner | Reason |\n| --- | --- | --- |\n");
+    out.push_str("|===\n\nPending, not covered by Iced captures (with owner and reason):\n\n");
+    out.push_str("[options=\"header\"]\n|===\n|Row |Owner |Reason\n");
     for row in &manifest.matrix.pending {
-        out.push_str(&format!(
-            "| {} | {} | {} |\n",
-            row.row, row.status, row.reason
-        ));
+        out.push_str(&format!("|{} |{} |{}\n", row.row, row.status, row.reason));
     }
 
-    out.push_str("\n## Captures that intentionally share pixels\n\n");
+    out.push_str("|===\n\n== Captures that intentionally share pixels\n\n");
     if manifest.pixel_aliases.is_empty() {
         out.push_str(
             "None: every capture in this set renders a different image, and the capture run fails\n\
              when two captures are byte-identical without a declared alias.\n",
         );
     } else {
-        out.push_str("| Capture | Identical to | Reason |\n| --- | --- | --- |\n");
+        out.push_str("[options=\"header\"]\n|===\n|Capture |Identical to |Reason\n");
         for alias in &manifest.pixel_aliases {
             out.push_str(&format!(
-                "| `{}` | `{}` | {} |\n",
+                "|`{}` |`{}` |{}\n",
                 alias.left, alias.right, alias.reason
             ));
         }
+        out.push_str("|===\n");
     }
 
-    out.push_str("\n## Fixtures\n\n");
+    out.push_str("\n== Fixtures\n\n");
     out.push_str(&format!("{}\n\n", manifest.fixtures.redistribution));
     out.push_str(&format!(
         "Generated files: {} (all hashed in `fixtures.sha256` and in `manifest.json`). The\n\
@@ -645,9 +643,7 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
         manifest.fixtures.files.len(),
         manifest.fixtures.broken_symlinks_available
     ));
-    out.push_str(
-        "| Reused fixture | SHA-256 | Provenance | Purpose |\n| --- | --- | --- | --- |\n",
-    );
+    out.push_str("[options=\"header\"]\n|===\n|Reused fixture |SHA-256 |Provenance |Purpose\n");
     for reused in &manifest.fixtures.reused {
         let verified = if reused.verified_sha256 == reused.sha256 {
             "verified".to_owned()
@@ -655,7 +651,7 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
             format!("MISMATCH: {}", reused.verified_sha256)
         };
         out.push_str(&format!(
-            "| `{}` | `{}` ({}) | {} | {} |\n",
+            "|`{}` |`{}` ({}) |{} |{}\n",
             reused.path,
             &reused.sha256[..12],
             verified,
@@ -664,21 +660,23 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
         ));
     }
 
-    out.push_str("\n## Fonts\n\n| Role | SHA-256 |\n| --- | --- |\n");
+    out.push_str("|===\n\n== Fonts\n\n[options=\"header\"]\n|===\n|Role |SHA-256\n");
     for font in &manifest.fonts {
-        out.push_str(&format!("| {} | `{}` |\n", font.role, font.sha256));
+        out.push_str(&format!("|{} |`{}`\n", font.role, font.sha256));
     }
 
+    out.push_str("|===\n");
+
     if !manifest.non_iced_authority.is_empty() {
-        out.push_str("\n## Non-Iced authority (rows this package does not capture)\n\n");
+        out.push_str("\n== Non-Iced authority (rows this package does not capture)\n\n");
         for authority in &manifest.non_iced_authority {
-            out.push_str(&format!("- {authority}\n"));
+            out.push_str(&format!("* {authority}\n"));
         }
     }
 
-    out.push_str("\n## Known limitations\n\n");
+    out.push_str("\n== Known limitations\n\n");
     for limitation in &manifest.limitations {
-        out.push_str(&format!("- {limitation}\n"));
+        out.push_str(&format!("* {limitation}\n"));
     }
     out
 }

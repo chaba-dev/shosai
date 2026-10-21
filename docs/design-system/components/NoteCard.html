@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NoteCard · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 20px 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; background: var(--chrome); min-height: 470px; box-sizing: border-box; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="col"><button class="sh-note" aria-current="true"><div class="sh-note__meta"><span class="sh-dot sh-dot--yellow"></span><span>Chapter IV · page 104</span></div><div class="sh-note__quote">This preservation of favourable variations and the rejection of injurious variations, I call Natural Selection.</div><div class="sh-note__text">The definition everything else hangs on. Compare with Shannon’s “selected from a set of possible messages”.</div></button><button class="sh-note"><div class="sh-note__meta"><span class="sh-dot sh-dot--green"></span><span>Chapter IV · page 106</span></div><div class="sh-note__quote">Let it be remembered how powerful the influence of a single introduced tree or mammal has been shown to be.</div></button></div>
+  <div class="col"><button class="sh-note"><div class="sh-note__meta"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg><span>Page note · page 61</span></div><div class="sh-note__text">Chapter III sets up the struggle for existence; read again before Chapter IV.</div></button><button class="sh-note"><div class="sh-note__meta"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></svg><span>Book note</span></div><div class="sh-note__text">Reading alongside Shannon for the seminar on 21 October. Focus on selection as a filter on variation.</div></button><button class="sh-note"><div class="sh-note__meta"><span class="sh-dot sh-dot--blue"></span><span class="sh-badge">PDF</span><span>A Mathematical Theory of Communication</span><span>·</span><span>page 3</span></div><div class="sh-note__quote">The fundamental problem of communication is that of reproducing at one point either exactly or approximately a message selected at another point.</div></button></div>
+</div>
+</body>
+</html>

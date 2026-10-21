@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shōsai design system</title>
+<link rel="icon" href="../../assets/shosai-icon.png">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<style>
+/* The viewer is built from the system it shows: tokens.css and components.css only. */
+html, body { margin: 0; background: var(--canvas); }
+.viewer { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+.nav { position: sticky; top: 0; height: 100vh; overflow: auto; box-sizing: border-box; padding: var(--space-5) var(--space-4); border-right: 1px solid var(--line); background: var(--chrome); }
+.nav .sh-wordmark { margin-bottom: var(--space-1); }
+.nav__sub { margin: 0 0 var(--space-5); font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+.nav__group { margin: var(--space-4) 0 var(--space-1); font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
+.nav a { display: block; padding: 5px var(--space-2); border-radius: var(--radius-sm); font-size: 13px; line-height: 18px; color: var(--ink); text-decoration: none; }
+.nav a:hover { background: var(--hover); }
+.main { min-width: 0; padding: var(--space-6) var(--space-6) var(--space-7); }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-6); }
+.bar p { margin: 0; max-width: 64ch; font-size: 14px; line-height: 20px; color: var(--ink-muted); }
+.bar code, .note code { font-size: 12px; }
+section { margin-bottom: var(--space-7); scroll-margin-top: var(--space-5); }
+h2 { margin: 0 0 var(--space-1); }
+.lede { margin: 0 0 var(--space-4); max-width: 72ch; font-size: 14px; line-height: 20px; color: var(--ink-muted); }
+.card { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); overflow: hidden; }
+.card + .card { margin-top: var(--space-4); }
+.card__head { display: flex; align-items: baseline; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
+.card__head span { font-size: 13px; line-height: 18px; color: var(--ink-muted); }
+.card__body { overflow-x: auto; }
+.card iframe { display: block; width: 100%; border: 0; background: var(--canvas); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 18px; }
+th { text-align: left; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); }
+td { padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td code { font-size: 12px; white-space: nowrap; }
+.muted { color: var(--ink-muted); }
+.swatches { white-space: nowrap; }
+.sw { display: inline-block; width: 44px; height: 28px; border-radius: var(--radius-xs); box-shadow: inset 0 0 0 1px var(--line); vertical-align: middle; }
+.sw + .sw { margin-left: 4px; }
+.mono { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-muted); white-space: nowrap; }
+.sample { color: var(--ink); }
+.bar-px { height: 12px; border-radius: 2px; background: var(--accent); }
+.radius-box { width: 56px; height: 40px; border: 1.5px solid var(--line-strong); background: var(--surface-sunken); }
+.shadow-box { width: 120px; height: 64px; border-radius: var(--radius-md); background: var(--surface); }
+.icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1px; background: var(--line); }
+.icons div { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--surface); font-size: 12px; color: var(--ink-muted); }
+.icons svg { width: 20px; height: 20px; flex: none; color: var(--ink); fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.brand { display: flex; align-items: center; gap: var(--space-6); padding: var(--space-5); }
+.brand img { width: 96px; height: 96px; border-radius: 22px; box-shadow: var(--shadow-cover); }
+.note { padding: var(--space-4); font-size: 13px; line-height: 18px; color: var(--ink-muted); }
+@media (max-width: 760px) {
+  .viewer { grid-template-columns: 1fr; }
+  .nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .main { padding: var(--space-5) var(--space-4); }
+  .bar { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<div class="sh viewer">
+  <nav class="nav" aria-label="Design system">
+    <div class="sh-wordmark"><span class="sh-mark">書</span>Shōsai</div>
+    <p class="nav__sub">Design system · development viewer</p>
+    <div class="nav__group">Foundations</div>
+    <a href="#colour">Colour</a>
+    <a href="#type">Typography</a>
+    <a href="#space">Space, size and radius</a>
+    <a href="#elevation">Elevation</a>
+    <a href="#icons">Icons</a>
+    <a href="#brand">Brand</a>
+    <div id="nav-components"></div>
+  </nav>
+  <main class="main">
+    <div class="bar">
+      <p>Rendered from <code>docs/design-system/tokens.json</code> and <code>components.css</code>. The rules and words live in <code>docs/design-system.md</code>.</p>
+      <div class="sh-seg" role="group" aria-label="App theme">
+        <button type="button" data-theme-choice="light" aria-pressed="true">Light</button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+
+    <section id="colour">
+      <h2 class="ui-title">Colour</h2>
+      <p class="lede">Chrome, accent and brand, page themes and marks. Both app themes are shown side by side; the page uses the theme chosen above.</p>
+      <div class="card"><div class="card__body"><table id="colour-table"><thead><tr><th>Light · Dark</th><th>Token</th><th>Values</th><th>Use</th></tr></thead><tbody></tbody></table></div></div>
+    </section>
+
+    <section id="type">
+      <h2 class="ui-title">Typography</h2>
+      <p class="lede">Interface, editorial and book roles, never interchanged. Follow <code>docs/typography.md</code>.</p>
+      <div id="type-cards"></div>
+    </section>
+
+    <section id="space">
+      <h2 class="ui-title">Space, size and radius</h2>
+      <p class="lede">A 4 px spacing base, the layout sizes every surface shares, and four radii.</p>
+      <div class="card"><div class="card__body"><table id="space-table"><thead><tr><th>Sample</th><th>Token</th><th>Value</th><th>Use</th></tr></thead><tbody></tbody></table></div></div>
+    </section>
+
+    <section id="elevation">
+      <h2 class="ui-title">Elevation</h2>
+      <p class="lede">Five shadows per theme. Borders separate everything else.</p>
+      <div class="card"><div class="card__body"><table id="shadow-table"><thead><tr><th>Sample</th><th>Token</th><th>Use</th></tr></thead><tbody></tbody></table></div></div>
+    </section>
+
+    <section id="icons">
+      <h2 class="ui-title">Icons</h2>
+      <p class="lede">Lucide glyphs (ISC licence) on a 24 px grid with a 1.75 px stroke, drawn in <code>currentColor</code>. 16 px in pointer controls, 20 px on touch.</p>
+      <div class="card"><div class="icons" id="icon-grid"></div></div>
+    </section>
+
+    <section id="brand">
+      <h2 class="ui-title">Brand</h2>
+      <p class="lede">The app icon is the mark. In the interface the mark is 書 in Noto Serif JP on a navy disc, beside the wordmark.</p>
+      <div class="card"><div class="brand"><img src="../../assets/shosai-icon.png" alt="Shōsai app icon"><div class="sh-wordmark"><span class="sh-mark">書</span>Shōsai</div></div></div>
+      <div class="card"><div class="card__head"><b class="ui-heading">Cover</b><span>Brand ground for generated covers and marketing</span></div><div class="card__body"><iframe src="components/Cover.html" title="Cover" style="height: 288px"></iframe></div></div>
+    </section>
+
+    <div id="component-sections"></div>
+  </main>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  // Component previews, in the order the doc describes them. Heights fit each preview's content.
+  var COMPONENTS = [
+    ['Actions', 'Button', 196, 'Primary, secondary, quiet, selected and touch buttons'],
+    ['Actions', 'SegmentedControl', 168, 'Two to four exclusive views of the same content'],
+    ['Actions', 'FormatBadge', 120, 'The only place a book’s format shows'],
+    ['Navigation', 'Sidebar', 600, 'Places and open books on desktop and tablet, and the rail while reading'],
+    ['Navigation', 'BottomNav', 150, 'The sidebar’s places on a phone'],
+    ['Navigation', 'TabSwitcher', 560, 'Open books on phone'],
+    ['Navigation', 'ReaderToolbar', 236, 'Title, place and every reader action'],
+    ['Navigation', 'StatusBar', 170, 'Section, progress and page in one line'],
+    ['Navigation', 'BackPill', 230, 'The way back after any jump'],
+    ['Reading', 'PageSpread', 1700, 'One or two pages, set like print', 1180],
+    ['Reading', 'Highlight', 712, 'Five colours, the selection toolbar, noted and focused states'],
+    ['Reading', 'ReferencePeek', 430, 'Footnotes, figures and sections before you jump'],
+    ['Notes and search', 'NoteCard', 470, 'Highlights, page notes and book notes'],
+    ['Notes and search', 'NotesPanel', 700, 'This book or all books, grouped by place'],
+    ['Notes and search', 'SearchPalette', 690, 'Book text and notes together'],
+    ['Settings', 'DisplaySettings', 500, 'Theme, size, pages, font and typeface behind Aa'],
+    ['Settings', 'TypefacePicker', 640, 'The six type sets; Inter + Literata by default'],
+    ['Library', 'ContinueReading', 420, 'The library opens on the book you were in', 1180],
+    ['Library', 'LibraryBook', 440, 'The shelf: cover, title, format and progress']
+  ];
+  var ICONS = ['library', 'plus', 'minus', 'x', 'list', 'search', 'bookmark', 'message-square-text', 'notebook-pen', 'file', 'book', 'highlighter', 'copy', 'arrow-right', 'undo-2', 'chevron-left', 'chevron-right', 'columns-2', 'rectangle-vertical'];
+
+  function el(tag, attrs, children) {
+    var node = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (key) {
+      if (key === 'text') { node.textContent = attrs[key]; } else if (key === 'style') { node.style.cssText = attrs[key]; } else { node.setAttribute(key, attrs[key]); }
+    });
+    (children || []).forEach(function (child) { if (child) { node.appendChild(child); } });
+    return node;
+  }
+  function code(text) { return el('code', { text: text }); }
+
+  // Theme: the viewer and every preview follow one choice.
+  var theme = 'light';
+  try { theme = localStorage.getItem('shosai-ds-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) { /* storage unavailable */ }
+  function applyTheme(next) {
+    theme = next;
+    document.documentElement.setAttribute('data-theme', theme);
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-theme-choice') === theme)); });
+    document.querySelectorAll('iframe').forEach(themeFrame);
+    try { localStorage.setItem('shosai-ds-theme', theme); } catch (e) { /* storage unavailable */ }
+  }
+  function themeFrame(frame) {
+    try { frame.contentDocument.documentElement.setAttribute('data-theme', theme); } catch (e) { /* not loaded yet */ }
+  }
+  document.querySelectorAll('[data-theme-choice]').forEach(function (b) {
+    b.addEventListener('click', function () { applyTheme(b.getAttribute('data-theme-choice')); });
+  });
+
+  // Components: one card per preview, grouped as in the doc.
+  var nav = document.getElementById('nav-components');
+  var host = document.getElementById('component-sections');
+  var section = null, group = null;
+  COMPONENTS.forEach(function (c) {
+    if (c[0] !== group) {
+      group = c[0];
+      var id = group.toLowerCase().replace(/[^a-z]+/g, '-');
+      nav.appendChild(el('div', { 'class': 'nav__group', text: group }));
+      section = el('section', { id: id }, [el('h2', { 'class': 'ui-title', text: group })]);
+      host.appendChild(section);
+    }
+    var anchor = 'c-' + c[1];
+    nav.appendChild(el('a', { href: '#' + anchor, text: c[1] }));
+    var frame = el('iframe', { src: 'components/' + c[1] + '.html', title: c[1], loading: 'lazy', style: 'height: ' + c[2] + 'px;' + (c[4] ? ' width: ' + c[4] + 'px;' : '') });
+    frame.addEventListener('load', function () { themeFrame(frame); });
+    section.appendChild(el('div', { 'class': 'card', id: anchor }, [
+      el('div', { 'class': 'card__head' }, [el('b', { 'class': 'ui-heading', text: c[1] }), el('span', { text: c[3] })]),
+      el('div', { 'class': 'card__body' }, [frame])
+    ]));
+  });
+  document.querySelectorAll('iframe').forEach(function (frame) { frame.addEventListener('load', function () { themeFrame(frame); }); });
+
+  // Icons, inlined so they take currentColor.
+  var grid = document.getElementById('icon-grid');
+  ICONS.forEach(function (name) {
+    var cell = el('div', {}, [el('span', { text: name })]);
+    grid.appendChild(cell);
+    fetch('icons/' + name + '.svg').then(function (r) { return r.text(); }).then(function (svg) {
+      var holder = document.createElement('span');
+      holder.innerHTML = svg;
+      var glyph = holder.querySelector('svg');
+      if (glyph) { glyph.setAttribute('aria-hidden', 'true'); cell.insertBefore(glyph, cell.firstChild); }
+    });
+  });
+
+  // Foundations, read from the token file so they cannot drift from it.
+  fetch('tokens.json').then(function (r) { return r.json(); }).then(function (tokens) {
+    var themes = tokens.color.themes.map(function (t) { return t.id; });
+    var byName = {};
+    tokens.color.tokens.forEach(function (t) { byName[t.name] = t; });
+    function resolve(value, th) {
+      var v = typeof value === 'string' ? value : value[th] || value[themes[0]];
+      var m = /^\{(.+)\}$/.exec(v);
+      return m && byName[m[1]] ? resolve(byName[m[1]].value, th) : v;
+    }
+
+    var colours = document.querySelector('#colour-table tbody');
+    tokens.color.tokens.forEach(function (t) {
+      var swatches = el('td', { 'class': 'swatches' }, themes.map(function (th) { return el('span', { 'class': 'sw', title: th, style: 'background: ' + resolve(t.value, th) }); }));
+      var values = typeof t.value === 'string' ? t.value : themes.map(function (th) { return t.value[th] || '—'; }).join(' · ');
+      colours.appendChild(el('tr', {}, [swatches, el('td', {}, [code(t.name)]), el('td', { 'class': 'mono', text: values }), el('td', { text: t.usage || '' })]));
+    });
+
+    var types = document.getElementById('type-cards');
+    tokens.type.groups.forEach(function (g) {
+      var body = el('tbody');
+      g.styles.forEach(function (s) {
+        var lang = s.name.indexOf('-ja') > 0 ? 'ja' : 'en';
+        body.appendChild(el('tr', {}, [
+          el('td', { style: 'width: 45%' }, [el('div', { 'class': s.name + ' sample', lang: lang, text: s.sample || s.name })]),
+          el('td', {}, [code(s.name)]),
+          el('td', { 'class': 'mono', text: s.fontSize + ' / ' + s.lineHeight + ' · ' + s.fontWeight }),
+          el('td', { text: s.usage || '' })
+        ]));
+      });
+      types.appendChild(el('div', { 'class': 'card' }, [
+        el('div', { 'class': 'card__head' }, [el('b', { 'class': 'ui-heading', text: g.name }), el('span', {}, [code('--font-' + g.family)])]),
+        el('div', { 'class': 'card__body' }, [el('table', {}, [body])])
+      ]));
+    });
+
+    var space = document.querySelector('#space-table tbody');
+    [['spacing', function (t) { return el('div', { 'class': 'bar-px', style: 'width: ' + t.value }); }],
+     ['size', function (t) { return parseFloat(t.value) <= 64 && /px$/.test(t.value) ? el('div', { 'class': 'bar-px', style: 'width: ' + t.value + '; opacity: .55' }) : el('span', { 'class': 'muted', text: '—' }); }],
+     ['radius', function (t) { return el('div', { 'class': 'radius-box', style: 'border-radius: ' + t.value }); }]
+    ].forEach(function (pair) {
+      tokens[pair[0]].tokens.forEach(function (t) {
+        space.appendChild(el('tr', {}, [el('td', {}, [pair[1](t)]), el('td', {}, [code(t.name)]), el('td', { 'class': 'mono', text: t.value }), el('td', { text: t.usage || '' })]));
+      });
+    });
+
+    var shadows = document.querySelector('#shadow-table tbody');
+    tokens.shadow.tokens.forEach(function (t) {
+      shadows.appendChild(el('tr', {}, [el('td', { style: 'padding: 16px' }, [el('div', { 'class': 'shadow-box', style: 'box-shadow: var(--' + t.name + ')' })]), el('td', {}, [code(t.name)]), el('td', { text: t.usage || '' })]));
+    });
+  }).catch(function () {
+    document.querySelector('.bar p').textContent = 'Could not read tokens.json. Serve the repository over HTTP with make design-system rather than opening this file directly.';
+  });
+
+  applyTheme(theme);
+})();
+</script>
+</body>
+</html>

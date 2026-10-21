@@ -20,7 +20,7 @@ matrix for the reader packages 4B, 4C and 4D of the
 - Reference base: the pinned Iced revision
   `1e54270a6bb24f15630ece336a0575bdbe5be113` (`main@origin` #108) supplies the
   reader composition and values; 1C's 60 captures
-  ([evidence](../rfd/0004/evidence/reference-shots-1c/README.md)) are the reader
+  ([evidence](../rfd/0004/evidence/reference-shots-1c/README.adoc)) are the reader
   reference. Neither establishes Flutter correctness (specification §4.0).
 
 **What this document is not.** It does not add design values, does not restate

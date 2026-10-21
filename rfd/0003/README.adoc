@@ -9,7 +9,10 @@
 
 Synchronize reading progress, bookmarks, and annotations across installations
 while preserving offline-first local reading and keeping credentials out of
-SQLite, logs, diagnostics, and payloads.
+SQLite, logs, diagnostics, and payloads. Open books and their positions are per
+device in the first release (link:../0004/README.adoc[RFD 4]); carrying them
+across devices is a possible follow-up here, decided by how much complexity it
+adds (recorded 2026-10-14).
 
 == Proposal
 
@@ -44,4 +47,4 @@ server-originated event justifies APNs, FCM, or web-push infrastructure.
 == Implementation
 
 The decision gates, migrations, transport milestones, and acceptance tests are
-tracked in link:IMPLEMENTATION.org[RFD 3 implementation checklist].
+tracked in link:IMPLEMENTATION.adoc[RFD 3 implementation checklist].

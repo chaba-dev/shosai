@@ -11,7 +11,7 @@ verify against one list.
   policy). Supersedes nothing; the restoration plan remains authoritative for
   sequencing, dependencies and acceptance.
 - Governing documents: [RFD 4](../rfd/0004/README.adoc), its
-  [implementation checklist](../rfd/0004/IMPLEMENTATION.org),
+  [implementation checklist](../rfd/0004/IMPLEMENTATION.adoc),
   [RFD 6](../rfd/0006/README.adoc) for selection/highlighting, and the required
   [Flutter architecture](flutter-architecture.md) and [typography](typography.md)
   guidance.
@@ -72,7 +72,7 @@ remote `main`. These are the revisions this specification refers to.
 
 Observation, not a pin: between local `main` `d1e06f408763` and the pinned base
 `1e54270a6bb2`, the 62-file change is confined to `flutter/`,
-`rfd/0004/IMPLEMENTATION.org`, `Cargo.lock`, `crates/shosai-core`
+`rfd/0004/IMPLEMENTATION.adoc`, `Cargo.lock`, `crates/shosai-core`
 (`bridge.rs`, `library.rs`, `zip_preflight.rs`, `library_tests.rs`, `Cargo.toml`) and
 `crates/shosai-flutter-bridge` (`api.rs`, `frb_generated.rs`). **No file under
 `crates/shosai-app` changed**, so the Iced application sources transcribed in §3 are
@@ -556,8 +556,14 @@ record exists.
 Bundled fonts (hashes match `assets/fonts/README.md`):
 `InterVariable.ttf` `4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf`;
 `NotoSansJP-Variable.ttf` `c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f`;
+`Literata[opsz,wght].ttf` `b41138c9373112f32abb589cc22e8674b06ed4048b0c513be922bdd26f274440`;
+`Literata-Italic[opsz,wght].ttf` `d483dfaeba9cbf4ce71d32a52ee65df82f7e35b15fff8d1011cdb242d1fcd465`;
+`ShipporiMincho-Regular.ttf` `769b5269f0f9bc6534b352c0e6bd856a566e03ff788f107191c2d835863570b2`;
+`ShipporiMincho-Medium.ttf` `700e505afc4cded2338eba29478a041e04c1c2ea5114fbb3e0b04e76c302c5d8`;
+`ShipporiMincho-SemiBold.ttf` `bc7925544894a91466449adb73c6d943f50c3e53eb1c74d0673fe2dbafcd4d2d`;
+`ShipporiMincho-Bold.ttf` `63bc4eddc74793f671c3ab827c5175e773ffbe569d0bf50ee65375ea9e3bc286`;
 `SourceSerif4Variable-Roman.ttf` `14d360ee1b76655da9276628b229e11671bc1f5d1083636144db6677d452cf55`;
-`NotoSerifJP-ShosaiMark-Regular.ttf` `8ecace995946627dd90e74dddaed727e66304dff9f619adc2446de78b469a9a8`.
+`NotoSerifJP-ShosaiMark-Black.ttf` `1f30507d5c2b12380d0e13883ebf7d9958d34fdf43c47ef071d368468c0f4c61`.
 
 Test-only fonts under `crates/shosai-app/tests/fonts/` have licenses but no recorded
 source/version: `InterVariable-Italic.ttf`
