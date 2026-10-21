@@ -65,6 +65,7 @@ class _DocumentViewState extends State<_DocumentView> {
       return Center(
         child: Text(
           model.error ?? 'Document content unavailable',
+          key: const ValueKey('reader-content-error'),
           style: TextStyle(
             color: pageColors(model.typography.theme).foreground,
           ),

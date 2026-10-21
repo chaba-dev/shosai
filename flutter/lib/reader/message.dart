@@ -24,18 +24,16 @@ final class ReaderViewportChanged extends ReaderMessage {
 
   /// The reported content-box height, when the reporter could measure it.
   ///
-  /// Real EPUB pagination needs a page height; the retained width-based layout
-  /// key is unchanged, and a document that has no reported height is served by
-  /// the retained renderer rather than paginated for a guessed box.
+  /// EPUB pagination needs a page height: an EPUB document waits for its first
+  /// reported height instead of paginating for a guessed box.
   final double? height;
 }
 
 /// Steps the reader's page by [delta] (±1) (RD-06 edge navigation).
 ///
-/// On the Dart EPUB path this turns a page inside the chapter and only crosses
-/// into the neighbouring chapter at a chapter edge. Every other document and
-/// the retained EPUB path keep the logical-unit semantics of
-/// [ReaderUnitRequested].
+/// In an EPUB this turns a page inside the chapter and only crosses into the
+/// neighbouring chapter at a chapter edge. A PDF keeps the logical-unit
+/// semantics of [ReaderUnitRequested].
 final class ReaderPageStepRequested extends ReaderMessage {
   const ReaderPageStepRequested(this.delta);
   final int delta;
@@ -122,8 +120,8 @@ final class ReaderPanelFocusRequested extends ReaderMessage {
 /// The controller owns the guarded effect. An injected loader is the test
 /// fixture seam; the default loader resolves the document's real table of
 /// contents from the Dart EPUB engine, and falls back to the EPUB chapter
-/// fallback when no TOC is available (a non-EPUB document, an unparseable
-/// source, or a source whose chapters are not the retained logical units).
+/// fallback when no TOC is available (a book without one, or an unparseable
+/// source).
 final class ReaderContentsRequested extends ReaderMessage {
   const ReaderContentsRequested();
 }
@@ -139,10 +137,9 @@ final class ReaderLocationNavigated extends ReaderMessage {
   final int? offset;
 }
 
-/// Activates a link painted on a Dart-engine EPUB page.
+/// Activates a link painted on an EPUB page.
 ///
-/// Only the Dart page produces this intent: the retained raster exposes no link
-/// geometry. [href] is the link's raw source attribute; the controller
+/// [href] is the link's raw source attribute; the controller
 /// classifies it and resolves internal references against the document's parsed
 /// source. An external reference never reaches the platform unless its scheme
 /// is one of the allowed ones, and the reader never fetches a book resource.
@@ -603,17 +600,6 @@ final class _ReaderSurfaceLoaded extends ReaderMessage {
   final FlutterSelectionSurface surface;
 }
 
-final class _ReaderEpubContentLoaded extends ReaderMessage {
-  const _ReaderEpubContentLoaded({
-    required this.generation,
-    required this.surface,
-    required this.pageImage,
-  });
-  final int generation;
-  final FlutterSelectionSurface surface;
-  final ui.Image pageImage;
-}
-
 final class _ReaderSelectionSupportFailed extends ReaderMessage {
   const _ReaderSelectionSupportFailed(this.generation, this.error);
   final int generation;
@@ -837,31 +823,6 @@ final class _ReaderContentsFinished extends ReaderMessage {
 /// token is owned by the controller rather than by one request.
 final class _ReaderEpubSourceFinished extends ReaderMessage {
   const _ReaderEpubSourceFinished(this.cancellation);
-  final BigInt cancellation;
-}
-
-/// A resolved internal link whose target chapter still had to be compared with
-/// the retained stream before its anchor offset could be navigated.
-final class _ReaderLinkResolved extends ReaderMessage {
-  const _ReaderLinkResolved(
-    this.generation,
-    this.revision,
-    this.unit, {
-    this.offset,
-  });
-
-  final int generation;
-  final int revision;
-  final int unit;
-
-  /// The verified anchor offset, or null when the target chapter's stream is
-  /// not the retained one and only the chapter-level target may be used.
-  final int? offset;
-}
-
-/// Releases the bridge cancellation one link activation owned.
-final class _ReaderLinkFinished extends ReaderMessage {
-  const _ReaderLinkFinished(this.cancellation);
   final BigInt cancellation;
 }
 

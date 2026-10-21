@@ -3,8 +3,6 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
-    show ExternalLibrary;
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
@@ -15,8 +13,7 @@ import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
-import 'package:shosai_flutter/src/rust/frb_generated.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 export 'package:shosai_flutter/reader/view.dart'
     show
@@ -99,25 +96,16 @@ export 'package:shosai_flutter/reader/controller.dart'
         ReaderModalEffect,
         ReaderNavigationAdapter,
         ReaderTabRevealAdapter,
-        ReaderProgressSource,
-        premultiplyRgba;
+        ReaderProgressSource;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await RustLib.init(externalLibrary: nativeLibrary());
   final directory = await getApplicationSupportDirectory();
-  // The Dart core keeps the records; the Rust bridge still serves the
-  // documents (RFD 4, M3.0) and keeps its own, now unused, database.
   final core = await ShosaiCore.open(
     directory.path,
     pdfEngine: PdfrxPdfEngine(),
   );
-  final databasePath = '${directory.path}/shosai.sqlite3';
-  runApp(
-    ShosaiApp(
-      productBridgeFactory: () => ApplicationBridge.at(core, databasePath),
-    ),
-  );
+  runApp(ShosaiApp(productBridgeFactory: () => ApplicationBridge(core)));
 }
 
 /// The Dart core opened in each application-support directory: one store
@@ -128,7 +116,6 @@ final Map<String, Future<ShosaiCore>> _cores = {};
 /// directory, for tools that build their own bridges.
 Future<FlutterBridge> createApplicationBridge({
   Future<Directory> Function()? applicationSupportDirectory,
-  String databaseName = 'annotations.sqlite3',
 }) async {
   final directory =
       await (applicationSupportDirectory ?? getApplicationSupportDirectory)();
@@ -136,27 +123,7 @@ Future<FlutterBridge> createApplicationBridge({
     directory.path,
     pdfEngine: PdfrxPdfEngine(),
   ));
-  return ApplicationBridge.at(core, '${directory.path}/$databaseName');
-}
-
-ExternalLibrary? nativeLibrary() {
-  final executableDirectory = File(Platform.resolvedExecutable).parent.path;
-  if (Platform.isLinux) {
-    return ExternalLibrary.open(
-      '$executableDirectory/lib/libshosai_flutter_bridge.so',
-    );
-  }
-  if (Platform.isMacOS) {
-    return ExternalLibrary.open(
-      '$executableDirectory/../Frameworks/libshosai_flutter_bridge.dylib',
-    );
-  }
-  if (Platform.isIOS) {
-    return ExternalLibrary.open(
-      'shosai_flutter_bridge.framework/shosai_flutter_bridge',
-    );
-  }
-  return null;
+  return ApplicationBridge(core);
 }
 
 /// The production application composition: Shad and Material themes, the

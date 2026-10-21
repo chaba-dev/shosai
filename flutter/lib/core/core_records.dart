@@ -1,15 +1,16 @@
 /// The records over the Dart application core (`shosai_core`), and the
-/// application bridge that serves them beside the Rust bridge's documents.
+/// application bridge that serves them beside the documents it opens.
 library;
 
 import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart';
-import 'package:shosai_flutter/reader/epub/content.dart' show parseEpubBytes;
+import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
+import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/documents.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
 
 /// The application's records: one store, opened once per process and shared
 /// by every bridge the shell creates.
@@ -75,7 +76,7 @@ final class PdfEngineInspector implements BookInspector {
     CancellationToken? cancellation,
   }) async {
     try {
-      final document = await _engine.open(path);
+      final document = await openPdfDocument(_engine, path);
       try {
         cancellation.throwIfCancelled();
         final info = await document.info();
@@ -127,13 +128,13 @@ final class PdfEngineInspector implements BookInspector {
   }
 }
 
-/// [ShosaiRecords] over a [ShosaiCore]. Library books open through
-/// [_documents], the Rust bridge that still serves the documents.
+/// [ShosaiRecords] over a [ShosaiCore]. Library books open into
+/// [_documents].
 final class CoreRecords implements ShosaiRecords {
   CoreRecords(this._core, this._documents);
 
   final ShosaiCore _core;
-  final FlutterBridge _documents;
+  final OpenDocuments _documents;
 
   /// The core cancellation behind each bridge cancellation id the records
   /// were given, until the id is released.
@@ -258,44 +259,25 @@ final class CoreRecords implements ShosaiRecords {
   Future<FlutterDocumentSummary> openLibraryBook({
     required int bookId,
     required BigInt cancellationId,
-  }) async => (await openLibraryBookAt(
-    bookId: bookId,
-    cancellationId: cancellationId,
-  )).$1;
-
-  /// [openLibraryBook], with the path the book opened from.
-  Future<(FlutterDocumentSummary, String)> openLibraryBookAt({
-    required int bookId,
-    required BigInt cancellationId,
-  }) async {
-    final (book, path) = await _guard(() async {
-      final book = await _core.library.get(bookId);
-      if (book == null) {
-        throw const CoreException.notFound('The book is not in the library.');
-      }
-      final path = await _core.library.verifiedPath(
-        bookId,
-        cancellation: _token(cancellationId),
-      );
-      return (book, path);
-    });
-    final opened = await _documents.openDocument(
-      request: FlutterOpenRequest(
-        localId: path,
-        pathKey: path,
-        formatHint: _flutterFormat(book.format),
-      ),
-      cancellationId: cancellationId,
+  }) => _guard(() async {
+    final book = await _core.library.get(bookId);
+    if (book == null) {
+      throw const CoreException.notFound('The book is not in the library.');
+    }
+    final cancellation = _token(cancellationId);
+    final path = await _core.library.verifiedPath(
+      bookId,
+      cancellation: cancellation,
     );
-    final summary = FlutterDocumentSummary(
-      handle: opened.handle,
+    final opened = await _documents.open(
+      path,
+      format: book.format,
       bookId: bookId,
-      format: opened.format,
       title: book.title,
-      logicalUnitCount: opened.logicalUnitCount,
+      cancellation: cancellation,
     );
-    return (summary, path);
-  }
+    return opened.summary;
+  });
 
   @override
   Future<FlutterReadingState?> loadReadingState({
@@ -543,151 +525,97 @@ final class CoreRecords implements ShosaiRecords {
   });
 }
 
-/// The bridge the application hands its controllers: the Rust bridge for
-/// documents, and [records] over the Dart core.
+/// The bridge the application hands its controllers: the documents it opens
+/// through the Dart engines, and [records] over the Dart core.
 ///
-/// Disposing it disposes the Rust bridge; the core outlives every bridge.
+/// Disposing it releases its documents; the core outlives every bridge.
 final class ApplicationBridge implements FlutterBridge, RecordsHost {
-  ApplicationBridge(ShosaiCore core, this._rust)
-    : records = CoreRecords(core, _rust);
+  ApplicationBridge(ShosaiCore core)
+    : this._(core, OpenDocuments(core.pdfEngine));
 
-  /// The application bridge over [core] and a Rust bridge whose own
-  /// database lives at [rustDatabasePath].
-  factory ApplicationBridge.at(ShosaiCore core, String rustDatabasePath) =>
-      ApplicationBridge(
-        core,
-        FlutterBridge.withDatabasePath(databasePath: rustDatabasePath),
-      );
+  ApplicationBridge._(ShosaiCore core, this._documents)
+    : records = CoreRecords(core, _documents);
 
-  final FlutterBridge _rust;
+  final OpenDocuments _documents;
 
   @override
   final CoreRecords records;
 
+  var _lastCancellation = BigInt.zero;
+  final Set<BigInt> _cancellations = {};
+  var _disposed = false;
+
   @override
-  BigInt createCancellation() => _rust.createCancellation();
+  BigInt createCancellation() {
+    _lastCancellation += BigInt.one;
+    _cancellations.add(_lastCancellation);
+    return _lastCancellation;
+  }
 
   @override
   bool cancel({required BigInt id}) {
+    if (!_cancellations.contains(id)) return false;
     records.cancel(id);
-    return _rust.cancel(id: id);
+    return true;
   }
 
   @override
   bool releaseCancellation({required BigInt id}) {
     records.release(id);
-    return _rust.releaseCancellation(id: id);
+    return _cancellations.remove(id);
   }
 
   @override
-  void dispose() => _rust.dispose();
+  void dispose() {
+    _disposed = true;
+    _documents.releaseAll();
+  }
 
   @override
-  bool get isDisposed => _rust.isDisposed;
+  bool get isDisposed => _disposed;
 
-  // Documents, served by the Rust bridge until the Dart engines replace it.
+  // Documents.
 
   @override
   Future<FlutterDocumentSummary> openDocument({
     required FlutterOpenRequest request,
     required BigInt cancellationId,
-  }) async {
-    final summary = await _rust.openDocument(
-      request: request,
-      cancellationId: cancellationId,
-    );
-    _opened[summary.handle] = _OpenedDocument(
-      summary,
+  }) => _guard(() async {
+    if (_disposed) {
+      throw const CoreException.invalidRequest('The bridge is disposed.');
+    }
+    final opened = await _documents.open(
       pdfPathFromKey(request.pathKey),
+      format: switch (request.formatHint) {
+        null => null,
+        final format => _bookFormat(format),
+      },
+      cancellation: records._token(cancellationId),
     );
-    return summary;
-  }
+    return opened.summary;
+  });
 
   @override
   Future<FlutterDocumentSummary> openLibraryBook({
     required int bookId,
     required BigInt cancellationId,
-  }) async {
-    final (summary, path) = await records.openLibraryBookAt(
-      bookId: bookId,
-      cancellationId: cancellationId,
-    );
-    _opened[summary.handle] = _OpenedDocument(summary, path);
-    return summary;
-  }
+  }) => records.openLibraryBook(bookId: bookId, cancellationId: cancellationId);
 
   @override
-  bool releaseDocument({required FlutterDocumentHandle handle}) {
-    _opened.remove(handle)?.release();
-    return _rust.releaseDocument(handle: handle);
-  }
-
-  @override
-  Future<FlutterRenderedBuffer> renderPage({
-    required FlutterDocumentHandle document,
-    required BigInt page,
-    required double scale,
-    required BigInt cancellationId,
-  }) => _rust.renderPage(
-    document: document,
-    page: page,
-    scale: scale,
-    cancellationId: cancellationId,
-  );
-
-  @override
-  Future<FlutterSelectionSurface> selectionSurface({
-    required FlutterDocumentHandle document,
-    required BigInt unit,
-    required double scale,
-    required double width,
-    required double fontSize,
-    required double lineSpacing,
-    required BigInt cancellationId,
-  }) => _rust.selectionSurface(
-    document: document,
-    unit: unit,
-    scale: scale,
-    width: width,
-    fontSize: fontSize,
-    lineSpacing: lineSpacing,
-    cancellationId: cancellationId,
-  );
-
-  @override
-  bool releaseSelection({required FlutterSelectionHandle handle}) =>
-      _rust.releaseSelection(handle: handle);
-
-  @override
-  Uint8List takeBuffer({required FlutterBufferHandle handle}) =>
-      _rust.takeBuffer(handle: handle);
-
-  @override
-  bool releaseBuffer({required FlutterBufferHandle handle}) =>
-      _rust.releaseBuffer(handle: handle);
-
-  @override
-  Future<String> epubCanonicalText({
-    required FlutterDocumentHandle document,
-    required BigInt unit,
-    required BigInt cancellationId,
-  }) => _rust.epubCanonicalText(
-    document: document,
-    unit: unit,
-    cancellationId: cancellationId,
-  );
-
-  @override
-  Future<Uint8List> epubSourceBytes({
+  Future<EpubBook> epubBook({
     required FlutterDocumentHandle document,
     required BigInt cancellationId,
-  }) =>
-      _rust.epubSourceBytes(document: document, cancellationId: cancellationId);
+  }) => _guard(() async {
+    records._token(cancellationId).throwIfCancelled();
+    return _documents[document].epub ??
+        (throw const CoreException.invalidRequest(
+          'The document is not an EPUB.',
+        ));
+  });
 
   @override
-  FlutterSelectionSurface roundTripVisibleScene({
-    required FlutterSelectionSurface scene,
-  }) => _rust.roundTripVisibleScene(scene: scene);
+  bool releaseDocument({required FlutterDocumentHandle handle}) =>
+      _documents.release(handle);
 
   // Records, served by the Dart core.
 
@@ -805,42 +733,28 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
 
   // Handle-keyed annotations and search, for callers that hold only a
   // document handle (tests and measurement tools). They read the document's
-  // text on their own: PDF pages through a second engine document, EPUB
-  // chapters through the Rust bridge's canonical stream. The reader passes
-  // its own text to [records] instead.
+  // own text: PDF pages through an engine document, EPUB chapters from the
+  // parsed book. The reader passes its own text to [records] instead.
 
-  final Map<FlutterDocumentHandle, _OpenedDocument> _opened = {};
-
-  _OpenedDocument _document(FlutterDocumentHandle handle) =>
-      _opened[handle] ??
-      (throw const FlutterBridgeError(
+  OpenDocument _document(FlutterDocumentHandle handle) {
+    try {
+      return _documents[handle];
+    } on CoreException catch (error) {
+      throw FlutterBridgeError(
         kind: FlutterBridgeErrorKind.invalidRequest,
-        message: 'unknown or released document handle',
-      ));
+        message: error.message,
+      );
+    }
+  }
 
-  ReaderText _text(_OpenedDocument opened, BigInt cancellationId) =>
-      switch (opened.summary.format) {
-        FlutterBookFormat.pdf => _LazyPdfText(opened, _pdfEngine),
-        FlutterBookFormat.epub => EpubReaderText(
-          unitCount: opened.summary.logicalUnitCount.toInt(),
-          text: (unit) => _rust.epubCanonicalText(
-            document: opened.summary.handle,
-            unit: BigInt.from(unit),
-            cancellationId: cancellationId,
-          ),
-          resourcePath: (unit) async {
-            final chapters = (await opened.epubChapters(
-              () => _rust.epubSourceBytes(
-                document: opened.summary.handle,
-                cancellationId: cancellationId,
-              ),
-            ));
-            return unit < chapters.length ? chapters[unit] : null;
-          },
-        ),
-      };
-
-  PdfEngine get _pdfEngine => records._core.pdfEngine;
+  ReaderText _text(OpenDocument opened) => switch (opened.epub) {
+    null => _LazyPdfText(opened, _documents.pdfEngine),
+    final book => EpubReaderText(
+      unitCount: book.chapters.length,
+      text: (unit) async => book.chapters[unit].canonicalText,
+      resourcePath: (unit) async => book.chapters[unit].resource,
+    ),
+  };
 
   @override
   Future<List<FlutterAnnotation>> listAnnotations({
@@ -851,7 +765,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
     final opened = _document(document);
     return records.listAnnotations(
       document: opened.summary,
-      text: _text(opened, cancellationId),
+      text: _text(opened),
       scale: scale,
       cancellationId: cancellationId,
     );
@@ -870,26 +784,29 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   }) async {
     final opened = _document(document);
     final FlutterSelectionSurface surface;
-    if (opened.summary.format == FlutterBookFormat.pdf) {
-      surface = await (await opened.pdf(
-        _pdfEngine,
-      )).selectionSurface(unit.toInt(), displayScale);
-    } else {
-      // The retained layout the Rust bridge annotated with.
-      final retained = await _rust.selectionSurface(
-        document: document,
-        unit: unit,
-        scale: 1,
-        width: 680,
-        fontSize: 18,
-        lineSpacing: 1.5,
-        cancellationId: cancellationId,
+    if (opened.epub case final book?) {
+      final chapter = unit < BigInt.from(book.chapters.length)
+          ? book.chapters[unit.toInt()]
+          : throw FlutterBridgeError(
+              kind: FlutterBridgeErrorKind.invalidRequest,
+              message: 'The EPUB has no chapter $unit.',
+            );
+      // The chapter's canonical stream, which every EPUB selection indexes.
+      surface = FlutterSelectionSurface(
+        text: chapter.canonicalText,
+        resourcePath: chapter.resource,
+        width: 0,
+        height: 0,
+        copyEligible: true,
+        visualLines: const [],
+        endpoints: const [],
+        graphemeBoundaries: Uint32List(0),
+        wordBoundaries: Uint32List(0),
       );
-      if (retained.raster case final raster?) {
-        _rust.releaseBuffer(handle: raster.handle);
-      }
-      _rust.releaseSelection(handle: retained.handle);
-      surface = retained;
+    } else {
+      surface = await (await opened.pdf(
+        _documents.pdfEngine,
+      )).selectionSurface(unit.toInt(), displayScale);
     }
     return records.createAnnotation(
       document: opened.summary,
@@ -958,36 +875,10 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
     final opened = _document(document);
     return records.searchDocument(
       document: opened.summary,
-      text: _text(opened, cancellationId),
+      text: _text(opened),
       query: query,
       cancellationId: cancellationId,
     );
-  }
-}
-
-/// A document this bridge opened, and what its handle-keyed calls loaded
-/// for it.
-final class _OpenedDocument {
-  _OpenedDocument(this.summary, this.path);
-
-  final FlutterDocumentSummary summary;
-  final String path;
-  Future<PdfEngineDocument>? _pdf;
-  Future<List<String>>? _epubChapters;
-
-  Future<PdfEngineDocument> pdf(PdfEngine engine) => _pdf ??= engine.open(path);
-
-  /// The EPUB chapters' resource paths, parsed once from [bytes].
-  Future<List<String>> epubChapters(Future<Uint8List> Function() bytes) =>
-      _epubChapters ??= () async {
-        final book = await parseEpubBytes(await bytes());
-        return [for (final chapter in book.chapters) chapter.resource];
-      }();
-
-  Future<void> release() async {
-    final pdf = _pdf;
-    _pdf = null;
-    if (pdf != null) await (await pdf).dispose();
   }
 }
 
@@ -995,7 +886,7 @@ final class _OpenedDocument {
 final class _LazyPdfText implements ReaderText {
   const _LazyPdfText(this._opened, this._engine);
 
-  final _OpenedDocument _opened;
+  final OpenDocument _opened;
   final PdfEngine _engine;
 
   @override

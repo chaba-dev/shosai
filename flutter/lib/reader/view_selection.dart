@@ -190,8 +190,6 @@ class _ReachableSelectableSurface extends StatelessWidget {
                 key: ValueKey((
                   model.generation,
                   model.unit,
-                  surface.handle.registry,
-                  surface.handle.id,
                   epubPage?.pageIndex,
                 )),
                 surface: surface,
@@ -204,23 +202,6 @@ class _ReachableSelectableSurface extends StatelessWidget {
             ),
           ),
         );
-        if (document.format == FlutterBookFormat.epub &&
-            model.typography.continuous) {
-          return KeyedSubtree(
-            key: presentationKey,
-            child: SingleChildScrollView(
-              key: ValueKey(
-                'reader-vertical-scroll-${model.generation}-${model.unit}',
-              ),
-              child: content(
-                Size(
-                  constraints.maxWidth,
-                  math.max(constraints.maxHeight, surface.height),
-                ),
-              ),
-            ),
-          );
-        }
         if (document.format == FlutterBookFormat.epub ||
             fit == BoxFit.contain) {
           return KeyedSubtree(

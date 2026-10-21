@@ -1,6 +1,6 @@
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/reader/controller.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 String safeError(Object error) => switch (error) {
   FlutterBridgeError() => error.message,

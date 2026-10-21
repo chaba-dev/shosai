@@ -7,7 +7,7 @@ import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/notices/library_notice_text.dart';
 import 'package:shosai_flutter/notices/notices.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 part 'message.dart';
 part 'model.dart';

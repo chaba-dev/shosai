@@ -12,7 +12,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart' show UnitTextSource;
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 /// A bridge that also serves the records.
 abstract interface class RecordsHost {

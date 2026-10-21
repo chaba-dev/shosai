@@ -15,7 +15,7 @@ import 'dart:ui' as ui;
 import 'package:characters/characters.dart';
 import 'package:flutter/painting.dart';
 import 'package:shosai_epub/shosai_epub.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import 'flow.dart';
 import 'pages.dart';
@@ -85,7 +85,6 @@ FlutterSelectionSurface buildPageSelectionSurface({
   final end = page.canonicalEnd;
   final boundaries = _boundariesFor(canonicalText, start, end);
   return FlutterSelectionSurface(
-    handle: FlutterSelectionHandle(registry: BigInt.zero, id: BigInt.zero),
     width: box.size.width,
     height: box.size.height,
     text: canonicalText,

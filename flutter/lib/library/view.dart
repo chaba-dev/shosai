@@ -15,7 +15,7 @@ import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/library/controller.dart';

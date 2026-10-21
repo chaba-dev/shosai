@@ -14,10 +14,9 @@ import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
-import 'package:shosai_flutter/reader/epub/font_coverage.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 part 'geometry.dart';
@@ -59,11 +58,9 @@ class ReaderScreen extends StatefulWidget {
     this.documentPicker,
     this.exportSink,
     this.noticeReporter,
-    this.fontCoverageLoader,
     this.epubImageDecoder,
     this.epubFontRegistrar,
     this.debugEpubSessionObserver,
-    this.debugEpubRoutingObserver,
     this.debugPathEntry = false,
   }) : assert(
          (bridge == null) != (bridgeFactory == null),
@@ -104,17 +101,11 @@ class ReaderScreen extends StatefulWidget {
   /// root; a reader built without one reports no notices.
   final ReaderNoticeReporter? noticeReporter;
 
-  /// Loads the bundled document faces' coverage for the EPUB routing gate.
-  ///
-  /// Defaults to the reader's own bundled faces; a test can inject a fixed
-  /// coverage so the routing decision is independent of the shipped assets.
-  final EpubFontCoverageLoader? fontCoverageLoader;
-
   /// Decodes one admitted EPUB image resource; defaults to the engine codec.
   ///
   /// A composition root or a test can inject its own decoder, the way the page
-  /// decoder is injected: the reader treats a null result as the retained
-  /// renderer's missing-image fallback.
+  /// decoder is injected: the reader paints a null result as the image's alt
+  /// text.
   final EpubImageDecoder? epubImageDecoder;
 
   /// Registers one admitted `@font-face` family; defaults to `FontLoader`.
@@ -126,11 +117,6 @@ class ReaderScreen extends StatefulWidget {
   /// resource ownership (which session was released, and when) without reaching
   /// into the controller; production composition leaves it null.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
-
-  /// Test-only observer for the outcome of each EPUB routing attempt
-  /// (see [ReaderController.debugEpubRoutingObserver]).
-  final void Function(int generation, int revision, double width, bool routed)?
-  debugEpubRoutingObserver;
 
   /// Renders the retired path entry for tests and development only.
   ///
@@ -312,8 +298,6 @@ class _ReaderScreenState extends State<ReaderScreen>
         epubImageDecoder: widget.epubImageDecoder ?? _decodeEpubImage,
         epubFontRegistrar: widget.epubFontRegistrar ?? _registerEpubFont,
         debugEpubSessionObserver: widget.debugEpubSessionObserver,
-        debugEpubRoutingObserver: widget.debugEpubRoutingObserver,
-        epubFontCoverage: widget.fontCoverageLoader ?? _bundledFontCoverage,
         initialTabs: widget.initialTabs,
         frameScheduler: (callback) =>
             WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
@@ -1145,8 +1129,8 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
       final availableWidth = constraints.maxWidth.isFinite
           ? math.max(1.0, constraints.maxWidth).roundToDouble()
           : widget.model.layout.width;
-      // The content-box height is reported alongside the width: real EPUB
-      // pagination needs the page height, and the retained renderer ignores it.
+      // The content-box height is reported alongside the width: EPUB
+      // pagination needs the page height.
       final availableHeight = constraints.maxHeight.isFinite
           ? math.max(1.0, constraints.maxHeight).roundToDouble()
           : null;
@@ -1213,41 +1197,6 @@ bool usesExplicitSelectionAnnouncements(TargetPlatform platform) =>
     platform == TargetPlatform.linux ||
     platform == TargetPlatform.macOS ||
     platform == TargetPlatform.windows;
-
-/// The reader's bundled document faces, parsed once per process.
-///
-/// The parsed *value* is cached rather than the future that produced it: a
-/// settled future belongs to the zone that awaited it, so reusing one across
-/// calls (a second reader, or a later relayout) can leave the caller waiting on
-/// a completion that will never be delivered to it. Every call therefore gets
-/// a fresh future; only the parse is shared.
-///
-/// The keys must be paths *inside* the Flutter project, so the bundler copies
-/// the files into the platform bundle (`flutter_assets/fonts/`): the fonts are
-/// symlinked from `assets/fonts/` into `flutter/fonts/` (see `pubspec.yaml`).
-/// A key that escapes the project is recorded in the manifests but never
-/// bundled, so loading it fails in a built desktop app and the gate would
-/// refuse every chapter.
-EpubFontCoverage? _bundledCoverage;
-bool _bundledCoverageFailed = false;
-Future<EpubFontCoverage?> _bundledFontCoverage() async {
-  final cached = _bundledCoverage;
-  if (cached != null) return cached;
-  if (_bundledCoverageFailed) return null;
-  try {
-    final inter = await rootBundle.load('fonts/InterVariable.ttf');
-    final noto = await rootBundle.load('fonts/NotoSansJP-Variable.ttf');
-    return _bundledCoverage = EpubFontCoverage.fromFonts([
-      inter.buffer.asUint8List(),
-      noto.buffer.asUint8List(),
-    ]);
-  } catch (_) {
-    // Without the faces' coverage the reader cannot promise the Dart renderer
-    // will draw a chapter, so it keeps the retained renderer instead.
-    _bundledCoverageFailed = true;
-    return null;
-  }
-}
 
 /// Decodes one admitted EPUB image resource.
 ///
