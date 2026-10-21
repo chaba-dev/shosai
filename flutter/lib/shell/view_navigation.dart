@@ -426,7 +426,7 @@ class _OpenBookRowState extends State<_OpenBookRow> {
     final l10n = AppLocalizations.of(context);
     final book = widget.entry.book;
     final status = shellReadingStatus(l10n, book.progress);
-    final started = (book.progress * 100).round() > 0;
+    final started = book.progress > 0;
     final closeLabel = l10n.shellCloseBook(book.title);
     final closeSize = widget.touch ? ShosaiTokens.sizeTouchTarget : 24.0;
     // Focus anywhere in the row reveals the close button too, so a keyboard

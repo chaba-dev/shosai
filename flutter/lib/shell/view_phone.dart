@@ -169,7 +169,7 @@ class _ReadingNowCard extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final book = entry.book;
     final status = shellReadingStatus(l10n, book.progress);
-    final started = (book.progress * 100).round() > 0;
+    final started = book.progress > 0;
     return SizedBox(
       width: ShellReadingNowCards.cardWidth,
       child: Stack(

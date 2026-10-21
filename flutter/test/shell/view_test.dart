@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -97,6 +98,35 @@ void main() {
     expect(ShellLayout.tablet.sidebarWidth, 220);
     expect(ShellLayout.desktop.railWidth, 64);
     expect(ShellLayout.tablet.railWidth, 56);
+  });
+
+  test('the reading status follows the progress, not its rounding', () {
+    final l10n = lookupAppLocalizations(const Locale('en'));
+    expect(shellReadingStatus(l10n, 0), 'Not started');
+    // A book under way never reads as not started or as complete.
+    expect(shellReadingStatus(l10n, .001), '1%');
+    expect(shellReadingStatus(l10n, .004), '1%');
+    expect(shellReadingStatus(l10n, .21), '21%');
+    expect(shellReadingStatus(l10n, .995), '99%');
+    expect(shellReadingStatus(l10n, .999), '99%');
+    expect(shellReadingStatus(l10n, 1), '100%');
+  });
+
+  testWidgets('a book barely started shows its bar in the sidebar', (
+    tester,
+  ) async {
+    final model = update(
+      const ShellModel(),
+      ShellBookOpened(_book(4, 'Walden', progress: .001)),
+    ).copyWith(reading: false);
+    await _pumpFrame(
+      tester,
+      size: const Size(1440, 900),
+      model: model,
+      recorder: _Recorder(),
+    );
+    expect(find.text('1%'), findsOneWidget);
+    expect(find.byType(ShellProgressBar), findsOneWidget);
   });
 
   testWidgets('the desktop library side has the full sidebar', (tester) async {

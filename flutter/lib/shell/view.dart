@@ -147,11 +147,13 @@ class ShellFrame extends StatelessWidget {
 }
 
 /// The reading status line: `21%`, or `Not started`.
+///
+/// The progress itself says whether a book is under way; only the shown
+/// percentage is rounded, and a book under way never rounds to 0% or 100%.
 String shellReadingStatus(AppLocalizations l10n, double progress) {
+  if (progress <= 0) return l10n.cardNotStarted;
   final percentage = (progress.clamp(0.0, 1.0) * 100).round();
-  return percentage == 0
-      ? l10n.cardNotStarted
-      : l10n.cardPercentRead(percentage);
+  return l10n.cardPercentRead(progress < 1 ? percentage.clamp(1, 99) : 100);
 }
 
 /// The 書 mark: the character inside a plain ring, in `brand-mark`
