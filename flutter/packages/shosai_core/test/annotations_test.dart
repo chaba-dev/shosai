@@ -543,10 +543,15 @@ void main() {
         bookId,
         _epubText(_text, path: 'OEBPS/other.xhtml'),
       );
+      final [unknown] = await annotations.list(
+        bookId,
+        FakeText([const UnitText(_text)]),
+      );
       final [empty] = await annotations.list(bookId, FakeText([null]));
       final [gone] = await annotations.list(bookId, FakeText([]));
 
       expect(moved.resolution, AnnotationResolution.orphaned);
+      expect(unknown.resolution, AnnotationResolution.exact);
       expect(empty.resolution, AnnotationResolution.orphaned);
       expect(gone.resolution, AnnotationResolution.orphaned);
     });

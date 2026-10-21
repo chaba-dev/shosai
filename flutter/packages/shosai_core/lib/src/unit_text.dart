@@ -10,7 +10,8 @@ final class UnitText {
   /// Canonical text, indexed in Unicode scalars like the anchors.
   final String text;
 
-  /// EPUB: the spine item's canonical resource path.
+  /// EPUB: the spine item's canonical resource path, or null when the engine
+  /// cannot tell; annotations then rely on the text alone.
   final String? resourcePath;
 }
 
