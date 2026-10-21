@@ -263,7 +263,7 @@ data work is done.
 
 === M3.0 — Replace the Rust core with Dart
 
-Status:: TODO
+Status:: IN-PROGRESS
 
 Decided 2026-10-21 (RFD 4, Decisions). Each slice is one reviewable PR
 stacked on the previous one, lands behind the retained library and reader UI,
@@ -278,8 +278,29 @@ and release, page text with character bounds and mapping status for the RFD 6
 PDF selection adapter, links, outlines and internal destinations for
 outcome 5, encryption and permission state. Record how document permissions
 are enforced, or that they are not. Prove the fixture corpus and the M0 raster
-budgets on Linux, macOS and a physical Android device; the retained Rust PDF
-path is deleted in the same slice.
+budgets on Linux, macOS and a physical Android device. The reader's Rust PDF
+path is replaced in this slice; `crates/shosai-core/src/pdf.rs` stays as the
+store's text extractor (annotation anchors, search over stored text) until
+the Records slice retires it with the rest of the core.
+** [x] Slice 1 (2026-10-21): `pdfrx` 2.4.7 (`pdfrx_engine` 0.4.5,
+`pdfium_dart` 0.2.5; PDFium `chromium/7811` fetched by the binding's build
+hook, the XCFramework from `pdfium_flutter` 0.2.3 on Apple targets) behind
+`flutter/lib/reader/pdf/`: `engine.dart` is the reader's contract,
+`pdfrx_engine.dart` the production engine, `selection.dart` the port of the
+retained selection snapshot (loose glyph boxes, bidi and orientation,
+half-zones, rows, keyboard lines, grapheme snapping, U+FFFD mapping) and
+`search.dart` the port of case-folded search. The reader controller opens,
+renders, builds selection surfaces, searches and lists the outline through
+it; the retained document handle stays open for the store. Permissions
+decision: the engine reports `isEncrypted` and `allowsCopying` and the reader
+does not enforce them; copy eligibility is text-mapping completeness, as
+before. A document that needs a user password fails to open.
+** [ ] Open gates: the binding's build hook pins the PDFium release but
+verifies no checksum; links and destinations are exposed by the engine and
+not yet navigable in the reader (outcome 5); the fixture corpus and the M0
+raster budgets on macOS and a physical Android device; `flutter test` loads
+PDFium from `SHOSAI_PDFIUM_LIBRARY` (the Nix shell) or `PDFIUM_PATH` because
+it does not link native assets.
 * [ ] *Store.* Add the Dart SQLite binding (`sqlite3`; `drift` only if typed
 queries and migration tooling justify its code generation) in the application
 core package, with a single connection owner, ordered migrations written fresh

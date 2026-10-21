@@ -300,6 +300,21 @@ this evaluation.
   two writers to the same database at any point, or reducing retained reader
   capabilities without a product decision.
 
+#### Slice reports
+
+- **Slice 1, PDF engine (2026-10-21).** `pdfrx` 2.4.7 behind the reader's
+  own `PdfEngine` contract (`flutter/lib/reader/pdf/`). pdfrx owns the PDFium
+  lifecycle, rendering, outline, links and permissions; glyph geometry for the
+  RFD 6 selection surface comes from PDFium's text API through raw
+  `pdfium_dart` calls on pdfrx's worker isolate, and the retained snapshot,
+  row, keyboard-line and grapheme logic is ported to pure Dart with its own
+  tests. Closes: the reader's PDF render, selection, search and outline no
+  longer cross the bridge; permissions are reported, not enforced (recorded in
+  RFD 4's checklist). Leaves open: PDFium checksum verification (the build
+  hook pins `chromium/7811` by name only), link navigation, the raster budget
+  evidence on macOS and Android, and the store-side use of `pdf.rs` until the
+  Records slice.
+
 The "Decisions still required" list below is updated in place; the remaining
 open items there are the ones M3.0 must answer with evidence.
 

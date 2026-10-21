@@ -68,9 +68,9 @@ bridge. The Elm boundary above is unchanged by either decision.
 
 | Responsibility | EPUB | PDF |
 | --- | --- | --- |
-| Parsing, normalization, canonical text, durable locations | Dart engine (`shosai_epub`) | Dart PDF engine (PDFium binding); Rust until M3.0 |
-| Layout, shaping, paint geometry, selection geometry | Flutter, over the Dart layout | Dart PDF engine; Rust until M3.0 |
-| Rendered pixels | Flutter, from the same layout as the geometry | Dart PDF engine raster; Rust until M3.0 |
+| Parsing, normalization, canonical text, durable locations | Dart engine (`shosai_epub`) | Dart PDF engine (`flutter/lib/reader/pdf`, pdfrx over PDFium) for the reader; Rust `pdf.rs` for the store until the M3.0 records slice |
+| Layout, shaping, paint geometry, selection geometry | Flutter, over the Dart layout | Dart PDF engine |
+| Rendered pixels | Flutter, from the same layout as the geometry | Dart PDF engine raster |
 | Library/import, SQLite storage, bookmarks, annotations, anchors, reading state, search | Dart application core; Rust until M3.0 | Dart application core; Rust until M3.0 |
 | Gestures, focus, overlays, navigation, platform adapters | Flutter | Flutter |
 
