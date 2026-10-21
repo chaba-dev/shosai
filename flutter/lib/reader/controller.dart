@@ -1097,7 +1097,7 @@ final class ReaderController implements Listenable {
       // A paginated EPUB chapter with a reported content-box height is served
       // by the Dart engine: the same guarded relayout path the retained
       // renderer uses, with the restored position as its target. Everything
-      // else (continuous EPUB, no height yet, PDF, CBZ) keeps the retained
+      // else (continuous EPUB, no height yet, PDF) keeps the retained
       // surface path below.
       final dartEpub =
           document.format == FlutterBookFormat.epub &&
@@ -1107,7 +1107,7 @@ final class ReaderController implements Listenable {
         // layout report): upgrade the chapter once the height arrives.
         _epubHeightPending = !_typographyContinuous;
       }
-      if (document.format != FlutterBookFormat.cbz && dartEpub) {
+      if (dartEpub) {
         if (!_isCurrent(generation)) return;
         _startRelayout(
           document,
@@ -1116,7 +1116,7 @@ final class ReaderController implements Listenable {
           offset: restored?.offset?.toInt(),
           height: _epubViewportHeight,
         );
-      } else if (document.format != FlutterBookFormat.cbz) {
+      } else {
         FlutterSelectionSurface? effectSurface;
         try {
           final surface = await _bridge.selectionSurface(
@@ -1226,9 +1226,6 @@ final class ReaderController implements Listenable {
         late final ui.Image image;
         try {
           final pixels = _bridge.takeBuffer(handle: rendered.handle);
-          if (document.format == FlutterBookFormat.cbz) {
-            premultiplyRgba(pixels);
-          }
           image = await _decoder(
             pixels,
             width: rendered.width,
@@ -1364,8 +1361,7 @@ final class ReaderController implements Listenable {
       _setRelayoutPending(layout != _model.layout);
       return;
     }
-    if (_model.contentState != ReaderContentState.ready ||
-        document.format == FlutterBookFormat.cbz) {
+    if (_model.contentState != ReaderContentState.ready) {
       _requestedLayout = layout;
       _failedLayout = null;
       _setRelayoutPending(false);
@@ -2387,11 +2383,7 @@ final class ReaderController implements Listenable {
 
   void _searchRequested(String query) {
     final document = _model.document;
-    if (document == null ||
-        document.format == FlutterBookFormat.cbz ||
-        _closing ||
-        _suspended ||
-        _recovering) {
+    if (document == null || _closing || _suspended || _recovering) {
       return;
     }
     final revision = ++_searchRevision;
@@ -3179,26 +3171,24 @@ final class ReaderController implements Listenable {
       }
       FlutterSelectionSurface? surface;
       String? selectionError;
-      if (document.format != FlutterBookFormat.cbz) {
-        try {
-          surface = await _bridge.selectionSurface(
-            document: document.handle,
-            unit: BigInt.from(unit),
-            scale: layout.scale,
-            width: layout.width,
-            fontSize: layout.fontSize,
-            lineSpacing: layout.lineSpacing,
-            cancellationId: cancellation,
-          );
-          ownedSurface = surface;
-          ownedRaster = surface.raster?.handle;
-          if (!_isCurrentLayout(generation, revision)) {
-            return;
-          }
-        } catch (error) {
-          if (document.format == FlutterBookFormat.epub) rethrow;
-          selectionError = _describeError(error);
+      try {
+        surface = await _bridge.selectionSurface(
+          document: document.handle,
+          unit: BigInt.from(unit),
+          scale: layout.scale,
+          width: layout.width,
+          fontSize: layout.fontSize,
+          lineSpacing: layout.lineSpacing,
+          cancellationId: cancellation,
+        );
+        ownedSurface = surface;
+        ownedRaster = surface.raster?.handle;
+        if (!_isCurrentLayout(generation, revision)) {
+          return;
         }
+      } catch (error) {
+        if (document.format == FlutterBookFormat.epub) rethrow;
+        selectionError = _describeError(error);
       }
       if (document.format == FlutterBookFormat.epub) {
         final raster = surface!.raster;
@@ -3229,9 +3219,6 @@ final class ReaderController implements Listenable {
             return;
           }
           final pixels = _bridge.takeBuffer(handle: rendered.handle);
-          if (document.format == FlutterBookFormat.cbz) {
-            premultiplyRgba(pixels);
-          }
           ownedImage = await _decoder(
             pixels,
             width: rendered.width,
@@ -3246,16 +3233,14 @@ final class ReaderController implements Listenable {
       }
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
-      if (document.format != FlutterBookFormat.cbz) {
-        try {
-          annotations = await _bridge.listAnnotations(
-            document: document.handle,
-            scale: layout.scale,
-            cancellationId: cancellation,
-          );
-        } catch (error) {
-          annotationError = _describeError(error);
-        }
+      try {
+        annotations = await _bridge.listAnnotations(
+          document: document.handle,
+          scale: layout.scale,
+          cancellationId: cancellation,
+        );
+      } catch (error) {
+        annotationError = _describeError(error);
       }
       if (!_isCurrentLayout(generation, revision)) {
         return;
@@ -4237,8 +4222,7 @@ final class ReaderController implements Listenable {
         _model.busy ||
         _model.relayoutBusy ||
         _model.annotationOperations.isNotEmpty ||
-        _model.contentState != ReaderContentState.ready ||
-        document.format == FlutterBookFormat.cbz) {
+        _model.contentState != ReaderContentState.ready) {
       return;
     }
     if (_requestedLayout != _model.layout &&
@@ -4307,7 +4291,6 @@ final class ReaderController implements Listenable {
   void _associationRequested() {
     final document = _model.document;
     if (document == null ||
-        document.format == FlutterBookFormat.cbz ||
         _model.busy ||
         !_model.annotationsReady ||
         _model.annotationOperations.isNotEmpty ||
@@ -4349,7 +4332,6 @@ final class ReaderController implements Listenable {
   void _annotationReloadRequested() {
     final document = _model.document;
     if (document == null ||
-        document.format == FlutterBookFormat.cbz ||
         _model.busy ||
         _model.annotationsReady ||
         _model.annotationOperations.isNotEmpty ||

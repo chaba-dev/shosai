@@ -646,12 +646,12 @@ mod tests {
         );
         assert_ne!(session.location.offset, Some(usize::MAX));
 
-        let cbz =
-            crate::cbz::CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec())
+        let pdf =
+            crate::pdf::PdfDoc::from_bytes(include_bytes!("../tests/fixtures/sample.pdf").to_vec())
                 .unwrap();
         session.replace_document(
-            DeviceFileLocator::from_path("book.cbz"),
-            OpenDocument::Cbz(std::sync::Arc::new(cbz)),
+            DeviceFileLocator::from_path("book.pdf"),
+            OpenDocument::Pdf(std::sync::Arc::new(pdf)),
         );
 
         assert_eq!(session.location.offset, None);

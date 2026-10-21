@@ -265,8 +265,8 @@ List<FlutterLibraryBook> harnessLibraryBooks() => const [
     bookId: 4,
     title: 'Mixed Script Atlas: 東京・Wien・São Paulo',
     author: 'Léa Dubois and 田中 陽子',
-    format: FlutterBookFormat.cbz,
-    pathKey: '/books/atlas.cbz',
+    format: FlutterBookFormat.pdf,
+    pathKey: '/books/atlas.pdf',
     managed: true,
     progress: 0.31,
     dateAdded: '2026-09-13',
@@ -906,7 +906,6 @@ T? _firstOrNull<T>(Iterable<T> values) => values.isEmpty ? null : values.first;
 FlutterBookFormat _formatForPath(String path) {
   final lower = path.toLowerCase();
   if (lower.endsWith('.epub')) return FlutterBookFormat.epub;
-  if (lower.endsWith('.cbz')) return FlutterBookFormat.cbz;
   return FlutterBookFormat.pdf;
 }
 

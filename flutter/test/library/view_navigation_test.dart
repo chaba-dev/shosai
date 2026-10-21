@@ -237,7 +237,7 @@ void main() {
       tester.widget<ShadButton>(navigationEntry(label));
 
   /// The format entries in the order the reference lists them.
-  const formatLabels = ['EPUB', 'PDF', 'CBZ'];
+  const formatLabels = ['EPUB', 'PDF'];
 
   /// The selected entry paints the accent-soft surface and the accent text.
   void expectSelected(WidgetTester tester, String label) {
@@ -446,13 +446,13 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.pump(const Duration(milliseconds: 300));
 
-      await tester.tap(navigationEntry('CBZ'));
+      await tester.tap(navigationEntry('PDF'));
       await tester.pumpAndSettle();
-      expectSelected(tester, 'CBZ');
+      expectSelected(tester, 'PDF');
       expect(
         find.text('Mixed Script Atlas: 東京・Wien・São Paulo'),
         findsOneWidget,
-        reason: 'the CBZ filter selects the CBZ book',
+        reason: 'the PDF filter selects the PDF books',
       );
       expect(bridge.removeCalls, 0);
     });
@@ -721,7 +721,6 @@ void main() {
       expectSelected(tester, 'PDF');
       expectUnselected(tester, 'All books');
       expectUnselected(tester, 'EPUB');
-      expectUnselected(tester, 'CBZ');
       expect(
         find.text(
           'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
@@ -1274,7 +1273,7 @@ void main() {
         expect(navigationEntry('本を追加'), findsOneWidget);
         expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
         // Format entries stay Latin in both locales, as in the reference.
-        for (final label in const ['EPUB', 'PDF', 'CBZ']) {
+        for (final label in const ['EPUB', 'PDF']) {
           expect(navigationEntry(label), findsOneWidget);
         }
         // The English chrome is gone rather than merely accompanied.

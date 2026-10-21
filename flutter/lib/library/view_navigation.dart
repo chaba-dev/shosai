@@ -13,11 +13,11 @@ part of 'view.dart';
 // Two deliberate differences from the reference, both recorded in the package
 // report:
 //
-// * The CBZ entry is the retained Flutter extension of Iced's All/EPUB/PDF
-//   entries (plan decision 9). Five entries cannot share one equal-width row at
-//   390 px without truncating "Settings", so the compact row sizes its entries
-//   to their labels instead of filling the width; at 200% text it wraps onto a
-//   second line rather than clipping or hiding an entry.
+// * The compact row sizes its entries to their labels instead of filling the
+//   width (chosen when a fifth CBZ entry could not share one equal-width row at
+//   390 px without truncating "Settings"; CBZ left with its format support on
+//   2026-10-20 and the sizing stays), and at 200% text it wraps onto a second
+//   line rather than clipping or hiding an entry.
 // * Refresh is a retained Flutter capability with no Iced counterpart in the
 //   library header. It stays reachable as a header action.
 //
@@ -339,7 +339,7 @@ class LibrarySidebar extends StatelessWidget {
 
 /// The compact layout's filter row.
 ///
-/// All/EPUB/PDF/CBZ and Settings stay directly reachable; the entries size to
+/// All/EPUB/PDF and Settings stay directly reachable; the entries size to
 /// their labels so every one of them stays readable, and the row wraps onto a
 /// second line at large text instead of clipping or dropping an entry.
 class LibraryFilterRow extends StatelessWidget {
@@ -386,8 +386,7 @@ class LibraryFilterRow extends StatelessWidget {
 ///
 /// The unfiltered entry is `All books` in the sidebar and `All` in the compact
 /// row, matching the reference's two labels. Format names stay Latin in both
-/// catalogs, as they are in the reference; CBZ is the retained Flutter
-/// extension of the reference's All/EPUB/PDF entries.
+/// catalogs, as they are in the reference.
 List<Widget> _libraryFormatEntries({
   required LibraryModel model,
   required AppLocalizations l10n,
@@ -399,7 +398,6 @@ List<Widget> _libraryFormatEntries({
     (null, compact ? l10n.filterAll : l10n.filterAllBooks),
     (FlutterBookFormat.epub, l10n.filterFormatEpub),
     (FlutterBookFormat.pdf, l10n.filterFormatPdf),
-    (FlutterBookFormat.cbz, l10n.filterFormatCbz),
   ])
     LibraryNavigationButton(
       label: label,

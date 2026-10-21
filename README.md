@@ -1,6 +1,6 @@
 # Shōsai
 
-Shōsai (書斎, "study") is a native desktop ebook reader for PDF and EPUB files. It is written in Rust and uses a GPU-accelerated native interface.
+Shōsai (書斎, "study") is an ebook reader for PDF and EPUB files. Its document engine and library are written in Rust; the application is a Flutter host for desktop and mobile.
 
 ## Features
 
@@ -18,14 +18,21 @@ Shōsai is currently a work in progress and has not been released yet. Follow de
 
 ### Build from source
 
-The repository includes a Nix development environment:
+The repository includes a Nix development environment with the Rust toolchain,
+Flutter, PDFium and the bridge code generator:
 
 ```sh
 nix develop
-cargo run --package shosai-app
+make flutter-dev            # generate the bridge bindings and run the Linux host
 ```
 
-Alternatively, install Rust 1.94 or newer and the native dependencies required by Iced and PDFium for your platform, then run the same Cargo command.
+`make flutter-linux-debug` builds the Linux host without running it, and
+`make flutter-macos-debug`, `make flutter-android-profile` and the
+`flutter-ios-*` targets build the other hosts. Without Nix, install Rust 1.94
+or newer, Flutter 3.41 or newer, `flutter_rust_bridge_codegen` 2.11.1 and the
+native dependencies PDFium and the Flutter host need on your platform, then run
+the same Make targets. See `docs/flutter-architecture.md` for how the Flutter
+host and the Rust core divide the work.
 
 ## Development
 
@@ -36,22 +43,16 @@ make test
 make check-rfds
 ```
 
-`make dev` stores its isolated database, preferences, and default managed book
-copies in `target/shosai-dev`; packaged releases use the platform `shosai` data
-directory. Deleting `target` or running `cargo clean` therefore also clears the
-default development state. With the development app closed, `make reset` removes
-only the ownership-marked `target/shosai-dev` state. Production data and books
-referenced from their current location are preserved. Copied books in an external
-development managed-library folder are removed only when it contains
-`.shosai-storage-profile` with the exact value `shosai-development-v1`; the folder
-itself and unrelated files in it are preserved. Reset fails safely if that marker
-is absent or does not match.
+Debug builds of the host keep their database, preferences and managed book
+copies in the platform application-support directory under the development
+profile (`shosai-dev`), separate from the `shosai` directory that release builds
+use.
 
-The project is a Cargo workspace:
+The project is a Cargo workspace with a Flutter application:
 
 - `crates/shosai-core` contains document formats, library storage, and reader logic.
-- `crates/shosai-app` contains the native Iced application.
-- `flutter` contains the cross-platform Flutter host and Rust bridge.
+- `crates/shosai-flutter-bridge` exposes the core to Flutter through `flutter_rust_bridge`.
+- `flutter` contains the cross-platform Flutter host.
 - `website` contains the Hugo source for the project website.
 
 On Apple Silicon macOS, build the Flutter iOS host with
@@ -63,7 +64,7 @@ runs. Physical device builds are intentionally unsigned; local development
 signing must be configured in Xcode before installing them.
 
 Architecture and product proposals follow the
-[Requests for Discussion process](rfd/README.md). The
+[Requests for Discussion process](rfd/README.adoc). The
 [project roadmap](docs/roadmap.org) links to the corresponding RFDs.
 
 ## Website

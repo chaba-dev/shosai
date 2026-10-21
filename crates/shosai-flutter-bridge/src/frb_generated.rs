@@ -2010,7 +2010,6 @@ impl CstDecode<crate::api::FlutterBookFormat> for i32 {
         match self {
             0 => crate::api::FlutterBookFormat::Pdf,
             1 => crate::api::FlutterBookFormat::Epub,
-            2 => crate::api::FlutterBookFormat::Cbz,
             _ => unreachable!("Invalid variant for FlutterBookFormat: {}", self),
         }
     }
@@ -2242,7 +2241,6 @@ impl SseDecode for crate::api::FlutterBookFormat {
         return match inner {
             0 => crate::api::FlutterBookFormat::Pdf,
             1 => crate::api::FlutterBookFormat::Epub,
-            2 => crate::api::FlutterBookFormat::Cbz,
             _ => unreachable!("Invalid variant for FlutterBookFormat: {}", inner),
         };
     }
@@ -3147,7 +3145,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::FlutterBookFormat {
         match self {
             Self::Pdf => 0.into_dart(),
             Self::Epub => 1.into_dart(),
-            Self::Cbz => 2.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -3824,7 +3821,6 @@ impl SseEncode for crate::api::FlutterBookFormat {
             match self {
                 crate::api::FlutterBookFormat::Pdf => 0,
                 crate::api::FlutterBookFormat::Epub => 1,
-                crate::api::FlutterBookFormat::Cbz => 2,
                 _ => {
                     unimplemented!("");
                 }

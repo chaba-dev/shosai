@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ReaderToolbar · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+.wide { border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.phone { width: 390px; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.touch { height: 56px; }
+.tabcount { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 4px; border: 1.75px solid currentColor; border-radius: 6px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="sh-toolbar wide">
+    <button class="sh-btn sh-btn--icon" aria-label="Contents"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/></svg></button>
+    <div class="sh-toolbar__title"><span class="sh-toolbar__book">On the Origin of Species</span><span class="sh-toolbar__loc">Chapter IV · Natural Selection</span></div>
+    <button class="sh-btn sh-btn--icon sh-aa" aria-label="Display settings">Aa</button>
+    <button class="sh-btn sh-btn--icon" aria-label="Bookmark this page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg></button>
+    <button class="sh-btn sh-btn--selected" aria-pressed="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg>Notes<span class="sh-count">12</span></button>
+  </div>
+  <div class="phone">
+    <div class="sh-toolbar touch">
+      <button class="sh-btn sh-btn--icon sh-btn--touch" aria-label="Library"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:20px;height:20px"><path d="m15 18-6-6 6-6"/></svg></button>
+      <div class="sh-toolbar__title"><span class="sh-toolbar__book">On the Origin of Species</span><span class="sh-toolbar__loc">Chapter IV · 21%</span></div>
+      <button class="sh-btn sh-btn--icon sh-btn--touch" aria-label="Search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:20px;height:20px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
+      <button class="sh-btn sh-btn--icon sh-btn--touch tabs" aria-label="3 open tabs"><span class="tabcount">3</span></button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

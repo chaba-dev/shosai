@@ -21,7 +21,6 @@ const MAX_CANCELLATIONS: usize = 64;
 pub enum FlutterBookFormat {
     Pdf,
     Epub,
-    Cbz,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,7 +189,6 @@ impl From<FlutterBookFormat> for BookFormat {
         match value {
             FlutterBookFormat::Pdf => Self::Pdf,
             FlutterBookFormat::Epub => Self::Epub,
-            FlutterBookFormat::Cbz => Self::Cbz,
         }
     }
 }
@@ -200,7 +198,6 @@ impl From<BookFormat> for FlutterBookFormat {
         match value {
             BookFormat::Pdf => Self::Pdf,
             BookFormat::Epub => Self::Epub,
-            BookFormat::Cbz => Self::Cbz,
         }
     }
 }

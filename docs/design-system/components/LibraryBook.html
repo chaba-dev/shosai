@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LibraryBook · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600&amp;text=%E5%90%BE%E8%BC%A9%E3%81%AF%E7%8C%AB%E3%81%A7%E3%81%82%E3%82%8B%E5%A4%8F%E7%9B%AE%E6%BC%B1%E7%9F%B3%E3%81%93%E3%81%93%E3%82%8D&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 24px 48px 0; display: flex; flex-direction: column; gap: 22px; background: var(--canvas); min-height: 440px; box-sizing: border-box; }
+.cov-navy { background: var(--brand-navy); }
+.cov-charcoal { background: var(--brand-charcoal); }
+.cov-vermilion { background: #b23c1b; }
+.cov-slate { background: #4d5e86; }
+.cov-green { background: #4e755d; }
+.ja { font-family: var(--font-editorial); }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="sh-section"><h2>All books</h2></div>
+  <div class="sh-shelf">
+    <button class="sh-book"><span class="sh-cover cov-charcoal"><span>A Mathematical Theory of Communication</span><small>C. E. Shannon</small></span><span class="sh-book__title">A Mathematical Theory of Communication</span><span class="sh-book__meta"><span class="sh-badge">PDF</span>2%</span><div class="sh-progress" aria-label="2% read"><div class="sh-progress__fill" style="width:2%"></div></div></button>
+    <button class="sh-book"><span class="sh-cover cov-vermilion ja"><span>吾輩は猫である</span><small>夏目漱石</small></span><span class="sh-book__title ja">吾輩は猫である</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>Not started</span></button>
+    <button class="sh-book"><span class="sh-cover cov-green"><span>Pride and Prejudice</span><small>Jane Austen</small></span><span class="sh-book__title">Pride and Prejudice</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>64%</span><div class="sh-progress" aria-label="64% read"><div class="sh-progress__fill" style="width:64%"></div></div></button>
+    <button class="sh-book"><span class="sh-cover cov-slate"><span>Walden</span><small>Henry David Thoreau</small></span><span class="sh-book__title">Walden</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>Finished</span></button>
+    <button class="sh-book"><span class="sh-cover cov-charcoal"><span>Meditations</span><small>Marcus Aurelius</small></span><span class="sh-book__title">Meditations</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>38%</span><div class="sh-progress" aria-label="38% read"><div class="sh-progress__fill" style="width:38%"></div></div></button>
+    <button class="sh-book"><span class="sh-cover cov-navy ja"><span>こころ</span><small>夏目漱石</small></span><span class="sh-book__title ja">こころ</span><span class="sh-book__meta"><span class="sh-badge">EPUB</span>12%</span><div class="sh-progress" aria-label="12% read"><div class="sh-progress__fill" style="width:12%"></div></div></button>
+    <button class="sh-book"><span class="sh-cover cov-slate"><span>The Elements of Euclid</span><small>Euclid</small></span><span class="sh-book__title">The Elements of Euclid</span><span class="sh-book__meta"><span class="sh-badge">PDF</span>Not started</span></button>
+  </div>
+  <div class="sh-shelf__edge"></div>
+</div>
+</body>
+</html>

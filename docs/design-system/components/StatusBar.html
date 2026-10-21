@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StatusBar · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.sh-status { border: 1px solid var(--line); border-radius: var(--radius-sm); }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="sh-status">
+    <span class="sh-status__section">Chapter IV · Natural Selection</span>
+    <div class="sh-progress" role="progressbar" aria-valuenow="21" aria-valuemin="0" aria-valuemax="100" aria-label="Reading progress"><div class="sh-progress__fill" style="width:21%"></div><span class="sh-progress__mark" style="left:9%" title="Bookmark"></span><span class="sh-progress__mark" style="left:58%" title="Bookmark"></span></div>
+    <span>21% · pages 104–105 of 502</span>
+  </div>
+  <div class="sh-status">
+    <span class="sh-status__section">2. Discrete Noiseless Channels</span>
+    <div class="sh-progress" role="progressbar" aria-valuenow="5" aria-valuemin="0" aria-valuemax="100" aria-label="Reading progress"><div class="sh-progress__fill" style="width:5%"></div></div>
+    <span>5% · pages 2–3 of 55</span>
+  </div>
+</div>
+</body>
+</html>

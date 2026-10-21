@@ -41,7 +41,7 @@ enum ReaderPanel { contents, typography, more }
 
 /// Which ordinal the reader status text names (RD-05).
 ///
-/// `page` is supplied for paginated EPUB/PDF/CBZ page ordinals and `chapter`
+/// `page` is supplied for paginated EPUB/PDF page ordinals and `chapter`
 /// only for the EPUB logical-unit fallback; the widget never derives this from
 /// the document format.
 enum ReaderDisplayUnit { chapter, page }
@@ -244,7 +244,7 @@ final class ReaderPageInputPresentation {
   int get hashCode => Object.hash(draft, error);
 }
 
-/// Typed raster fit for PDF/CBZ (RD-09).
+/// Typed raster fit for PDF (RD-09).
 ///
 /// The persisted preference codec that replaces the legacy `pdfZoom` sentinel
 /// is 5A/6B work; 4C presents and applies the value locally.
@@ -254,7 +254,7 @@ enum ReaderRasterFit { fitPage, fitWidth, manual }
 ///
 /// Availability is derived from [format] and [continuous], never from a
 /// widget-local boolean: a reflowable (EPUB) document shows font size, line
-/// spacing and the theme cycle; a raster (PDF/CBZ) document shows zoom and the
+/// spacing and the theme cycle; a raster (PDF) document shows zoom and the
 /// fit controls.
 final class ReaderTypographyPresentation {
   const ReaderTypographyPresentation({
@@ -282,8 +282,11 @@ final class ReaderTypographyPresentation {
   /// Whether the document is reflowable (EPUB), so the EPUB controls apply.
   bool get reflowable => format == FlutterBookFormat.epub;
 
-  /// Whether the document is searchable (Iced: EPUB and PDF, not CBZ).
-  bool get searchable => format != FlutterBookFormat.cbz;
+  /// Whether the document is searchable. Every supported format (EPUB and
+  /// PDF) is; the retired CBZ format was the one that had no text.
+  bool get searchable => switch (format) {
+    FlutterBookFormat.pdf || FlutterBookFormat.epub => true,
+  };
 
   ReaderTypographyPresentation copyWith({
     FlutterBookFormat? format,

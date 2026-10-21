@@ -111,7 +111,7 @@ shopt -u nullglob
 
 for entry in "${entries[@]}"; do
 	entry_name="$(basename "${entry}")"
-	[[ "${entry_name}" == "README.md" ]] && continue
+	[[ "${entry_name}" == "README.adoc" ]] && continue
 	if [[ ! -d "${entry}" || ! "${entry_name}" =~ ^[0-9]{4}$ ]]; then
 		printf "%sinvalid RFD entry%s: %s\n" "${color_red}" "${color_reset}" "${entry_name}" >&2
 		failures=$((failures + 1)); continue
@@ -127,40 +127,30 @@ for entry in "${entries[@]}"; do
 	number="$(printf '%s\n' "${entry_name}" | sed 's/^0*//')"
 	[[ -n "${number}" ]] || number="0"
 	task_summary="-"
-	implementations=()
-	[[ -f "${entry}/IMPLEMENTATION.org" ]] && implementations+=("${entry}/IMPLEMENTATION.org")
-	[[ -f "${entry}/IMPLEMENTATION.md" ]] && implementations+=("${entry}/IMPLEMENTATION.md")
+	implementation="${entry}/IMPLEMENTATION.adoc"
+	implementation_name="IMPLEMENTATION.adoc"
 
-	if [[ "${#implementations[@]}" -eq 0 ]]; then
-		printf "%smissing implementation checklist%s: %s/IMPLEMENTATION.org or IMPLEMENTATION.md\n" "${color_red}" "${color_reset}" "${entry_name}" >&2
-		failures=$((failures + 1))
-	elif [[ "${#implementations[@]}" -gt 1 ]]; then
-		printf "%smultiple implementation checklist formats%s: %s\n" "${color_red}" "${color_reset}" "${entry_name}" >&2
+	if [[ ! -f "${implementation}" ]]; then
+		printf "%smissing implementation checklist%s: %s/%s\n" "${color_red}" "${color_reset}" "${entry_name}" "${implementation_name}" >&2
 		failures=$((failures + 1))
 	else
-		implementation="${implementations[0]}"
-		implementation_name="$(basename "${implementation}")"
+		# Count checklist items at every AsciiDoc list depth (`*`, `**`, ...).
 		read -r implementation_total implementation_completed < <(
 			awk '
-			  /^[[:space:]]*[-+*][[:space:]]+\[[ xX]\][[:space:]]/ {
+			  /^[[:space:]]*[-+*]+[[:space:]]+\[[ xX]\][[:space:]]/ {
 			    total++
-			    if ($0 ~ /^[[:space:]]*[-+*][[:space:]]+\[[xX]\][[:space:]]/) completed++
+			    if ($0 ~ /^[[:space:]]*[-+*]+[[:space:]]+\[[xX]\][[:space:]]/) completed++
 			  }
 			  END { printf "%d %d\n", total, completed }
 			' "${implementation}"
 		)
 		task_summary="${implementation_completed}/${implementation_total}"
-		case "${implementation_name}" in
-		IMPLEMENTATION.org)
-			expected_heading="#+TITLE: RFD ${entry_name} implementation checklist"; backlink="[[file:README.adoc][" ;;
-		IMPLEMENTATION.md)
-			expected_heading="# RFD ${entry_name} implementation checklist"; backlink="](README.adoc)" ;;
-		esac
+		expected_heading="= RFD ${entry_name} implementation checklist"
 		if [[ "$(head -n 1 "${implementation}")" != "${expected_heading}" ]]; then
 			printf "%sinvalid implementation checklist heading%s: %s/%s\n" "${color_red}" "${color_reset}" "${entry_name}" "${implementation_name}" >&2
 			failures=$((failures + 1))
 		fi
-		if ! grep -Fq "${backlink}" "${implementation}"; then
+		if ! grep -Fq "link:README.adoc[" "${implementation}"; then
 			printf "%simplementation checklist must link to its RFD%s: %s/%s\n" "${color_red}" "${color_reset}" "${entry_name}" "${implementation_name}" >&2
 			failures=$((failures + 1))
 		fi

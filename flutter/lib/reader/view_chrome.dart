@@ -418,8 +418,7 @@ class _ReaderHeader extends StatelessWidget {
       // no home in the three-action reference header; 4B keeps the existing
       // Flutter capability rather than dropping it (its final home — a panel
       // or a recovery surface — is 4C/4D work).
-      if (model.document != null &&
-          model.document!.format != FlutterBookFormat.cbz)
+      if (model.document != null)
         ShadIconAction(
           tooltip: model.annotationsReady
               ? 'Associate highlights from an earlier version…'
@@ -1388,7 +1387,7 @@ class _ReaderSavedPlaceRow extends StatelessWidget {
 ///
 /// Mode-specific availability comes from [ReaderTypographyPresentation]:
 /// a reflowable (EPUB) document shows font size, line spacing and the theme
-/// cycle; a raster (PDF/CBZ) document shows zoom and the fit controls. The
+/// cycle; a raster (PDF) document shows zoom and the fit controls. The
 /// controls are disabled while a relayout is in flight; a failed relayout
 /// reports through the shared error surface.
 class _ReaderTypographyPanel extends StatelessWidget {

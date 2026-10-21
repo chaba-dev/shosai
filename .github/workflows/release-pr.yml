@@ -20,9 +20,6 @@ jobs:
   create-release-pr:
     runs-on: ubuntu-latest
     environment: RELEASE
-    outputs:
-      release_commit: ${{ steps.release-branch.outputs.commit }}
-      release_tag: ${{ steps.next-version.outputs.content }}
     steps:
       - name: Create chaba2-bot token
         id: app-token
@@ -34,7 +31,6 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
           permission-pull-requests: write
-          permission-statuses: write
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -107,10 +103,10 @@ jobs:
           sed -i.bak -E "s/^version = \".*\"/version = \"${version}\"/" Cargo.toml
           rm Cargo.toml.bak
 
-          sed -i.bak -E "/^name = \"shosai-(app|core)\"$/ { n; s/^version = \".*\"/version = \"${version}\"/; }" Cargo.lock
+          sed -i.bak -E "/^name = \"shosai-(core|flutter-bridge)\"$/ { n; s/^version = \".*\"/version = \"${version}\"/; }" Cargo.lock
           rm Cargo.lock.bak
 
-          updated="$(grep -A1 -E '^name = "shosai-(app|core)"$' Cargo.lock | grep -c "^version = \"${version}\"$")"
+          updated="$(grep -A1 -E '^name = "shosai-(core|flutter-bridge)"$' Cargo.lock | grep -c "^version = \"${version}\"$")"
           if [ "${updated}" -ne 2 ]; then
             echo "Failed to update both workspace package versions in Cargo.lock"
             exit 1
@@ -216,19 +212,6 @@ jobs:
           git push origin "${branch}"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Mark release build as pending
-        if: steps.release-branch.outputs.commit != ''
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          RELEASE_COMMIT: ${{ steps.release-branch.outputs.commit }}
-        run: |
-          gh api \
-            --method POST \
-            "repos/${{ github.repository }}/statuses/${RELEASE_COMMIT}" \
-            -f state=pending \
-            -f context='Release build dry run' \
-            -f description='Building installable release packages'
-
       - name: Create PR body
         if: steps.release-branch.outputs.commit != ''
         env:
@@ -286,54 +269,3 @@ jobs:
           gh pr edit "${{ steps.existing-pr.outputs.pr_number }}" \
             --title "chore(release): ${RELEASE_TAG}" \
             --body-file /tmp/release-pr-body.md
-
-  dry-run-release:
-    name: Dry-run release packages
-    needs: create-release-pr
-    if: needs.create-release-pr.outputs.release_commit != ''
-    permissions:
-      contents: read
-    uses: ./.github/workflows/publish-release.yml
-    with:
-      release_tag: ${{ needs.create-release-pr.outputs.release_tag }}
-      checkout_ref: ${{ needs.create-release-pr.outputs.release_commit }}
-      publish: false
-
-  report-dry-run:
-    name: Report release build result
-    needs: [create-release-pr, dry-run-release]
-    if: always() && needs.create-release-pr.outputs.release_commit != ''
-    runs-on: ubuntu-latest
-    environment: RELEASE
-    steps:
-      - name: Create chaba2-bot token
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_SECRET }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-statuses: write
-
-      - name: Update release commit status
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          RELEASE_COMMIT: ${{ needs.create-release-pr.outputs.release_commit }}
-          BUILD_RESULT: ${{ needs.dry-run-release.result }}
-        run: |
-          if [ "${BUILD_RESULT}" = success ]; then
-            state=success
-            description='All installable release packages built successfully'
-          else
-            state=failure
-            description='One or more release packages failed to build'
-          fi
-
-          gh api \
-            --method POST \
-            "repos/${{ github.repository }}/statuses/${RELEASE_COMMIT}" \
-            -f state="${state}" \
-            -f context='Release build dry run' \
-            -f description="${description}" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

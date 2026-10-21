@@ -1,5 +1,11 @@
 # Flutter reader presentation contract
 
+> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
+> on 2026-10-20 (RFD 4, "The first release"); the `crates/shosai-app` citations
+> below refer to the pinned reference revision in the repository history, and
+> the 1C captures under `rfd/0004/evidence/reference-shots-1c/` are the frozen
+> reference. CBZ support was removed the same day (RFD 2).
+
 Typed presentation model, intent ownership, fixture/live boundary and acceptance
 matrix for the reader packages 4B, 4C and 4D of the
 [Flutter UI restoration plan](flutter-ui-restoration-plan.md).
@@ -20,7 +26,7 @@ matrix for the reader packages 4B, 4C and 4D of the
 - Reference base: the pinned Iced revision
   `1e54270a6bb24f15630ece336a0575bdbe5be113` (`main@origin` #108) supplies the
   reader composition and values; 1C's 60 captures
-  ([evidence](../rfd/0004/evidence/reference-shots-1c/README.md)) are the reader
+  ([evidence](../rfd/0004/evidence/reference-shots-1c/README.adoc)) are the reader
   reference. Neither establishes Flutter correctness (specification §4.0).
 
 **What this document is not.** It does not add design values, does not restate

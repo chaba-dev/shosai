@@ -17,7 +17,6 @@ pub mod annotations;
 pub mod application;
 pub mod bookmarks;
 pub mod bridge;
-pub mod cbz;
 pub mod document;
 mod document_admission;
 pub mod epub;

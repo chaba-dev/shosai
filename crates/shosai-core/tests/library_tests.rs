@@ -87,14 +87,6 @@ async fn test_import_epub() {
 }
 
 #[tokio::test]
-async fn test_import_cbz() {
-    let (lib, _, _dir) = temp_library().await;
-    let book = lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
-    assert_eq!(book.format, BookFormat::Cbz);
-    assert_eq!(book.title, "sample");
-}
-
-#[tokio::test]
 async fn test_import_duplicate_returns_existing() {
     let (lib, _, _dir) = temp_library().await;
     let book1 = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
@@ -207,10 +199,9 @@ async fn test_list_all() {
     let (lib, _, _dir) = temp_library().await;
     lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     lib.import_file(&fixture_path("sample.epub")).await.unwrap();
-    lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
 
     let books = lib.list_all().await.unwrap();
-    assert_eq!(books.len(), 3);
+    assert_eq!(books.len(), 2);
 }
 
 #[tokio::test]
@@ -238,7 +229,6 @@ async fn test_filter_by_format() {
     let (lib, _, _dir) = temp_library().await;
     lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     lib.import_file(&fixture_path("sample.epub")).await.unwrap();
-    lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
 
     let pdfs = lib.filter_by_format(BookFormat::Pdf).await.unwrap();
     assert_eq!(pdfs.len(), 1);
@@ -253,13 +243,12 @@ async fn test_library_pages_are_bounded_and_combine_filters() {
     let (lib, _, _dir) = temp_library().await;
     lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     lib.import_file(&fixture_path("sample.epub")).await.unwrap();
-    lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
 
-    let first = lib.page(None, None, 2, 0).await.unwrap();
-    assert_eq!(first.books.len(), 2);
+    let first = lib.page(None, None, 1, 0).await.unwrap();
+    assert_eq!(first.books.len(), 1);
     assert!(first.has_more);
 
-    let second = lib.page(None, None, 2, 2).await.unwrap();
+    let second = lib.page(None, None, 1, 1).await.unwrap();
     assert_eq!(second.books.len(), 1);
     assert!(!second.has_more);
 
@@ -358,13 +347,12 @@ async fn test_library_id_snapshot_stays_stable_when_sort_order_changes() {
     let (lib, _, _dir) = temp_library().await;
     let pdf = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     let epub = lib.import_file(&fixture_path("sample.epub")).await.unwrap();
-    let cbz = lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
 
     let ids = lib.matching_ids(None, None).await.unwrap();
     lib.update_progress(pdf.id, 0.5).await.unwrap();
 
-    let first = lib.books_by_ids(&ids[..2]).await.unwrap();
-    let second = lib.books_by_ids(&ids[2..]).await.unwrap();
+    let first = lib.books_by_ids(&ids[..1]).await.unwrap();
+    let second = lib.books_by_ids(&ids[1..]).await.unwrap();
     let loaded_ids: Vec<_> = first
         .into_iter()
         .chain(second)
@@ -372,9 +360,9 @@ async fn test_library_id_snapshot_stays_stable_when_sort_order_changes() {
         .collect();
 
     assert_eq!(loaded_ids, ids);
-    assert_eq!(loaded_ids.len(), 3);
+    assert_eq!(loaded_ids.len(), 2);
+    assert!(loaded_ids.contains(&pdf.id));
     assert!(loaded_ids.contains(&epub.id));
-    assert!(loaded_ids.contains(&cbz.id));
 }
 
 #[tokio::test]
@@ -425,15 +413,6 @@ async fn test_cover_extracted_for_epub() {
     assert!(book.cover.is_some(), "EPUB should have a cover");
     let cover = book.cover.unwrap();
     // Should be valid PNG
-    assert!(cover.starts_with(&[0x89, b'P', b'N', b'G']));
-}
-
-#[tokio::test]
-async fn test_cover_extracted_for_cbz() {
-    let (lib, _, _dir) = temp_library().await;
-    let book = lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
-    assert!(book.cover.is_some(), "CBZ should have a cover");
-    let cover = book.cover.unwrap();
     assert!(cover.starts_with(&[0x89, b'P', b'N', b'G']));
 }
 
@@ -915,10 +894,10 @@ async fn file_batch_continues_after_a_failure_and_reports_it() {
     let (lib, _, dir) = temp_library().await;
     let first = dir.path().join("first.pdf");
     let corrupt = dir.path().join("corrupt.epub");
-    let last = dir.path().join("last.cbz");
+    let last = dir.path().join("last.epub");
     std::fs::copy(fixture_path("sample.pdf"), &first).unwrap();
     std::fs::write(&corrupt, b"not an epub").unwrap();
-    std::fs::copy(fixture_path("sample.cbz"), &last).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &last).unwrap();
 
     let report = lib.import_files(&[first, corrupt.clone(), last]).await;
 
@@ -1365,8 +1344,8 @@ async fn stale_library_facade_cannot_recreate_the_old_managed_directory() {
     let destination = dir.path().join("external").join("Shosai");
     lib.relocate_managed_books(&destination).await.unwrap();
 
-    let next = dir.path().join("next.cbz");
-    std::fs::copy(fixture_path("sample.cbz"), &next).unwrap();
+    let next = dir.path().join("next.epub");
+    std::fs::copy(fixture_path("sample.epub"), &next).unwrap();
     let error = lib.import_managed_file(&next).await.unwrap_err();
     assert!(error.to_string().contains("location changed"));
     assert!(lib.import_file(&next).await.is_err());
@@ -1410,12 +1389,12 @@ async fn non_unicode_managed_directory_survives_persistence() {
 #[tokio::test]
 async fn managed_import_uses_the_source_filename_for_fallback_metadata() {
     let (lib, _, dir) = temp_library().await;
-    let source = dir.path().join("My Comic.cbz");
-    std::fs::copy(fixture_path("sample.cbz"), &source).unwrap();
+    let source = dir.path().join("My Report.pdf");
+    std::fs::copy(fixture_path("sample.pdf"), &source).unwrap();
 
     let book = lib.import_managed_file(&source).await.unwrap();
 
-    assert_eq!(book.title, "My Comic");
+    assert_eq!(book.title, "My Report");
 }
 
 #[tokio::test]

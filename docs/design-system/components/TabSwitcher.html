@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TabSwitcher · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.phone { width: 390px; height: 560px; margin: 0 auto; background: var(--chrome); display: flex; flex-direction: column; }
+.head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 16px; }
+.ttl { font-size: 16px; line-height: 22px; font-weight: 600; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 4px 16px 16px; }
+.meta { display: flex; align-items: center; gap: 6px; }
+.lib { align-items: center; justify-content: center; gap: 8px; color: var(--ink-muted); font-size: 13px; font-weight: 500; border-style: dashed; background: transparent; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="sh phone">
+  <div class="head"><span class="ttl">3 tabs</span><button class="sh-btn sh-btn--touch">Done</button></div>
+  <div class="grid">
+    <div class="sh-tabcard" role="tab" aria-selected="true"><div class="sh-tabcard__title">On the Origin of Species</div><button class="sh-btn sh-btn--icon sh-tabcard__close" aria-label="Close On the Origin of Species"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button><div class="sh-tabcard__foot"><span class="meta"><span class="sh-badge">EPUB</span>Chapter IV · 21%</span><div class="sh-progress"><div class="sh-progress__fill" style="width:21%"></div></div></div></div>
+    <div class="sh-tabcard" role="tab" aria-selected="false"><div class="sh-tabcard__title">A Mathematical Theory of Communication</div><button class="sh-btn sh-btn--icon sh-tabcard__close" aria-label="Close A Mathematical Theory of Communication"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button><div class="sh-tabcard__foot"><span class="meta"><span class="sh-badge">PDF</span>p. 3 of 55</span><div class="sh-progress"><div class="sh-progress__fill" style="width:5%"></div></div></div></div>
+    <div class="sh-tabcard" role="tab" aria-selected="false"><div class="sh-tabcard__title">吾輩は猫である</div><button class="sh-btn sh-btn--icon sh-tabcard__close" aria-label="Close 吾輩は猫である"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button><div class="sh-tabcard__foot"><span class="meta"><span class="sh-badge">EPUB</span>4% · page 6 of 162</span><div class="sh-progress"><div class="sh-progress__fill" style="width:4%"></div></div></div></div>
+    <button class="sh-tabcard lib"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:20px;height:20px"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg><span>Library</span></button>
+  </div>
+</div>
+</body>
+</html>

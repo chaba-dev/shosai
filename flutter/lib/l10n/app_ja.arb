@@ -9,7 +9,6 @@
   "filterSettings": "設定",
   "filterFormatEpub": "EPUB",
   "filterFormatPdf": "PDF",
-  "filterFormatCbz": "CBZ",
   "addBooksAction": "本を追加",
   "cancelImportAction": "キャンセル",
   "cancelOperationTooltip": "操作をキャンセル",

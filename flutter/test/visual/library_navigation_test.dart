@@ -430,8 +430,8 @@ void main() {
             expect(find.byType(LibraryFilterRow), findsOneWidget);
             expect(find.byType(LibrarySidebar), findsNothing);
             final labels = japanese
-                ? const ['すべて', 'EPUB', 'PDF', 'CBZ', '設定']
-                : const ['All', 'EPUB', 'PDF', 'CBZ', 'Settings'];
+                ? const ['すべて', 'EPUB', 'PDF', '設定']
+                : const ['All', 'EPUB', 'PDF', 'Settings'];
             for (final label in labels) {
               expect(entry(label), findsOneWidget);
               expect(tester.widget<ShadButton>(entry(label)).enabled, isTrue);

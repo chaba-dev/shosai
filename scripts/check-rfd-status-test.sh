@@ -11,7 +11,7 @@ trap 'rm -rf "${test_root}"' EXIT
 
 reset_fixtures() {
 	rm -rf "${rfd_root}"; mkdir -p "${rfd_root}"
-	printf '# Test RFDs\n' >"${rfd_root}/README.md"
+	printf '= Test RFDs\n' >"${rfd_root}/README.adoc"
 }
 
 run_success() {
@@ -35,12 +35,7 @@ run_failure() {
 }
 
 write_valid_rfd() {
-	local state="$1" discussion="$2" implementation_format="${3:-org}" implementation_name
-	case "${implementation_format}" in
-	org) implementation_name="IMPLEMENTATION.org" ;;
-	md) implementation_name="IMPLEMENTATION.md" ;;
-	*) printf 'unsupported test implementation format: %s\n' "${implementation_format}" >&2; exit 1 ;;
-	esac
+	local state="$1" discussion="$2"
 	mkdir -p "${rfd_root}/0001"
 	cat >"${rfd_root}/0001/README.adoc" <<EOF
 :authors: Example Author <author@example.com>
@@ -52,55 +47,51 @@ write_valid_rfd() {
 
 == Implementation
 
-See link:${implementation_name}[implementation checklist].
+See link:IMPLEMENTATION.adoc[implementation checklist].
 EOF
-	case "${implementation_format}" in
-	org)
-		cat >"${rfd_root}/0001/${implementation_name}" <<'EOF'
-#+TITLE: RFD 0001 implementation checklist
+	cat >"${rfd_root}/0001/IMPLEMENTATION.adoc" <<'EOF'
+= RFD 0001 implementation checklist
 
-Implements [[file:README.adoc][RFD 1: Valid RFD]].
+Implements link:README.adoc[RFD 1: Valid RFD].
 
-- [ ] Complete the work.
+* [ ] Complete the work.
 EOF
-		;;
-	md)
-		cat >"${rfd_root}/0001/${implementation_name}" <<'EOF'
-# RFD 0001 implementation checklist
-
-Implements [RFD 1: Valid RFD](README.adoc).
-
-- [ ] Complete the work.
-EOF
-		;;
-	esac
 }
 
 reset_fixtures; write_valid_rfd discussion https://example.com/pull/1
-cat >>"${rfd_root}/0001/IMPLEMENTATION.org" <<'EOF'
-- [X] Finished task.
-  - [x] Finished nested task.
+cat >>"${rfd_root}/0001/IMPLEMENTATION.adoc" <<'EOF'
+* [X] Finished task.
+** [x] Finished nested task.
 EOF
 run_success "0001  discussion       2/3"
 
-reset_fixtures; write_valid_rfd prediscussion "" md
-cat >>"${rfd_root}/0001/IMPLEMENTATION.md" <<'EOF'
-- [x] Finished task.
-+ [X] Another finished task.
+reset_fixtures; write_valid_rfd prediscussion ""
+cat >>"${rfd_root}/0001/IMPLEMENTATION.adoc" <<'EOF'
+* [x] Finished task.
+- [X] Another finished task.
 EOF
 run_success "0001  prediscussion    2/3"
 
 reset_fixtures; write_valid_rfd prediscussion ""
-rm "${rfd_root}/0001/IMPLEMENTATION.org"
+rm "${rfd_root}/0001/IMPLEMENTATION.adoc"
 run_failure "missing implementation checklist"
+
+reset_fixtures; write_valid_rfd prediscussion ""
+printf '= RFD 1 implementation checklist\n\nImplements link:README.adoc[RFD 1].\n' >"${rfd_root}/0001/IMPLEMENTATION.adoc"
+run_failure "invalid implementation checklist heading"
+
+reset_fixtures; write_valid_rfd prediscussion ""
+printf '= RFD 0001 implementation checklist\n\nImplements RFD 1.\n' >"${rfd_root}/0001/IMPLEMENTATION.adoc"
+run_failure "implementation checklist must link to its RFD"
+
+reset_fixtures; write_valid_rfd prediscussion ""
+sed -i.bak 's/link:IMPLEMENTATION.adoc\[implementation checklist\]/the implementation checklist/' "${rfd_root}/0001/README.adoc"
+rm "${rfd_root}/0001/README.adoc.bak"
+run_failure "RFD must link to its implementation checklist"
 
 reset_fixtures; write_valid_rfd prediscussion ""
 printf '\n* [ ] This belongs in the implementation document.\n' >>"${rfd_root}/0001/README.adoc"
 run_failure "implementation checkboxes belong in a separate implementation document"
-
-reset_fixtures; write_valid_rfd prediscussion ""
-printf '# RFD 0001 implementation checklist\n\nImplements [RFD 1](README.adoc).\n' >"${rfd_root}/0001/IMPLEMENTATION.md"
-run_failure "multiple implementation checklist formats"
 
 reset_fixtures; write_valid_rfd draft ""
 run_failure "invalid state: draft"

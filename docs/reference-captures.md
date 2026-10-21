@@ -1,5 +1,12 @@
 # Reference captures (packages 1B and 1C)
 
+> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and the
+> `make reference-shots` capture harness were removed on 2026-10-20 (RFD 4, "The
+> first release"), so the capture and `VERIFY=1` procedures below can no longer
+> be run. The committed captures under `rfd/0004/evidence/reference-shots-1b/`
+> and `rfd/0004/evidence/reference-shots-1c/` are the frozen reference; the
+> `1C-CBZ-*` captures record a format that left with CBZ support (RFD 2).
+
 Deterministic, inspected **Iced reference images** for the library, import,
 settings and reader surfaces, each with a provenance manifest. They are the
 reference the Flutter restoration is compared against; they are not acceptance
@@ -101,7 +108,7 @@ validator (`reference_shots::evidence`) as `VERIFY=1`. It
   so a missing or unexpected file fails instead of being skipped;
 - hashes every committed PNG against the committed manifest entry (both the
   SHA-256 and the byte size) and rejects images the manifest does not list;
-- recomputes `captures.sha256`, `fixtures.sha256` and the generated `README.md`
+- recomputes `captures.sha256`, `fixtures.sha256` and the generated `README.adoc`
   from the committed manifest;
 - compares the committed fixture tree, file by file, with the tree the generator
   produces now, including the declared dangling symlink;
@@ -170,7 +177,7 @@ Each package writes the same six entries into its own evidence directory
 | `captures/*.png` | One image per capture, named `<id>.png` |
 | `captures.sha256` | `sha256sum -c captures.sha256` verifies the images |
 | `manifest.json` | Machine-readable provenance (see below) |
-| `README.md` | Human-readable rendering of the manifest |
+| `README.adoc` | Human-readable rendering of the manifest |
 | `fixtures/` | The generated reference fixture tree, committed for inspection |
 | `fixtures.sha256` | Verifies the committed fixture tree |
 
@@ -692,7 +699,7 @@ degenerate 1 px layout rather than a document image.
 
 ## Coverage and limitations
 
-`manifest.json` and the generated `README.md` list the covered rows, the rows the
+`manifest.json` and the generated `README.adoc` list the covered rows, the rows the
 manifest itself satisfies (provenance) and the pending rows with owners. A row's
 entry is the set of captures that contribute evidence for it, so the
 configuration columns of the specification can be followed through it: `LB-02`
