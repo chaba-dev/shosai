@@ -5,6 +5,7 @@ import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/notices/library_notice_text.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import '../support/bridge_pdf_engine.dart';
 
 FlutterLibraryBook _book(int id, String title) => FlutterLibraryBook(
   bookId: id,
@@ -23,7 +24,7 @@ Future<void> _settle() async {
 }
 
 /// The bridge surface the import/settings notice integration needs.
-class _StubBridge implements FlutterBridge {
+class _StubBridge with BridgePdfEngine implements FlutterBridge {
   _StubBridge();
 
   Completer<FlutterImportReport>? importCompleter;
