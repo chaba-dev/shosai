@@ -19,6 +19,8 @@ dependencies:
   pdfium_dart: 0.2.5
   pdfrx: 2.4.7
   shadcn_ui: ^0.56.3
+  shosai_core:
+    path: packages/shosai_core
   shosai_epub:
     path: packages/shosai_epub
   shosai_flutter_bridge:
