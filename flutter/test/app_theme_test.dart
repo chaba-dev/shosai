@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
@@ -445,6 +446,74 @@ void main() {
           borderRadius: BorderRadius.circular(6),
         ),
       );
+    });
+
+    testWidgets('a rendered input draws its boundary in line-strong', (
+      tester,
+    ) async {
+      // Shad's default input theme borders a field with the decorative `line`
+      // (`border`); the scheme's `input` role is only read when the theme
+      // routes it to the input decoration. Sample the painted edge itself.
+      const view = HarnessView(size: Size(400, 200));
+      view.apply(tester);
+      const boundary = ValueKey('input-boundary');
+      final cases = <String, (ShadThemeData, Color, Color)>{
+        'light': (
+          shosaiShadTheme(Brightness.light),
+          appBorderStrong,
+          appBorder,
+        ),
+        'dark': (shosaiShadTheme(Brightness.dark), appDarkInput, appDarkBorder),
+        'reader chrome': (
+          shosaiReaderShadTheme('dark'),
+          appBorderStrong,
+          appBorder,
+        ),
+      };
+      for (final MapEntry(key: name, value: (theme, expected, line))
+          in cases.entries) {
+        await tester.pumpWidget(
+          productionShell(
+            home: ShadTheme(
+              data: theme,
+              child: Scaffold(
+                backgroundColor: theme.colorScheme.background,
+                body: Center(
+                  child: RepaintBoundary(
+                    key: boundary,
+                    child: const SizedBox(
+                      width: 200,
+                      child: ShadInput(placeholder: Text('Search')),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        final render = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(boundary),
+        );
+        final pixels = await tester.runAsync(() async {
+          final image = await render.toImage();
+          final data = await image.toByteData();
+          final width = image.width;
+          final height = image.height;
+          image.dispose();
+          return (data!, width, height);
+        });
+        final (data, width, height) = pixels!;
+        // The left edge, half way down: a straight run of the 1 px border.
+        final offset = ((height ~/ 2) * width) * 4;
+        final painted = Color.fromARGB(
+          data.getUint8(offset + 3),
+          data.getUint8(offset),
+          data.getUint8(offset + 1),
+          data.getUint8(offset + 2),
+        );
+        expect(painted, expected, reason: '$name input border');
+        expect(painted, isNot(line), reason: '$name input border');
+      }
     });
 
     testWidgets('the production shell installs the mapped Material theme', (

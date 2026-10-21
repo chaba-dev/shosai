@@ -210,12 +210,16 @@ ShadColorScheme shosaiReaderColorScheme(String? readerTheme) =>
 };
 
 /// The application Shad theme for [brightness].
-ShadThemeData shosaiShadTheme(Brightness brightness) => ShadThemeData(
-  brightness: brightness,
-  colorScheme: shosaiAppColorScheme(brightness),
-  radius: BorderRadius.circular(ShosaiTokens.radiusSmall),
-  textTheme: _shosaiShadTextTheme(),
-);
+ShadThemeData shosaiShadTheme(Brightness brightness) {
+  final colorScheme = shosaiAppColorScheme(brightness);
+  return ShadThemeData(
+    brightness: brightness,
+    colorScheme: colorScheme,
+    radius: _shosaiRadius,
+    textTheme: _shosaiShadTextTheme(),
+    inputTheme: _shosaiInputTheme(colorScheme),
+  );
+}
 
 /// The reader Shad theme for [readerTheme] (`light`, `dark`, `sepia` or null).
 ///
@@ -223,13 +227,33 @@ ShadThemeData shosaiShadTheme(Brightness brightness) => ShadThemeData(
 /// [shosaiReaderColorScheme]. The reader palette is the document's
 /// ([shosaiReaderDocumentColors]).
 ShadThemeData shosaiReaderShadTheme(String? readerTheme) {
+  final colorScheme = shosaiReaderColorScheme(readerTheme);
   return ShadThemeData(
     brightness: Brightness.light,
-    colorScheme: shosaiReaderColorScheme(readerTheme),
-    radius: BorderRadius.circular(ShosaiTokens.radiusSmall),
+    colorScheme: colorScheme,
+    radius: _shosaiRadius,
     textTheme: _shosaiShadTextTheme(),
+    inputTheme: _shosaiInputTheme(colorScheme),
   );
 }
+
+final _shosaiRadius = BorderRadius.circular(ShosaiTokens.radiusSmall);
+
+/// Inputs draw their boundary in the scheme's `input` role (`line-strong`).
+///
+/// Shad's default input theme borders a field with `border`, the decorative
+/// `line`; `docs/design-system.md` requires a control that must be seen to use
+/// `line-strong`. Only the border colour changes: width, radius and the focus
+/// ring keep Shad's defaults.
+ShadInputTheme _shosaiInputTheme(ShadColorScheme colorScheme) => ShadInputTheme(
+  decoration: ShadDecoration(
+    border: ShadBorder.all(
+      width: 1,
+      color: colorScheme.input,
+      radius: _shosaiRadius,
+    ),
+  ),
+);
 
 /// The Shad text theme mapped to the Iced type scale.
 ///
