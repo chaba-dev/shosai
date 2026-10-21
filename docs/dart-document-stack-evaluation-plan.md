@@ -331,6 +331,9 @@ this evaluation.
   application bridge opens EPUB books through `shosai_epub` and PDF documents
   through the PDF engine (`flutter/lib/core/documents.dart`), and the EPUB
   reader takes the parsed book from it with no retained-renderer fallback.
+  Continuous EPUB reading, which only the retained renderer drew, is rebuilt
+  on the Dart layout as one scrolled page per chapter (owner decision,
+  2026-10-21); the prototype's continuous tiles are not ported.
   The EPUB canonical-stream parity gate against the Rust stream is retired with
   the Rust stream. Closes: no Rust in the build or the checks; the PDFium
   sharing crash (pdfrx is the only PDFium user, and
