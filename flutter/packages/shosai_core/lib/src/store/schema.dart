@@ -53,4 +53,16 @@ CREATE TABLE managed_file_deletion_debt (
     retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0)
 ) STRICT;
 '''),
+  Migration(3, 'reading state', '''
+-- Where the reader left each book. Keyed by content, so it survives removing
+-- and re-importing the book.
+CREATE TABLE reading_state (
+    content_hash    TEXT PRIMARY KEY NOT NULL
+                    CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    unit            INTEGER NOT NULL CHECK (unit >= 0),
+    location_offset INTEGER CHECK (location_offset IS NULL OR location_offset >= 0),
+    zoom            REAL NOT NULL CHECK (zoom > 0 AND zoom <= 1e300),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+) STRICT, WITHOUT ROWID;
+'''),
 ];

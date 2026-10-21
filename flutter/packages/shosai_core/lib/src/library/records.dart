@@ -423,3 +423,14 @@ void _recordDeletionDebt(Database db, String path, String managedDirectory) {
     [path, managedDirectory],
   );
 }
+
+/// The content hash of book [bookId], for records keyed by content.
+String bookContentHash(Database db, int bookId) {
+  final row = db.select('SELECT content_hash FROM books WHERE id = ?', [
+    bookId,
+  ]).firstOrNull;
+  if (row == null) {
+    throw const CoreException.notFound('The book is not in the library.');
+  }
+  return row.columnAt(0) as String;
+}
