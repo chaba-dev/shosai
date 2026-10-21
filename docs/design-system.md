@@ -165,7 +165,7 @@ The page is set like print, on a stage lit from the centre.
 - **The book's direction.** Right-to-left books turn leftward with the first page on the right; vertical Japanese keeps `vertical-rl`. Undeclared books read horizontally. There is no override.
 - **PDF stays the PDF.** Pages re-render at the current zoom so text is sharp on any screen; on phones they fit the width. Night inverts page luminance.
 
-Layout, pagination and durable anchors are computed in Rust; Flutter renders the laid-out pages (see [flutter-architecture.md](flutter-architecture.md)).
+Layout, pagination and durable anchors come from the Dart document engines and application core; Flutter renders the laid-out pages (see [flutter-architecture.md](flutter-architecture.md)).
 
 ## Components
 
@@ -224,7 +224,7 @@ On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears 
 
 **PageSpread.** The reading surface; see [Reading surfaces](#reading-surfaces). Right-to-left spreads use `sh-spread--rtl`; vertical pages `sh-page--vertical`.
 
-**Highlight.** One selection and highlight model for EPUB and PDF (RFD 6), stored with durable anchors computed in Rust.
+**Highlight.** One selection and highlight model for EPUB and PDF (RFD 6), stored with durable anchors computed in the Dart application core.
 
 - Selecting text raises an `inverse` capsule above the selection (below when there is no room): five colour swatches that save at once, **Note** (saves yellow and opens the editor), **Copy** and **Search**.
 - Fills are `hl-*` at 40% with `radius-xs` corners that wrap per line. A highlight with a note gets a dotted underline (`sh-hl--noted`); the one open in the notes panel or just jumped to gets a 2 px `accent` ring (`sh-hl--focus`).
