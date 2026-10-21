@@ -7,11 +7,12 @@
 
 == Goal
 
-Use one maintained presentation codebase for desktop, phone, and tablet while
-retaining Shōsai's Rust document and application core, and define what that
-frontend ships first: one reading experience across formats and devices (see
+Build Shōsai as one Dart and Flutter application for desktop, phone, and
+tablet, with the document engines, the store, and the reading model in Dart
+rather than behind a native bridge, and define what that application ships
+first: one reading experience across formats and devices (see
 <<_the_first_release>>). Preserve a credible web path without claiming that
-native Rust dependencies already run in a browser.
+native dependencies already run in a browser.
 
 == Proposal
 
@@ -20,6 +21,16 @@ Android, and iOS. The Iced application is historical reference, not a baseline
 the Flutter frontend must match: the first release is defined by the outcomes
 in <<_the_first_release>>, and the Iced code is removed in its own change
 rather than kept until a parity gate.
+
+The application is Dart only (decided 2026-10-21; see <<_decisions>>). The
+Rust core (`crates/shosai-core`), the `flutter_rust_bridge` crate and its
+generated Dart are replaced by Dart modules before the first-release reader
+work builds on them: the EPUB engine is already Dart (`shosai_epub`, adopted
+2026-09-28), PDF moves to a Dart-owned PDFium binding, storage to a Dart
+SQLite binding, and library, bookmarks, reading state, annotations and search
+are ported with their tests. Rust stays a behavioural reference until each
+slice lands, then is deleted; nothing new is built in it. The replacement is
+tracked as milestone M3.0 in link:IMPLEMENTATION.adoc[the checklist].
 
 [cols="1,1,2",options="header"]
 |===
@@ -39,12 +50,12 @@ rather than kept until a parity gate.
 
 |Web
 |Flutter Web
-|Feasibility target requiring WASM or service adapters
+|Feasibility target: ordinary Flutter web once the PDF and SQLite bindings
+run in a browser, or a service adapter
 |===
 
-The application has not been released. Internal Rust APIs, Dart bridge APIs, and
-the development SQLite schema may change without compatibility wrappers or
-dual-read periods. Once a release or synchronization wire format exists, its
+The application has not been released. Internal Dart APIs and the development
+SQLite schema may change without compatibility wrappers or dual-read periods. Once a release or synchronization wire format exists, its
 declared compatibility contract applies normally.
 
 == The first release
@@ -216,6 +227,15 @@ Recorded from owner review on 2026-10-14 and 2026-10-20.
   shelf of covers under a _Continue reading_ hero, warm paper chrome, book and
   screen titles in the editorial serif. The design system records the tokens
   and components; the Iced tab strip is not carried forward.
+* *The application is Dart only* (2026-10-21). The Rust core and the
+  Dart/Rust bridge are replaced by Dart before the reader work of M3.2 builds
+  on them, in the order PDF engine, SQLite store and records, then deletion of
+  the crates and the bridge toolchain (M3.0). The
+  link:../../docs/dart-document-stack-evaluation-plan.md[Dart document stack
+  evaluation] had found a Dart-owned PDFium binding and a Dart SQLite binding
+  viable and left both unselected; this decision selects them. EPUB was
+  already Dart-owned (2026-09-28). Old development databases and persisted
+  anchors need no migration.
 
 == Rationale
 
@@ -236,24 +256,69 @@ short term but permanently duplicate reader interaction, accessibility, and UI
 testing. Before release, replacing that duplication is cheaper than maintaining
 two frontends indefinitely.
 
+The same reasoning applies one layer down. With the EPUB engine in Dart, what
+the Rust core still owned after the Iced removal was one PDFium wrapper, the
+SQLite store and the library, bookmark, reading-state, annotation and search
+records: ordinary application code with no shaping or layout in it. Keeping it
+in Rust cost a second language and test suite, a generated bridge pinned to a
+Rust toolchain and a bridge-generator version, a native library to
+cross-compile and package for five targets, and a WASM project before any web
+build. Every first-release feature (notes, search, references) would have
+crossed that bridge. Replacing the core before M3.2 builds on it is cheaper
+than building the reader twice. The evaluation's measured findings (a Dart
+PDFium binding rasterised at least as fast on the tested corpus; SQLite needs
+eleven tables and no full-text extension) support the move; its named risks
+(binding version pinning, native asset provisioning, one permission-bit
+defect) are gates in M3.0, not reasons to keep the bridge.
+
 == Architecture
 
-=== Rust application core
+One language, three layers: document engines, an application core, and the
+Flutter presentation. The layers are Dart packages and modules with explicit
+ownership, not processes or a bridge; the Elm-style controller boundary in
+link:../../docs/flutter-architecture.md[the Flutter architecture contract]
+is unchanged.
 
-The Rust core owns document admission and parsing, resource limits, format
-capabilities, stable locations, pagination and renderer-neutral layout where
-portable, library operations, reader sessions, reading progress, bookmarks,
-annotations, search, caching policy, stable content identity, SQLite storage,
-and synchronization (EPUB parsing/layout amended 2026-09-28; see the note under
-"Flutter frontend and platform adapters"). Move code from `shosai-app` only when
-it is a coherent platform-neutral responsibility; do not move widgets or
-event-loop state merely to reduce the old crate's size.
+=== Document engines
 
-Core APIs expose coarse commands, owned data transfer objects, opaque stable
-handles, typed errors, bounded buffers, cancellation, and explicit resource
-release. They do not expose Iced or Flutter types, borrowed Rust references,
-framework messages, viewport pixels as durable locations, or per-glyph calls
-across the bridge.
+Each format has one engine that owns parsing, admission and resource limits,
+canonical text, durable locations, and the geometry the reader paints or hit
+tests. An engine never produces geometry for pixels it did not lay out.
+
+* *EPUB*: `shosai_epub`, the app-owned pure-Dart parser and normalizer
+  (archive, OPF, spine, table of contents, bounded CSS subset, canonical text,
+  `(spine, scalar)` locations, embedded-font and image admission), with
+  Flutter laying out and painting chapters over it. Adopted 2026-09-28; the
+  RFD 1 fidelity, resource-security and stable-location decisions apply to it.
+* *PDF*: a Dart-owned PDFium binding (the evaluation tested `pdfrx`, which
+  bundles PDFium per platform). It renders pages at the requested zoom and
+  display density into bounded owned bitmaps, extracts page text, character
+  bounds, links, outlines and internal destinations, and reports encryption
+  and permission state. Page rasters and page-space geometry remain one
+  contract. The binding's PDFium version and checksums are pinned.
+
+Engines expose coarse asynchronous operations with cancellation and explicit
+resource release, run their heavy work off the UI isolate where the binding
+allows, and return owned values, never live handles into a widget.
+
+=== Application core
+
+A Dart package, independent of Flutter widgets, owns the records and the
+policy around them: the library and import (referenced and private managed
+copies, bounded archive preflight, cover extraction, deferred cleanup), stable
+content identity, reader sessions and reading progress, open books, bookmarks,
+annotations with their layered durable anchors and resolution states (RFD 6),
+notes, search over book text and notes, notification intents, and the future
+synchronization records (RFD 3). It is the only writer of the SQLite database,
+through a Dart SQLite binding (`sqlite3`, or `drift` over it if typed queries
+and migration tooling justify the code generation), with ordered migrations
+and a single connection owner. Anchor normalization and quote recovery live
+here, format-neutral, with the engines supplying canonical text and geometry.
+
+The core's API is the controller's effect surface: typed commands, immutable
+result values, typed errors, bounded buffers, cancellation tokens. It does not
+expose Flutter types, database rows, viewport pixels as durable locations, or
+engine-internal handles.
 
 === Flutter frontend and platform adapters
 
@@ -263,48 +328,31 @@ safe areas, orientation, lifecycle, memory-pressure handling, file and document
 providers, secure storage, deep links, notification delivery, signing, and
 packaging. Platform plugins are replaceable adapters, not domain dependencies.
 
-Native targets call Rust through a generated or hand-written Dart FFI bridge
-selected by a measured spike. PDF rendering initially reuses Rust PDFium and
-transfers bounded page or tile buffers. EPUB parsing, resource admission,
-computed styles, stable offsets, embedded fonts, and MathML were proposed as
-Rust-owned; the 2026-09-28 EPUB adoption decision supersedes that ownership for
-EPUB (note below). The spike decides the granularity of a Rust-laid-out
-renderer-neutral scene and semantic representation that Flutter paints; for
-PDF and the bridge decision it must not move document layout, parsing, or
-resource security policy into Flutter, while EPUB parsing and layout follow the
-amendment below.
+Canonical paths, Android content URIs, iOS security-scoped URLs, and browser file
+handles are device-local locators, never portable book identities. Flutter
+supplies storage locations and file capabilities; the core never infers a
+desktop configuration directory.
 
 [NOTE]
 ====
-*Amended 2026-09-28 — EPUB ownership.* The owner adopted a Dart-owned EPUB
-parser/normalizer with Flutter layout
-(link:../../docs/dart-document-stack-evaluation-plan.md[decision record]). For
-EPUB, parsing, normalization, canonical text, durable anchors, resource
-admission for rendering, and layout/selection geometry move to the Dart/Flutter
-boundary, and Flutter paints the text it lays out. Rust retains PDF and CBZ
-parsing/rendering, library and import, SQLite storage, bookmarks, annotations,
-reading state and search, and remains the only database writer while the EPUB
-slice is integrated. The evaluation's own recommendation was "insufficient
-evidence to choose"; adoption is an owner decision above that recommendation,
-with production gates recorded in the decision and in
-link:../../docs/flutter-ui-restoration-plan.md[the restoration plan]. Recording
-the decision closes no gate and ships no planned capability, and the superseded
-5B package is paused rather than accepted.
+*History.* Until 2026-10-21 the core was Rust (`crates/shosai-core`) reached
+through `flutter_rust_bridge`, and this section described coarse bridge DTOs,
+opaque handles, and a Rust-laid-out EPUB scene. The 2026-09-28 amendment moved
+EPUB parsing and layout to Dart first; the 2026-10-21 decision moves the rest.
+The milestone records link:PHASE-0.adoc[Phase 0], link:PHASE-1.adoc[Phase 1]
+and link:PHASE-2.adoc[Phase 2] describe that architecture as it was measured
+and are kept as evidence, not as the current boundary.
 ====
-
-Canonical paths, Android content URIs, iOS security-scoped URLs, and browser file
-handles are device-local locators, never portable book identities. Flutter
-supplies storage locations and file capabilities rather than asking Rust to
-infer a desktop config directory.
 
 === Web boundary
 
-Flutter Web does not make native Dart FFI, SQLx SQLite, PDFium loading, or direct
-filesystem access browser-compatible. A web target must use the same conceptual
-application API through either:
+Flutter Web cannot load native PDFium, native SQLite, or the filesystem the way
+the native hosts do. A web target reuses the same Dart engines and core through
+either:
 
-* a WASM build of the portable Rust subset plus browser storage, file, and PDF
-  adapters; or
+* the bindings' browser builds (PDFium compiled to WebAssembly, SQLite over
+  WebAssembly with IndexedDB or OPFS persistence) plus browser file
+  capabilities; or
 * a remote service implementing the application boundary.
 
 The native release is not blocked on web. No core contract may unnecessarily
@@ -325,15 +373,17 @@ Lock-screen content defaults to generic text. Titles, note contents, reading
 history, endpoint details, and credentials are excluded unless a user explicitly
 chooses a more descriptive privacy setting.
 
-== Feasibility and migration gate
+== Feasibility and migration gates
 
-Use RFD 6 highlighting as the first demanding cross-format Flutter vertical
-slice after its renderer-neutral annotation model and store exist. The latest
-Iced Phase 0 spike already proves PDF and EPUB selection endpoints; reproducing
-the complete feature in Iced before migration would create disposable UI work.
-The Flutter slice must prove:
+=== The Flutter gate (M2, passed)
 
-* packaged Dart/Rust calls and deterministic resource release;
+RFD 6 highlighting was the first demanding cross-format Flutter vertical slice,
+built after its renderer-neutral annotation model and store existed. The Iced
+Phase 0 spike had proved PDF and EPUB selection endpoints; reproducing the
+complete feature in Iced before migration would have created disposable UI
+work. The Flutter slice had to prove, and did (link:PHASE-2.adoc[Phase 2]):
+
+* packaged native calls and deterministic resource release;
 * SQLite create, reset/migrate, restart, and process-death recovery;
 * PDF and EPUB opening, bounded rendering, selection hit testing, highlight
   overlays, persistence, and relayout;
@@ -349,16 +399,42 @@ The Flutter slice must prove:
   latency, drag latency, and resource-cycle behavior on the first desktop and
   physical mobile targets.
 
-Run the M2 slice on desktop and at least one physical Android or iOS device. One
-mobile target may ship first, but evidence does not transfer between operating
-systems: independently validate the other OS before claiming or packaging it as
-supported. Complete per-release-target accessibility, physical failure, startup,
-installed-size, representative large-document, navigation/relayout, and native
-comparison gates remain mandatory for M5. Web feasibility separately proves the
-chosen WASM or service boundary and does not delay native migration.
+The M2 slice ran on desktop and a physical Android device. One mobile target
+may ship first, but evidence does not transfer between operating systems:
+independently validate the other OS before claiming or packaging it as
+supported. Complete per-release-target accessibility, physical failure,
+startup, installed-size, representative large-document, navigation/relayout,
+and native comparison gates remain mandatory for M5. Web feasibility
+separately proves the chosen browser or service boundary and does not delay
+native delivery.
 
-After the gate, build the library shell and the remaining first-release
-outcomes in vertical slices. Nothing new is built in Iced.
+=== The Dart core gate (M3.0)
+
+The replacement of the Rust core is delivered in slices behind the retained
+reader and library UI, each stacked on the previous one, and the first-release
+reader work (M3.2) starts on the Dart core, not on the bridge. The slices
+must prove, with the M2 evidence as the bar:
+
+* the PDF engine opens the existing fixture corpus and representative real
+  documents, renders at the active zoom and display density within the M0
+  raster budgets, extracts text and geometry that the RFD 6 PDF selection
+  adapter can consume unchanged, reports links, outlines and destinations for
+  outcome 5, and either enforces document permissions correctly or the
+  product records that it does not enforce them;
+* the SQLite store creates, migrates, restarts, and recovers from process
+  death; one connection owner; no second writer;
+* every record type (library, open books, reading state, bookmarks,
+  annotations and anchors, notes) round-trips through the Dart core with the
+  Rust test expectations ported, including anchor exact, recovered, ambiguous
+  and orphaned states across relayout and changed bytes;
+* the reader and library interaction, lifecycle, restoration and
+  accessibility coverage from M2 and M3.1 stays green through each slice;
+* the native bindings load from the packaged Linux, macOS and Android hosts
+  with pinned, checksummed PDFium and SQLite, and the bundle sizes are
+  recorded against the M0 budgets.
+
+After the Rust crates, the bridge package and the bridge toolchain are gone,
+build the remaining first-release outcomes in vertical slices.
 
 == Migration phases and tracking
 
@@ -377,21 +453,28 @@ does not waive the gate.
 budgets, and highlighting as the first vertical slice.
 |The boundary can be implemented without creating two production feature paths.
 
-|M1 — Rust application core
+|M1 — Rust application core (done, historical)
 |Extract renderer-neutral sessions, layout, caches, orchestration, persistence,
 and coarse bridge contracts from the Iced application.
 |Core behavior is independently tested and bridge-facing types contain no UI
 framework or durable viewport state.
 
-|M2 — Highlighting feasibility
-|Build the smallest packaged Flutter/Rust application that opens EPUB and PDF
-and completes selection, persistence, relayout, and accessibility end to end.
+|M2 — Highlighting feasibility (done)
+|Build the smallest packaged Flutter application that opens EPUB and PDF and
+completes selection, persistence, relayout, and accessibility end to end.
 |The measured slice passes on desktop and at least one physical mobile platform;
-otherwise reconsider the bridge, rendering boundary, or Flutter decision.
+otherwise reconsider the rendering boundary or the Flutter decision.
+
+|M3.0 — Dart core
+|Replace the Rust core and the bridge with the Dart PDF engine, the Dart
+SQLite store and ported records, then delete the crates and the bridge
+toolchain.
+|The Dart core gate above passes; no Rust remains in the build, the
+repository's checks, or the packaged hosts.
 
 |M3 — Vertical product delivery
 |Build the library shell and the PDF and EPUB reader behavior the first release
-defines, in reviewable vertical slices.
+defines, in reviewable vertical slices on the Dart core.
 |Flutter delivers every first-release outcome with its "done when" criterion
 on desktop, tablet, and phone.
 
@@ -402,21 +485,23 @@ local notifications, and eventually justified push notifications.
 are tested independently of synchronization correctness.
 
 |M5 — Packaging and release
-|Package, sign, and smoke-test each Flutter host with the Rust library, PDFium,
-assets, manifests, and notices.
+|Package, sign, and smoke-test each Flutter host with its pinned PDFium and
+SQLite libraries, assets, manifests, and notices.
 |Every claimed platform has an independently releasable artifact.
 
 |M6 — Web feasibility
-|Evaluate a browser-compatible core subset and adapters against a remote-service
+|Evaluate the engines' and store's browser builds against a remote-service
 boundary using opening, reading, search, and annotations.
 |Record a separate web go/no-go decision without blocking or weakening native
 delivery.
 |===
 
-M0 and M1 may overlap where an extraction is needed to measure a boundary. M2
-is the Flutter go/no-go gate and precedes broad UI work. M4 is demand-driven and need not block M3. M5 follows the
-first-release outcomes on each platform. M6 is intentionally independent and may run
-in parallel once the portable application boundary is stable.
+M0 to M2 are complete and record the Rust-era boundary. M3.0 precedes M3.2:
+the reader by format is built on the Dart core, not on the bridge; M3.1 (the
+library slice) was delivered on the bridge and is re-pointed at the Dart core
+by M3.0. M4 is demand-driven and need not block M3. M5 follows the
+first-release outcomes on each platform. M6 is intentionally independent and
+may run in parallel once the Dart core is stable.
 
 == Alternatives
 
@@ -427,15 +512,29 @@ Separate SwiftUI and Android-native frontends maximize platform fidelity but add
 two UI languages and still need another desktop frontend. Reconsider separate
 native frontends only if the Flutter gate fails a required criterion.
 
+Keeping the Rust core behind `flutter_rust_bridge` (the architecture from M0 to
+M3.1) preserved tested code and a memory-safe parsing boundary, and it is what
+M2 measured. It was rejected on 2026-10-21 because, once EPUB was Dart, the
+remaining Rust was application code whose only Rust-specific value was the
+PDFium wrapper, and that wrapper exists as a Dart binding; the bridge's
+toolchain, cross-compilation, packaging and web costs then bought nothing. A
+hybrid that kept only PDF in Rust was not taken either: it keeps every cost of
+the bridge for one module. Rust may return for a specific, measured need (a
+format parser with no sound Dart binding) as a leaf native plugin, never as
+the application core.
+
 == Dependencies and consequences
 
 RFD 1's parser, resource-security, stable-location, and bounded-layout decisions
-remain valid; its Iced implementation is historical evidence rather than the
-future presentation boundary. RFD 2 format capabilities, including the comic
-archives that leave the first release, must drive one Flutter reader shell. RFD 3 supplies portable identity and sync semantics independently
-of notification delivery. RFD 5 must package Flutter hosts and the Rust native
-library instead of assuming the current Cargo binary layout. RFD 6 supplies the
-first cross-format interaction and persistence slice.
+remain valid and now bind the Dart EPUB engine; its Iced implementation is
+historical evidence rather than the presentation boundary. RFD 2 format
+capabilities, including the comic archives that leave the first release, are
+Dart engines behind one Flutter reader shell. RFD 3 supplies portable identity
+and sync semantics independently of notification delivery and extends the
+Dart store. RFD 5 packages Flutter hosts with their pinned native libraries
+(PDFium, SQLite) instead of a Rust library and bridge. RFD 6 supplied the
+first cross-format interaction and persistence slice; its annotation store and
+PDF adapter move to Dart with M3.0.
 
 == Implementation
 
@@ -448,6 +547,10 @@ tracked in link:IMPLEMENTATION.adoc[RFD 4 implementation checklist].
 * https://docs.flutter.dev/reference/supported-platforms[Flutter supported deployment platforms]
 * https://docs.flutter.dev/platform-integration/desktop[Flutter desktop support]
 * https://dart.dev/interop/c-interop[Dart C interoperability]
+* https://pub.dev/packages/pdfrx[pdfrx: PDFium for Flutter]
+* https://pub.dev/packages/sqlite3[sqlite3: Dart SQLite bindings]
+* https://drift.simonbinder.eu/[Drift]
+* link:../../docs/dart-document-stack-evaluation-plan.md[Dart document stack evaluation plan]
 * link:../0001/README.adoc[RFD 1: Enhanced EPUB rendering]
 * link:../0003/README.adoc[RFD 3: Cloud synchronization]
 * link:../0005/README.adoc[RFD 5: Distribution and packaging]
