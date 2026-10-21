@@ -52,6 +52,10 @@ final class PdfrxPdfEngine implements PdfEngine {
         break;
       }
     }
+    // pdfrx asks path_provider for a cache directory it uses only for
+    // documents fetched over HTTP, which the reader never opens; the system
+    // temporary directory keeps initialisation free of a plugin channel.
+    pdfrx.Pdfrx.cacheDirectoryPath ??= Directory.systemTemp.path;
     await pdfrx.pdfrxFlutterInitialize();
   }
 
@@ -223,8 +227,7 @@ final class _PdfrxDocument implements PdfEngineDocument {
           ],
           url: link.url,
           page: switch (link.dest?.pageNumber) {
-            final target? when target >= 1 && target <= pageCount =>
-              target - 1,
+            final target? when target >= 1 && target <= pageCount => target - 1,
             _ => null,
           },
         ),
@@ -296,9 +299,7 @@ List<PdfCharacterSample> _sampleOnWorker(_SampleRequest request) {
   try {
     final textPage = pdfium.FPDFText_LoadPage(page);
     if (textPage == nullptr) {
-      throw PdfEngineException(
-        'failed to load text for page ${request.page}',
-      );
+      throw PdfEngineException('failed to load text for page ${request.page}');
     }
     try {
       return using((arena) {
