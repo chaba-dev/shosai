@@ -80,14 +80,21 @@ import of a referenced book adopts it as a private copy.
   and unlinks a direct entry of the directory recorded when the copy was
   imported, never a symlink's target or a path a book uses.
 - Publishing, claiming and deleting copies hold one lock per managed
-  directory: in-process for every `Library` over it, keyed by the directory's
+  directory: in-isolate for every `Library` over it, keyed by the directory's
   resolved path so aliases share it (and taken before the lock file is
   opened), and an exclusive file lock on `.shosai-lock` across processes. A
-  referenced import of a path inside the managed directory is refused.
+  POSIX file lock belongs to the process, so two isolates of one process are
+  not excluded from each other: use a managed directory from one isolate per
+  process. A referenced import of a path inside the managed directory is
+  refused.
 - The managed directory's resolved path is recorded the first time it is
   used. If it later resolves elsewhere (it or a parent was replaced by a
   symlink), managed imports fail and nothing is published, swept or deleted
-  there; removals still commit and leave the copy's deletion pending.
+  there; removals still commit and leave the copy's deletion pending. The
+  directory is checked again just before each change in it, which narrows a
+  replacement during an operation to that instant without closing it
+  (`dart:io` has no directory-handle-relative operations): the library
+  assumes nothing else replaces its private directory while it runs.
 - Removing a book never needs the managed directory: the removal commits
   first, and only the copy's deletion needs the lock, so an unusable
   directory leaves it pending. Deletion debt recorded in another directory

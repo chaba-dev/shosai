@@ -835,6 +835,25 @@ void main() {
       expect(File(t.managedDirectory).readAsStringSync(), 'not a folder');
     });
 
+    test('a managed directory redirected mid-import keeps what the new '
+        'target holds', () async {
+      final t = await TempLibrary.create(
+        inspectors: const {BookFormat.pdf: _RedirectingInspector()},
+      );
+      final source = t.copyFixture('sample.pdf', 'source.pdf');
+
+      final item = await t.library.importFile(source, managed: true);
+
+      expect(item.book, isNull);
+      expect(item.error, contains('no longer resolves'));
+      final entries = Directory(t.path('documents')).listSync();
+      expect(entries, hasLength(1));
+      expect(
+        File(entries.single.path).readAsStringSync(),
+        'the person\'s own file',
+      );
+    });
+
     test('debt recorded in another directory stays pending', () async {
       final t = await TempLibrary.create();
       final source = t.copyFixture('sample.epub', 'source.epub');
@@ -920,46 +939,36 @@ void main() {
         final t = await TempLibrary.create();
         Directory(t.managedDirectory).createSync();
         final root = canonicalBookPath(t.managedDirectory);
+        final lockFile = p.join(root, '.shosai-lock');
         final alias = t.path('alias');
         Link(alias).createSync(t.managedDirectory);
-        final inspected = _SignallingInspector();
-        final importer = Library(
-          t.store,
-          managedDirectory: alias,
-          inspectors: {BookFormat.pdf: inspected},
-        );
-        // A large copy whose removal is still owed: the import reclaims it,
-        // hashing it under the lock, while the retry would delete it.
-        final source = t.path('large.pdf');
-        final bytes = Uint8List(32 * 1024 * 1024);
-        for (var i = 0; i < bytes.length; i += 4096) {
-          bytes[i] = i ~/ 4096 & 0xff;
+        final aliased = Library(t.store, managedDirectory: alias);
+        // Another process holds the directory's file lock, so the first
+        // library to take the in-isolate lock waits on it with the lock file
+        // open. The other, sharing that lock, must not open the file: in one
+        // process its file lock would be granted at once.
+        final holder = await _holdFileLock(t, lockFile);
+        int openLockFiles() => [
+          for (final entry in Directory('/proc/self/fd').listSync())
+            if (_linkTarget(entry.path) == lockFile) entry,
+        ].length;
+
+        final retries = [
+          t.library.retryManagedFileDeletions(),
+          aliased.retryManagedFileDeletions(),
+        ];
+        while (openLockFiles() == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
         }
-        File(source).writeAsBytesSync(bytes);
-        final copy = p.join(root, '${sha256.convert(bytes)}.pdf');
-        File(source).copySync(copy);
-        await t.execute(
-          'INSERT INTO managed_file_deletion_debt (file_path, managed_dir) '
-          'VALUES (?, ?)',
-          [copy, root],
-        );
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        final whileHeld = openLockFiles();
+        await holder.stdin.close();
+        await Future.wait(retries);
 
-        final importing = importer.importFile(source, managed: true);
-        await inspected.done.future;
-        // The import is now taking the lock and hashing the existing copy.
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-        final retry = await t.library.retryManagedFileDeletions();
-        final item = await importing;
-
-        expect(item.error, isNull);
-        expect(item.book!.path, copy);
-        expect(await t.library.verifiedPath(item.book!.id), copy);
-        // Usually the retry waits for the import, which takes the debt over;
-        // if it wins the lock first, the import publishes a fresh copy.
-        // Either way nothing stays pending and the committed copy is intact.
-        expect(retry.pending, 0);
-        expect(await t.count('managed_file_deletion_debt'), 0);
+        expect(whileHeld, 1);
+        expect(await holder.exitCode, 0);
       },
+      skip: Platform.isLinux ? false : 'reads /proc/self/fd',
     );
 
     test('the orphan sweep is not starved by owned copies', () async {
@@ -981,16 +990,20 @@ void main() {
             [copy(i), i.toRadixString(16).padLeft(64, '0')],
         ],
       );
+      // One more orphan than a sweep deletes: whatever order the directory
+      // lists in, a sweep that counted owned copies would stop short of 100.
       final orphans = [
-        for (var i = owned; i < owned + 3; i++)
+        for (var i = owned; i < owned + managedDeletionRetryBatch + 1; i++)
           File(copy(i))..writeAsStringSync('orphan'),
       ];
+      int remaining() => orphans.where((orphan) => orphan.existsSync()).length;
 
       await t.library.retryManagedFileDeletions();
+      final afterOne = remaining();
+      await t.library.retryManagedFileDeletions();
 
-      for (final orphan in orphans) {
-        expect(orphan.existsSync(), isFalse);
-      }
+      expect(afterOne, 1);
+      expect(remaining(), 0);
       expect(t.managedEntries(), hasLength(owned));
     });
   });
@@ -1033,6 +1046,25 @@ void main() {
         expect(item.error, contains('Not a regular file'));
       },
       skip: Platform.isWindows ? 'needs mkfifo' : false,
+    );
+
+    test(
+      'a content probe that cannot close the file fails that file',
+      () async {
+        final t = await TempLibrary.create();
+        final path = t.path('book');
+        File(fixturePath('sample.pdf')).copySync(path);
+
+        await expectLater(
+          IOOverrides.runZoned(
+            () => detectBookFormat(path),
+            createFile: (path) =>
+                _CloseFailingFile(Zone.root.run(() => File(path))),
+          ),
+          throwsCoreError(CoreErrorKind.inaccessible),
+        );
+        expect(await detectBookFormat(path), BookFormat.pdf);
+      },
     );
 
     test('a cover that fails to decode is dropped, not fatal', () {
@@ -1111,24 +1143,108 @@ void main() {
 
 /// Replace the file at [path] with a non-empty directory, which deletion
 /// refuses to remove.
-/// Reports when an import has inspected its staged copy.
-final class _SignallingInspector implements BookInspector {
-  final done = Completer<void>();
+void _blockDeletion(String path) {
+  File(path).deleteSync();
+  Directory(path).createSync();
+  File(p.join(path, 'blocker')).writeAsStringSync('block deletion');
+}
+
+/// Start a process that holds an exclusive lock on [lockFile] until its
+/// standard input closes.
+Future<Process> _holdFileLock(TempLibrary t, String lockFile) async {
+  final script = File(t.path('hold_lock.dart'))
+    ..writeAsStringSync('''
+import 'dart:io';
+
+Future<void> main(List<String> arguments) async {
+  final file = await File(arguments.single).open(mode: FileMode.append);
+  await file.lock(FileLock.blockingExclusive);
+  stdout.writeln('locked');
+  await stdin.drain<void>();
+  await file.close();
+}
+''');
+  final holder = await Process.start(Platform.resolvedExecutable, [
+    script.path,
+    lockFile,
+  ]);
+  final lines = holder.stdout.transform(const SystemEncoding().decoder);
+  await lines.firstWhere((line) => line.contains('locked'));
+  return holder;
+}
+
+/// Where the link at [path] points, or null once it is gone.
+String? _linkTarget(String path) {
+  try {
+    return Link(path).targetSync();
+  } on FileSystemException {
+    return null;
+  }
+}
+
+/// While inspecting the staged copy, puts a file of the person's under the
+/// stage's name in a `documents` folder beside the managed directory and
+/// replaces the managed directory with a link to it, as if the directory were
+/// redirected mid-import.
+final class _RedirectingInspector implements BookInspector {
+  const _RedirectingInspector();
 
   @override
   Future<BookMetadata> inspect(
     String path, {
     CancellationToken? cancellation,
   }) async {
-    if (!done.isCompleted) done.complete();
-    return const BookMetadata(title: 'Large');
+    final managed = p.dirname(path);
+    final documents = Directory(p.join(p.dirname(managed), 'documents'))
+      ..createSync();
+    File(
+      p.join(documents.path, p.basename(path)),
+    ).writeAsStringSync('the person\'s own file');
+    Directory(managed).renameSync(p.join(p.dirname(managed), 'moved-books'));
+    Link(managed).createSync(documents.path);
+    return const BookMetadata(title: 'Redirected');
   }
 }
 
-void _blockDeletion(String path) {
-  File(path).deleteSync();
-  Directory(path).createSync();
-  File(p.join(path, 'blocker')).writeAsStringSync('block deletion');
+/// A file whose handles fail to close.
+final class _CloseFailingFile implements File {
+  _CloseFailingFile(this._file);
+
+  final File _file;
+
+  @override
+  String get path => _file.path;
+
+  @override
+  Future<FileStat> stat() => _file.stat();
+
+  @override
+  Future<RandomAccessFile> open({FileMode mode = FileMode.read}) async =>
+      _CloseFailingHandle(await _file.open(mode: mode));
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _CloseFailingHandle implements RandomAccessFile {
+  _CloseFailingHandle(this._handle);
+
+  final RandomAccessFile _handle;
+
+  @override
+  String get path => _handle.path;
+
+  @override
+  Future<Uint8List> read(int count) => _handle.read(count);
+
+  @override
+  Future<void> close() async {
+    await _handle.close();
+    throw FileSystemException('Close failed', path, const OSError('EIO', 5));
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 /// Cancels [token] while inspecting, as if the person cancelled mid-import.

@@ -90,17 +90,16 @@ Future<BookFormat?> detectBookFormat(String path) async {
   } on FileSystemException catch (error) {
     throw _inaccessible('inspect', path, error);
   }
+  // A read or close failure fails this file only.
   final Uint8List header;
   try {
-    header = await file.read(58);
+    try {
+      header = await file.read(58);
+    } finally {
+      await file.close();
+    }
   } on FileSystemException catch (error) {
     throw _inaccessible('inspect', path, error);
-  } finally {
-    try {
-      await file.close();
-    } on FileSystemException {
-      // Only read from; nothing was left unwritten.
-    }
   }
   if (_startsWith(header, '%PDF-')) return BookFormat.pdf;
   if (header.length == 58 &&

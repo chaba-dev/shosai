@@ -75,10 +75,11 @@ final class Library {
     Future<T> Function(String? root) section,
   ) async {
     final key = await _resolveManagedDirectory();
-    // A redirected directory gets no lock file either: nothing will be
-    // published or deleted in it.
-    if (await _validatedRoot(key) == null) return section(null);
     return _managedLocks.putIfAbsent(key, _Lock.new).run(() async {
+      // Checked once the in-isolate lock is held, so a redirection while
+      // waiting for it is caught: a redirected directory gets no lock file
+      // either, since nothing will be published or deleted in it.
+      if (await _validatedRoot(key) == null) return section(null);
       final RandomAccessFile lock;
       try {
         lock = await File(
@@ -362,6 +363,7 @@ final class Library {
           return (current, true);
         }
         await _records.checkDestinationOwner(destination, fingerprint.hash);
+        if (!await _resolvesTo(root)) throw _redirectedDirectory();
         final destinationExisted = await File(destination).exists();
         await publishManagedFile(stage, destination, fingerprint);
         try {
@@ -382,12 +384,16 @@ final class Library {
               );
           }
         } catch (_) {
-          if (!destinationExisted) await _deleteQuietly(destination);
+          if (!destinationExisted && await _resolvesTo(root)) {
+            await _deleteQuietly(destination);
+          }
           rethrow;
         }
       });
     } finally {
-      if (staged) await _deleteQuietly(stage);
+      // A stage left behind in a redirected directory is swept later, if
+      // the directory comes back.
+      if (staged && await _resolvesTo(root)) await _deleteQuietly(stage);
     }
   }
 
@@ -539,6 +545,7 @@ final class Library {
       pending.clear();
     }
 
+    if (!await _resolvesTo(root)) return;
     try {
       await for (final entry in Directory(root).list(followLinks: false)) {
         if (entry is! File) continue;
@@ -562,6 +569,8 @@ final class Library {
     }
     for (final path in orphans.take(managedDeletionRetryBatch)) {
       if (await _records.isOwned(path)) continue;
+      // The listing is only trusted while root still resolves to itself.
+      if (!await _resolvesTo(root)) return;
       await _deleteQuietly(path);
     }
   }
@@ -614,6 +623,7 @@ final class Library {
       return false;
     }
     await _records.clearDeletionDebt(path);
+    if (!await _resolvesTo(parent)) return false;
     try {
       await quarantined.delete();
     } on PathNotFoundException {
@@ -641,6 +651,23 @@ const _staleStageAge = Duration(days: 1);
 
 /// Sweep candidates checked for an owner per database read.
 const _sweepOwnershipBatch = 200;
+
+/// Whether the directory at [path] still resolves to [path] itself: checked
+/// just before each filesystem change in the managed directory, since it may
+/// be replaced by a symlink while an operation runs.
+///
+/// This narrows a concurrent redirection to the instant between the check
+/// and the change, without closing it: `dart:io` has no operations relative
+/// to an open directory handle (`openat`, `renameat`, `unlinkat`). Replacing
+/// the app's private directory while the library uses it is outside what it
+/// defends against.
+Future<bool> _resolvesTo(String path) async {
+  try {
+    return await Directory(path).resolveSymbolicLinks() == path;
+  } on FileSystemException {
+    return false;
+  }
+}
 
 CoreException _unusableDirectory(FileSystemException error) => CoreException(
   CoreErrorKind.inaccessible,
