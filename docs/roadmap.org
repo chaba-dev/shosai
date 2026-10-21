@@ -14,7 +14,8 @@ desktop application was removed on 2026-10-20 and the tree below records the
 structure as it was; CBZ support left the core the same day and returns as a
 format package after the first release. On 2026-10-21 the owner decided to
 replace the remaining Rust core and the Dart/Rust bridge with Dart before the
-first-release reader work builds on them (RFD 4, milestone M3.0).
+first-release reader work builds on them (RFD 4, milestone M3.0); the same day
+M3.0's removal slice deleted the crates, the bridge and the Rust toolchain.
 
 ** Goals
 
@@ -31,7 +32,7 @@ first-release reader work builds on them (RFD 4, milestone M3.0).
 
 | Component     | Crate/Tool             | License          | Direction                                      |
 |---------------+------------------------+------------------+------------------------------------------------|
-| Core language | Rust (edition 2024) → Dart | —            | Rust core replaced by Dart (RFD 4 M3.0, 2026-10-21) |
+| Core language | Dart                   | —                | Rust core removed (RFD 4 M3.0, 2026-10-21)     |
 | Frontend      | ~iced~ 0.14 → Flutter  | MIT / BSD-3-Clause | Iced removed 2026-10-20; Flutter is the app  |
 | Bridge        | ~flutter_rust_bridge~ → none | MIT        | Removed with the Rust core (M3.0)              |
 | PDF rendering | ~pdfium-render~ → ~pdfrx~ | Apache-2.0 / MIT | Dart-owned PDFium binding, pinned per target |
@@ -40,7 +41,7 @@ first-release reader work builds on them (RFD 4, milestone M3.0).
 | CBZ support   | after the first release | —               | Returns as a Dart format package (RFD 2)       |
 | Platform APIs | Flutter plugins/adapters | Varies         | Files, lifecycle, secure storage, notifications |
 | Database      | ~sqlx~ → ~sqlite3~ (Dart) | MIT / Apache-2.0 | Dart SQLite binding; ~drift~ only if justified |
-| Text shaping  | Flutter                | BSD-3-Clause     | Engine-side shaping; ~cosmic-text~ leaves with Rust |
+| Text shaping  | Flutter                | BSD-3-Clause     | Engine-side shaping; ~cosmic-text~ left with Rust |
 | Build/Dev     | Nix + Flutter tooling  | —                | Reproducible native builds per target          |
 
 ** Licensing Decisions
@@ -314,8 +315,9 @@ RFD: [[file:../rfd/0004/README.adoc][RFD 4: Cross-platform Flutter frontend]]
 - [X] Use cross-format highlighting as the first Flutter desktop/mobile slice
   (M2, Linux and a physical Android device)
 - [X] Retire the Iced reference frontend (2026-10-20)
-- [ ] Replace the Rust core and the bridge with the Dart PDF engine, the Dart
-  SQLite store and ported records, then delete the crates (M3.0)
+- [X] Replace the Rust core and the bridge with the Dart PDF engine, the Dart
+  SQLite store and ported records, then delete the crates (M3.0 slices,
+  2026-10-21; M3.0's exit gate is tracked in RFD 4)
 - [ ] Build the Bookshelf shell and the PDF and EPUB readers on the Dart core
   (M3), then validate each additional platform before claiming support
 - [ ] Evaluate Flutter Web separately through the bindings' browser builds or
@@ -336,36 +338,25 @@ RFD: [[file:../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]
 - [ ] iOS signed archive/IPA and store validation
 
 *Note — PDFium bundling*: The app depends on ~libpdfium~ at runtime (a C
-shared library). Development uses ~pdfium-binaries~ from the Nix dev shell.
-The existing portable Linux archives and macOS bundles already ship PDFium;
-each remaining distribution format must provide and verify its own runtime
-layout:
-- *Nix package* (implemented): Keep ~pdfium-binaries~ in the package closure and
-  wrap the executable with the required runtime library paths.
-- *Portable Linux archives* (implemented): Bundle ~libpdfium.so~ under ~lib/~
-  beside the packaged ~bin/~ directory.
-- *AppImage / Flatpak*: Bundle ~libpdfium.so~ alongside the binary inside
-  the container.
-- *macOS .app* (implemented): Embed ~libpdfium.dylib~ in the bundle's
-  ~Frameworks/~ directory; Developer ID signing and notarization remain.
-- *Windows*: Ship ~pdfium.dll~ next to the ~.exe~ (DLL search order finds it
-  automatically).
-- Alternatively, investigate ~pdfium-render~'s ~static~ feature or building
-  PDFium from source as a static library to eliminate the shared-library
-  dependency entirely.
-- The ~bblanchon/pdfium-binaries~ GitHub repo provides pre-built binaries
-  for all major platforms that CI can download during the release build.
+shared library). Since M3.0 the ~pdfrx~ binding's build hook fetches the
+pinned PDFium release (~chromium/7811~) and Flutter bundles it as a native
+asset on every target, so a host build no longer copies PDFium itself. The
+Iced-era portable Linux archives, macOS bundle and Nix package that shipped
+their own PDFium were removed with the Iced application; each Flutter
+distribution format (RFD 5) must verify the bundled library, its checksum and
+its license notices. ~flutter test~ does not link native assets, so the Nix
+dev shell keeps ~pdfium-binaries~ only to name a PDFium for tests
+(~SHOSAI_PDFIUM_LIBRARY~).
 
 * Key Technical Risks & Mitigations
 
 | Risk                                        | Impact | Mitigation                                                       |
 |---------------------------------------------+--------+------------------------------------------------------------------|
-| Flutter/Rust bridge ownership or latency     | High   | Coarse owned DTOs, measured highlighting slice, explicit release |
 | PDFium binary distribution complexity       | Medium | Nix handles dev; each distro format must bundle libpdfium       |
-| EPUB Flutter rendering boundary unclear     | High   | Measure Rust scene vs semantic model before broad migration      |
+| EPUB Flutter rendering boundary unclear     | High   | Dart engine + Flutter layout adopted 2026-09-28; one renderer    |
 | Mobile lifecycle and memory pressure        | High   | Physical-device suspend/resume and recovery gates per platform   |
 | Iced and Flutter behavior drift in migration | Medium | Freeze Iced; replace in tested vertical slices, then remove it  |
-| ~pdfium-render~ types thread safety         | Medium | Investigate early, may need message-passing architecture         |
+| PDFium thread safety                        | Medium | pdfrx serialises every PDFium call on one worker isolate         |
 | Complex PDFs rendering incorrectly          | Medium | PDFium is battle-tested (Chromium), low risk in practice         |
 | EPUB content diversity (tables, math, etc.) | Medium | Simplified renderer won't handle all content; phase 5 addresses  |
 

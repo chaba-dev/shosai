@@ -1,6 +1,6 @@
 # Shōsai
 
-Shōsai (書斎, "study") is an ebook reader for PDF and EPUB files. Its document engine and library are written in Rust; the application is a Flutter host for desktop and mobile.
+Shōsai (書斎, "study") is an ebook reader for PDF and EPUB files. It is one Dart and Flutter application for desktop and mobile: Dart document engines and a Dart application core under a Flutter interface.
 
 ## Features
 
@@ -18,21 +18,23 @@ Shōsai is currently a work in progress and has not been released yet. Follow de
 
 ### Build from source
 
-The repository includes a Nix development environment with the Rust toolchain,
-Flutter, PDFium and the bridge code generator:
+The repository includes a Nix development environment with Flutter and the
+platform build dependencies:
 
 ```sh
 nix develop
-make flutter-dev            # generate the bridge bindings and run the Linux host
+make flutter-dev            # run the Linux host
 ```
 
 `make flutter-linux-debug` builds the Linux host without running it, and
 `make flutter-macos-debug`, `make flutter-android-profile` and the
-`flutter-ios-*` targets build the other hosts. Without Nix, install Rust 1.94
-or newer, Flutter 3.41 or newer, `flutter_rust_bridge_codegen` 2.11.1 and the
-native dependencies PDFium and the Flutter host need on your platform, then run
-the same Make targets. See `docs/flutter-architecture.md` for how the Flutter
-host and the Rust core divide the work.
+`flutter-ios-*` targets build the other hosts. Without Nix, install Flutter
+3.41 or newer and the native dependencies the Flutter host needs on your
+platform, then run the same Make targets; the PDFium and SQLite libraries are
+fetched by the Dart bindings' build hooks. `make test` also needs a PDFium
+shared library named by `SHOSAI_PDFIUM_LIBRARY`, because `flutter test` does
+not link native assets. See `docs/flutter-architecture.md` for how the
+application is divided.
 
 ## Development
 
@@ -48,19 +50,19 @@ copies in the platform application-support directory under the development
 profile (`shosai-dev`), separate from the `shosai` directory that release builds
 use.
 
-The project is a Cargo workspace with a Flutter application:
+The project is a Flutter application:
 
-- `crates/shosai-core` contains document formats, library storage, and reader logic.
-- `crates/shosai-flutter-bridge` exposes the core to Flutter through `flutter_rust_bridge`.
-- `flutter` contains the cross-platform Flutter host.
+- `flutter/lib` contains the Flutter interface, the reader controllers and the PDF engine.
+- `flutter/packages/shosai_epub` is the EPUB engine.
+- `flutter/packages/shosai_core` is the application core: library, storage, reading state, bookmarks, annotations and search.
+- `fixtures` holds the test documents the packages and the app share.
 - `website` contains the Hugo source for the project website.
 
 On Apple Silicon macOS, build the Flutter iOS host with
 `make flutter-ios-simulator-debug`, `make flutter-ios-device-profile`, or
-`make flutter-ios-device-release`. These targets download checksum-pinned,
-writable Flutter and PDFium artifacts under `target`, package PDFium
-redistribution notices, and remove Nix compiler and SDK variables before Xcode
-runs. Physical device builds are intentionally unsigned; local development
+`make flutter-ios-device-release`. These targets download a checksum-pinned,
+writable Flutter SDK under `target` and remove Nix compiler and SDK variables
+before Xcode runs. Physical device builds are intentionally unsigned; local development
 signing must be configured in Xcode before installing them.
 
 Architecture and product proposals follow the

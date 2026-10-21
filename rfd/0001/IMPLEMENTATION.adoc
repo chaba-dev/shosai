@@ -74,7 +74,7 @@ Status:: DONE
 === Prerequisites
 
 * [-] Capture baseline screenshots, load time, and memory use using
-`crates/shosai-core/tests/fixtures/sample.epub` and at least one large EPUB.
+`fixtures/sample.epub` and at least one large EPUB.
 The Wry comparison stopped when hard platform requirements rejected that
 route; native load/memory and controlled visual baselines remain release
 milestone measurements rather than a renderer-selection prerequisite.
@@ -465,7 +465,7 @@ non-system absolute load dependencies.
 * Extend `crates/shosai-core/tests/epub_tests.rs` and unit tests in
 `epub/render.rs` / `epub/style.rs` for parsing, resolution, cascade, and limits.
 * [x] Add the first generated, redistribution-safe EPUB fixture set under
-`crates/shosai-core/tests/fixtures/` with source/build scripts or clear
+`fixtures/` with source/build scripts or clear
 provenance. Keep each feature isolated plus one combined conformance book.
 Twelve deterministic books plus three expected-rejection archives now cover
 the fidelity source oracles and representative malformed/hostile inputs,
