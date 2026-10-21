@@ -155,9 +155,10 @@
               libGL
             ]);
 
-            # Mesa is libglvnd's EGL vendor; this works under Xvfb and on hosts
-            # whose own GL drivers do not match the Nix glibc.
-            __EGL_VENDOR_LIBRARY_FILENAMES = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
+            # Mesa as libglvnd's only EGL vendor, for headless runs under Xvfb
+            # (`make test-flutter-packaged-linux`). Not set shell-wide: it would
+            # hide every other vendor, such as a desktop's NVIDIA driver.
+            SHOSAI_TEST_EGL_VENDOR = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
 
             # The Flutter PDF engine tests load PDFium from here: `flutter test`
             # does not link pdfrx's native asset. Application bundles carry

@@ -113,10 +113,13 @@ flutter-bundle-check-linux:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_flutter_bundle.py \
 		flutter/build/linux/x64/debug/bundle
 
-## Run the packaged-host integration tests on the Linux host under Xvfb. No
-## PDFium override is set, so the bundle's own PDFium and SQLite must load.
+## Run the packaged-host integration tests on the Linux host under Xvfb, on X11
+## with Mesa's EGL (from the Nix dev shell). No PDFium override is set, so the
+## bundle's own PDFium and SQLite must load.
 test-flutter-packaged-linux:
 	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
+		GDK_BACKEND=x11 \
+		__EGL_VENDOR_LIBRARY_FILENAMES="$${SHOSAI_TEST_EGL_VENDOR:?run in the Nix dev shell}" \
 		xvfb-run -a -s '-screen 0 1280x1024x24' \
 		flutter test -d linux integration_test/packaged_core_test.dart
 

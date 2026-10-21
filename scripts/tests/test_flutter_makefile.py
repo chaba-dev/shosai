@@ -88,6 +88,99 @@ class FlutterMakefileTest(unittest.TestCase):
             ],
         )
 
+    def _run_packaged_target(self, target, command, **variables):
+        """Runs `target` with `command` (a fixture path) stubbed to record its
+        directory, the variables the packaged run depends on, and arguments."""
+        self._write_executable(
+            command,
+            'printf "%s\\n" "$PWD" "${PDFIUM_PATH-unset}" '
+            '"${SHOSAI_PDFIUM_LIBRARY-unset}" "${GDK_BACKEND-unset}" '
+            '"${__EGL_VENDOR_LIBRARY_FILENAMES-unset}" "$@" > "$CAPTURE"',
+        )
+        environment = os.environ.copy()
+        environment.pop("__EGL_VENDOR_LIBRARY_FILENAMES", None)
+        environment.update(
+            {
+                "PATH": f"{self.bin}:{environment['PATH']}",
+                "CAPTURE": str(self.capture),
+                "PDFIUM_PATH": "/environment/pdfium",
+                "SHOSAI_PDFIUM_LIBRARY": "/environment/libpdfium.so",
+                "GDK_BACKEND": "wayland",
+                **variables,
+            }
+        )
+        return subprocess.run(
+            [self.make, target],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_packaged_linux_tests_load_bundled_libraries_on_xvfb(self):
+        # xvfb-run's stand-in drops its own options and runs the command.
+        self._write_executable(
+            self.bin / "xvfb-run",
+            'while [ "$1" = -a ] || [ "$1" = -s ]; do\n'
+            '  if [ "$1" = -s ]; then shift; fi; shift\n'
+            'done\nexec "$@"',
+        )
+        result = self._run_packaged_target(
+            "test-flutter-packaged-linux",
+            self.bin / "flutter",
+            SHOSAI_TEST_EGL_VENDOR="/mesa/50_mesa.json",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.capture.read_text().splitlines(),
+            [
+                str(self.root / "flutter"),
+                "unset",
+                "unset",
+                "x11",
+                "/mesa/50_mesa.json",
+                "test",
+                "-d",
+                "linux",
+                "integration_test/packaged_core_test.dart",
+            ],
+        )
+
+    def test_packaged_linux_tests_need_the_dev_shell_egl_vendor(self):
+        result = self._run_packaged_target(
+            "test-flutter-packaged-linux",
+            self.bin / "flutter",
+            SHOSAI_TEST_EGL_VENDOR="",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("run in the Nix dev shell", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_packaged_macos_tests_run_without_pdfium_overrides(self):
+        result = self._run_packaged_target(
+            "test-flutter-packaged-macos",
+            self.root / "scripts" / "build-flutter-macos.sh",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.capture.read_text().splitlines(),
+            [
+                str(self.root),
+                "unset",
+                "unset",
+                "wayland",
+                "unset",
+                "test",
+                "-d",
+                "macos",
+                "integration_test/packaged_core_test.dart",
+            ],
+        )
+
     def test_aggregate_tests_remain_sequential_with_parallel_make(self):
         overlap = self.root / "overlap"
         lock = self.root / "command-lock"
