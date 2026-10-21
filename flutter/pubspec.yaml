@@ -62,12 +62,17 @@ flutter:
       fonts:
         - asset: fonts/NotoSansJP-Variable.ttf
     # The editorial face of the default type set (`docs/typography.md`): book,
-    # screen and section titles in the Bookshelf shell. Shippori Mincho, its
-    # Japanese partner, is not bundled yet, so Japanese titles fall back to
-    # Noto Sans JP.
+    # screen and section titles in the Bookshelf shell.
     - family: Literata
       fonts:
         - asset: fonts/Literata-Variable.ttf
+    # Literata's Japanese partner in the editorial role. The shell sets every
+    # editorial style at 600, so only that static weight ships; add the other
+    # weights from `assets/fonts/` when a style needs them.
+    - family: Shippori Mincho
+      fonts:
+        - asset: fonts/ShipporiMincho-SemiBold.ttf
+          weight: 600
     # The 書 of the brand mark only (U+66F8); see `assets/fonts/README.md`.
     - family: Shosai Mark
       fonts:
@@ -82,6 +87,7 @@ flutter:
     - fonts/LICENSE-Inter
     - fonts/LICENSE-NotoSansJP.txt
     - fonts/LICENSE-Literata.txt
+    - fonts/LICENSE-ShipporiMincho.txt
     - fonts/LICENSE-NotoSerifJP.txt
 
 dependency_overrides:

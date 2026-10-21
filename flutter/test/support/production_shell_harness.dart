@@ -149,6 +149,8 @@ Future<void> loadHarnessFonts() async {
       ..addFont(rootBundle.load('fonts/NotoSansJP-Variable.ttf')),
     FontLoader('Literata')
       ..addFont(rootBundle.load('fonts/Literata-Variable.ttf')),
+    FontLoader('Shippori Mincho')
+      ..addFont(rootBundle.load('fonts/ShipporiMincho-SemiBold.ttf')),
     FontLoader('Shosai Mark')
       ..addFont(rootBundle.load('fonts/NotoSerifJP-ShosaiMark-Black.ttf')),
     FontLoader('MaterialIcons')

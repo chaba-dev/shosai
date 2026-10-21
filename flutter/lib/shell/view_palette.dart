@@ -18,9 +18,14 @@ TextStyle shellEditorialStyle(
   FontWeight weight = FontWeight.w600,
 }) => TextStyle(
   fontFamily: shellEditorialFontFamily,
-  // Shippori Mincho, the set's Japanese editorial face, is not bundled yet,
-  // so Japanese titles fall back to the bundled interface face.
-  fontFamilyFallback: const [shosaiJapaneseInterfaceFontFamily],
+  // Japanese sets in the set's Japanese editorial face, as the CSS stack
+  // `Literata, "Shippori Mincho"` does; the symbols and rarer ideographs
+  // neither carries (circled and squared forms, Kangxi radicals, halfwidth
+  // kana) still find the bundled Japanese interface face.
+  fontFamilyFallback: const [
+    ShosaiTokens.typeFamilyEditorialJapaneseFlutter,
+    shosaiJapaneseInterfaceFontFamily,
+  ],
   fontSize: size,
   height: lineHeight / size,
   fontWeight: weight,
