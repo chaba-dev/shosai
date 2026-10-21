@@ -91,10 +91,11 @@ import of a referenced book adopts it as a private copy.
   used. If it later resolves elsewhere (it or a parent was replaced by a
   symlink), managed imports fail and nothing is published, swept or deleted
   there; removals still commit and leave the copy's deletion pending. The
-  directory is checked again just before each change in it, which narrows a
-  replacement during an operation to that instant without closing it
-  (`dart:io` has no directory-handle-relative operations): the library
-  assumes nothing else replaces its private directory while it runs.
+  directory is checked again at selected points of an operation, but only as
+  a best effort: nothing guards against it being replaced while an operation
+  runs (`dart:io` has no directory-handle-relative operations), so the library
+  assumes nothing replaces its private directory, or a parent of it, while it
+  runs.
 - Removing a book never needs the managed directory: the removal commits
   first, and only the copy's deletion needs the lock, so an unusable
   directory leaves it pending. Deletion debt recorded in another directory

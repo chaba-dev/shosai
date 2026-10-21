@@ -652,15 +652,15 @@ const _staleStageAge = Duration(days: 1);
 /// Sweep candidates checked for an owner per database read.
 const _sweepOwnershipBatch = 200;
 
-/// Whether the directory at [path] still resolves to [path] itself: checked
-/// just before each filesystem change in the managed directory, since it may
-/// be replaced by a symlink while an operation runs.
+/// Whether the directory at [path] still resolves to [path] itself.
 ///
-/// This narrows a concurrent redirection to the instant between the check
-/// and the change, without closing it: `dart:io` has no operations relative
-/// to an open directory handle (`openat`, `renameat`, `unlinkat`). Replacing
-/// the app's private directory while the library uses it is outside what it
-/// defends against.
+/// A best-effort check at selected boundaries of an operation in the managed
+/// directory (before publishing, sweeping, and some clean-ups); it gives no
+/// guarantee against the directory being replaced while an operation runs:
+/// `dart:io` has no operations relative to an open directory handle
+/// (`openat`, `renameat`, `unlinkat`), and helpers such as the staging copy
+/// still change files after longer waits. The library assumes that nothing
+/// replaces its private directory, or a parent of it, while it runs.
 Future<bool> _resolvesTo(String path) async {
   try {
     return await Directory(path).resolveSymbolicLinks() == path;
