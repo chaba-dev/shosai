@@ -12,10 +12,6 @@
   "@searchLibraryPlaceholder": {
     "description": "Iced reference key: search-library-placeholder. The retained Flutter string keeps the approved candidate wording."
   },
-  "collectionLabel": "COLLECTION",
-  "@collectionLabel": {
-    "description": "Iced reference key: collection. Uppercase in both locales by reference design."
-  },
   "filterAll": "All",
   "@filterAll": {
     "description": "Iced reference key: all (compact filter row)."

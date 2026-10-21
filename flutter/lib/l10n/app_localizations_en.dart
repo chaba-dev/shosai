@@ -18,9 +18,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchLibraryPlaceholder => 'Search title or author';
 
   @override
-  String get collectionLabel => 'COLLECTION';
-
-  @override
   String get filterAll => 'All';
 
   @override

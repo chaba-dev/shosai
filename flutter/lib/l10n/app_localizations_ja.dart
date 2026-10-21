@@ -18,9 +18,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get searchLibraryPlaceholder => 'タイトル・著者を検索...';
 
   @override
-  String get collectionLabel => 'コレクション';
-
-  @override
   String get filterAll => 'すべて';
 
   @override

@@ -6,13 +6,15 @@ part of 'view.dart';
 // and `mobile_library_filters` in `crates/shosai-app/src/app.rs` at the pinned
 // base `1e54270a6bb2`, with the values frozen in
 // `docs/flutter-ui-reference-spec.md` §3.5: a header carrying the page title,
-// subtitle, a 380 px search and the add-books action; a 184 px collection
-// sidebar with Settings pinned to its bottom in wide windows; and a filter row
-// carrying the same entries in compact windows. Neither layout has a drawer.
+// subtitle, a 380 px search and the add-books action, and a filter row carrying
+// the format entries and Settings. Neither layout has a drawer.
 //
-// Two deliberate differences from the reference, both recorded in the package
-// report:
+// Deliberate differences from the reference:
 //
+// * The Bookshelf shell's sidebar (RFD 4, 2026-10-20) replaced the reference's
+//   184 px collection sidebar, so the filter row carries the format entries
+//   and Settings at every width.
+
 // * The compact row sizes its entries to their labels instead of filling the
 //   width (chosen when a fifth CBZ entry could not share one equal-width row at
 //   390 px without truncating "Settings"; CBZ left with its format support on
@@ -255,89 +257,7 @@ class _LibraryActivityBar extends StatelessWidget {
   }
 }
 
-/// The wide layout's collection sidebar.
-///
-/// The format entries sit in a group under the `COLLECTION` label and Settings
-/// is pinned to the bottom, as in the reference. It is not a drawer and is
-/// never shown in compact windows.
-class LibrarySidebar extends StatelessWidget {
-  const LibrarySidebar({
-    super.key,
-    required this.model,
-    required this.onFormatChanged,
-    required this.onSettingsRequested,
-  });
-
-  final LibraryModel model;
-  final ValueChanged<FlutterBookFormat?> onFormatChanged;
-  final VoidCallback? onSettingsRequested;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-    final l10n = AppLocalizations.of(context);
-    final group = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      spacing: 6,
-      children: [
-        Text(
-          l10n.collectionLabel,
-          style: Theme.of(
-            context,
-          ).textTheme.labelSmall?.copyWith(color: scheme.mutedForeground),
-        ),
-        ..._libraryFormatEntries(
-          model: model,
-          l10n: l10n,
-          compact: false,
-          onFormatChanged: onFormatChanged,
-          fillWidth: true,
-        ),
-      ],
-    );
-    final settings = LibraryNavigationButton(
-      label: l10n.filterSettings,
-      selected: false,
-      onPressed: onSettingsRequested,
-      fillWidth: true,
-    );
-    return Container(
-      width: ShosaiTokens.layoutLibrarySidebarWidth,
-      // The pinned Iced sidebar surface has no dark counterpart in the token
-      // source, so the retained dark palette's raised surface stands in for it.
-      color: theme.brightness == Brightness.dark
-          ? scheme.secondary
-          : ShosaiTokens.appSidebarBackground,
-      // Settings stays pinned to the bottom while the sidebar has room for it
-      // and scrolls into reach when a short window does not. The padding sits
-      // inside the scroll view: a padded viewport would be narrower than the
-      // entries and would clip the focus ring they paint outside themselves.
-      child: LayoutBuilder(
-        builder: (context, constraints) => SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: IntrinsicHeight(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 22,
-                  horizontal: 14,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  spacing: 12,
-                  children: [group, const Spacer(), settings],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The compact layout's filter row.
+/// The filter row under the header.
 ///
 /// All/EPUB/PDF and Settings stay directly reachable; the entries size to
 /// their labels so every one of them stays readable, and the row wraps onto a
@@ -366,9 +286,7 @@ class LibraryFilterRow extends StatelessWidget {
           ..._libraryFormatEntries(
             model: model,
             l10n: l10n,
-            compact: true,
             onFormatChanged: onFormatChanged,
-            fillWidth: false,
           ),
           LibraryNavigationButton(
             label: l10n.filterSettings,
@@ -382,20 +300,15 @@ class LibraryFilterRow extends StatelessWidget {
   }
 }
 
-/// One format entry per retained filter, in the reference's order.
-///
-/// The unfiltered entry is `All books` in the sidebar and `All` in the compact
-/// row, matching the reference's two labels. Format names stay Latin in both
-/// catalogs, as they are in the reference.
+/// One format entry per retained filter, in the reference's order. Format
+/// names stay Latin in both catalogs, as they are in the reference.
 List<Widget> _libraryFormatEntries({
   required LibraryModel model,
   required AppLocalizations l10n,
-  required bool compact,
   required ValueChanged<FlutterBookFormat?> onFormatChanged,
-  required bool fillWidth,
 }) => [
   for (final (filter, label) in <(FlutterBookFormat?, String)>[
-    (null, compact ? l10n.filterAll : l10n.filterAllBooks),
+    (null, l10n.filterAll),
     (FlutterBookFormat.epub, l10n.filterFormatEpub),
     (FlutterBookFormat.pdf, l10n.filterFormatPdf),
   ])
@@ -403,7 +316,7 @@ List<Widget> _libraryFormatEntries({
       label: label,
       selected: model.format == filter,
       onPressed: () => onFormatChanged(filter),
-      fillWidth: fillWidth,
+      fillWidth: false,
     ),
 ];
 

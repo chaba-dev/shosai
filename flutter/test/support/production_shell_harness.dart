@@ -416,6 +416,7 @@ class HarnessBridge
   int get pdfEnginePageCount => unitCount;
   final int unitCount;
 
+  int libraryCalls = 0;
   int pageCalls = 0;
   int surfaceCalls = 0;
 
@@ -451,6 +452,7 @@ class HarnessBridge
     required int offset,
     required BigInt cancellationId,
   }) async {
+    libraryCalls += 1;
     final filtered = books
         .where(
           (book) =>

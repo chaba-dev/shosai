@@ -155,8 +155,9 @@ void main() {
         metadata: const <String, Object?>{'config': 'C390 T200'},
         ready: () => harnessImagesReady(tester),
         verify: (tester) async {
-          // A capture named for Japanese must select that interface.
-          expect(find.text('ライブラリ'), findsOneWidget);
+          // A capture named for Japanese must select that interface; the
+          // header's title and the shell's place both read ライブラリ.
+          expect(find.text('ライブラリ'), findsNWidgets(2));
           expect(find.text('Library'), findsNothing);
         },
       );
@@ -175,8 +176,9 @@ void main() {
         metadata: const <String, Object?>{'config': 'W900 T200'},
         ready: () => harnessImagesReady(tester),
         verify: (tester) async {
-          // A capture named for Japanese must select that interface.
-          expect(find.text('ライブラリ'), findsOneWidget);
+          // A capture named for Japanese must select that interface; the
+          // header's title and the shell's place both read ライブラリ.
+          expect(find.text('ライブラリ'), findsNWidgets(2));
           expect(find.text('Library'), findsNothing);
         },
       );

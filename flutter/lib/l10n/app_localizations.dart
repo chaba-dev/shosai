@@ -116,12 +116,6 @@ abstract class AppLocalizations {
   /// **'Search title or author'**
   String get searchLibraryPlaceholder;
 
-  /// Iced reference key: collection. Uppercase in both locales by reference design.
-  ///
-  /// In en, this message translates to:
-  /// **'COLLECTION'**
-  String get collectionLabel;
-
   /// Iced reference key: all (compact filter row).
   ///
   /// In en, this message translates to:

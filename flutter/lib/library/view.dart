@@ -16,6 +16,7 @@ import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/library/controller.dart';
@@ -57,12 +58,32 @@ class ProductShell extends StatefulWidget {
 }
 
 class _ProductShellState extends State<ProductShell> with RestorationMixin {
-  final RestorableStringN _activeBook = RestorableStringN(null);
+  /// The open books and whether the reader was showing, kept across a
+  /// platform restoration.
+  final RestorableStringN _session = RestorableStringN(null);
   final Set<Route<Object?>> _dialogRoutes = {};
   NavigatorState? _navigator;
-  ({FlutterLibraryBook book, String path, int? bookId})? _pendingRestoredBook;
-  ({String path, int? bookId})? _restoredLocator;
+  _RestoredSession? _pendingRestoredSession;
   bool _restoredOpenScheduled = false;
+
+  /// Add books chosen from the rail: the library opens the picker once the
+  /// reader has gone and the library is idle again.
+  bool _pendingImport = false;
+
+  late final ShellController _shell = ShellController(
+    presentReader: _presentReader,
+    dismissReader: _dismissReader,
+  )..addListener(_shellChanged);
+  ModalRoute<void>? _readerRoute;
+
+  /// The reader for the current open book, built once per book so a locator
+  /// report does not rebuild it.
+  (int, Widget)? _reader;
+
+  /// The open books the reader showed during one presentation; their saves
+  /// are drained before the library reloads.
+  final Set<int> _shownBooks = {};
+  List<FlutterLibraryBook>? _listedBooks;
   late final AndroidDocumentImportAdapter _androidImport =
       widget.androidImport ?? AndroidDocumentImportAdapter();
   final Set<String> _providerOperations = {};
@@ -88,11 +109,22 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
 
   void _changed() {
     setState(() {});
+    final books = controller.model.books;
+    if (!identical(books, _listedBooks)) {
+      _listedBooks = books;
+      _shell.dispatch(ShellLibraryBooksChanged(books));
+    }
     _scheduleRestoredOpen();
+    _schedulePendingImport();
+  }
+
+  void _shellChanged() {
+    setState(() {});
+    _session.value = _encodeSession(_shell.model);
   }
 
   void _scheduleRestoredOpen() {
-    if (_pendingRestoredBook != null &&
+    if (_pendingRestoredSession != null &&
         controller.model.loaded &&
         !controller.model.busy &&
         !_restoredOpenScheduled) {
@@ -102,14 +134,29 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         if (!mounted || !controller.model.loaded || controller.model.busy) {
           return;
         }
-        final restored = _pendingRestoredBook;
-        _pendingRestoredBook = null;
-        if (restored != null) {
-          _restoredLocator = (path: restored.path, bookId: restored.bookId);
-          controller.dispatch(LibraryBookOpened(restored.book));
+        final restored = _pendingRestoredSession;
+        _pendingRestoredSession = null;
+        if (restored == null) return;
+        _shell.dispatch(ShellRestored(restored.model));
+        final open = restored.model.currentBook;
+        if (restored.reading && open != null) {
+          controller.dispatch(LibraryBookOpened(open.book));
         }
       });
     }
+  }
+
+  void _schedulePendingImport() {
+    if (!_pendingImport ||
+        _shell.model.reading ||
+        !controller.model.loaded ||
+        controller.model.busy) {
+      return;
+    }
+    _pendingImport = false;
+    scheduleMicrotask(() {
+      if (mounted) controller.dispatch(const LibraryImportRequested());
+    });
   }
 
   @override
@@ -117,9 +164,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
 
   @override
   void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
-    registerForRestoration(_activeBook, 'active-book');
-    if (_activeBook.value case final encoded?) {
-      _pendingRestoredBook = _decodeActiveBook(encoded);
+    registerForRestoration(_session, 'open-books');
+    if (_session.value case final encoded?) {
+      _pendingRestoredSession = _decodeSession(encoded);
       _scheduleRestoredOpen();
     }
   }
@@ -146,44 +193,124 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
     controller.removeListener(_changed);
     controller.dispose();
-    _activeBook.dispose();
+    _shell.removeListener(_shellChanged);
+    _shell.dispose();
+    _session.dispose();
     super.dispose();
   }
 
+  /// The library's open adapter: the shell opens or focuses [book] and the
+  /// effect lasts until the reader has gone, so the library refreshes after it
+  /// as it did when each book was a route of its own.
   Future<void> _openBook(FlutterLibraryBook book) async {
-    final restored = _restoredLocator;
-    _restoredLocator = null;
-    final initialPath = restored?.path ?? book.pathKey;
-    final initialBookId = restored == null ? book.bookId : restored.bookId;
-    _activeBook.value = _encodeBook(
-      book,
-      path: initialPath,
-      bookId: initialBookId,
+    _shell.dispatch(ShellBookOpened(book));
+    await _shell.readerDismissed;
+    // The library drains [book]'s saves itself; the other books the reader
+    // showed are drained here, so the reload reads their final progress.
+    final shown = _shownBooks.where((id) => id != book.bookId).toList();
+    _shownBooks.clear();
+    Object? failure;
+    for (final id in shown) {
+      try {
+        await ReaderController.drainBookWrites(id);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure != null) throw failure;
+  }
+
+  /// Presents the reader inside the shell: the rail beside it on desktop and
+  /// tablet, the reader alone on a phone. Completes when the route has gone.
+  Future<void> _presentReader() async {
+    if (!mounted) return;
+    final route = MaterialPageRoute<void>(
+      builder: (_) => ListenableBuilder(
+        listenable: Listenable.merge([_shell, controller]),
+        builder: (context, _) => _readerFrame(),
+      ),
     );
+    _readerRoute = route;
     try {
-      final route = MaterialPageRoute<void>(
-        builder: (_) => widget.readerBuilder(
-          widget.bridgeFactory(),
-          book,
-          controller.model.settings,
-          initialPath,
-          initialBookId,
-          (path, bookId) {
-            if (mounted) {
-              _activeBook.value = _encodeBook(book, path: path, bookId: bookId);
-            }
-          },
-          // The reader route is pushed outside the shell's notice host, so the
-          // composition root's reporter is handed to it (package 4C).
-          widget.noticeReporter ?? ignoreNotice,
-        ),
-      );
       unawaited(Navigator.of(context).push<void>(route));
       await route.completed;
     } finally {
-      if (mounted) _activeBook.value = null;
+      if (identical(_readerRoute, route)) _readerRoute = null;
+      _reader = null;
     }
   }
+
+  void _dismissReader() {
+    final route = _readerRoute;
+    final navigator = route?.navigator;
+    if (route == null || navigator == null) return;
+    if (route.isCurrent) {
+      navigator.pop();
+    } else {
+      navigator.removeRoute(route);
+    }
+  }
+
+  Widget _readerFrame() {
+    final current = _shell.model.currentBook;
+    return LayoutBuilder(
+      builder: (context, constraints) => ShellFrame(
+        layout: ShellLayout.forWidth(constraints.maxWidth),
+        // The leaving route keeps its rail while it animates away.
+        model: _shell.model.copyWith(reading: true),
+        covers: controller.model.covers,
+        actions: _shellActions,
+        child: current == null ? const SizedBox.expand() : _readerFor(current),
+      ),
+    );
+  }
+
+  Widget _readerFor(OpenBook open) {
+    if (_reader case (final id, final reader) when id == open.id) {
+      return reader;
+    }
+    _shownBooks.add(open.id);
+    final reader = KeyedSubtree(
+      key: ValueKey(open.id),
+      child: widget.readerBuilder(
+        widget.bridgeFactory(),
+        open.book,
+        controller.model.settings,
+        open.path,
+        open.bookId,
+        (path, bookId) {
+          if (mounted) {
+            _shell.dispatch(
+              ShellLocatorChanged(open.id, path: path, bookId: bookId),
+            );
+          }
+        },
+        // The reader route is pushed outside the shell's notice host, so the
+        // composition root's reporter is handed to it (package 4C).
+        widget.noticeReporter ?? ignoreNotice,
+      ),
+    );
+    _reader = (open.id, reader);
+    return reader;
+  }
+
+  ShellActions get _shellActions => ShellActions(
+    selectPlace: (place) => _shell.dispatch(ShellPlaceSelected(place)),
+    openBook: (open) => _shell.model.reading
+        ? _shell.dispatch(ShellBookActivated(open.id))
+        : controller.dispatch(LibraryBookOpened(open.book)),
+    closeBook: (open) => _shell.dispatch(ShellBookClosed(open.id)),
+    moveBook: (from, to) => _shell.dispatch(ShellBookMoved(from, to)),
+    addBooks: _shell.model.reading
+        ? () {
+            _pendingImport = true;
+            _shell.dispatch(const ShellPlaceSelected(ShellPlace.library));
+          }
+        : controller.model.busy
+        ? null
+        : () => controller.dispatch(const LibraryImportRequested()),
+    loadCover: controller.requestCover,
+  );
 
   Future<LibraryImportSelection?> _pickImport() async {
     if (defaultTargetPlatform == TargetPlatform.android) {
@@ -540,79 +667,84 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
 
   @override
   Widget build(BuildContext context) {
-    final model = controller.model;
-    void formatChanged(FlutterBookFormat? format) =>
-        controller.dispatch(LibraryFormatChanged(format));
-    final settingsRequest = model.settings == null
-        ? null
-        : () => controller.dispatch(const LibrarySettingsRequested());
     return Scaffold(
-      // The shared library/settings breakpoint is measured on the client
-      // width, so the probe sits outside the safe area, which insets the
-      // content rather than the window.
+      // The shell's window class and the library's header breakpoint are both
+      // measured on the client width, so the probes sit outside the safe
+      // area, which insets the content rather than the window.
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final compact =
-              constraints.maxWidth <
-              ShosaiTokens.layoutLibraryCompactBreakpoint;
-          return SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                LibraryHeader(
-                  compact: compact,
-                  model: model,
-                  // The header's add-books action is the import's cancel
-                  // action; every other cancellable operation keeps the
-                  // separate cancel action (the retained Flutter capability
-                  // Iced has no counterpart for).
-                  canCancelOperation: controller.canCancel && !model.importing,
-                  onQueryChanged: (query) =>
-                      controller.dispatch(LibraryQueryChanged(query)),
-                  onImportRequested: () =>
-                      controller.dispatch(const LibraryImportRequested()),
-                  onImportCancelled: () =>
-                      controller.dispatch(const LibraryOperationCancelled()),
-                  onOperationCancelled: () =>
-                      controller.dispatch(const LibraryOperationCancelled()),
-                  onRefresh: () =>
-                      controller.dispatch(const LibraryRefreshed()),
-                ),
-                Expanded(
-                  child: compact
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            LibraryFilterRow(
-                              model: model,
-                              onFormatChanged: formatChanged,
-                              onSettingsRequested: settingsRequest,
-                            ),
-                            Expanded(child: _libraryContent(model)),
-                          ],
-                        )
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            LibrarySidebar(
-                              model: model,
-                              onFormatChanged: formatChanged,
-                              onSettingsRequested: settingsRequest,
-                            ),
-                            Expanded(child: _libraryContent(model)),
-                          ],
-                        ),
-                ),
-              ],
-            ),
+          final layout = ShellLayout.forWidth(constraints.maxWidth);
+          final shell = _shell.model;
+          return ShellFrame(
+            layout: layout,
+            model: shell.copyWith(reading: false),
+            covers: controller.model.covers,
+            actions: _shellActions,
+            child: shell.place == ShellPlace.library
+                ? SafeArea(
+                    bottom: layout != ShellLayout.phone,
+                    child: _libraryPlace(layout),
+                  )
+                : ShellPlacePage(layout: layout, place: shell.place),
           );
         },
       ),
     );
   }
 
-  /// The collection column: retained debt surfaces above the collection, so the
-  /// sidebar keeps the full height it has in the reference.
+  /// The Library place: the header, the format filters and Settings, then the
+  /// collection; on a phone the open books lead as Reading now cards.
+  Widget _libraryPlace(ShellLayout layout) {
+    final model = controller.model;
+    final settingsRequest = model.settings == null
+        ? null
+        : () => controller.dispatch(const LibrarySettingsRequested());
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LibraryHeader(
+            compact:
+                constraints.maxWidth <
+                ShosaiTokens.layoutLibraryCompactBreakpoint,
+            model: model,
+            // The header's add-books action is the import's cancel action;
+            // every other cancellable operation keeps the separate cancel
+            // action (the retained Flutter capability Iced has no
+            // counterpart for).
+            canCancelOperation: controller.canCancel && !model.importing,
+            onQueryChanged: (query) =>
+                controller.dispatch(LibraryQueryChanged(query)),
+            onImportRequested: () =>
+                controller.dispatch(const LibraryImportRequested()),
+            onImportCancelled: () =>
+                controller.dispatch(const LibraryOperationCancelled()),
+            onOperationCancelled: () =>
+                controller.dispatch(const LibraryOperationCancelled()),
+            onRefresh: () => controller.dispatch(const LibraryRefreshed()),
+          ),
+          LibraryFilterRow(
+            model: model,
+            onFormatChanged: (format) =>
+                controller.dispatch(LibraryFormatChanged(format)),
+            onSettingsRequested: settingsRequest,
+          ),
+          if (layout == ShellLayout.phone && _shell.model.openBooks.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: ShellReadingNowCards(
+                model: _shell.model,
+                covers: model.covers,
+                actions: _shellActions,
+              ),
+            ),
+          Expanded(child: _libraryContent(model)),
+        ],
+      ),
+    );
+  }
+
+  /// The collection column, with the retained debt surfaces above it.
   ///
   /// The failure alert itself belongs to the collection (the reference draws it
   /// inside the scroll column above the grid), and the two debt states are
@@ -700,46 +832,62 @@ class LibraryBanner extends StatelessWidget {
   }
 }
 
-String _encodeBook(
-  FlutterLibraryBook book, {
-  required String path,
-  required int? bookId,
-}) => jsonEncode({
-  'id': book.bookId,
-  'title': book.title,
-  'author': book.author,
-  'format': book.format.name,
-  'path': book.pathKey,
-  'managed': book.managed,
-  'progress': book.progress,
-  'added': book.dateAdded,
-  'read': book.lastRead,
-  'openPath': path,
-  'openBookId': bookId,
+/// The open books, the current one and whether the reader was showing.
+String _encodeSession(ShellModel model) => jsonEncode({
+  'books': [
+    for (final open in model.openBooks)
+      {
+        'id': open.book.bookId,
+        'title': open.book.title,
+        'author': open.book.author,
+        'format': open.book.format.name,
+        'path': open.book.pathKey,
+        'managed': open.book.managed,
+        'progress': open.book.progress,
+        'added': open.book.dateAdded,
+        'read': open.book.lastRead,
+        'openPath': open.path,
+        'openBookId': open.bookId,
+      },
+  ],
+  'current': model.currentBookId,
+  'reading': model.reading,
 });
 
-({FlutterLibraryBook book, String path, int? bookId})? _decodeActiveBook(
-  String encoded,
-) {
+typedef _RestoredSession = ({ShellModel model, bool reading});
+
+_RestoredSession? _decodeSession(String encoded) {
   try {
     final value = jsonDecode(encoded) as Map<String, Object?>;
-    final format = FlutterBookFormat.values.byName(value['format']! as String);
-    final book = FlutterLibraryBook(
-      bookId: value['id']! as int,
-      title: value['title']! as String,
-      author: value['author'] as String?,
-      format: format,
-      pathKey: value['path']! as String,
-      managed: value['managed']! as bool,
-      cover: null,
-      progress: (value['progress']! as num).toDouble(),
-      dateAdded: value['added']! as String,
-      lastRead: value['read'] as String?,
-    );
+    final books = [
+      for (final entry in value['books']! as List<Object?>)
+        if (entry case final Map<String, Object?> book)
+          OpenBook(
+            book: FlutterLibraryBook(
+              bookId: book['id']! as int,
+              title: book['title']! as String,
+              author: book['author'] as String?,
+              format: FlutterBookFormat.values.byName(
+                book['format']! as String,
+              ),
+              pathKey: book['path']! as String,
+              managed: book['managed']! as bool,
+              cover: null,
+              progress: (book['progress']! as num).toDouble(),
+              dateAdded: book['added']! as String,
+              lastRead: book['read'] as String?,
+            ),
+            path: book['openPath'] as String? ?? book['path']! as String,
+            bookId: book['openBookId'] as int?,
+          ),
+    ];
+    final current = value['current'] as int?;
     return (
-      book: book,
-      path: value['openPath'] as String? ?? book.pathKey,
-      bookId: value['openBookId'] as int?,
+      model: ShellModel(
+        openBooks: List.unmodifiable(books),
+        currentBookId: books.any((open) => open.id == current) ? current : null,
+      ),
+      reading: value['reading'] == true,
     );
   } catch (_) {
     return null;

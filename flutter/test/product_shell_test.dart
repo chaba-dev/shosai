@@ -216,7 +216,7 @@ void main() {
     );
 
     final pdfFilter = find.descendant(
-      of: find.byType(LibrarySidebar),
+      of: find.byType(LibraryFilterRow),
       matching: find.text('PDF'),
     );
     expect(pdfFilter, findsOneWidget);
@@ -1358,8 +1358,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(_cardTitle('詳しい本'), findsOneWidget);
-    // The Japanese interface is selected, not only Japanese metadata.
-    expect(find.text('ライブラリ'), findsOneWidget);
+    // The Japanese interface is selected, not only Japanese metadata: the
+    // header's title and the bottom bar's place both read ライブラリ.
+    expect(find.text('ライブラリ'), findsNWidgets(2));
     expect(find.text('Library'), findsNothing);
     expect(tester.takeException(), isNull);
     await expectLater(
