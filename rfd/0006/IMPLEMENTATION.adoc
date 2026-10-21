@@ -6,8 +6,11 @@ Phases 0 through 4 deliver the first release. Phase 0 closes contracts and
 technical risk before the database schema becomes durable. Phases 1 through 3
 build the shared core and one Flutter vertical slice per format. Phase 4
 integrates the common product experience and is the first-release gate. Phases
-5 and 6 are independent post-MVP interoperability work. RFD 4 owns the Flutter
-bridge, platform gate, and retirement of the Iced reference frontend.
+5 and 6 are independent post-MVP interoperability work. RFD 4 owns the
+application core, the platform gate, and the retirement of the Iced reference
+frontend; since 2026-10-21 the core is Dart (RFD 4, M3.0), so the Rust
+locations named in Phase 1 record where the work was done and Phases 2 to 4
+build on the Dart core.
 
 == Phase 0 — Contracts and technical proof
 
@@ -81,9 +84,9 @@ extraction, and explicit offset conversions.
 
 * [ ] Extract bounded PDF page text, mapping status, character endpoints, and
 ordered page-space geometry once per visible page.
-* [ ] Expose the owned PDF selection snapshot through the Dart/Rust bridge and
-verify pointer movement in Flutter does not cross FFI, reopen PDFium, or
-acquire its global lock.
+* [ ] Expose the owned PDF selection snapshot through the controller-owned
+PDF engine adapter and verify pointer movement in Flutter does not call the
+PDFium binding, reopen the document, or acquire its global lock.
 * [ ] Render temporary and saved PDF overlays in continuous, single-page, and
 spread modes across manual, fit-width, and fit-page zoom.
 * [ ] Preserve logical range order and correct page-space geometry for
@@ -99,8 +102,8 @@ screen-reader semantics on the RFD 4 platform matrix.
 layout/scene chosen by RFD 4, using the same geometry Flutter paints.
 ** EPUB layout is Dart/Flutter-owned as of 2026-09-28
 (link:../../docs/dart-document-stack-evaluation-plan.md[decision record]); the adapter must derive logical ranges and display geometry from
-the same Flutter layout. The anchor model and Rust annotation store are
-unchanged.
+the same Flutter layout. The anchor model is unchanged; the annotation store
+is the Dart core's (RFD 4, M3.0).
 * [ ] Coordinate drag selection across inline spans, block widgets, and visual
 page fragments within one spine item, stopping at the spine boundary.
 * [ ] Render temporary and saved EPUB highlights in continuous and paginated
@@ -118,10 +121,11 @@ keyboard extension, focus order, and screen-reader semantics.
 
 * [ ] Load annotations outside the document-open critical path and preserve
 active-tab isolation when switching or closing reader tabs.
-* [ ] Add selection and annotation commands to the Dart/Rust application
-boundary; keep PDF extraction and anchor logic in `shosai-core`, and keep the
-EPUB anchor schema, resolution states and annotation store there while the
-EPUB parser/normalizer moves to the Dart engine (2026-09-28 amendment above).
+* [ ] Add selection and annotation commands to the application core's
+effect surface; PDF extraction lives in the Dart PDF engine, and the anchor
+schema, normalization, resolution states and annotation store in the Dart
+application core (RFD 4, M3.0), format-neutral, with the engines supplying
+canonical text and geometry.
 * [ ] Provide the shared selection action surface for copy, named color choice,
 optional note creation, and cancellation with equivalent behavior in both
 formats.
@@ -148,8 +152,8 @@ bidirectional and complex Unicode text.
 * [ ] Bound copied quote/context and exclude it from logs and diagnostics.
 * [ ] Verify database migration behavior, process interruption, unavailable
 files, malformed anchors, documents changed in place, and tab lifecycle.
-* [ ] Run `cargo fmt --check`, targeted core and Flutter tests, `cargo clippy`
-for changed Rust crates, Flutter analyze/test, and `make check-rfds`.
+* [ ] Run `make lint-flutter`, targeted core-package and Flutter tests,
+`make test-flutter`, and `make check-rfds`.
 
 Phases 0 through 4 are complete only when all first-release acceptance criteria
 below pass on RFD 4's selected desktop and physical-device platform matrix.

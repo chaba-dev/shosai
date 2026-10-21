@@ -73,6 +73,15 @@ from the same layout, exactly as required below. The layered anchor model, the
 four resolution states, bounded quote/context recovery and the Rust annotation
 store are unchanged, and Rust remains the only database writer while the EPUB
 slice is integrated. PDF keeps its Rust adapter and PDFium geometry path.
+
+*Amended 2026-10-21 — Dart-only core.* link:../0004/README.adoc[RFD 4]
+replaces the Rust core and the Dart/Rust bridge with Dart (its milestone
+M3.0). The annotation store, anchor normalization and quote recovery move to
+the Dart application core; the PDF adapter maps through a Dart-owned PDFium
+binding's page text and character bounds instead of the Rust adapter; the
+Dart core becomes the only database writer. The layered anchor model, the
+resolution states and every rule in this RFD are unchanged; "Rust" in the
+sections below names the implementation this RFD was written against.
 ====
 
 The first release uses each format's natural document boundary.  An EPUB
@@ -126,6 +135,10 @@ owned geometry and buffers, pointer/keyboard/touch input, overlays, responsive
 layout, persistence, relayout, lifecycle, and accessibility before the rest of
 the UI migrates. Do not integrate the full highlighting product into Iced first;
 keep Iced only as an executable behavioral and geometry reference.
+
+(Both steps were completed on the Rust core: RFD 4's M1 and M2. The Iced
+application was removed afterwards, and the 2026-10-21 amendment above ports
+the model and store to Dart with their tests before Phase 4 builds on them.)
 
 === Layered durable anchors
 

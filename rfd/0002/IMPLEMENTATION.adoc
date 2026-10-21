@@ -11,6 +11,11 @@ package with dependency/license approval, bounded parsing, fixtures, reader and
 library integration, and explicit acceptance criteria. DRM circumvention is
 outside the project.
 
+NOTE: The `crates/shosai-core` paths below describe the Rust core that RFD 4
+replaces with Dart (decided 2026-10-21, milestone M3.0). Each format package
+is re-planned against the Dart engines and application core when this RFD
+leaves ideation; the gates and acceptance criteria are unchanged.
+
 == Current Baseline and Prerequisites
 
 * `BookFormat`, extension recognition, database strings, metadata/cover dispatch,

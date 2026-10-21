@@ -22,12 +22,13 @@ and open dispatch without forcing unlike raster, reflowable, and archive-image
 formats behind one rendering abstraction. Add only the seam required to remove
 existing duplicated dispatch; do not define a plugin ABI.
 
-The registry and format operations live in Rust and expose renderer-neutral
-capabilities to the Flutter reader shell proposed by RFD 4. Flutter reuses the
+The registry and format operations are Dart engines behind the Flutter
+reader shell defined by RFD 4 (Dart-only since 2026-10-21). Flutter reuses the
 same fixed-page, reflowable, and image-sequence interaction surfaces across
-formats; format parsing, admission limits, stable locations, and metadata do not
-move into Dart. The existing Iced branches remain migration evidence rather than
-the target application factory.
+formats; format parsing, admission limits, stable locations, and metadata stay
+in each format's engine package, never in widgets. A format whose only sound
+decoder is native enters as a leaf plugin with its own license and packaging
+gate, not as a second application core.
 
 Every format requires legally redistributable fixtures, explicit corrupt and
 unsupported errors, resource bounds, background parsing or decoding where

@@ -42,13 +42,14 @@ webview. It does not require Iced to remain the product frontend forever. The
 Iced implementation and measurements remain evidence for the published
 renderer decision.
 
-link:../0004/README.adoc[RFD 4] proposes moving renderer-neutral pagination,
-geometry, and hit-testing into the Rust core and presenting them through
-Flutter. That proposal may supersede the Iced presentation boundary without
-reopening this RFD's no-script, no-network, bounded-resource, or native-layout
-decisions. A Flutter implementation must preserve the semantic fixtures, stable
-locations, fallback behavior, and performance budgets recorded here rather than
-introducing a second EPUB parser.
+link:../0004/README.adoc[RFD 4] moved the EPUB engine to Dart
+(`shosai_epub`, adopted 2026-09-28) and, on 2026-10-21, the whole application
+core with it. Those decisions supersede the Iced and Rust presentation
+boundaries without reopening this RFD's no-script, no-network,
+bounded-resource, or native-layout decisions. The Dart engine is the one EPUB
+parser and must preserve the semantic fixtures, stable locations, fallback
+behavior, and performance budgets recorded here; the Rust renderer's fixtures
+and measurements remain the evidence it is held to.
 
 == Implementation
 
