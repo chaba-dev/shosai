@@ -294,6 +294,116 @@ void main() {
       },
     );
 
+    testWidgets('the tablet hero buttons are touch targets', (tester) async {
+      // docs/design-system.md: `touch-target` (44 px) on tablet; the buttons
+      // still grow with the text instead of clipping it.
+      for (final (textScale, desktop) in [
+        (1.0, false),
+        (2.0, false),
+        (1.0, true),
+      ]) {
+        await tester.pumpWidget(const SizedBox());
+        final bridge = _ContinueBridge(
+          books: [_resumable(1, 'Resumable')],
+          covers: harnessCovers(count: 1),
+        );
+        HarnessView(
+          size: desktop ? const Size(1280, 800) : const Size(1024, 768),
+          textScale: textScale,
+        ).apply(tester);
+        await renderHarnessState(
+          tester,
+          productionShell(
+            locale: const Locale('en'),
+            home: ProductShell(
+              bridgeFactory: () => bridge,
+              readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+            ),
+          ),
+          ready: () => harnessImagesReady(tester),
+        );
+        for (final label in ['Continue', 'Notes']) {
+          final button = find.ancestor(
+            of: find.descendant(
+              of: find.byType(LibraryContinueCard),
+              matching: find.text(label),
+            ),
+            matching: find.byWidgetPredicate((widget) => widget is ShadButton),
+          );
+          final height = tester.getSize(button.first).height;
+          if (desktop) {
+            expect(height, lessThan(44), reason: '$label keeps pointer size');
+          } else {
+            expect(
+              height,
+              greaterThanOrEqualTo(44),
+              reason: '$label at ${textScale}x',
+            );
+          }
+        }
+        expectOnlyKnownDefects(
+          await findRenderDefects(tester),
+          const <KnownRenderDefect>[],
+        );
+      }
+    });
+
+    testWidgets('the compact hero keeps both actions at 200% text', (
+      tester,
+    ) async {
+      // A narrow tablet puts the hero below its 560 px compact width.
+      for (final locale in const [Locale('en'), Locale('ja')]) {
+        await tester.pumpWidget(const SizedBox());
+        final bridge = _ContinueBridge(
+          books: [_resumable(1, 'Resumable')],
+          covers: harnessCovers(count: 1),
+        );
+        const HarnessView(size: Size(720, 900), textScale: 2).apply(tester);
+        await renderHarnessState(
+          tester,
+          productionShell(
+            locale: locale,
+            home: ProductShell(
+              bridgeFactory: () => bridge,
+              readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+            ),
+          ),
+          ready: () => harnessImagesReady(tester),
+        );
+        final hero = find.byType(LibraryContinueCard);
+        expect(
+          tester
+              .getSize(
+                find.descendant(
+                  of: hero,
+                  matching: find.byType(LibraryBookCover),
+                ),
+              )
+              .width,
+          72,
+          reason: '$locale hero is compact',
+        );
+        final buttons = find.descendant(
+          of: hero,
+          matching: find.byWidgetPredicate((widget) => widget is ShadButton),
+        );
+        expect(buttons, findsNWidgets(2), reason: '$locale actions');
+        final heroRect = tester.getRect(hero);
+        for (final button in buttons.evaluate()) {
+          final rect = tester.getRect(find.byWidget(button.widget));
+          expect(
+            rect.left >= heroRect.left && rect.right <= heroRect.right,
+            isTrue,
+            reason: '$locale action $rect inside the hero $heroRect',
+          );
+        }
+        expectOnlyKnownDefects(
+          await findRenderDefects(tester),
+          const <KnownRenderDefect>[],
+        );
+      }
+    });
+
     testWidgets('a nearly finished hero book does not read as complete', (
       tester,
     ) async {

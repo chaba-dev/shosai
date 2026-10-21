@@ -926,6 +926,10 @@ class LibraryContinueCard extends StatelessWidget {
       final tablet = layout != ShellLayout.desktop;
       final palette = ShellPalette.of(context);
       final l10n = AppLocalizations.of(context);
+      // Touch layouts take the 20 px touch icon, padded to `touch-target`.
+      final (buttonPadding, iconSize) = layout.touch
+          ? (_heroTouchButtonPadding, 20.0)
+          : (_heroButtonPadding, 16.0);
       final (coverWidth, coverType) = compact
           ? (72.0, ShellCoverType.heroCompact)
           : tablet
@@ -1002,7 +1006,7 @@ class LibraryContinueCard extends StatelessWidget {
               children: [
                 ShadButton(
                   height: 0,
-                  padding: _heroButtonPadding,
+                  padding: buttonPadding,
                   // The primary button has an opaque hovered fill, the design
                   // system's accent-hover; the Shad primary variant's is
                   // translucent.
@@ -1013,15 +1017,15 @@ class LibraryContinueCard extends StatelessWidget {
                       ? ShosaiTokens.appDarkPrimaryHovered
                       : ShosaiTokens.appAccentHovered,
                   onPressed: () => openBook(book),
-                  leading: const Icon(LucideIcons.arrowRight, size: 16),
+                  leading: Icon(LucideIcons.arrowRight, size: iconSize),
                   child: Text(l10n.libraryContinue),
                 ),
                 ShadButton.outline(
                   height: 0,
-                  padding: _heroButtonPadding,
+                  padding: buttonPadding,
                   backgroundColor: palette.surface,
                   onPressed: openNotes,
-                  leading: const Icon(LucideIcons.messageSquareText, size: 16),
+                  leading: Icon(LucideIcons.messageSquareText, size: iconSize),
                   child: Text(l10n.shellPlaceNotes),
                 ),
               ],
@@ -1074,6 +1078,13 @@ class LibraryContinueCard extends StatelessWidget {
 const EdgeInsets _heroButtonPadding = EdgeInsets.symmetric(
   horizontal: 12,
   vertical: 7,
+);
+
+/// On touch layouts the same buttons are at least `touch-target` (44 px)
+/// tall: 12 px above and below the 20 px icon.
+const EdgeInsets _heroTouchButtonPadding = EdgeInsets.symmetric(
+  horizontal: 14,
+  vertical: (ShosaiTokens.sizeTouchTarget - 20) / 2,
 );
 
 /// A kicker (`sh-kicker`): `ui-label` small capitals over a title. Japanese
