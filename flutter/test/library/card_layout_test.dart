@@ -491,6 +491,48 @@ void main() {
         findsNothing,
       );
     });
+
+    testWidgets('only a book read to the end is finished', (tester) async {
+      // Status and bar follow the progress itself; the shown percentage is
+      // the only rounded value.
+      const cases = <(double, String, bool)>[
+        (0, 'Not started', false),
+        (.001, '1%', true),
+        (.994, '99%', true),
+        (.995, '99%', true),
+        (.999, '99%', true),
+        (1, 'Finished', false),
+      ];
+      for (final (progress, status, bar) in cases) {
+        // A fresh library per case: the shell keeps its first bridge.
+        await tester.pumpWidget(const SizedBox());
+        await pumpLibrary(
+          tester,
+          books: [
+            FlutterLibraryBook(
+              bookId: 4,
+              title: 'Walden',
+              format: FlutterBookFormat.epub,
+              pathKey: '/books/walden.epub',
+              managed: true,
+              progress: progress,
+              dateAdded: '2026-09-10',
+            ),
+          ],
+        );
+        final card = find.byType(LibraryBookCard);
+        expect(
+          find.descendant(of: card, matching: find.text(status)),
+          findsOneWidget,
+          reason: 'status at $progress',
+        );
+        expect(
+          find.descendant(of: card, matching: find.byType(ShellProgressBar)),
+          bar ? findsOneWidget : findsNothing,
+          reason: 'bar at $progress',
+        );
+      }
+    });
   });
 
   group('covers', () {

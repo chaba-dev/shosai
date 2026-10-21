@@ -284,6 +284,31 @@ void main() {
       },
     );
 
+    testWidgets('a nearly finished hero book does not read as complete', (
+      tester,
+    ) async {
+      final bridge = _ContinueBridge(
+        books: [_resumable(1, 'Nearly done', progress: 0.999)],
+        covers: harnessCovers(count: 1),
+      );
+      const view = HarnessView(size: Size(1280, 800));
+      view.apply(tester);
+      await renderHarnessState(
+        tester,
+        productionShell(
+          locale: const Locale('en'),
+          home: ProductShell(
+            bridgeFactory: () => bridge,
+            readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          ),
+        ),
+        ready: () => harnessImagesReady(tester),
+      );
+      expect(continueTitle('Nearly done'), findsOneWidget);
+      expect(find.text('99% complete'), findsOneWidget);
+      expect(find.text('100% complete'), findsNothing);
+    });
+
     testWidgets('a search hides the section and titles the results', (
       tester,
     ) async {

@@ -936,7 +936,12 @@ class LibraryContinueCard extends StatelessWidget {
           : tablet
           ? shellEditorialStyle(28, 34)
           : shellEditorialStyle(34, 40).copyWith(letterSpacing: -.34);
-      final percentage = (book.progress.clamp(0.0, 1.0) * 100).round();
+      // The hero's book is under way (below 1.0), so it never rounds to 100%;
+      // a started book never rounds to 0% either.
+      final percentage = (book.progress.clamp(0.0, 1.0) * 100).round().clamp(
+        book.progress > 0 ? 1 : 0,
+        99,
+      );
       final place = l10n.libraryPercentComplete(percentage);
       final author = book.author ?? l10n.cardUnknownAuthor;
       final metaStyle = shellInterfaceStyle(
@@ -1137,7 +1142,6 @@ class LibraryBookCard extends StatelessWidget {
     final palette = ShellPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final metaStyle = _cardMetaStyle(context);
-    final percentage = (book.progress.clamp(0.0, 1.0) * 100).round();
     final status = shellReadingStatus(l10n, book.progress);
     final wraps = _cardMetadataWraps(context);
     final statusLabel = removing
@@ -1247,7 +1251,7 @@ class LibraryBookCard extends StatelessWidget {
                 // started, and not once it is finished.
                 SizedBox(
                   height: _cardProgressHeight,
-                  child: percentage > 0 && percentage < 100
+                  child: book.progress > 0 && book.progress < 1
                       ? ShellProgressBar(
                           value: book.progress,
                           height: _cardProgressHeight,
