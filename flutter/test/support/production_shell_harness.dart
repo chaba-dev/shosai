@@ -13,6 +13,7 @@ import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'bridge_pdf_engine.dart';
+import 'bridge_records.dart';
 
 /// Test support for rendering and inspecting the production shell.
 ///
@@ -380,7 +381,9 @@ Uint8List deterministicPageRgba({
 ///
 /// Every method returns fixed data derived from the constructor arguments, so
 /// repeated renders of the same state produce identical pixels.
-class HarnessBridge with BridgePdfEngine implements FlutterBridge {
+class HarnessBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   HarnessBridge({
     List<FlutterLibraryBook>? books,
     Map<int, Uint8List>? covers,

@@ -5,7 +5,7 @@ typedef LibraryRemovalConfirmer =
 typedef LibraryImportPicker = Future<LibraryImportSelection?> Function();
 typedef LibraryImportRunner =
     Future<FlutterImportReport> Function(
-      FlutterBridge bridge,
+      ShosaiRecords records,
       BigInt cancellation,
     );
 typedef LibraryBookOpener = Future<void> Function(FlutterLibraryBook book);

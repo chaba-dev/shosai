@@ -14,6 +14,7 @@ import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 import 'support/bridge_pdf_engine.dart';
+import 'support/bridge_records.dart';
 
 final _documentHandle = FlutterDocumentHandle(
   registry: BigInt.one,
@@ -7567,7 +7568,9 @@ Future<void> _openControlled(
   await bridge.waitForOp(target);
 }
 
-final class _ControlledBridge with BridgePdfEngine implements FlutterBridge {
+final class _ControlledBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _ControlledBridge({
     this.format = FlutterBookFormat.epub,
     this.logicalUnitCount = 1,
@@ -8184,7 +8187,7 @@ final class _ControlledBridge with BridgePdfEngine implements FlutterBridge {
   }
 }
 
-class _FakeBridge with BridgePdfEngine implements FlutterBridge {
+class _FakeBridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
   _FakeBridge({Uint8List? pixels, this.selectionRaster = false})
     : pixels = pixels ?? Uint8List.fromList(List.filled(8, 255));
 
@@ -8435,7 +8438,9 @@ class _FakeBridge with BridgePdfEngine implements FlutterBridge {
   }
 }
 
-final class _SequentialBridge with BridgePdfEngine implements FlutterBridge {
+final class _SequentialBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _SequentialBridge(this.openResults);
 
   final Queue<Object> openResults;

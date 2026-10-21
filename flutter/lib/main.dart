@@ -8,10 +8,12 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
+import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
@@ -104,24 +106,37 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init(externalLibrary: nativeLibrary());
   final directory = await getApplicationSupportDirectory();
+  // The Dart core keeps the records; the Rust bridge still serves the
+  // documents (RFD 4, M3.0) and keeps its own, now unused, database.
+  final core = await ShosaiCore.open(
+    directory.path,
+    pdfEngine: PdfrxPdfEngine(),
+  );
   final databasePath = '${directory.path}/shosai.sqlite3';
   runApp(
     ShosaiApp(
-      productBridgeFactory: () =>
-          FlutterBridge.withDatabasePath(databasePath: databasePath),
+      productBridgeFactory: () => ApplicationBridge.at(core, databasePath),
     ),
   );
 }
 
+/// The Dart core opened in each application-support directory: one store
+/// owner per database, however many bridges share it.
+final Map<String, Future<ShosaiCore>> _cores = {};
+
+/// An application bridge over the Dart core in the application-support
+/// directory, for tools that build their own bridges.
 Future<FlutterBridge> createApplicationBridge({
   Future<Directory> Function()? applicationSupportDirectory,
   String databaseName = 'annotations.sqlite3',
 }) async {
   final directory =
       await (applicationSupportDirectory ?? getApplicationSupportDirectory)();
-  return FlutterBridge.withDatabasePath(
-    databasePath: '${directory.path}/$databaseName',
-  );
+  final core = await (_cores[directory.path] ??= ShosaiCore.open(
+    directory.path,
+    pdfEngine: PdfrxPdfEngine(),
+  ));
+  return ApplicationBridge.at(core, '${directory.path}/$databaseName');
 }
 
 ExternalLibrary? nativeLibrary() {
@@ -247,7 +262,10 @@ class ShosaiApp extends StatefulWidget {
     this.bridge,
     this.productBridgeFactory,
     this.locale,
-  });
+  }) : assert(
+         (bridge == null) != (productBridgeFactory == null),
+         'the app takes exactly one of bridge and productBridgeFactory',
+       );
 
   final FlutterBridge? bridge;
   final FlutterBridge Function()? productBridgeFactory;
@@ -279,7 +297,7 @@ class _ShosaiAppState extends State<ShosaiApp> {
       locale: widget.locale,
       noticeCenter: _noticeCenter,
       home: widget.productBridgeFactory == null
-          ? ReaderScreen(bridge: widget.bridge)
+          ? ReaderScreen(bridge: widget.bridge!)
           : ProductShell(
               bridgeFactory: widget.productBridgeFactory!,
               noticeReporter: _noticeCenter.reporter,

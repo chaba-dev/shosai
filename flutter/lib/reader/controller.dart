@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart'
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
     show shosaiInterfaceFontFamily, shosaiJapaneseInterfaceFontFamily;
+import 'package:shosai_flutter/core/reader_text.dart';
+import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
 import 'package:shosai_flutter/notices/reader_notice_text.dart';
@@ -66,6 +68,7 @@ final class ReaderController implements Listenable {
         ),
     double? baseScale,
   }) : _bridge = bridge,
+       _records = recordsOf(bridge),
        _decoder = decoder,
        // The PDF engine is the reader's own; a bridge that is also an engine
        // (the test fakes) serves both so a fixture bridge keeps one seam.
@@ -111,6 +114,10 @@ final class ReaderController implements Listenable {
   }
 
   final FlutterBridge _bridge;
+
+  /// Books, reading state, bookmarks, annotations and book search, served
+  /// beside [_bridge].
+  final ShosaiRecords _records;
   final PageDecoder _decoder;
   final PdfEngine _pdfEngine;
 
@@ -1049,7 +1056,7 @@ final class ReaderController implements Listenable {
               request: FlutterOpenRequest(localId: path, pathKey: path),
               cancellationId: cancellation,
             )
-          : await _bridge.openLibraryBook(
+          : await _records.openLibraryBook(
               bookId: bookId,
               cancellationId: cancellation,
             );
@@ -1070,7 +1077,7 @@ final class ReaderController implements Listenable {
       var restorationFailed = false;
       if (bookId != null) {
         try {
-          restored = await _bridge.loadReadingState(
+          restored = await _records.loadReadingState(
             bookId: bookId,
             cancellationId: cancellation,
           );
@@ -1095,7 +1102,7 @@ final class ReaderController implements Listenable {
       List<FlutterBookmark> bookmarks = const [];
       if (bookId != null) {
         try {
-          bookmarks = await _bridge.listBookmarks(
+          bookmarks = await _records.listBookmarks(
             bookId: bookId,
             cancellationId: cancellation,
           );
@@ -1215,8 +1222,9 @@ final class ReaderController implements Listenable {
         }
         final revision = _annotationRevision;
         try {
-          final annotations = await _bridge.listAnnotations(
-            document: document.handle,
+          final annotations = await _records.listAnnotations(
+            document: document,
+            text: _readerText(document, cancellation, pdf: pdf),
             scale: restoredLayout.scale,
             cancellationId: cancellation,
           );
@@ -2474,8 +2482,9 @@ final class ReaderController implements Listenable {
             ? await (pdf ??
                       (throw StateError('PDF engine document is missing')))
                   .search(_searchQuery)
-            : await _bridge.searchDocument(
-                document: document.handle,
+            : await _records.searchDocument(
+                document: document,
+                text: _readerText(document, cancellation),
                 query: _searchQuery,
                 cancellationId: cancellation,
               );
@@ -2515,12 +2524,12 @@ final class ReaderController implements Listenable {
       revision: revision,
       bookId: bookId,
       mutation: () => existing == null
-          ? _bridge.toggleBookmark(
+          ? _records.toggleBookmark(
               bookId: bookId,
               unit: BigInt.from(unit),
               offset: offset == null ? null : BigInt.from(offset),
             )
-          : _bridge.deleteBookmark(id: existing.id),
+          : _records.deleteBookmark(id: existing.id),
     );
   }
 
@@ -2580,7 +2589,7 @@ final class ReaderController implements Listenable {
       revision: message.revision,
       bookId: message.bookId,
       mutation: () => message.bookmarkId == null
-          ? _bridge.toggleBookmark(
+          ? _records.toggleBookmark(
               bookId: message.bookId,
               unit: BigInt.from(message.unit),
               offset: message.offset == null
@@ -2588,7 +2597,7 @@ final class ReaderController implements Listenable {
                   : BigInt.from(message.offset!),
               note: message.note,
             )
-          : _bridge.updateBookmarkNote(
+          : _records.updateBookmarkNote(
               id: message.bookmarkId!,
               note: message.note,
             ),
@@ -2604,7 +2613,7 @@ final class ReaderController implements Listenable {
       generation: generation,
       revision: revision,
       bookId: bookId,
-      mutation: () => _bridge.deleteBookmark(id: id),
+      mutation: () => _records.deleteBookmark(id: id),
     );
   }
 
@@ -2634,7 +2643,7 @@ final class ReaderController implements Listenable {
       try {
         await mutation();
         mutationCommitted = true;
-        final items = await _bridge.listBookmarks(
+        final items = await _records.listBookmarks(
           bookId: bookId,
           cancellationId: cancellation,
         );
@@ -2685,7 +2694,7 @@ final class ReaderController implements Listenable {
     );
     unawaited(() async {
       try {
-        final markdown = await _bridge.exportBookmarks(bookId: bookId);
+        final markdown = await _records.exportBookmarks(bookId: bookId);
         // A stale export must not deliver its text: an older book's Markdown
         // would overwrite the newer export's clipboard/notice.
         if (!_isCurrent(generation) || revision != _exportRevision) {
@@ -2853,8 +2862,9 @@ final class ReaderController implements Listenable {
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {
-        annotations = await _bridge.listAnnotations(
-          document: document.handle,
+        annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation),
           scale: layout.scale,
           cancellationId: cancellation,
         );
@@ -2911,6 +2921,42 @@ final class ReaderController implements Listenable {
         replacement.dispose();
       }
     }
+  }
+
+  /// The open [document]'s text for annotations and book search: PDF pages
+  /// from [pdf] (the current engine document when null), EPUB chapters in the
+  /// retained canonical stream every selection surface indexes, with their
+  /// resource paths from the Dart engine's source.
+  ReaderText _readerText(
+    FlutterDocumentSummary document,
+    BigInt cancellation, {
+    PdfEngineDocument? pdf,
+  }) {
+    if (document.format == FlutterBookFormat.pdf) {
+      return PdfReaderText(
+        pdf ??
+            _pdfDocument ??
+            (throw StateError('PDF engine document is missing')),
+      );
+    }
+    final generation = _model.generation;
+    return EpubReaderText(
+      unitCount: document.logicalUnitCount.toInt(),
+      text: (unit) => _bridge.epubCanonicalText(
+        document: document.handle,
+        unit: BigInt.from(unit),
+        cancellationId: cancellation,
+      ),
+      resourcePath: (unit) async {
+        final chapters = (await _ensureEpubSource(
+          document,
+          generation,
+        ))?.book.chapters;
+        return chapters != null && unit < chapters.length
+            ? chapters[unit].resource
+            : null;
+      },
+    );
   }
 
   /// The parsed Dart-engine source for [document], opened once per generation.
@@ -3293,8 +3339,9 @@ final class ReaderController implements Listenable {
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {
-        annotations = await _bridge.listAnnotations(
-          document: document.handle,
+        annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation),
           scale: layout.scale,
           cancellationId: cancellation,
         );
@@ -3448,7 +3495,7 @@ final class ReaderController implements Listenable {
         run: () async {
           String? writeError;
           try {
-            await _bridge.saveReadingState(
+            await _records.saveReadingState(
               bookId: bookId,
               value: value,
               unitCount: unitCount,
@@ -3852,7 +3899,8 @@ final class ReaderController implements Listenable {
       anchor < focus ? focus : anchor,
     );
     final document = _model.document;
-    if (document == null) return;
+    final surface = _model.selectionSurface;
+    if (document == null || surface == null) return;
     final generation = _model.generation;
     final selectionRevision = _selectionRevision;
     if (_model.annotationOperations.isNotEmpty || _closing) return;
@@ -3883,8 +3931,9 @@ final class ReaderController implements Listenable {
       var succeeded = false;
       String? writeError;
       try {
-        final created = await _bridge.createAnnotation(
-          document: document.handle,
+        final created = await _records.createAnnotation(
+          document: document,
+          surface: surface,
           unit: BigInt.from(_model.unit),
           start: BigInt.from(selection.start),
           end: BigInt.from(selection.end),
@@ -3991,8 +4040,8 @@ final class ReaderController implements Listenable {
       ),
     );
     try {
-      final changed = await _bridge.updateAnnotation(
-        document: document.handle,
+      final changed = await _records.updateAnnotation(
+        document: document,
         id: message.id,
         color: message.color,
         body: message.body,
@@ -4092,8 +4141,8 @@ final class ReaderController implements Listenable {
     );
     String? writeError;
     try {
-      final changed = await _bridge.deleteAnnotation(
-        document: document.handle,
+      final changed = await _records.deleteAnnotation(
+        document: document,
         id: id,
       );
       if (!_isCurrent(generation)) return;
@@ -4420,8 +4469,9 @@ final class ReaderController implements Listenable {
       List<FlutterAnnotation>? annotations;
       String? error;
       try {
-        annotations = await _bridge.listAnnotations(
-          document: document.handle,
+        annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation),
           scale: _model.layout.scale,
           cancellationId: cancellation,
         );
@@ -4454,8 +4504,8 @@ final class ReaderController implements Listenable {
     String? cursor,
   ) async {
     try {
-      final page = await _bridge.listAnnotationAssociationSources(
-        target: document.handle,
+      final page = await _records.listAnnotationAssociationSources(
+        target: document,
         cursor: cursor,
         limit: BigInt.from(32),
         cancellationId: cancellation,
@@ -4602,9 +4652,9 @@ final class ReaderController implements Listenable {
     if (bookId != null) _beginBookWrite(bookId);
     String? writeError;
     try {
-      final outcome = await _bridge.associateAnnotationVersion(
+      final outcome = await _records.associateAnnotationVersion(
         sourceVersionId: selected.versionId,
-        target: sources.document.handle,
+        target: sources.document,
         cancellationId: sources.cancellation,
       );
       dispatch(_ReaderAssociationPersisted(sources: sources, outcome: outcome));
@@ -4650,8 +4700,9 @@ final class ReaderController implements Listenable {
     _ReaderAssociationSourcesLoaded sources,
   ) async {
     try {
-      final annotations = await _bridge.listAnnotations(
-        document: sources.document.handle,
+      final annotations = await _records.listAnnotations(
+        document: sources.document,
+        text: _readerText(sources.document, sources.cancellation),
         scale: _model.layout.scale,
         cancellationId: sources.cancellation,
       );

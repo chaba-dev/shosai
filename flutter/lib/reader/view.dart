@@ -65,7 +65,10 @@ class ReaderScreen extends StatefulWidget {
     this.debugEpubSessionObserver,
     this.debugEpubRoutingObserver,
     this.debugPathEntry = false,
-  }) : assert(bridge == null || bridgeFactory == null);
+  }) : assert(
+         (bridge == null) != (bridgeFactory == null),
+         'a reader takes exactly one of bridge and bridgeFactory',
+       );
 
   final FlutterBridge? bridge;
   final FlutterBridge Function()? bridgeFactory;
@@ -262,8 +265,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (!_controllerInitialized) {
       _controllerInitialized = true;
       _controller = ReaderController(
-        bridge:
-            widget.bridge ?? widget.bridgeFactory?.call() ?? FlutterBridge(),
+        bridge: widget.bridge ?? widget.bridgeFactory!(),
         decoder: (pixels, {required width, required height}) =>
             widget.decoder(pixels, width: width, height: height),
         initialScale: (widget.initialSettings?.pdfZoom ?? 0) > 0

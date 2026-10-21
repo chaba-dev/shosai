@@ -14,6 +14,7 @@ import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
 import '../support/bridge_pdf_engine.dart';
+import '../support/bridge_records.dart';
 
 /// Package 3A: the library's navigation composition (LB-03 … LB-10).
 ///
@@ -54,7 +55,9 @@ class _PickerStub {
 
 /// A library bridge whose loads and imports can be held open, so a test can
 /// observe the header while an operation is genuinely in flight.
-class _ControlledBridge with BridgePdfEngine implements FlutterBridge {
+class _ControlledBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _ControlledBridge({List<FlutterLibraryBook>? books})
     : books = books ?? harnessLibraryBooks();
 
