@@ -300,7 +300,12 @@ verifies no checksum; links and destinations are exposed by the engine and
 not yet navigable in the reader (outcome 5); the fixture corpus and the M0
 raster budgets on macOS and a physical Android device; `flutter test` loads
 PDFium from `SHOSAI_PDFIUM_LIBRARY` (the Nix shell) or `PDFIUM_PATH` because
-it does not link native assets.
+it does not link native assets. The Rust core's `pdfium-render` initialises
+PDFium before each call and destroys it after; where it and pdfrx load the same
+image (one `SHOSAI_PDFIUM_LIBRARY` in tests, likely one `lib/libpdfium.so` in
+the Linux bundle and the Android APK), a Rust PDF open tears PDFium down under
+pdfrx and the next page load crashes. pdfrx loads a private copy of an
+environment library; the packaged hosts are unproven until Removal.
 * [ ] *Store.* Add the Dart SQLite binding (`sqlite3`; `drift` only if typed
 queries and migration tooling justify its code generation) in the application
 core package, with a single connection owner, ordered migrations written fresh
@@ -312,8 +317,9 @@ Started 2026-10-21 in `flutter/packages/shosai_core`: one worker isolate
 owns the only connection; ordered migrations stamp `user_version` and an
 `application_id`, and refuse foreign or newer databases untouched; WAL with a
 killed-writer recovery test. `package:sqlite3` 3.5.2 bundles SQLite 3.53.4
-through its build hook (the newest release Flutter 3.41.5 resolves). Open: the packaged-host and Android load proofs, which
-need the app to depend on the package.
+through its build hook (the newest release Flutter 3.41.5 resolves). The app
+depends on the package and opens the store at launch. Open: the packaged-host
+and Android load proofs.
 * [ ] *Records.* Port library and import (referenced and private managed
 copies, bounded archive preflight, cover extraction, deferred cleanup,
 duplicate detection by content identity), open books and reading state,
@@ -323,6 +329,24 @@ integration tests ported as Dart tests. Anchor exact, recovered, ambiguous and
 orphaned behaviour across relayout and changed bytes matches the M2 evidence.
 The EPUB engine's canonical-stream parity gate against the Rust stream is
 retired with the Rust stream; the engine's own fixtures become the reference.
+** [x] Core (2026-10-21): `flutter/packages/shosai_core` ports library and
+import (referenced and managed copies, archive preflight, EPUB covers and PDF
+first-page covers through the PDF engine, deferred deletion, content-hash
+duplicates), reading state, bookmarks and reader settings keyed by content
+hash, annotations (layered anchors, quote-v1, exact, recovered, ambiguous and
+orphaned resolution, bounded quote recovery in isolate batches) and search
+(full Unicode case folding, Unicode 15.1.0, linear matching with the Rust
+limits), with the Rust integration tests ported as Dart tests.
+** [x] Controllers (2026-10-21): the library and reader controllers read
+records through `ShosaiRecords` (`flutter/lib/core/records.dart`); the app's
+`ApplicationBridge` serves them from the Dart core and still delegates
+documents to the Rust bridge. EPUB search runs in the Dart core; annotations
+read EPUB chapter text from the retained canonical stream, which both
+renderers' selection surfaces index, and PDF page text from the PDF engine.
+** [ ] Open: documents opened from a file outside the library keep no
+highlights (the Rust store keyed them by path); the Rust document session and
+canonical stream remain until Removal; PDF search is still duplicated in
+`flutter/lib/reader/pdf/search.dart`.
 * [ ] *Removal.* Delete `crates/`, `Cargo.toml`, `Cargo.lock`,
 `flutter/rust_builder`, `flutter/lib/src/rust`, the `flutter_rust_bridge`
 and `ffigen` dependencies, the bridge codegen and `check-frb` Makefile
