@@ -1,4 +1,4 @@
-.PHONY: lint lint-flutter fmt fmt-flutter check-fmt-flutter test test-flutter test-scripts check-l10n-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release check-rfds changelog next-version theme-tokens check-theme-tokens design-system design-system-css check-design-system-css test-epub-prototype epub-prototype-fixtures measure-epub-prototype flutter-bundle-check-linux
+.PHONY: lint lint-flutter fmt fmt-flutter check-fmt-flutter test test-flutter test-scripts check-l10n-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release check-rfds changelog next-version theme-tokens check-theme-tokens design-system design-system-css check-design-system-css test-epub-prototype epub-prototype-fixtures measure-epub-prototype flutter-bundle-check-linux test-flutter-packaged-linux test-flutter-packaged-macos
 
 ## Run the Flutter and Dart package lints
 lint: lint-flutter
@@ -112,6 +112,19 @@ flutter-linux-debug:
 flutter-bundle-check-linux:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_flutter_bundle.py \
 		flutter/build/linux/x64/debug/bundle
+
+## Run the packaged-host integration tests on the Linux host under Xvfb. No
+## PDFium override is set, so the bundle's own PDFium and SQLite must load.
+test-flutter-packaged-linux:
+	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
+		xvfb-run -a -s '-screen 0 1280x1024x24' \
+		flutter test -d linux integration_test/packaged_core_test.dart
+
+## Run the packaged-host integration tests on the macOS host, likewise with no
+## PDFium override
+test-flutter-packaged-macos:
+	env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY ./scripts/build-flutter-macos.sh \
+		test -d macos integration_test/packaged_core_test.dart
 
 ## Build the Android arm64 Flutter host in profile mode
 flutter-android-profile:

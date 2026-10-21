@@ -9,12 +9,13 @@ import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 /// Packaged-host check for the Dart core's native libraries.
 ///
-/// Run on a desktop host (`flutter test integration_test/packaged_core_test.dart
-/// -d linux`, or `-d macos`) with no `SHOSAI_PDFIUM_LIBRARY` or `PDFIUM_PATH`:
-/// the application bundle supplies PDFium and SQLite, so this proves both
-/// load there. The library import (cover rendering), the open and the reader's
-/// own engine document all use the one PDFium in this process, the sharing
-/// that crashed while the Rust core loaded a second user of the same image.
+/// Run on a desktop host with no `SHOSAI_PDFIUM_LIBRARY` or `PDFIUM_PATH`
+/// (`make test-flutter-packaged-linux` or `make test-flutter-packaged-macos`
+/// unset both; CI runs each): the application bundle supplies PDFium and
+/// SQLite, so this proves both load there. The library import (cover
+/// rendering), the open and the reader's own engine document all use the one
+/// PDFium in this process, the sharing that crashed while the Rust core loaded
+/// a second user of the same image.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 

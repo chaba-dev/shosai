@@ -95,6 +95,23 @@ jobs:
       - name: Verify the Linux bundle carries the declared fonts
         run: nix develop --command make flutter-bundle-check-linux
 
+  flutter-packaged-linux:
+    name: Flutter packaged tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      # Unsets the PDFium overrides: the bundle's PDFium and SQLite must load.
+      - run: nix develop --command make test-flutter-packaged-linux
+
+  flutter-packaged-macos:
+    name: Flutter packaged tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - run: nix develop --command make test-flutter-packaged-macos
+
   flutter-macos-host:
     name: Flutter macOS host
     runs-on: macos-latest
