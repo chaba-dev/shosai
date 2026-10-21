@@ -570,12 +570,14 @@ void main() {
   });
 
   group('covers', () {
-    testWidgets('a generated cover sets a Latin author in capitals', (
+    testWidgets('a generated cover sets a Latin author in ui-label', (
       tester,
     ) async {
-      for (final (author, shown, tracking) in const [
-        ('Ada Lovelace', 'ADA LOVELACE', .6),
-        ('夏目漱石', '夏目漱石', null),
+      // `ui-label` is 11/14 capitals at 600 tracked by 0.08em; a Japanese
+      // author takes `ui-caption`, 12/16 at 400, untracked.
+      for (final (author, shown, size, height, weight, tracking) in const [
+        ('Ada Lovelace', 'ADA LOVELACE', 11.0, 14.0, FontWeight.w600, .88),
+        ('夏目漱石', '夏目漱石', 12.0, 16.0, FontWeight.w400, null),
       ]) {
         await tester.pumpWidget(
           productionShell(
@@ -593,6 +595,13 @@ void main() {
           ),
         );
         final text = tester.widget<Text>(find.text(shown));
+        expect(text.style?.fontSize, size, reason: author);
+        expect(
+          text.style!.fontSize! * text.style!.height!,
+          closeTo(height, 1e-9),
+          reason: author,
+        );
+        expect(text.style?.fontWeight, weight, reason: author);
         expect(text.style?.letterSpacing, tracking, reason: author);
       }
     });

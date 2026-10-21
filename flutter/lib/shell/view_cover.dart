@@ -216,8 +216,9 @@ class ShellFormatBadge extends StatelessWidget {
   }
 }
 
-/// A generated cover's author in `ui-label` capitals; Japanese has no
-/// capitals to set, so it keeps its own form without the tracking.
+/// A generated cover's author in `ui-label`: 11/14 capitals tracked by
+/// 0.08em. `ui-label` is for Latin text, so a Japanese author, which has no
+/// capitals to set, reads in `ui-caption`: 12/16 at weight 400, untracked.
 class _CoverAuthor extends StatelessWidget {
   const _CoverAuthor({required this.author});
 
@@ -227,18 +228,20 @@ class _CoverAuthor extends StatelessWidget {
   Widget build(BuildContext context) {
     final japanese =
         shosaiInterfaceFontForText(author) == shosaiJapaneseInterfaceFontFamily;
-    final style = shellInterfaceStyle(
-      10,
-      13,
-      weight: FontWeight.w500,
-    ).copyWith(color: ShellPalette.coverInk.withValues(alpha: .85));
+    final style = japanese
+        ? shellInterfaceStyle(12, 16)
+        : shellInterfaceStyle(
+            11,
+            14,
+            weight: FontWeight.w600,
+          ).copyWith(letterSpacing: .88);
     return Text(
       japanese ? author : author.toUpperCase(),
       textAlign: TextAlign.start,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: shosaiInterfaceStyleForText(
-        japanese ? style : style.copyWith(letterSpacing: .6),
+        style.copyWith(color: ShellPalette.coverInk.withValues(alpha: .85)),
         author,
       ),
     );

@@ -126,9 +126,9 @@ void main() {
   });
 
   group('card metadata typography', () {
-    // Book titles are editorial: Literata, falling back to the bundled
-    // Japanese face until the Japanese editorial face is bundled. The author is
-    // set on the generated cover in the interface face for its script.
+    // Book titles are editorial: Literata, then Shippori Mincho for Japanese.
+    // The author is set on the generated cover in the interface face for its
+    // script.
     testWidgets('Japanese titles and authors reach the bundled Japanese face', (
       tester,
     ) async {
@@ -139,10 +139,11 @@ void main() {
       final title = _paragraph(tester, _japaneseBook.title, size: 14);
       expect(title.text.style?.fontFamily, shellEditorialFontFamily);
       expect(
-        title.text.style?.fontFamilyFallback,
-        contains(shosaiJapaneseInterfaceFontFamily),
+        title.text.style?.fontFamilyFallback?.first,
+        ShosaiTokens.typeFamilyEditorialJapaneseFlutter,
       );
-      final author = _paragraph(tester, _japaneseBook.author!, size: 10);
+      // A Japanese author is a `ui-caption` label.
+      final author = _paragraph(tester, _japaneseBook.author!, size: 12);
       expect(author.text.style?.fontFamily, shosaiJapaneseInterfaceFontFamily);
       expect(author.text.style?.fontFamilyFallback, [
         shosaiInterfaceFontFamily,
@@ -162,7 +163,7 @@ void main() {
       final author = _paragraph(
         tester,
         _latinBook.author!.toUpperCase(),
-        size: 10,
+        size: 11,
       );
       expect(author.text.style?.fontFamily, shosaiInterfaceFontFamily);
     });
