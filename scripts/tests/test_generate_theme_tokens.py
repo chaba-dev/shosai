@@ -18,6 +18,7 @@ import unittest
 REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY / "scripts" / "generate-theme-tokens.py"
 TOKENS = REPOSITORY / "assets" / "theme" / "tokens.json"
+DESIGN_SYSTEM_TOKENS = REPOSITORY / "docs" / "design-system" / "tokens.json"
 DART_OUTPUT = REPOSITORY / "flutter" / "lib" / "theme_tokens.dart"
 
 
@@ -117,13 +118,107 @@ class TokenSourceTest(unittest.TestCase):
         self.generator.validate(tokens, self.document)
         self.assertGreater(len(tokens), 100)
 
-    def test_the_accent_is_the_iced_value(self):
+    def test_the_accent_is_the_design_system_slate(self):
         colors = self.generator.token_colors(
             self.generator.collect(
                 self.document, self.document["meta"]["authority"]
             )
         )
-        self.assertEqual(self.generator._color_hex(colors["app.accent"]), "#4D5E86")
+        self.assertEqual(self.generator._color_hex(colors["app.accent"]), "#2B3A5C")
+        self.assertEqual(
+            self.generator._color_hex(colors["color.light.accent"]), "#2B3A5C"
+        )
+
+    def test_references_resolve_to_the_referenced_value(self):
+        tokens = self.generator.collect(
+            self.document, self.document["meta"]["authority"]
+        )
+        by_path = {token.dotted: token for token in tokens}
+        background = by_path["app.background"]
+        self.assertEqual(background.reference, "color.light.canvas")
+        self.assertEqual(background.value, by_path["color.light.canvas"].value)
+        # A chain resolves to its end: controlRaised -> surface.
+        raised = by_path["color.light.controlRaised"]
+        self.assertEqual(raised.value, by_path["color.light.surface"].value)
+
+    def test_a_missing_reference_fails(self):
+        document = json.loads(json.dumps(self.document))
+        document["app"]["background"] = "{color.light.nothing}"
+        with self.assertRaises(self.generator.TokenError):
+            self.generator.collect(document, document["meta"]["authority"])
+
+    def test_a_reference_cycle_fails(self):
+        document = json.loads(json.dumps(self.document))
+        document["color"]["light"]["canvas"] = "{app.background}"
+        with self.assertRaises(self.generator.TokenError):
+            self.generator.collect(document, document["meta"]["authority"])
+
+    def test_the_colors_are_the_design_system_tokens(self):
+        """Every design-system color is transcribed under its own name."""
+        design = json.loads(DESIGN_SYSTEM_TOKENS.read_text(encoding="utf-8"))
+        colors = self.generator.token_colors(
+            self.generator.collect(
+                self.document, self.document["meta"]["authority"]
+            )
+        )
+
+        def camel(name):
+            first, *rest = name.split("-")
+            return first + "".join(word[:1].upper() + word[1:] for word in rest)
+
+        def canonical(value, theme):
+            if value.startswith("{"):
+                target = next(
+                    token
+                    for token in design["color"]["tokens"]
+                    if token["name"] == value[1:-1]
+                )
+                target_value = target["value"]
+                if isinstance(target_value, dict):
+                    target_value = target_value[theme]
+                return canonical(target_value, theme)
+            if value.startswith("rgba("):
+                red, green, blue, alpha = (
+                    part.strip() for part in value[5:-1].split(",")
+                )
+                return (
+                    f"#{int(red):02X}{int(green):02X}{int(blue):02X}"
+                    f"{round(float(alpha) * 255):02X}"
+                )
+            return value.upper()
+
+        for token in design["color"]["tokens"]:
+            value = token["value"]
+            themes = ("light", "dark") if isinstance(value, dict) else (None,)
+            for theme in themes:
+                path = (
+                    f"color.{theme}.{camel(token['name'])}"
+                    if theme
+                    else f"color.{camel(token['name'])}"
+                )
+                expected = canonical(value[theme] if theme else value, theme)
+                with self.subTest(path=path):
+                    self.assertIn(path, colors)
+                    self.assertEqual(
+                        self.generator._color_hex(colors[path]).upper(), expected
+                    )
+
+    def test_the_metrics_are_the_design_system_tokens(self):
+        design = json.loads(DESIGN_SYSTEM_TOKENS.read_text(encoding="utf-8"))
+
+        def pixels(value):
+            return float(value.removesuffix("px").removesuffix("em"))
+
+        for token in design["spacing"]["tokens"]:
+            number = token["name"].removeprefix("space-")
+            self.assertEqual(self.document["space"][number], pixels(token["value"]))
+        for token in design["radius"]["tokens"]:
+            key = token["name"].removeprefix("radius-")
+            self.assertEqual(self.document["radius"][key], pixels(token["value"]))
+        for token in design["size"]["tokens"]:
+            first, *rest = token["name"].split("-")
+            key = first + "".join(word.capitalize() for word in rest)
+            self.assertEqual(self.document["size"][key], pixels(token["value"]))
 
     def test_the_historical_brown_is_not_a_token_value(self):
         tokens = self.generator.collect(
@@ -177,7 +272,7 @@ class TokenSourceTest(unittest.TestCase):
             authority["radius"],
         )
 
-    def test_retained_values_are_not_generated_as_iced(self):
+    def test_design_system_values_are_not_generated_as_iced(self):
         dart = self.generator.generate()[DART_OUTPUT]
         lines = dart.splitlines()
         index = next(
@@ -190,14 +285,15 @@ class TokenSourceTest(unittest.TestCase):
             index -= 1
             documentation.insert(0, lines[index].removeprefix("  ///").strip())
         authority = " ".join(documentation)
-        self.assertIn("`app.dark.background` — Retained Flutter", authority)
-        self.assertNotIn("Iced (crates/shosai-app", authority)
+        self.assertIn("`app.dark.background` — Design system dark theme", authority)
+        self.assertNotIn("Iced", authority)
 
     def test_dart_documentation_names_each_token_and_its_authority(self):
         dart = self.generator.generate()[DART_OUTPUT]
-        self.assertIn("/// `app.dark.background` — Retained Flutter", dart)
-        self.assertIn("/// `reader.selection.dragFill` — Retained Flutter", dart)
-        self.assertIn("/// `app.accent` — Iced", dart)
+        self.assertIn("/// `app.dark.background` — Design system dark theme", dart)
+        self.assertIn("/// `reader.selection.dragFill` — Design system", dart)
+        self.assertIn("/// `app.accent` — Design system light theme", dart)
+        self.assertIn("/// `layout.library.gridMinColumn` — Iced", dart)
         for line in dart.splitlines():
             self.assertLessEqual(len(line), 80, line)
 
@@ -210,7 +306,7 @@ class TokenSourceTest(unittest.TestCase):
                 with self.assertRaises(self.generator.TokenError):
                     self.generator.validate(tokens, document)
 
-    def test_a_family_without_both_product_names_fails_validation(self):
+    def test_a_family_without_the_flutter_name_fails_validation(self):
         document = json.loads(json.dumps(self.document))
         del document["type"]["family"]["ui"]["latin"]["flutter"]
         tokens = self.generator.collect(document, document["meta"]["authority"])
@@ -261,7 +357,9 @@ class GeneratedFileTest(unittest.TestCase):
 
     def test_dart_output_uses_colors(self):
         dart = self.generated[DART_OUTPUT]
-        self.assertIn("static const appAccent = Color(0xFF4D5E86);", dart)
+        self.assertIn("static const colorLightAccent = Color(0xFF2B3A5C);", dart)
+        # A reference names the referenced constant instead of repeating it.
+        self.assertIn("static const appAccent = colorLightAccent;", dart)
         self.assertIn("import 'dart:ui' show Color;", dart)
         # The generated module is a transcription: no theme value may be
         # written as a literal in the sources that consume it.

@@ -757,16 +757,15 @@ class _LibraryEmptyCollection extends StatelessWidget {
                         horizontal:
                             ShosaiTokens.layoutButtonPrimaryPaddingHorizontal,
                       ),
-                      // The reference's primary button has an opaque hovered
-                      // fill; the Shad primary variant's is translucent, so the
-                      // light theme keeps the reference value and the dark theme
-                      // keeps its own variant behavior (the header's add-books
+                      // The primary button has an opaque hovered fill, the
+                      // design system's accent-hover; the Shad primary
+                      // variant's is translucent (the header's add-books
                       // action does the same).
                       hoverBackgroundColor: dark
-                          ? null
+                          ? ShosaiTokens.appDarkPrimaryHovered
                           : ShosaiTokens.appAccentHovered,
                       pressedBackgroundColor: dark
-                          ? null
+                          ? ShosaiTokens.appDarkPrimaryHovered
                           : ShosaiTokens.appAccentHovered,
                       onPressed: model.importing ? cancelImport : addFirstBooks,
                       leading: model.importing

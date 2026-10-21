@@ -243,11 +243,12 @@ void main() {
   /// The format entries in the order the reference lists them.
   const formatLabels = ['EPUB', 'PDF'];
 
-  /// The selected entry paints the accent-soft surface and the accent text.
+  /// The selected entry paints the accent-soft surface and the on-accent-soft
+  /// text.
   void expectSelected(WidgetTester tester, String label) {
     final button = navigationButton(tester, label);
     expect(button.backgroundColor, ShosaiTokens.appAccentSoft);
-    expect(button.foregroundColor, ShosaiTokens.appAccent);
+    expect(button.foregroundColor, ShosaiTokens.colorLightOnAccentSoft);
   }
 
   void expectUnselected(WidgetTester tester, String label) {
@@ -626,6 +627,11 @@ void main() {
         reason:
             'the light hovered fill cannot carry the dark theme\'s dark '
             'primary label',
+      );
+      expect(
+        hovered.toARGB32(),
+        ShosaiTokens.appDarkPrimaryHovered.toARGB32(),
+        reason: 'the dark theme uses the design system accent-hover',
       );
       expect(
         hovered.computeLuminance(),

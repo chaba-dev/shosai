@@ -7,9 +7,10 @@ import 'package:shosai_flutter/theme_tokens.dart';
 // The mapped design tokens and the Shad/Material themes built from them.
 //
 // [ShosaiTokens] is generated from `assets/theme/tokens.json`, the single
-// tracked design-token source shared with the Iced application (plan
-// decision 2). Every color, radius, type size and layout metric in this file
-// comes from those tokens; no theme value is written as a literal here, and
+// tracked design-token source (plan decision 2). Its colors are the Shōsai
+// design system (`docs/design-system.md`, the Bookshelf look, D1 paper). Every
+// color, radius, type size and layout metric in this file comes from those
+// tokens; no theme value is written as a literal here, and
 // `flutter/test/app_theme_test.dart` rejects new literal theme colors in
 // `lib/`.
 //
@@ -17,10 +18,10 @@ import 'package:shosai_flutter/theme_tokens.dart';
 //
 // | Flutter theme | Source tokens |
 // | --- | --- |
-// | `shosaiShadTheme(Brightness.light)` | `app.*` (the pinned Iced application palette) |
-// | `shosaiShadTheme(Brightness.dark)` | `app.dark.*` (retained Flutter: Iced defines no dark application palette) |
-// | `shosaiReaderShadTheme(<any reader theme>)` | `app.*` (the pinned Iced reader chrome; owner decision 2026-09-28: the chrome does not follow the reader theme) |
-// | reader page colors (`pageColors`) | `reader.<theme>.*` (the pinned Iced document palettes; the reader palette applies to the document area only) |
+// | `shosaiShadTheme(Brightness.light)` | `app.*` (the design system's light theme, `color.light.*`) |
+// | `shosaiShadTheme(Brightness.dark)` | `app.dark.*` (the design system's dark theme, `color.dark.*`) |
+// | `shosaiReaderShadTheme(<any reader theme>)` | `app.*` (owner decision 2026-09-28: the chrome does not follow the reader theme) |
+// | reader page colors (`pageColors`) | `reader.<theme>.*` (the design system's page themes; the reader palette applies to the document area only) |
 // | radii | `radius.small` / `radius.medium` |
 // | type | `type.family.*` and `type.size.*` |
 //
@@ -120,9 +121,10 @@ ShadButtonSizeTheme _shosaiButtonSizeTheme(
 
 /// The application palette as a Shad color scheme.
 ///
-/// The light scheme is the pinned Iced application palette (`app.*`); the dark
-/// scheme is the retained Flutter dark palette (`app.dark.*`), because Iced
-/// defines no dark application palette.
+/// The light scheme is the design system's light theme (`app.*`, which reads
+/// `color.light.*`); the dark scheme is its dark theme (`app.dark.*`, which
+/// reads `color.dark.*`). Inputs take `line-strong` and quiet selected controls
+/// take `on-accent-soft` text, as `docs/design-system.md` requires.
 ShadColorScheme shosaiAppColorScheme(Brightness brightness) =>
     brightness == Brightness.dark ? _appDarkColorScheme : _appLightColorScheme;
 
@@ -140,11 +142,11 @@ const _appLightColorScheme = ShadColorScheme(
   muted: ShosaiTokens.appSurfaceMuted,
   mutedForeground: ShosaiTokens.appTextMuted,
   accent: ShosaiTokens.appAccentSoft,
-  accentForeground: ShosaiTokens.appAccent,
+  accentForeground: ShosaiTokens.colorLightOnAccentSoft,
   destructive: ShosaiTokens.appDanger,
   destructiveForeground: ShosaiTokens.appTextOnAccent,
   border: ShosaiTokens.appBorder,
-  input: ShosaiTokens.appBorder,
+  input: ShosaiTokens.colorLightLineStrong,
   ring: ShosaiTokens.appAccent,
   selection: ShosaiTokens.appAccentSoft,
 );
@@ -186,8 +188,9 @@ ShadColorScheme shosaiReaderColorScheme(String? readerTheme) =>
 
 /// The reader **document** palette for [readerTheme].
 ///
-/// These are the pinned Iced document palettes (`reader.light.*`,
-/// `reader.dark.*`, `reader.sepia.*`); the shared chrome does not use them
+/// These are the design system's page themes (`reader.light.*` = paper,
+/// `reader.dark.*` = night, `reader.sepia.*` = sepia); the shared chrome does
+/// not use them
 /// (see [shosaiReaderColorScheme]).
 ({Color background, Color foreground}) shosaiReaderDocumentColors(
   String? readerTheme,
@@ -368,16 +371,16 @@ ColorScheme shosaiMaterialColorScheme(Brightness brightness) =>
         primary: ShosaiTokens.appAccent,
         onPrimary: ShosaiTokens.appTextOnAccent,
         primaryContainer: ShosaiTokens.appAccentSoft,
-        onPrimaryContainer: ShosaiTokens.appAccent,
+        onPrimaryContainer: ShosaiTokens.colorLightOnAccentSoft,
         secondary: ShosaiTokens.appAccentSoft,
-        onSecondary: ShosaiTokens.appAccent,
+        onSecondary: ShosaiTokens.colorLightOnAccentSoft,
         error: ShosaiTokens.appDanger,
         onError: ShosaiTokens.appTextOnAccent,
         surface: ShosaiTokens.appBackground,
         onSurface: ShosaiTokens.appText,
         onSurfaceVariant: ShosaiTokens.appTextMuted,
         outline: ShosaiTokens.appBorder,
-        outlineVariant: ShosaiTokens.appBorder,
+        outlineVariant: ShosaiTokens.colorLightLineStrong,
         surfaceContainerHighest: ShosaiTokens.appSurfaceMuted,
         surfaceContainerLow: ShosaiTokens.appSurface,
         shadow: ShosaiTokens.appShadowBase,

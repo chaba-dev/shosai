@@ -81,9 +81,10 @@ _吾輩は猫である_ (EPUB, vertical text).
 The mock is the reference for layout and interaction. How it looks and speaks
 is the link:../../docs/design-system.md[design system]: tokens, components,
 words and reading-surface rules, with a development viewer under
-`docs/design-system/`. Its tokens are the design target; the applications keep
-rendering from `assets/theme/tokens.json` until implementation moves the
-values across.
+`docs/design-system/`. The application renders from `assets/theme/tokens.json`,
+which carries the design system's colors, radii, spacing and sizes under the
+same names; its type styles, shadows and the Bookshelf composition move across
+as the screens are rebuilt.
 
 === 1. Every device
 
