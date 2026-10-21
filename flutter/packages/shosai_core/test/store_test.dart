@@ -145,25 +145,102 @@ void main() {
     },
   );
 
-  test('a database from a newer schema is refused', () async {
+  test(
+    'a database from a newer schema is refused and left untouched',
+    () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      await (await Store.open(path)).close();
+      final db = sqlite3.open(path);
+      db.execute('PRAGMA journal_mode = DELETE');
+      db.execute('PRAGMA user_version = 999');
+      db.close();
+      final before = File(path).readAsBytesSync();
+
+      await expectLater(
+        Store.open(path),
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.malformed,
+          ),
+        ),
+      );
+
+      expect(File(path).readAsBytesSync(), before);
+      final after = sqlite3.open(path);
+      addTearDown(after.close);
+      expect(after.select('PRAGMA journal_mode').first.columnAt(0), 'delete');
+    },
+  );
+
+  test('a failed first migration leaves a fresh file unclaimed', () async {
     final directory = tempDataDirectory();
     final path = '${directory.path}/library.sqlite3';
-    await (await Store.open(path)).close();
-    final db = sqlite3.open(path);
-    db.execute('PRAGMA user_version = 999');
-    db.close();
 
     await expectLater(
-      Store.open(path),
-      throwsA(
-        isA<CoreException>().having(
-          (e) => e.kind,
-          'kind',
-          CoreErrorKind.malformed,
-        ),
+      Store.open(
+        path,
+        migrations: const [
+          Migration(1, 'broken', '''
+            CREATE TABLE half_done (id INTEGER PRIMARY KEY);
+            THIS IS NOT SQL;
+          '''),
+        ],
       ),
+      throwsA(isA<CoreException>()),
     );
+
+    final db = sqlite3.open(path);
+    expect(db.select('PRAGMA application_id').first.columnAt(0), 0);
+    expect(db.select('PRAGMA user_version').first.columnAt(0), 0);
+    expect(db.select('SELECT name FROM sqlite_schema'), isEmpty);
+    db.close();
+    final store = await Store.open(path, migrations: _testMigrations);
+    addTearDown(store.close);
+    expect(store.schemaVersion, 1);
   });
+
+  test(
+    'two instances opening an older database apply a migration once',
+    () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      await (await Store.open(path, migrations: _testMigrations)).close();
+      final migrations = [
+        ..._testMigrations,
+        const Migration(
+          2,
+          'seed',
+          "INSERT INTO notes (body) VALUES ('migrated');",
+        ),
+      ];
+      // Hold the write lock so both instances are admitted at version 1 and
+      // then queue for the migration's lock.
+      final holder = sqlite3.open(path);
+      holder.execute('BEGIN IMMEDIATE');
+      final opening = [
+        Store.open(path, migrations: migrations),
+        Store.open(path, migrations: migrations),
+      ];
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      holder.execute('COMMIT');
+      holder.close();
+
+      final stores = await Future.wait(opening);
+      for (final store in stores) {
+        addTearDown(store.close);
+        expect(store.schemaVersion, 2);
+      }
+      expect(
+        await stores.first.read(
+          (db) => db.select('SELECT COUNT(*) FROM notes').first.columnAt(0),
+        ),
+        1,
+      );
+    },
+  );
 
   test('a file that is not SQLite is refused', () async {
     final directory = tempDataDirectory();
@@ -272,6 +349,71 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('a write whose result cannot be sent is rolled back', () async {
+    final store = await tempStore();
+
+    await expectLater(
+      store.transaction((db) {
+        db.execute("INSERT INTO preferences (key, value) VALUES ('lost', 'x')");
+        return ReceivePortHolder();
+      }),
+      throwsA(
+        isA<CoreException>().having(
+          (e) => e.kind,
+          'kind',
+          CoreErrorKind.storage,
+        ),
+      ),
+    );
+
+    expect(await Preferences(store).get('lost'), isNull);
+  });
+
+  test(
+    'an async body is refused, persists nothing and stops the store',
+    () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      final store = await Store.open(path);
+
+      final refused = store.transaction((db) async {
+        db.execute(
+          "INSERT INTO preferences (key, value) VALUES ('before', 'x')",
+        );
+        await Future<void>.delayed(Duration.zero);
+        db.execute(
+          "INSERT INTO preferences (key, value) VALUES ('after', 'x')",
+        );
+      });
+      final queued = store.read((db) => 1);
+
+      await expectLater(
+        refused,
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.storage,
+          ),
+        ),
+      );
+      await expectLater(queued, throwsA(isA<CoreException>()));
+      await store.close();
+
+      final reopened = await Store.open(path);
+      addTearDown(reopened.close);
+      expect(await Preferences(reopened).getAll(), isEmpty);
+    },
+  );
+
+  test('concurrent and repeated closes all settle', () async {
+    final directory = tempDataDirectory();
+    final store = await Store.open('${directory.path}/library.sqlite3');
+
+    await Future.wait([store.close(), store.close()]);
+    await store.close();
   });
 
   test('closing finishes queued work and then refuses new requests', () async {

@@ -44,10 +44,18 @@ final class Preferences {
 }
 
 String? _get(Database db, String key) {
-  final rows = db.select('SELECT value FROM preferences WHERE key = ?', [key]);
+  // The size check runs in SQL so an oversized stored value is never
+  // materialized in Dart.
+  final rows = db.select(
+    '''
+    SELECT CASE WHEN length(CAST(value AS BLOB)) <= ? THEN value END
+    FROM preferences WHERE key = ?
+    ''',
+    [maxPreferenceValueBytes, key],
+  );
   if (rows.isEmpty) return null;
-  final value = rows.first.columnAt(0) as String;
-  if (_bytes(value) > maxPreferenceValueBytes) {
+  final value = rows.first.columnAt(0) as String?;
+  if (value == null) {
     throw const CoreException.limitExceeded(
       'A stored preference exceeds its byte limit.',
     );

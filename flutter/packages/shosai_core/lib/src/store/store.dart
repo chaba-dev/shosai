@@ -40,7 +40,12 @@ final class Migration {
 /// The body runs synchronously against the only connection. It is sent to the
 /// worker, so it may capture only values that can cross an isolate boundary
 /// (strings, numbers, lists, records, plain data classes), and its result must
-/// be such a value too.
+/// be such a value too. A write's result is checked before its `COMMIT`: one
+/// that cannot be sent rolls the write back.
+///
+/// The body must be synchronous. One that returns a `Future` (an `async`
+/// body) fails with [CoreErrorKind.storage], its transaction is rolled back,
+/// and the store closes before the body's continuation can run.
 typedef StoreBody<T> = T Function(Database db);
 
 /// The application's SQLite database, owned by a dedicated worker isolate.
@@ -143,7 +148,12 @@ final class _StoreClient {
       switch (message) {
         case _Result(:final id, :final value):
           _pending.remove(id)?.complete(value);
+        case _Staged(:final id, :final value):
+          _staged[id] = value;
+        case _Committed(:final id):
+          _pending.remove(id)?.complete(_staged.remove(id));
         case _Failure(:final id, :final error, :final stackTrace):
+          _staged.remove(id);
           _pending
               .remove(id)
               ?.completeError(error, StackTrace.fromString(stackTrace));
@@ -158,6 +168,7 @@ final class _StoreClient {
   final ReceivePort _exit;
   final void Function() _onDone;
   final _pending = <int, Completer<Object?>>{};
+  final _staged = <int, Object?>{};
   final _exited = Completer<void>();
   var _nextRequest = 0;
   Completer<void>? _closing;
@@ -203,6 +214,7 @@ final class _StoreClient {
       );
     }
     _pending.clear();
+    _staged.clear();
     _responses.close();
     _exit.close();
     _onDone();
@@ -265,47 +277,40 @@ final class _Failure {
   final String stackTrace;
 }
 
+/// A write's result, sent before its `COMMIT` so that a result which cannot
+/// be sent rolls the write back. The client holds it until [_Committed].
+final class _Staged {
+  const _Staged(this.id, this.value);
+
+  final int id;
+  final Object? value;
+}
+
+final class _Committed {
+  const _Committed(this.id);
+
+  final int id;
+}
+
 void _workerMain(_Startup startup) {
-  final Database db;
-  final int version;
+  final (Database, int) opened;
   try {
-    db = openStoreDatabase(startup.path);
-    try {
-      version = migrateStoreDatabase(db, startup.migrations);
-    } catch (_) {
-      db.close();
-      rethrow;
-    }
+    opened = _openDatabase(startup.path, startup.migrations);
   } catch (error) {
     startup.startup.send(_Failed(_sendableError(error)));
     return;
   }
+  final (db, version) = opened;
   final requests = ReceivePort();
+  final responses = startup.responses;
   startup.startup.send(_Ready(requests.sendPort, version));
   requests.listen((message) {
     switch (message) {
       case _Run(:final id, :final body, :final write):
-        try {
-          final value = write
-              ? _inTransaction(db, body)
-              : (body as Object? Function(Database))(db);
-          try {
-            startup.responses.send(_Result(id, value));
-          } on ArgumentError catch (error) {
-            startup.responses.send(
-              _Failure(
-                id,
-                CoreException.storage(
-                  'A database result could not be sent: $error',
-                ),
-                StackTrace.current.toString(),
-              ),
-            );
-          }
-        } catch (error, stackTrace) {
-          startup.responses.send(
-            _Failure(id, _sendableError(error), stackTrace.toString()),
-          );
+        if (write) {
+          _runWrite(db, responses, id, body);
+        } else {
+          _runRead(db, responses, id, body);
         }
       case _Close():
         db.close();
@@ -314,17 +319,70 @@ void _workerMain(_Startup startup) {
   });
 }
 
-Object? _inTransaction(Database db, Function body) {
-  db.execute('BEGIN IMMEDIATE');
+void _runRead(Database db, SendPort responses, int id, Function body) {
+  final Object? value;
   try {
-    final value = (body as Object? Function(Database))(db);
-    db.execute('COMMIT');
-    return value;
-  } catch (_) {
-    if (!db.autocommit) db.execute('ROLLBACK');
-    rethrow;
+    value = (body as Object? Function(Database))(db);
+  } catch (error, stackTrace) {
+    responses.send(_Failure(id, _sendableError(error), stackTrace.toString()));
+    return;
+  }
+  if (value is Future) _stopForAsyncBody(db, responses, id);
+  try {
+    responses.send(_Result(id, value));
+  } on ArgumentError catch (error) {
+    responses.send(_unsendable(id, error));
   }
 }
+
+void _runWrite(Database db, SendPort responses, int id, Function body) {
+  try {
+    db.execute('BEGIN IMMEDIATE');
+    final value = (body as Object? Function(Database))(db);
+    if (value is Future) _stopForAsyncBody(db, responses, id);
+    // Stage the result before committing: if it cannot cross the isolate
+    // boundary the write is rolled back rather than committed and reported
+    // as failed.
+    try {
+      responses.send(_Staged(id, value));
+    } on ArgumentError catch (error) {
+      db.execute('ROLLBACK');
+      responses.send(_unsendable(id, error));
+      return;
+    }
+    db.execute('COMMIT');
+    responses.send(_Committed(id));
+  } catch (error, stackTrace) {
+    if (!db.autocommit) db.execute('ROLLBACK');
+    responses.send(_Failure(id, _sendableError(error), stackTrace.toString()));
+  }
+}
+
+/// A body returned a `Future`: it is `async` and its continuation would run
+/// SQL outside its request (and outside its transaction). Roll back, close
+/// the connection and stop the worker now, before that continuation can run.
+/// Requests still queued fail as "worker stopped".
+Never _stopForAsyncBody(Database db, SendPort responses, int id) {
+  if (!db.autocommit) db.execute('ROLLBACK');
+  db.close();
+  Isolate.exit(
+    responses,
+    _Failure(
+      id,
+      const CoreException.storage(
+        'A database body must be synchronous; an async body was refused '
+        'and the database closed.',
+      ),
+      StackTrace.current.toString(),
+    ),
+  );
+}
+
+_Failure _unsendable(int id, ArgumentError error) => _Failure(
+  id,
+  CoreException.storage('A database result could not be sent: $error'),
+  StackTrace.current.toString(),
+);
 
 /// SQLite failures become storage errors; core errors pass through unchanged.
 Object _sendableError(Object error) => switch (error) {
@@ -337,11 +395,17 @@ Object _sendableError(Object error) => switch (error) {
         : CoreException.storage('$error'),
 };
 
-/// Open the database file with the store's connection settings.
+/// Open the database at [path], migrate it to the newest of [migrations] and
+/// return the connection with its schema version.
 ///
-/// Exposed for tests and tools that inspect a database the way the worker
-/// does; application code goes through [Store.open].
-Database openStoreDatabase(String path) {
+/// A file this build must refuse (not SQLite, another application's database,
+/// a newer schema) is refused before anything writes to it, including the
+/// journal mode. Each migration decides whether to run while it holds the
+/// write lock, so two application instances opening the same older database
+/// apply each step exactly once.
+(Database, int) _openDatabase(String path, List<Migration> migrations) {
+  _checkMigrationOrder(migrations);
+  final latest = migrations.isEmpty ? 0 : migrations.last.version;
   final parent = File(path).parent;
   try {
     parent.createSync(recursive: true);
@@ -362,20 +426,7 @@ Database openStoreDatabase(String path) {
   }
   try {
     db.execute('PRAGMA busy_timeout = ${storeBusyTimeout.inMilliseconds}');
-    // Check ownership before anything (even the journal mode) writes to the
-    // file, so a database this core did not create is left byte for byte.
-    if (_pragmaInt(db, 'application_id') != shosaiApplicationId) {
-      final hasObjects = db
-          .select('SELECT 1 FROM sqlite_schema LIMIT 1')
-          .isNotEmpty;
-      if (_pragmaInt(db, 'application_id') != 0 ||
-          _pragmaInt(db, 'user_version') != 0 ||
-          hasObjects) {
-        throw const CoreException.malformed(
-          'The database was not created by this version of Shōsai.',
-        );
-      }
-    }
+    _checkAdmission(db, latest);
     final mode = db.select('PRAGMA journal_mode = WAL').first.columnAt(0);
     if (mode != 'wal') {
       throw CoreException.storage(
@@ -384,49 +435,86 @@ Database openStoreDatabase(String path) {
     }
     db.execute('PRAGMA synchronous = NORMAL');
     db.execute('PRAGMA foreign_keys = ON');
-    return db;
+    for (final migration in migrations) {
+      _migrate(db, migration, latest);
+    }
+    return (db, _pragmaInt(db, 'user_version'));
   } on SqliteException catch (error) {
     db.close();
-    throw CoreException.malformed(
-      'The file is not a usable database: ${error.message}',
-    );
+    throw _openingError(error);
   } catch (_) {
     db.close();
     rethrow;
   }
 }
 
-/// Bring [db] to the newest of [migrations] and return its schema version.
-///
-/// [db] must come from [openStoreDatabase], which refuses foreign files.
-int migrateStoreDatabase(Database db, List<Migration> migrations) {
-  _checkMigrationOrder(migrations);
+/// Refuse a database this build does not own or cannot read.
+void _checkAdmission(Database db, int latest) {
   final userVersion = _pragmaInt(db, 'user_version');
-  final latest = migrations.isEmpty ? 0 : migrations.last.version;
+  if (_pragmaInt(db, 'application_id') != shosaiApplicationId) {
+    final hasObjects = db
+        .select('SELECT 1 FROM sqlite_schema LIMIT 1')
+        .isNotEmpty;
+    if (_pragmaInt(db, 'application_id') != 0 ||
+        userVersion != 0 ||
+        hasObjects) {
+      throw const CoreException.malformed(
+        'The database was not created by this version of Shōsai.',
+      );
+    }
+  }
   if (userVersion > latest) {
     throw CoreException.malformed(
       'The database schema ($userVersion) is newer than this application ($latest).',
     );
   }
-  for (final migration in migrations) {
-    if (migration.version <= userVersion) continue;
-    db.execute('BEGIN IMMEDIATE');
-    try {
-      if (migration.version == 1) {
-        db.execute('PRAGMA application_id = $shosaiApplicationId');
-      }
-      db.execute(migration.sql);
-      db.execute('PRAGMA user_version = ${migration.version}');
-      db.execute('COMMIT');
-    } catch (error) {
-      if (!db.autocommit) db.execute('ROLLBACK');
-      throw CoreException.storage(
-        'Migration ${migration.version} (${migration.name}) failed: $error',
-      );
-    }
-  }
-  return _pragmaInt(db, 'user_version');
 }
+
+/// Apply [migration] unless the database, read under the write lock, already
+/// has it.
+void _migrate(Database db, Migration migration, int latest) {
+  db.execute('BEGIN IMMEDIATE');
+  try {
+    // Another instance may have migrated (or claimed a fresh file) since
+    // this connection was admitted.
+    _checkAdmission(db, latest);
+    if (_pragmaInt(db, 'user_version') >= migration.version) {
+      db.execute('COMMIT');
+      return;
+    }
+    if (migration.version == 1) {
+      db.execute('PRAGMA application_id = $shosaiApplicationId');
+    }
+    db.execute(migration.sql);
+    db.execute('PRAGMA user_version = ${migration.version}');
+    db.execute('COMMIT');
+  } on CoreException {
+    if (!db.autocommit) db.execute('ROLLBACK');
+    rethrow;
+  } catch (error) {
+    if (!db.autocommit) db.execute('ROLLBACK');
+    throw CoreException.storage(
+      'Migration ${migration.version} (${migration.name}) failed: $error',
+    );
+  }
+}
+
+/// Only a file SQLite cannot read as a database is malformed; lock
+/// contention and I/O failures are operational.
+CoreException _openingError(SqliteException error) =>
+    switch (error.resultCode) {
+      11 || 26 => CoreException.malformed(
+        'The file is not a usable database: ${error.message}',
+      ),
+      3 || 8 || 10 || 14 || 23 => CoreException(
+        CoreErrorKind.inaccessible,
+        'The database could not be read or written: ${error.message}',
+      ),
+      _ => CoreException.storage(
+        'The database could not be opened: ${error.message} '
+        '(SQLite ${error.extendedResultCode})',
+      ),
+    };
 
 void _checkMigrationOrder(List<Migration> migrations) {
   for (var index = 0; index < migrations.length; index++) {

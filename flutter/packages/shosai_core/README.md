@@ -14,7 +14,10 @@ isolate never blocks on SQLite. `Store.transaction` wraps a body in
 `BEGIN IMMEDIATE … COMMIT` and rolls back on any exception.
 
 A body is sent across an isolate boundary: it may capture plain values (and a
-`Store` or a facade holding one), and it must return plain values.
+`Store` or a facade holding one), and it must return plain values. A write's
+result is sent before its `COMMIT`, so a result that cannot be sent rolls the
+write back. A body must be synchronous: an `async` body is refused, its
+transaction rolled back and the store closed before its continuation runs.
 
 The connection runs in WAL mode with `synchronous = NORMAL`, foreign keys on
 and a five-second busy timeout for a second application instance. A process
@@ -32,6 +35,9 @@ The store refuses, without writing to it:
 - a database with tables but without Shōsai's application id (for example
   one written by the retired Rust core; those are not migrated),
 - a database whose `user_version` is newer than this build.
+
+Each migration rereads `user_version` while it holds the write lock, so two
+application instances opening the same older database apply it once.
 
 Append a migration for every schema change; never edit one that has merged.
 
