@@ -290,8 +290,8 @@ hosts and the Android build.
 Started 2026-10-21 in `flutter/packages/shosai_core`: one worker isolate
 owns the only connection; ordered migrations stamp `user_version` and an
 `application_id`, and refuse foreign or newer databases untouched; WAL with a
-killed-writer recovery test. `package:sqlite3` 3.7.1 bundles SQLite 3.54.0
-through its build hook. Open: the packaged-host and Android load proofs, which
+killed-writer recovery test. `package:sqlite3` 3.5.2 bundles SQLite 3.53.4
+through its build hook (the newest release Flutter 3.41.5 resolves). Open: the packaged-host and Android load proofs, which
 need the app to depend on the package.
 * [ ] *Records.* Port library and import (referenced and private managed
 copies, bounded archive preflight, cover extraction, deferred cleanup,

@@ -12,7 +12,7 @@ environment:
 dependencies:
   # Bundles SQLite through its build hook (no system library); see the
   # package README for the pinned binary and the hosts it was proven on.
-  sqlite3: 3.7.1
+  sqlite3: 3.5.2
 
 dev_dependencies:
   lints: ^6.0.0

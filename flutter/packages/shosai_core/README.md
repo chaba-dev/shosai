@@ -37,11 +37,13 @@ Append a migration for every schema change; never edit one that has merged.
 
 ### SQLite binary
 
-`package:sqlite3` (pinned to 3.7.1) bundles SQLite through its build hook: the
+`package:sqlite3` (pinned to 3.5.2) bundles SQLite through its build hook: the
 hook downloads the release's prebuilt library, checks it against the hashes
 published with the package and ships it with the application, so no system
-SQLite is used. `dart test` and `flutter build` run the hook. Version 3.7.1
-bundles SQLite 3.54.0.
+SQLite is used. `dart test` and `flutter build` run the hook. Version 3.5.2
+bundles SQLite 3.53.4. It is the newest release the Flutter SDK resolves:
+3.6 and later need `hooks` 2.2, whose `record_use` needs a newer `meta` than
+the one Flutter pins.
 
 ## Records
 
