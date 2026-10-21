@@ -1,8 +1,8 @@
 # Shōsai Flutter frontend
 
 This is the Flutter feasibility frontend from RFD 0004 M2. The Linux and macOS
-hosts load the generated `flutter_rust_bridge` bindings, open PDF, EPUB, and
-CBZ documents through `shosai-core`, and render selectable PDF and EPUB
+hosts load the generated `flutter_rust_bridge` bindings, open PDF and EPUB
+documents through `shosai-core`, and render selectable PDF and EPUB
 content. Rust extracts bounded, owned hit-test geometry once per visible
 surface; pointer and touch drags consume it locally while Flutter paints
 temporary and saved overlays without rerendering the document.

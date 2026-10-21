@@ -15,7 +15,7 @@ pub struct RenderedPage {
     pub pixels: bytes::Bytes,
 }
 
-/// Trait representing any openable document (PDF, EPUB, CBZ, etc.).
+/// Trait representing any openable document (PDF, EPUB, etc.).
 pub trait Document {
     /// Total number of pages in the document.
     fn page_count(&self) -> usize;

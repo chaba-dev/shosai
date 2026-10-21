@@ -1580,9 +1580,6 @@ impl Bridge {
         let retained = self.document(handle)?;
         let document = retained.document.clone();
         let format = document.format();
-        if format == BookFormat::Cbz {
-            return Err(BridgeError::UnsupportedOperation(BookFormat::Cbz));
-        }
         let limits = SearchLimits::default();
         let workspace = limits
             .maximum_workspace_bytes()
@@ -1608,9 +1605,6 @@ impl Bridge {
                 }
                 OpenDocument::Epub(epub) => {
                     crate::search::search_epub_with(epub, &query, limits, &worker_cancel)
-                }
-                OpenDocument::Cbz(_) => {
-                    Err(SearchError::Document("CBZ has no searchable text".into()))
                 }
             }
         });
@@ -2220,7 +2214,6 @@ impl Bridge {
                     complete.then_some(quote),
                 )
             }
-            OpenDocument::Cbz(_) => return Err(BridgeError::UnsupportedOperation(BookFormat::Cbz)),
         };
         let annotation = NewAnnotation {
             id: AnnotationId::new(),
@@ -2426,9 +2419,6 @@ impl Bridge {
         let format = match &target.document {
             OpenDocument::Epub(_) => AnnotationDocumentFormat::Epub,
             OpenDocument::Pdf(_) => AnnotationDocumentFormat::Pdf,
-            OpenDocument::Cbz(_) => {
-                return Err(BridgeError::UnsupportedOperation(BookFormat::Cbz));
-            }
         };
         let store = tokio::select! {
             store = self.annotation_store() => store?,
@@ -2667,9 +2657,6 @@ impl Bridge {
         }
         let render_transient_byte_len = match &retained_document.document {
             OpenDocument::Pdf(_) => byte_len,
-            OpenDocument::Cbz(document) => document
-                .render_admission_byte_len_at_scale(request.page, request.scale)
-                .ok_or(BridgeError::BufferLimit)?,
             OpenDocument::Epub(_) => {
                 return Err(BridgeError::UnsupportedOperation(BookFormat::Epub));
             }
@@ -3247,16 +3234,9 @@ fn render_probe_byte_len(document: &OpenDocument, page: usize) -> Result<usize, 
     if page >= page_count {
         return Err(BridgeError::InvalidPage { page, page_count });
     }
-    let byte_len = match document {
-        OpenDocument::Cbz(document) => document
-            .render_admission_byte_len(page)
-            .ok_or(BridgeError::InvalidPage { page, page_count })?,
-        OpenDocument::Pdf(_) | OpenDocument::Epub(_) => 0,
-    };
-    if byte_len > MAX_BRIDGE_PROBE_BYTES {
-        return Err(BridgeError::BufferLimit);
-    }
-    Ok(byte_len)
+    // PDF and EPUB measure their render without a decode-time allocation, so
+    // the probe acquires no transient bytes before the render size is known.
+    Ok(0)
 }
 
 fn render_byte_len(
@@ -3283,9 +3263,6 @@ fn render_byte_len(
                 Ok(byte_len)
             }
         }
-        OpenDocument::Cbz(document) => document
-            .rendered_byte_len_cancellable(page, scale, is_cancelled)
-            .map_err(map_preflight_error),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
 }
@@ -3299,9 +3276,6 @@ fn render(
     match document {
         OpenDocument::Pdf(document) => document
             .render_page_with_highlights_cancellable(page, scale, &[], is_cancelled)
-            .map_err(map_render_error),
-        OpenDocument::Cbz(document) => document
-            .render_page_cancellable(page, scale, is_cancelled)
             .map_err(map_render_error),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
@@ -3511,7 +3485,6 @@ fn selection_surface(
                 raster_height,
             })
         }
-        OpenDocument::Cbz(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Cbz)),
     }
 }
 
@@ -3754,7 +3727,6 @@ fn selection_transient_byte_len(
                 .and_then(|bytes| bytes.checked_add(rasters))
                 .ok_or(BridgeError::BufferLimit)
         }
-        OpenDocument::Cbz(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Cbz)),
     }
 }
 
@@ -3839,7 +3811,6 @@ fn annotation_document_format(
     match document {
         OpenDocument::Epub(_) => Ok(AnnotationDocumentFormat::Epub),
         OpenDocument::Pdf(_) => Ok(AnnotationDocumentFormat::Pdf),
-        OpenDocument::Cbz(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Cbz)),
     }
 }
 
@@ -3958,7 +3929,6 @@ fn annotation_dtos(
                     })?,
             ),
             OpenDocument::Pdf(_) => None,
-            OpenDocument::Cbz(_) => None,
         };
         let Some((text, mapping_complete)) = text else {
             continue;
@@ -4244,22 +4214,10 @@ mod tests {
         );
     }
 
-    fn cbz_request() -> OpenRequest {
-        OpenRequest {
-            book_id: None,
-            local_id: "fixture".to_owned(),
-            path_key: crate::path_key::path_key(std::path::Path::new(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/sample.cbz"
-            ))),
-            format_hint: Some(BookFormat::Cbz),
-        }
-    }
-
     #[tokio::test]
     async fn bridge_rejects_unverified_book_identity_pairings() {
         let bridge = Bridge::new();
-        let mut request = cbz_request();
+        let mut request = pdf_request();
         request.book_id = Some(7);
 
         assert!(matches!(
@@ -4431,7 +4389,7 @@ mod tests {
         );
         assert_eq!(
             BridgeError::Open {
-                format: BookFormat::Cbz,
+                format: BookFormat::Epub,
                 detail: "entry exceeds byte limit".to_owned(),
             }
             .kind(),
@@ -4693,10 +4651,10 @@ mod tests {
         let first_bridge = Bridge::with_admission(Arc::clone(&admission));
         let second_bridge = Bridge::with_admission(admission);
         let first = first_bridge
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
-        let mut waiting = Box::pin(second_bridge.open_document(cbz_request(), Cancellation::new()));
+        let mut waiting = Box::pin(second_bridge.open_document(pdf_request(), Cancellation::new()));
 
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(20), &mut waiting)
@@ -4719,7 +4677,7 @@ mod tests {
             .unwrap();
 
         let error = bridge
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap_err();
 
@@ -4782,11 +4740,11 @@ mod tests {
         let first = Bridge::with_admission(Arc::clone(&admission));
         let second = Bridge::with_admission(admission);
         let first_document = first
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
         let second_document = second
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
         let request = |document| RenderRequest {
@@ -4811,38 +4769,6 @@ mod tests {
             .await
             .unwrap();
         assert!(second.release_buffer(buffer.handle));
-    }
-
-    #[tokio::test]
-    async fn cbz_probe_and_decode_peak_is_acquired_atomically() {
-        let document = OpenDocument::open(&DeviceFileLocator::from_path(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/sample.cbz"
-        )))
-        .unwrap();
-        let permits = render_probe_byte_len(&document, 0).unwrap();
-        let semaphore = Arc::new(Semaphore::new(permits));
-        let first = acquire_permits(
-            Arc::clone(&semaphore),
-            u32::try_from(permits).unwrap(),
-            &Cancellation::new(),
-        )
-        .await
-        .unwrap();
-        let cancellation = Cancellation::new();
-        let mut second = Box::pin(acquire_permits(
-            Arc::clone(&semaphore),
-            u32::try_from(permits).unwrap(),
-            &cancellation,
-        ));
-
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(20), &mut second)
-                .await
-                .is_err()
-        );
-        drop(first);
-        let _second = second.await.unwrap();
     }
 
     #[tokio::test]
@@ -6864,21 +6790,12 @@ mod tests {
         assert!(bridge.release_document(second.handle));
     }
 
-    #[test]
-    fn cbz_retention_charge_includes_copied_directory_names_and_indexes() {
-        let encoded = 1024;
-
-        let retained = retained_document_byte_len(BookFormat::Cbz, encoded).unwrap();
-
-        assert!(retained > encoded * 2);
-    }
-
     #[tokio::test]
     async fn queued_document_users_keep_retention_admission() {
         let admission = Arc::new(BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1));
         let bridge = Bridge::with_admission(Arc::clone(&admission));
         let summary = bridge
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
         let retained = bridge.document(summary.handle).unwrap();
@@ -7127,7 +7044,7 @@ mod tests {
         cancellation.cancel();
 
         let error = bridge
-            .open_document(cbz_request(), cancellation)
+            .open_document(pdf_request(), cancellation)
             .await
             .unwrap_err();
 
@@ -7138,8 +7055,8 @@ mod tests {
     #[tokio::test]
     async fn missing_documents_have_a_stable_not_found_category() {
         let bridge = Bridge::new();
-        let mut request = cbz_request();
-        request.path_key = "/definitely/missing/shosai-book.cbz".to_owned();
+        let mut request = pdf_request();
+        request.path_key = "/definitely/missing/shosai-book.pdf".to_owned();
 
         let error = bridge
             .open_document(request, Cancellation::new())
@@ -7153,7 +7070,7 @@ mod tests {
     #[tokio::test]
     async fn malformed_reserved_path_keys_are_invalid_requests() {
         let bridge = Bridge::new();
-        let mut request = cbz_request();
+        let mut request = pdf_request();
         request.path_key = "\0unix-path-v1:not-hex".to_owned();
 
         let error = bridge
@@ -7167,9 +7084,9 @@ mod tests {
     #[tokio::test]
     async fn oversized_request_strings_are_rejected_before_document_admission() {
         let bridge = Bridge::new();
-        let mut local_id = cbz_request();
+        let mut local_id = pdf_request();
         local_id.local_id = "x".repeat(MAX_BRIDGE_LOCAL_ID_BYTES + 1);
-        let mut path_key = cbz_request();
+        let mut path_key = pdf_request();
         path_key.path_key = "x".repeat(MAX_BRIDGE_PATH_KEY_BYTES + 1);
 
         for request in [local_id, path_key] {
@@ -7188,9 +7105,9 @@ mod tests {
         use std::os::unix::ffi::OsStrExt;
 
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join(OsStr::from_bytes(b"book-\x80.cbz"));
+        let path = directory.path().join(OsStr::from_bytes(b"book-\x80.pdf"));
         std::fs::copy(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.cbz"),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.pdf"),
             &path,
         )
         .unwrap();
@@ -7198,7 +7115,7 @@ mod tests {
             book_id: None,
             local_id: "native-path".to_owned(),
             path_key: crate::path_key::path_key(&path),
-            format_hint: Some(BookFormat::Cbz),
+            format_hint: Some(BookFormat::Pdf),
         };
 
         let summary = Bridge::new()
@@ -7206,7 +7123,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(summary.format, BookFormat::Cbz);
+        assert_eq!(summary.format, BookFormat::Pdf);
     }
 
     #[test]
@@ -7237,7 +7154,7 @@ mod tests {
     async fn owned_buffers_and_documents_are_released_deterministically() {
         let bridge = Bridge::new();
         let document = bridge
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
         assert_eq!(document.logical_unit, LogicalUnit::Page);
@@ -7268,7 +7185,7 @@ mod tests {
     async fn retained_and_in_flight_buffers_share_one_budget() {
         let bridge = Bridge::with_limits(8, 1);
         let document = bridge
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
         let permit = Arc::clone(&bridge.admission.buffer_bytes)
@@ -7351,7 +7268,7 @@ mod tests {
     async fn released_document_cannot_publish_an_in_flight_result() {
         let bridge = Bridge::with_limits(8, 1);
         let document = bridge
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
         let permit = Arc::clone(&bridge.admission.buffer_bytes)
@@ -7412,7 +7329,7 @@ mod tests {
         let first = Bridge::new();
         let second = Bridge::new();
         let document = first
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
 
@@ -7435,7 +7352,7 @@ mod tests {
     async fn invalid_pages_and_oversized_scales_fail_before_rendering() {
         let bridge = Bridge::new();
         let document = bridge
-            .open_document(cbz_request(), Cancellation::new())
+            .open_document(pdf_request(), Cancellation::new())
             .await
             .unwrap();
 
@@ -7595,7 +7512,7 @@ mod tests {
         let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
         let source = std::path::Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/sample.cbz"
+            "/tests/fixtures/sample.epub"
         ));
         let imported = bridge
             .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
@@ -9649,21 +9566,5 @@ mod tests {
         let error = bridge.remove_library_book(book_id).await.unwrap_err();
         assert_eq!(error.kind(), BridgeErrorKind::LimitExceeded);
         assert!(matches!(error, BridgeError::BufferLimit));
-    }
-
-    #[tokio::test]
-    async fn cbz_search_reports_unsupported_instead_of_render_failure() {
-        let bridge = Bridge::new();
-        let document = bridge
-            .open_document(cbz_request(), Cancellation::new())
-            .await
-            .unwrap();
-
-        assert_eq!(
-            bridge
-                .search_document(document.handle, "text".into(), Cancellation::new())
-                .await,
-            Err(BridgeError::UnsupportedOperation(BookFormat::Cbz))
-        );
     }
 }

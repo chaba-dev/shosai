@@ -36,9 +36,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get filterFormatPdf => 'PDF';
 
   @override
-  String get filterFormatCbz => 'CBZ';
-
-  @override
   String get addBooksAction => 'Add books';
 
   @override

@@ -51,13 +51,6 @@
           ];
         };
 
-        rustPlatform = pkgs.makeRustPlatform {
-          cargo = rustToolchain;
-          rustc = rustToolchain;
-        };
-
-        workspacePackage = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package;
-
         androidSdk = (pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "35" "36" ];
           buildToolsVersions = [ "35.0.0" "36.0.0" ];
@@ -110,7 +103,8 @@
             gtk3
             ninja
 
-            # GUI deps (iced / wgpu)
+            # Native windowing and GPU development files for the Flutter Linux
+            # host and the tools that run under Xvfb below
             libxkbcommon
             wayland
             libx11
@@ -119,9 +113,6 @@
             libxi
             vulkan-loader
             vulkan-headers
-
-            # Optional EPUB Wry spike (GTK 3 and WebKitGTK 4.1 development files)
-            webkitgtk_4_1
 
             # Headless desktop E2E and screenshot verification
             xvfb
@@ -137,7 +128,6 @@
             # Essential macOS libraries for Rust compilation
             libiconv
             # macOS system frameworks are automatically available
-            # iced uses Metal and native APIs which are built into macOS
           ];
 
         macosDevDeps =
@@ -154,121 +144,10 @@
           with pkgs;
           pkgs.lib.optionals pkgs.stdenv.hostPlatform.isWindows [
             # Windows system APIs are automatically available
-            # iced uses DirectX/DXGI which are built into Windows
             # No additional dependencies needed for native Windows builds
           ];
-
-        packageRuntimeDeps =
-          with pkgs;
-          [ pdfium-binaries ]
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            libglvnd
-            libxkbcommon
-            mesa
-            wayland
-            libx11
-            libxcursor
-            libxrandr
-            libxi
-            vulkan-loader
-          ];
-
-        shosai = rustPlatform.buildRustPackage (
-          {
-            pname = "shosai";
-            inherit (workspacePackage) version;
-            src = pkgs.lib.fileset.toSource {
-              root = ./.;
-              fileset = pkgs.lib.fileset.unions [
-                ./Cargo.lock
-                ./Cargo.toml
-                ./assets/fonts
-                ./assets/shosai-dev-icon.png
-                ./assets/shosai-icon.png
-                ./crates
-                ./packaging/linux/shosai.desktop
-              ];
-            };
-
-            cargoLock.lockFile = ./Cargo.lock;
-            cargoBuildFlags = [
-              "--package"
-              "shosai-app"
-              "--bin"
-              "shosai"
-            ];
-
-            nativeBuildInputs = with pkgs; [
-              clang
-              cmake
-              makeWrapper
-              pkg-config
-            ];
-
-            buildInputs = (with pkgs; [ openssl ]) ++ packageRuntimeDeps ++ macosDeps;
-
-            postInstall =
-              pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-                wrapProgram "$out/bin/shosai" \
-                  --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath packageRuntimeDeps} \
-                  --set-default __EGL_VENDOR_LIBRARY_FILENAMES \
-                    "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json" \
-                  --set-default LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri"
-
-                install -Dm644 packaging/linux/shosai.desktop \
-                  "$out/share/applications/shosai.desktop"
-                install -Dm644 assets/shosai-icon.png \
-                  "$out/share/icons/hicolor/1024x1024/apps/shosai.png"
-                substituteInPlace "$out/share/applications/shosai.desktop" \
-                  --replace-fail '@SHOSAI_EXEC@' "$out/bin/shosai"
-              ''
-              + pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
-                wrapProgram "$out/bin/shosai" \
-                  --prefix DYLD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath packageRuntimeDeps}
-              ''
-              + ''
-                install -Dm644 assets/fonts/LICENSE-Inter \
-                  "$out/share/licenses/shosai/INTER-LICENSE"
-              '';
-
-            meta = {
-              description = "Native desktop ebook reader for PDF, EPUB, and CBZ files";
-              homepage = workspacePackage.repository;
-              license = with pkgs.lib.licenses; [ asl20 ofl ];
-              mainProgram = "shosai";
-              platforms = pkgs.pdfium-binaries.meta.platforms;
-            };
-          }
-          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath packageRuntimeDeps;
-          }
-          // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-            DYLD_LIBRARY_PATH = pkgs.lib.makeLibraryPath packageRuntimeDeps;
-            SHOSAI_PDFIUM_LIBRARY = "${pkgs.pdfium-binaries}/lib/libpdfium.dylib";
-          }
-        );
       in
       {
-        packages = {
-          inherit shosai;
-          default = shosai;
-        };
-
-        apps =
-          let
-            app = {
-              type = "app";
-              program = "${shosai}/bin/shosai";
-              meta.description = "Run the Shosai ebook reader";
-            };
-          in
-          {
-            shosai = app;
-            default = app;
-          };
-
-        checks.shosai = shosai;
-
         devShells.default = pkgs.mkShell (
           {
             nativeBuildInputs = commonDeps ++ linuxDeps ++ macosDeps ++ macosDevDeps ++ windowsDeps;
@@ -294,12 +173,11 @@
                 libxrandr
                 libxi
                 vulkan-loader
-                webkitgtk_4_1
               ])
             );
 
-            # WebKitGTK's propagated build environment can exceed GCC collect2's
-            # spawn limit; Clang links the same native Cargo targets directly.
+            # Clang (in the shell's build deps) links the native Cargo targets
+            # directly, matching the toolchain the Flutter host builds use.
             CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang";
             CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "clang";
           })

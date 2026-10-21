@@ -12,7 +12,7 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
 
 ROOT = Path(__file__).resolve().parent
-FONT_ROOT = ROOT.parents[3] / "shosai-app" / "tests" / "fonts" / "epub"
+FONT_ROOT = ROOT.parent / "fonts" / "epub"
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="

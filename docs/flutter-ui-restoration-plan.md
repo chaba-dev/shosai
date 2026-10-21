@@ -1,5 +1,12 @@
 # Flutter UI restoration plan
 
+> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and CBZ
+> support were removed on 2026-10-20 (RFD 4, "The first release"; RFD 2 returns
+> CBZ as a later format package). The Iced references below point at the pinned
+> reference revision in the repository history and the frozen captures under
+> `rfd/0004/evidence/`; the CBZ rows, filters and acceptance items are no longer
+> part of the first release and stay here as the record for that package.
+
 Restore Iced's information hierarchy and reading workflow in Flutter while keeping
 useful Flutter capabilities. This is a presentation rebuild and targeted reader
 contract work, not a frontend restart or pixel-identical port.

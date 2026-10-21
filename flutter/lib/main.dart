@@ -234,7 +234,7 @@ class _ShosaiShellState extends State<ShosaiShell> {
 Future<ReaderPickedDocument?> pickReaderDocument() async {
   final file = await openFile(
     acceptedTypeGroups: const [
-      XTypeGroup(label: 'Books', extensions: ['pdf', 'epub', 'cbz']),
+      XTypeGroup(label: 'Books', extensions: ['pdf', 'epub']),
     ],
   );
   if (file == null) return null;

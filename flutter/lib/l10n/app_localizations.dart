@@ -152,12 +152,6 @@ abstract class AppLocalizations {
   /// **'PDF'**
   String get filterFormatPdf;
 
-  /// Retained Flutter extension of the Iced All/EPUB/PDF entries (plan decision 9). Latin in both locales on purpose.
-  ///
-  /// In en, this message translates to:
-  /// **'CBZ'**
-  String get filterFormatCbz;
-
   /// Iced reference key: add-books. The Flutter action draws the plus as an icon, so the label carries no plus sign.
   ///
   /// In en, this message translates to:

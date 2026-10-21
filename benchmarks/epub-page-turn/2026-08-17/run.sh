@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Historical record (2026-08-17): this harness built the Iced application crate
+# `crates/shosai-app`, which was removed from the repository on 2026-10-20.
 set -euo pipefail
 
 benchmark_dir=$(cd "$(dirname "$0")" && pwd)

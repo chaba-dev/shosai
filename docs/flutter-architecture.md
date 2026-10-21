@@ -39,7 +39,7 @@ implicit widget state.
 6. Document ownership is format-scoped (amended 2026-09-28; see
    [Document ownership by format](#document-ownership-by-format)). Rust owns
    parsing, text shaping, paint geometry, durable anchors, persistence,
-   cancellation, and memory admission for PDF and CBZ. For EPUB, Dart owns
+   cancellation, and memory admission for PDF. For EPUB, Dart owns
    parsing, normalization, canonical text and durable anchors, and Flutter owns
    layout, shaping, paint geometry and selection geometry; Rust still owns
    storage, records and search. Flutter owns gestures, overlays, focus,
@@ -47,7 +47,7 @@ implicit widget state.
 7. Renderer geometry and renderer pixels are one contract **within one format's
    renderer**. Flutter must not independently reshape EPUB text whose hit zones
    were produced by Rust, and the Dart EPUB engine must not produce geometry for
-   rasters it did not lay out. PDF/CBZ keep the Rust-produced raster and geometry
+   rasters it did not lay out. PDF keeps the Rust-produced raster and geometry
    pairing.
 8. Dialogs, pickers, and similar platform effects are injected controller
    adapters. Widgets dispatch an intent; only the controller starts and awaits
@@ -63,7 +63,7 @@ adopted Dart-owned EPUB parsing/normalization with Flutter layout. Rule 6's
 single-owner sentence predates that decision; ownership is now format-scoped and
 the Elm boundary above is unchanged.
 
-| Responsibility | EPUB | PDF / CBZ |
+| Responsibility | EPUB | PDF |
 | --- | --- | --- |
 | Parsing, normalization, canonical text, durable anchors | Dart engine | Rust |
 | Layout, shaping, paint geometry, selection geometry | Flutter, over the Dart layout | Rust |

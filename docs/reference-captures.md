@@ -1,5 +1,12 @@
 # Reference captures (packages 1B and 1C)
 
+> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and the
+> `make reference-shots` capture harness were removed on 2026-10-20 (RFD 4, "The
+> first release"), so the capture and `VERIFY=1` procedures below can no longer
+> be run. The committed captures under `rfd/0004/evidence/reference-shots-1b/`
+> and `rfd/0004/evidence/reference-shots-1c/` are the frozen reference; the
+> `1C-CBZ-*` captures record a format that left with CBZ support (RFD 2).
+
 Deterministic, inspected **Iced reference images** for the library, import,
 settings and reader surfaces, each with a provenance manifest. They are the
 reference the Flutter restoration is compared against; they are not acceptance

@@ -216,7 +216,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             _DialogActionTile(
               icon: LucideIcons.file,
               title: 'Choose files',
-              subtitle: 'Select one or more PDF, EPUB, or CBZ files',
+              subtitle: 'Select one or more PDF or EPUB files',
               onPressed: () => Navigator.pop(context, false),
             ),
             _DialogActionTile(
@@ -236,7 +236,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           ].whereType<String>().toList()
         : (await openFiles(
             acceptedTypeGroups: const [
-              XTypeGroup(label: 'Books', extensions: ['pdf', 'epub', 'cbz']),
+              XTypeGroup(label: 'Books', extensions: ['pdf', 'epub']),
             ],
             confirmButtonText: 'Review books',
           )).map((file) => file.path).toList();

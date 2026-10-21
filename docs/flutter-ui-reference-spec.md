@@ -1,5 +1,12 @@
 # Flutter UI reference specification
 
+> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
+> on 2026-10-20 (RFD 4, "The first release"); its source citations below refer
+> to the pinned reference revision in the repository history, and the captures
+> under `rfd/0004/evidence/` are the frozen reference. CBZ support was removed
+> the same day and returns as a later format package (RFD 2); the CBZ rows are
+> retained as the record of that reference.
+
 Token and acceptance specification for the Flutter restoration described by
 [the restoration plan](flutter-ui-restoration-plan.md). Owned by package 1A; it
 freezes design values, states and acceptance rows so later packages implement and
@@ -565,13 +572,13 @@ Bundled fonts (hashes match `assets/fonts/README.md`):
 `SourceSerif4Variable-Roman.ttf` `14d360ee1b76655da9276628b229e11671bc1f5d1083636144db6677d452cf55`;
 `NotoSerifJP-ShosaiMark-Black.ttf` `1f30507d5c2b12380d0e13883ebf7d9958d34fdf43c47ef071d368468c0f4c61`.
 
-Test-only fonts under `crates/shosai-app/tests/fonts/` have licenses but no recorded
+Test-only fonts under `crates/shosai-core/tests/fixtures/fonts/` have licenses but no recorded
 source/version: `InterVariable-Italic.ttf`
 `d6f1f6a172d9e588438db9f986fd5cfad7b30f644374080a8a9d4d91e344586f`,
 `NotoSansArabic.ttf` `ee489b994b3e62def9874c918145e32b133b625abaf98cec60502bdb40102c56`,
 `NotoSansHebrew.ttf` `3d4fef85b449ade4d165de982969374fa30b2a5fe7bc679f5a3f5bfc047fb703`,
 plus generated `epub/book-a.{ttf,otf,woff,woff2}`, `book-b.ttf`, `other-family.ttf`
-(generator `dcf135e196e627293fb871e1782b6e3ab3a5dedf394578140d363bc688169bb5`).
+(generator `717de1439c58ecb38a3afd2aab333ebb50c059603af087e62e99332381d3d27d`).
 
 ### 5.2 Provenance (separately owned; citation rule here)
 

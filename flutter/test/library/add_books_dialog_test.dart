@@ -183,10 +183,7 @@ void main() {
 
     expect(find.text('Choose files'), findsOneWidget);
     expect(find.text('Choose a folder'), findsOneWidget);
-    expect(
-      find.text('Select one or more PDF, EPUB, or CBZ files'),
-      findsOneWidget,
-    );
+    expect(find.text('Select one or more PDF or EPUB files'), findsOneWidget);
     expect(find.text('Find supported books in all subfolders'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -198,7 +195,7 @@ void main() {
     await _openAddBooks(tester);
 
     for (final (title, subtitle) in const [
-      ('Choose files', 'Select one or more PDF, EPUB, or CBZ files'),
+      ('Choose files', 'Select one or more PDF or EPUB files'),
       ('Choose a folder', 'Find supported books in all subfolders'),
     ]) {
       final node = tester.getSemantics(find.text(title));

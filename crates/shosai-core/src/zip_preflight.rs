@@ -9,10 +9,8 @@ pub(crate) struct ZipPreflight {
     pub(crate) entries: usize,
     pub(crate) declared_uncompressed_bytes: u64,
     pub(crate) central_directory_bytes: usize,
-    pub(crate) copied_filename_ceiling: usize,
     pub(crate) has_epub_mimetype: bool,
     pub(crate) has_epub_container: bool,
-    pub(crate) has_comic_image: bool,
 }
 
 pub(crate) fn preflight<R: Read + Seek>(
@@ -117,10 +115,8 @@ pub(crate) fn preflight<R: Read + Seek>(
     }
     reader.seek(SeekFrom::Start(central_offset))?;
     let mut declared = 0_u64;
-    let mut copied_filename_ceiling = 0_usize;
     let mut has_epub_mimetype = false;
     let mut has_epub_container = false;
-    let mut has_comic_image = false;
     let mut mimetype_entry = None;
     for _ in 0..entries {
         check_cancelled(is_cancelled)?;
@@ -131,13 +127,6 @@ pub(crate) fn preflight<R: Read + Seek>(
         }
         let name_len = usize::from(le16(&header, 28).unwrap());
         let extra_len = usize::from(le16(&header, 30).unwrap());
-        // zip may replace the raw name with an Info-ZIP Unicode Path value
-        // held in the extra fields. Otherwise lossy UTF-8 decoding expands
-        // each invalid raw byte to at most three bytes.
-        let copied_name = name_len.checked_mul(3).context("ZIP filename overflowed")?;
-        copied_filename_ceiling = copied_filename_ceiling
-            .checked_add(copied_name.max(extra_len))
-            .context("ZIP filename byte total overflowed")?;
         let comment_len = usize::from(le16(&header, 32).unwrap());
         let variable_len = name_len
             .checked_add(extra_len)
@@ -163,7 +152,6 @@ pub(crate) fn preflight<R: Read + Seek>(
             ));
         }
         has_epub_container |= name == b"META-INF/container.xml";
-        has_comic_image |= comic_image_name(&name);
         declared = declared
             .checked_add(uncompressed_size)
             .context("ZIP declared size overflowed")?;
@@ -179,10 +167,8 @@ pub(crate) fn preflight<R: Read + Seek>(
         declared_uncompressed_bytes: declared,
         central_directory_bytes: usize::try_from(central_size)
             .context("ZIP central-directory size cannot be represented")?,
-        copied_filename_ceiling,
         has_epub_mimetype,
         has_epub_container,
-        has_comic_image,
     })
 }
 
@@ -242,22 +228,6 @@ fn epub_mimetype_matches<R: Read + Seek>(
     let mut value = [0_u8; MIME.len()];
     read_exact_cancellable(reader, &mut value, cancelled)?;
     Ok(value == MIME)
-}
-
-fn comic_image_name(name: &[u8]) -> bool {
-    [
-        b".jpg".as_slice(),
-        b".jpeg",
-        b".png",
-        b".gif",
-        b".webp",
-        b".bmp",
-    ]
-    .iter()
-    .any(|extension| {
-        name.len() >= extension.len()
-            && name[name.len() - extension.len()..].eq_ignore_ascii_case(extension)
-    })
 }
 
 pub(crate) fn metadata_allocation_ceiling(preflight: ZipPreflight) -> Option<usize> {
@@ -516,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_requires_the_epub_mimetype_value_and_classifies_comic_names() {
+    fn preflight_requires_the_epub_mimetype_value() {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let stored =
             SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
@@ -527,11 +497,6 @@ mod tests {
         let epub = preflight(Cursor::new(writer.finish().unwrap().into_inner()), 10, None).unwrap();
         assert!(!epub.has_epub_mimetype);
         assert!(epub.has_epub_container);
-        assert!(!epub.has_comic_image);
-
-        let comic = preflight(Cursor::new(named_archive(&["pages/001.BMP"])), 10, None).unwrap();
-        assert!(comic.has_comic_image);
-        assert!(!comic.has_epub_mimetype);
     }
 
     #[test]
@@ -546,7 +511,6 @@ mod tests {
         extra.extend_from_slice(unicode);
 
         assert_eq!(effective_name(raw, &extra).unwrap(), unicode);
-        assert!(comic_image_name(&effective_name(raw, &extra).unwrap()));
     }
 
     #[test]

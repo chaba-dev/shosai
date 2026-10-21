@@ -343,7 +343,7 @@ class FlutterAnnotationTextRange {
           end == other.end;
 }
 
-enum FlutterBookFormat { pdf, epub, cbz }
+enum FlutterBookFormat { pdf, epub }
 
 class FlutterBookmark {
   final PlatformInt64 id;

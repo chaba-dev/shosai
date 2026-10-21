@@ -320,7 +320,7 @@ private object DocumentImportManager {
             ?.substringAfterLast('/')
             ?: return "Document ${index + 1}"
         val extension = candidate.substringAfterLast('.', "").lowercase()
-        if (extension !in setOf("pdf", "epub", "cbz")) return "Document ${index + 1}"
+        if (extension !in setOf("pdf", "epub")) return "Document ${index + 1}"
         val stem = candidate.dropLast(extension.length + 1)
             .take(60)
             .map { character ->
@@ -439,9 +439,6 @@ private object DocumentImportChannel {
                     "application/epub+zip",
                     "application/zip",
                     "application/octet-stream",
-                    "application/x-cbz",
-                    "application/vnd.comicbook+zip",
-                    "application/x-comicbook+zip",
                 ),
             )
         }

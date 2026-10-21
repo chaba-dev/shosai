@@ -1,9 +1,9 @@
 """Tests for the shared design-token generator.
 
 The generator is the bridge between `assets/theme/tokens.json` (the single
-tracked design-token source) and the two generated modules. These tests cover
+tracked design-token source) and the generated Dart module. These tests cover
 the color grammar, the invariants the token source must hold, the deterministic
-output, and the `--check` gate that keeps the committed files in sync.
+output, and the `--check` gate that keeps the committed file in sync.
 """
 
 import importlib.util
@@ -18,7 +18,6 @@ import unittest
 REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY / "scripts" / "generate-theme-tokens.py"
 TOKENS = REPOSITORY / "assets" / "theme" / "tokens.json"
-RUST_OUTPUT = REPOSITORY / "crates" / "shosai-app" / "src" / "theme_tokens.rs"
 DART_OUTPUT = REPOSITORY / "flutter" / "lib" / "theme_tokens.dart"
 
 
@@ -53,16 +52,15 @@ class ColorGrammarTest(unittest.TestCase):
         color = self.generator.parse_color("rgb(0.1, 0.1, 0.1)", "test")
         self.assertEqual(color.channels, "f32")
         self.assertEqual((color.red, color.green, color.blue), (0.1, 0.1, 0.1))
-        self.assertEqual(self.generator._rust_color(color)[0], "(0.1, 0.1, 0.1)")
+        self.assertEqual(
+            self.generator._dart_color(color),
+            "Color.from(alpha: 1.0, red: 0.1, green: 0.1, blue: 0.1)",
+        )
 
     def test_rgba_over_hex_keeps_the_fractional_alpha(self):
         color = self.generator.parse_color("rgba(#21201E, 0.16)", "test")
         self.assertEqual(color.channels, "u8")
         self.assertEqual(color.alpha, 0.16)
-        self.assertEqual(
-            self.generator._rust_color(color),
-            ("((0x21, 0x20, 0x1E), 0.16)", "((u8, u8, u8), f32)"),
-        )
         self.assertEqual(
             self.generator._dart_color(color),
             "Color.fromRGBO(0x21, 0x20, 0x1E, 0.16)",
@@ -91,16 +89,6 @@ class ColorGrammarTest(unittest.TestCase):
 class NameMappingTest(unittest.TestCase):
     def setUp(self):
         self.generator = load_generator()
-
-    def test_rust_names_split_camel_case_and_numbers(self):
-        self.assertEqual(
-            self.generator._rust_name(["app", "surfaceMuted"]), "APP_SURFACE_MUTED"
-        )
-        self.assertEqual(
-            self.generator._rust_name(["reader", "light", "tableHeaderBackground"]),
-            "READER_LIGHT_TABLE_HEADER_BACKGROUND",
-        )
-        self.assertEqual(self.generator._rust_name(["type", "size", "26"]), "TYPE_SIZE_26")
 
     def test_dart_names_are_camel_case(self):
         self.assertEqual(
@@ -190,17 +178,20 @@ class TokenSourceTest(unittest.TestCase):
         )
 
     def test_retained_values_are_not_generated_as_iced(self):
-        rust = self.generator.generate()[RUST_OUTPUT]
-        dark_line = next(
-            line
-            for line in rust.splitlines()
-            if line.startswith("pub const APP_DARK_BACKGROUND")
+        dart = self.generator.generate()[DART_OUTPUT]
+        lines = dart.splitlines()
+        index = next(
+            index
+            for index, line in enumerate(lines)
+            if "static const appDarkBackground" in line
         )
-        authority_line = rust.splitlines()[
-            rust.splitlines().index(dark_line) - 1
-        ]
-        self.assertIn("Retained Flutter", authority_line)
-        self.assertNotIn("Iced (crates/shosai-app", authority_line)
+        documentation = []
+        while lines[index - 1].startswith("  ///"):
+            index -= 1
+            documentation.insert(0, lines[index].removeprefix("  ///").strip())
+        authority = " ".join(documentation)
+        self.assertIn("`app.dark.background` — Retained Flutter", authority)
+        self.assertNotIn("Iced (crates/shosai-app", authority)
 
     def test_dart_documentation_names_each_token_and_its_authority(self):
         dart = self.generator.generate()[DART_OUTPUT]
@@ -255,26 +246,25 @@ class GeneratedFileTest(unittest.TestCase):
         self.assertIn("match", result.stdout)
 
     def test_check_mode_rejects_a_stale_file(self):
-        original = self.generator.RUST_PATH
+        original = self.generator.DART_PATH
         with tempfile.TemporaryDirectory() as temporary:
-            stale = pathlib.Path(temporary) / "theme_tokens.rs"
+            stale = pathlib.Path(temporary) / "theme_tokens.dart"
             stale.write_text("// stale\n", encoding="utf-8")
-            self.generator.RUST_PATH = stale
+            self.generator.DART_PATH = stale
             try:
                 self.assertEqual(self.generator.main(["--check"]), 1)
             finally:
-                self.generator.RUST_PATH = original
+                self.generator.DART_PATH = original
 
-    def test_rust_output_uses_plain_values_and_dart_output_uses_colors(self):
-        rust = self.generated[RUST_OUTPUT]
+    def test_only_the_dart_module_is_generated(self):
+        self.assertEqual(list(self.generated), [self.generator.DART_PATH])
+
+    def test_dart_output_uses_colors(self):
         dart = self.generated[DART_OUTPUT]
-        self.assertIn("pub const APP_ACCENT: (u8, u8, u8) = (0x4D, 0x5E, 0x86);", rust)
         self.assertIn("static const appAccent = Color(0xFF4D5E86);", dart)
-        self.assertIn("#![allow(dead_code)]", rust)
         self.assertIn("import 'dart:ui' show Color;", dart)
-        # The generated modules are transcriptions: no theme value may be
-        # written as a literal in the sources that consume them.
-        self.assertNotIn("Color::from_rgb8(0x", rust)
+        # The generated module is a transcription: no theme value may be
+        # written as a literal in the sources that consume it.
         self.assertNotIn("withOpacity", dart)
 
     def test_dart_output_fits_the_formatter_page(self):

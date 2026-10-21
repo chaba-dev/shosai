@@ -1,27 +1,31 @@
 # Design tokens
 
 `assets/theme/tokens.json` is the single tracked design-token source for the
-desktop application and the Flutter frontend (restoration plan decision 2: "One
-tracked token source supplies both frontends, including application and reader
-palettes, type scale, radii and gate-relevant layout metrics"). The Iced
-frontend supplies the values; the file transcribes them from the pinned
-reference and nothing else may define a theme color.
+Flutter frontend (restoration plan decision 2: "One tracked token source
+supplies both frontends, including application and reader palettes, type scale,
+radii and gate-relevant layout metrics"). The values were transcribed from the
+pinned Iced reference, and nothing else may define a theme color.
+
+The Iced application (`crates/shosai-app`) was removed on 2026-10-20 (RFD 4,
+"The first release"). The file keeps its schema: the `Iced` authority entries
+and the per-product `iced`/`flutter` font family keys now record the historical
+reference the values were taken from, and the generator no longer emits a Rust
+module.
 
 | File | Role |
 | --- | --- |
 | `assets/theme/tokens.json` | The source. Edit this file only. |
-| `crates/shosai-app/src/theme_tokens.rs` | Generated Rust token table, consumed by `crate::theme` (colors), `crate::typography` (families) and `crate::app` / `crate::widgets` (the reader, library, cover and button metrics this package migrates). |
 | `flutter/lib/theme_tokens.dart` | Generated Dart token class, consumed by `flutter/lib/app_theme.dart` and the reader paint path. |
-| `scripts/generate-theme-tokens.py` | Generates both files and checks them (`--check`). |
+| `scripts/generate-theme-tokens.py` | Generates the Dart module and checks it (`--check`). |
 
 The design system (`docs/design-system.md`, tokens in
 `docs/design-system/tokens.json`) is the design target for the MVP and is not
-read by either frontend. Values move from it into this file, through the
-generator and both sides' tests, as the MVP implementation adopts them.
+read by the frontend. Values move from it into this file, through the
+generator and the Flutter tests, as the MVP implementation adopts them.
 
 ```sh
-make theme-tokens          # regenerate both files after editing the JSON
-make check-theme-tokens    # verify the committed files still match the source
+make theme-tokens          # regenerate the Dart module after editing the JSON
+make check-theme-tokens    # verify the committed module still matches the source
 ```
 
 The generator's `--check` gate runs in `make test-scripts` through
@@ -31,7 +35,9 @@ JSON in `flutter/test/app_theme_test.dart`.
 ## Authority
 
 Each token group records its authority in the JSON `meta.authority` map, and the
-generated files repeat it as a doc comment on every constant.
+generated module repeats it as a doc comment on every constant. `Iced` names
+the removed application at the pinned reference revision: the historical source
+of the value, not a live consumer.
 
 | Group | Authority |
 | --- | --- |
@@ -86,32 +92,16 @@ grid and card metrics (`layout.library.grid*`, `layout.library.card.*`,
 `layout.library.alertPadding*`,
 `layout.library.continueSectionTrailingSpace`).
 
-## Rust mapping
+## Rust mapping (historical)
 
-`crate::theme` converts the generated tuples into `iced::Color` with four
-`const fn` helpers and keeps the public names (`APP_BACKGROUND`, `ACCENT`,
-`RADIUS_SMALL`, …). The Iced style functions, the reader palettes, the
-application palette and the reader code-block fallback all read those
-constants. `crate::typography` takes the interface family names from the tokens,
-and `crate::app` / `crate::widgets` take the reader chrome, spread threshold,
-library breakpoint, page size, cover decode bounds and button geometry they
-already used from `layout.*`. The remaining `layout.*` values (import review
-rows, modal widths, settings content width, the collection's section, alert,
-continue-card, skeleton and empty-state metrics) are catalogued for the packages
-that own those surfaces and are not migrated here.
-
-`crates/shosai-core` cannot depend on the application crate, so
-`math_layout::MATH_FONT_FAMILY` keeps its own literal; the app-side token test
-asserts that literal equals `type.family.math.iced`, which keeps the two sides
-from drifting without adding a second generated table to the core crate.
+Until 2026-10-20 the generator also wrote `crates/shosai-app/src/theme_tokens.rs`,
+which the Iced application's `theme`, `typography`, `app` and `widgets` modules
+read. That module went with the crate. `crates/shosai-core` never read the
+tokens: `math_layout::MATH_FONT_FAMILY` keeps its own literal, which the
+removed app-side test used to compare against `type.family.math.iced`.
 
 ## Rejecting new literal theme colors
 
-* `crates/shosai-app/src/theme.rs` has a test that scans every application
-  module for literal color constructors and fails on any file outside a
-  one-entry allowlist (the EPUB document text fallback in
-  `epub/native_text.rs`, which is not an interface color). Test modules are not
-  scanned.
 * `flutter/test/app_theme_test.dart` scans `flutter/lib` for `Color(0x…)`,
   `Color.from…`, `Color.fromARGB` and `Colors.*` and fails outside the generated
   `theme_tokens.dart`.

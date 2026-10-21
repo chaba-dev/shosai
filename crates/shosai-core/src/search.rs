@@ -138,7 +138,7 @@ impl std::error::Error for SearchError {}
 /// A single search match within a document.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchMatch {
-    /// Page index (PDF/CBZ) or chapter index (EPUB).
+    /// Page index (PDF) or chapter index (EPUB).
     pub page: usize,
     /// Character offset within the page/chapter text where the match starts.
     pub offset: usize,

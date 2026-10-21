@@ -149,24 +149,6 @@ pub(crate) fn pdf_retained_ceiling(encoded_bytes: usize) -> Option<usize> {
     encoded_bytes.checked_add(16 * 1024 * 1024)
 }
 
-pub(crate) fn cbz_retained_ceiling(
-    encoded_bytes: usize,
-    max_entries: usize,
-    archive_metadata_bytes: usize,
-    copied_filename_ceiling: usize,
-) -> Option<usize> {
-    encoded_bytes
-        .checked_add(archive_metadata_bytes)?
-        .checked_add(copied_filename_ceiling)?
-        .checked_add(max_entries.checked_mul(
-            std::mem::size_of::<String>()
-                + std::mem::size_of::<usize>()
-                + std::mem::size_of::<Option<(u32, u32)>>()
-                + std::mem::size_of::<Option<usize>>(),
-        )?)?
-        .checked_add(4 * 1024)
-}
-
 pub(crate) fn epub_retained_ceiling(
     encoded_bytes: usize,
     total_uncompressed_bytes: usize,
