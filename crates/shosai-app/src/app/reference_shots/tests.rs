@@ -2196,7 +2196,7 @@ fn rewrite_manifest(root: &Path, edit: impl FnOnce(&mut super::manifest::Manifes
         ),
     )
     .expect("write the manifest");
-    std::fs::write(root.join("README.md"), super::manifest::readme(&manifest))
+    std::fs::write(root.join("README.adoc"), super::manifest::readme(&manifest))
         .expect("write the README");
 }
 
@@ -2286,9 +2286,9 @@ fn evidence_validator_rejects_an_orphaned_fixture() {
 fn evidence_validator_rejects_a_stale_readme() {
     tampered_evidence(
         |root| {
-            std::fs::write(root.join("README.md"), b"# stale\n").expect("stale README");
+            std::fs::write(root.join("README.adoc"), b"= stale\n").expect("stale README");
         },
-        "README.md is stale",
+        "README.adoc is stale",
     );
 }
 
