@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 
 import '../cancellation.dart';
 import '../errors.dart';
+import '../worker.dart';
 import 'book.dart';
 
 /// Largest book file the library admits, for every format.
@@ -83,7 +84,7 @@ Future<BookFormat?> detectBookFormat(String path) async {
       : BookFormat.fromExtension(extension.substring(1));
   if (byExtension != null) return byExtension;
   // Probe only a regular file: opening a FIFO or device could block.
-  await _stat(File(path), path);
+  _statSync(File(path), path);
   final RandomAccessFile file;
   try {
     file = await File(path).open();
@@ -121,7 +122,7 @@ Future<Uint8List> readBookBytes(
   CancellationToken? cancellation,
 }) async {
   final file = File(path);
-  final stat = await _stat(file, path);
+  final stat = _statSync(file, path);
   if (stat.size > maxBytes) {
     throw CoreException.limitExceeded(
       'The book is larger than $maxBytes bytes.',
@@ -160,21 +161,23 @@ bool _startsWith(Uint8List bytes, String prefix) =>
     latin1.decode(bytes.sublist(0, prefix.length)) == prefix;
 
 /// Hash the file at [path] and check that it did not change while it was read.
+///
+/// The file is read and hashed on a worker isolate.
 Future<FileFingerprint> fingerprintFile(
   String path, {
   int maxBytes = maxBookInputBytes,
   CancellationToken? cancellation,
-}) async {
+}) => runCancellable(
+  () => _fingerprintSync(path, maxBytes),
+  cancellation: cancellation,
+);
+
+FileFingerprint _fingerprintSync(String path, int maxBytes) {
   final file = File(path);
-  final before = await _stat(file, path);
-  if (before.size > maxBytes) {
-    throw const CoreException.limitExceeded(
-      'The book is larger than $maxBookInputBytes bytes.',
-    );
-  }
+  final before = _statSync(file, path, maxBytes);
   final RandomAccessFile input;
   try {
-    input = await file.open();
+    input = file.openSync();
   } on FileSystemException catch (error) {
     throw _inaccessible('read', path, error);
   }
@@ -183,8 +186,7 @@ Future<FileFingerprint> fingerprintFile(
   var read = 0;
   try {
     while (true) {
-      cancellation.throwIfCancelled();
-      final chunk = await input.read(_chunkBytes);
+      final chunk = input.readSync(_chunkBytes);
       if (chunk.isEmpty) break;
       read += chunk.length;
       if (read > before.size) break;
@@ -193,10 +195,10 @@ Future<FileFingerprint> fingerprintFile(
   } on FileSystemException catch (error) {
     throw _inaccessible('read', path, error);
   } finally {
-    await input.close();
+    input.closeSync();
   }
   hasher.close();
-  final after = await _stat(file, path);
+  final after = _statSync(file, path);
   if (read != before.size || !_sameVersion(before, after)) {
     throw CoreException.conflict('The file changed while it was read: $path');
   }
@@ -208,23 +210,44 @@ Future<FileFingerprint> fingerprintFile(
 /// [destination] must not exist; this creates it exclusively. It is flushed
 /// to disk before this returns. On any failure, including cancellation, a
 /// destination this call created is deleted again; one that already existed
-/// is never touched.
+/// is never touched. The copy runs on a worker isolate.
 Future<FileFingerprint> copyAndFingerprint(
   String source,
   String destination, {
   int maxBytes = maxBookInputBytes,
   CancellationToken? cancellation,
 }) async {
-  final sourceFile = File(source);
-  final before = await _stat(sourceFile, source);
-  if (before.size > maxBytes) {
-    throw const CoreException.limitExceeded(
-      'The book is larger than $maxBookInputBytes bytes.',
-    );
+  cancellation.throwIfCancelled();
+  // Created here, so this call knows it owns the destination when a killed
+  // worker leaves it behind.
+  try {
+    await File(destination).create(exclusive: true);
+  } on FileSystemException catch (error) {
+    throw _inaccessible('copy to', destination, error);
   }
+  try {
+    return await runCancellable(
+      () => _copyAndFingerprintSync(source, destination, maxBytes),
+      cancellation: cancellation,
+    );
+  } catch (_) {
+    // The worker has exited (runCancellable waits for it), so nothing can
+    // recreate the file after this.
+    await _deleteQuietly(File(destination));
+    rethrow;
+  }
+}
+
+FileFingerprint _copyAndFingerprintSync(
+  String source,
+  String destination,
+  int maxBytes,
+) {
+  final sourceFile = File(source);
+  final before = _statSync(sourceFile, source, maxBytes);
   final RandomAccessFile input;
   try {
-    input = await sourceFile.open();
+    input = sourceFile.openSync();
   } on FileSystemException catch (error) {
     throw _inaccessible('read', source, error);
   }
@@ -233,23 +256,19 @@ Future<FileFingerprint> copyAndFingerprint(
   final digest = _DigestSink();
   final hasher = sha256.startChunkedConversion(digest);
   var copied = 0;
-  var created = false;
   try {
-    await target.create(exclusive: true);
-    created = true;
-    output = await target.open(mode: FileMode.writeOnly);
+    output = target.openSync(mode: FileMode.writeOnly);
     while (true) {
-      cancellation.throwIfCancelled();
-      final chunk = await input.read(_chunkBytes);
+      final chunk = input.readSync(_chunkBytes);
       if (chunk.isEmpty) break;
       copied += chunk.length;
       if (copied > before.size) break;
       hasher.add(chunk);
-      await output.writeFrom(chunk);
+      output.writeFromSync(chunk);
     }
-    await output.flush();
+    output.flushSync();
     hasher.close();
-    final after = await _stat(sourceFile, source);
+    final after = _statSync(sourceFile, source);
     if (copied != before.size || !_sameVersion(before, after)) {
       throw CoreException.conflict(
         'The file changed while it was copied: $source',
@@ -257,16 +276,15 @@ Future<FileFingerprint> copyAndFingerprint(
     }
     return FileFingerprint(digest.value.toString(), copied, after.modified);
   } catch (error) {
-    await output?.close();
+    output?.closeSync();
     output = null;
-    if (created) await _deleteQuietly(target);
     if (error is FileSystemException) {
       throw _inaccessible('copy', source, error);
     }
     rethrow;
   } finally {
-    await output?.close();
-    await input.close();
+    output?.closeSync();
+    input.closeSync();
   }
 }
 
@@ -338,13 +356,18 @@ Future<void> _deleteQuietly(File file) async {
   }
 }
 
-Future<FileStat> _stat(File file, String path) async {
-  final stat = await file.stat();
+FileStat _statSync(File file, String path, [int? maxBytes]) {
+  final stat = file.statSync();
   if (stat.type == FileSystemEntityType.notFound) {
     throw CoreException.notFound('The file does not exist: $path');
   }
   if (stat.type != FileSystemEntityType.file) {
     throw CoreException.invalidRequest('Not a regular file: $path');
+  }
+  if (maxBytes != null && stat.size > maxBytes) {
+    throw const CoreException.limitExceeded(
+      'The book is larger than $maxBookInputBytes bytes.',
+    );
   }
   return stat;
 }

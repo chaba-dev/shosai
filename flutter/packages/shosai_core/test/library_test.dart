@@ -1219,6 +1219,9 @@ final class _CloseFailingFile implements File {
   Future<FileStat> stat() => _file.stat();
 
   @override
+  FileStat statSync() => _file.statSync();
+
+  @override
   Future<RandomAccessFile> open({FileMode mode = FileMode.read}) async =>
       _CloseFailingHandle(await _file.open(mode: mode));
 
