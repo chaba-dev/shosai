@@ -567,6 +567,188 @@ void main() {
     },
   );
 
+  group('a long Reading now list', () {
+    // Twenty open books overflow a 600 px window several times over, so the
+    // later rows are past the list's build cache when the sidebar first lays
+    // out.
+    final books = [
+      for (var id = 1; id <= 20; id += 1)
+        _book(id, 'Volume ${id.toString().padLeft(2, '0')}'),
+    ];
+
+    /// Pumps the desktop sidebar over a model that applies its own moves, as
+    /// the shell controller does, and returns the model's current ids.
+    Future<List<int> Function()> pumpLive(WidgetTester tester) async {
+      var model = const ShellModel();
+      for (final book in books) {
+        model = update(model, ShellBookOpened(book));
+      }
+      model = update(model, const ShellBookActivated(1));
+      model = model.copyWith(reading: false, place: ShellPlace.library);
+      tester.view.physicalSize = const Size(1440, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final recorder = _Recorder();
+      await tester.pumpWidget(
+        productionShell(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => ShellFrame(
+                layout: ShellLayout.desktop,
+                model: model,
+                covers: const {},
+                actions: ShellActions(
+                  selectPlace: recorder.places.add,
+                  openBook: (entry) => recorder.opened.add(entry.id),
+                  closeBook: (entry) => recorder.closed.add(entry.id),
+                  moveBook: (from, to) => setState(
+                    () => model = update(model, ShellBookMoved(from, to)),
+                  ),
+                  addBooks: () => recorder.adds += 1,
+                  loadCover: (_) => true,
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return () => [for (final entry in model.openBooks) entry.id];
+    }
+
+    /// The titles of the built rows, top to bottom as drawn.
+    List<String> drawnTitles(WidgetTester tester) {
+      final titles = find.textContaining(RegExp(r'^Volume \d\d$'));
+      final drawn = titles.evaluate().map((element) {
+        final text = element.widget as Text;
+        return (text.data!, tester.getRect(find.byWidget(text)).top);
+      }).toList()..sort((a, b) => a.$2.compareTo(b.$2));
+      return [for (final (title, _) in drawn) title];
+    }
+
+    Future<void> drag(WidgetTester tester, String title, double dy) async {
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text(title)),
+      );
+      // A row lifts on a long press, so a plain press still opens the book.
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      for (var i = 0; i < 10; i += 1) {
+        await gesture.moveBy(Offset(0, dy / 10));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('rows reorder by dragging, down and up', (tester) async {
+      final ids = await pumpLive(tester);
+      final row =
+          tester.getRect(find.text('Volume 02')).top -
+          tester.getRect(find.text('Volume 01')).top;
+
+      // Volume 01 dragged two rows down takes Volume 03's place.
+      await drag(tester, 'Volume 01', row * 2);
+      expect(ids().take(5), [2, 3, 1, 4, 5]);
+      expect(drawnTitles(tester).take(5), [
+        'Volume 02',
+        'Volume 03',
+        'Volume 01',
+        'Volume 04',
+        'Volume 05',
+      ]);
+
+      // Volume 04, the last row in the window, dragged three rows up takes
+      // the first place.
+      await drag(tester, 'Volume 04', -row * 3);
+      expect(ids().take(6), [4, 2, 3, 1, 5, 6]);
+      expect(drawnTitles(tester).take(5), [
+        'Volume 04',
+        'Volume 02',
+        'Volume 03',
+        'Volume 01',
+        'Volume 05',
+      ]);
+      expect(ids()..sort(), [for (var id = 1; id <= 20; id += 1) id]);
+    });
+
+    testWidgets('the keyboard walks every row and close button, both ways', (
+      tester,
+    ) async {
+      await pumpLive(tester);
+      expect(
+        find.text('Volume 20'),
+        findsNothing,
+        reason: 'the last row starts outside the build cache',
+      );
+
+      /// The focused control: a close button by its tooltip, else the first
+      /// text inside it.
+      String? focused() {
+        final context = FocusManager.instance.primaryFocus?.context;
+        if (context == null) return null;
+        final tooltip = context.findAncestorWidgetOfExactType<Tooltip>();
+        if (tooltip != null) return tooltip.message;
+        String? text;
+        void visit(Element element) {
+          if (text != null) return;
+          if (element.widget case Text(:final data?)) {
+            text = data;
+            return;
+          }
+          element.visitChildren(visit);
+        }
+
+        (context as Element).visitChildren(visit);
+        return text;
+      }
+
+      final expected = [
+        for (final book in books) ...[book.title, 'Close ${book.title}'],
+        'Add books',
+      ];
+      Future<List<String>> walk(bool backwards, String until) async {
+        final walked = <String>[];
+        for (var i = 0; i < 80; i += 1) {
+          if (backwards) {
+            await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          }
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          if (backwards) {
+            await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+          }
+          await tester.pumpAndSettle();
+          final label = focused();
+          if (label != null && expected.contains(label)) {
+            walked.add(label);
+            // Whatever the keyboard is on is in the window, ring and all.
+            final viewport = tester.getRect(
+              find.descendant(
+                of: find.byType(ShellSidebar),
+                matching: find.byType(Viewport),
+              ),
+            );
+            final control = FocusManager.instance.primaryFocus!.context!;
+            final ring = tester
+                .getRect(find.byElementPredicate((e) => e == control))
+                .inflate(2);
+            expect(
+              viewport.contains(ring.topLeft) &&
+                  viewport.contains(ring.bottomRight - const Offset(.01, .01)),
+              isTrue,
+              reason: '$label focus ring $ring inside the viewport $viewport',
+            );
+          }
+          if (label == until) return walked;
+        }
+        fail('$until never took focus; walked $walked');
+      }
+
+      expect(await walk(false, 'Add books'), expected);
+      expect(await walk(true, 'Volume 01'), expected.reversed.skip(1).toList());
+    });
+  });
+
   testWidgets('the Japanese sidebar keeps its labels unspaced', (tester) async {
     await _pumpFrame(
       tester,
