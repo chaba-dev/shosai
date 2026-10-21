@@ -638,6 +638,36 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
   final String? annotationError;
 }
 
+/// The region of a continuous EPUB chapter the view shows, in the page's
+/// coordinates, for the location request it answers.
+///
+/// The controller lays out the chapter's window around it; a report for an
+/// older request (before the view revealed the new location) is ignored.
+final class ReaderContinuousViewportChanged extends ReaderMessage {
+  const ReaderContinuousViewportChanged({
+    required this.generation,
+    required this.revision,
+    required this.top,
+    required this.bottom,
+  });
+
+  final int generation;
+
+  /// The [ReaderModel.locationRequestRevision] the view has revealed.
+  final int revision;
+  final double top;
+  final double bottom;
+}
+
+/// One due step of the continuous window, for the layout that scheduled it.
+final class _ReaderContinuousWindowTick extends ReaderMessage {
+  const _ReaderContinuousWindowTick(this.generation, this.revision, this.token);
+
+  final int generation;
+  final int revision;
+  final int token;
+}
+
 /// One installed page window of the Dart EPUB renderer.
 ///
 /// The effect reports the page it wants installed (by canonical scalar); the

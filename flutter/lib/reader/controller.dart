@@ -13,6 +13,7 @@ import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
 import 'package:shosai_flutter/notices/reader_notice_text.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
+import 'package:shosai_flutter/reader/epub/continuous.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
@@ -52,6 +53,7 @@ final class ReaderController implements Listenable {
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
     this.debugEpubSessionObserver,
+    this.debugContinuousStepObserver,
     List<ReaderTabPresentation> initialTabs = const [],
     ReaderTypographyPresentation initialTypography =
         const ReaderTypographyPresentation(
@@ -149,6 +151,10 @@ final class ReaderController implements Listenable {
   /// one is not) needs to reach the session object itself.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
 
+  /// Test and measurement hook: the synchronous microseconds of each
+  /// continuous window step (layout, geometry and page derivation).
+  final void Function(int micros)? debugContinuousStepObserver;
+
   ReaderModel _model = ReaderModel();
   int _revealRevision = 0;
   double? _lastReportedWidth;
@@ -179,6 +185,30 @@ final class ReaderController implements Listenable {
   ChapterLayoutSession? _epubSession;
   _EpubLayoutKey? _epubSessionKey;
   double? _epubLayoutHeight;
+
+  /// The column extents of the continuous chapter at [_continuousExtentsKey].
+  ///
+  /// Keyed by layout rather than by session: a navigation that replaces the
+  /// session keeps the chapter's measured column, so its nodes keep their
+  /// places.
+  ContinuousExtents? _continuousExtents;
+  _EpubLayoutKey? _continuousExtentsKey;
+
+  /// The per-node geometry of each continuous session's window.
+  final Expando<ContinuousGeometryCache> _continuousCaches = Expando();
+
+  /// The column region the continuous view last reported showing, for the
+  /// location request it answers; null until the view reports one.
+  ({double top, double bottom})? _continuousViewport;
+
+  /// The pending window step, if any, and the layout it was scheduled for: a
+  /// step is one bounded batch per frame.
+  int _continuousTickToken = 0;
+  ({int generation, int revision})? _continuousTickFor;
+
+  /// Blocks a window step released whose page may still be on screen; each
+  /// list is released after the frame that replaces its page.
+  final List<List<FlowBlock>> _releasedEpubBlocks = [];
 
   /// Whether an EPUB layout waits for the first reported page height. The
   /// first report then lays the chapter out.
@@ -747,7 +777,6 @@ final class ReaderController implements Listenable {
         if (_isCurrentLayout(message.generation, message.revision) &&
             _relayoutCancellations.contains(message.cancellation)) {
           _activeRelayoutIntent = null;
-          final previousPage = _model.epubPage;
           _applyEpubPage(
             generation: message.generation,
             revision: message.revision,
@@ -763,24 +792,11 @@ final class ReaderController implements Listenable {
             session: message.session,
             sessionKey: message.sessionKey,
           );
-          final page = _model.epubPage;
-          if (_typographyContinuous &&
-              page != null &&
-              !page.continuous &&
-              (previousPage == null ||
-                  previousPage.unit != page.unit ||
-                  previousPage.continuous)) {
-            // The chapter is over the continuous ceilings and is shown as
-            // pages: the reader is told once, when it enters the chapter.
-            _reportNotice(
-              const NoticeRequest(
-                text: ReaderChapterPaginatedNotice(),
-                kind: NoticeKind.info,
-                lifetime: NoticeLifetime.brief,
-              ),
-            );
-          }
         }
+      case ReaderContinuousViewportChanged():
+        _continuousViewportChanged(message);
+      case _ReaderContinuousWindowTick():
+        _continuousWindowTick(message);
       case _ReaderRelayoutFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _layoutRevision) {
@@ -1515,6 +1531,11 @@ final class ReaderController implements Listenable {
     final layout = _model.layout;
     final height = _epubLayoutHeight;
     if (height == null) return;
+    if (page.continuous) {
+      // A continuous chapter scrolls; a page step moves between chapters.
+      _unitRequested(_model.unit + delta);
+      return;
+    }
     final step = delta < 0
         ? _epubPageBefore(session, page.canonicalStart)
         : _epubPageAfter(session, page.canonicalStart);
@@ -1603,11 +1624,7 @@ final class ReaderController implements Listenable {
   PaginatedChapter? _paginatedWindow(ChapterLayoutSession session) {
     final key = _epubSessionKey;
     if (key == null) return null;
-    return paginateWindow(
-      session.snapshot(),
-      ui.Size(key.width, key.height),
-      continuous: key.continuous,
-    );
+    return paginateWindow(session.snapshot(), ui.Size(key.width, key.height));
   }
 
   /// Derives the page window containing [scalar] and publishes it.
@@ -1636,19 +1653,26 @@ final class ReaderController implements Listenable {
     final document = _model.document;
     if ((installed == null && session == null) || document == null) return;
     final previousSession = installed;
-    final page = pageWindowFor(
-      session: session ?? installed!,
-      scalar: scalar,
-      unit: unit,
-      chapterCount: document.logicalUnitCount.toInt(),
-      windowSize: ui.Size(layout.width, height),
-      continuous:
-          (sessionKey ?? _epubSessionKey)?.continuous ?? _typographyContinuous,
-    );
+    final pageSession = session ?? installed!;
+    final pageKey = sessionKey ?? _epubSessionKey;
+    final page = pageKey != null && pageKey.continuous
+        ? _continuousPage(pageSession, pageKey, scalar)
+        : pageWindowFor(
+            session: pageSession,
+            scalar: scalar,
+            unit: unit,
+            chapterCount: document.logicalUnitCount.toInt(),
+            windowSize: ui.Size(layout.width, height),
+          );
     final oldImage = _model.pageImage;
     final changedLocation =
         unit != _model.unit || offset != null || replaceReadingOffset;
-    if (changedLocation) _readingStatePersistenceBlocked = false;
+    if (changedLocation) {
+      _readingStatePersistenceBlocked = false;
+      // The view reveals the new location before it reports what it shows:
+      // the region reported for the previous location is not this one's.
+      _continuousViewport = null;
+    }
     final readingOffset = changedLocation ? offset : _model.readingOffset;
     // The ownership transfer is the commit, and it happens after the next model
     // is derived but before it is published: a failure in the injected progress
@@ -1706,6 +1730,7 @@ final class ReaderController implements Listenable {
     if (adopting && previousSession != null) {
       _retireEpubSession(previousSession);
     }
+    if (page.continuous) _scheduleContinuousTick();
     if (length != null) {
       _frameScheduler(
         () => dispatch(_ReaderSurfaceFocusReady(generation, revision)),
@@ -2617,10 +2642,9 @@ final class ReaderController implements Listenable {
     // the typed refusal.
     final refusal = source.layoutLimitExceeded(unit);
     if (refusal != null) throw refusal;
-    // A continuous reader scrolls a chapter as one page whose selection
-    // surface covers the whole chapter; a chapter over the continuous ceilings
-    // is shown as pages instead, so that surface stays bounded.
-    final continuous = _typographyContinuous && source.continuousAdmitted(unit);
+    // A continuous chapter lays out only a window around the viewport, so any
+    // admitted chapter reads continuously however long it is.
+    final continuous = _typographyContinuous;
     final chapter = source.book.chapters[unit];
     try {
       await source.ensureImages(chapter, _epubImageDecoder);
@@ -2680,19 +2704,6 @@ final class ReaderController implements Listenable {
     var adopted = replacement == null;
     try {
       if (!active.started) active.layoutWindowAt(target);
-      if (continuous) {
-        // A continuous chapter is one scrolled page, so it is installed whole:
-        // the rest of the chapter is measured first, in the same bounded,
-        // yielding batches the paginated window fills with afterwards.
-        while (!active.complete) {
-          await Future<void>.delayed(const Duration(milliseconds: 1));
-          if (!_isCurrentLayout(generation, revision)) return;
-          final progressed = active.lastNodeIndex + 1 < active.totalNodes
-              ? active.layoutForward(maxNodes: 24, maxMicros: 8000)
-              : active.layoutBackward(maxNodes: 24, maxMicros: 8000);
-          if (progressed == 0) break;
-        }
-      }
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {
@@ -2736,7 +2747,9 @@ final class ReaderController implements Listenable {
         // effect must never release a session the controller now owns.
         adopted = replacement == null || identical(_epubSession, replacement);
       }
-      if (!adopted) return;
+      // A continuous window grows and shrinks with the viewport instead (see
+      // [_continuousWindowTick]): measuring the whole chapter would retain it.
+      if (!adopted || continuous) return;
       while (!active.complete) {
         // A real event-loop turn: frames and input run between batches.
         await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -2932,6 +2945,150 @@ final class ReaderController implements Listenable {
     return 'shosai-epub-$hash-${safe.isEmpty ? 'face' : safe}';
   }
 
+  /// The continuous page of [session]'s window at [key], answering [scalar].
+  ReaderEpubPage _continuousPage(
+    ChapterLayoutSession session,
+    _EpubLayoutKey key,
+    int scalar,
+  ) {
+    var extents = _continuousExtents;
+    if (extents == null || _continuousExtentsKey != key) {
+      extents = ContinuousExtents(session.chapter);
+      _continuousExtents = extents;
+      _continuousExtentsKey = key;
+      // The column is new, so the region the view reported is in the old
+      // one's coordinates: the window waits for the view's next report.
+      _continuousViewport = null;
+    }
+    final cache = _continuousCaches[session] ??= ContinuousGeometryCache(
+      session.chapter,
+    );
+    return continuousWindowFor(
+      session: session,
+      extents: extents,
+      cache: cache,
+      scalar: scalar,
+      unit: key.unit,
+      chapterCount: _model.document?.logicalUnitCount.toInt() ?? key.unit + 1,
+      windowSize: ui.Size(key.width, key.height),
+    );
+  }
+
+  void _continuousViewportChanged(ReaderContinuousViewportChanged message) {
+    final page = _model.epubPage;
+    if (page == null ||
+        !page.continuous ||
+        message.generation != _model.generation ||
+        message.revision != _model.locationRequestRevision) {
+      return;
+    }
+    _continuousViewport = (
+      top: message.top - kEpubPageMargin,
+      bottom: message.bottom - kEpubPageMargin,
+    );
+    _scheduleContinuousTick();
+  }
+
+  /// Schedules one window step after the next frame, unless one is pending.
+  void _scheduleContinuousTick() {
+    final generation = _model.generation;
+    final revision = _layoutRevision;
+    if (_closing ||
+        _continuousTickFor == (generation: generation, revision: revision)) {
+      return;
+    }
+    // A step pending for an older layout is superseded, not waited for.
+    _continuousTickFor = (generation: generation, revision: revision);
+    final token = ++_continuousTickToken;
+    _frameScheduler(
+      () => dispatch(_ReaderContinuousWindowTick(generation, revision, token)),
+    );
+  }
+
+  /// Moves the continuous window one bounded step toward the viewport and
+  /// installs the page of the new window.
+  ///
+  /// The step is the window's only layout work in a frame; when the window
+  /// still does not cover the viewport's lead, the next step is scheduled for
+  /// the next frame. Blocks the step released stay alive until the page that
+  /// still paints them has been replaced on screen.
+  void _continuousWindowTick(_ReaderContinuousWindowTick message) {
+    if (message.token != _continuousTickToken) return;
+    _continuousTickFor = null;
+    final session = _epubSession;
+    final key = _epubSessionKey;
+    final page = _model.epubPage;
+    final viewport = _continuousViewport;
+    final extents = _continuousExtents;
+    if (!_isCurrentLayout(message.generation, message.revision) ||
+        session == null ||
+        key == null ||
+        !key.continuous ||
+        page == null ||
+        !page.continuous ||
+        viewport == null ||
+        extents == null ||
+        _continuousExtentsKey != key ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _closing ||
+        _suspended) {
+      // A relayout in flight installs its own page and schedules a step then.
+      return;
+    }
+    final stopwatch = Stopwatch()..start();
+    final ContinuousWindowStep step;
+    final ReaderEpubPage next;
+    try {
+      step = advanceContinuousWindow(
+        session: session,
+        extents: extents,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom,
+      );
+      if (!step.changed) return;
+      next = _continuousPage(session, key, page.targetScalar);
+    } catch (error) {
+      // A failed batch adopted nothing; the page on screen stays valid.
+      _emit(_model.copyWith(relayoutError: 'Layout failed: $error'));
+      return;
+    }
+    // The content under the viewport's top keeps its place: the view scrolls
+    // by the shift the measurement made, and the controller's copy of the
+    // viewport follows it until the view reports again.
+    final shift = next.window!.nodeTops[step.anchorNode] - step.anchorTop;
+    _continuousViewport = (
+      top: viewport.top + shift,
+      bottom: viewport.bottom + shift,
+    );
+    _publish(
+      _deriveModel(
+        _model.copyWith(
+          epubPage: next,
+          selectionSurface: _freezeSurface(next.surface),
+          selectionVisualLine: null,
+          selectionPreferredX: null,
+        ),
+      ),
+    );
+    if (step.released.isNotEmpty) _releaseEpubBlocksAfterFrame(step.released);
+    debugContinuousStepObserver?.call(stopwatch.elapsedMicroseconds);
+    if (step.pending) _scheduleContinuousTick();
+  }
+
+  /// Releases [blocks] after the frame that stops painting them.
+  void _releaseEpubBlocksAfterFrame(List<FlowBlock> blocks) {
+    _releasedEpubBlocks.add(blocks);
+    try {
+      _frameScheduler(() {
+        if (_releasedEpubBlocks.remove(blocks)) disposeFlowBlocks(blocks);
+      });
+    } catch (_) {
+      _releasedEpubBlocks.remove(blocks);
+      disposeFlowBlocks(blocks);
+    }
+  }
+
   /// Retires the active chapter session after the current frame.
   ///
   /// Deferred through the injected frame scheduler, so a page the model still
@@ -2952,6 +3109,11 @@ final class ReaderController implements Listenable {
     // platform's finalizers.
     if (immediate) {
       retired.dispose();
+      // No frame is coming: blocks the window released wait for none.
+      for (final blocks in _releasedEpubBlocks) {
+        disposeFlowBlocks(blocks);
+      }
+      _releasedEpubBlocks.clear();
       return;
     }
     try {

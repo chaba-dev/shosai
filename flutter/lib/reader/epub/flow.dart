@@ -446,7 +446,11 @@ class ChapterLayoutSession {
   final double _maxBlockHeight;
 
   final List<FlowBlock> _blocks = [];
-  _FlowContext? _forward;
+
+  /// Frame cursor at the start of each laid-out node, then the range's end:
+  /// `laidOutNodes + 1` entries once started. A released node's extent is read
+  /// from here, so the frame of the nodes that stay never moves.
+  final List<double> _bounds = [];
   double _rangeStart = 0;
   double _cursor = 0;
   int _firstNode = 0;
@@ -508,18 +512,26 @@ class ChapterLayoutSession {
   );
 
   /// Measure the priority window around [scalar]: from the node containing it
-  /// forward until at least [viewports] viewport heights are measured, so the
-  /// reader can show the durable location plus the following page.
-  void layoutWindowAt(int scalar, {double viewports = 2.5}) {
+  /// (or from [node] when given) forward until at least [viewports] viewport
+  /// heights are measured, so the reader can show the durable location plus
+  /// the following page.
+  ///
+  /// It is the first range of a session, or the first after [releaseAll].
+  void layoutWindowAt(int scalar, {double viewports = 2.5, int? node}) {
     assert(!_started, 'the priority window is the first range of a session');
     final context = _newContext();
     final stopwatch = Stopwatch()..start();
-    final target = nodeIndexForScalar(scalar);
+    final target = math.max(
+      0,
+      math.min(node ?? nodeIndexForScalar(scalar), chapter.blocks.length - 1),
+    );
     var index = target;
+    final bounds = <double>[0];
     final targetHeight = math.max(120.0, spec.height) * viewports;
     try {
       while (index < chapter.blocks.length) {
         context.layoutNode(chapter.blocks[index], index, 0, 0);
+        bounds.add(context.cursor);
         index++;
         if (context.cursor >= targetHeight) break;
       }
@@ -531,11 +543,12 @@ class ChapterLayoutSession {
       rethrow;
     }
     layoutWorkMicros += stopwatch.elapsedMicroseconds;
-    _forward = context;
     _blocks.addAll(context.blocks);
     context.transferCreatedPainters();
     _overflowClipped += context.overflowClippedBlocks;
-    _countedOverflow = context.overflowClippedBlocks;
+    _bounds
+      ..clear()
+      ..addAll(bounds);
     _firstNode = target;
     _nextNode = index;
     _rangeStart = 0;
@@ -545,50 +558,104 @@ class ChapterLayoutSession {
 
   /// Measure up to [maxNodes] further nodes after the current range, stopping
   /// early when [maxMicros] of layout work has been spent.
+  ///
+  /// Each batch measures in its own context starting at the range's end, so
+  /// the session retains only the blocks of its current range: a released
+  /// block is referenced by nothing the session keeps.
   int layoutForward({int maxNodes = 24, int maxMicros = 8000}) {
-    final context = _forward;
-    if (!_started || context == null || _nextNode >= chapter.blocks.length) {
-      return 0;
-    }
+    if (!_started || _nextNode >= chapter.blocks.length) return 0;
+    final context = _newContext()..cursor = _cursor;
     final stopwatch = Stopwatch()..start();
+    final bounds = <double>[];
+    var next = _nextNode;
     var laid = 0;
-    final before = context.blocks.length;
-    final start = _nextNode;
-    final cursorBefore = context.cursor;
-    final overflowBefore = context.overflowClippedBlocks;
     try {
-      while (_nextNode < chapter.blocks.length &&
+      while (next < chapter.blocks.length &&
           laid < maxNodes &&
           stopwatch.elapsedMicroseconds < maxMicros) {
-        if (_nextNode == debugFailNodeIndex) {
-          throw StateError('debug layout failure at $_nextNode');
+        if (next == debugFailNodeIndex) {
+          throw StateError('debug layout failure at $next');
         }
-        context.layoutNode(chapter.blocks[_nextNode], _nextNode, 0, 0);
-        _nextNode++;
+        context.layoutNode(chapter.blocks[next], next, 0, 0);
+        bounds.add(context.cursor);
+        next++;
         laid++;
       }
     } catch (_) {
-      // A batch that throws adopts nothing: release every painter this call
-      // created that the adopted prefix does not own (including a painter whose
-      // construction never finished), drop the blocks it appended and rewind the
-      // range, so a retry re-measures those nodes instead of leaving a hole.
-      context.releaseUnadoptedPainters(context.blocks.sublist(0, before));
-      context.blocks.removeRange(before, context.blocks.length);
-      context.cursor = cursorBefore;
-      context.overflowClippedBlocks = overflowBefore;
-      _nextNode = start;
+      // A batch that throws adopts nothing: every painter this call created
+      // (including one whose construction never finished) is released here,
+      // and the range is unchanged, so a retry re-measures those nodes instead
+      // of leaving a hole.
+      context.releaseUnadoptedPainters(const []);
       rethrow;
     }
-    _blocks.addAll(context.blocks.sublist(before));
+    _blocks.addAll(context.blocks);
     context.transferCreatedPainters();
-    _overflowClipped += context.overflowClippedBlocks - _countedOverflow;
-    _countedOverflow = context.overflowClippedBlocks;
+    _bounds.addAll(bounds);
+    _overflowClipped += context.overflowClippedBlocks;
+    _nextNode = next;
     _cursor = context.cursor;
     layoutWorkMicros += stopwatch.elapsedMicroseconds;
     return laid;
   }
 
-  int _countedOverflow = 0;
+  /// Detaches every block of the nodes before [node] from the range.
+  ///
+  /// The blocks are returned, not released: a page the model still paints may
+  /// reference them, so their owner disposes them ([disposeFlowBlocks]) once
+  /// nothing renders them. The remaining nodes keep their frame positions.
+  List<FlowBlock> releaseBefore(int node) {
+    if (!_started || node <= _firstNode) return const [];
+    final to = math.min(node, _nextNode);
+    var count = 0;
+    while (count < _blocks.length && _blocks[count].nodeIndex < to) {
+      count++;
+    }
+    final released = _blocks.sublist(0, count);
+    _blocks.removeRange(0, count);
+    final nodes = to - _firstNode;
+    _rangeStart = _bounds[nodes];
+    _bounds.removeRange(0, nodes);
+    _firstNode = to;
+    return released;
+  }
+
+  /// Detaches every block of [node] and the nodes after it from the range.
+  ///
+  /// As with [releaseBefore], the owner disposes the returned blocks.
+  List<FlowBlock> releaseFrom(int node) {
+    if (!_started || node >= _nextNode) return const [];
+    final from = math.max(node, _firstNode);
+    var keep = _blocks.length;
+    while (keep > 0 && _blocks[keep - 1].nodeIndex >= from) {
+      keep--;
+    }
+    final released = _blocks.sublist(keep);
+    _blocks.removeRange(keep, _blocks.length);
+    final nodes = from - _firstNode;
+    _cursor = _bounds[nodes];
+    _bounds.removeRange(nodes + 1, _bounds.length);
+    _nextNode = from;
+    return released;
+  }
+
+  /// Detaches the whole range, so the next [layoutWindowAt] starts a new one.
+  ///
+  /// As with [releaseBefore], the owner disposes the returned blocks.
+  List<FlowBlock> releaseAll() {
+    final released = List<FlowBlock>.of(_blocks);
+    _blocks.clear();
+    _bounds.clear();
+    _firstNode = 0;
+    _nextNode = 0;
+    _rangeStart = 0;
+    _cursor = 0;
+    _started = false;
+    return released;
+  }
+
+  /// The blocks of the laid-out range in node order, in the session frame.
+  List<FlowBlock> get blocks => List.unmodifiable(_blocks);
 
   /// Measure up to [maxNodes] earlier nodes before the current range, stopping
   /// early when [maxMicros] of layout work has been spent. Existing blocks
@@ -605,6 +672,7 @@ class ChapterLayoutSession {
     final staged = <FlowBlock>[];
     final contexts = <_FlowContext>[];
     var stagedRange = _rangeStart;
+    final tops = <double>[];
     var stagedOverflow = 0;
     var first = _firstNode;
     var laid = 0;
@@ -621,6 +689,7 @@ class ChapterLayoutSession {
         context.layoutNode(chapter.blocks[index], index, 0, 0);
         final height = context.cursor;
         stagedRange -= height;
+        tops.add(stagedRange);
         staged.insertAll(0, [
           for (final block in context.blocks) block.shifted(stagedRange),
         ]);
@@ -638,6 +707,7 @@ class ChapterLayoutSession {
     for (final context in contexts) {
       context.transferCreatedPainters();
     }
+    _bounds.insertAll(0, tops.reversed);
     _rangeStart = stagedRange;
     _overflowClipped += stagedOverflow;
     _firstNode = first;
@@ -725,7 +795,7 @@ class ChapterLayoutSession {
     _disposed = true;
     disposeFlowBlocks(_blocks);
     _blocks.clear();
-    _forward = null;
+    _bounds.clear();
     debugCreatedPainters.clear();
   }
 }

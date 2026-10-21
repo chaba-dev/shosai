@@ -213,7 +213,9 @@ class _ReachableSelectableSurface extends StatelessWidget {
                 'reader-vertical-scroll-${model.generation}-${model.unit}',
               ),
               page: continuousPage,
+              generation: model.generation,
               revealRevision: model.locationRequestRevision,
+              dispatch: dispatch,
               child: content(
                 Size(
                   constraints.maxWidth,
@@ -273,18 +275,27 @@ class _ReachableSelectableSurface extends StatelessWidget {
 /// included, and the same location again after the reader scrolled away. A
 /// passive relayout (a resize, a height refresh) installs a page with the same
 /// revision and keeps the scroll offset the reader has.
+///
+/// The page lays out only a window of the chapter: the view reports the region
+/// it shows, and the controller moves the window toward it. When a new window
+/// measures nodes above the viewport, the content the reader sees moves in the
+/// column; the view scrolls by the same amount so it stays in place.
 class _ContinuousEpubScroll extends StatefulWidget {
   const _ContinuousEpubScroll({
     super.key,
     required this.page,
+    required this.generation,
     required this.revealRevision,
+    required this.dispatch,
     required this.child,
   });
 
   final ReaderEpubPage page;
+  final int generation;
 
   /// The model's [ReaderModel.locationRequestRevision] [page] answers.
   final int revealRevision;
+  final void Function(ReaderMessage) dispatch;
   final Widget child;
 
   @override
@@ -294,16 +305,64 @@ class _ContinuousEpubScroll extends StatefulWidget {
 class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
   final ScrollController _scroll = ScrollController();
 
+  /// The revision whose target has been revealed; the view reports what it
+  /// shows only for it.
+  int? _revealed;
+
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_report);
     _revealTarget();
   }
 
   @override
   void didUpdateWidget(_ContinuousEpubScroll oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.revealRevision != oldWidget.revealRevision) _revealTarget();
+    if (widget.revealRevision != oldWidget.revealRevision) {
+      _revealTarget();
+      return;
+    }
+    final before = oldWidget.page.window;
+    final after = widget.page.window;
+    if (before == null ||
+        after == null ||
+        identical(before, after) ||
+        !_scroll.hasClients ||
+        before.nodeTops.length != after.nodeTops.length) {
+      return;
+    }
+    // Keep the first node the view shows in place where the reader sees it.
+    final position = _scroll.position;
+    final node = continuousAnchorNode(
+      before.nodeTops,
+      position.pixels - kEpubPageMargin,
+      firstLaidOut: before.firstNode,
+      endLaidOut: before.endNode,
+    );
+    final shift = after.nodeTops[node] - before.nodeTops[node];
+    // A correction, not a scroll: the new extent is applied at the next
+    // layout, in the same frame the new window paints.
+    if (shift != 0) position.correctBy(shift);
+    // The controller moves the window toward what the view shows now.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+  }
+
+  /// Reports the region the view shows, in the page's coordinates.
+  void _report() {
+    if (!mounted || !_scroll.hasClients || _revealed != widget.revealRevision) {
+      return;
+    }
+    final position = _scroll.position;
+    if (!position.hasContentDimensions) return;
+    widget.dispatch(
+      ReaderContinuousViewportChanged(
+        generation: widget.generation,
+        revision: widget.revealRevision,
+        top: position.pixels,
+        bottom: position.pixels + position.viewportDimension,
+      ),
+    );
   }
 
   void _revealTarget() {
@@ -319,13 +378,16 @@ class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
       }
       final page = widget.page;
       // The chapter start is a target like any other: it scrolls to the top.
-      final top = page.targetScalar <= page.canonicalStart
+      final top = page.targetScalar <= 0
           ? 0.0
           : (_continuousTargetTop(page) ?? kEpubPageMargin) - kEpubPageMargin;
       final position = _scroll.position;
+      _revealed = revision;
       _scroll.jumpTo(
         top.clamp(position.minScrollExtent, position.maxScrollExtent),
       );
+      // A jump to the offset the view already has notifies nothing.
+      _report();
     });
   }
 
