@@ -367,8 +367,10 @@ void main() {
     ) async {
       await pumpLibrary(tester, const Size(1280, 800));
 
+      // The library is a screen of its own, titled in `ed-display`.
       final title = tester.renderObject<RenderParagraph>(headerText('Library'));
-      expect(title.text.style?.fontSize, ShosaiTokens.typeSize26);
+      expect(title.text.style?.fontSize, 40);
+      expect(title.text.style?.fontFamily, shellEditorialFontFamily);
       final subtitle = tester.renderObject<RenderParagraph>(
         find.text('Your private reading room'),
       );

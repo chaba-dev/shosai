@@ -32,6 +32,7 @@ LibraryCollection _collection(
 }) => LibraryCollection(
   model: model,
   openBook: openBook ?? (_) {},
+  openNotes: () {},
   removeBook: removeBook ?? (_) {},
   loadMore: loadMore ?? () {},
   retryPaging: () {},

@@ -82,7 +82,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get libraryContinueReading => '読書を続ける';
 
   @override
-  String get libraryContinue => '続きを読む  ›';
+  String get libraryContinue => '続きを読む';
 
   @override
   String libraryPercentComplete(int percentage) {

@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
-import 'package:shosai_flutter/theme_tokens.dart';
+import 'package:shosai_flutter/shell/view.dart';
 
 import '../support/bridge_pdf_engine.dart';
 import '../support/production_shell_harness.dart';
@@ -107,27 +107,29 @@ void main() {
   setUpAll(loadHarnessFonts);
 
   /// The continue card's own 16 px title line, not a grid card's 13 px one.
-  Finder continueTitle(String title) => find.byWidgetPredicate(
-    (widget) =>
-        widget is Text &&
-        widget.data == title &&
-        widget.style?.fontSize == ShosaiTokens.typeSize16,
+  Finder continueTitle(String title) => find.descendant(
+    of: find.byType(LibraryContinueCard),
+    matching: find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          widget.data == title &&
+          widget.style?.fontSize == 34,
+    ),
   );
 
-  /// The collection's own 18 px section title, not the sidebar's entry.
+  /// The collection's own 22 px section head, not the sidebar's entry.
   Finder sectionTitle(String label) => find.byWidgetPredicate(
     (widget) =>
-        widget is Text &&
-        widget.data == label &&
-        widget.style?.fontSize == ShosaiTokens.typeSize18,
+        widget is Text && widget.data == label && widget.style?.fontSize == 22,
   );
 
-  /// The grid card's own 13 px title line.
-  Finder cardTitle(String title) => find.byWidgetPredicate(
-    (widget) =>
-        widget is Text &&
-        widget.data == title &&
-        widget.style?.fontSize == ShosaiTokens.typeSize13,
+  /// The shelf card's own title line, not its generated cover's.
+  Finder cardTitle(String title) => find.byElementPredicate(
+    (element) =>
+        element.widget is Text &&
+        (element.widget as Text).data == title &&
+        element.findAncestorWidgetOfExactType<LibraryBookCard>() != null &&
+        element.findAncestorWidgetOfExactType<ShellGeneratedCover>() == null,
   );
 
   group('selection', () {
@@ -241,28 +243,26 @@ void main() {
           ready: () => harnessImagesReady(tester),
         );
 
-        // The section: heading, the card, then the collection's own title.
-        expect(find.text('Continue reading'), findsOneWidget);
+        // The hero: its kicker, the book, its place and Continue, then the
+        // collection's own section head.
+        expect(find.text('CONTINUE READING'), findsOneWidget);
         expect(continueTitle('Resumable'), findsOneWidget);
         expect(find.text('42% complete'), findsOneWidget);
-        expect(find.text('Continue  ›'), findsOneWidget);
-        // The finished and never-opened books are not the continue card.
+        expect(find.text('Continue'), findsOneWidget);
+        expect(find.text('Notes'), findsWidgets);
+        // The finished and never-opened books are not the hero.
         expect(continueTitle('Finished'), findsNothing);
         expect(continueTitle('Never opened'), findsNothing);
-        // The continued book keeps its grid card as well.
+        // The continued book keeps its shelf card as well.
         expect(cardTitle('Resumable'), findsOneWidget);
 
-        final heading = tester.getRect(find.text('Continue reading'));
-        final card = tester.getRect(find.byType(LibraryContinueCard));
+        final kicker = tester.getRect(find.text('CONTINUE READING'));
+        final hero = tester.getRect(find.byType(LibraryContinueCard));
         final section = tester.getRect(sectionTitle('All books'));
         final gridCard = tester.getRect(find.byType(LibraryBookCard).first);
-        expect(card.top, greaterThan(heading.bottom));
-        expect(section.top, greaterThan(card.bottom));
+        expect(hero.contains(kicker.topLeft), isTrue);
+        expect(section.top, greaterThan(hero.bottom));
         expect(gridCard.top, greaterThan(section.bottom));
-        expect(
-          card.width,
-          lessThanOrEqualTo(ShosaiTokens.layoutContinueCardMaxWidth),
-        );
         expect(
           tester.getSize(
             find.descendant(
@@ -270,22 +270,17 @@ void main() {
               matching: find.byType(LibraryBookCover),
             ),
           ),
-          const Size(
-            ShosaiTokens.layoutContinueCardCoverWidth,
-            ShosaiTokens.layoutContinueCardCoverHeight,
+          const Size(168, 252),
+          reason: 'the desktop hero cover is 168 px at 2:3',
+        );
+        final bar = tester.getRect(
+          find.descendant(
+            of: find.byType(LibraryContinueCard),
+            matching: find.byType(ShellProgressBar),
           ),
         );
-        expect(
-          tester
-              .getRect(
-                find.descendant(
-                  of: find.byType(LibraryContinueCard),
-                  matching: find.byType(ShadProgress),
-                ),
-              )
-              .height,
-          ShosaiTokens.layoutProgressGirth,
-        );
+        expect(bar.height, 4);
+        expect(bar.width, lessThanOrEqualTo(LibraryContinueCard.placeMaxWidth));
       },
     );
 
@@ -316,7 +311,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(LibraryContinueCard), findsNothing);
-      expect(find.text('Continue reading'), findsNothing);
+      expect(find.text('CONTINUE READING'), findsNothing);
       expect(sectionTitle('Search results'), findsOneWidget);
     });
   });
@@ -347,7 +342,12 @@ void main() {
         ready: () => harnessImagesReady(tester),
       );
 
-      await tester.tap(find.byType(LibraryContinueCard));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(LibraryContinueCard),
+          matching: find.text('Continue'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(opened.map((book) => book.bookId), [7]);
@@ -374,7 +374,12 @@ void main() {
         ready: () => harnessImagesReady(tester),
       );
 
-      await tester.tap(find.byType(LibraryContinueCard));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(LibraryContinueCard),
+          matching: find.text('Continue'),
+        ),
+      );
       // The reader's own effects (document open, durable state, page raster)
       // complete on the real event loop, so the wait alternates real-async
       // windows with frame pumps until the page is rendered.

@@ -75,9 +75,12 @@ class LibraryHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       spacing: 2,
       children: [
+        // The library is a screen of its own, titled in `ed-display`.
         Text(
           l10n.libraryTitle,
-          style: Theme.of(context).textTheme.headlineMedium,
+          style: shellScreenTitleStyle(
+            ShellLayout.forWidth(MediaQuery.sizeOf(context).width),
+          ).copyWith(color: scheme.foreground),
         ),
         Text(
           l10n.librarySubtitle,

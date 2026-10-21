@@ -102,9 +102,9 @@
   "@libraryContinueReading": {
     "description": "Iced reference key: continue-reading. The collection section heading above the continue card."
   },
-  "libraryContinue": "Continue  ›",
+  "libraryContinue": "Continue",
   "@libraryContinue": {
-    "description": "Iced reference key: continue. The continue card's right-hand link label; the two spaces before the chevron are the reference's own spacing."
+    "description": "The Continue reading hero's primary action, which opens the book at its saved place."
   },
   "libraryPercentComplete": "{percentage}% complete",
   "@libraryPercentComplete": {

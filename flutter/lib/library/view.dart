@@ -774,6 +774,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           child: LibraryCollection(
             model: model,
             openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
+            openNotes: () =>
+                _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),
             removeBook: (book) =>
                 controller.dispatch(LibraryBookRemovalRequested(book)),
             loadMore: () => controller.dispatch(const LibraryMoreRequested()),

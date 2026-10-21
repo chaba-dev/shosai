@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
@@ -22,12 +23,14 @@ import '../support/production_shell_harness.dart';
 /// here; the package's rendered states are captured and inspected in
 /// `test/visual/library_cards_test.dart`.
 
-/// The card's own title line, not the missing cover's placeholder copy.
-Finder cardTitle(String title) => find.byWidgetPredicate(
-  (widget) =>
-      widget is Text &&
-      widget.data == title &&
-      widget.style?.fontSize == ShosaiTokens.typeSize13,
+/// The card's own title line, not the generated cover's copy of it.
+Finder cardTitle(String title) => find.byElementPredicate(
+  (element) =>
+      element.widget is Text &&
+      (element.widget as Text).data == title &&
+      element.findAncestorWidgetOfExactType<LibraryBookCard>() != null &&
+      element.findAncestorWidgetOfExactType<ShellGeneratedCover>() == null,
+  description: 'the card title "$title"',
 );
 
 /// The card for [title].
@@ -262,77 +265,80 @@ Future<HarnessBridge> pumpLibrary(
 void main() {
   setUpAll(loadHarnessFonts);
 
-  group('grid sizing', () {
-    test('the fluid column count is the pinned Iced formula', () {
-      // `ceil((available + spacing) / (min_column + spacing))`, the strategy
-      // `grid(...).fluid(220)` uses at the pinned reference.
-      expect(libraryGridColumns(1048), 5, reason: '1280 wide: 5 columns');
-      expect(libraryGridColumns(668), 3, reason: '900 wide: 3 columns');
-      expect(libraryGridColumns(342), 2, reason: '390 compact: 2 columns');
-      expect(libraryGridColumns(238), 2);
-      expect(libraryGridColumns(220), 1);
+  group('shelf sizing', () {
+    test('the shelf fits columns of at least 118 px', () {
+      // `repeat(auto-fill, minmax(118px, 1fr))` at a 28 px gap on a desktop
+      // and 22 px on a tablet; a phone's shelf is always three across.
+      expect(libraryGridColumns(1104), 7, reason: '1440 desktop: seven');
+      expect(
+        libraryGridColumns(896, layout: ShellLayout.tablet),
+        6,
+        reason: '1180 tablet: six',
+      );
+      expect(libraryGridColumns(944), 6, reason: '1280 desktop: six');
+      expect(libraryGridColumns(264), 2);
+      expect(libraryGridColumns(263), 1);
       expect(libraryGridColumns(0), 1, reason: 'never zero columns');
       expect(libraryGridColumns(-1), 1);
+      expect(libraryGridColumns(200, layout: ShellLayout.phone), 3);
     });
 
-    testWidgets('the rendered grid divides the width equally', (tester) async {
+    testWidgets('the rendered shelf divides the width equally', (tester) async {
       await pumpLibrary(tester);
-      // 1280 px is a tablet window: 1280 - 220 sidebar - 48 collection
-      // padding leaves 992 px, five columns of 184 px.
+      // 1280 - 240 sidebar - 96 margins leaves 944 px: six columns of 134 px
+      // at a 28 px gap.
       final wide = tester.getRect(find.byType(LibraryBookCard).first);
-      expect(wide.width, closeTo(184, 0.6));
+      expect(wide.width, closeTo(134, 0.6));
       expect(
         tester.getRect(find.byType(LibraryBookCard).at(1)).left - wide.left,
-        closeTo(wide.width + ShosaiTokens.layoutLibraryGridSpacing, 0.6),
-        reason: 'cards are one column plus the 18 px spacing apart',
+        closeTo(wide.width + 28, 0.6),
+        reason: 'cards are one column plus the 28 px gap apart',
       );
 
       await tester.pumpWidget(const SizedBox.shrink());
       await pumpLibrary(tester, size: const Size(900, 700));
-      // 900 - 220 - 48 leaves 632 px: three columns of 198.7 px.
+      // 900 - 220 - 64 leaves 616 px: four columns of 137.5 px.
       expect(
         tester.getRect(find.byType(LibraryBookCard).first).width,
-        closeTo(198.7, 0.6),
+        closeTo(137.5, 0.6),
       );
 
       await tester.pumpWidget(const SizedBox.shrink());
       await pumpLibrary(tester, size: const Size(390, 844));
+      // 390 - 32 leaves 358 px: three columns of 110 px at a 14 px gap.
       expect(
         tester.getRect(find.byType(LibraryBookCard).first).width,
-        closeTo(162, 0.6),
+        closeTo(110, 0.6),
       );
     });
   });
 
   group('card sizing', () {
-    testWidgets('the tile keeps the reference height and its own text', (
+    LibraryShelf shelfOf(WidgetTester tester) => tester
+        .widget<LibraryBookCard>(find.byType(LibraryBookCard).first)
+        .shelf;
+
+    testWidgets('the tile is the 2:3 cover and the text it paints', (
       tester,
     ) async {
       await pumpLibrary(tester);
       final context = tester.element(find.byType(LibraryBookCard).first);
-      final extent = libraryCardTileExtent(context);
-      expect(
-        extent,
-        greaterThanOrEqualTo(ShosaiTokens.layoutLibraryCardHeight),
-        reason: 'the pinned Iced card height is the floor',
-      );
-      expect(
-        extent,
-        lessThanOrEqualTo(ShosaiTokens.layoutLibraryCardHeight + 10),
-        reason:
-            'the tile only grows by the measured text: +6 for a Japanese '
-            'two-line title box and +4 for its author box, both of which the '
-            'reference clips inside its fixed 32/28 px boxes',
-      );
+      final shelf = shelfOf(tester);
+      final extent = libraryCardTileExtent(context, shelf);
       expect(
         tester.getRect(find.byType(LibraryBookCard).first).height,
         extent,
         reason: 'the painted card is exactly one tile',
       );
       expect(
-        tester.getSize(cardCover('The Quiet Cartographer')).height,
-        ShosaiTokens.layoutLibraryCardCoverHeight,
-        reason: 'LB-12: the cover box keeps the reference height',
+        tester.getSize(cardCover('The Quiet Cartographer')),
+        Size(shelf.columnWidth, shelf.columnWidth * 3 / 2),
+        reason: 'LB-12: the cover fills the column at 2:3',
+      );
+      expect(
+        extent - shelf.columnWidth * 3 / 2,
+        lessThan(90),
+        reason: 'below the cover: two title lines, the meta line and the bar',
       );
     });
 
@@ -340,70 +346,60 @@ void main() {
       await pumpLibrary(tester, size: const Size(390, 844), textScale: 2);
       await revealFirstCard(tester);
       final card = tester.getRect(find.byType(LibraryBookCard).first);
+      final shelf = shelfOf(tester);
       final extent = libraryCardTileExtent(
         tester.element(find.byType(LibraryBookCard).first),
+        shelf,
       );
       expect(card.height, extent);
       expect(
-        card.height,
-        greaterThan(ShosaiTokens.layoutLibraryCardHeight + 50),
+        card.height - shelf.columnWidth * 3 / 2,
+        greaterThan(120),
         reason: 'the scaled text block needs the room',
       );
       expect(
         tester.getSize(cardCover('The Quiet Cartographer')).height,
-        ShosaiTokens.layoutLibraryCardCoverHeight,
-        reason: 'the cover keeps its reference height at 200% text',
+        closeTo(shelf.columnWidth * 3 / 2, 0.01),
+        reason: 'the cover keeps its 2:3 box at 200% text',
       );
     });
 
-    testWidgets('the cover sits above the title, author, status and bar', (
+    testWidgets('the cover sits above the title, meta line and bar', (
       tester,
     ) async {
       await pumpLibrary(tester);
       final card = tester.getRect(find.byType(LibraryBookCard).first);
       final cover = tester.getRect(cardCover('The Quiet Cartographer'));
       final title = tester.getRect(cardTitle('The Quiet Cartographer'));
-      final author = tester.getRect(
-        find.descendant(
-          of: cardFor('The Quiet Cartographer'),
-          matching: find.text('Ada Lovelace'),
-        ),
-      );
       final status = tester.getRect(find.text('42%'));
       final progress = tester.getRect(
         find.descendant(
           of: find.byType(LibraryBookCard).first,
-          matching: find.byType(ShadProgress),
+          matching: find.byType(ShellProgressBar),
         ),
       );
-      expect(cover.top, card.top + ShosaiTokens.layoutButtonBookPadding);
-      expect(cover.width, closeTo(card.width - 16, 0.6));
+      expect(cover.top, card.top);
+      expect(cover.width, closeTo(card.width, 0.6));
       expect(title.top, greaterThan(cover.bottom));
-      expect(author.top, greaterThan(title.top));
-      expect(status.top, greaterThan(author.top));
+      expect(status.top, greaterThan(title.top));
       expect(progress.top, greaterThanOrEqualTo(status.bottom));
       expect(progress.bottom, lessThanOrEqualTo(card.bottom));
-      expect(
-        progress.height,
-        ShosaiTokens.layoutProgressGirth,
-        reason: 'the reference progress bar girth',
-      );
+      expect(progress.height, 3, reason: 'the shelf progress bar is 3 px');
     });
 
-    testWidgets('the reference type sizes carry the card hierarchy', (
-      tester,
-    ) async {
+    testWidgets('the type sizes carry the card hierarchy', (tester) async {
       await pumpLibrary(tester);
       for (final (text, size) in <(String, double)>[
-        ('The Quiet Cartographer', ShosaiTokens.typeSize13),
-        ('Ada Lovelace', ShosaiTokens.typeSize11),
-        ('42%', ShosaiTokens.typeSize10),
-        ('EPUB', ShosaiTokens.typeSize10),
+        ('The Quiet Cartographer', 14),
+        ('42%', 12),
+        ('EPUB', 10),
       ]) {
         final paragraph = tester.renderObject<RenderParagraph>(
           find.descendant(
             of: find.byType(LibraryBookCard).first,
-            matching: find.text(text),
+            matching: text == 'The Quiet Cartographer'
+                ? cardTitle(text)
+                : find.text(text),
           ),
         );
         expect(paragraph.text.style?.fontSize, size, reason: text);
@@ -469,27 +465,36 @@ void main() {
       expect(find.byTooltip('Book actions'), findsNothing);
     });
 
-    testWidgets('a book without an author reads as unknown', (tester) async {
+    testWidgets('a finished book reads as finished without a bar', (
+      tester,
+    ) async {
       await pumpLibrary(
         tester,
         books: const [
           FlutterLibraryBook(
             bookId: 3,
-            title: 'Anonymous Work',
+            title: 'Read Work',
             format: FlutterBookFormat.pdf,
             pathKey: '/books/c.pdf',
             managed: false,
-            progress: 0.1,
+            progress: 1,
             dateAdded: '2026-09-10',
           ),
         ],
       );
-      expect(find.text('Unknown author'), findsOneWidget);
+      expect(find.text('Finished'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(LibraryBookCard),
+          matching: find.byType(ShellProgressBar),
+        ),
+        findsNothing,
+      );
     });
   });
 
   group('covers', () {
-    testWidgets('a missing cover shows the title placeholder in its box', (
+    testWidgets('a missing cover shows the typographic cover in its box', (
       tester,
     ) async {
       // Longer than the reference's twenty-character cut, so restoring that
@@ -513,9 +518,9 @@ void main() {
         ready: () => find.byType(LibraryBookCard).evaluate().isNotEmpty,
       );
       final cover = tester.getRect(find.byType(LibraryBookCover));
-      expect(cover.height, ShosaiTokens.layoutLibraryCardCoverHeight);
+      expect(cover.height, closeTo(cover.width * 3 / 2, 0.01));
       expect(find.byType(Image), findsNothing);
-      // The placeholder carries the whole title, not a prefix of it.
+      // The typographic cover carries the whole title, not a prefix of it.
       final placeholder = find.descendant(
         of: find.byType(LibraryBookCover),
         matching: find.text(title),
@@ -586,20 +591,15 @@ void main() {
   });
 
   group('long metadata', () {
-    testWidgets('a long Japanese title wraps inside its two-line cap', (
+    testWidgets('a long Japanese title fills its two lines, then ellipsizes', (
       tester,
     ) async {
       await pumpLibrary(tester, size: const Size(390, 844));
       final title = cardTitle('海辺の図書館 — 失われた書架をめぐる長い旅路');
       final paragraph = tester.renderObject<RenderParagraph>(title);
-      // Two lines of the taller Japanese line box, fully painted: the
-      // reference's fixed 32 px box cuts this title mid-glyph (finding F8).
-      expect(paragraph.didExceedMaxLines, isFalse);
-      expect(
-        paragraph.size.height,
-        greaterThan(2 * ShosaiTokens.typeSize13),
-        reason: 'the title uses both of its lines',
-      );
+      // Two whole lines in a phone's narrow column, never a line cut
+      // mid-glyph (finding F8).
+      expect(paragraph.size.height, closeTo(2 * 17, 0.6));
       final card = tester.getRect(cardFor('海辺の図書館 — 失われた書架をめぐる長い旅路'));
       final rect = tester.getRect(title);
       expect(card.contains(rect.topLeft), isTrue);
@@ -626,7 +626,7 @@ void main() {
               ),
             )
             .width,
-        closeTo(184, 0.6),
+        closeTo(134, 0.6),
         reason: 'the long token does not widen the card',
       );
     });
@@ -719,7 +719,7 @@ void main() {
       final progress = tester.getRect(
         find.descendant(
           of: cardFor(title),
-          matching: find.byType(ShadProgress),
+          matching: find.byType(ShellProgressBar),
         ),
       );
       // The chip is a decorated run of its own at this scale, so the tile's
@@ -1000,8 +1000,8 @@ void main() {
     testWidgets('no opaque surface covers the cover behind the trigger', (
       tester,
     ) async {
-      // Book 5 has no cover, so what the trigger paints over is the solid
-      // placeholder and the composite can be checked exactly.
+      // Book 5 has no cover, so what the trigger paints over is the generated
+      // cover's ground and the composite can be checked exactly.
       await pumpLibrary(
         tester,
         books: harnessLibraryBooks(),
@@ -1011,14 +1011,19 @@ void main() {
       final target = tester.getRect(trigger);
       final surface = triggerSurface(tester, trigger);
       final cover = tester.getRect(cardCover('A Book With No Cover At All'));
-      // Inside the placeholder, below its centred title: the surface the
-      // trigger covers.
+      // The generated cover just left of the target, above its title: the
+      // surface the trigger covers. Sampled beside the trigger because the
+      // cover's sheen shades it from spine to fore-edge.
       final background = await paintedColorAt(
         tester,
-        Offset(cover.left + 12, cover.bottom - 12),
+        Offset(target.left - 3, surface.center.dy),
+      );
+      expect(
+        cover.contains(Offset(target.left - 3, surface.center.dy)),
+        isTrue,
       );
       expectPaintedColor(
-        await paintedColorAt(tester, target.topLeft + const Offset(3, 3)),
+        await paintedColorAt(tester, target.topLeft + const Offset(3, 6)),
         background,
         reason:
             "the reference's opaque SURFACE fill is gone: the cover paints "
@@ -1052,10 +1057,9 @@ void main() {
       final trigger = cardTrigger('A Book With No Cover At All');
       final target = tester.getRect(trigger);
       final surface = triggerSurface(tester, trigger);
-      final cover = tester.getRect(cardCover('A Book With No Cover At All'));
       final background = await paintedColorAt(
         tester,
-        Offset(cover.left + 12, cover.bottom - 12),
+        Offset(target.left - 3, surface.center.dy),
       );
       final scrim = surface.centerLeft + const Offset(3, 0);
 
@@ -1071,7 +1075,7 @@ void main() {
         reason: 'hover deepens the scrim',
       );
       expectPaintedColor(
-        await paintedColorAt(tester, target.topLeft + const Offset(3, 3)),
+        await paintedColorAt(tester, target.topLeft + const Offset(3, 6)),
         background,
         reason: 'hover does not grow the paint into the rest of the target',
       );
