@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -768,28 +769,96 @@ void main() {
       },
     );
 
-    test(
-      'a managed directory replaced by a symlink never redirects deletion',
-      () async {
-        final t = await TempLibrary.create();
-        final source = t.copyFixture('sample.epub', 'source.epub');
-        final book = await t.importBook(source, managed: true);
-        final name = p.basename(book.path);
-        // The person's folder holds a file with the copy's name; the managed
-        // directory is moved away and replaced by a link to that folder.
-        final documents = Directory(t.path('documents'))..createSync();
-        final userFile = File(p.join(documents.path, name))
-          ..writeAsStringSync('the person\'s own file');
-        Directory(t.managedDirectory).renameSync(t.path('moved-books'));
-        Link(t.managedDirectory).createSync(documents.path);
+    test('a managed directory replaced by a symlink never redirects deletion '
+        'or publication', () async {
+      final t = await TempLibrary.create();
+      final source = t.copyFixture('sample.epub', 'source.epub');
+      final book = await t.importBook(source, managed: true);
+      final name = p.basename(book.path);
+      // The person's folder holds a file with the copy's name; the managed
+      // directory is moved away and replaced by a link to that folder.
+      final documents = Directory(t.path('documents'))..createSync();
+      final userFile = File(p.join(documents.path, name))
+        ..writeAsStringSync('the person\'s own file');
+      Directory(t.managedDirectory).renameSync(t.path('moved-books'));
+      Link(t.managedDirectory).createSync(documents.path);
 
-        final outcome = await t.library.remove(book.id);
-        await t.library.retryManagedFileDeletions();
+      // The book's copy now looks damaged; repairing it would replace the
+      // person's file.
+      final reimport = await t.library.importFile(source, managed: true);
+      final outcome = await t.library.remove(book.id);
+      await t.library.retryManagedFileDeletions();
+      final fresh = await t.library.importFile(source, managed: true);
 
-        expect(outcome.managedFileDeletionPending, isTrue);
-        expect(userFile.readAsStringSync(), 'the person\'s own file');
-      },
-    );
+      for (final item in [reimport, fresh]) {
+        expect(item.book, isNull);
+        expect(item.error, contains('no longer resolves'));
+      }
+      expect(outcome.removed, isTrue);
+      expect(outcome.managedFileDeletionPending, isTrue);
+      expect(await t.library.get(book.id), isNull);
+      expect(await t.count('managed_file_deletion_debt'), 1);
+      expect(userFile.readAsStringSync(), 'the person\'s own file');
+      expect(documents.listSync().map((e) => p.basename(e.path)), [name]);
+      expect(File(p.join(t.path('moved-books'), name)).existsSync(), isTrue);
+    });
+
+    test('removal commits without a usable managed directory and never '
+        'deletes', () async {
+      final t = await TempLibrary.create();
+      final referenced = await t.importBook(
+        t.copyFixture('sample.pdf', 'referenced.pdf'),
+      );
+      final source = t.copyFixture('sample.epub', 'source.epub');
+      final managed = await t.importBook(source, managed: true);
+      final name = p.basename(managed.path);
+      // The managed directory's path is taken by a regular file.
+      Directory(t.managedDirectory).renameSync(t.path('moved-books'));
+      File(t.managedDirectory).writeAsStringSync('not a folder');
+
+      final referencedOutcome = await t.library.remove(referenced.id);
+      final managedOutcome = await t.library.remove(managed.id);
+      final item = await t.library.importFile(source, managed: true);
+
+      expect(referencedOutcome.removed, isTrue);
+      expect(referencedOutcome.managedFileDeletionPending, isFalse);
+      expect(managedOutcome.removed, isTrue);
+      expect(managedOutcome.managedFileDeletionPending, isTrue);
+      expect(await t.library.get(managed.id), isNull);
+      expect(await t.count('managed_file_deletion_debt'), 1);
+      expect(item.error, contains('not usable'));
+      await expectLater(
+        t.library.retryManagedFileDeletions(),
+        throwsCoreError(CoreErrorKind.inaccessible),
+      );
+      expect(File(p.join(t.path('moved-books'), name)).existsSync(), isTrue);
+      expect(File(t.managedDirectory).readAsStringSync(), 'not a folder');
+    });
+
+    test('debt recorded in another directory stays pending', () async {
+      final t = await TempLibrary.create();
+      final source = t.copyFixture('sample.epub', 'source.epub');
+      final book = await t.importBook(source, managed: true);
+      // The same database used with another managed directory.
+      final elsewhere = Library(
+        t.store,
+        managedDirectory: t.path('other-books'),
+      );
+
+      final outcome = await elsewhere.remove(book.id);
+
+      expect(outcome.managedFileDeletionPending, isTrue);
+      expect(await elsewhere.retryManagedFileDeletions(), (
+        cleared: 0,
+        pending: 1,
+      ));
+      expect(File(book.path).existsSync(), isTrue);
+      expect(await t.library.retryManagedFileDeletions(), (
+        cleared: 1,
+        pending: 0,
+      ));
+      expect(File(book.path).existsSync(), isFalse);
+    });
 
     test('a crash before the commit leaves no lasting orphan', () async {
       final t = await TempLibrary.create();
@@ -844,6 +913,86 @@ void main() {
         }
       },
     );
+
+    test(
+      'libraries over one directory through a symlink alias share its lock',
+      () async {
+        final t = await TempLibrary.create();
+        Directory(t.managedDirectory).createSync();
+        final root = canonicalBookPath(t.managedDirectory);
+        final alias = t.path('alias');
+        Link(alias).createSync(t.managedDirectory);
+        final inspected = _SignallingInspector();
+        final importer = Library(
+          t.store,
+          managedDirectory: alias,
+          inspectors: {BookFormat.pdf: inspected},
+        );
+        // A large copy whose removal is still owed: the import reclaims it,
+        // hashing it under the lock, while the retry would delete it.
+        final source = t.path('large.pdf');
+        final bytes = Uint8List(32 * 1024 * 1024);
+        for (var i = 0; i < bytes.length; i += 4096) {
+          bytes[i] = i ~/ 4096 & 0xff;
+        }
+        File(source).writeAsBytesSync(bytes);
+        final copy = p.join(root, '${sha256.convert(bytes)}.pdf');
+        File(source).copySync(copy);
+        await t.execute(
+          'INSERT INTO managed_file_deletion_debt (file_path, managed_dir) '
+          'VALUES (?, ?)',
+          [copy, root],
+        );
+
+        final importing = importer.importFile(source, managed: true);
+        await inspected.done.future;
+        // The import is now taking the lock and hashing the existing copy.
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final retry = await t.library.retryManagedFileDeletions();
+        final item = await importing;
+
+        expect(item.error, isNull);
+        expect(item.book!.path, copy);
+        expect(await t.library.verifiedPath(item.book!.id), copy);
+        // Usually the retry waits for the import, which takes the debt over;
+        // if it wins the lock first, the import publishes a fresh copy.
+        // Either way nothing stays pending and the committed copy is intact.
+        expect(retry.pending, 0);
+        expect(await t.count('managed_file_deletion_debt'), 0);
+      },
+    );
+
+    test('the orphan sweep is not starved by owned copies', () async {
+      final t = await TempLibrary.create();
+      await t.library.retryManagedFileDeletions();
+      final root = canonicalBookPath(t.managedDirectory);
+      String copy(int i) =>
+          p.join(root, '${i.toRadixString(16).padLeft(64, '0')}.pdf');
+      const owned = 400;
+      for (var i = 0; i < owned; i++) {
+        File(copy(i)).writeAsStringSync('owned $i');
+      }
+      await t.executeMany(
+        '''INSERT INTO books (title, format, file_path, storage_kind,
+             original_path, content_hash, file_size)
+           VALUES ('Owned', 'pdf', ?1, 'managed', ?1, ?2, 1)''',
+        [
+          for (var i = 0; i < owned; i++)
+            [copy(i), i.toRadixString(16).padLeft(64, '0')],
+        ],
+      );
+      final orphans = [
+        for (var i = owned; i < owned + 3; i++)
+          File(copy(i))..writeAsStringSync('orphan'),
+      ];
+
+      await t.library.retryManagedFileDeletions();
+
+      for (final orphan in orphans) {
+        expect(orphan.existsSync(), isFalse);
+      }
+      expect(t.managedEntries(), hasLength(owned));
+    });
   });
 
   group('file admission', () {
@@ -962,6 +1111,20 @@ void main() {
 
 /// Replace the file at [path] with a non-empty directory, which deletion
 /// refuses to remove.
+/// Reports when an import has inspected its staged copy.
+final class _SignallingInspector implements BookInspector {
+  final done = Completer<void>();
+
+  @override
+  Future<BookMetadata> inspect(
+    String path, {
+    CancellationToken? cancellation,
+  }) async {
+    if (!done.isCompleted) done.complete();
+    return const BookMetadata(title: 'Large');
+  }
+}
+
 void _blockDeletion(String path) {
   File(path).deleteSync();
   Directory(path).createSync();

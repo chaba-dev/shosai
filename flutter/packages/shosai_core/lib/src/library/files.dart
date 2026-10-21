@@ -90,19 +90,26 @@ Future<BookFormat?> detectBookFormat(String path) async {
   } on FileSystemException catch (error) {
     throw _inaccessible('inspect', path, error);
   }
+  final Uint8List header;
   try {
-    final header = await file.read(58);
-    if (_startsWith(header, '%PDF-')) return BookFormat.pdf;
-    if (header.length == 58 &&
-        _startsWith(header, 'PK\x03\x04') &&
-        latin1.decode(header.sublist(30, 38)) == 'mimetype' &&
-        latin1.decode(header.sublist(38, 58)) == 'application/epub+zip') {
-      return BookFormat.epub;
-    }
-    return null;
+    header = await file.read(58);
+  } on FileSystemException catch (error) {
+    throw _inaccessible('inspect', path, error);
   } finally {
-    await file.close();
+    try {
+      await file.close();
+    } on FileSystemException {
+      // Only read from; nothing was left unwritten.
+    }
   }
+  if (_startsWith(header, '%PDF-')) return BookFormat.pdf;
+  if (header.length == 58 &&
+      _startsWith(header, 'PK\x03\x04') &&
+      latin1.decode(header.sublist(30, 38)) == 'mimetype' &&
+      latin1.decode(header.sublist(38, 58)) == 'application/epub+zip') {
+    return BookFormat.epub;
+  }
+  return null;
 }
 
 /// Read the whole book file at [path], admitting at most [maxBytes].
@@ -454,6 +461,12 @@ Future<Discovery> discoverBooks(
         format = await detectBookFormat(resolved);
       } on CoreException catch (error) {
         failures.add((path: resolved, error: error.message));
+        continue;
+      } on FileSystemException catch (error) {
+        failures.add((
+          path: resolved,
+          error: _inaccessible('inspect', resolved, error).message,
+        ));
         continue;
       }
       if (format == null) continue;

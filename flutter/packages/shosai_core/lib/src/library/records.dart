@@ -1,9 +1,11 @@
 /// The library's database records. Every query the library makes is here.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../errors.dart';
@@ -85,25 +87,53 @@ final class LibraryRecords {
   Future<Book?> remove(int id) =>
       _store.transaction((db) => _removeBook(db, id));
 
-  /// Record [canonical] as the managed directory's resolved path the first
-  /// time, and report whether it still is.
-  Future<bool> claimManagedDirectory(String canonical) =>
-      _store.transaction((db) {
-        final recorded = db
-            .select('SELECT value FROM preferences WHERE key = ?', [
-              _managedDirectoryKey,
-            ])
-            .firstOrNull
-            ?.columnAt(0);
-        if (recorded == null) {
-          db.execute('INSERT INTO preferences (key, value) VALUES (?, ?)', [
-            _managedDirectoryKey,
-            canonical,
-          ]);
-          return true;
-        }
-        return recorded == canonical;
-      });
+  /// Record [canonical] as the resolved path of the managed directory
+  /// configured as [configured] the first time, and report whether it still
+  /// is. Each configured path is recorded separately (under a hash of it, so
+  /// the key stays within the preference limits), so a library configured
+  /// with a new directory starts afresh while one whose directory was
+  /// redirected is caught.
+  Future<bool> claimManagedDirectory(String configured, String canonical) {
+    final key =
+        '$_managedDirectoryKey.${sha256.convert(utf8.encode(configured))}';
+    return _store.transaction((db) {
+      final recorded = db
+          .select('SELECT value FROM preferences WHERE key = ?', [key])
+          .firstOrNull
+          ?.columnAt(0);
+      if (recorded == null) {
+        db.execute('INSERT INTO preferences (key, value) VALUES (?, ?)', [
+          key,
+          canonical,
+        ]);
+        return true;
+      }
+      return recorded == canonical;
+    });
+  }
+
+  /// The paths among [paths] that no book or deletion debt owns.
+  Future<List<String>> unowned(List<String> paths) {
+    if (paths.isEmpty) return Future.value(const []);
+    final candidates = List.of(paths);
+    return _store.read((db) {
+      final marks = List.filled(candidates.length, '?').join(', ');
+      final owned = {
+        for (final row in db.select(
+          '''SELECT file_path FROM books WHERE file_path IN ($marks)
+             UNION
+             SELECT file_path FROM managed_file_deletion_debt
+             WHERE file_path IN ($marks)''',
+          [...candidates, ...candidates],
+        ))
+          row.columnAt(0) as String,
+      };
+      return [
+        for (final path in candidates)
+          if (!owned.contains(path)) path,
+      ];
+    });
+  }
 
   /// Whether a book or a deletion debt owns [path].
   Future<bool> isOwned(String path) => _store.read(
@@ -150,7 +180,6 @@ final class LibraryRecords {
     String path,
   ) => _store.read((db) {
     final used = db.select('SELECT 1 FROM books WHERE file_path = ?', [path]);
-    if (used.isNotEmpty) return (inUse: true, directory: null);
     final directory =
         db
                 .select(
@@ -160,7 +189,7 @@ final class LibraryRecords {
                 .firstOrNull
                 ?.columnAt(0)
             as String?;
-    return (inUse: false, directory: directory);
+    return (inUse: used.isNotEmpty, directory: directory);
   });
 
   Future<void> clearDeletionDebt(String path) => _store.transaction(
