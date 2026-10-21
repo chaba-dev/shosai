@@ -311,9 +311,10 @@ Rust core gone pdfrx is the only PDFium user in the process and loads the
 environment library directly again (the private-copy workaround is removed).
 `flutter/integration_test/packaged_core_test.dart` imports a PDF (cover
 render), opens and searches it through the application bridge and renders it
-through a second engine document in one packaged process. It passes on the
-packaged Linux debug bundle (Xvfb, 2026-10-21); macOS and Android are not run
-yet.
+through a second engine document in one packaged process. CI runs it on the
+Linux debug bundle under Xvfb (`make test-flutter-packaged-linux`) and on the
+macOS host (`make test-flutter-packaged-macos`), with no PDFium override;
+Android is not run yet.
 * [ ] *Store.* Add the Dart SQLite binding (`sqlite3`; `drift` only if typed
 queries and migration tooling justify its code generation) in the application
 core package, with a single connection owner, ordered migrations written fresh
@@ -328,8 +329,12 @@ killed-writer recovery test. `package:sqlite3` 3.5.2 bundles SQLite 3.53.4
 through its build hook (the newest release Flutter 3.41.5 resolves). The app
 depends on the package and opens the store at launch. The packaged Linux
 debug bundle loads its bundled `libsqlite3.so` and `libpdfium.so`
-(`flutter/integration_test/packaged_core_test.dart` under Xvfb, 2026-10-21).
-Open: the macOS and Android load proofs.
+(`flutter/integration_test/packaged_core_test.dart`, in CI). Both are mapped
+to bare-name `dlopen` calls from the engine library, which find them only
+through its `$ORIGIN` RUNPATH; the pinned nixpkgs dropped that, so before
+2026-10-21 no Linux bundle built in the Nix shell could load SQLite, and
+`flake.nix` now restores it. Open: the first passing macOS run and the
+Android load proof.
 * [ ] *Records.* Port library and import (referenced and private managed
 copies, bounded archive preflight, cover extraction, deferred cleanup,
 duplicate detection by content identity), open books and reading state,
