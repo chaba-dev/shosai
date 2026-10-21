@@ -68,6 +68,12 @@ final class Annotations {
 
   /// Book [bookId]'s live annotations, oldest first, resolved against
   /// [text], the book as it is open now.
+  ///
+  /// [cancellation] is observed between steps: before and after each unit's
+  /// text is read, around each resolution batch, and before returning, so a
+  /// cancelled listing never returns results. Work inside one batch (at most
+  /// a few MiB of text, bounded by [maxAnchorResolutionWork]) runs in another
+  /// isolate and is not interrupted; its results are discarded.
   Future<List<ResolvedAnnotation>> list(
     int bookId,
     UnitTextSource text, {
@@ -147,7 +153,7 @@ final class Annotations {
         quote,
       );
     case PdfSelection():
-      checkRectangles(selection.rectangles);
+      final rectangles = checkRectangles(selection.rectangles);
       if (selection.page < 0) {
         throw const CoreException.invalidRequest(
           'A PDF annotation needs a page.',
@@ -155,10 +161,7 @@ final class Annotations {
       }
       final text = selection.text;
       if (text == null) {
-        return (
-          PdfAnchor(page: selection.page, rectangles: selection.rectangles),
-          null,
-        );
+        return (PdfAnchor(page: selection.page, rectangles: rectangles), null);
       }
       final (start, end) = (selection.start, selection.end);
       if (start == null || end == null) {
@@ -169,7 +172,7 @@ final class Annotations {
       return (
         PdfAnchor(
           page: selection.page,
-          rectangles: selection.rectangles,
+          rectangles: rectangles,
           start: start,
           end: end,
         ),
@@ -241,6 +244,7 @@ Future<List<ResolvedAnnotation>> _resolve(
     cancellation.throwIfCancelled();
     final remaining = budget;
     final (results, left) = await _runBatch(work, remaining);
+    cancellation.throwIfCancelled();
     budget = left;
     for (final (index, anchor) in results) {
       resolved[index] = ResolvedAnnotation(
@@ -255,6 +259,7 @@ Future<List<ResolvedAnnotation>> _resolve(
   for (final MapEntry(key: unit, value: anchors) in byUnit.entries) {
     cancellation.throwIfCancelled();
     final text = await source.unitText(unit, cancellation: cancellation);
+    cancellation.throwIfCancelled();
     if (text == null) continue;
     final epubPath = text.resourcePath;
     final matching = [
@@ -273,6 +278,7 @@ Future<List<ResolvedAnnotation>> _resolve(
     if (batchUnits >= _resolutionBatchUnits) await flush();
   }
   await flush();
+  cancellation.throwIfCancelled();
   return resolved;
 }
 
@@ -298,9 +304,10 @@ Future<(List<(int, ResolvedAnchor)>, int)> _runBatch(
       final (start, end) = anchor.sameContent
           ? (anchor.start, anchor.end)
           : (0, 0);
+      // Records validated each selector when they read it.
       results.add((
         anchor.index,
-        text.resolve(start, end, anchor.quote, budget: shared),
+        resolveStoredAnchor(text, start, end, anchor.quote, shared),
       ));
     }
   }

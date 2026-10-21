@@ -1,10 +1,36 @@
+import 'dart:collection';
+
 import 'package:shosai_core/shosai_core.dart';
+import 'package:shosai_core/src/annotations/resolution.dart'
+    show forEachBoundedGrapheme;
 import 'package:test/test.dart';
 
 import 'support/library_fixtures.dart';
 
 ResolvedAnchor _resolve(String text, int start, int end, QuoteSelector quote) =>
     resolveTextAnchor(text, start, end, quote);
+
+/// A huge list of scalars that counts how many of them are read.
+final class _CountingScalars extends ListBase<int> {
+  _CountingScalars(this.length, this.scalarAt);
+
+  @override
+  final int length;
+  final int Function(int index) scalarAt;
+  var reads = 0;
+
+  @override
+  set length(int value) => throw UnsupportedError('fixed length');
+
+  @override
+  int operator [](int index) {
+    reads++;
+    return scalarAt(index);
+  }
+
+  @override
+  void operator []=(int index, int value) => throw UnsupportedError('fixed');
+}
 
 const _exact = AnnotationResolution.exact;
 const _recovered = AnnotationResolution.recovered;
@@ -49,6 +75,20 @@ void main() {
       expect(selector.suffix, 's' * 31);
     });
 
+    test('context cuts Unicode 17 clusters at the 32-scalar boundary', () {
+      // U+1ACF is Extend from Unicode 17 (unassigned in 16), so a + U+1ACF
+      // is one cluster that does not fit beside 31 other scalars.
+      final selector = QuoteSelector.of(
+        'selected',
+        'a\u1ACF${'x' * 31}',
+        '${'x' * 31}a\u1ACF',
+      );
+      expect(selector.prefix, 'x' * 31);
+      expect(selector.suffix, 'x' * 31);
+      final fits = QuoteSelector.of('selected', 'a\u1ACF${'x' * 30}', '');
+      expect(fits.prefix, 'a\u1ACF${'x' * 30}');
+    });
+
     test('a selector from text reads a bounded window of context', () {
       final text = '${'a' * 5000} middle ${'b' * 5000}'.runes.toList();
 
@@ -76,6 +116,23 @@ void main() {
         () => QuoteSelector.fromText('abc'.runes.toList(), 2, 2),
         throwsA(isA<CoreException>()),
       );
+      // U+0958 is composition-excluded: NFC expands it to two scalars.
+      expect(
+        () => QuoteSelector.of('\u0958' * 32769, '', ''),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect(
+        QuoteSelector.of('\u0958' * 32768, '', '').exact.runes,
+        hasLength(maxQuoteScalars),
+      );
+      expect(
+        () => QuoteSelector.of(
+          'quote',
+          'x' * (maxQuoteContextInputScalars + 1),
+          '',
+        ),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
       expect(
         () => QuoteSelector.fromText('abc'.runes.toList(), 1, 4),
         throwsA(isA<CoreException>()),
@@ -93,6 +150,84 @@ void main() {
         () => scalarRangeToUtf16('short', 0, 6),
         throwsA(isA<CoreException>()),
       );
+    });
+  });
+
+  group('selector validation', () {
+    QuoteSelector selector({
+      String? original,
+      String exact = 'quote',
+      String prefix = '',
+      String suffix = '',
+    }) => QuoteSelector(
+      original: original,
+      exact: exact,
+      prefix: prefix,
+      suffix: suffix,
+    );
+
+    test('resolution rejects selectors QuoteSelector.of cannot build', () {
+      for (final invalid in [
+        selector(exact: ''),
+        // Within twice the limit in UTF-16 units, over it in scalars.
+        selector(prefix: 'p' * (maxContextScalars + 1)),
+        selector(suffix: 's' * (maxContextScalars + 1)),
+        selector(exact: 'q' * (maxQuoteScalars + 1)),
+        selector(original: 'o' * (maxQuoteScalars + 1)),
+        // Not normalized.
+        selector(exact: 'a  b'),
+        selector(exact: 'Cafe\u0301'),
+        selector(prefix: ' p'),
+        selector(suffix: 'x\u00ADy'),
+        // The original does not normalize to the exact quote.
+        selector(original: 'a', exact: 'b'),
+      ]) {
+        expect(
+          () => resolveTextAnchor('quote a b', 0, 5, invalid),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+          reason: '$invalid',
+        );
+        expect(
+          () => AnchorText('quote').resolveExact(0, 5, invalid),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+          reason: '$invalid',
+        );
+        expect(
+          () => AnchorText('quote').resolve(0, 5, invalid),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+          reason: '$invalid',
+        );
+      }
+      expect(
+        resolveTextAnchor(
+          'a Café',
+          2,
+          6,
+          selector(original: 'Cafe\u0301', exact: 'Café'),
+        ),
+        const ResolvedAnchor(_exact, 2, 6),
+      );
+    });
+
+    test('supplementary-plane selectors at their limits resolve', () {
+      final exact = '😀' * maxQuoteScalars;
+      final context = '🇯' * maxContextScalars;
+      final quote = selector(
+        original: exact,
+        exact: exact,
+        prefix: '𝒜' * maxContextScalars,
+        suffix: '😀' * maxContextScalars,
+      );
+      final text =
+          '${'𝒜' * maxContextScalars}$exact${'😀' * maxContextScalars}';
+      expect(
+        resolveTextAnchor(text, 32, 32 + maxQuoteScalars, quote),
+        const ResolvedAnchor(_exact, 32, 32 + maxQuoteScalars),
+      );
+      final built = QuoteSelector.of(exact, '$context$context', '😀' * 40);
+      expect(built.exact, exact);
+      expect(built.prefix.runes, hasLength(maxContextScalars));
+      expect(built.suffix, '😀' * maxContextScalars);
     });
   });
 
@@ -189,6 +324,68 @@ void main() {
       expect(
         _resolve('${'a' * 1023}🇷🇸🇮', 0, 1, QuoteSelector.of('🇷🇸', '', '')),
         const ResolvedAnchor(_recovered, 1023, 1025),
+      );
+    });
+
+    test('clusters by Unicode 17', () {
+      // U+1ACF joins the a before it from Unicode 17, so a alone is gone.
+      expect(
+        _resolve('xa\u1ACF', 0, 1, QuoteSelector.of('a', '', '')),
+        const ResolvedAnchor(_orphaned),
+      );
+      expect(
+        _resolve('xa\u1ACF', 0, 1, QuoteSelector.of('a\u1ACF', '', '')),
+        const ResolvedAnchor(_recovered, 1, 3),
+      );
+      // A Khmer conjunct (GB9c from Unicode 17) is one cluster.
+      expect(
+        _resolve(
+          'x\u179F\u17D2\u178F',
+          0,
+          1,
+          QuoteSelector.of('\u179F\u17D2', '', ''),
+        ),
+        const ResolvedAnchor(_orphaned),
+      );
+    });
+
+    test('rejects an oversized cluster with bounded work', () {
+      // One cluster of a hundred million scalars: a and combining acutes.
+      final scalars = _CountingScalars(
+        100000000,
+        (index) => index == 0 ? 0x61 : 0x0301,
+      );
+      final budget = ResolutionBudget();
+      expect(
+        () => forEachBoundedGrapheme(scalars, budget, (_, _) {}),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect(scalars.reads, maxAnchorGraphemeScalars + 1);
+      expect(
+        maxAnchorResolutionWork - budget.remaining,
+        maxAnchorGraphemeScalars + 1,
+      );
+
+      // A cluster at the ceiling is accepted, and cancellation is polled
+      // while one long cluster is read.
+      final clusters = <(int, int)>[];
+      forEachBoundedGrapheme(
+        [0x61, for (var i = 1; i < maxAnchorGraphemeScalars; i++) 0x0301, 0x62],
+        ResolutionBudget(),
+        (start, end) => clusters.add((start, end)),
+      );
+      expect(clusters, [
+        (0, maxAnchorGraphemeScalars),
+        (maxAnchorGraphemeScalars, maxAnchorGraphemeScalars + 1),
+      ]);
+      var polls = 0;
+      expect(
+        () => forEachBoundedGrapheme(
+          _CountingScalars(5000, (index) => index == 0 ? 0x61 : 0x0301),
+          ResolutionBudget(maxAnchorResolutionWork, () => ++polls > 0),
+          (_, _) {},
+        ),
+        throwsCoreError(CoreErrorKind.cancelled),
       );
     });
 

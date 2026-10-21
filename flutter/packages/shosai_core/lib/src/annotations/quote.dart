@@ -2,10 +2,10 @@
 /// text with bounded surrounding context.
 library;
 
-import 'package:characters/characters.dart';
 import 'package:unorm_dart/unorm_dart.dart' as unorm;
 
 import '../errors.dart';
+import 'graphemes.dart';
 
 /// The name stored with every quote normalized by [normalizeQuoteV1].
 const quoteProfileV1 = 'shosai-quote-v1';
@@ -16,6 +16,10 @@ const maxQuoteScalars = 65536;
 /// Longest prefix or suffix context, in Unicode scalars.
 const maxContextScalars = 32;
 
+/// Longest text before or after a selection [QuoteSelector.of] accepts, in
+/// Unicode scalars.
+const maxQuoteContextInputScalars = 65536;
+
 /// How much text around a selection [QuoteSelector.fromText] reads to build
 /// its context, in Unicode scalars.
 const quoteContextWindowScalars = 1024;
@@ -23,10 +27,16 @@ const quoteContextWindowScalars = 1024;
 /// Normalize [value] by the quote-v1 profile: drop soft hyphens, turn CR
 /// and CRLF into LF, compose each grapheme cluster to NFC, and collapse runs
 /// of whitespace into one space without leading or trailing whitespace.
+///
+/// The profile pins Unicode 17.0.0. Grapheme clusters come from the
+/// package's own Unicode 17.0.0 segmenter ([graphemeClusters]); NFC comes
+/// from `unorm_dart` 0.3.2, pinned exactly because it carries Unicode 17.0.0
+/// data (0.3.3 moved to Unicode 18). `test/unicode_test.dart` fails if either
+/// changes version.
 String normalizeQuoteV1(String value) {
   final normalized = <int>[];
   var pendingSpace = false;
-  for (final grapheme in profileInput(value).characters) {
+  for (final grapheme in graphemeClusters(profileInput(value))) {
     for (final scalar in nfcGrapheme(grapheme).runes) {
       if (isQuoteWhitespace(scalar)) {
         pendingSpace = normalized.isNotEmpty;
@@ -101,10 +111,24 @@ final class QuoteSelector {
         'An annotation quote exceeds $maxQuoteScalars Unicode scalars.',
       );
     }
+    if (_exceeds(before, maxQuoteContextInputScalars) ||
+        _exceeds(after, maxQuoteContextInputScalars)) {
+      throw const CoreException.limitExceeded(
+        'An annotation quote context exceeds $maxQuoteContextInputScalars '
+        'Unicode scalars.',
+      );
+    }
     final exact = normalizeQuoteV1(selected);
     if (exact.isEmpty) {
       throw const CoreException.invalidRequest(
         'An annotation quote must not be empty.',
+      );
+    }
+    // NFC can expand: U+0958 decomposes into two scalars.
+    if (_exceeds(exact, maxQuoteScalars)) {
+      throw const CoreException.limitExceeded(
+        'An annotation quote exceeds $maxQuoteScalars Unicode scalars once '
+        'normalized.',
       );
     }
     return QuoteSelector(
@@ -168,8 +192,47 @@ final class QuoteSelector {
 bool _exceeds(String value, int scalars) =>
     value.length > scalars && value.runes.length > scalars;
 
+/// Throw unless [quote] is a selector [QuoteSelector.of] could have built:
+/// a non-empty exact quote and contexts within their scalar limits, each
+/// already normalized, and an original quote, when present, that normalizes
+/// to the exact one.
+///
+/// Throws [kind]: [CoreErrorKind.invalidRequest] for a caller's selector,
+/// [CoreErrorKind.malformed] for a stored one. Normalizes every field once,
+/// so call it once per selector, not per candidate.
+void checkQuoteSelector(
+  QuoteSelector quote, {
+  CoreErrorKind kind = CoreErrorKind.invalidRequest,
+}) {
+  final original = quote.original;
+  if (quote.exact.isEmpty ||
+      _exceeds(quote.exact, maxQuoteScalars) ||
+      _exceeds(quote.prefix, maxContextScalars) ||
+      _exceeds(quote.suffix, maxContextScalars) ||
+      (original != null && _exceeds(original, maxQuoteScalars))) {
+    throw CoreException(
+      kind,
+      'The annotation quote selector is empty or exceeds its scalar limit.',
+    );
+  }
+  if (normalizeQuoteV1(quote.exact) != quote.exact ||
+      normalizeQuoteV1(quote.prefix) != quote.prefix ||
+      normalizeQuoteV1(quote.suffix) != quote.suffix) {
+    throw CoreException(
+      kind,
+      'The annotation quote selector is not normalized by $quoteProfileV1.',
+    );
+  }
+  if (original != null && normalizeQuoteV1(original) != quote.exact) {
+    throw CoreException(
+      kind,
+      'The annotation original and normalized quotes do not match.',
+    );
+  }
+}
+
 String _context(String value, {required bool prefix}) {
-  final graphemes = normalizeQuoteV1(value).characters.toList();
+  final graphemes = graphemeClusters(normalizeQuoteV1(value));
   var scalars = 0;
   final kept = <String>[];
   for (final grapheme in prefix ? graphemes.reversed : graphemes) {

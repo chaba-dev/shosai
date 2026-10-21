@@ -8,7 +8,8 @@ library;
 export 'src/annotations/annotation.dart';
 export 'src/annotations/annotations.dart';
 export 'src/annotations/quote.dart';
-export 'src/annotations/resolution.dart';
+export 'src/annotations/resolution.dart'
+    hide forEachBoundedGrapheme, resolveStoredAnchor;
 export 'src/cancellation.dart';
 export 'src/errors.dart';
 export 'src/library/book.dart';

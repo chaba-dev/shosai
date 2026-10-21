@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart';
@@ -48,6 +49,23 @@ EpubTextSelection _select(
 }
 
 const _rectangles = [PageRect(10.5, 20, 110.25, 32)];
+
+/// Unit texts that run [onRead] as each one is read.
+final class _HookedText extends FakeText {
+  _HookedText(super.units, this.onRead);
+
+  final void Function(int unit) onRead;
+
+  @override
+  Future<UnitText?> unitText(
+    int unit, {
+    CancellationToken? cancellation,
+  }) async {
+    final text = await super.unitText(unit, cancellation: cancellation);
+    onRead(unit);
+    return text;
+  }
+}
 
 void main() {
   late TempLibrary t;
@@ -277,6 +295,78 @@ void main() {
       expect(source.requested, [1]);
     });
 
+    test('rectangles are checked as the float32 values stored', () async {
+      final bookId = await book('pdf');
+      for (final rectangle in [
+        // Overflows float32 to infinity.
+        const PageRect(0, 0, 1e40, 9),
+        const PageRect(-1e40, 0, 5, 9),
+        // Distinct doubles, one float32: an empty rectangle.
+        const PageRect(16777216, 0, 16777217, 9),
+        const PageRect(0, 16777216, 9, 16777217),
+      ]) {
+        await expectLater(
+          annotations.create(
+            bookId,
+            PdfSelection(page: 0, rectangles: [_rectangles.first, rectangle]),
+          ),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+          reason: '$rectangle',
+        );
+      }
+      expect(await t.count('annotations'), 0);
+
+      // Not representable in float32, and still valid once rounded.
+      const ordinary = PageRect(0.1, 0.2, 100.3, 50.7);
+      final created = await annotations.create(
+        bookId,
+        const PdfSelection(page: 0, rectangles: [ordinary]),
+      );
+      expect(created.rectangles, [ordinary.quantized]);
+      expect(ordinary.quantized, isNot(ordinary));
+      expect(ordinary.quantized.isValid, isTrue);
+      final [listed] = await annotations.list(bookId, FakeText([null]));
+      expect(listed.rectangles, [ordinary.quantized]);
+    });
+
+    test('stored rectangles and quotes are checked when read', () async {
+      final pdf = await book('pdf');
+      await annotations.create(
+        pdf,
+        const PdfSelection(page: 0, rectangles: _rectangles),
+      );
+      final empty = ByteData(16)
+        ..setFloat32(0, 5, Endian.little)
+        ..setFloat32(4, 0, Endian.little)
+        ..setFloat32(8, 5, Endian.little)
+        ..setFloat32(12, 9, Endian.little);
+      await t.execute('UPDATE annotations SET pdf_rectangles = ?', [
+        empty.buffer.asUint8List(),
+      ]);
+      await expectLater(
+        annotations.list(pdf, FakeText([null])),
+        throwsCoreError(CoreErrorKind.malformed),
+      );
+
+      final epub = await book('epub');
+      await annotations.create(epub, _select(_text, 'lead'));
+      for (final (column, value) in [
+        ('normalized_exact', 'other'),
+        ('normalized_exact', 'a  b'),
+        ('normalized_prefix', ' The'),
+      ]) {
+        await t.execute(
+          "UPDATE annotations SET $column = ? WHERE format = 'epub'",
+          [value],
+        );
+        await expectLater(
+          annotations.list(epub, _epubText(_text)),
+          throwsCoreError(CoreErrorKind.malformed),
+          reason: '$column $value',
+        );
+      }
+    });
+
     test('geometry resolves only on the content it was drawn on', () async {
       final drawn = await book('pdf');
       final edition = await book('pdf');
@@ -392,6 +482,36 @@ void main() {
       ]);
       expect(source.requested.toSet(), {0, 2});
       expect(source.requested, hasLength(2));
+    });
+
+    test('cancellation while the last unit text is read fails', () async {
+      final bookId = await book('epub');
+      await annotations.create(bookId, _select(_text, 'lead'));
+      final cancellation = CancellationToken();
+      // The only unit cancels and has no text, so no batch is left to run.
+      final source = _HookedText([null], (_) => cancellation.cancel());
+
+      await expectLater(
+        annotations.list(bookId, source, cancellation: cancellation),
+        throwsCoreError(CoreErrorKind.cancelled),
+      );
+      expect(source.requested, [0]);
+    });
+
+    test('cancellation while the final batch runs fails', () async {
+      final bookId = await book('epub');
+      await annotations.create(bookId, _select(_text, 'lead'));
+      final cancellation = CancellationToken();
+      // Cancels once the batch has been sent to its isolate.
+      final source = _HookedText([
+        const UnitText(_text, resourcePath: _chapter),
+      ], (_) => Timer.run(cancellation.cancel));
+
+      await expectLater(
+        annotations.list(bookId, source, cancellation: cancellation),
+        throwsCoreError(CoreErrorKind.cancelled),
+      );
+      expect(source.requested, [0]);
     });
 
     test('listing observes cancellation', () async {
@@ -614,6 +734,18 @@ void main() {
           const PdfSelection(page: 0, rectangles: []),
           CoreErrorKind.invalidRequest,
         ),
+        // NFC expands each U+0958 to two scalars, past the quote limit.
+        (
+          epub,
+          EpubTextSelection(
+            spineIndex: 0,
+            resourcePath: _chapter,
+            text: '\u0958' * 32769,
+            start: 0,
+            end: 32769,
+          ),
+          CoreErrorKind.limitExceeded,
+        ),
         (
           pdf,
           const PdfSelection(page: 0, rectangles: [PageRect(5, 5, 5, 9)]),
@@ -772,7 +904,21 @@ void main() {
     test('the schema rejects records the API cannot produce', () async {
       final bookId = await book('epub');
       final created = await annotations.create(bookId, _select(_text, 'lead'));
-      final [version] = await t.select('SELECT version_id FROM annotations');
+      final pdfBook = await book('pdf');
+      final pdfCreated = await annotations.create(
+        pdfBook,
+        const PdfSelection(page: 0, rectangles: _rectangles),
+      );
+      final [epubVersion] = await t.select(
+        'SELECT version_id FROM annotations WHERE id = ?',
+        [created.id],
+      );
+      final [pdfVersion] = await t.select(
+        'SELECT version_id FROM annotations WHERE id = ?',
+        [pdfCreated.id],
+      );
+      final kept = [created.id, pdfCreated.id];
+      const deleteOthers = 'DELETE FROM annotations WHERE id NOT IN (?, ?)';
       const insert = '''INSERT INTO annotations (id, version_id, format,
           anchor_version, original_quote, normalization_profile,
           normalized_exact, normalized_prefix, normalized_suffix, color,
@@ -790,9 +936,12 @@ void main() {
         int? end = 4,
         int? page,
         int? rectangles,
+        String? versionFormat,
       }) => [
         '11111111-1111-4111-8111-111111111111',
-        version['version_id'],
+        ((versionFormat ?? format) == 'epub'
+            ? epubVersion
+            : pdfVersion)['version_id'],
         format,
         anchor,
         null,
@@ -809,23 +958,26 @@ void main() {
         rectangles == null ? null : Uint8List(rectangles),
       ];
 
-      await t.execute(insert, row());
-      await t.execute('DELETE FROM annotations WHERE id != ?', [created.id]);
-      await t.execute(
-        insert,
-        row(
-          format: 'pdf',
-          exact: null,
-          profile: null,
-          prefix: null,
-          start: null,
-          end: null,
-          page: 0,
-          rectangles: 16,
-        ),
+      List<Object?> pdfRow({String? versionFormat}) => row(
+        format: 'pdf',
+        exact: null,
+        profile: null,
+        prefix: null,
+        start: null,
+        end: null,
+        page: 0,
+        rectangles: 16,
+        versionFormat: versionFormat,
       );
-      await t.execute('DELETE FROM annotations WHERE id != ?', [created.id]);
+
+      await t.execute(insert, row());
+      await t.execute(deleteOthers, kept);
+      await t.execute(insert, pdfRow());
+      await t.execute(deleteOthers, kept);
       for (final invalid in [
+        // An annotation has its version's format.
+        row(versionFormat: 'pdf'),
+        pdfRow(versionFormat: 'epub'),
         row(anchor: 2),
         row(color: 'red'),
         row(end: 0),
@@ -854,8 +1006,8 @@ void main() {
           reason: '$invalid',
         );
       }
-      await t.execute('DELETE FROM annotations WHERE id != ?', [created.id]);
-      expect(await t.count('annotations'), 1);
+      await t.execute(deleteOthers, kept);
+      expect(await t.count('annotations'), 2);
     });
   });
 }

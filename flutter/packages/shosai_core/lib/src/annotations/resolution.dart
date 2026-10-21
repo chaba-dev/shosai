@@ -1,9 +1,8 @@
 /// Resolving a stored text anchor against a document's current text.
 library;
 
-import 'package:characters/characters.dart';
-
 import '../errors.dart';
+import 'graphemes.dart';
 import 'quote.dart';
 
 /// Work units one resolution pass may spend (a unit is roughly one scalar
@@ -89,6 +88,9 @@ final class ResolutionBudget {
 /// normalization). Otherwise the quote is searched for in the normalized
 /// text: a single occurrence, or a single one whose context matches, is
 /// recovered; several are ambiguous and none is orphaned.
+///
+/// Throws [CoreErrorKind.invalidRequest] unless [quote] is a selector
+/// [QuoteSelector.of] could have built (see [checkQuoteSelector]).
 ResolvedAnchor resolveTextAnchor(
   String text,
   int start,
@@ -96,9 +98,20 @@ ResolvedAnchor resolveTextAnchor(
   QuoteSelector quote, {
   ResolutionBudget? budget,
 }) {
+  checkQuoteSelector(quote);
   final resolver = AnchorText(text, budget: budget);
-  return resolver.resolve(start, end, quote, budget: budget);
+  return resolver._resolve(start, end, quote, budget ?? ResolutionBudget());
 }
+
+/// Resolve a stored anchor whose [quote] was validated when it was read
+/// (records check every selector they decode). Not exported.
+ResolvedAnchor resolveStoredAnchor(
+  AnchorText text,
+  int start,
+  int end,
+  QuoteSelector quote,
+  ResolutionBudget budget,
+) => text._resolve(start, end, quote, budget);
 
 /// One unit's text, indexed for resolving many anchors against it.
 final class AnchorText {
@@ -111,14 +124,40 @@ final class AnchorText {
   int get length => _scalars.length;
 
   /// The anchor at [start]..[end] when it still holds [quote], else null.
+  ///
+  /// Throws [CoreErrorKind.invalidRequest] unless [quote] is a selector
+  /// [QuoteSelector.of] could have built (see [checkQuoteSelector]).
   ResolvedAnchor? resolveExact(
     int start,
     int end,
     QuoteSelector quote, {
     ResolutionBudget? budget,
   }) {
-    budget ??= ResolutionBudget();
-    _checkSelector(quote);
+    checkQuoteSelector(quote);
+    return _resolveExact(start, end, quote, budget ?? ResolutionBudget());
+  }
+
+  /// Resolve [quote], stored at [start]..[end]. Pass an empty range for a
+  /// quote captured from other content, which can only be recovered.
+  ///
+  /// Throws [CoreErrorKind.invalidRequest] unless [quote] is a selector
+  /// [QuoteSelector.of] could have built (see [checkQuoteSelector]).
+  ResolvedAnchor resolve(
+    int start,
+    int end,
+    QuoteSelector quote, {
+    ResolutionBudget? budget,
+  }) {
+    checkQuoteSelector(quote);
+    return _resolve(start, end, quote, budget ?? ResolutionBudget());
+  }
+
+  ResolvedAnchor? _resolveExact(
+    int start,
+    int end,
+    QuoteSelector quote,
+    ResolutionBudget budget,
+  ) {
     if (start < 0 || start >= end || end > _scalars.length) return null;
     final selected = String.fromCharCodes(_scalars, start, end);
     budget.spend(end - start);
@@ -129,31 +168,17 @@ final class AnchorText {
     return null;
   }
 
-  /// Resolve [quote], stored at [start]..[end]. Pass an empty range for a
-  /// quote captured from other content, which can only be recovered.
-  ResolvedAnchor resolve(
+  ResolvedAnchor _resolve(
     int start,
     int end,
-    QuoteSelector quote, {
-    ResolutionBudget? budget,
-  }) {
-    budget ??= ResolutionBudget();
+    QuoteSelector quote,
+    ResolutionBudget budget,
+  ) {
     budget.checkCancelled();
-    final exact = resolveExact(start, end, quote, budget: budget);
+    final exact = _resolveExact(start, end, quote, budget);
     if (exact != null) return exact;
     final mapped = _mapped ??= _MappedText.of(_scalars, budget);
     return mapped.search(quote, budget);
-  }
-}
-
-void _checkSelector(QuoteSelector quote) {
-  if (quote.exact.isEmpty ||
-      quote.exact.length > 2 * maxQuoteScalars ||
-      quote.prefix.length > 2 * maxContextScalars ||
-      quote.suffix.length > 2 * maxContextScalars) {
-    throw const CoreException.invalidRequest(
-      'The annotation quote selector is invalid.',
-    );
   }
 }
 
@@ -166,31 +191,48 @@ List<int> _scalarsOf(String text, ResolutionBudget budget) {
   return scalars;
 }
 
-/// The grapheme clusters of [value], each at most
-/// [maxAnchorGraphemeScalars] scalars long.
-Iterable<String> _boundedGraphemes(
-  String value,
+/// Call [visit] with the half-open range of every grapheme cluster of
+/// [scalars], each at most [maxAnchorGraphemeScalars] scalars long.
+///
+/// Clusters are found one scalar at a time ([GraphemeBreaker] carries the
+/// ZWJ, regional-indicator and conjunct state across them), so an oversized
+/// cluster is rejected after reading [maxAnchorGraphemeScalars] + 1 of its
+/// scalars, and every scalar read is charged to [budget], which polls
+/// cancellation.
+void forEachBoundedGrapheme(
+  List<int> scalars,
   ResolutionBudget budget,
-) sync* {
-  for (final grapheme in value.characters) {
-    final scalars = grapheme.runes.length;
-    if (scalars > maxAnchorGraphemeScalars) {
+  void Function(int start, int end) visit,
+) {
+  final breaker = GraphemeBreaker();
+  var start = 0;
+  for (var index = 0; index < scalars.length; index++) {
+    budget.spend(1);
+    if (breaker.next(scalars[index])) {
+      if (index > start) visit(start, index);
+      start = index;
+    } else if (index - start >= maxAnchorGraphemeScalars) {
       throw const CoreException.limitExceeded(
         'A grapheme cluster exceeds $maxAnchorGraphemeScalars Unicode scalars.',
       );
     }
-    budget.spend(scalars);
-    yield grapheme;
   }
+  if (scalars.length > start) visit(start, scalars.length);
+}
+
+/// The NFC form of the grapheme cluster [start]..[end] of [scalars].
+Iterable<int> _nfcCluster(List<int> scalars, int start, int end) {
+  if (end - start == 1 && scalars[start] < 0x0300) return [scalars[start]];
+  return nfcGrapheme(String.fromCharCodes(scalars, start, end)).runes;
 }
 
 String _boundedNormalize(String value, ResolutionBudget budget) {
-  final input = profileInput(value);
+  final input = profileInput(value).runes.toList();
   budget.spend(input.length);
   final normalized = <int>[];
   var pendingSpace = false;
-  for (final grapheme in _boundedGraphemes(input, budget)) {
-    for (final scalar in nfcGrapheme(grapheme).runes) {
+  forEachBoundedGrapheme(input, budget, (start, end) {
+    for (final scalar in _nfcCluster(input, start, end)) {
       budget.spend(1);
       if (isQuoteWhitespace(scalar)) {
         pendingSpace = normalized.isNotEmpty;
@@ -202,7 +244,7 @@ String _boundedNormalize(String value, ResolutionBudget budget) {
         normalized.add(scalar);
       }
     }
-  }
+  });
   return String.fromCharCodes(normalized);
 }
 
@@ -236,16 +278,10 @@ final class _MappedText {
     final ends = <int>[];
     int? pendingStart;
     int? pendingEnd;
-    var inputIndex = 0;
-    for (final grapheme in _boundedGraphemes(
-      String.fromCharCodes(input),
-      budget,
-    )) {
-      final length = grapheme.runes.length;
-      final sourceStart = inputStarts[inputIndex];
-      final sourceEnd = inputEnds[inputIndex + length - 1];
-      inputIndex += length;
-      for (final scalar in nfcGrapheme(grapheme).runes) {
+    forEachBoundedGrapheme(input, budget, (start, end) {
+      final sourceStart = inputStarts[start];
+      final sourceEnd = inputEnds[end - 1];
+      for (final scalar in _nfcCluster(input, start, end)) {
         budget.spend(1);
         if (isQuoteWhitespace(scalar)) {
           if (text.isNotEmpty) {
@@ -255,7 +291,7 @@ final class _MappedText {
         } else {
           if (pendingStart != null) {
             text.add(0x20);
-            starts.add(pendingStart);
+            starts.add(pendingStart!);
             ends.add(pendingEnd!);
             pendingStart = null;
             pendingEnd = null;
@@ -265,7 +301,7 @@ final class _MappedText {
           ends.add(sourceEnd);
         }
       }
-    }
+    });
     return _MappedText(text, starts, ends);
   }
 

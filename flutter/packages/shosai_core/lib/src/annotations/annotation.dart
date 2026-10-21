@@ -2,6 +2,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../errors.dart';
 import 'quote.dart';
@@ -40,7 +41,8 @@ const maxProvenanceIdBytes = 4096;
 enum HighlightColor { yellow, green, blue, pink, purple }
 
 /// A rectangle on a PDF page, in the page's coordinate space (points, y
-/// growing downward).
+/// growing downward). Stored as float32 coordinates, so a stored annotation
+/// holds the float32 rounding of the rectangles it was created with.
 final class PageRect {
   const PageRect(this.left, this.top, this.right, this.bottom);
 
@@ -49,6 +51,8 @@ final class PageRect {
   final double right;
   final double bottom;
 
+  /// Finite and non-empty. Annotations check this of the float32 rounding
+  /// they store ([quantized]), not of the coordinates given.
   bool get isValid =>
       left.isFinite &&
       top.isFinite &&
@@ -56,6 +60,19 @@ final class PageRect {
       bottom.isFinite &&
       left < right &&
       top < bottom;
+
+  /// This rectangle with each coordinate rounded to float32, as stored. A
+  /// coordinate beyond float32's range becomes infinite and two distinct
+  /// coordinates may become equal, so a valid rectangle can become invalid.
+  PageRect get quantized {
+    final coordinates = Float32List.fromList([left, top, right, bottom]);
+    return PageRect(
+      coordinates[0],
+      coordinates[1],
+      coordinates[2],
+      coordinates[3],
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -391,15 +408,25 @@ void checkProvenance(AnnotationProvenance? provenance) {
   }
 }
 
-void checkRectangles(List<PageRect> rectangles) {
+/// [rectangles] rounded to float32 as they will be stored, after checking
+/// that there are 1 to [maxPdfRectangles] of them and that every rounded
+/// rectangle is finite and non-empty. Throws [kind] otherwise.
+List<PageRect> checkRectangles(
+  List<PageRect> rectangles, {
+  CoreErrorKind kind = CoreErrorKind.invalidRequest,
+}) {
   if (rectangles.isEmpty || rectangles.length > maxPdfRectangles) {
-    throw const CoreException.invalidRequest(
+    throw CoreException(
+      kind,
       'A PDF annotation covers 1 to $maxPdfRectangles rectangles.',
     );
   }
-  if (!rectangles.every((rectangle) => rectangle.isValid)) {
-    throw const CoreException.invalidRequest(
-      'PDF annotation rectangles must be finite and non-empty.',
+  final quantized = [for (final rectangle in rectangles) rectangle.quantized];
+  if (!quantized.every((rectangle) => rectangle.isValid)) {
+    throw CoreException(
+      kind,
+      'PDF annotation rectangles must be finite and non-empty in float32.',
     );
   }
+  return quantized;
 }

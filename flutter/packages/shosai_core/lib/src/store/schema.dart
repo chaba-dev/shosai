@@ -107,6 +107,7 @@ CREATE TABLE annotation_document_versions (
                                CHECK (length(CAST(title AS BLOB)) BETWEEN 1 AND 4096),
     associated_from_version_id TEXT REFERENCES annotation_document_versions(id),
     associated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (id, format),
     FOREIGN KEY (document_id, format) REFERENCES annotation_documents(id, format)
 ) STRICT;
 
@@ -115,8 +116,9 @@ CREATE INDEX annotation_document_versions_document_idx
 
 CREATE TABLE annotations (
     id                    TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
-    -- The version whose text and geometry the anchor was captured from.
-    version_id            TEXT NOT NULL REFERENCES annotation_document_versions(id),
+    -- The version whose text and geometry the anchor was captured from; the
+    -- annotation has that version's format.
+    version_id            TEXT NOT NULL,
     format                TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
     anchor_version        INTEGER NOT NULL CHECK (anchor_version = 1),
     original_quote        TEXT CHECK (original_quote IS NULL OR length(original_quote) <= 65536),
@@ -174,7 +176,8 @@ CREATE TABLE annotations (
         (normalization_profile IS NOT NULL AND normalized_exact IS NOT NULL
          AND normalized_prefix IS NOT NULL AND normalized_suffix IS NOT NULL)
     ),
-    CHECK (source_id IS NULL OR source_system IS NOT NULL)
+    CHECK (source_id IS NULL OR source_system IS NOT NULL),
+    FOREIGN KEY (version_id, format) REFERENCES annotation_document_versions(id, format)
 ) STRICT;
 
 CREATE INDEX annotations_version_live_idx

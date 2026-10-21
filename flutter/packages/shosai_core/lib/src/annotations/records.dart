@@ -253,14 +253,7 @@ StoredAnnotation _annotation(Row row) {
         rectangles: decodeRectangles(row.columnAt(18) as Uint8List),
       ),
     },
-    quote: exact == null
-        ? null
-        : QuoteSelector(
-            original: row.columnAt(3) as String?,
-            exact: exact,
-            prefix: row.columnAt(5) as String,
-            suffix: row.columnAt(6) as String,
-          ),
+    quote: exact == null ? null : _quote(row, exact),
     color: HighlightColor.values.byName(row.columnAt(7) as String),
     body: row.columnAt(8) as String?,
     provenance: system == null
@@ -271,7 +264,24 @@ StoredAnnotation _annotation(Row row) {
   );
 }
 
+/// [rectangles] as little-endian float32 quadruples. Throws
+/// [CoreErrorKind.invalidRequest] unless their float32 rounding is valid
+/// (see [checkRectangles]), so no invalid rectangle is ever stored.
+/// The stored selector of [row], checked as [QuoteSelector.of] builds them,
+/// so resolution can trust it.
+QuoteSelector _quote(Row row, String exact) {
+  final quote = QuoteSelector(
+    original: row.columnAt(3) as String?,
+    exact: exact,
+    prefix: row.columnAt(5) as String,
+    suffix: row.columnAt(6) as String,
+  );
+  checkQuoteSelector(quote, kind: CoreErrorKind.malformed);
+  return quote;
+}
+
 Uint8List encodeRectangles(List<PageRect> rectangles) {
+  rectangles = checkRectangles(rectangles);
   final data = ByteData(rectangles.length * 16);
   for (var index = 0; index < rectangles.length; index++) {
     final rectangle = rectangles[index];
@@ -284,9 +294,17 @@ Uint8List encodeRectangles(List<PageRect> rectangles) {
   return data.buffer.asUint8List();
 }
 
+/// The rectangles [encodeRectangles] stored in [bytes]. Throws
+/// [CoreErrorKind.malformed] unless they are 1 to [maxPdfRectangles] valid
+/// rectangles.
 List<PageRect> decodeRectangles(Uint8List bytes) {
+  if (bytes.length % 16 != 0) {
+    throw const CoreException.malformed(
+      'Stored PDF annotation rectangles are truncated.',
+    );
+  }
   final data = ByteData.sublistView(bytes);
-  return [
+  final rectangles = [
     for (var offset = 0; offset + 16 <= bytes.length; offset += 16)
       PageRect(
         data.getFloat32(offset, Endian.little),
@@ -295,6 +313,7 @@ List<PageRect> decodeRectangles(Uint8List bytes) {
         data.getFloat32(offset + 12, Endian.little),
       ),
   ];
+  return checkRectangles(rectangles, kind: CoreErrorKind.malformed);
 }
 
 BookAnnotations _list(Database db, int bookId) {

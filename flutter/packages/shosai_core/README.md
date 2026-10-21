@@ -153,9 +153,25 @@ format engine supplies it through `UnitTextSource`:
   or the page is gone. A PDF annotation without text resolves only on its own
   content.
 
+`shosai-quote-v1` pins Unicode 17.0.0 (RFD 6). NFC comes from `unorm_dart`
+0.3.2, pinned exactly: it carries Unicode 17.0.0 data, and 0.3.3 moved to
+Unicode 18. Grapheme clusters come from the package's own UAX #29 segmenter
+(`lib/src/annotations/graphemes.dart`), because `characters`, which the
+Flutter SDK pins at 1.4.1, implements Unicode 16; its table is generated from
+the Unicode 17.0.0 Character Database by
+`scripts/generate-quote-unicode-tables.py` (`--check` verifies it), and
+`test/unicode_test.dart` runs the official conformance file and fails if
+either part changes Unicode version. Selectors are checked where they enter
+resolution and when records read them: limits in scalars, fields already
+normalized, and an original quote that normalizes to the exact one.
+
 Resolution runs in another isolate, in batches of about 4 MiB of text, and is
 bounded at 64M work units and 1,024-scalar graphemes, so a hostile book fails
-with `limitExceeded` instead of stalling. A document holds at most 1,024 live
+with `limitExceeded` instead of stalling. Cancellation is checked between
+steps (each unit's text, each batch, before returning), so a cancelled
+listing returns nothing; the work inside one batch is not interrupted.
+PDF rectangles are stored as float32 and checked after rounding, so none is
+stored infinite or empty. A document holds at most 1,024 live
 annotations, 65,536 PDF rectangles and an estimated 8 MiB, and spans at most
 128 versions; deletion leaves a tombstone for synchronization.
 
