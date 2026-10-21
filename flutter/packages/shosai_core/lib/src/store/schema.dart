@@ -65,4 +65,22 @@ CREATE TABLE reading_state (
     updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT, WITHOUT ROWID;
 '''),
+  Migration(4, 'bookmarks', '''
+-- Point bookmarks, keyed by content like the reading state.
+CREATE TABLE bookmarks (
+    id              INTEGER PRIMARY KEY,
+    content_hash    TEXT NOT NULL
+                    CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    unit            INTEGER NOT NULL CHECK (unit >= 0),
+    location_offset INTEGER CHECK (location_offset IS NULL OR location_offset >= 0),
+    title           TEXT CHECK (title IS NULL OR length(CAST(title AS BLOB)) <= 4096),
+    note            TEXT CHECK (note IS NULL OR length(CAST(note AS BLOB)) <= 65536),
+    color           TEXT NOT NULL DEFAULT 'yellow'
+                    CHECK (length(CAST(color AS BLOB)) BETWEEN 1 AND 64),
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+) STRICT;
+
+CREATE INDEX bookmarks_book_order_idx
+    ON bookmarks(content_hash, unit, coalesce(location_offset, 0), created_at, id);
+'''),
 ];

@@ -12,6 +12,7 @@ export 'src/library/files.dart';
 export 'src/library/inspection.dart';
 export 'src/library/library.dart';
 export 'src/preferences.dart';
+export 'src/reading/bookmarks.dart';
 export 'src/reading/reader_settings.dart';
 export 'src/reading/reading_state.dart';
 export 'src/store/schema.dart';

@@ -62,9 +62,10 @@ the one Flutter pins.
 | `Library` | books, import, covers, progress and private copies (below) |
 | `ReadingState` | each book's last position (unit, offset, zoom) and its library progress |
 | `ReaderSettingsStore` | reading mode, theme, EPUB font size and line spacing, PDF zoom, over `Preferences` |
+| `Bookmarks` | point bookmarks with an optional title and note (1,024 per book, 4 MiB Markdown export) |
 
-Reading state is keyed by the book's content hash, not its
-library row, so it survives removing and re-importing the same book. The
+Reading state and bookmarks are keyed by the book's content hash, not its
+library row, so they survive removing and re-importing the same book. The
 store runs requests in the order they were sent, so the last reading-state
 save sent is the one that persists; no revision counter is needed.
 
