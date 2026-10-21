@@ -82,6 +82,8 @@ Future<BookFormat?> detectBookFormat(String path) async {
       ? null
       : BookFormat.fromExtension(extension.substring(1));
   if (byExtension != null) return byExtension;
+  // Probe only a regular file: opening a FIFO or device could block.
+  await _stat(File(path), path);
   final RandomAccessFile file;
   try {
     file = await File(path).open();
@@ -101,6 +103,50 @@ Future<BookFormat?> detectBookFormat(String path) async {
   } finally {
     await file.close();
   }
+}
+
+/// Read the whole book file at [path], admitting at most [maxBytes].
+///
+/// The size is checked before reading and the read stops one byte past the
+/// limit, so a file that grows meanwhile cannot force a larger allocation.
+Future<Uint8List> readBookBytes(
+  String path, {
+  int maxBytes = maxBookInputBytes,
+  CancellationToken? cancellation,
+}) async {
+  final file = File(path);
+  final stat = await _stat(file, path);
+  if (stat.size > maxBytes) {
+    throw CoreException.limitExceeded(
+      'The book is larger than $maxBytes bytes.',
+    );
+  }
+  cancellation.throwIfCancelled();
+  final RandomAccessFile input;
+  try {
+    input = await file.open();
+  } on FileSystemException catch (error) {
+    throw _inaccessible('read', path, error);
+  }
+  final builder = BytesBuilder(copy: false);
+  try {
+    while (builder.length <= maxBytes) {
+      cancellation.throwIfCancelled();
+      final chunk = await input.read(_chunkBytes);
+      if (chunk.isEmpty) break;
+      builder.add(chunk);
+    }
+  } on FileSystemException catch (error) {
+    throw _inaccessible('read', path, error);
+  } finally {
+    await input.close();
+  }
+  if (builder.length > maxBytes) {
+    throw CoreException.limitExceeded(
+      'The book is larger than $maxBytes bytes.',
+    );
+  }
+  return builder.takeBytes();
 }
 
 bool _startsWith(Uint8List bytes, String prefix) =>
@@ -153,8 +199,10 @@ Future<FileFingerprint> fingerprintFile(
 
 /// Copy [source] to a new file [destination] while hashing it.
 ///
-/// [destination] must not exist. It is flushed to disk before this returns
-/// and deleted again on any failure, including cancellation.
+/// [destination] must not exist; this creates it exclusively. It is flushed
+/// to disk before this returns. On any failure, including cancellation, a
+/// destination this call created is deleted again; one that already existed
+/// is never touched.
 Future<FileFingerprint> copyAndFingerprint(
   String source,
   String destination, {
@@ -179,8 +227,10 @@ Future<FileFingerprint> copyAndFingerprint(
   final digest = _DigestSink();
   final hasher = sha256.startChunkedConversion(digest);
   var copied = 0;
+  var created = false;
   try {
     await target.create(exclusive: true);
+    created = true;
     output = await target.open(mode: FileMode.writeOnly);
     while (true) {
       cancellation.throwIfCancelled();
@@ -203,7 +253,7 @@ Future<FileFingerprint> copyAndFingerprint(
   } catch (error) {
     await output?.close();
     output = null;
-    await _deleteQuietly(target);
+    if (created) await _deleteQuietly(target);
     if (error is FileSystemException) {
       throw _inaccessible('copy', source, error);
     }
@@ -355,13 +405,23 @@ Future<Discovery> discoverBooks(
   final seenFiles = <String>{};
   final pending = <String>[canonicalRoot];
   var entries = 0;
-  while (pending.isNotEmpty) {
+  var exhausted = false;
+  while (pending.isNotEmpty && !exhausted) {
     cancellation.throwIfCancelled();
     final directory = pending.removeLast();
     if (!visited.add(directory)) continue;
-    final List<FileSystemEntity> children;
+    // Read the listing as a stream so the entry budget and cancellation
+    // apply while a huge folder is being listed, not after.
+    final children = <FileSystemEntity>[];
     try {
-      children = await Directory(directory).list(followLinks: false).toList();
+      await for (final child in Directory(directory).list(followLinks: false)) {
+        cancellation.throwIfCancelled();
+        if (++entries > maxDiscoveryEntries) {
+          exhausted = true;
+          break;
+        }
+        children.add(child);
+      }
     } on FileSystemException catch (error) {
       failures.add((
         path: directory,
@@ -370,16 +430,15 @@ Future<Discovery> discoverBooks(
       ));
       continue;
     }
+    if (exhausted) {
+      failures.add((
+        path: canonicalRoot,
+        error: 'Discovery stopped after $maxDiscoveryEntries entries.',
+      ));
+    }
     children.sort((a, b) => a.path.compareTo(b.path));
     for (final child in children) {
-      if (++entries > maxDiscoveryEntries) {
-        failures.add((
-          path: canonicalRoot,
-          error: 'Discovery stopped after $maxDiscoveryEntries entries.',
-        ));
-        pending.clear();
-        break;
-      }
+      cancellation.throwIfCancelled();
       final resolved = canonicalBookPath(child.path);
       if (!p.isWithin(canonicalRoot, resolved)) continue;
       final type = await FileSystemEntity.type(resolved, followLinks: false);
@@ -403,7 +462,7 @@ Future<Discovery> discoverBooks(
           path: canonicalRoot,
           error: 'The folder holds more than $maxDiscoveredBooks books.',
         ));
-        pending.clear();
+        exhausted = true;
         break;
       }
       books.add((path: resolved, format: format));

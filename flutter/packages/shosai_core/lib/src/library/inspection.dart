@@ -1,7 +1,6 @@
 /// Book metadata and cover extraction for import.
 library;
 
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -10,6 +9,7 @@ import 'package:shosai_epub/shosai_epub.dart';
 
 import '../cancellation.dart';
 import '../errors.dart';
+import 'files.dart';
 
 /// Largest cover thumbnail the library stores.
 const maxCoverBytes = 512 * 1024;
@@ -52,16 +52,7 @@ final class EpubInspector implements BookInspector {
     String path, {
     CancellationToken? cancellation,
   }) async {
-    final Uint8List bytes;
-    try {
-      bytes = await File(path).readAsBytes();
-    } on FileSystemException catch (error) {
-      throw CoreException(
-        CoreErrorKind.inaccessible,
-        'Could not read $path: ${error.osError?.message ?? error.message}',
-      );
-    }
-    cancellation.throwIfCancelled();
+    final bytes = await readBookBytes(path, cancellation: cancellation);
     final limits = this.limits;
     return Isolate.run(() => _inspectEpub(bytes, limits));
   }
@@ -75,6 +66,8 @@ BookMetadata _inspectEpub(Uint8List bytes, EpubLimits limits) {
     throw CoreException.limitExceeded('The EPUB exceeds a limit: $error');
   } on EpubFormatError catch (error) {
     throw CoreException.malformed('The EPUB cannot be read: ${error.message}');
+  } on EpubPathError catch (error) {
+    throw CoreException.malformed('The EPUB cannot be read: $error');
   }
   return BookMetadata(
     title: inspection.title,
@@ -88,19 +81,29 @@ BookMetadata _inspectEpub(Uint8List bytes, EpubLimits limits) {
 
 /// Decode an encoded cover image and scale it into a PNG thumbnail.
 ///
-/// Returns null for an image that cannot be decoded, has more than
-/// [maxCoverSourcePixels] pixels, or encodes larger than [maxCoverBytes].
+/// Returns null for an image that cannot be decoded (including one whose
+/// decoder throws), has more than [maxCoverSourcePixels] pixels, or encodes
+/// larger than [maxCoverBytes]. A cover is optional, so a bad one never fails
+/// the import.
 Uint8List? coverThumbnail(Uint8List encoded) {
-  final decoder = image.findDecoderForData(encoded);
-  final info = decoder?.startDecode(encoded);
-  if (decoder == null ||
-      info == null ||
-      info.width <= 0 ||
-      info.height <= 0 ||
-      info.width * info.height > maxCoverSourcePixels) {
+  final image.Image? decoded;
+  try {
+    final decoder = image.findDecoderForData(encoded);
+    final info = decoder?.startDecode(encoded);
+    if (decoder == null ||
+        info == null ||
+        info.width <= 0 ||
+        info.height <= 0 ||
+        info.width * info.height > maxCoverSourcePixels) {
+      return null;
+    }
+    decoded = decoder.decode(encoded);
+  } on image.ImageException {
+    return null;
+  } on RangeError {
+    // Truncated image data indexes past its buffer.
     return null;
   }
-  final decoded = decoder.decode(encoded);
   if (decoded == null) return null;
   final scale = [
     coverMaxWidth / decoded.width,

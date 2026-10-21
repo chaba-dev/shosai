@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -230,7 +231,7 @@ void main() {
 
         expect(report.cancelled, isTrue);
         expect(await t.count('books'), 0);
-        expect(Directory(t.managedDirectory).listSync(), isEmpty);
+        expect(t.managedEntries(), isEmpty);
       },
     );
 
@@ -518,12 +519,9 @@ void main() {
       expect(book.originalPath, source);
       expect(book.title, 'Sample Book');
       expect(await t.library.verifiedPath(book.id), expected);
-      expect(
-        Directory(
-          t.managedDirectory,
-        ).listSync().map((e) => canonicalBookPath(e.path)),
-        [expected],
-      );
+      expect(t.managedEntries().map((e) => canonicalBookPath(e.path)), [
+        expected,
+      ]);
     });
 
     test('use the source file name for fallback metadata', () async {
@@ -568,7 +566,7 @@ void main() {
         File(again.path).readAsBytesSync(),
         File(source).readAsBytesSync(),
       );
-      expect(Directory(t.managedDirectory).listSync(), hasLength(1));
+      expect(t.managedEntries(), hasLength(1));
     });
 
     test(
@@ -579,7 +577,18 @@ void main() {
         final destination = managedPath(t, source, 'epub');
         Directory(t.managedDirectory).createSync();
         File(source).copySync(destination);
-        final referenced = await t.importBook(destination);
+        // A referenced import of a private copy path is refused, so the owner
+        // is written directly, as an older library could have left it.
+        final refused = await t.library.importFile(destination, managed: false);
+        expect(refused.error, contains("library's private copies"));
+        final hash = sha256.convert(File(source).readAsBytesSync()).toString();
+        final referencedId = await t.execute(
+          '''INSERT INTO books (title, format, file_path, storage_kind,
+               original_path, content_hash, file_size)
+             VALUES ('Owner', 'epub', ?, 'referenced', ?, ?, ?)''',
+          [destination, destination, hash, File(source).lengthSync()],
+        );
+        final referenced = (await t.library.get(referencedId))!;
         File(destination).writeAsStringSync('referenced owner bytes');
 
         final item = await t.library.importFile(source, managed: true);
@@ -590,7 +599,7 @@ void main() {
           (await t.library.get(referenced.id))!.storageKind,
           StorageKind.referenced,
         );
-        expect(Directory(t.managedDirectory).listSync(), hasLength(1));
+        expect(t.managedEntries(), hasLength(1));
       },
     );
 
@@ -609,7 +618,7 @@ void main() {
       expect(items.map((item) => item.book?.id).toSet(), hasLength(1));
       expect(items.where((item) => !item.duplicate), hasLength(1));
       expect(await t.count('books'), 1);
-      expect(Directory(t.managedDirectory).listSync(), hasLength(1));
+      expect(t.managedEntries(), hasLength(1));
     });
 
     test('removing a managed book deletes its copy', () async {
@@ -624,7 +633,7 @@ void main() {
       expect(outcome.removed, isTrue);
       expect(outcome.managedFileDeletionPending, isFalse);
       expect(await t.library.get(book.id), isNull);
-      expect(Directory(t.managedDirectory).listSync(), isEmpty);
+      expect(t.managedEntries(), isEmpty);
       expect(await t.count('managed_file_deletion_debt'), 0);
       expect((await t.library.remove(book.id)).removed, isFalse);
     });
@@ -672,7 +681,7 @@ void main() {
         cleared: 1,
         pending: 0,
       ));
-      expect(Directory(t.managedDirectory).listSync(), isEmpty);
+      expect(t.managedEntries(), isEmpty);
       expect(await countRows(reopened, 'managed_file_deletion_debt'), 0);
     });
 
@@ -735,7 +744,7 @@ void main() {
       final outcome = await t.library.remove(book.id);
 
       expect(outcome.managedFileDeletionPending, isFalse);
-      expect(Directory(t.managedDirectory).listSync(), isEmpty);
+      expect(t.managedEntries(), isEmpty);
       expect(File(target).existsSync(), isTrue);
     });
 
@@ -758,6 +767,149 @@ void main() {
         expect(File(outside).existsSync(), isTrue);
       },
     );
+
+    test(
+      'a managed directory replaced by a symlink never redirects deletion',
+      () async {
+        final t = await TempLibrary.create();
+        final source = t.copyFixture('sample.epub', 'source.epub');
+        final book = await t.importBook(source, managed: true);
+        final name = p.basename(book.path);
+        // The person's folder holds a file with the copy's name; the managed
+        // directory is moved away and replaced by a link to that folder.
+        final documents = Directory(t.path('documents'))..createSync();
+        final userFile = File(p.join(documents.path, name))
+          ..writeAsStringSync('the person\'s own file');
+        Directory(t.managedDirectory).renameSync(t.path('moved-books'));
+        Link(t.managedDirectory).createSync(documents.path);
+
+        final outcome = await t.library.remove(book.id);
+        await t.library.retryManagedFileDeletions();
+
+        expect(outcome.managedFileDeletionPending, isTrue);
+        expect(userFile.readAsStringSync(), 'the person\'s own file');
+      },
+    );
+
+    test('a crash before the commit leaves no lasting orphan', () async {
+      final t = await TempLibrary.create();
+      final kept = await t.importBook(
+        t.copyFixture('sample.epub', 'kept.epub'),
+        managed: true,
+      );
+      // What an import killed between publishing and committing, and a
+      // publish killed while a damaged copy was set aside, leave behind.
+      final orphan = File(p.join(t.managedDirectory, '${'b' * 64}.pdf'))
+        ..writeAsStringSync('orphan');
+      final damaged = File(
+        p.join(t.managedDirectory, '.shosai-damaged-1-2-3.tmp'),
+      )..writeAsStringSync('damaged');
+      final activeStage = File(
+        p.join(t.managedDirectory, '.shosai-import-1-2-3.tmp'),
+      )..writeAsStringSync('an import still copying');
+
+      await t.library.retryManagedFileDeletions();
+
+      expect(orphan.existsSync(), isFalse);
+      expect(damaged.existsSync(), isFalse);
+      expect(activeStage.existsSync(), isTrue);
+      expect(await t.library.verifiedPath(kept.id), kept.path);
+    });
+
+    test(
+      'two libraries over one directory never delete a reclaimed copy',
+      () async {
+        final t = await TempLibrary.create();
+        final other = Library(t.store, managedDirectory: t.managedDirectory);
+        final source = t.copyFixture('sample.epub', 'source.epub');
+        for (var round = 0; round < 20; round++) {
+          final book = await t.importBook(source, managed: true);
+          final results = await Future.wait([
+            t.library.remove(book.id),
+            other.importFile(source, managed: true),
+          ]);
+          final item = results[1] as ImportItem;
+          final again = item.book;
+          if (again == null) {
+            // The import joined the book the removal took away: refused,
+            // and nothing it published is left owned.
+            expect(item.error, contains('library changed'));
+          } else {
+            // A committed import's copy is never deleted under it.
+            expect(await t.library.verifiedPath(again.id), again.path);
+            await t.library.remove(again.id);
+          }
+          await t.library.retryManagedFileDeletions();
+          expect(t.managedEntries(), isEmpty);
+        }
+      },
+    );
+  });
+
+  group('file admission', () {
+    test('a failed copy never deletes an existing destination', () async {
+      final t = await TempLibrary.create();
+      final source = t.copyFixture('sample.epub', 'source.epub');
+      final existing = File(t.path('existing.epub'))
+        ..writeAsStringSync('keep me');
+
+      await expectLater(
+        copyAndFingerprint(source, existing.path),
+        throwsA(isA<CoreException>()),
+      );
+      await expectLater(
+        copyAndFingerprint(source, source),
+        throwsA(isA<CoreException>()),
+      );
+
+      expect(existing.readAsStringSync(), 'keep me');
+      expect(
+        File(source).readAsBytesSync(),
+        File(fixturePath('sample.epub')).readAsBytesSync(),
+      );
+    });
+
+    test(
+      'an extensionless FIFO is refused without blocking',
+      () async {
+        final t = await TempLibrary.create();
+        final fifo = t.path('pipe');
+        expect((await Process.run('mkfifo', [fifo])).exitCode, 0);
+
+        final item = await t.library
+            .importFile(fifo, managed: false)
+            .timeout(const Duration(seconds: 5));
+
+        expect(item.book, isNull);
+        expect(item.error, contains('Not a regular file'));
+      },
+      skip: Platform.isWindows ? 'needs mkfifo' : false,
+    );
+
+    test('a cover that fails to decode is dropped, not fatal', () {
+      final png = File(fixturePath('sample.epub')).readAsBytesSync();
+      // A PNG signature and IHDR whose CRC is wrong, then garbage.
+      final broken = Uint8List.fromList([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, //
+        0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, //
+        0, 0, 0, 4, 0, 0, 0, 4, 8, 6, 0, 0, 0, //
+        0xDE, 0xAD, 0xBE, 0xEF, ...png.take(64),
+      ]);
+
+      expect(coverThumbnail(broken), isNull);
+    });
+
+    test('book bytes are read within the limit', () async {
+      final t = await TempLibrary.create();
+      final path = t.path('big.epub');
+      File(path).writeAsBytesSync(List.filled(1025, 0));
+
+      expect(await readBookBytes(path, maxBytes: 1025), hasLength(1025));
+      await expectLater(
+        readBookBytes(path, maxBytes: 1024),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+    });
   });
 
   group('schema', () {

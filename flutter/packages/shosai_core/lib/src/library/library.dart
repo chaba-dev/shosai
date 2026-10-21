@@ -54,10 +54,44 @@ final class Library {
   final String managedDirectory;
   final Map<BookFormat, BookInspector> _inspectors;
 
-  /// Serializes publishing and deleting private copies with the database
-  /// changes that own them, so a deletion never removes a copy that an import
-  /// is about to claim.
-  final _managedFiles = _Lock();
+  /// Run [section] while holding the managed directory's lock, which
+  /// serializes publishing, claiming and deleting private copies with the
+  /// database changes that own them, so a deletion never removes a copy that
+  /// an import is about to claim.
+  ///
+  /// The lock is shared by every [Library] over the same directory in this
+  /// isolate, and by other processes through an exclusive lock on
+  /// `.shosai-lock` in the directory. (POSIX file locks belong to the
+  /// process, so use a library's directory from one isolate per process.)
+  Future<T> _withManagedFiles<T>(Future<T> Function() section) {
+    final key = p.normalize(p.absolute(managedDirectory));
+    return _managedLocks.putIfAbsent(key, _Lock.new).run(() async {
+      final RandomAccessFile lock;
+      try {
+        await Directory(managedDirectory).create(recursive: true);
+        lock = await File(
+          p.join(managedDirectory, _lockFileName),
+        ).open(mode: FileMode.append);
+      } on FileSystemException catch (error) {
+        throw CoreException(
+          CoreErrorKind.inaccessible,
+          'The private copy folder is not usable: '
+          '${error.osError?.message ?? error.message}',
+        );
+      }
+      try {
+        await lock.lock(FileLock.blockingExclusive);
+        // Remember where the directory resolved when it was first used, so a
+        // later sweep can tell it was redirected.
+        await _records.claimManagedDirectory(
+          canonicalBookPath(managedDirectory),
+        );
+        return await section();
+      } finally {
+        await lock.close();
+      }
+    });
+  }
 
   /// The book with [id], or null.
   Future<Book?> get(int id) => _records.book(id);
@@ -135,6 +169,7 @@ final class Library {
     CancellationToken? cancellation,
   }) async {
     checkBookPath(directory);
+    final root = canonicalBookPath(directory);
     final discovery = await discoverBooks(
       directory,
       cancellation: cancellation,
@@ -147,10 +182,11 @@ final class Library {
       try {
         cancellation.throwIfCancelled();
         report.add(
-          await importFile(
+          await _importFile(
             book.path,
             managed: managed,
             cancellation: cancellation,
+            within: root,
           ),
         );
       } on CoreException catch (error) {
@@ -169,11 +205,32 @@ final class Library {
     String selected, {
     required bool managed,
     CancellationToken? cancellation,
+  }) => _importFile(selected, managed: managed, cancellation: cancellation);
+
+  /// [within], for a directory import, is the chosen folder: the file is
+  /// resolved again here, and one that now resolves outside it (a folder
+  /// replaced by a symlink since discovery) is refused.
+  Future<ImportItem> _importFile(
+    String selected, {
+    required bool managed,
+    CancellationToken? cancellation,
+    String? within,
   }) async {
     try {
       checkBookPath(selected);
+      cancellation.throwIfCancelled();
       final path = canonicalBookPath(selected);
       checkBookPath(path);
+      if (within != null && !p.isWithin(within, path)) {
+        throw CoreException.invalidRequest(
+          'The file is no longer inside the chosen folder: $selected',
+        );
+      }
+      if (!managed && _isPrivateCopyPath(path)) {
+        throw CoreException.invalidRequest(
+          'The file is one of the library\'s private copies: $selected',
+        );
+      }
       final format = await detectBookFormat(path);
       if (format == null) {
         final extension = p.extension(path);
@@ -192,7 +249,17 @@ final class Library {
     } on CoreException catch (error) {
       if (error.kind == CoreErrorKind.cancelled) rethrow;
       return ImportItem.failed(selected, error.message);
+    } on FileSystemException catch (error) {
+      return ImportItem.failed(
+        selected,
+        'Could not import: ${error.osError?.message ?? error.message}',
+      );
     }
+  }
+
+  bool _isPrivateCopyPath(String path) {
+    final directory = canonicalBookPath(managedDirectory);
+    return path == directory || p.isWithin(directory, path);
   }
 
   Future<(Book, bool)> _importReferenced(
@@ -227,18 +294,17 @@ final class Library {
   ) async {
     await Directory(managedDirectory).create(recursive: true);
     final stage = uniqueTemporaryPath(managedDirectory, 'import');
+    // The stage is only cleaned up once this import created it: a failed
+    // exclusive create must not delete a file it does not own.
+    var staged = false;
     try {
       final fingerprint = await copyAndFingerprint(
         source,
         stage,
         cancellation: cancellation,
       );
+      staged = true;
       final existing = await _records.bookWithContent(fingerprint.hash);
-      if (existing != null &&
-          existing.managed &&
-          await fileHasFingerprint(existing.path, fingerprint)) {
-        return (existing, true);
-      }
       final metadata = existing == null
           ? await _inspect(stage, format, cancellation, titlePath: source)
           : null;
@@ -250,7 +316,14 @@ final class Library {
       cancellation.throwIfCancelled();
       // The commit point: from here the copy is published and recorded even
       // if cancellation arrives.
-      return await _managedFiles.run(() async {
+      return await _withManagedFiles(() async {
+        // Decided under the lock: a removal may have claimed the copy since.
+        final current = await _records.bookWithContent(fingerprint.hash);
+        if (current != null &&
+            current.managed &&
+            await fileHasFingerprint(current.path, fingerprint)) {
+          return (current, true);
+        }
         await _records.checkDestinationOwner(destination, fingerprint.hash);
         final destinationExisted = await File(destination).exists();
         await publishManagedFile(stage, destination, fingerprint);
@@ -277,7 +350,7 @@ final class Library {
         }
       });
     } finally {
-      await _deleteQuietly(stage);
+      if (staged) await _deleteQuietly(stage);
     }
   }
 
@@ -354,9 +427,8 @@ final class Library {
 
   /// Remove book [id]. A referenced file is never touched; a private copy is
   /// deleted after the removal commits, or recorded for a later retry.
-  Future<RemoveOutcome> remove(int id) => _managedFiles.run(() async {
-    final managedDirectory = canonicalBookPath(this.managedDirectory);
-    final removed = await _records.remove(id, managedDirectory);
+  Future<RemoveOutcome> remove(int id) => _withManagedFiles(() async {
+    final removed = await _records.remove(id);
     if (removed == null) {
       return const RemoveOutcome(
         removed: false,
@@ -367,9 +439,11 @@ final class Library {
     return RemoveOutcome(removed: true, managedFileDeletionPending: pending);
   });
 
-  /// Retry deleting private copies of removed books, least-tried first.
+  /// Retry deleting private copies of removed books, least-tried first,
+  /// then delete what a crash left in the managed directory (see
+  /// [_sweepOrphans]). Run at start-up.
   Future<({int cleared, int pending})> retryManagedFileDeletions() =>
-      _managedFiles.run(() async {
+      _withManagedFiles(() async {
         final paths = await _records.claimDeletionRetries(
           managedDeletionRetryBatch,
         );
@@ -377,27 +451,69 @@ final class Library {
         for (final path in paths) {
           if (await _deleteManagedFile(path)) cleared++;
         }
+        await _sweepOrphans();
         return (cleared: cleared, pending: paths.length - cleared);
       });
+
+  /// Delete entries of the managed directory that no book or deletion debt
+  /// owns: a copy published by an import that died before its commit, and
+  /// quarantined files from a publish or deletion that died midway. Staging
+  /// files are written outside the lock by imports that may still be running,
+  /// so only ones older than [_staleStageAge] go. Runs under the lock, where
+  /// every published copy has a book or a debt.
+  ///
+  /// The sweep only runs while the managed directory resolves to the path
+  /// recorded the first time it ran: if the directory or an ancestor has been
+  /// replaced by a symlink, the listing could be someone else's folder.
+  Future<void> _sweepOrphans() async {
+    final directory = canonicalBookPath(managedDirectory);
+    if (!await _records.claimManagedDirectory(directory)) return;
+    final now = DateTime.now();
+    final candidates = <String>[];
+    try {
+      await for (final entry in Directory(directory).list(followLinks: false)) {
+        if (entry is! File) continue;
+        final name = p.basename(entry.path);
+        if (_publishedName.hasMatch(name) ||
+            name.startsWith('.shosai-damaged-') ||
+            name.startsWith('.shosai-delete-')) {
+          candidates.add(entry.path);
+        } else if (name.startsWith('.shosai-import-') &&
+            now.difference((await entry.stat()).modified) > _staleStageAge) {
+          candidates.add(entry.path);
+        }
+        if (candidates.length >= managedDeletionRetryBatch) break;
+      }
+    } on FileSystemException {
+      return;
+    }
+    for (final path in candidates) {
+      if (await _records.isOwned(path)) continue;
+      await _deleteQuietly(path);
+    }
+  }
 
   /// Delete the recorded private copy at [path]. A path that a book uses
   /// again stays, and so does its debt until that book is gone (a managed
   /// import that reclaims the copy clears the debt itself). Returns true once
-  /// nothing remains to do. Runs under [_managedFiles].
+  /// nothing remains to do. Runs under [_withManagedFiles].
   Future<bool> _deleteManagedFile(String path) async {
     final debt = await _records.deletionDebt(path);
     if (debt.inUse) return false;
     final managedDirectory = debt.directory;
     if (managedDirectory == null) return true;
-    // Only delete a direct child of the managed directory recorded with the
-    // debt; a path that resolves anywhere else stays.
+    // Only delete a direct child of the directory recorded with the debt
+    // (the copy's own canonical directory when it was imported). The parent
+    // is resolved now and compared with that stored path, never with a fresh
+    // resolution of it: if the directory or an ancestor has since been
+    // replaced by a symlink, they differ and nothing is deleted.
     final String parent;
     try {
       parent = await Directory(p.dirname(path)).resolveSymbolicLinks();
     } on FileSystemException {
       return false;
     }
-    if (parent != canonicalBookPath(managedDirectory)) return false;
+    if (parent != managedDirectory) return false;
     // Rename the entry itself (a symlink is never followed), then delete it.
     final FileSystemEntity entry;
     switch (await FileSystemEntity.type(path, followLinks: false)) {
@@ -411,14 +527,18 @@ final class Library {
       default:
         return false;
     }
+    // Record the quarantine path before the rename, so a crash between the
+    // two leaves a debt for wherever the file is.
     final quarantine = uniqueTemporaryPath(parent, 'delete');
+    await _records.recordDeletionDebt(quarantine, managedDirectory);
     final FileSystemEntity quarantined;
     try {
       quarantined = await entry.rename(quarantine);
     } on FileSystemException {
+      await _records.clearDeletionDebt(quarantine);
       return false;
     }
-    await _records.moveDeletionDebt(path, quarantine);
+    await _records.clearDeletionDebt(path);
     try {
       await quarantined.delete();
     } on PathNotFoundException {
@@ -430,6 +550,17 @@ final class Library {
     return true;
   }
 }
+
+/// Locks of the managed directories open in this isolate, by path.
+final _managedLocks = <String, _Lock>{};
+
+const _lockFileName = '.shosai-lock';
+
+/// The name of a published private copy: `<sha256>.<format>`.
+final _publishedName = RegExp(r'^[0-9a-f]{64}\.(epub|pdf)$');
+
+/// A staging file this old belongs to an import that is no longer running.
+const _staleStageAge = Duration(days: 1);
 
 String? _metadataText(String? value) {
   final collapsed = value?.trim().replaceAll(RegExp(r'\s+'), ' ');

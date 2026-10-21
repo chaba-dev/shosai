@@ -77,8 +77,16 @@ import of a referenced book adopts it as a private copy.
   Removing a managed book deletes the copy after the commit; a deletion that
   fails is recorded in `managed_file_deletion_debt` and retried by
   `retryManagedFileDeletions` (at start-up), and a deletion only ever renames
-  and unlinks a direct entry of the recorded managed directory, never a
-  symlink's target or a path a book uses.
+  and unlinks a direct entry of the directory recorded when the copy was
+  imported, never a symlink's target or a path a book uses.
+- Publishing, claiming and deleting copies hold one lock per managed
+  directory: in-process for every `Library` over it, and an exclusive file
+  lock on `.shosai-lock` across processes. A referenced import of a path
+  inside the managed directory is refused.
+- `retryManagedFileDeletions` also sweeps what a crash left behind: a
+  published copy no book or debt owns, set-aside damaged copies, and staging
+  files older than a day. It only sweeps while the directory still resolves
+  to the path recorded when it was first used.
 - `verifiedPath` re-hashes the file before the reader opens it and fails with
   `conflict` when the content changed.
 - Directory import follows symlinks only inside the chosen folder, visits each

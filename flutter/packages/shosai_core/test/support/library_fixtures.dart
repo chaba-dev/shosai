@@ -18,6 +18,12 @@ final class TempLibrary {
 
   String get managedDirectory => library.managedDirectory;
 
+  /// Entries of the managed directory, without the library's lock file.
+  List<FileSystemEntity> managedEntries() => [
+    for (final entry in Directory(managedDirectory).listSync())
+      if (p.basename(entry.path) != '.shosai-lock') entry,
+  ];
+
   static Future<TempLibrary> create({
     Map<BookFormat, BookInspector>? inspectors,
   }) async {

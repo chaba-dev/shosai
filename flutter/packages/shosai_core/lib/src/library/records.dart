@@ -82,8 +82,46 @@ final class LibraryRecords {
       });
 
   /// Delete book [id], recording its private copy (if any) as deletion debt.
-  Future<Book?> remove(int id, String managedDirectory) =>
-      _store.transaction((db) => _removeBook(db, id, managedDirectory));
+  Future<Book?> remove(int id) =>
+      _store.transaction((db) => _removeBook(db, id));
+
+  /// Record [canonical] as the managed directory's resolved path the first
+  /// time, and report whether it still is.
+  Future<bool> claimManagedDirectory(String canonical) =>
+      _store.transaction((db) {
+        final recorded = db
+            .select('SELECT value FROM preferences WHERE key = ?', [
+              _managedDirectoryKey,
+            ])
+            .firstOrNull
+            ?.columnAt(0);
+        if (recorded == null) {
+          db.execute('INSERT INTO preferences (key, value) VALUES (?, ?)', [
+            _managedDirectoryKey,
+            canonical,
+          ]);
+          return true;
+        }
+        return recorded == canonical;
+      });
+
+  /// Whether a book or a deletion debt owns [path].
+  Future<bool> isOwned(String path) => _store.read(
+    (db) => db
+        .select(
+          '''SELECT 1 FROM books WHERE file_path = ?1
+         UNION ALL
+         SELECT 1 FROM managed_file_deletion_debt WHERE file_path = ?1''',
+          [path],
+        )
+        .isNotEmpty,
+  );
+
+  /// Record a private copy at [path], in [managedDirectory], to delete.
+  Future<void> recordDeletionDebt(String path, String managedDirectory) =>
+      _store.transaction(
+        (db) => _recordDeletionDebt(db, path, managedDirectory),
+      );
 
   /// Up to [limit] debt paths, least-tried first, each counted as tried.
   Future<List<String>> claimDeletionRetries(int limit) =>
@@ -125,13 +163,6 @@ final class LibraryRecords {
     return (inUse: false, directory: directory);
   });
 
-  Future<void> moveDeletionDebt(String from, String to) => _store.transaction(
-    (db) => db.execute(
-      'UPDATE managed_file_deletion_debt SET file_path = ? WHERE file_path = ?',
-      [to, from],
-    ),
-  );
-
   Future<void> clearDeletionDebt(String path) => _store.transaction(
     (db) => db.execute(
       'DELETE FROM managed_file_deletion_debt WHERE file_path = ?',
@@ -139,6 +170,8 @@ final class LibraryRecords {
     ),
   );
 }
+
+const _managedDirectoryKey = 'library.managed_directory';
 
 const _bookColumns = '''id, title, author, format, file_path, storage_kind,
   original_path, content_hash, file_size, cover IS NOT NULL, progress,
@@ -344,11 +377,13 @@ Book _insertBook(
   return _bookById(db, db.lastInsertRowId)!;
 }
 
-Book? _removeBook(Database db, int id, String managedDirectory) {
+Book? _removeBook(Database db, int id) {
   final book = _bookById(db, id);
   if (book == null) return null;
   db.execute('DELETE FROM books WHERE id = ?', [id]);
-  if (book.managed) _recordDeletionDebt(db, book.path, managedDirectory);
+  // The copy's directory as recorded at import (its canonical path then),
+  // never a fresh resolution of the configured directory.
+  if (book.managed) _recordDeletionDebt(db, book.path, p.dirname(book.path));
   return book;
 }
 
