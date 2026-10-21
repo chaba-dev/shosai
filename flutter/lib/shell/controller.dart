@@ -66,9 +66,13 @@ class ShellController extends ChangeNotifier {
       try {
         await _presentReader();
       } finally {
-        if (identical(_presentation, presentation)) _presentation = null;
+        // Each presentation settles its own future, but only the current one
+        // may end the session: a presentation the shell already dismissed can
+        // complete after the reader was presented again.
+        final current = identical(_presentation, presentation);
+        if (current) _presentation = null;
         presentation.complete();
-        dispatch(const _ShellReaderDismissed());
+        if (current) dispatch(const _ShellReaderDismissed());
       }
     }());
   }

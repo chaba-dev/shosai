@@ -200,6 +200,40 @@ void main() {
       expect(controller.model.reading, isTrue);
     });
 
+    test('a stale presentation cannot end the next reader session', () async {
+      // The first presentation's dismissal is held until after the reader
+      // was presented again.
+      final held = <Completer<void>>[];
+      final overlapping = ShellController(
+        presentReader: () {
+          final presentation = Completer<void>();
+          held.add(presentation);
+          return presentation.future;
+        },
+        dismissReader: () {},
+      );
+      addTearDown(overlapping.dispose);
+      overlapping.dispatch(ShellBookOpened(_book(1)));
+      final firstDismissed = overlapping.readerDismissed;
+      overlapping.dispatch(const ShellPlaceSelected(ShellPlace.library));
+      overlapping.dispatch(const ShellBookActivated(1));
+      expect(held, hasLength(2));
+
+      held.first.complete();
+      await pumpEventQueue();
+      await firstDismissed;
+      expect(overlapping.model.reading, isTrue);
+
+      var settled = false;
+      unawaited(overlapping.readerDismissed.then((_) => settled = true));
+      await pumpEventQueue();
+      expect(settled, isFalse);
+      held.last.complete();
+      await pumpEventQueue();
+      expect(settled, isTrue);
+      expect(overlapping.model.reading, isFalse);
+    });
+
     test('readerDismissed is complete when nothing is presented', () async {
       await controller.readerDismissed;
     });
