@@ -2949,8 +2949,10 @@ final class ReaderController implements Listenable {
   ReaderEpubPage _continuousPage(
     ChapterLayoutSession session,
     _EpubLayoutKey key,
-    int scalar,
-  ) {
+    int scalar, {
+    double priorityTop = 0,
+    int? selectionBudgetMicros,
+  }) {
     var extents = _continuousExtents;
     if (extents == null || _continuousExtentsKey != key) {
       extents = ContinuousExtents(session.chapter);
@@ -2971,6 +2973,8 @@ final class ReaderController implements Listenable {
       unit: key.unit,
       chapterCount: _model.document?.logicalUnitCount.toInt() ?? key.unit + 1,
       windowSize: ui.Size(key.width, key.height),
+      priorityTop: priorityTop,
+      selectionBudgetMicros: selectionBudgetMicros,
     );
   }
 
@@ -3046,8 +3050,15 @@ final class ReaderController implements Listenable {
         viewportTop: viewport.top,
         viewportBottom: viewport.bottom,
       );
-      if (!step.changed) return;
-      next = _continuousPage(session, key, page.targetScalar);
+      final cache = _continuousCaches[session];
+      if (!step.changed && !(cache?.selectionPending ?? false)) return;
+      next = _continuousPage(
+        session,
+        key,
+        page.targetScalar,
+        priorityTop: viewport.top,
+        selectionBudgetMicros: kContinuousSelectionMicros,
+      );
     } catch (error) {
       // A failed batch adopted nothing; the page on screen stays valid.
       _emit(_model.copyWith(relayoutError: 'Layout failed: $error'));
@@ -3073,7 +3084,9 @@ final class ReaderController implements Listenable {
     );
     if (step.released.isNotEmpty) _releaseEpubBlocksAfterFrame(step.released);
     debugContinuousStepObserver?.call(stopwatch.elapsedMicroseconds);
-    if (step.pending) _scheduleContinuousTick();
+    if (step.pending || _continuousCaches[session]!.selectionPending) {
+      _scheduleContinuousTick();
+    }
   }
 
   /// Releases [blocks] after the frame that stops painting them.
@@ -4830,8 +4843,21 @@ final class ReaderController implements Listenable {
   );
 
   void _publish(ReaderModel derived, {bool notifyListeners = true}) {
+    // The description reads the selected text out of the surface's canonical
+    // stream (a whole chapter): skip it when nothing it depends on changed,
+    // as on a continuous window step.
+    final previous = _model;
     final selectionChanged =
-        _model.selectionDescription != derived.selectionDescription;
+        !(previous.selectionPhase == derived.selectionPhase &&
+            previous.anchor == derived.anchor &&
+            previous.focus == derived.focus &&
+            previous.selectionSurface?.copyEligible ==
+                derived.selectionSurface?.copyEligible &&
+            identical(
+              previous.selectionSurface?.text,
+              derived.selectionSurface?.text,
+            )) &&
+        previous.selectionDescription != derived.selectionDescription;
     _model = derived;
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
       unawaited(_announceSelection(derived.selectionDescription));
@@ -5349,7 +5375,9 @@ List<ReaderSelection> _savedSelections(
 );
 
 FlutterSelectionSurface _freezeSurface(FlutterSelectionSurface surface) {
-  if (_frozenSurfaces[surface] ?? false) return surface;
+  if ((_frozenSurfaces[surface] ?? false) || continuousSurfaceFrozen(surface)) {
+    return surface;
+  }
   final frozen = FlutterSelectionSurface(
     width: surface.width,
     height: surface.height,

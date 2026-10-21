@@ -35,16 +35,20 @@ const double kContinuousLeadViewports = 1.5;
 ///
 /// Wider than [kContinuousLeadViewports], so a reader scrolling back and forth
 /// near a window edge does not release and re-measure the same nodes.
-const double kContinuousKeepViewports = 4;
+const double kContinuousKeepViewports = 3;
 
 /// The most nodes one window step measures.
 const int kContinuousBatchNodes = 8;
 
 /// The layout time after which one window step stops measuring.
 ///
-/// Half the paginated fill's batch: a window step also builds the selection
-/// geometry of the nodes it measured, in the same frame.
-const int kContinuousBatchMicros = 4000;
+/// Half the paginated fill's batch: a window step also places the nodes it
+/// measured and builds selection geometry, in the same frame.
+const int kContinuousBatchMicros = 3000;
+
+/// The time after which one window step stops building selection geometry;
+/// the remaining nodes paint without it until the next step.
+const int kContinuousSelectionMicros = 2500;
 
 /// The column extent of every node of one chapter at one layout: measured
 /// where the node has been laid out, estimated elsewhere.
@@ -178,25 +182,81 @@ int continuousAnchorNode(
 /// One laid-out node's page slices and selection geometry, placed at the
 /// node's own top (content x, node-local y).
 class _NodeGeometry {
-  _NodeGeometry({
-    required this.first,
-    required this.page,
-    required this.endpoints,
-    required this.visualLines,
-    required this.graphemes,
-    required this.words,
-  });
+  _NodeGeometry({required this.first, required this.page});
 
   /// The node's first measured block: a node released and laid out again has
   /// new blocks, so a cached entry is only valid while this is still its first.
   final FlowBlock first;
+
+  /// The node's slices, node-local: what paints it. Cheap, so it is built as
+  /// soon as the node is laid out.
   final FlowPage page;
-  final List<FlutterSelectionEndpoint> endpoints;
-  final List<FlutterSelectionVisualLine> visualLines;
-  final List<int> graphemes;
-  final List<int> words;
+
+  /// The node's selection geometry, node-local, once built.
+  ///
+  /// Building it costs one shaped-box query per grapheme, the most expensive
+  /// part of a step, so it has its own per-step budget: a node paints from
+  /// [page] before its selection geometry exists.
+  ({
+    List<FlutterSelectionEndpoint> endpoints,
+    List<FlutterSelectionVisualLine> visualLines,
+    List<int> graphemes,
+    List<int> words,
+  })?
+  selection;
 
   double get extent => page.height;
+
+  /// This node's geometry placed at column top [_placedAt], kept until the
+  /// node moves (or gains its selection geometry): a window step re-places
+  /// only the nodes that are new or moved.
+  double? _placedAt;
+  bool _placedSelection = false;
+  List<PageSlice> _slices = const [];
+  List<FlutterSelectionEndpoint> _endpoints = const [];
+  List<FlutterSelectionVisualLine> _visualLines = const [];
+
+  void _place(double dy) {
+    final selection = this.selection;
+    if (_placedAt != dy) {
+      _slices = [for (final slice in page.slices) _shiftedSlice(slice, dy)];
+    } else if (_placedSelection == (selection != null)) {
+      return;
+    }
+    _placedAt = dy;
+    _placedSelection = selection != null;
+    if (selection == null) return;
+    _endpoints = [
+      for (final endpoint in selection.endpoints)
+        FlutterSelectionEndpoint(
+          offset: endpoint.offset,
+          rangeStart: endpoint.rangeStart,
+          rangeEnd: endpoint.rangeEnd,
+          rect: FlutterSelectionRect(
+            left: endpoint.rect.left,
+            top: endpoint.rect.top + dy,
+            right: endpoint.rect.right,
+            bottom: endpoint.rect.bottom + dy,
+          ),
+        ),
+    ];
+    _visualLines = [
+      for (final line in selection.visualLines)
+        FlutterSelectionVisualLine(
+          carets: List.unmodifiable([
+            for (final caret in line.carets)
+              FlutterSelectionCaret(
+                offset: caret.offset,
+                x: caret.x,
+                alongLine: caret.alongLine,
+                vertical: caret.vertical,
+                top: caret.top + dy,
+                bottom: caret.bottom + dy,
+              ),
+          ]),
+        ),
+    ];
+  }
 }
 
 /// Per-node geometry of one layout session's window.
@@ -215,11 +275,15 @@ class ContinuousGeometryCache {
   /// Nodes whose geometry this cache holds.
   int get cachedNodes => _nodes.length;
 
+  /// Whether a laid-out node of the last window still lacks its selection
+  /// geometry, so another step is due to build it.
+  bool get selectionPending => _selectionPending;
+  bool _selectionPending = false;
+
   _NodeGeometry _geometry(
     int node,
     List<FlowBlock> blocks,
     ChapterLayoutSession session,
-    EpubPageBox box,
   ) {
     final cached = _nodes[node];
     if (cached != null && identical(cached.first, blocks.first)) return cached;
@@ -238,21 +302,23 @@ class ContinuousGeometryCache {
       pageHeight: double.infinity,
       pageWidth: session.spec.width,
     ).pages.first;
-    final geometry = pageSelectionGeometry(page, box);
+    final entry = _NodeGeometry(first: blocks.first, page: page);
+    _nodes[node] = entry;
+    return entry;
+  }
+
+  void _buildSelection(int node, _NodeGeometry entry, EpubPageBox box) {
+    final geometry = pageSelectionGeometry(entry.page, box);
     final canonical = chapter.blocks[node].canonical;
-    final boundaries = canonical == null || page.slices.isEmpty
+    final boundaries = canonical == null || entry.page.slices.isEmpty
         ? (graphemes: const <int>[], words: const <int>[])
         : _scalars.boundaries(canonical.start, canonical.end);
-    final entry = _NodeGeometry(
-      first: blocks.first,
-      page: page,
+    entry.selection = (
       endpoints: geometry.endpoints,
       visualLines: geometry.visualLines,
       graphemes: boundaries.graphemes,
       words: boundaries.words,
     );
-    _nodes[node] = entry;
-    return entry;
   }
 
   void _retainOnly(int first, int end) =>
@@ -325,6 +391,11 @@ class _ScalarIndex {
 ///
 /// Records every laid-out node's measured extent into [extents] first, and
 /// calibrates its estimate from the first window.
+///
+/// With [selectionBudgetMicros], selection geometry is built for the nodes
+/// nearest [priorityTop] (column coordinates) until the budget is spent; the
+/// others paint without it until a later call
+/// ([ContinuousGeometryCache.selectionPending]).
 ReaderEpubPage continuousWindowFor({
   required ChapterLayoutSession session,
   required ContinuousExtents extents,
@@ -333,6 +404,8 @@ ReaderEpubPage continuousWindowFor({
   required int unit,
   required int chapterCount,
   required Size windowSize,
+  double priorityTop = 0,
+  int? selectionBudgetMicros,
 }) {
   final chapter = session.chapter;
   final frame = epubPageBoxFor(windowSize);
@@ -353,12 +426,7 @@ ReaderEpubPage continuousWindowFor({
     while (end < blocks.length && blocks[end].nodeIndex == node) {
       end += 1;
     }
-    final geometry = cache._geometry(
-      node,
-      blocks.sublist(index, end),
-      session,
-      nodeBox,
-    );
+    final geometry = cache._geometry(node, blocks.sublist(index, end), session);
     extents.record(node, geometry.extent);
     nodes.add((node: node, geometry: geometry));
     index = end;
@@ -374,6 +442,29 @@ ReaderEpubPage continuousWindowFor({
     }
     cache._retainOnly(session.firstNodeIndex, session.lastNodeIndex + 1);
   }
+  // Selection geometry nearest [priorityTop] first, within the budget; the
+  // first node is always built, so every step makes progress.
+  final pending = [
+    for (final entry in nodes)
+      if (entry.geometry.selection == null) entry,
+  ];
+  if (pending.isNotEmpty) {
+    final before = extents.tops();
+    double distance(int node) => (before[node] - priorityTop).abs();
+    pending.sort((a, b) => distance(a.node).compareTo(distance(b.node)));
+    final watch = Stopwatch()..start();
+    for (final (:node, :geometry) in pending) {
+      if (selectionBudgetMicros != null &&
+          !identical(geometry, pending.first.geometry) &&
+          watch.elapsedMicroseconds >= selectionBudgetMicros) {
+        break;
+      }
+      cache._buildSelection(node, geometry, nodeBox);
+    }
+  }
+  cache._selectionPending = nodes.any(
+    (entry) => entry.geometry.selection == null,
+  );
   final typography = session.spec.typography;
   extents.calibrate(
     // One line of body text per line of characters at roughly half an em.
@@ -395,45 +486,15 @@ ReaderEpubPage continuousWindowFor({
   }
 
   for (final (:node, :geometry) in nodes) {
-    final dy = tops[node];
-    for (final slice in geometry.page.slices) {
-      slices.add(_shiftedSlice(slice, dy));
+    geometry._place(tops[node]);
+    slices.addAll(geometry._slices);
+    endpoints.addAll(geometry._endpoints);
+    visualLines.addAll(geometry._visualLines);
+    final selection = geometry.selection;
+    if (selection != null) {
+      addBoundaries(graphemes, selection.graphemes);
+      addBoundaries(words, selection.words);
     }
-    for (final endpoint in geometry.endpoints) {
-      final rect = endpoint.rect;
-      endpoints.add(
-        FlutterSelectionEndpoint(
-          offset: endpoint.offset,
-          rangeStart: endpoint.rangeStart,
-          rangeEnd: endpoint.rangeEnd,
-          rect: FlutterSelectionRect(
-            left: rect.left,
-            top: rect.top + dy,
-            right: rect.right,
-            bottom: rect.bottom + dy,
-          ),
-        ),
-      );
-    }
-    for (final line in geometry.visualLines) {
-      visualLines.add(
-        FlutterSelectionVisualLine(
-          carets: [
-            for (final caret in line.carets)
-              FlutterSelectionCaret(
-                offset: caret.offset,
-                x: caret.x,
-                alongLine: caret.alongLine,
-                vertical: caret.vertical,
-                top: caret.top + dy,
-                bottom: caret.bottom + dy,
-              ),
-          ],
-        ),
-      );
-    }
-    addBoundaries(graphemes, geometry.graphemes);
-    addBoundaries(words, geometry.words);
   }
   final height = tops[tops.length - 1];
   final box = EpubPageBox(
@@ -456,11 +517,14 @@ ReaderEpubPage continuousWindowFor({
     text: chapter.canonicalText,
     copyEligible: true,
     resourcePath: chapter.resource,
-    endpoints: endpoints,
-    graphemeBoundaries: Uint32List.fromList(graphemes),
-    wordBoundaries: Uint32List.fromList(words),
-    visualLines: visualLines,
+    // Built unmodifiable, so the owner adopts it without copying it again
+    // ([continuousSurfaceFrozen]).
+    endpoints: List.unmodifiable(endpoints),
+    graphemeBoundaries: Uint32List.fromList(graphemes).asUnmodifiableView(),
+    wordBoundaries: Uint32List.fromList(words).asUnmodifiableView(),
+    visualLines: List.unmodifiable(visualLines),
   );
+  _frozen[surface] = true;
   return ReaderEpubPage(
     unit: unit,
     targetScalar: scalar,
@@ -502,6 +566,13 @@ PageSlice _shiftedSlice(PageSlice slice, double dy) => switch (slice) {
   ),
   WholePageSlice() => WholePageSlice(block: slice.block, top: slice.top + dy),
 };
+
+final Expando<bool> _frozen = Expando();
+
+/// Whether [surface] is a continuous window's surface, whose lists are
+/// already unmodifiable.
+bool continuousSurfaceFrozen(FlutterSelectionSurface surface) =>
+    _frozen[surface] ?? false;
 
 /// What one [advanceContinuousWindow] step did.
 class ContinuousWindowStep {
