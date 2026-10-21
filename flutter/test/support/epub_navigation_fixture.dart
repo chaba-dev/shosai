@@ -296,3 +296,40 @@ Uint8List harnessEpub(int chapters) => buildTestEpub(
   },
   nav: '<ol></ol>',
 );
+
+/// A chapter of [paragraphs] numbered paragraphs (about 250K scalars at the
+/// default), alternating short and long so a node's estimated extent is not
+/// its measured one, with a link at the start to an anchor three quarters in.
+Uint8List longChapterEpub({int paragraphs = 2400}) {
+  final deep = paragraphs * 3 ~/ 4;
+  final body = StringBuffer(
+    '<h1 id="long-start">Long chapter</h1>'
+    '<p>Start of the chapter. <a href="#long-deep">Jump to the deep '
+    'anchor</a>.</p>',
+  );
+  for (var index = 0; index < paragraphs; index += 1) {
+    if (index == deep) {
+      body.write('<h2 id="long-deep">Deep anchor</h2>');
+    }
+    body.write(
+      index.isEven
+          ? '<p>Paragraph $index is short.</p>'
+          : '<p>Paragraph $index is a long paragraph of a very long chapter, '
+                'which reads continuously however long it is, because only '
+                'the part of it near the viewport is laid out, and the rest '
+                'reserves its estimated height until it is measured.</p>',
+    );
+  }
+  return buildTestEpub(
+    chapters: {
+      'OPS/Text/chapter-1.xhtml': body.toString(),
+      'OPS/Text/chapter-2.xhtml': '<p>A short chapter.</p>',
+    },
+    nav:
+        '<ol>'
+        '<li><a href="../Text/chapter-1.xhtml">Long start</a></li>'
+        '<li><a href="../Text/chapter-1.xhtml#long-deep">Long deep</a></li>'
+        '<li><a href="../Text/chapter-2.xhtml">Short chapter</a></li>'
+        '</ol>',
+  );
+}
