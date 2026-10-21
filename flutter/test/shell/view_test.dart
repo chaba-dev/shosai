@@ -292,6 +292,35 @@ void main() {
     expect(recorder.closed, [3]);
   });
 
+  testWidgets('a control removed right after taking focus does not throw', (
+    tester,
+  ) async {
+    final recorder = _Recorder();
+    await _pumpFrame(
+      tester,
+      size: const Size(1440, 900),
+      model: _model(),
+      recorder: recorder,
+    );
+    // Focus a place row, then remove the sidebar before the next frame runs
+    // the row's reveal callback.
+    final focus = Focus.of(
+      tester.element(
+        find.descendant(
+          of: find.ancestor(
+            of: find.text('Notes'),
+            matching: find.byType(InkWell),
+          ),
+          matching: find.byType(Text),
+        ),
+      ),
+    );
+    focus.requestFocus();
+    await tester.idle();
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the tablet sidebar is narrower and has no search button', (
     tester,
   ) async {
@@ -505,6 +534,25 @@ void main() {
           await tester.pumpAndSettle();
         }
         expect(focused(), isTrue, reason: '$label takes focus');
+        // The focus ring is drawn 2 px outside the control; the viewport's
+        // clip must leave room for it.
+        final viewport = tester.getRect(
+          find.descendant(
+            of: find.byType(ShellSidebar),
+            matching: find.byType(Viewport),
+          ),
+        );
+        final ring = tester
+            .getRect(
+              find.ancestor(of: target, matching: find.byType(InkWell)).first,
+            )
+            .inflate(2);
+        expect(
+          viewport.contains(ring.topLeft) &&
+              viewport.contains(ring.bottomRight - const Offset(.01, .01)),
+          isTrue,
+          reason: '$label focus ring $ring inside the viewport $viewport',
+        );
         final rect = tester.getRect(target);
         expect(
           rect.top >= sidebar.top && rect.bottom <= sidebar.bottom,

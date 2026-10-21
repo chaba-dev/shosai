@@ -48,50 +48,55 @@ class ShellSidebar extends StatelessWidget {
           color: palette.chrome,
           border: BorderDirectional(end: BorderSide(color: palette.line)),
         ),
-        padding: const EdgeInsets.fromLTRB(14, 20, 14, 14),
         // One scroll view holds the whole stack, so a short window (or large
         // text) scrolls to every place, book and Add books instead of
-        // overflowing; while there is room, Add books stays at the foot.
+        // overflowing; while there is room, Add books stays at the foot. The
+        // sidebar's padding sits inside the viewport, so its clip leaves room
+        // for the 2 px focus ring drawn outside each control.
         child: CustomScrollView(
           slivers: [
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                spacing: 6,
-                children: [
-                  const Padding(
-                    padding: EdgeInsetsDirectional.fromSTEB(6, 0, 6, 14),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: ShellWordmark(),
-                    ),
-                  ),
-                  if (layout == ShellLayout.desktop)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _SidebarSearchButton(
-                        onPressed: () => actions.selectPlace(ShellPlace.search),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(14, 20, 14, 0),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  spacing: 6,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsetsDirectional.fromSTEB(6, 0, 6, 14),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: ShellWordmark(),
                       ),
                     ),
-                  for (final (place, icon) in _places)
-                    _PlaceRow(
-                      icon: icon,
-                      label: shellPlaceLabel(l10n, place),
-                      touch: layout.touch,
-                      current: !model.reading && model.place == place,
-                      onPressed: () => actions.selectPlace(place),
-                    ),
-                  if (open.isNotEmpty)
-                    _SidebarHead(
-                      label: l10n.shellReadingNow,
-                      count: '${open.length}',
-                    ),
-                ],
+                    if (layout == ShellLayout.desktop)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _SidebarSearchButton(
+                          onPressed: () =>
+                              actions.selectPlace(ShellPlace.search),
+                        ),
+                      ),
+                    for (final (place, icon) in _places)
+                      _PlaceRow(
+                        icon: icon,
+                        label: shellPlaceLabel(l10n, place),
+                        touch: layout.touch,
+                        current: !model.reading && model.place == place,
+                        onPressed: () => actions.selectPlace(place),
+                      ),
+                    if (open.isNotEmpty)
+                      _SidebarHead(
+                        label: l10n.shellReadingNow,
+                        count: '${open.length}',
+                      ),
+                  ],
+                ),
               ),
             ),
             if (open.isNotEmpty)
               SliverPadding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
                 sliver: SliverReorderableList(
                   itemCount: open.length,
                   onReorder: (from, to) =>
@@ -119,22 +124,25 @@ class ShellSidebar extends StatelessWidget {
               ),
             SliverFillRemaining(
               hasScrollBody: false,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: _PlaceRow(
-                      icon: LucideIcons.plus,
-                      label: l10n.addBooksAction,
-                      touch: layout.touch,
-                      current: false,
-                      muted: true,
-                      onPressed: actions.addBooks,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: _PlaceRow(
+                        icon: LucideIcons.plus,
+                        label: l10n.addBooksAction,
+                        touch: layout.touch,
+                        current: false,
+                        muted: true,
+                        onPressed: actions.addBooks,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],

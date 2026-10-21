@@ -332,6 +332,9 @@ class ShellProgressBar extends StatelessWidget {
   }
 }
 
+/// The shared focus ring's width, drawn outside the control.
+const double _ringWidth = 2;
+
 /// A quiet pressable surface with the shared 2 px `accent` focus ring.
 class _ShellPressable extends StatefulWidget {
   const _ShellPressable({
@@ -363,6 +366,19 @@ class _ShellPressable extends StatefulWidget {
 class _ShellPressableState extends State<_ShellPressable> {
   bool _focused = false;
 
+  void _focusChanged(bool focused) {
+    setState(() => _focused = focused);
+    if (!focused) return;
+    // Focus traversal scrolls the control itself into view; the ring is
+    // drawn 2 px outside it, so bring that margin into view as well.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_focused) return;
+      final box = context.findRenderObject();
+      if (box is! RenderBox || !box.attached) return;
+      box.showOnScreen(rect: (Offset.zero & box.size).inflate(_ringWidth));
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
@@ -374,7 +390,7 @@ class _ShellPressableState extends State<_ShellPressable> {
         border: _focused
             ? Border.all(
                 color: palette.accent,
-                width: 2,
+                width: _ringWidth,
                 strokeAlign: BorderSide.strokeAlignOutside,
               )
             : null,
@@ -397,7 +413,7 @@ class _ShellPressableState extends State<_ShellPressable> {
             highlightColor: palette.hover,
             splashFactory: NoSplash.splashFactory,
             focusColor: palette.hover.withValues(alpha: 0),
-            onFocusChange: (focused) => setState(() => _focused = focused),
+            onFocusChange: _focusChanged,
             // A label replaces the child's own text for assistive technology,
             // while the InkWell keeps its tap and focus semantics.
             child: widget.semanticLabel == null
