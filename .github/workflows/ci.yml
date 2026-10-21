@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "flutter/**"
+      - "fixtures/**"
       - "assets/**"
       - "rfd/**"
       - "scripts/**"
@@ -19,6 +20,7 @@ on:
     branches: [main]
     paths:
       - "flutter/**"
+      - "fixtures/**"
       - "assets/**"
       - "rfd/**"
       - "scripts/**"
