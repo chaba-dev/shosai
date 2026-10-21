@@ -48,7 +48,7 @@ final class PdfrxPdfEngine implements PdfEngine {
     for (final variable in const ['PDFIUM_PATH', 'SHOSAI_PDFIUM_LIBRARY']) {
       final override = Platform.environment[variable];
       if (override != null && override.isNotEmpty) {
-        pdfrx.Pdfrx.pdfiumModulePath ??= override;
+        pdfrx.Pdfrx.pdfiumModulePath ??= _privateCopy(override);
         break;
       }
     }
@@ -57,6 +57,29 @@ final class PdfrxPdfEngine implements PdfEngine {
     // temporary directory keeps initialisation free of a plugin channel.
     pdfrx.Pdfrx.cacheDirectoryPath ??= Directory.systemTemp.path;
     await pdfrx.pdfrxFlutterInitialize();
+  }
+
+  /// A copy of the PDFium library at [path] that only pdfrx loads.
+  ///
+  /// The Rust core's `pdfium-render` initialises PDFium before every call and
+  /// destroys it after, and it loads the same library from
+  /// `SHOSAI_PDFIUM_LIBRARY`. Sharing one loaded image would let that destroy
+  /// tear PDFium down under pdfrx; the loader maps a copy at another path as
+  /// a separate image with its own state. This goes with the Rust core.
+  static String _privateCopy(String path) {
+    final source = File(path);
+    final stat = source.statSync();
+    if (stat.type != FileSystemEntityType.file) return path;
+    final name = source.uri.pathSegments.last;
+    final copy = File(
+      '${Directory.systemTemp.path}/shosai-pdfrx-'
+      '${stat.size}-${stat.modified.millisecondsSinceEpoch}-$name',
+    );
+    if (!copy.existsSync() || copy.lengthSync() != stat.size) {
+      final partial = source.copySync('${copy.path}.$pid.partial');
+      partial.renameSync(copy.path);
+    }
+    return copy.path;
   }
 
   @override
