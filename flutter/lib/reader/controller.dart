@@ -1563,11 +1563,10 @@ final class ReaderController implements Listenable {
   PaginatedChapter? _paginatedWindow(ChapterLayoutSession session) {
     final key = _epubSessionKey;
     if (key == null) return null;
-    final box = epubPageBoxFor(ui.Size(key.width, key.height));
-    return paginateFlow(
-      flow: session.snapshot(),
-      pageHeight: box.contentHeight,
-      pageWidth: box.contentWidth,
+    return paginateWindow(
+      session.snapshot(),
+      ui.Size(key.width, key.height),
+      continuous: _typographyContinuous,
     );
   }
 
@@ -1603,6 +1602,7 @@ final class ReaderController implements Listenable {
       unit: unit,
       chapterCount: document.logicalUnitCount.toInt(),
       windowSize: ui.Size(layout.width, height),
+      continuous: _typographyContinuous,
     );
     final oldImage = _model.pageImage;
     final changedLocation =
@@ -2624,6 +2624,19 @@ final class ReaderController implements Listenable {
     var adopted = replacement == null;
     try {
       if (!active.started) active.layoutWindowAt(target);
+      if (_typographyContinuous) {
+        // A continuous chapter is one scrolled page, so it is installed whole:
+        // the rest of the chapter is measured first, in the same bounded,
+        // yielding batches the paginated window fills with afterwards.
+        while (!active.complete) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+          if (!_isCurrentLayout(generation, revision)) return;
+          final progressed = active.lastNodeIndex + 1 < active.totalNodes
+              ? active.layoutForward(maxNodes: 24, maxMicros: 8000)
+              : active.layoutBackward(maxNodes: 24, maxMicros: 8000);
+          if (progressed == 0) break;
+        }
+      }
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {

@@ -336,6 +336,7 @@ List<String> chapterImageSources(EpubChapter chapter) {
 class ReaderEpubPage {
   ReaderEpubPage({
     required this.unit,
+    required this.targetScalar,
     required this.pageIndex,
     required this.pageCount,
     required this.layoutComplete,
@@ -354,6 +355,10 @@ class ReaderEpubPage {
 
   /// Spine ordinal of the chapter this page belongs to.
   final int unit;
+
+  /// Canonical scalar the window was requested for. A continuous page holds
+  /// the whole chapter, so this is the location the view scrolls to.
+  final int targetScalar;
 
   /// 0-based page ordinal inside the laid-out window.
   final int pageIndex;
@@ -406,30 +411,53 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
   contentHeight: math.max(40.0, windowSize.height - 2 * kEpubPageMargin),
 );
 
+/// Paginates [flow] for a page window of [windowSize]; a [continuous] chapter
+/// is one page of unbounded height.
+PaginatedChapter paginateWindow(
+  ChapterFlow flow,
+  Size windowSize, {
+  required bool continuous,
+}) {
+  final box = epubPageBoxFor(windowSize);
+  return paginateFlow(
+    flow: flow,
+    pageHeight: continuous ? double.infinity : box.contentHeight,
+    pageWidth: box.contentWidth,
+  );
+}
+
 /// Extracts the page window that contains [scalar].
 ///
 /// [windowSize] is the page window's own size (the reader's content box), and
 /// the content is laid out inset by [kEpubPageMargin] on every side. The
 /// surface's coordinate space is the whole window, so the retained fit
 /// transform is the identity for an un-resized page.
+///
+/// A [continuous] window is the whole laid-out chapter as one page: its box
+/// keeps the window's width and grows to the chapter's height (never shorter
+/// than the window), and the view scrolls it.
 ReaderEpubPage pageWindowFor({
   required ChapterLayoutSession session,
   required int scalar,
   required int unit,
   required int chapterCount,
   required Size windowSize,
+  bool continuous = false,
 }) {
-  final box = epubPageBoxFor(windowSize);
   final flow = session.snapshot();
-  final paginated = paginateFlow(
-    flow: flow,
-    pageHeight: box.contentHeight,
-    pageWidth: box.contentWidth,
-  );
+  final paginated = paginateWindow(flow, windowSize, continuous: continuous);
   final index = paginated
       .pageOfCanonical(scalar)
       .clamp(0, paginated.pages.length - 1);
   final page = paginated.pages[index];
+  final box = epubPageBoxFor(
+    continuous
+        ? Size(
+            windowSize.width,
+            math.max(windowSize.height, page.height + 2 * kEpubPageMargin),
+          )
+        : windowSize,
+  );
   final surface = buildPageSelectionSurface(
     page: page,
     canonicalText: session.chapter.canonicalText,
@@ -438,6 +466,7 @@ ReaderEpubPage pageWindowFor({
   );
   return ReaderEpubPage(
     unit: unit,
+    targetScalar: scalar,
     pageIndex: index,
     pageCount: paginated.pages.length,
     layoutComplete: flow.layoutComplete,

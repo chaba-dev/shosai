@@ -6,10 +6,10 @@
 ///
 /// This is the reader's production port of the evaluated prototype's
 /// `layout/pages.dart` pagination half
-/// (`prototypes/epub-dart-eval/lib/reader/layout/pages.dart`). The prototype's
-/// continuous tiles, tile plan and spread decision are not part of this slice:
-/// continuous mode is still served by the retained Rust renderer, and spreads
-/// are 5G work.
+/// (`prototypes/epub-dart-eval/lib/reader/layout/pages.dart`). Continuous mode
+/// paginates with an unbounded page height, so a chapter is one page the view
+/// scrolls; the prototype's continuous tiles and spread decision are not
+/// ported (spreads are 5G work).
 library;
 
 import 'dart:math' as math;
