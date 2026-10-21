@@ -1,5 +1,5 @@
 :authors: Shōsai contributors <https://github.com/chaba-dev/shosai>
-:state: discussion
+:state: published
 :discussion: https://github.com/chaba-dev/shosai/pull/76
 :labels: cross-platform, flutter, mobile, desktop, web, architecture, accessibility, packaging, product, reader, navigation
 
