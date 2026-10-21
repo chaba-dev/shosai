@@ -5,6 +5,8 @@
 /// of Flutter widgets so its behaviour is tested with `dart test`.
 library;
 
+export 'src/annotations/annotation.dart';
+export 'src/annotations/annotations.dart';
 export 'src/annotations/quote.dart';
 export 'src/annotations/resolution.dart';
 export 'src/cancellation.dart';
@@ -19,3 +21,4 @@ export 'src/reading/reader_settings.dart';
 export 'src/reading/reading_state.dart';
 export 'src/store/schema.dart';
 export 'src/store/store.dart';
+export 'src/unit_text.dart';

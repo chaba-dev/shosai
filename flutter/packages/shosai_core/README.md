@@ -63,6 +63,7 @@ the one Flutter pins.
 | `ReadingState` | each book's last position (unit, offset, zoom) and its library progress |
 | `ReaderSettingsStore` | reading mode, theme, EPUB font size and line spacing, PDF zoom, over `Preferences` |
 | `Bookmarks` | point bookmarks with an optional title and note (1,024 per book, 4 MiB Markdown export) |
+| `Annotations` | highlights with an optional note, anchored in text and resolved against the open book (below) |
 
 Reading state and bookmarks are keyed by the book's content hash, not its
 library row, so they survive removing and re-importing the same book. The
@@ -125,6 +126,38 @@ import of a referenced book adopts it as a private copy.
   300×400 pixels and 512 KiB.
 - Import takes a `CancellationToken`, checked between file chunks and books;
   once a book's commit starts it finishes.
+
+### Annotations
+
+An annotation belongs to a document version, the content (SHA-256) it was
+made on, and versions belong to a document. A book's first annotation creates
+both, so annotations follow the content through removal and re-import like
+reading state. `associate` brings another content's annotations (an earlier
+edition, a re-exported file) to a book: into the book's document when it has
+one, otherwise by adding the book's content to the source's document.
+`associationSources` lists candidates of the same format whose documents have
+live annotations, a page of at most 100 at a time with cursors both ways.
+
+Each anchor keeps layered evidence: the unit (EPUB spine index and resource
+path, or PDF page and rectangles), the Unicode-scalar range it covered, and a
+quote normalized by the `shosai-quote-v1` profile with 32 scalars of context
+on each side. `list` resolves every anchor against the book's text as the
+format engine supplies it through `UnitTextSource`:
+
+- **exact**: the stored range still holds the quote, on the content the
+  annotation was made on;
+- **recovered**: the quote occurs once (or once in its context) elsewhere in
+  the unit;
+- **ambiguous**: it occurs more than once and context cannot decide;
+- **orphaned**: it no longer occurs, the spine item holds another resource,
+  or the page is gone. A PDF annotation without text resolves only on its own
+  content.
+
+Resolution runs in another isolate, in batches of about 4 MiB of text, and is
+bounded at 64M work units and 1,024-scalar graphemes, so a hostile book fails
+with `limitExceeded` instead of stalling. A document holds at most 1,024 live
+annotations, 65,536 PDF rectangles and an estimated 8 MiB, and spans at most
+128 versions; deletion leaves a tombstone for synchronization.
 
 Errors are `CoreException`s whose `CoreErrorKind` the controllers map to
 their own messages.
