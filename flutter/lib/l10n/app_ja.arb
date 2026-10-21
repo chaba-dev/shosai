@@ -128,5 +128,18 @@
   "readerAnnotationUnavailable": "利用不可",
   "readerChangeColor": "色を変更",
   "readerDeleteHighlight": "ハイライトを削除",
-  "noticeReaderExportFailed": "ブックマークを書き出せませんでした"
+  "noticeReaderExportFailed": "ブックマークを書き出せませんでした",
+  "shellPlacesLabel": "場所",
+  "shellPlaceLibrary": "ライブラリ",
+  "shellPlaceNotes": "ノート",
+  "shellPlaceBookmarks": "ブックマーク",
+  "shellPlaceSearch": "検索",
+  "shellReadingNow": "読書中",
+  "shellCloseBook": "{title}を閉じる",
+  "shellNotesEmptyHeading": "ノートはまだありません",
+  "shellNotesEmptyBody": "本の文章を選んでハイライトするか、ページにノートを追加してください。すべてのノートとハイライトがここに並びます。",
+  "shellBookmarksEmptyHeading": "ブックマークはまだありません",
+  "shellBookmarksEmptyBody": "リーダーのツールバーからページをブックマークすると、ここに表示されます。",
+  "shellSearchEmptyHeading": "本とノートを検索",
+  "shellSearchEmptyBody": "ライブラリ全体の本文とノートの検索は準備中です。今はライブラリでタイトルや著者から本を探せます。"
 }
