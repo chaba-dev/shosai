@@ -597,12 +597,11 @@ packages:
     source: hosted
     version: "2.4.7"
   pdfrx_engine:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: pdfrx_engine
-      sha256: "8043527245e4c35a2a3b7df8494c066b9efa97fe031945951e46b378318b3d5f"
-      url: "https://pub.dev"
-    source: hosted
+      path: "third_party/pdfrx_engine"
+      relative: true
+    source: path
     version: "0.4.5"
   petitparser:
     dependency: transitive
