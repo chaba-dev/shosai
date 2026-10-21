@@ -16,4 +16,41 @@ CREATE TABLE preferences (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT;
 '''),
+  Migration(2, 'library', '''
+CREATE TABLE books (
+    id            INTEGER PRIMARY KEY,
+    title         TEXT NOT NULL
+                  CHECK (length(CAST(title AS BLOB)) BETWEEN 1 AND 4096),
+    author        TEXT
+                  CHECK (author IS NULL OR length(CAST(author AS BLOB)) BETWEEN 1 AND 4096),
+    format        TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
+    file_path     TEXT NOT NULL UNIQUE
+                  CHECK (length(CAST(file_path AS BLOB)) BETWEEN 1 AND 16384),
+    storage_kind  TEXT NOT NULL CHECK (storage_kind IN ('referenced', 'managed')),
+    original_path TEXT NOT NULL
+                  CHECK (length(CAST(original_path AS BLOB)) BETWEEN 1 AND 16384),
+    content_hash  TEXT NOT NULL UNIQUE
+                  CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    file_size     INTEGER NOT NULL CHECK (file_size >= 0),
+    cover         BLOB CHECK (cover IS NULL OR length(cover) BETWEEN 1 AND 524288),
+    progress      REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
+    date_added    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_read     TEXT
+) STRICT;
+
+CREATE INDEX books_library_order_idx
+    ON books(last_read DESC, date_added DESC, id DESC);
+CREATE INDEX books_format_library_order_idx
+    ON books(format, last_read DESC, date_added DESC, id DESC);
+
+-- A removed book's private copy whose deletion has not finished yet.
+CREATE TABLE managed_file_deletion_debt (
+    file_path   TEXT PRIMARY KEY NOT NULL
+                CHECK (length(CAST(file_path AS BLOB)) BETWEEN 1 AND 16384),
+    managed_dir TEXT NOT NULL
+                CHECK (length(CAST(managed_dir AS BLOB)) BETWEEN 1 AND 16384),
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0)
+) STRICT;
+'''),
 ];
