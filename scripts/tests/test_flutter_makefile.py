@@ -28,8 +28,6 @@ class FlutterMakefileTest(unittest.TestCase):
         scripts = self.root / "scripts"
         scripts.mkdir()
         shutil.copy2(ROOT / "Makefile", self.root / "Makefile")
-        self._write_executable(scripts / "check-flutter-codegen.sh", "exit 0")
-        self._write_executable(self.bin / "cargo", "exit 0")
         self.capture = self.root / "capture"
         self._write_executable(
             self.bin / "flutter",
@@ -100,7 +98,6 @@ class FlutterMakefileTest(unittest.TestCase):
                 'rmdir "$LOCK"',
             ]
         )
-        self._write_executable(self.bin / "cargo", guarded_command)
         self._write_executable(self.bin / "flutter", guarded_command)
         # The engine package leg is guarded like every other aggregate command,
         # and marked so the test proves it ran rather than merely not failing.
@@ -110,12 +107,6 @@ class FlutterMakefileTest(unittest.TestCase):
             f'{guarded_command}\ntouch "{dart_marker}"',
         )
         self._write_executable(self.bin / "python3", guarded_command)
-        self._write_executable(
-            self.root / "scripts" / "check-frb-codegen.sh", guarded_command
-        )
-        self._write_executable(
-            self.root / "scripts" / "check-flutter-codegen.sh", guarded_command
-        )
         self._write_executable(
             self.root / "scripts" / "check-l10n-codegen.sh", guarded_command
         )

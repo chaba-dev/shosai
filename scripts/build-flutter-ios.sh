@@ -69,8 +69,6 @@ if [[ ! -x "$flutter_root/bin/flutter" ]] ||
   mv "$temporary_root" "$flutter_root"
 fi
 
-"$repository_root/scripts/fetch-ios-pdfium.sh" >/dev/null
-
 export FLUTTER_ROOT="$flutter_root"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$flutter_root/bin:$PATH"
 

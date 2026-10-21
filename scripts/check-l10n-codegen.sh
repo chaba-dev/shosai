@@ -4,9 +4,7 @@
 #
 # The generated `AppLocalizations` sources are committed (see `flutter/l10n.yaml`)
 # so `flutter analyze` and `flutter test` work without a generation step. This
-# check regenerates them and fails if the committed files would change, which is
-# the localization counterpart of `check-frb-codegen.sh` and
-# `check-flutter-codegen.sh`.
+# check regenerates them and fails if the committed files would change.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

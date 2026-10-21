@@ -30,7 +30,7 @@ class DevWrapperTests(unittest.TestCase):
         for checkout in (self.main, self.workspace):
             (checkout / ".agents").mkdir(parents=True)
             shutil.copy2(WRAPPER, checkout / ".agents" / "dev")
-            for name in ("flake.nix", "flake.lock", "Cargo.toml"):
+            for name in ("flake.nix", "flake.lock"):
                 (checkout / name).write_text(name)
         (self.main / ".git").mkdir()
         (self.main / ".jj" / "repo").mkdir(parents=True)
@@ -72,7 +72,7 @@ class DevWrapperTests(unittest.TestCase):
         self.assert_safe_invocation(self.workspace)
 
     def test_input_drift_fails_before_nix(self):
-        for name in ("flake.nix", "flake.lock", "Cargo.toml"):
+        for name in ("flake.nix", "flake.lock"):
             with self.subTest(name=name):
                 path = self.workspace / name
                 path.write_text("different")

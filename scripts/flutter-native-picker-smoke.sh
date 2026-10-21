@@ -501,11 +501,11 @@ log "platform: $platform"
 case "$platform" in
   Linux)
     test_device="linux"
-    prerequisites=(flutter cargo ps Xvfb xdotool xwininfo xprop timeout mktemp import)
+    prerequisites=(flutter ps Xvfb xdotool xwininfo xprop timeout mktemp import)
     ;;
   Darwin)
     test_device="macos"
-    prerequisites=(flutter cargo ps screencapture osascript swiftc timeout mktemp)
+    prerequisites=(flutter ps screencapture osascript swiftc timeout mktemp)
     ;;
   *)
     log "UNAVAILABLE: no native picker automation path for platform $platform"
