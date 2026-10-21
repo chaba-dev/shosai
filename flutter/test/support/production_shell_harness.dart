@@ -147,6 +147,10 @@ Future<void> loadHarnessFonts() async {
     FontLoader('Inter')..addFont(rootBundle.load('fonts/InterVariable.ttf')),
     FontLoader('Noto Sans JP')
       ..addFont(rootBundle.load('fonts/NotoSansJP-Variable.ttf')),
+    FontLoader('Literata')
+      ..addFont(rootBundle.load('fonts/Literata-Variable.ttf')),
+    FontLoader('Shosai Mark')
+      ..addFont(rootBundle.load('fonts/NotoSerifJP-ShosaiMark-Black.ttf')),
     FontLoader('MaterialIcons')
       ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')),
     FontLoader('packages/lucide_icons_flutter/Lucide')..addFont(
