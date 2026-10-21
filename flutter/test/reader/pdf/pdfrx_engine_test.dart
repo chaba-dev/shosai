@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfrx/pdfrx.dart' show Pdfrx;
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
@@ -9,12 +8,6 @@ const _fixture = '../crates/shosai-core/tests/fixtures/sample.pdf';
 
 void main() {
   final engine = PdfrxPdfEngine();
-
-  setUpAll(() {
-    // pdfrx asks path_provider for a cache directory it never uses for a
-    // file-backed document; the plugin channel is absent under `flutter test`.
-    Pdfrx.cacheDirectoryPath ??= Directory.systemTemp.path;
-  });
 
   test('opens the fixture and reports its pages', () async {
     final document = await engine.open(_fixture);
@@ -40,29 +33,31 @@ void main() {
     expect(rendered.pixels.sublist(0, 3), [255, 255, 255]);
   });
 
-  test('builds a selection surface whose text has one scalar per character',
-      () async {
-    final document = await engine.open(_fixture);
-    addTearDown(document.dispose);
-    final surface = await document.selectionSurface(0, 1);
-    final bitmap = document.bitmapSize(0, 1);
-    expect(surface.width, bitmap.width.toDouble());
-    expect(surface.height, bitmap.height.toDouble());
-    expect(surface.text, isNotEmpty);
-    expect(surface.endpoints, isNotEmpty);
-    expect(surface.visualLines, isNotEmpty);
-    expect(surface.graphemeBoundaries.first, 0);
-    expect(surface.graphemeBoundaries.last, surface.text.runes.length);
-    for (final endpoint in surface.endpoints) {
-      expect(endpoint.rect.left, lessThan(endpoint.rect.right));
-      expect(endpoint.rect.top, lessThan(endpoint.rect.bottom));
-      expect(endpoint.rect.right, lessThanOrEqualTo(surface.width));
-      expect(endpoint.rect.bottom, lessThanOrEqualTo(surface.height));
-    }
-    final text = await document.pageText(0);
-    expect(text, surface.text);
-    stdout.writeln('TEXT: ${text.substring(0, text.length.clamp(0, 120))}');
-  });
+  test(
+    'builds a selection surface whose text has one scalar per character',
+    () async {
+      final document = await engine.open(_fixture);
+      addTearDown(document.dispose);
+      final surface = await document.selectionSurface(0, 1);
+      final bitmap = document.bitmapSize(0, 1);
+      expect(surface.width, bitmap.width.toDouble());
+      expect(surface.height, bitmap.height.toDouble());
+      expect(surface.text, isNotEmpty);
+      expect(surface.endpoints, isNotEmpty);
+      expect(surface.visualLines, isNotEmpty);
+      expect(surface.graphemeBoundaries.first, 0);
+      expect(surface.graphemeBoundaries.last, surface.text.runes.length);
+      for (final endpoint in surface.endpoints) {
+        expect(endpoint.rect.left, lessThan(endpoint.rect.right));
+        expect(endpoint.rect.top, lessThan(endpoint.rect.bottom));
+        expect(endpoint.rect.right, lessThanOrEqualTo(surface.width));
+        expect(endpoint.rect.bottom, lessThanOrEqualTo(surface.height));
+      }
+      final text = await document.pageText(0);
+      expect(text, surface.text);
+      stdout.writeln('TEXT: ${text.substring(0, text.length.clamp(0, 120))}');
+    },
+  );
 
   test('search finds a word from the page text case-insensitively', () async {
     final document = await engine.open(_fixture);

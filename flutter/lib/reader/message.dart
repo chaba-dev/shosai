@@ -561,6 +561,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   const _ReaderDocumentOpened({
     required this.generation,
     required this.document,
+    required this.pdfDocument,
     required this.unit,
     required this.bookmarks,
     required this.layout,
@@ -573,6 +574,9 @@ final class _ReaderDocumentOpened extends ReaderMessage {
 
   final int generation;
   final FlutterDocumentSummary document;
+
+  /// The engine document behind a PDF; null for every other format.
+  final PdfEngineDocument? pdfDocument;
   final int unit;
   final List<FlutterBookmark> bookmarks;
   final ReaderLayout layout;
@@ -743,10 +747,14 @@ final class _ReaderOpenFailed extends ReaderMessage {
     required this.generation,
     required this.document,
     required this.error,
+    this.pdfDocument,
   });
 
   final int generation;
   final FlutterDocumentSummary? document;
+
+  /// An engine document the failed open still owns, released with it.
+  final PdfEngineDocument? pdfDocument;
   final String error;
 }
 
