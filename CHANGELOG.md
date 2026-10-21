@@ -105,6 +105,7 @@ All notable changes to this project will be documented in this file.
 - Adopt Requests for Discussion format (#64)
 - *(rfd)* Choose Flutter for mobile (#65)
 - Define the first release in RFDs 4 and 6 and add the Shōsai design system (#148)
+- *(rfd)* Revise RFD 4 for a Dart-only application core (#151)
 
 ### ⚡ Performance
 
