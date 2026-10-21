@@ -66,9 +66,11 @@ CREATE TABLE reading_state (
 ) STRICT, WITHOUT ROWID;
 '''),
   Migration(4, 'bookmarks', '''
--- Point bookmarks, keyed by content like the reading state.
+-- Point bookmarks, keyed by content like the reading state. AUTOINCREMENT
+-- keeps a deleted bookmark's id from being reused, so a late request for it
+-- cannot reach a newer bookmark.
 CREATE TABLE bookmarks (
-    id              INTEGER PRIMARY KEY,
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
     content_hash    TEXT NOT NULL
                     CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
     unit            INTEGER NOT NULL CHECK (unit >= 0),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:shosai_core/shosai_core.dart';
 import 'package:test/test.dart';
 
@@ -84,6 +86,24 @@ void main() {
       },
     );
 
+    test('a deleted bookmark id is never reused', () async {
+      final bookmarks = Bookmarks(t.store);
+      final a = (await bookmarks.toggle(pdf.id, 0, note: 'A'))!;
+      await bookmarks.delete(a.id);
+
+      final b = (await bookmarks.toggle(epub.id, 0, note: 'B'))!;
+
+      expect(b.id, isNot(a.id));
+      // Late requests for the deleted bookmark do not reach the new one.
+      await expectLater(
+        bookmarks.updateNote(a.id, 'late'),
+        throwsCoreError(CoreErrorKind.notFound),
+      );
+      await bookmarks.delete(a.id);
+      expect(await bookmarks.list(epub.id), [b]);
+      expect(b.note, 'B');
+    });
+
     test(
       'bookmarks follow the content through removal and re-import',
       () async {
@@ -137,16 +157,20 @@ void main() {
       await t.executeMany(
         'INSERT INTO bookmarks (content_hash, unit) VALUES (?, ?)',
         [
-          for (var unit = 0; unit < maxBookmarksPerBook; unit++)
-            [pdf.contentHash, unit],
+          for (var unit = 0; unit < 1023; unit++) [pdf.contentHash, unit],
         ],
       );
 
+      // The 1,024th bookmark fits; the 1,025th does not.
+      final last = await bookmarks.toggle(pdf.id, 1023);
+      expect(last, isNotNull);
       await expectLater(
-        bookmarks.toggle(pdf.id, maxBookmarksPerBook),
+        bookmarks.toggle(pdf.id, 1024),
         throwsCoreError(CoreErrorKind.limitExceeded),
       );
-      expect(await bookmarks.list(pdf.id), hasLength(maxBookmarksPerBook));
+      final listed = await bookmarks.list(pdf.id);
+      expect(listed, hasLength(1024));
+      expect(listed.last, last);
       // Removing one still works at the limit.
       expect(await bookmarks.toggle(pdf.id, 0), isNull);
 
@@ -223,6 +247,53 @@ void main() {
         ],
       );
 
+      await expectLater(
+        bookmarks.exportMarkdown(pdf.id),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+    });
+
+    test('an export of exactly 4 MiB succeeds; one byte more fails', () async {
+      const limit = 4 * 1024 * 1024;
+      const added = '2026-01-02T03:04:05.678Z';
+      // A note of exactly [bytes] UTF-8 bytes, mostly three-byte characters.
+      String noteOf(int bytes) =>
+          '日' * (bytes ~/ 3) + const ['', 'a', 'é'][bytes % 3];
+      String entry(int unit, String note) =>
+          '## Page ${unit + 1}: Untitled\n\n$note\n\n'
+          '*Added: $added*\n\n---\n\n';
+      int size(String text) => utf8.encode(text).length;
+
+      // Fill the export to the limit with notes of at most 64 KiB each.
+      var expected = '# Bookmarks: Sample PDF\n\n';
+      final notes = <String>[];
+      while (size(expected) < limit) {
+        final room = limit - size(expected) - size(entry(notes.length, ''));
+        expect(room, greaterThan(0));
+        final note = noteOf(room < 65536 ? room : 65536);
+        expected += entry(notes.length, note);
+        notes.add(note);
+      }
+      expect(size(expected), limit);
+      await t.executeMany(
+        '''INSERT INTO bookmarks (content_hash, unit, note, created_at)
+           VALUES (?, ?, ?, ?)''',
+        [
+          for (final (unit, note) in notes.indexed)
+            [pdf.contentHash, unit, note, added],
+        ],
+      );
+      final bookmarks = Bookmarks(t.store);
+
+      expect(await bookmarks.exportMarkdown(pdf.id), expected);
+
+      // One more byte in the last note puts the export over the limit.
+      expect(size(notes.last), lessThan(65536));
+      await t.execute(
+        "UPDATE bookmarks SET note = note || 'x' WHERE content_hash = ? "
+        'AND unit = ?',
+        [pdf.contentHash, notes.length - 1],
+      );
       await expectLater(
         bookmarks.exportMarkdown(pdf.id),
         throwsCoreError(CoreErrorKind.limitExceeded),

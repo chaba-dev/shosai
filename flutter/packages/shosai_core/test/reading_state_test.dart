@@ -72,6 +72,38 @@ void main() {
       expect(readingProgress(0, 1), 1);
     });
 
+    test('a failed progress update rolls back the whole save', () async {
+      final state = ReadingState(t.store);
+      await state.save(
+        epub.id,
+        const ReadingPosition(unit: 1, offset: 7),
+        unitCount: 5,
+      );
+      final before = (await t.library.get(epub.id))!;
+      await t.execute('''CREATE TRIGGER reject_progress
+           BEFORE UPDATE OF progress ON books
+           BEGIN SELECT RAISE(ABORT, 'injected progress failure'); END''');
+
+      await expectLater(
+        state.save(
+          epub.id,
+          const ReadingPosition(unit: 4, offset: 3, zoom: 2),
+          unitCount: 5,
+        ),
+        throwsCoreError(CoreErrorKind.storage),
+      );
+
+      expect(
+        await state.load(epub.id),
+        const ReadingPosition(unit: 1, offset: 7),
+      );
+      final after = (await t.library.get(epub.id))!;
+      expect(before.progress, 0.25);
+      expect(after.progress, 0.25);
+      expect(after.lastRead, isNotNull);
+      expect(after.lastRead, before.lastRead);
+    });
+
     test('positions persist across opens', () async {
       await ReadingState(
         t.store,
