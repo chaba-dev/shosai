@@ -1,7 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
@@ -223,6 +222,43 @@ void main() {
     await mouse.moveTo(tester.getCenter(find.text('吾輩は猫である')));
     await tester.pumpAndSettle();
     await tester.tap(close);
+    expect(recorder.closed, [3]);
+  });
+
+  testWidgets('a desktop close button shows while the keyboard is on it', (
+    tester,
+  ) async {
+    final recorder = _Recorder();
+    await _pumpFrame(
+      tester,
+      size: const Size(1440, 900),
+      model: _model(),
+      recorder: recorder,
+    );
+    final close = find.byTooltip('Close 吾輩は猫である');
+    bool visible() => tester
+        .widget<Visibility>(
+          find.ancestor(of: close, matching: find.byType(Visibility)).first,
+        )
+        .visible;
+    bool onClose() {
+      final focused = FocusManager.instance.primaryFocus?.context;
+      return focused != null &&
+          find
+              .descendant(of: close, matching: find.byWidget(focused.widget))
+              .evaluate()
+              .isNotEmpty;
+    }
+
+    expect(visible(), isFalse);
+    for (var i = 0; i < 40 && !onClose(); i += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+    }
+    expect(onClose(), isTrue, reason: 'Tab reaches the close button');
+    expect(visible(), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
     expect(recorder.closed, [3]);
   });
 

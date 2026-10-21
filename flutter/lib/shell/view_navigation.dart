@@ -386,6 +386,7 @@ class _OpenBookRow extends StatefulWidget {
 
 class _OpenBookRowState extends State<_OpenBookRow> {
   bool _hovered = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
@@ -395,79 +396,86 @@ class _OpenBookRowState extends State<_OpenBookRow> {
     final status = shellReadingStatus(l10n, book.progress);
     final started = (book.progress * 100).round() > 0;
     final closeLabel = l10n.shellCloseBook(book.title);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: Stack(
-        children: [
-          _ShellPressable(
-            onPressed: () => widget.actions.openBook(widget.entry),
-            current: widget.current,
-            color: widget.current ? palette.surface : null,
-            shadow: widget.current ? palette.raised : null,
-            child: Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(8, 6, 30, 6),
-              child: Row(
-                spacing: 10,
-                children: [
-                  ShellCoverThumb(
-                    book: book,
-                    cover: widget.cover,
-                    loadCover: widget.actions.loadCover,
-                    width: 34,
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      spacing: 3,
-                      children: [
-                        Text(
-                          book.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: shellEditorialStyle(
-                            13,
-                            17,
-                          ).copyWith(color: palette.ink),
-                        ),
-                        Text(
-                          status,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: shosaiInterfaceStyleForText(
-                            shellInterfaceStyle(11, 14).copyWith(
-                              color: palette.inkMuted,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
-                            status,
-                          ),
-                        ),
-                        if (started) ShellProgressBar(value: book.progress),
-                      ],
+    // Focus anywhere in the row reveals the close button too, so a keyboard
+    // user can see the control and its focus ring before pressing it.
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (focused) => setState(() => _focused = focused),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: Stack(
+          children: [
+            _ShellPressable(
+              onPressed: () => widget.actions.openBook(widget.entry),
+              current: widget.current,
+              color: widget.current ? palette.surface : null,
+              shadow: widget.current ? palette.raised : null,
+              child: Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(8, 6, 30, 6),
+                child: Row(
+                  spacing: 10,
+                  children: [
+                    ShellCoverThumb(
+                      book: book,
+                      cover: widget.cover,
+                      loadCover: widget.actions.loadCover,
+                      width: 34,
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          PositionedDirectional(
-            end: 4,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: Visibility.maintain(
-                visible: widget.touch || _hovered,
-                child: _CloseButton(
-                  label: closeLabel,
-                  size: widget.touch ? 32 : 24,
-                  onPressed: () => widget.actions.closeBook(widget.entry),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        spacing: 3,
+                        children: [
+                          Text(
+                            book.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: shellEditorialStyle(
+                              13,
+                              17,
+                            ).copyWith(color: palette.ink),
+                          ),
+                          Text(
+                            status,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: shosaiInterfaceStyleForText(
+                              shellInterfaceStyle(11, 14).copyWith(
+                                color: palette.inkMuted,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                              status,
+                            ),
+                          ),
+                          if (started) ShellProgressBar(value: book.progress),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-          ),
-        ],
+            PositionedDirectional(
+              end: 4,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Visibility.maintain(
+                  visible: widget.touch || _hovered || _focused,
+                  child: _CloseButton(
+                    label: closeLabel,
+                    size: widget.touch ? 32 : 24,
+                    onPressed: () => widget.actions.closeBook(widget.entry),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
