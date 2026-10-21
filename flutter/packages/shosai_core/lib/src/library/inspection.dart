@@ -79,6 +79,26 @@ BookMetadata _inspectEpub(Uint8List bytes, EpubLimits limits) {
   );
 }
 
+/// Scale a straight RGBA rendering ([width] × [height]) into a PNG
+/// thumbnail, as [coverThumbnail] does for an encoded image.
+Uint8List? coverThumbnailFromRgba(int width, int height, Uint8List pixels) {
+  if (width <= 0 ||
+      height <= 0 ||
+      width * height > maxCoverSourcePixels ||
+      pixels.length != width * height * 4) {
+    return null;
+  }
+  return _thumbnail(
+    image.Image.fromBytes(
+      width: width,
+      height: height,
+      bytes: pixels.buffer,
+      bytesOffset: pixels.offsetInBytes,
+      numChannels: 4,
+    ),
+  );
+}
+
 /// Decode an encoded cover image and scale it into a PNG thumbnail.
 ///
 /// Returns null for an image that cannot be decoded (including one whose
@@ -105,6 +125,10 @@ Uint8List? coverThumbnail(Uint8List encoded) {
     return null;
   }
   if (decoded == null) return null;
+  return _thumbnail(decoded);
+}
+
+Uint8List? _thumbnail(image.Image decoded) {
   final scale = [
     coverMaxWidth / decoded.width,
     coverMaxHeight / decoded.height,
