@@ -312,8 +312,8 @@ environment library directly again (the private-copy workaround is removed).
 `flutter/integration_test/packaged_core_test.dart` imports a PDF (cover
 render), opens and searches it through the application bridge and renders it
 through a second engine document in one packaged process. CI runs it on the
-Linux debug bundle under Xvfb (`make test-flutter-packaged-linux`) and on the
-macOS host (`make test-flutter-packaged-macos`), with no PDFium override;
+Linux debug bundle under Xvfb (`make test-packaged-linux`) and on the macOS
+host (`make test-packaged-macos`), with no PDFium override;
 Android is not run yet.
 * [ ] *Store.* Add the Dart SQLite binding (`sqlite3`; `drift` only if typed
 queries and migration tooling justify its code generation) in the application
