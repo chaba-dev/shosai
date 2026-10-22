@@ -152,7 +152,23 @@ printf '%s\n' \\
         nested_file = versions / "A/FlutterMacOS"
         nested_file.write_text("immutable engine")
         source_mode = nested_file.stat().st_mode
-        for path in [self.sdk, self.engine, *self.sdk.rglob("*"), *self.engine.rglob("*")]:
+        release_engine = self.root / "engine-source-release/FlutterMacOS.xcframework"
+        (release_engine / "macos-arm64").mkdir(parents=True)
+        (release_engine / "macos-arm64/FlutterMacOS").write_text("release engine")
+        release_link = (
+            self.sdk
+            / "bin/cache/artifacts/engine/darwin-x64-release/FlutterMacOS.xcframework"
+        )
+        release_link.parent.mkdir(parents=True)
+        release_link.symlink_to(release_engine)
+        for path in [
+            self.sdk,
+            self.engine,
+            release_engine,
+            *self.sdk.rglob("*"),
+            *self.engine.rglob("*"),
+            *release_engine.rglob("*"),
+        ]:
             if not path.is_symlink():
                 path.chmod(path.stat().st_mode & ~stat.S_IWUSR)
         if os.access(self.engine, os.W_OK):
@@ -176,6 +192,20 @@ printf '%s\n' \\
                 / "macos-arm64/FlutterMacOS.framework/Versions/A/FlutterMacOS",
                 os.W_OK,
             )
+        )
+        copied_release_engine = (
+            writable_sdk
+            / "bin/cache/artifacts/engine/darwin-x64-release/FlutterMacOS.xcframework"
+        )
+        self.assertFalse(copied_release_engine.is_symlink())
+        self.assertTrue(
+            os.access(copied_release_engine / "macos-arm64/FlutterMacOS", os.W_OK)
+        )
+        self.assertFalse(
+            (
+                writable_sdk
+                / "bin/cache/artifacts/engine/darwin-x64-profile"
+            ).exists()
         )
         current = (
             copied_engine / "macos-arm64/FlutterMacOS.framework/Versions/Current"

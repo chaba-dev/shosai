@@ -11,8 +11,11 @@
 library;
 
 import 'dart:async';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
 
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_epub/shosai_epub.dart';
@@ -133,8 +136,7 @@ final class DocumentSnapshots {
       final root = await Directory(_parent).resolveSymbolicLinks();
       final staging = await Directory(root).createTemp(_staging);
       if (Platform.isLinux || Platform.isMacOS) {
-        final chmod = await Process.run('chmod', ['700', staging.path]);
-        if (chmod.exitCode != 0 ||
+        if (!_restrictToOwner(staging.path) ||
             ((await staging.stat()).mode & _groupOrOther) != 0) {
           await staging.delete(recursive: true);
           throw const CoreException(
@@ -166,11 +168,6 @@ final class DocumentSnapshots {
         CoreErrorKind.inaccessible,
         'Could not create the document snapshot directory: '
         '${error.osError?.message ?? error.message}',
-      );
-    } on ProcessException catch (error) {
-      throw CoreException(
-        CoreErrorKind.inaccessible,
-        'Could not restrict the document snapshot directory: $error',
       );
     }
   }
@@ -531,3 +528,26 @@ Future<EpubBook> _parseEpub(Uint8List bytes) async {
 
 String? _nonEmpty(String? value) =>
     value == null || value.trim().isEmpty ? null : value;
+
+/// Sets [path]'s mode to 0700 in process. A `chmod` child process would
+/// depend on PATH, which NixOS does not populate with `/bin/chmod`.
+bool _restrictToOwner(String path) => using((arena) {
+  final name = path.toNativeUtf8(allocator: arena).cast<Char>();
+  const ownerOnly = 448; // 0700
+  return (Platform.isMacOS
+          ? _chmodDarwin(name, ownerOnly)
+          : _chmodLinux(name, ownerOnly)) ==
+      0;
+});
+
+// mode_t is 32 bits on Linux and 16 bits on macOS.
+final _chmodLinux = DynamicLibrary.process()
+    .lookupFunction<
+      Int Function(Pointer<Char>, Uint32),
+      int Function(Pointer<Char>, int)
+    >('chmod');
+final _chmodDarwin = DynamicLibrary.process()
+    .lookupFunction<
+      Int Function(Pointer<Char>, Uint16),
+      int Function(Pointer<Char>, int)
+    >('chmod');

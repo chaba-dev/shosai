@@ -16,16 +16,23 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 flutter_executable="$(command -v flutter)"
 flutter_root="$(cd "$(dirname "$flutter_executable")/.." && pwd -P)"
 dart_executable="$(command -v dart)"
+# Debug builds unpack this engine framework; profile and release builds unpack
+# their own, when the SDK has them.
 engine_relative_path="bin/cache/artifacts/engine/darwin-x64/FlutterMacOS.xcframework"
 engine_source="$flutter_root/$engine_relative_path"
+engine_relative_paths=("$engine_relative_path")
+for mode in profile release; do
+  if [[ -e "$flutter_root/${engine_relative_path/darwin-x64/darwin-x64-$mode}" ]]; then
+    engine_relative_paths+=("${engine_relative_path/darwin-x64/darwin-x64-$mode}")
+  fi
+done
 
 # Nix supplies a pinned Flutter SDK from its immutable store. Flutter copies the
 # engine framework's read-only modes into the build directory, then lipo needs
 # to create a temporary sibling while selecting the host architecture. Give
-# only that SDK view and engine artifact a writable location.
+# only that SDK view and the engine artifacts a writable location.
 if [[ ! -w "$engine_source" ]]; then
   writable_flutter_root="$repository_root/target/flutter-macos-sdk"
-  resolved_engine_source="$(cd "$engine_source" && pwd -P)"
 
   if [[ -d "$writable_flutter_root" ]]; then
     find "$writable_flutter_root" -type d -exec chmod u+w {} +
@@ -34,11 +41,14 @@ if [[ ! -w "$engine_source" ]]; then
   mkdir -p "$(dirname "$writable_flutter_root")"
   cp -R "$flutter_root" "$writable_flutter_root"
   find "$writable_flutter_root" -type d -exec chmod u+w {} +
-  rm "$writable_flutter_root/$engine_relative_path" \
-    "$writable_flutter_root/bin/dart"
-  cp -R "$resolved_engine_source" \
-    "$writable_flutter_root/$engine_relative_path"
-  chmod -R u+w "$writable_flutter_root/$engine_relative_path"
+  for engine_relative_path in "${engine_relative_paths[@]}"; do
+    resolved_engine_source="$(cd "$flutter_root/$engine_relative_path" && pwd -P)"
+    rm -rf "$writable_flutter_root/$engine_relative_path"
+    cp -R "$resolved_engine_source" \
+      "$writable_flutter_root/$engine_relative_path"
+    chmod -R u+w "$writable_flutter_root/$engine_relative_path"
+  done
+  rm "$writable_flutter_root/bin/dart"
   ln -s "$dart_executable" "$writable_flutter_root/bin/dart"
 
   flutter_root="$writable_flutter_root"
