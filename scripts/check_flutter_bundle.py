@@ -27,7 +27,8 @@ one found, this check verifies that every font asset in `FontManifest.json`:
   swapped the two families' files cannot validate.
 
 It also checks that the bundle's `NOTICES.Z` carries the bundled faces'
-licenses and PDFium's notices.
+licenses and every entry of the vendored `pdfium_dart` package's `NOTICES`
+(PDFium's license and those of the code compiled into it).
 
 Exit codes: 0 when every bundle validates, 1 otherwise.
 """
@@ -71,13 +72,16 @@ NOTICE_MARKERS = {
     ),
 }
 
-# Likewise for the PDFium the bundle carries: its own and its third-party
-# notices come from the patched `pdfium_dart` package's NOTICES (FreeType
-# stands for the third-party ones). SQLite is in the public domain.
-NATIVE_NOTICE_MARKERS = (
-    ("Copyright 2014 The PDFium Authors", "PDFium's license"),
-    ("The FreeType Project LICENSE", "FreeType's license (part of PDFium)"),
-)
+# The PDFium the bundle carries brings its own and its third-party notices
+# through the patched `pdfium_dart` package's NOTICES. A marker cannot stand
+# for them: Flutter's engine notices already carry FreeType's license, for
+# one. So every entry must arrive whole. SQLite is in the public domain.
+PDFIUM_NOTICES = Path("flutter/third_party/pdfium_dart/NOTICES")
+
+# Flutter's license collector splits a package's NOTICES on this line, reads
+# each entry as "<package names>\n\n<license text>", merges the names of
+# identical texts and writes the entries back joined by the same line.
+LICENSE_SEPARATOR = "\n" + "-" * 80 + "\n"
 
 
 def _inventory_face_hashes(inventory_root: Path) -> dict[str, str]:
@@ -122,7 +126,9 @@ def _check_asset_key(assets: Path, key: str) -> tuple[Path | None, str | None]:
     return None, f"font asset file is missing from the bundle: {key!r}"
 
 
-def _check_flutter_assets(assets: Path, faces: dict[str, str]) -> list[str]:
+def _check_flutter_assets(
+    assets: Path, faces: dict[str, str], pdfium_notices: dict[str, set[str]]
+) -> list[str]:
     manifest = assets / "FontManifest.json"
     if not manifest.is_file():
         return [f"FontManifest.json is missing from {assets}"]
@@ -188,11 +194,23 @@ def _check_flutter_assets(assets: Path, faces: dict[str, str]) -> list[str]:
                 f"bundled face {key} sha256 {actual} does not match the "
                 f"inventory checksum {expected}"
             )
-    failures.extend(_check_notices(assets, faces))
+    failures.extend(_check_notices(assets, faces, pdfium_notices))
     return failures
 
 
-def _check_notices(assets: Path, faces: dict[str, str]) -> list[str]:
+def _license_entries(text: str) -> dict[str, set[str]]:
+    """Map each license text in a NOTICES file to its package names."""
+    entries: dict[str, set[str]] = {}
+    for raw in text.split(LICENSE_SEPARATOR):
+        names, separator, body = raw.partition("\n\n")
+        if separator:
+            entries.setdefault(body, set()).update(names.split("\n"))
+    return entries
+
+
+def _check_notices(
+    assets: Path, faces: dict[str, str], pdfium_notices: dict[str, set[str]]
+) -> list[str]:
     """Verify the bundle's license notices carry the redistributed fonts
     and native libraries.
 
@@ -220,10 +238,12 @@ def _check_notices(assets: Path, faces: dict[str, str]) -> list[str]:
                 f"{description} ({filename}) is missing from the bundle's "
                 f"license notices"
             )
-    for marker, description in NATIVE_NOTICE_MARKERS:
-        if marker not in text:
+    bundled = _license_entries(text)
+    for body, names in pdfium_notices.items():
+        if not names <= bundled.get(body, set()):
             failures.append(
-                f"{description} is missing from the bundle's license notices"
+                f"PDFium's notice for {', '.join(sorted(names))} is missing "
+                f"from the bundle's license notices"
             )
     return failures
 
@@ -240,11 +260,19 @@ def main() -> int:
     parser.add_argument(
         "--inventory",
         default=str(Path(__file__).resolve().parents[1]),
-        help="repository root holding assets/fonts/README.md (default: the "
-        "checkout this script lives in)",
+        help="repository root holding assets/fonts/README.md and "
+        f"{PDFIUM_NOTICES} (default: the checkout this script lives in)",
     )
     arguments = parser.parse_args()
     faces = _inventory_face_hashes(Path(arguments.inventory))
+    pdfium_notices_file = Path(arguments.inventory) / PDFIUM_NOTICES
+    if not pdfium_notices_file.is_file():
+        raise SystemExit(f"PDFium notices not found: {pdfium_notices_file}")
+    pdfium_notices = _license_entries(
+        pdfium_notices_file.read_text(encoding="utf-8")
+    )
+    if not pdfium_notices:
+        raise SystemExit(f"PDFium notices have no entries: {pdfium_notices_file}")
 
     failures: list[str] = []
     bundles = 0
@@ -271,7 +299,7 @@ def main() -> int:
                 )
                 continue
             bundles += 1
-            for failure in _check_flutter_assets(assets, faces):
+            for failure in _check_flutter_assets(assets, faces, pdfium_notices):
                 failures.append(f"{assets}: {failure}")
 
     if failures:
