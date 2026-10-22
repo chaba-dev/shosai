@@ -120,14 +120,40 @@ final class ReaderPdfSpread {
   );
 }
 
+/// The bitmap size of a spread of two pages of [first] and [second] pixels,
+/// side by side.
+///
+/// Throws [PdfEngineLimitException] when the spread exceeds the engine's
+/// limits, though each page alone is within them: two admissible pages can
+/// make a raster too wide or too large to decode.
+PdfBitmapSize pdfSpreadBitmapSize(PdfBitmapSize first, PdfBitmapSize second) {
+  final width = first.width + second.width;
+  final height = math.max(first.height, second.height);
+  if (width > pdfMaxBitmapDimension ||
+      height > pdfMaxBitmapDimension ||
+      width * height > pdfMaxBitmapPixels) {
+    throw const PdfEngineLimitException(
+      'PDF spread bitmap exceeds decoded image limits',
+    );
+  }
+  return PdfBitmapSize(width, height);
+}
+
 /// One raster for two pages rendered at the same scale, [first] on the left
 /// and both top-aligned; a shorter page leaves transparent pixels below it.
+///
+/// Throws [PdfEngineLimitException] before allocating a spread larger than
+/// the engine's limits.
 PdfRenderedPage composePdfSpread(
   PdfRenderedPage first,
   PdfRenderedPage second,
 ) {
-  final width = first.width + second.width;
-  final height = math.max(first.height, second.height);
+  final size = pdfSpreadBitmapSize(
+    PdfBitmapSize(first.width, first.height),
+    PdfBitmapSize(second.width, second.height),
+  );
+  final width = size.width;
+  final height = size.height;
   final pixels = Uint8List(width * height * 4);
   for (var row = 0; row < height; row += 1) {
     final target = row * width * 4;

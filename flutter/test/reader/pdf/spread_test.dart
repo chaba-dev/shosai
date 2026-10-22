@@ -109,4 +109,34 @@ void main() {
       reason: 'the shorter page leaves transparent pixels below it',
     );
   });
+
+  test('two admissible pages can make a spread past the engine limits', () {
+    // Each page is within the limits; side by side they are not.
+    expect(
+      () => pdfSpreadBitmapSize(
+        const PdfBitmapSize(6000, 6000),
+        const PdfBitmapSize(6000, 6000),
+      ),
+      throwsA(isA<PdfEngineLimitException>()),
+      reason: '72 million pixels is past the 40 million area limit',
+    );
+    expect(
+      () => pdfSpreadBitmapSize(
+        const PdfBitmapSize(9000, 10),
+        const PdfBitmapSize(9000, 10),
+      ),
+      throwsA(isA<PdfEngineLimitException>()),
+      reason: '18000 px is past the 16384 px edge limit',
+    );
+    final size = pdfSpreadBitmapSize(
+      const PdfBitmapSize(4000, 5000),
+      const PdfBitmapSize(4000, 4000),
+    );
+    expect((size.width, size.height), (8000, 5000));
+    // The compositor refuses before it allocates the spread.
+    expect(
+      () => composePdfSpread(_raster(9000, 1, 1), _raster(9000, 1, 2)),
+      throwsA(isA<PdfEngineLimitException>()),
+    );
+  });
 }
