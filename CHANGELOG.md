@@ -161,6 +161,7 @@ All notable changes to this project will be documented in this file.
 - Update release PRs with append-only commits (#72)
 - *(nix)* Add Flutter mobile development tools (#77)
 - Remove the Rust core (M3.0 slice 3) (#162)
+- Simplify Make targets (#168)
 
 ### 🛡️ Security
 
