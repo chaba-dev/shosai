@@ -172,6 +172,35 @@ double continuousMapToColumn(List<double> from, List<double> to, double y) {
   return to[node] + math.min(within, math.max(0.0, to[node + 1] - to[node]));
 }
 
+/// Where the view's top [y], in [before]'s column, is once [after] is
+/// installed: the rule the view corrects its scroll offset by, and the one
+/// the controller maps a report against an older window with.
+///
+/// A restarted window keeps the view's place in the node under [y]
+/// ([continuousMapToColumn]); otherwise the laid-out node the view keeps in
+/// place ([continuousAnchorNode]) moves the view by its own shift, and with
+/// no such node nothing moves.
+double continuousCorrectedTop(
+  ReaderEpubWindow before,
+  ReaderEpubWindow after,
+  double y,
+) {
+  if (identical(before, after) ||
+      before.nodeTops.length != after.nodeTops.length) {
+    return y;
+  }
+  if (after.restartedAt != null) {
+    return continuousMapToColumn(before.nodeTops, after.nodeTops, y);
+  }
+  final node = continuousAnchorNode(
+    before.nodeTops,
+    y,
+    firstLaidOut: before.firstNode,
+    endLaidOut: before.endNode,
+  );
+  return node == null ? y : y + after.nodeTops[node] - before.nodeTops[node];
+}
+
 /// The node the view keeps in place when the column changes, or null when
 /// nothing laid out can be: the first laid-out node that starts at or below
 /// [y], within [firstLaidOut]..[endLaidOut], or else the laid-out node under
@@ -503,24 +532,58 @@ ReaderEpubPage continuousWindowFor({
     }
     cache._retainOnly(session.firstNodeIndex, session.lastNodeIndex + 1);
   }
-  // Selection geometry nearest [priorityTop] first, within the budget; the
-  // first node is always built, so every step makes progress.
-  final pending = [
-    for (final entry in nodes)
-      if (entry.geometry.selection == null) entry,
-  ];
-  if (pending.isNotEmpty) {
+  // Selection geometry is built as one run of consecutive nodes, grown
+  // toward [priorityTop] within the budget (and started at the node nearest
+  // it). A node is always built, so every step makes progress. Never two runs
+  // with a node still pending between them: the surface's visual lines then
+  // hold no gap a keyboard movement could step across.
+  if (nodes.any((entry) => entry.geometry.selection == null)) {
     final before = extents.tops();
-    double distance(int node) => (before[node] - priorityTop).abs();
-    pending.sort((a, b) => distance(a.node).compareTo(distance(b.node)));
+    double distance(int index) {
+      final node = nodes[index].node;
+      return math.max(
+        0.0,
+        math.max(before[node] - priorityTop, priorityTop - before[node + 1]),
+      );
+    }
+
     final watch = Stopwatch()..start();
-    for (final (:node, :geometry) in pending) {
-      if (selectionBudgetMicros != null &&
-          !identical(geometry, pending.first.geometry) &&
-          watch.elapsedMicroseconds >= selectionBudgetMicros) {
-        break;
-      }
+    var built = 0;
+    bool spent() =>
+        selectionBudgetMicros != null &&
+        built > 0 &&
+        watch.elapsedMicroseconds >= selectionBudgetMicros;
+    void build(int index) {
+      final (:node, :geometry) = nodes[index];
       cache._buildSelection(node, geometry, nodeBox);
+      built += 1;
+    }
+
+    var low = nodes.indexWhere((entry) => entry.geometry.selection != null);
+    var high = nodes.lastIndexWhere(
+      (entry) => entry.geometry.selection != null,
+    );
+    if (low < 0) {
+      var nearest = 0;
+      for (var index = 1; index < nodes.length; index += 1) {
+        if (distance(index) < distance(nearest)) nearest = index;
+      }
+      build(nearest);
+      low = high = nearest;
+    }
+    for (var index = low; index <= high && !spent(); index += 1) {
+      if (nodes[index].geometry.selection == null) build(index);
+    }
+    while (!spent() && (low > 0 || high < nodes.length - 1)) {
+      final above = low > 0 ? distance(low - 1) : double.infinity;
+      final below = high < nodes.length - 1
+          ? distance(high + 1)
+          : double.infinity;
+      if (above <= below) {
+        build(low -= 1);
+      } else {
+        build(high += 1);
+      }
     }
   }
   cache._selectionPending = nodes.any(
@@ -644,8 +707,6 @@ class ContinuousWindowStep {
   const ContinuousWindowStep({
     required this.changed,
     required this.pending,
-    this.anchorNode,
-    this.anchorTop = 0,
     this.restartedAt,
   });
 
@@ -659,16 +720,6 @@ class ContinuousWindowStep {
   /// Whether the window does not cover the viewport's lead yet, so another
   /// step is due.
   final bool pending;
-
-  /// The laid-out node the view keeps in place ([continuousAnchorNode]), and
-  /// its column top before the step; null when the view shows no laid-out
-  /// node, and then nothing is kept in place.
-  ///
-  /// Measuring nodes above it moves it in the column; the view keeps it in
-  /// place by scrolling by the same amount, which is its top in the next page
-  /// minus [anchorTop].
-  final int? anchorNode;
-  final double anchorTop;
 }
 
 /// Moves [session]'s window one bounded step toward the viewport
@@ -699,12 +750,6 @@ ContinuousWindowStep advanceContinuousWindow({
   final span = math.max(1.0, viewportBottom - viewportTop);
   final visible = continuousNodeAt(before, viewportTop);
   final bottom = continuousNodeAt(before, viewportBottom);
-  final anchor = continuousAnchorNode(
-    before,
-    viewportTop,
-    firstLaidOut: session.started ? session.firstNodeIndex : 0,
-    endLaidOut: session.started ? session.lastNodeIndex + 1 : 0,
-  );
   final lead = kContinuousLeadViewports * span;
   final keep = kContinuousKeepViewports * span;
   final first = continuousNodeAt(before, viewportTop - lead);
@@ -758,8 +803,6 @@ ContinuousWindowStep advanceContinuousWindow({
     pending:
         changed &&
         (session.firstNodeIndex > first || session.lastNodeIndex < last),
-    anchorNode: restartedAt == null ? anchor : null,
-    anchorTop: anchor == null ? 0 : before[anchor],
     restartedAt: restartedAt,
   );
 }

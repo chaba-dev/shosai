@@ -64,6 +64,11 @@ class _ContinuousBridge extends HarnessBridge {
   }) async => matches;
 }
 
+/// The rules between the paragraphs of the backward-search fixture: sized so
+/// a search back across them reaches its window limit a few nodes after the
+/// paragraph nearest them, where restarting further back would skip it.
+const _backwardGap = 4971;
+
 const _continuous = FlutterReaderSettings(
   continuous: true,
   theme: 'light',
@@ -1327,6 +1332,250 @@ void main() {
     expect(highlightPainter(tester).anchor, last);
 
     await closeReader(tester);
+  });
+
+  testWidgets('a line movement crosses a gap taller than the window keeps, '
+      'both ways, and the window stays bounded', (tester) async {
+    final epub = buildTestEpub(
+      chapters: {
+        'OPS/Text/chapter-1.xhtml':
+            '${'<p>A paragraph before the rules.</p>' * 80}'
+            '${'<hr/>' * 6000}'
+            '${'<p>A paragraph after the rules.</p>' * 100}',
+        'OPS/Text/chapter-2.xhtml': '<p>A short chapter.</p>',
+      },
+      nav: '<ol></ol>',
+    );
+    final chapter = openEpubBytes(epub).chapters.first;
+    final text = chapter.canonicalText;
+    final last = text.lastIndexOf('A paragraph before');
+    final after = text.indexOf('A paragraph after');
+    final steps = <int>[];
+    await openReader(
+      tester,
+      bridge(
+        epub: epub,
+        unitCount: 2,
+        readingState: FlutterReadingState(
+          unit: BigInt.zero,
+          offset: BigInt.from(last),
+          zoom: 1,
+        ),
+      ),
+      stepObserver: steps.add,
+    );
+    await settle(tester);
+    await dragSelect(tester, last, last + 'A paragraph'.length);
+
+    final position = chapterScroll(tester);
+    final gap =
+        dartPage(tester)!.window!.nodeTops[80 + 6000] -
+        dartPage(tester)!.window!.nodeTops[80];
+    expect(gap, greaterThan(4 * position.viewportDimension));
+
+    var widest = 0;
+    Future<void> settleUntil(bool Function() done) async {
+      for (var round = 0; round < 30 && !done(); round += 1) {
+        await settle(tester);
+        final window = dartPage(tester)!.window!;
+        widest = math.max(widest, window.endNode - window.firstNode);
+      }
+    }
+
+    bool inAfter(int? focus) =>
+        focus != null &&
+        focus >= after &&
+        focus <= after + 'A paragraph after the rules.'.length;
+    await pressShifted(tester, LogicalKeyboardKey.arrowDown);
+    await settleUntil(() => inAfter(highlightPainter(tester).focus));
+    expect(
+      inAfter(highlightPainter(tester).focus),
+      isTrue,
+      reason: 'the line after the gap',
+    );
+    expect(highlightPainter(tester).anchor, last);
+    expect(
+      widest,
+      lessThan(3000),
+      reason: 'the window never holds the whole gap',
+    );
+
+    // Back up across it.
+    bool inLast(int? focus) =>
+        focus != null &&
+        focus >= last &&
+        focus <= last + 'A paragraph before the rules.'.length;
+    await pressShifted(tester, LogicalKeyboardKey.arrowUp);
+    await settleUntil(() => inLast(highlightPainter(tester).focus));
+    expect(inLast(highlightPainter(tester).focus), isTrue);
+    expect(widest, lessThan(3000));
+
+    // Then the window follows the view again (a few hundred rules at a
+    // batch a frame), and its steps stop.
+    var count = -1;
+    for (var round = 0; round < 30 && count != steps.length; round += 1) {
+      count = steps.length;
+      await settle(tester);
+    }
+    expect(steps.length, count, reason: 'no step is scheduled once settled');
+    expectWindowCoversView(tester);
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a backward line movement across a gap lands on the nearest '
+      'paragraph before it, past a tall one', (tester) async {
+    // Tall paragraphs, then the paragraph nearest the gap: a search that
+    // restarts further back and lays out forward would stop after a tall
+    // paragraph and never examine the nearer one.
+    final epub = buildTestEpub(
+      chapters: {
+        'OPS/Text/chapter-1.xhtml':
+            '${'<p>${'A sentence of a paragraph taller than several views. ' * 160}</p>' * 10}'
+            '<p>The paragraph nearest the gap.</p>'
+            '${'<hr/>' * _backwardGap}'
+            '${'<p>A paragraph after the rules.</p>' * 40}',
+        'OPS/Text/chapter-2.xhtml': '<p>A short chapter.</p>',
+      },
+      nav: '<ol></ol>',
+    );
+    final text = openEpubBytes(epub).chapters.first.canonicalText;
+    final near = text.indexOf('The paragraph nearest the gap.');
+    final after = text.indexOf('A paragraph after');
+    final steps = <int>[];
+    await openReader(
+      tester,
+      bridge(
+        epub: epub,
+        unitCount: 2,
+        readingState: FlutterReadingState(
+          unit: BigInt.zero,
+          offset: BigInt.from(after),
+          zoom: 1,
+        ),
+      ),
+      stepObserver: steps.add,
+    );
+    await settle(tester);
+    // The window fills the view's lead with rules a batch a frame.
+    for (var round = 0, count = -1; round < 30 && count != steps.length;) {
+      count = steps.length;
+      round += 1;
+      await settle(tester);
+    }
+    await dragSelect(tester, after, after + 'A paragraph'.length);
+
+    await pressShifted(tester, LogicalKeyboardKey.arrowUp);
+    bool landed() => (highlightPainter(tester).focus ?? after) < after;
+    for (var round = 0; round < 30 && !landed(); round += 1) {
+      await settle(tester);
+    }
+    expect(
+      highlightPainter(tester).focus,
+      inInclusiveRange(near, near + 'The paragraph nearest the gap.'.length),
+      reason: 'the paragraph nearest the gap, not a tall one before it',
+    );
+    expect(highlightPainter(tester).anchor, after);
+
+    await closeReader(tester);
+  });
+
+  test('selection geometry is built as one run of nodes, toward the '
+      'priority point', () {
+    final session = ChapterLayoutSession(
+      chapter: longChapter,
+      spec: const ChapterLayoutSpec(
+        width: 632,
+        height: 552,
+        typography: ReaderEpubTypography(
+          fontFamily: 'Inter',
+          fontFamilyFallback: ['Noto Sans JP'],
+          fontSize: 18,
+          lineHeight: 1.5,
+          palette: ReaderEpubPalette(
+            background: ui.Color(0xFFFFFFFF),
+            foreground: ui.Color(0xFF1A1A1A),
+            link: ui.Color(0xFF174EA6),
+            tableHeaderBackground: ui.Color(0xFFE8EEF8),
+            tableHeaderBorder: ui.Color(0xFF596B89),
+          ),
+        ),
+      ),
+      images: const {},
+    )..layoutWindowAt(0, maxNodes: 40, viewports: 100);
+    final extents = ContinuousExtents(longChapter);
+    final cache = ContinuousGeometryCache(longChapter);
+    ReaderEpubPage window(double priorityTop) => continuousWindowFor(
+      session: session,
+      extents: extents,
+      cache: cache,
+      scalar: 0,
+      unit: 0,
+      chapterCount: 2,
+      windowSize: const ui.Size(680, 600),
+      priorityTop: priorityTop,
+      selectionBudgetMicros: 0,
+    );
+    Set<int> built(ReaderEpubPage page) => {
+      for (final line in page.surface.visualLines)
+        for (final caret in line.carets)
+          session.nodeIndexForScalar(caret.offset.toInt()),
+    };
+    // Near the top first, then near the window's bottom: the second step
+    // builds the node next to the first run, not the one at the bottom.
+    final first = window(0);
+    final top = built(first);
+    expect(top, isNotEmpty);
+    final bottom = first.window!.nodeTops[39];
+    var page = first;
+    for (var step = 0; step < 4; step += 1) {
+      page = window(bottom);
+      final nodes = built(page).toList()..sort();
+      expect(
+        nodes.last - nodes.first + 1,
+        nodes.length,
+        reason: 'no node is pending between two built ones',
+      );
+    }
+    expect(built(page).reduce(math.max), greaterThan(top.reduce(math.max)));
+    expect(cache.selectionPending, isTrue);
+    session.dispose();
+  });
+
+  test('a report against an older window is corrected as the view is', () {
+    const before = ReaderEpubWindow(
+      firstNode: 2,
+      endNode: 3,
+      nodeTops: [0, 1000, 2000, 2100],
+    );
+    // Measuring above the laid-out node moves it up by 900: the view keeps
+    // it in place, so a view top 200 above it is 200 above its new top.
+    expect(
+      continuousCorrectedTop(
+        before,
+        const ReaderEpubWindow(
+          firstNode: 1,
+          endNode: 3,
+          nodeTops: [0, 1000, 1100, 1200],
+        ),
+        1800,
+      ),
+      900,
+    );
+    // A restarted window keeps the view's place in the node under it.
+    expect(
+      continuousCorrectedTop(
+        before,
+        const ReaderEpubWindow(
+          firstNode: 1,
+          endNode: 2,
+          nodeTops: [0, 1000, 1100, 1200],
+          restartedAt: 1,
+        ),
+        1800,
+      ),
+      1100,
+    );
   });
 
   test('a window step measures one batch and keeps released nodes in '

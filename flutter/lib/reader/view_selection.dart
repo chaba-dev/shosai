@@ -332,37 +332,17 @@ class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
         before.nodeTops.length != after.nodeTops.length) {
       return;
     }
-    // Keep the first node the view shows in place where the reader sees it.
-    final position = _scroll.position;
-    final restartedAt = after.restartedAt;
-    if (restartedAt != null) {
-      // The view showed none of the previous window: the new one starts at
-      // the node under the view's top, which keeps its place in that node.
-      position.correctBy(
-        continuousMapToColumn(
-              before.nodeTops,
-              after.nodeTops,
-              position.pixels - kEpubPageMargin,
-            ) +
-            kEpubPageMargin -
-            position.pixels,
-      );
-      WidgetsBinding.instance.addPostFrameCallback((_) => _report());
-      return;
-    }
-    final node = continuousAnchorNode(
-      before.nodeTops,
-      position.pixels - kEpubPageMargin,
-      firstLaidOut: before.firstNode,
-      endLaidOut: before.endNode,
-    );
-    // Nothing laid out is in view (the window restarts there): no content
-    // the reader sees moves, so nothing is kept in place.
-    final shift = node == null
-        ? 0.0
-        : after.nodeTops[node] - before.nodeTops[node];
-    // A correction, not a scroll: the new extent is applied at the next
+    // What the reader sees keeps its place ([continuousCorrectedTop]): a
+    // correction, not a scroll, so the new extent is applied at the next
     // layout, in the same frame the new window paints.
+    final position = _scroll.position;
+    final shift =
+        continuousCorrectedTop(
+          before,
+          after,
+          position.pixels - kEpubPageMargin,
+        ) -
+        (position.pixels - kEpubPageMargin);
     if (shift != 0) position.correctBy(shift);
     // The controller moves the window toward what the view shows now.
     WidgetsBinding.instance.addPostFrameCallback((_) => _report());

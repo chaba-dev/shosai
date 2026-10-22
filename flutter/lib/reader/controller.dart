@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -251,6 +252,10 @@ final class ReaderController implements Listenable {
   int _annotationRevision = 0;
   int _layoutRevision = 0;
   int _selectionRevision = 0;
+
+  /// The keyboard movement a continuous window is still laying out for, if
+  /// any; it owns the window until it lands or is superseded.
+  _ReaderSelectionMovementContinued? _continuousMovement;
   int _nextOperationId = 0;
   int _noteRevision = 0;
   int _searchRevision = 0;
@@ -3010,7 +3015,17 @@ final class ReaderController implements Listenable {
   /// grows by one batch in the movement's direction. Each is one bounded step,
   /// in the message handler; a movement that needs more steps continues in a
   /// later frame ([_ReaderSelectionMovementContinued]).
-  bool _continuousEnsureSelectionGeometry(int focus, bool forward) {
+  ///
+  /// A continued movement ([probe]) is searching past the focus for the next
+  /// caret: it never restarts at the focus, and once the window is
+  /// [_kContinuousProbeViewports] tall it restarts at the node just past the
+  /// window's edge instead of growing, and reveals that frontier. The search is then
+  /// bounded in memory however far the next text is.
+  bool _continuousEnsureSelectionGeometry(
+    int focus,
+    bool forward, {
+    bool probe = false,
+  }) {
     final session = _epubSession;
     final key = _epubSessionKey;
     final page = _model.epubPage;
@@ -3024,15 +3039,35 @@ final class ReaderController implements Listenable {
         _continuousExtentsKey != key) {
       return false;
     }
-    final node = session.nodeIndexForScalar(focus);
-    final reveal =
+    var node = session.nodeIndexForScalar(focus);
+    final outside =
         !session.started ||
         node < session.firstNodeIndex ||
         node > session.lastNodeIndex;
     final pending = _continuousCaches[session]?.selectionPending ?? false;
+    final tops = extents.tops();
+    // The node a probe restarts at, past the window's edge, when the window
+    // is as tall as a probe may make it.
+    int? frontier;
+    if (probe && !pending && session.started) {
+      final height =
+          tops[session.lastNodeIndex + 1] - tops[session.firstNodeIndex];
+      if (height > _kContinuousProbeViewports * key.height) {
+        if (forward) {
+          if (session.lastNodeIndex + 1 >= session.totalNodes) return false;
+          frontier = session.lastNodeIndex + 1;
+        } else {
+          if (session.firstNodeIndex == 0) return false;
+          frontier = session.firstNodeIndex - 1;
+        }
+      }
+    }
+    final restart = outside && !probe;
+    final reveal = restart || frontier != null;
+    var target = page.targetScalar;
     final ReaderEpubPage next;
     try {
-      if (reveal) {
+      if (restart) {
         _detachedEpubBlocks.addAll(session.releaseAll());
         session.layoutWindowAt(
           focus,
@@ -3040,14 +3075,33 @@ final class ReaderController implements Listenable {
           maxMicros: kContinuousBatchMicros,
         );
         session.layoutBackward(maxNodes: 1, maxMicros: kContinuousBatchMicros);
+        target = focus;
+      } else if (frontier != null) {
+        _detachedEpubBlocks.addAll(session.releaseAll());
+        // The frontier adjoins what the probe has searched: forward, the
+        // window is laid out from it; backward, it is the frontier node alone
+        // and grows backward, since a window laid out forward from further
+        // back could stop at a tall node and leave the nodes before the
+        // frontier unexamined.
+        session.layoutWindowAt(
+          0,
+          node: frontier,
+          maxNodes: forward ? _kContinuousProbeNodes : 1,
+          maxMicros: kContinuousBatchMicros,
+        );
+        node = frontier;
+        target = session.chapter.blocks[frontier].canonical?.start ?? focus;
       } else if (!pending) {
+        // A probe grows by more nodes per step: the nodes it crosses have no
+        // text, so the time budget bounds the step.
+        final nodes = probe ? _kContinuousProbeNodes : kContinuousBatchNodes;
         final grown = forward
             ? session.layoutForward(
-                maxNodes: kContinuousBatchNodes,
+                maxNodes: nodes,
                 maxMicros: kContinuousBatchMicros,
               )
             : session.layoutBackward(
-                maxNodes: kContinuousBatchNodes,
+                maxNodes: nodes,
                 maxMicros: kContinuousBatchMicros,
               );
         if (grown == 0) return false;
@@ -3055,11 +3109,16 @@ final class ReaderController implements Listenable {
       next = _continuousPage(
         session,
         key,
-        reveal ? focus : page.targetScalar,
-        priorityTop: reveal ? 0.0 : extents.tops()[node],
+        target,
+        priorityTop: restart
+            ? 0.0
+            : extents.tops()[math.min(
+                math.max(node, session.firstNodeIndex),
+                session.lastNodeIndex,
+              )],
         // A restarted window is one batch: all of its selection geometry is
         // built, so the focus's caret exists when the focus has one.
-        selectionBudgetMicros: reveal ? null : kContinuousSelectionMicros,
+        selectionBudgetMicros: restart ? null : kContinuousSelectionMicros,
       );
     } catch (error) {
       // Detached blocks stay owned until the page painting them is replaced.
@@ -3099,11 +3158,11 @@ final class ReaderController implements Listenable {
     }
     // The view reports in the column of the page it built; a tick may have
     // installed a newer page since, in the same frame. The region is mapped
-    // into the current column, so a window that keeps changing still follows
-    // the view.
-    final top = continuousMapToColumn(
-      reported.nodeTops,
-      window.nodeTops,
+    // into the current column by the correction the view applies to it, so
+    // a window that keeps changing still follows the view.
+    final top = continuousCorrectedTop(
+      reported,
+      window,
       message.top - kEpubPageMargin,
     );
     _continuousViewport = (
@@ -3156,8 +3215,11 @@ final class ReaderController implements Listenable {
         _model.busy ||
         _model.relayoutBusy ||
         _closing ||
-        _suspended) {
-      // A relayout in flight installs its own page and schedules a step then.
+        _suspended ||
+        _continuousMovement != null) {
+      // A relayout in flight installs its own page and schedules a step then;
+      // a keyboard movement owns the window until it lands, then schedules
+      // one.
       return;
     }
     final stopwatch = Stopwatch()..start();
@@ -3187,21 +3249,12 @@ final class ReaderController implements Listenable {
       return;
     }
     // The content under the viewport's top keeps its place: the view scrolls
-    // by the shift the measurement made, and the controller's copy of the
-    // viewport follows it until the view reports again.
-    final anchor = step.anchorNode;
-    final restartedAt = step.restartedAt;
-    // A restarted window keeps the view's place in the node under its top.
-    final shift = restartedAt != null
-        ? continuousMapToColumn(
-                page.window!.nodeTops,
-                next.window!.nodeTops,
-                viewport.top,
-              ) -
-              viewport.top
-        : anchor == null
-        ? 0.0
-        : next.window!.nodeTops[anchor] - step.anchorTop;
+    // by the shift the measurement made ([continuousCorrectedTop]), and the
+    // controller's copy of the viewport follows it until the view reports
+    // again.
+    final shift =
+        continuousCorrectedTop(page.window!, next.window!, viewport.top) -
+        viewport.top;
     _continuousViewport = (
       top: viewport.top + shift,
       bottom: viewport.bottom + shift,
@@ -3644,7 +3697,10 @@ final class ReaderController implements Listenable {
   void _selectionKeyboardExtended(
     ReaderSelectionMovement movement, {
     bool retried = false,
+    bool probing = false,
   }) {
+    // A key press supersedes a movement still continuing.
+    if (!probing) _continuousMovement = null;
     final surface = _model.selectionSurface;
     // A continuous window may paint no text (a run of images) while the
     // selection's focus is in text outside it.
@@ -3723,13 +3779,22 @@ final class ReaderController implements Listenable {
             lineMove == null &&
             horizontalMove == null &&
             _caretForOffset(surface.visualLines, current, null) == null &&
-            _continuousSelectionResolved(current)
+            (probing || _continuousSelectionResolved(current)) &&
+            !_continuousSelectionPending()
         ? switch (movement) {
             ReaderSelectionMovement.previousGrapheme ||
             ReaderSelectionMovement.nextGrapheme ||
             ReaderSelectionMovement.previousWord ||
             ReaderSelectionMovement.nextWord => null,
-            _ => _nearestCaret(surface.visualLines, current, forward),
+            _ => _nearestCaret(
+              surface.visualLines,
+              current,
+              forward,
+              movement == ReaderSelectionMovement.previousLine ||
+                      movement == ReaderSelectionMovement.nextLine
+                  ? _model.selectionPreferredX
+                  : null,
+            ),
           }
         : null;
     final next =
@@ -3757,10 +3822,16 @@ final class ReaderController implements Listenable {
       // them, then the movement is tried again; when that is not yet enough
       // (a run of images, geometry still pending) it continues next frame.
       if (current != null &&
-          _continuousEnsureSelectionGeometry(current, forward)) {
+          _continuousEnsureSelectionGeometry(
+            current,
+            forward,
+            probe: probing,
+          )) {
         if (!retried) {
           _selectionKeyboardExtended(movement, retried: true);
         } else {
+          // The movement owns the window until it lands: window steps toward
+          // the viewport wait for it, so they cannot release what it laid out.
           final message = _ReaderSelectionMovementContinued(
             generation: _model.generation,
             layoutRevision: _layoutRevision,
@@ -3768,6 +3839,7 @@ final class ReaderController implements Listenable {
             focus: current,
             movement: movement,
           );
+          _continuousMovement = message;
           _frameScheduler(() => dispatch(message));
         }
       }
@@ -3830,13 +3902,26 @@ final class ReaderController implements Listenable {
   /// the frame it was pressed in, unless the selection, the layout or the
   /// document changed since.
   void _selectionMovementContinued(_ReaderSelectionMovementContinued message) {
-    if (!_isCurrentLayout(message.generation, message.layoutRevision) ||
-        message.selectionRevision != _selectionRevision ||
-        message.focus != _model.focus) {
-      return;
+    if (!identical(message, _continuousMovement)) return;
+    _continuousMovement = null;
+    if (_isCurrentLayout(message.generation, message.layoutRevision) &&
+        message.selectionRevision == _selectionRevision &&
+        message.focus == _model.focus) {
+      _selectionKeyboardExtended(
+        message.movement,
+        retried: true,
+        probing: true,
+      );
     }
-    _selectionKeyboardExtended(message.movement, retried: true);
+    // Landed or abandoned: the window follows the viewport again.
+    if (_continuousMovement == null) _scheduleContinuousTick();
   }
+
+  /// Whether the continuous window still has selection geometry to build.
+  bool _continuousSelectionPending() => switch (_epubSession) {
+    final session? => _continuousCaches[session]?.selectionPending ?? true,
+    null => true,
+  };
 
   /// Whether the continuous window holds [focus]'s node with all of its
   /// selection geometry built, so a caret missing at [focus] is missing from
@@ -5378,13 +5463,22 @@ final class ReaderController implements Listenable {
   }
 }
 
+/// The window height a continued keyboard movement grows the continuous
+/// window to before it restarts the window at its frontier.
+const double _kContinuousProbeViewports = 6;
+
+/// The most nodes one step of a continued keyboard movement lays out.
+const int _kContinuousProbeNodes = 64;
+
 /// The caret nearest [offset] strictly in the direction [forward], with its
-/// line and position along it.
+/// line and position along it; on that caret's line, the caret nearest
+/// [preferredX] when given (a line movement keeps its column).
 ({int offset, int line, double preferredX})? _nearestCaret(
   List<FlutterSelectionVisualLine> lines,
   int offset,
-  bool forward,
-) {
+  bool forward, [
+  double? preferredX,
+]) {
   ({int offset, int line, double preferredX})? best;
   for (var line = 0; line < lines.length; line += 1) {
     for (final caret in lines[line].carets) {
@@ -5396,7 +5490,18 @@ final class ReaderController implements Listenable {
       }
     }
   }
-  return best;
+  if (best == null || preferredX == null) return best;
+  final caret = lines[best.line].carets.reduce(
+    (a, b) =>
+        (b.alongLine - preferredX).abs() < (a.alongLine - preferredX).abs()
+        ? b
+        : a,
+  );
+  return (
+    offset: caret.offset.toInt(),
+    line: best.line,
+    preferredX: preferredX,
+  );
 }
 
 int? _adjacentOffset(List<int> offsets, int? current, bool forward) {
