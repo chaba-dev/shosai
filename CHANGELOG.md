@@ -152,6 +152,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Add production-shell render harness and native picker smoke (#120)
 - *(epub)* Add opt-in real-book corpus harness and measurement evidence (#145)
 - *(core)* List /proc/self/fd without following links (#166)
+- *(reader)* Settle continuous EPUB tests with frames only (#183)
 
 ### ⚙️ Miscellaneous Tasks
 
