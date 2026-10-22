@@ -402,6 +402,18 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerFitPage => 'ページに合わせる';
 
   @override
+  String get readerPages => 'ページ';
+
+  @override
+  String get readerPagesHint => '画面に余裕があるときは見開きで表示します。';
+
+  @override
+  String get readerOnePage => '単ページ';
+
+  @override
+  String get readerTwoPages => '見開き';
+
+  @override
   String get readerPageInputLabel => 'ページ';
 
   @override

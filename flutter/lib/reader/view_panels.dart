@@ -786,6 +786,7 @@ class _ReaderDisplayPanel extends StatelessWidget {
                     segments: [
                       (
                         key: const ValueKey('reader-typography-fit-width'),
+                        icon: null,
                         label: l10n.readerFitWidth,
                         selected:
                             typography.rasterFit == ReaderRasterFit.fitWidth,
@@ -799,6 +800,7 @@ class _ReaderDisplayPanel extends StatelessWidget {
                       ),
                       (
                         key: const ValueKey('reader-typography-fit-page'),
+                        icon: null,
                         label: l10n.readerFitPage,
                         selected:
                             typography.rasterFit == ReaderRasterFit.fitPage,
@@ -836,6 +838,36 @@ class _ReaderDisplayPanel extends StatelessWidget {
                 ],
               ),
             ),
+          _ReaderField(
+            label: l10n.readerPages,
+            hint: l10n.readerPagesHint,
+            child: _ReaderSegmented(
+              segments: [
+                (
+                  key: const ValueKey('reader-typography-one-page'),
+                  icon: LucideIcons.rectangleVertical,
+                  label: l10n.readerOnePage,
+                  selected: !typography.twoPages,
+                  onPressed: enabled
+                      ? () => dispatch(
+                          const ReaderTypographyChanged(twoPages: false),
+                        )
+                      : null,
+                ),
+                (
+                  key: const ValueKey('reader-typography-two-pages'),
+                  icon: LucideIcons.columns2,
+                  label: l10n.readerTwoPages,
+                  selected: typography.twoPages,
+                  onPressed: enabled
+                      ? () => dispatch(
+                          const ReaderTypographyChanged(twoPages: true),
+                        )
+                      : null,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -1075,7 +1107,15 @@ class _ReaderStepper extends StatelessWidget {
 class _ReaderSegmented extends StatelessWidget {
   const _ReaderSegmented({required this.segments});
 
-  final List<({Key key, String label, bool selected, VoidCallback? onPressed})>
+  final List<
+    ({
+      Key key,
+      IconData? icon,
+      String label,
+      bool selected,
+      VoidCallback? onPressed,
+    })
+  >
   segments;
 
   @override
@@ -1124,6 +1164,15 @@ class _ReaderSegmented extends StatelessWidget {
                     ),
                   ),
                   onPressed: segment.onPressed,
+                  leading: segment.icon == null
+                      ? null
+                      : Icon(
+                          segment.icon,
+                          size: 14,
+                          color: segment.selected
+                              ? palette.ink
+                              : palette.inkMuted,
+                        ),
                   child: Flexible(
                     child: Text(
                       segment.label,

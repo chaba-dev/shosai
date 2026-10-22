@@ -100,6 +100,7 @@ final class ReaderController implements Listenable {
        _typographyLineSpacing = initialTypography.epubLineSpacing,
        _typographyTheme = initialTypography.theme,
        _typographyContinuous = initialTypography.continuous,
+       _typographyTwoPages = initialTypography.twoPages,
        _rasterFit = initialTypography.rasterFit,
        _rasterZoom = initialTypography.rasterZoom,
        _baseScale = baseScale ?? initialTypography.rasterZoom,
@@ -282,6 +283,7 @@ final class ReaderController implements Listenable {
   double _typographyLineSpacing;
   String _typographyTheme;
   final bool _typographyContinuous;
+  bool _typographyTwoPages;
   ReaderRasterFit _rasterFit;
   double _rasterZoom;
   final double _baseScale;
@@ -2312,6 +2314,10 @@ final class ReaderController implements Listenable {
     if (theme != null && _readerThemes.contains(theme)) {
       _typographyTheme = theme;
     }
+    // The view decides whether two pages fit and reports the spread with the
+    // viewport, which lays the page out again; the setting needs no relayout
+    // of its own.
+    if (message.twoPages case final twoPages?) _typographyTwoPages = twoPages;
     if (message.rasterFit case final fit?) {
       _rasterFit = fit;
       if (fit != ReaderRasterFit.manual) _rasterZoom = _baseScale;
@@ -5376,6 +5382,7 @@ final class ReaderController implements Listenable {
         epubLineSpacing: _typographyLineSpacing,
         rasterFit: _rasterFit,
         rasterZoom: _rasterZoom,
+        twoPages: _typographyTwoPages,
       );
 
   /// The search bar presentation for [model] (RD-11).

@@ -780,6 +780,30 @@ abstract class AppLocalizations {
   /// **'Fit page'**
   String get readerFitPage;
 
+  /// NEW: no Iced string. The Display settings field that chooses one or two pages (RFD 4).
+  ///
+  /// In en, this message translates to:
+  /// **'Pages'**
+  String get readerPages;
+
+  /// NEW: no Iced string. The hint under the Pages field: phones and narrow windows show one page.
+  ///
+  /// In en, this message translates to:
+  /// **'Two pages show when the window has room.'**
+  String get readerPagesHint;
+
+  /// NEW: no Iced string. The one-page choice of the Pages field.
+  ///
+  /// In en, this message translates to:
+  /// **'One'**
+  String get readerOnePage;
+
+  /// NEW: no Iced string. The two-page (spread) choice of the Pages field.
+  ///
+  /// In en, this message translates to:
+  /// **'Two'**
+  String get readerTwoPages;
+
   /// Iced reference key: page. The more panel's page-input placeholder.
   ///
   /// In en, this message translates to:

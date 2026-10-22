@@ -604,6 +604,22 @@
   "@readerFitPage": {
     "description": "Iced reference key: fit-page."
   },
+  "readerPages": "Pages",
+  "@readerPages": {
+    "description": "NEW: no Iced string. The Display settings field that chooses one or two pages (RFD 4)."
+  },
+  "readerPagesHint": "Two pages show when the window has room.",
+  "@readerPagesHint": {
+    "description": "NEW: no Iced string. The hint under the Pages field: phones and narrow windows show one page."
+  },
+  "readerOnePage": "One",
+  "@readerOnePage": {
+    "description": "NEW: no Iced string. The one-page choice of the Pages field."
+  },
+  "readerTwoPages": "Two",
+  "@readerTwoPages": {
+    "description": "NEW: no Iced string. The two-page (spread) choice of the Pages field."
+  },
   "readerPageInputLabel": "Page",
   "@readerPageInputLabel": {
     "description": "Iced reference key: page. The more panel's page-input placeholder."

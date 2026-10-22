@@ -232,6 +232,7 @@ final class ReaderTypographyPresentation {
     required this.epubLineSpacing,
     required this.rasterFit,
     required this.rasterZoom,
+    this.twoPages = true,
   });
 
   final FlutterBookFormat format;
@@ -245,6 +246,11 @@ final class ReaderTypographyPresentation {
   /// and the reader's base density for the fit modes. Applying a real fit-page
   /// or fit-width computation from page geometry is 5A/6B.
   final double rasterZoom;
+
+  /// The Pages setting: two pages side by side where the stage has room for
+  /// them (the default), or always one. Phones and narrow stages show one page
+  /// either way.
+  final bool twoPages;
 
   /// Whether the document is reflowable (EPUB), so the EPUB controls apply.
   bool get reflowable => format == FlutterBookFormat.epub;
@@ -263,6 +269,7 @@ final class ReaderTypographyPresentation {
     double? epubLineSpacing,
     ReaderRasterFit? rasterFit,
     double? rasterZoom,
+    bool? twoPages,
   }) => ReaderTypographyPresentation(
     format: format ?? this.format,
     continuous: continuous ?? this.continuous,
@@ -271,6 +278,7 @@ final class ReaderTypographyPresentation {
     epubLineSpacing: epubLineSpacing ?? this.epubLineSpacing,
     rasterFit: rasterFit ?? this.rasterFit,
     rasterZoom: rasterZoom ?? this.rasterZoom,
+    twoPages: twoPages ?? this.twoPages,
   );
 
   @override
@@ -282,7 +290,8 @@ final class ReaderTypographyPresentation {
       other.epubFontSize == epubFontSize &&
       other.epubLineSpacing == epubLineSpacing &&
       other.rasterFit == rasterFit &&
-      other.rasterZoom == rasterZoom;
+      other.rasterZoom == rasterZoom &&
+      other.twoPages == twoPages;
 
   @override
   int get hashCode => Object.hash(
@@ -293,6 +302,7 @@ final class ReaderTypographyPresentation {
     epubLineSpacing,
     rasterFit,
     rasterZoom,
+    twoPages,
   );
 }
 
