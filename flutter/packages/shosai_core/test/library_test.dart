@@ -427,6 +427,30 @@ void main() {
       );
     });
 
+    test('ignores the case of accented letters when sorting', () async {
+      // SQLite's NOCASE folds only ASCII, which would put `École` before
+      // `éclair` and `Éric` before `émile`.
+      await t.executeMany(
+        '''INSERT INTO books (title, author, format, file_path, storage_kind,
+             original_path, content_hash, file_size)
+           VALUES (?, ?, 'pdf', ?, 'referenced', ?, ?, 1)''',
+        [
+          ['École', 'émile', '/books/e1.pdf', '/books/e1.pdf', '1' * 64],
+          ['éclair', 'Éric', '/books/e2.pdf', '/books/e2.pdf', '2' * 64],
+        ],
+      );
+
+      final byTitle = await t.library.page(sort: LibrarySort.title);
+      final byAuthor = await t.library.page(sort: LibrarySort.author);
+
+      expect([
+        for (final book in byTitle.books) book.title,
+      ], containsAllInOrder(['éclair', 'École']));
+      expect([
+        for (final book in byAuthor.books) book.author,
+      ], containsAllInOrder(['émile', 'Éric']));
+    });
+
     test('counts the whole library and finds the book to continue', () async {
       final unread = await t.library.page(format: BookFormat.pdf);
       expect(unread.bookCount, 2);

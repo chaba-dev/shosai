@@ -283,9 +283,10 @@ LibraryPage _page(
 /// paging through equal keys neither repeats nor skips a book.
 const _orders = {
   LibrarySort.recent: 'last_read DESC, date_added DESC, id DESC',
-  LibrarySort.title: 'title COLLATE NOCASE, id',
+  LibrarySort.title: 'title COLLATE unicode_nocase, id',
   LibrarySort.author:
-      'author IS NULL, author COLLATE NOCASE, title COLLATE NOCASE, id',
+      'author IS NULL, author COLLATE unicode_nocase, '
+      'title COLLATE unicode_nocase, id',
 };
 
 sealed class CommitOutcome {
