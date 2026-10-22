@@ -325,6 +325,8 @@ void main() {
       epubFontSize: 20,
       epubLineSpacing: 1.8,
       pdfZoom: -1,
+      twoPages: false,
+      librarySort: FlutterLibrarySort.title,
     );
     await bridge.saveReaderSettings(value: settings);
     expect(

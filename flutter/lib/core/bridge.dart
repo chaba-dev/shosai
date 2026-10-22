@@ -670,6 +670,8 @@ class FlutterOpenRequest {
           formatHint == other.formatHint;
 }
 
+/// The settings the library loads and saves: the reader's, and the order the
+/// shelf lists books in.
 class FlutterReaderSettings {
   final bool continuous;
   final String theme;
@@ -677,13 +679,37 @@ class FlutterReaderSettings {
   final double epubLineSpacing;
   final double pdfZoom;
 
+  /// The Pages setting: two pages side by side where there is room for them.
+  final bool twoPages;
+  final FlutterLibrarySort librarySort;
+
   const FlutterReaderSettings({
     required this.continuous,
     required this.theme,
     required this.epubFontSize,
     required this.epubLineSpacing,
     required this.pdfZoom,
+    this.twoPages = true,
+    this.librarySort = FlutterLibrarySort.recent,
   });
+
+  FlutterReaderSettings copyWith({
+    bool? continuous,
+    String? theme,
+    double? epubFontSize,
+    double? epubLineSpacing,
+    double? pdfZoom,
+    bool? twoPages,
+    FlutterLibrarySort? librarySort,
+  }) => FlutterReaderSettings(
+    continuous: continuous ?? this.continuous,
+    theme: theme ?? this.theme,
+    epubFontSize: epubFontSize ?? this.epubFontSize,
+    epubLineSpacing: epubLineSpacing ?? this.epubLineSpacing,
+    pdfZoom: pdfZoom ?? this.pdfZoom,
+    twoPages: twoPages ?? this.twoPages,
+    librarySort: librarySort ?? this.librarySort,
+  );
 
   @override
   int get hashCode =>
@@ -691,7 +717,9 @@ class FlutterReaderSettings {
       theme.hashCode ^
       epubFontSize.hashCode ^
       epubLineSpacing.hashCode ^
-      pdfZoom.hashCode;
+      pdfZoom.hashCode ^
+      twoPages.hashCode ^
+      librarySort.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -702,7 +730,9 @@ class FlutterReaderSettings {
           theme == other.theme &&
           epubFontSize == other.epubFontSize &&
           epubLineSpacing == other.epubLineSpacing &&
-          pdfZoom == other.pdfZoom;
+          pdfZoom == other.pdfZoom &&
+          twoPages == other.twoPages &&
+          librarySort == other.librarySort;
 }
 
 class FlutterReadingState {

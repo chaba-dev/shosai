@@ -55,6 +55,12 @@ final class LibrarySortChanged extends LibraryMessage {
   final FlutterLibrarySort sort;
 }
 
+/// The reader's Pages setting changed: two pages side by side, or one.
+final class LibraryPagesChanged extends LibraryMessage {
+  const LibraryPagesChanged(this.twoPages);
+  final bool twoPages;
+}
+
 final class LibraryImportRequested extends LibraryMessage {
   const LibraryImportRequested();
 }
@@ -89,12 +95,22 @@ final class _LibraryLoaded extends LibraryMessage {
     this.settings,
     this.append,
     this.cancellation,
+    this.sort,
   );
   final int revision;
   final FlutterLibraryPage page;
   final FlutterReaderSettings? settings;
   final bool append;
   final BigInt cancellation;
+
+  /// The order [page] is listed in.
+  final FlutterLibrarySort sort;
+}
+
+/// A settings write finished, with its error if it failed.
+final class _LibrarySettingsSaved extends LibraryMessage {
+  const _LibrarySettingsSaved(this.error);
+  final String? error;
 }
 
 final class _LibraryFailed extends LibraryMessage {

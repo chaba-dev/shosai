@@ -84,16 +84,27 @@ class _StubLibraryBridge
     );
   }
 
-  @override
-  Future<FlutterReaderSettings> loadReaderSettings({
-    required BigInt cancellationId,
-  }) async => const FlutterReaderSettings(
+  FlutterReaderSettings storedSettings = const FlutterReaderSettings(
     continuous: false,
     theme: 'light',
     epubFontSize: 18,
     epubLineSpacing: 1.5,
     pdfZoom: 0,
   );
+  final savedSettings = <FlutterReaderSettings>[];
+
+  @override
+  Future<FlutterReaderSettings> loadReaderSettings({
+    required BigInt cancellationId,
+  }) async => storedSettings;
+
+  @override
+  Future<void> saveReaderSettings({
+    required FlutterReaderSettings value,
+  }) async {
+    savedSettings.add(value);
+    storedSettings = value;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -244,6 +255,95 @@ void main() {
     controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
     await _settle();
     expect(bridge.pages, hasLength(2));
+
+    // The order is saved with the settings.
+    expect(bridge.savedSettings.single.librarySort, FlutterLibrarySort.title);
+    expect(controller.model.settings?.librarySort, FlutterLibrarySort.title);
+    expect(controller.model.error, isNull);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('the first page lists the shelf in its saved order', () async {
+    final bridge = _StubLibraryBridge()
+      ..storedSettings = const FlutterReaderSettings(
+        continuous: false,
+        theme: 'light',
+        epubFontSize: 18,
+        epubLineSpacing: 1.5,
+        pdfZoom: 0,
+        librarySort: FlutterLibrarySort.author,
+      );
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    expect(bridge.sorts.single, FlutterLibrarySort.author);
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    expect(controller.model.sort, FlutterLibrarySort.author);
+
+    // The next page continues in that order.
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.sorts.last, FlutterLibrarySort.author);
+    expect(bridge.offsets.last, 1);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('an order chosen before the settings arrive is kept', () async {
+    final bridge = _StubLibraryBridge()
+      ..storedSettings = const FlutterReaderSettings(
+        continuous: false,
+        theme: 'light',
+        epubFontSize: 18,
+        epubLineSpacing: 1.5,
+        pdfZoom: 0,
+        librarySort: FlutterLibrarySort.author,
+      );
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
+    await _settle();
+    expect(bridge.sorts.last, FlutterLibrarySort.title);
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    expect(controller.model.sort, FlutterLibrarySort.title);
+    expect(controller.model.settings?.librarySort, FlutterLibrarySort.title);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('the Pages setting is saved with the settings', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryPagesChanged(false));
+    await _settle();
+    expect(controller.model.settings?.twoPages, isFalse);
+    expect(bridge.savedSettings.single.twoPages, isFalse);
+
+    // The setting already in place is not saved again.
+    controller.dispatch(const LibraryPagesChanged(false));
+    await _settle();
+    expect(bridge.savedSettings, hasLength(1));
 
     controller.dispose();
     await _settle();

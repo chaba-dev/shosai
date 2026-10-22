@@ -47,15 +47,7 @@ Future<FlutterReaderSettings?> _settingsDialog(
                         }),
                     onChanged: (theme) {
                       if (theme != null) {
-                        setState(
-                          () => value = FlutterReaderSettings(
-                            continuous: value.continuous,
-                            theme: theme,
-                            epubFontSize: value.epubFontSize,
-                            epubLineSpacing: value.epubLineSpacing,
-                            pdfZoom: value.pdfZoom,
-                          ),
-                        );
+                        setState(() => value = value.copyWith(theme: theme));
                       }
                     },
                   ),
@@ -64,13 +56,7 @@ Future<FlutterReaderSettings?> _settingsDialog(
                   title: 'Continuous reading',
                   value: value.continuous,
                   onChanged: (continuous) => setState(
-                    () => value = FlutterReaderSettings(
-                      continuous: continuous,
-                      theme: value.theme,
-                      epubFontSize: value.epubFontSize,
-                      epubLineSpacing: value.epubLineSpacing,
-                      pdfZoom: value.pdfZoom,
-                    ),
+                    () => value = value.copyWith(continuous: continuous),
                   ),
                 ),
                 _SettingField(
@@ -82,13 +68,7 @@ Future<FlutterReaderSettings?> _settingsDialog(
                     initialValue: value.epubFontSize.clamp(12, 32),
                     label: value.epubFontSize.round().toString(),
                     onChanged: (fontSize) => setState(
-                      () => value = FlutterReaderSettings(
-                        continuous: value.continuous,
-                        theme: value.theme,
-                        epubFontSize: fontSize,
-                        epubLineSpacing: value.epubLineSpacing,
-                        pdfZoom: value.pdfZoom,
-                      ),
+                      () => value = value.copyWith(epubFontSize: fontSize),
                     ),
                   ),
                 ),
@@ -101,13 +81,8 @@ Future<FlutterReaderSettings?> _settingsDialog(
                     initialValue: value.epubLineSpacing.clamp(1, 3),
                     label: value.epubLineSpacing.toStringAsFixed(2),
                     onChanged: (lineSpacing) => setState(
-                      () => value = FlutterReaderSettings(
-                        continuous: value.continuous,
-                        theme: value.theme,
-                        epubFontSize: value.epubFontSize,
-                        epubLineSpacing: lineSpacing,
-                        pdfZoom: value.pdfZoom,
-                      ),
+                      () =>
+                          value = value.copyWith(epubLineSpacing: lineSpacing),
                     ),
                   ),
                 ),
@@ -140,13 +115,7 @@ Future<FlutterReaderSettings?> _settingsDialog(
                     onChanged: (pdfZoom) {
                       if (pdfZoom != null) {
                         setState(
-                          () => value = FlutterReaderSettings(
-                            continuous: value.continuous,
-                            theme: value.theme,
-                            epubFontSize: value.epubFontSize,
-                            epubLineSpacing: value.epubLineSpacing,
-                            pdfZoom: pdfZoom,
-                          ),
+                          () => value = value.copyWith(pdfZoom: pdfZoom),
                         );
                       }
                     },

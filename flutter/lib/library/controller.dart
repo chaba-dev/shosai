@@ -75,6 +75,10 @@ class LibraryController implements Listenable {
   String? _displayedQuery;
   FlutterBookFormat? _displayedFormat;
   FlutterLibrarySort? _displayedSort;
+
+  /// Whether the shelf's order was chosen in this session, so the saved one
+  /// no longer applies.
+  bool _sortChosen = false;
   int? _stalledAppendOffset;
   bool _closing = false;
   bool _bridgeDisposed = false;
@@ -100,6 +104,7 @@ class LibraryController implements Listenable {
         message is! _LibraryCoverLoaded &&
         message is! _LibraryCoverFailed &&
         message is! _LibraryCoverEffectFinished &&
+        message is! _LibrarySettingsSaved &&
         message is! _LibraryCleanupStatusChanged) {
       return;
     }
@@ -168,9 +173,35 @@ class LibraryController implements Listenable {
         _load();
       case LibrarySortChanged():
         if (message.sort == _model.sort) return;
-        _emit(_model.copyWith(sort: message.sort, hasMore: false));
+        _sortChosen = true;
+        final settings = _model.settings?.copyWith(librarySort: message.sort);
+        _emit(
+          _model.copyWith(
+            sort: message.sort,
+            settings: settings ?? _model.settings,
+            hasMore: false,
+          ),
+        );
+        if (settings != null) _saveSettings(settings);
         _loadRevision += 1;
         _load();
+      case LibraryPagesChanged():
+        final settings = _model.settings;
+        if (settings == null || settings.twoPages == message.twoPages) return;
+        final changed = settings.copyWith(twoPages: message.twoPages);
+        _emit(_model.copyWith(settings: changed));
+        _saveSettings(changed);
+      case _LibrarySettingsSaved():
+        _activeEffects -= 1;
+        if (!_closing && message.error != null) {
+          _emit(
+            _model.copyWith(
+              error: message.error,
+              failure: LibraryFailure.settings,
+            ),
+          );
+        }
+        _disposeBridgeIfIdle();
       case LibraryImportRequested():
         _import();
       case LibraryCoverRequested():
@@ -205,7 +236,7 @@ class LibraryController implements Listenable {
           if (!message.append) {
             _displayedQuery = _model.query;
             _displayedFormat = _model.format;
-            _displayedSort = _model.sort;
+            _displayedSort = message.sort;
             // A replacement load is a new collection: whatever offset stalled
             // before it is not this collection's.
             _stalledAppendOffset = null;
@@ -227,7 +258,11 @@ class LibraryController implements Listenable {
                       ]
                     : message.page.books.map(_withoutCover).toList(),
               ),
-              settings: message.settings ?? _model.settings,
+              // An order chosen while the settings loaded is the one kept.
+              settings:
+                  message.settings?.copyWith(librarySort: message.sort) ??
+                  _model.settings,
+              sort: message.sort,
               bookCount: message.page.bookCount,
               continueReading: switch (message.page.continueReading) {
                 final book? => _withoutCover(book),
@@ -427,6 +462,7 @@ class LibraryController implements Listenable {
     final query = _model.query;
     final format = _model.format;
     final sort = _model.sort;
+    final sortChosen = _sortChosen;
     final offset = append ? _model.books.length : 0;
     late final BigInt cancellation;
     try {
@@ -457,19 +493,31 @@ class LibraryController implements Listenable {
     _emit(_model.copyWith(loading: true, loadingMore: append));
     unawaited(() async {
       try {
+        final settings = _model.settings == null
+            ? await _records.loadReaderSettings(cancellationId: cancellation)
+            : null;
+        // The first page lists the shelf in its saved order, unless an order
+        // was chosen before the settings arrived.
+        final pageSort = settings != null && !sortChosen
+            ? settings.librarySort
+            : sort;
         final page = await _records.libraryPage(
           query: query,
           format: format,
-          sort: sort,
+          sort: pageSort,
           limit: libraryPageSize,
           offset: offset,
           cancellationId: cancellation,
         );
-        final settings = _model.settings == null
-            ? await _records.loadReaderSettings(cancellationId: cancellation)
-            : null;
         dispatch(
-          _LibraryLoaded(revision, page, settings, append, cancellation),
+          _LibraryLoaded(
+            revision,
+            page,
+            settings,
+            append,
+            cancellation,
+            pageSort,
+          ),
         );
       } catch (error) {
         dispatch(
@@ -681,6 +729,22 @@ class LibraryController implements Listenable {
       } finally {
         dispatch(const _LibraryEffectFinished());
       }
+    }());
+  }
+
+  /// Saves [settings] in the background: a setting changed outside the
+  /// settings dialog takes effect at once, and a failed write reports as a
+  /// settings failure.
+  void _saveSettings(FlutterReaderSettings settings) {
+    _activeEffects += 1;
+    unawaited(() async {
+      String? error;
+      try {
+        await _records.saveReaderSettings(value: settings);
+      } catch (caught) {
+        error = safeError(caught);
+      }
+      dispatch(_LibrarySettingsSaved(error));
     }());
   }
 
