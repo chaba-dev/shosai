@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/shell/view.dart';
@@ -440,6 +441,91 @@ void main() {
       );
       expect(find.text('42%'), findsOneWidget);
       expect(find.text('Not started'), findsOneWidget);
+    });
+
+    testWidgets('the Open tag and the status stay whole on a phone column', (
+      tester,
+    ) async {
+      // A phone column is 110 px wide: `EPUB  Not started  Open` does not fit
+      // on one line, and the tag must not cut the status or be cut itself.
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      Future<void> pumpCard(Locale locale, double progress, bool open) async {
+        final shelf = LibraryShelf.of(ShellLayout.phone, 358, openTag: true);
+        await tester.pumpWidget(
+          productionShell(
+            locale: locale,
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: Builder(
+                  builder: (context) => SizedBox(
+                    width: shelf.columnWidth,
+                    height: libraryCardTileExtent(context, shelf),
+                    child: LibraryBookCard(
+                      book: FlutterLibraryBook(
+                        bookId: 1,
+                        title: 'Walden',
+                        author: 'A',
+                        format: FlutterBookFormat.epub,
+                        pathKey: '/books/a.epub',
+                        managed: true,
+                        progress: progress,
+                        dateAdded: '2026-09-10',
+                      ),
+                      cover: null,
+                      demandRevision: 0,
+                      shelf: shelf,
+                      open: open,
+                      removing: false,
+                      loadCover: (_) => false,
+                      openBook: (_) {},
+                      removeBook: (_) {},
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      bool cut(Finder text) =>
+          tester.renderObject<RenderParagraph>(text).didExceedMaxLines;
+
+      for (final (locale, tag, textScale) in const [
+        (Locale('en'), 'Open', 1.0),
+        (Locale('en'), 'Open', 2.0),
+        (Locale('ja'), '読書中', 1.0),
+        (Locale('ja'), '読書中', 2.0),
+      ]) {
+        tester.platformDispatcher.textScaleFactorTestValue = textScale;
+        final l10n = await AppLocalizations.delegate.load(locale);
+        for (final progress in const [0.0, 0.42, 1.0]) {
+          final reason = '${locale.languageCode} ${textScale}x at $progress';
+          final status = find.text(shellReadingStatus(l10n, progress));
+          await pumpCard(locale, progress, false);
+          final closedCut = cut(status);
+
+          await pumpCard(locale, progress, true);
+          expect(cut(status), closedCut, reason: '$reason: status');
+          final tagText = find.text(tag);
+          expect(cut(tagText), isFalse, reason: '$reason: tag');
+          final card = tester.getRect(find.byType(LibraryBookCard));
+          final tagRect = tester.getRect(tagText);
+          expect(
+            card.contains(tagRect.topLeft) &&
+                tagRect.right <= card.right + 0.01 &&
+                tagRect.bottom <= card.bottom + 0.01,
+            isTrue,
+            reason: '$reason: tag inside the card',
+          );
+          expect(tester.takeException(), isNull, reason: reason);
+        }
+      }
     });
 
     testWidgets('the Japanese catalog supplies the status text', (

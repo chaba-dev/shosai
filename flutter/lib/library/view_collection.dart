@@ -33,13 +33,21 @@ final class LibraryShelf {
     required this.columnGap,
     required this.rowGap,
     required this.layout,
+    required this.openTag,
   });
 
   /// The shelf for [available] px of content width at [layout]: three
   /// columns on a phone, otherwise as many columns of at least
   /// [libraryShelfMinColumn] as fit (seven across at 1440 px, six on a
   /// tablet).
-  factory LibraryShelf.of(ShellLayout layout, double available) {
+  ///
+  /// [openTag] says a book on the shelf is open in Reading now, so every card
+  /// keeps a line for the *Open* tag and the rows stay level.
+  factory LibraryShelf.of(
+    ShellLayout layout,
+    double available, {
+    bool openTag = false,
+  }) {
     final columnGap = switch (layout) {
       ShellLayout.phone => 14.0,
       ShellLayout.tablet => 22.0,
@@ -55,6 +63,7 @@ final class LibraryShelf {
       columnGap: columnGap,
       rowGap: layout == ShellLayout.phone ? 20 : columnGap,
       layout: layout,
+      openTag: openTag,
     );
   }
 
@@ -63,6 +72,9 @@ final class LibraryShelf {
   final double columnGap;
   final double rowGap;
   final ShellLayout layout;
+
+  /// Whether the cards keep a line for the *Open* tag.
+  final bool openTag;
 
   bool get phone => layout == ShellLayout.phone;
 
@@ -109,7 +121,7 @@ double libraryCardTileExtent(BuildContext context, LibraryShelf shelf) =>
     shelf.columnWidth * 3 / 2 +
     _cardSpacing * 3 +
     _cardTitleBox(context, shelf) +
-    _cardMetadataBox(context) +
+    _cardMetadataBox(context, shelf) +
     _cardProgressHeight;
 
 /// The title box: two lines of the card's editorial title, the second
@@ -132,8 +144,17 @@ bool _cardMetadataWraps(BuildContext context) =>
 /// removal-pending chip, whichever is taller. Above it the line wraps: the
 /// badge on a run of its own, then the status or the chip, each allowed a
 /// second line so a scaled `Not started` in a phone's column is wrapped rather
-/// than cut.
-double _cardMetadataBox(BuildContext context) {
+/// than cut. A shelf with an open book adds a run for the *Open* tag, which
+/// wraps onto it where it does not fit after the status.
+double _cardMetadataBox(BuildContext context, LibraryShelf shelf) {
+  final tag = shelf.openTag
+      ? _cardMetadataRunSpacing + _lineHeight(context, _cardOpenTagStyle)
+      : 0.0;
+  return _cardMetadataRuns(context) + tag;
+}
+
+/// The badge and status runs of the meta line.
+double _cardMetadataRuns(BuildContext context) {
   final status = _lineHeight(context, _cardMetaStyle(context));
   final badge =
       _lineHeight(context, shellInterfaceStyle(10, 12)) +
@@ -150,6 +171,13 @@ double _cardMetadataBox(BuildContext context) {
       _cardMetadataRunSpacing +
       math.max(status * lines, status * lines + chipChrome);
 }
+
+/// The *Open* tag: `ui-label` weight in `accent`.
+final TextStyle _cardOpenTagStyle = shellInterfaceStyle(
+  11,
+  14,
+  weight: FontWeight.w600,
+);
 
 /// How many lines a wrapped meta line gives the status or the chip.
 const int _cardMetadataWrappedLines = 2;
@@ -626,6 +654,9 @@ class _LibraryGridState extends State<_LibraryGrid> {
         final shelf = LibraryShelf.of(
           layout,
           constraints.maxWidth - padding.horizontal,
+          openTag: widget.model.books.any(
+            (book) => widget.openBookIds.contains(book.bookId),
+          ),
         );
         return CustomScrollView(
           controller: _scroll,
@@ -1280,31 +1311,25 @@ class LibraryBookCard extends StatelessWidget {
               style: shosaiInterfaceStyleForText(metaStyle, l10n.cardRemoving),
             ),
           )
-        : Text.rich(
-            TextSpan(
-              text: status,
-              children: [
-                if (open) ...[
-                  const TextSpan(text: ' · '),
-                  // The tag: `ui-label` weight in `accent`.
-                  TextSpan(
-                    text: l10n.cardOpenTag,
-                    style: shellInterfaceStyle(
-                      11,
-                      14,
-                      weight: FontWeight.w600,
-                    ).copyWith(color: palette.accent),
-                  ),
-                ],
-              ],
-            ),
+        : Text(
+            status,
             maxLines: wraps ? _cardMetadataWrappedLines : 1,
             overflow: TextOverflow.ellipsis,
-            style: shosaiInterfaceStyleForText(
-              metaStyle,
-              open ? '$status${l10n.cardOpenTag}' : status,
-            ),
+            style: shosaiInterfaceStyleForText(metaStyle, status),
           );
+    // The tag follows the status, or takes the next run where it does not
+    // fit, so neither cuts the other.
+    final tag = open && !removing
+        ? Text(
+            l10n.cardOpenTag,
+            maxLines: 1,
+            softWrap: false,
+            style: shosaiInterfaceStyleForText(
+              _cardOpenTagStyle,
+              l10n.cardOpenTag,
+            ).copyWith(color: palette.accent),
+          )
+        : null;
     final badge = ShellFormatBadge(format: book.format);
     final radius = BorderRadius.circular(ShosaiTokens.radiusSm);
     return Stack(
@@ -1375,7 +1400,7 @@ class LibraryBookCard extends StatelessWidget {
                   ),
                 ),
                 SizedBox(
-                  height: _cardMetadataBox(context),
+                  height: _cardMetadataBox(context, shelf),
                   child: Align(
                     alignment: AlignmentDirectional.topStart,
                     child: wraps
@@ -1383,13 +1408,30 @@ class LibraryBookCard extends StatelessWidget {
                             spacing: 6,
                             runSpacing: _cardMetadataRunSpacing,
                             crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [badge, statusLabel],
+                            children: [badge, statusLabel, ?tag],
                           )
-                        : Row(
+                        : tag == null
+                        ? Row(
                             spacing: 6,
                             children: [
                               badge,
                               Flexible(child: statusLabel),
+                            ],
+                          )
+                        : Wrap(
+                            spacing: 6,
+                            runSpacing: _cardMetadataRunSpacing,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                spacing: 6,
+                                children: [
+                                  badge,
+                                  Flexible(child: statusLabel),
+                                ],
+                              ),
+                              tag,
                             ],
                           ),
                   ),
