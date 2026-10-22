@@ -683,15 +683,31 @@ class _ReaderScreenState extends State<ReaderScreen>
       actionFocus: _actionFocus,
       debugPathEntry: widget.debugPathEntry,
     );
+    final openPanel = model.openPanel;
+    // A floating panel covers the page: the page leaves keyboard traversal
+    // and the semantics tree until it closes, so focus and a screen reader
+    // stay with the panel. The controller's requests for the document's focus
+    // while it is covered (a note chosen in the panel) fail, so focus stays on
+    // the chosen note; closing the panel returns it to the toolbar.
+    final covered =
+        openPanel != null &&
+        _readerPanelPresentation(openPanel, layout) !=
+            _ReaderPanelPresentation.docked;
     final stage = LayoutBuilder(
       builder: (context, constraints) => Stack(
         children: [
           Positioned.fill(
-            child: _ReaderStage(
-              model: model,
-              layout: layout,
-              dispatch: _controller.dispatch,
-              content: content,
+            child: ExcludeFocus(
+              excluding: covered,
+              child: ExcludeSemantics(
+                excluding: covered,
+                child: _ReaderStage(
+                  model: model,
+                  layout: layout,
+                  dispatch: _controller.dispatch,
+                  content: content,
+                ),
+              ),
             ),
           ),
           ..._readerPanelOverlay(
@@ -705,12 +721,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         ],
       ),
     );
-    final panel = model.openPanel;
-    if (panel == null ||
-        _readerPanelPresentation(panel, layout) !=
-            _ReaderPanelPresentation.docked) {
-      return stage;
-    }
+    final panel = openPanel;
+    if (panel == null || covered) return stage;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

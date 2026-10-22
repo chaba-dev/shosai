@@ -188,6 +188,10 @@ class _ReaderPanelHost extends StatelessWidget {
           key: ValueKey('reader-panel-${panel.name}'),
           container: true,
           label: label,
+          // A floating panel is dismissed like the scrim around it.
+          onDismiss: presentation == _ReaderPanelPresentation.docked
+              ? null
+              : () => dispatch(ReaderPanelToggled(panel)),
           child: Material(
             type: MaterialType.transparency,
             child: DecoratedBox(

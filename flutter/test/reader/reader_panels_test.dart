@@ -1122,6 +1122,121 @@ void main() {
     });
   });
 
+  group('panel modality', () {
+    bool focusInStage(WidgetTester tester) {
+      final context = FocusManager.instance.primaryFocus?.context;
+      if (context == null) return false;
+      final stage = tester.element(find.byKey(const ValueKey('reader-stage')));
+      var inside = identical(context, stage);
+      context.visitAncestorElements((ancestor) {
+        if (identical(ancestor, stage)) inside = true;
+        return !inside;
+      });
+      return inside;
+    }
+
+    /// Whether the live semantics tree exposes the page's text.
+    bool documentText(WidgetTester tester) {
+      var found = false;
+      bool visit(SemanticsNode node) {
+        if (node.label.startsWith('Document text')) found = true;
+        if (!found) node.visitChildren(visit);
+        return !found;
+      }
+
+      visit(
+        tester
+            .binding
+            .renderViews
+            .first
+            .owner!
+            .semanticsOwner!
+            .rootSemanticsNode!,
+      );
+      return found;
+    }
+
+    for (final (name, size, open) in [
+      ('a tablet Notes slide-over', const Size(1024, 800), _openNotes),
+      ('a desktop Contents popover', const Size(1280, 800), _openContents),
+      ('a phone Notes sheet', const Size(390, 800), _openNotes),
+    ]) {
+      testWidgets('$name takes the page out of focus and semantics', (
+        tester,
+      ) async {
+        _setView(tester, size);
+        final semantics = tester.ensureSemantics();
+        final bridge = _PanelBridge(unitCount: 3);
+        await _open(
+          tester,
+          _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+        );
+        expect(documentText(tester), isTrue);
+        await open(tester);
+
+        expect(documentText(tester), isFalse);
+        for (var press = 0; press < 30; press += 1) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          expect(focusInStage(tester), isFalse, reason: 'Tab press $press');
+        }
+        semantics.dispose();
+      });
+    }
+
+    testWidgets('a note chosen in the slide-over keeps focus in the panel, '
+        'and Escape closes it', (tester) async {
+      _setView(tester, const Size(1024, 800));
+      final bridge = _PanelBridge(
+        unitCount: 3,
+        bookmarks: [_bookmark(id: 7, unit: BigInt.two)],
+      );
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/atlas.pdf',
+          initialBookId: 1,
+        ),
+      );
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-saved-place-open-7')));
+      await tester.pump();
+      await _settle(tester);
+      expect(find.text('100% · page 3 of 3'), findsOneWidget);
+      expect(find.byKey(const ValueKey('reader-panel-notes')), findsOneWidget);
+      expect(focusInStage(tester), isFalse);
+      expect(FocusManager.instance.primaryFocus, isNotNull);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await _settle(tester);
+      expect(find.byKey(const ValueKey('reader-panel-notes')), findsNothing);
+    });
+
+    testWidgets('the docked desktop Notes panel leaves the page reachable', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final semantics = tester.ensureSemantics();
+      final bridge = _PanelBridge(unitCount: 3);
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+      );
+      await _openNotes(tester);
+      expect(documentText(tester), isTrue);
+      var reached = false;
+      for (var press = 0; press < 40 && !reached; press += 1) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        reached = focusInStage(tester);
+      }
+      expect(reached, isTrue);
+      semantics.dispose();
+    });
+  });
+
   group('page field, bookmark and open book', () {
     testWidgets('the page field validates and converts the 1-based ordinal', (
       tester,
