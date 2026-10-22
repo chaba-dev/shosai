@@ -563,6 +563,25 @@ class FlutterLibraryBook {
 /// The order a library page lists books in.
 enum FlutterLibrarySort { recent, title, author }
 
+/// A book's notes at a glance: how many there are, and the words of the
+/// latest one (its quote, or its note when it quotes nothing).
+class FlutterNotesSummary {
+  final int count;
+  final String? latest;
+
+  const FlutterNotesSummary({required this.count, this.latest});
+
+  @override
+  int get hashCode => count.hashCode ^ latest.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNotesSummary &&
+          count == other.count &&
+          latest == other.latest;
+}
+
 class FlutterLibraryPage {
   final List<FlutterLibraryBook> books;
   final bool hasMore;
@@ -575,11 +594,15 @@ class FlutterLibraryPage {
   /// page's query, format and order.
   final FlutterLibraryBook? continueReading;
 
+  /// [continueReading]'s notes, for the Continue reading hero.
+  final FlutterNotesSummary? continueReadingNotes;
+
   const FlutterLibraryPage({
     required this.books,
     required this.hasMore,
     this.bookCount,
     this.continueReading,
+    this.continueReadingNotes,
   });
 
   @override
@@ -587,7 +610,8 @@ class FlutterLibraryPage {
       books.hashCode ^
       hasMore.hashCode ^
       bookCount.hashCode ^
-      continueReading.hashCode;
+      continueReading.hashCode ^
+      continueReadingNotes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -597,7 +621,8 @@ class FlutterLibraryPage {
           books == other.books &&
           hasMore == other.hasMore &&
           bookCount == other.bookCount &&
-          continueReading == other.continueReading;
+          continueReading == other.continueReading &&
+          continueReadingNotes == other.continueReadingNotes;
 }
 
 class FlutterLibraryRemoveOutcome {

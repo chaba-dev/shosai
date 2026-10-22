@@ -87,7 +87,19 @@ void main() {
     testWidgets('normal wide English library renders on the production shell', (
       tester,
     ) async {
-      final bridge = libraryBridge();
+      // The hero quotes the latest note and counts them on Notes.
+      final bridge = HarnessBridge(
+        books: harnessLibraryBooks(),
+        covers: harnessCovers(),
+        notes: const {
+          1: FlutterNotesSummary(
+            count: 3,
+            latest:
+                'Every map is a promise that the ground will keep its shape '
+                'until the traveller arrives.',
+          ),
+        },
+      );
       await check(
         tester,
         'library-normal-1280',

@@ -1,5 +1,35 @@
 part of 'view.dart';
 
+/// A count inside a toggle (`sh-count`): how many items it holds, in
+/// tabular figures on a `surface-sunken` capsule. Callers hide it at zero.
+class ShellCount extends StatelessWidget {
+  const ShellCount({super.key, required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ShellPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.surfaceSunken,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Padding(
+        // 16 px tall, so a 32 px button keeps its height.
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Text(
+          '$count',
+          style: shellInterfaceStyle(11, 16, weight: FontWeight.w600).copyWith(
+            color: palette.inkMuted,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// One option of a [ShellSegmentedControl]: its value and its short noun.
 typedef ShellSegment<T> = ({T value, String label});
 

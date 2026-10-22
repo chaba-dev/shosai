@@ -405,11 +405,15 @@ class HarnessBridge
     this.pageWidth = 420,
     this.pageHeight = 560,
     this.unitCount = 3,
+    this.notes = const {},
   }) : books = books ?? const [],
        covers = covers ?? const {};
 
   final List<FlutterLibraryBook> books;
   final Map<int, Uint8List> covers;
+
+  /// Each book's notes, by book id; a book without an entry has none.
+  final Map<int, FlutterNotesSummary> notes;
   final FlutterReaderSettings settings;
   final int pageWidth;
   final int pageHeight;
@@ -484,13 +488,18 @@ class HarnessBridge
         );
     }
     final end = (offset + limit).clamp(0, filtered.length);
+    final continueReading = books
+        .where((book) => book.lastRead != null && book.progress < 1)
+        .firstOrNull;
     return FlutterLibraryPage(
       books: filtered.sublist(offset.clamp(0, end), end),
       hasMore: end < filtered.length,
       bookCount: books.length,
-      continueReading: books
-          .where((book) => book.lastRead != null && book.progress < 1)
-          .firstOrNull,
+      continueReading: continueReading,
+      continueReadingNotes: continueReading == null
+          ? null
+          : notes[continueReading.bookId] ??
+                const FlutterNotesSummary(count: 0),
     );
   }
 

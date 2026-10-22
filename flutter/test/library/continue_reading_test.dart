@@ -50,6 +50,7 @@ class _ContinueBridge extends HarnessBridge {
   _ContinueBridge({
     required super.books,
     required super.covers,
+    super.notes,
     this.readingState,
   });
 
@@ -267,6 +268,59 @@ void main() {
         expect(bridge.openedBooks, isEmpty);
       },
     );
+
+    testWidgets('the hero quotes the latest note and counts the notes', (
+      tester,
+    ) async {
+      Future<void> pump(Size size, Map<int, FlutterNotesSummary> notes) async {
+        await tester.pumpWidget(const SizedBox());
+        final bridge = _ContinueBridge(
+          books: [_resumable(1, 'Resumable')],
+          covers: harnessCovers(count: 1),
+          notes: notes,
+        );
+        HarnessView(size: size).apply(tester);
+        await renderHarnessState(
+          tester,
+          productionShell(
+            locale: const Locale('en'),
+            home: ProductShell(
+              bridgeFactory: () => bridge,
+              readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+            ),
+          ),
+          ready: () => harnessImagesReady(tester),
+        );
+      }
+
+      final hero = find.byType(LibraryContinueCard);
+      Finder inHero(Finder finder) =>
+          find.descendant(of: hero, matching: finder);
+      const notes = {1: FlutterNotesSummary(count: 12, latest: 'A sea of ink')};
+
+      await pump(const Size(1280, 800), notes);
+      expect(inHero(find.text('“A sea of ink”')), findsOneWidget);
+      final count = inHero(find.byType(ShellCount));
+      expect(count, findsOneWidget);
+      expect(
+        find.descendant(of: count, matching: find.text('12')),
+        findsOneWidget,
+      );
+      expectOnlyKnownDefects(
+        await findRenderDefects(tester),
+        const <KnownRenderDefect>[],
+      );
+
+      // A narrow tablet's compact hero drops the quote and keeps the count.
+      await pump(const Size(720, 900), notes);
+      expect(inHero(find.textContaining('A sea of ink')), findsNothing);
+      expect(inHero(find.byType(ShellCount)), findsOneWidget);
+
+      // Nothing to quote and nothing to count: no placeholder, no zero.
+      await pump(const Size(1280, 800), const {});
+      expect(inHero(find.textContaining('“')), findsNothing);
+      expect(inHero(find.byType(ShellCount)), findsNothing);
+    });
 
     testWidgets('the tablet hero buttons are touch targets', (tester) async {
       // docs/design-system.md: `touch-target` (44 px) on tablet; the buttons
