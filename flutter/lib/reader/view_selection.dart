@@ -620,6 +620,11 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
         }
 
         final epubPage = widget.epubPage;
+        final pdfPageShadow =
+            epubPage == null &&
+            widget.model.document?.format == FlutterBookFormat.pdf &&
+            ShellLayout.forWidth(MediaQuery.sizeOf(context).width) !=
+                ShellLayout.phone;
         final contentPainter = epubPage == null
             ? _PageContentPainter(
                 image: widget.image,
@@ -754,6 +759,19 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             child: Stack(
               fit: StackFit.expand,
               children: [
+                // A PDF page lies on the stage like the EPUB page's paper,
+                // with `shadow-page` under the raster; a phone page is
+                // full-bleed and has none.
+                if (pdfPageShadow)
+                  Positioned.fromRect(
+                    rect: transform.destination,
+                    child: DecoratedBox(
+                      key: const ValueKey('reader-pdf-page-shadow'),
+                      decoration: BoxDecoration(
+                        boxShadow: _readerPageShadow(ShellPalette.of(context)),
+                      ),
+                    ),
+                  ),
                 RepaintBoundary(
                   key: const ValueKey('reader-page-paint'),
                   child: KeyedSubtree(
