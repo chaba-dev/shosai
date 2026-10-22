@@ -69,22 +69,44 @@ void main() {
     );
   }
 
-  test('kanji, kana and their punctuation stand upright; Latin, digits, '
-      'brackets and the long vowel mark turn with the line', () {
-    for (final upright in '吾輩はネコ。、ゃッ！？々〇１'.runes) {
+  test('kanji, kana, their punctuation, brackets and the long vowel mark '
+      'are drawn upright; Latin, digits and dashes turn with the line', () {
+    // The brackets, the wave dash and the long vowel mark (`Tr`) are drawn
+    // upright in their vertical forms, as the small kana and the ideographic
+    // comma and full stop (`Tu`) are.
+    for (final upright in '吾輩はネコ。、ゃッ！？々〇１「」『』（）ー〜～：'.runes) {
       expect(
         isUprightInVertical(upright),
         isTrue,
         reason: String.fromCharCode(upright),
       );
     }
-    for (final turned in 'Aa1 ,.「」『』（）ー…―〜～：'.runes) {
+    for (final turned in 'Aa1 ,.…―－＜＞'.runes) {
       expect(
         isUprightInVertical(turned),
         isFalse,
         reason: String.fromCharCode(turned),
       );
     }
+  });
+
+  test('a grapheme cluster keeps one orientation', () {
+    final (:map, :upright, span: _) = buildBlockText(
+      [EpubTextSpan(text: '葛\u{E0100}城 e\u0301 👩\u200D💻')],
+      typography,
+      18,
+      vertical: true,
+    );
+    final runs = [
+      for (final run in upright)
+        map.text.substring(
+          run.start - map.codeUnitOffset,
+          run.end - map.codeUnitOffset,
+        ),
+    ];
+    // The ideograph keeps its variation selector and the emoji its joined
+    // parts; the accented Latin letter turns with the line, mark and all.
+    expect(runs, ['葛\u{E0100}城', '👩\u200D💻']);
   });
 
   test('a page box turns the flow a quarter turn clockwise', () {
@@ -231,7 +253,7 @@ void main() {
           run.end - mixed.map.codeUnitOffset,
         ),
     ];
-    expect(runs, ['と書生は言った。明治', '年、', '年のことである。']);
+    expect(runs, ['「', '」と書生は言った。明治', '年、', '年のことである。']);
     for (final run in mixed.upright) {
       expect(run.style.color, typography.palette.foreground);
     }
@@ -248,7 +270,7 @@ void main() {
     for (final run in runs) {
       expect(laidOut[run]!.a, 0, reason: run);
     }
-    expect(laidOut['「Hello, world」'], typography.palette.foreground);
+    expect(laidOut['Hello, world'], typography.palette.foreground);
   });
 
   test('images in a vertical flow are measured turned', () async {

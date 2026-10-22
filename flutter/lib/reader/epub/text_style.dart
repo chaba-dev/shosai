@@ -10,6 +10,7 @@ library;
 
 import 'dart:ui' as ui;
 
+import 'package:characters/characters.dart';
 import 'package:flutter/painting.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
@@ -381,15 +382,20 @@ class UprightRun {
   final TextStyle style;
 }
 
-/// Whether [rune] stands upright in vertical text.
+/// Whether [rune] is drawn upright in vertical text.
 ///
 /// A compact reading of UAX #50 (Vertical Text Layout) for the scripts a
-/// vertical book sets: CJK ideographs, kana, Hangul, full-width forms and the
-/// symbols set in an ideographic em square are upright; Latin, digits and
-/// the brackets, long vowel mark, dashes, ellipses and tildes rotate with the
-/// line. The `Tu` characters (the ideographic comma and full stop, the small
-/// kana) are upright and take their vertical forms from the font's `vert`
-/// feature when they are drawn.
+/// vertical book sets. Upright (`U`) are CJK ideographs, kana, Hangul,
+/// full-width forms and the symbols set in an ideographic em square; Latin,
+/// digits and the dashes and ellipses (`R`) rotate with the line.
+///
+/// The `Tu` characters (the ideographic comma and full stop, the small kana)
+/// and the `Tr` ones (the CJK brackets, the wave dash, the long vowel mark,
+/// the full-width parentheses, colon and tilde) are drawn upright too: they
+/// take their vertical forms from the font's `vert` feature, which turns a
+/// `Tr` bracket or long vowel mark into its designed vertical glyph. Flutter's
+/// text API does not tell whether a font has those forms; Shippori Mincho, the
+/// fallback for Japanese, has them, as fonts made for vertical text do.
 bool isUprightInVertical(int rune) {
   if (rune < 0x00A7) return false;
   if (rune == 0x00A7 || rune == 0x00A9 || rune == 0x00AE) return true;
@@ -400,35 +406,18 @@ bool isUprightInVertical(int rune) {
   if (rune >= 0x2460 && rune <= 0x24FF) return true; // enclosed numbers
   if (rune >= 0x25A0 && rune <= 0x27BF) return true; // shapes, symbols
   if (rune >= 0x2E80 && rune <= 0x2FFF) return true; // radicals
-  if (rune >= 0x3000 && rune <= 0x303F) {
-    // Brackets, the wave dash and the double prime quotes rotate.
-    return !((rune >= 0x3008 && rune <= 0x3011) ||
-        (rune >= 0x3014 && rune <= 0x301F) ||
-        rune == 0x3030);
-  }
-  if (rune >= 0x3040 && rune <= 0x30FF) {
-    // The long vowel mark and the double hyphen rotate.
-    return rune != 0x30FC && rune != 0x30A0;
-  }
-  if (rune >= 0x3100 && rune <= 0x9FFF) return true; // ideographs and more
+  if (rune >= 0x3000 && rune <= 0x9FFF) return true; // CJK, kana, ideographs
   if (rune >= 0xA960 && rune <= 0xA97F) return true;
   if (rune >= 0xAC00 && rune <= 0xD7FF) return true; // Hangul
   if (rune >= 0xF900 && rune <= 0xFAFF) return true;
   if (rune >= 0xFE10 && rune <= 0xFE1F) return true; // vertical forms
-  if (rune >= 0xFE30 && rune <= 0xFE4F) return true;
+  if (rune >= 0xFE30 && rune <= 0xFE6F) return true; // compatibility, small
   if (rune >= 0xFF01 && rune <= 0xFF60) {
-    // Full-width brackets, hyphen, colons, comparison signs, low line, braces,
-    // vertical line and tilde rotate.
-    return !(rune == 0xFF08 ||
-        rune == 0xFF09 ||
-        rune == 0xFF0D ||
-        (rune >= 0xFF1A && rune <= 0xFF1E) ||
-        rune == 0xFF3B ||
-        rune == 0xFF3D ||
-        rune == 0xFF3F ||
-        rune >= 0xFF5B);
+    // The full-width hyphen and comparison signs rotate (`R`).
+    return !(rune == 0xFF0D || (rune >= 0xFF1C && rune <= 0xFF1E));
   }
   if (rune >= 0xFFE0 && rune <= 0xFFE6) return true;
+  if (rune >= 0x1B000 && rune <= 0x1B2FF) return true; // kana supplements
   if (rune >= 0x1F000 && rune <= 0x1FAFF) return true; // emoji
   if (rune >= 0x20000 && rune <= 0x3FFFF) return true; // ideographs
   return false;
@@ -495,14 +484,17 @@ bool isUprightInVertical(int rune) {
       runStart = end;
     }
 
+    // Orientation applies to whole grapheme clusters (UAX #50, 3.2.1): a
+    // variation selector, a combining mark or an emoji joined by ZWJ goes
+    // with its base, so the upright repaint shapes what the line shaped.
     var unit = 0;
-    for (final rune in span.text.runes) {
-      final isUpright = isUprightInVertical(rune);
+    for (final cluster in span.text.characters) {
+      final isUpright = isUprightInVertical(cluster.runes.first);
       if (runUpright != isUpright) {
         flush(unit);
         runUpright = isUpright;
       }
-      unit += rune > 0xFFFF ? 2 : 1;
+      unit += cluster.length;
     }
     flush(unit);
   }
