@@ -12,10 +12,6 @@
   "@searchLibraryPlaceholder": {
     "description": "Iced reference key: search-library-placeholder. The retained Flutter string keeps the approved candidate wording."
   },
-  "collectionLabel": "COLLECTION",
-  "@collectionLabel": {
-    "description": "Iced reference key: collection. Uppercase in both locales by reference design."
-  },
   "filterAll": "All",
   "@filterAll": {
     "description": "Iced reference key: all (compact filter row)."
@@ -60,6 +56,10 @@
   "@cardNotStarted": {
     "description": "Iced reference key: not-started. The card's reading status at zero progress."
   },
+  "cardFinished": "Finished",
+  "@cardFinished": {
+    "description": "A book's reading status once it is read to the end."
+  },
   "cardPercentRead": "{percentage}%",
   "@cardPercentRead": {
     "description": "Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.",
@@ -74,6 +74,18 @@
     "description": "Retained Flutter semantics label for the card's cover image.",
     "placeholders": {
       "title": {
+        "type": "String"
+      }
+    }
+  },
+  "cardTitleByAuthorSemantics": "{title}, by {author}",
+  "@cardTitleByAuthorSemantics": {
+    "description": "Semantics label for a shelf card's title: the title with its author, which the card shows only on a generated cover.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "author": {
         "type": "String"
       }
     }
@@ -102,9 +114,9 @@
   "@libraryContinueReading": {
     "description": "Iced reference key: continue-reading. The collection section heading above the continue card."
   },
-  "libraryContinue": "Continue  ›",
+  "libraryContinue": "Continue",
   "@libraryContinue": {
-    "description": "Iced reference key: continue. The continue card's right-hand link label; the two spaces before the chevron are the reference's own spacing."
+    "description": "The Continue reading hero's primary action, which opens the book at its saved place."
   },
   "libraryPercentComplete": "{percentage}% complete",
   "@libraryPercentComplete": {
@@ -636,5 +648,62 @@
   "noticeReaderChapterPaginated": "This chapter is too long to scroll continuously, so it is shown as pages",
   "@noticeReaderChapterPaginated": {
     "description": "Brief notice in continuous EPUB reading when a chapter is over the continuous-page ceiling and is shown as pages instead."
+  },
+  "shellPlacesLabel": "Places",
+  "@shellPlacesLabel": {
+    "description": "The Bookshelf shell: accessible name of the sidebar, rail and bottom bar that hold the places."
+  },
+  "shellPlaceLibrary": "Library",
+  "@shellPlaceLibrary": {
+    "description": "The Bookshelf shell: the Library place in the sidebar, rail and bottom bar."
+  },
+  "shellPlaceNotes": "Notes",
+  "@shellPlaceNotes": {
+    "description": "The Bookshelf shell: the Notes place (notes and highlights across all books)."
+  },
+  "shellPlaceBookmarks": "Bookmarks",
+  "@shellPlaceBookmarks": {
+    "description": "The Bookshelf shell: the Bookmarks place (bookmarks across all books)."
+  },
+  "shellPlaceSearch": "Search",
+  "@shellPlaceSearch": {
+    "description": "The Bookshelf shell: the Search place and the sidebar's field-shaped search button."
+  },
+  "shellReadingNow": "Reading now",
+  "@shellReadingNow": {
+    "description": "The Bookshelf shell: heading of the open books in the sidebar and on the phone's library."
+  },
+  "shellCloseBook": "Close {title}",
+  "@shellCloseBook": {
+    "description": "The Bookshelf shell: accessible name and tooltip of an open book's close button.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "shellNotesEmptyHeading": "No notes yet",
+  "@shellNotesEmptyHeading": {
+    "description": "The Bookshelf shell: the Notes place before any note or highlight exists."
+  },
+  "shellNotesEmptyBody": "Select text in a book to highlight it, or add a note to a page. Every note and highlight appears here.",
+  "@shellNotesEmptyBody": {
+    "description": "The Bookshelf shell: the Notes place's empty state, saying what to do."
+  },
+  "shellBookmarksEmptyHeading": "No bookmarks yet",
+  "@shellBookmarksEmptyHeading": {
+    "description": "The Bookshelf shell: the Bookmarks place before any bookmark exists."
+  },
+  "shellBookmarksEmptyBody": "Bookmark a page from the reader’s toolbar and it appears here.",
+  "@shellBookmarksEmptyBody": {
+    "description": "The Bookshelf shell: the Bookmarks place's empty state, saying what to do."
+  },
+  "shellSearchEmptyHeading": "Search books and notes",
+  "@shellSearchEmptyHeading": {
+    "description": "The Bookshelf shell: the Search place's title."
+  },
+  "shellSearchEmptyBody": "Searching book text and notes across the library is coming. To find a book now, search the library by title or author.",
+  "@shellSearchEmptyBody": {
+    "description": "The Bookshelf shell: the Search place until the search palette (RFD 6) exists."
   }
 }

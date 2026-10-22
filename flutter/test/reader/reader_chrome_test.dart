@@ -435,28 +435,37 @@ void main() {
       );
     });
 
-    testWidgets('the selected tab uses the accent token and the others the '
-        'muted token', (tester) async {
-      _setView(tester, const Size(1280, 800));
-      await _open(
-        tester,
-        _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
-      );
+    testWidgets(
+      'the selected tab uses the on-accent-soft token and the others the '
+      'muted token',
+      (tester) async {
+        _setView(tester, const Size(1280, 800));
+        await _open(
+          tester,
+          _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
+        );
 
-      TextStyle? labelStyle(String key) => tester
-          .widget<Text>(
-            find
-                .descendant(
-                  of: find.byKey(ValueKey(key)),
-                  matching: find.byType(Text),
-                )
-                .first,
-          )
-          .style;
+        TextStyle? labelStyle(String key) => tester
+            .widget<Text>(
+              find
+                  .descendant(
+                    of: find.byKey(ValueKey(key)),
+                    matching: find.byType(Text),
+                  )
+                  .first,
+            )
+            .style;
 
-      expect(labelStyle('reader-tab-tab-0')?.color, ShosaiTokens.appAccent);
-      expect(labelStyle('reader-tab-tab-1')?.color, ShosaiTokens.appTextMuted);
-    });
+        expect(
+          labelStyle('reader-tab-tab-0')?.color,
+          ShosaiTokens.colorLightOnAccentSoft,
+        );
+        expect(
+          labelStyle('reader-tab-tab-1')?.color,
+          ShosaiTokens.appTextMuted,
+        );
+      },
+    );
 
     testWidgets('activation and close run through rendered controls', (
       tester,

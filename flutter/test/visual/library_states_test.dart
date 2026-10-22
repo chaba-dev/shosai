@@ -8,7 +8,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
-import 'package:shosai_flutter/theme_tokens.dart';
+import 'package:shosai_flutter/shell/view.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -92,20 +92,16 @@ void main() {
     return bridge;
   }
 
-  /// The continue card's own 16 px title line.
-  Finder continueTitle(String title) => find.byWidgetPredicate(
-    (widget) =>
-        widget is Text &&
-        widget.data == title &&
-        widget.style?.fontSize == ShosaiTokens.typeSize16,
+  /// The hero's own title line.
+  Finder continueTitle(String title) => find.descendant(
+    of: find.byType(LibraryContinueCard),
+    matching: find.text(title),
   );
 
-  /// The collection's own 18 px section title.
+  /// The collection's own 22 px section head.
   Finder sectionTitle(String label) => find.byWidgetPredicate(
     (widget) =>
-        widget is Text &&
-        widget.data == label &&
-        widget.style?.fontSize == ShosaiTokens.typeSize18,
+        widget is Text && widget.data == label && widget.style?.fontSize == 22,
   );
 
   /// A bridge whose next page can be held open or failed.
@@ -127,10 +123,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'continue-reading'},
         verify: (tester) async {
-          expect(find.text('Continue reading'), findsOneWidget);
+          expect(find.text('CONTINUE READING'), findsOneWidget);
           expect(continueTitle('The Quiet Cartographer'), findsOneWidget);
           expect(find.text('42% complete'), findsOneWidget);
-          expect(find.text('Continue  ›'), findsOneWidget);
+          expect(find.text('Continue'), findsOneWidget);
         },
       );
     });
@@ -144,9 +140,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'continue-reading'},
         verify: (tester) async {
+          // Japanese has no capitals: the kicker reads as written.
           expect(find.text('読書を続ける'), findsOneWidget);
           expect(find.text('42% 完了'), findsOneWidget);
-          expect(find.text('続きを読む  ›'), findsOneWidget);
+          expect(find.text('続きを読む'), findsOneWidget);
         },
       );
     });
@@ -163,17 +160,22 @@ void main() {
         },
         verify: (tester) async {
           expect(find.byType(LibraryContinueCard), findsOneWidget);
-          // The card grew with its scaled text instead of cutting a line.
+          // The hero grew with its scaled text instead of cutting a line: it
+          // is taller than its cover.
           final card = tester.getRect(find.byType(LibraryContinueCard));
-          expect(
-            card.height,
-            greaterThan(ShosaiTokens.layoutContinueCardDetailsHeight),
+          final cover = tester.getRect(
+            find.descendant(
+              of: find.byType(LibraryContinueCard),
+              matching: find.byType(LibraryBookCover),
+            ),
           );
+          expect(card.height, greaterThan(cover.height + 40));
         },
       );
     });
 
     testWidgets('C390 Japanese interface at 200% text', (tester) async {
+      // A phone has no hero: the open books are Reading now cards instead.
       await render(
         tester,
         '3c-library-continue-390-ja-t200',
@@ -184,8 +186,8 @@ void main() {
           'state': 'continue-reading-compact-large-text',
         },
         verify: (tester) async {
-          expect(find.byType(LibraryContinueCard), findsOneWidget);
-          expect(find.text('続きを読む  ›'), findsOneWidget);
+          expect(find.byType(LibraryContinueCard), findsNothing);
+          expect(find.text('続きを読む'), findsNothing);
         },
       );
     });
@@ -213,18 +215,18 @@ void main() {
         ready: () => find.byType(LibraryContinueCard).evaluate().isNotEmpty,
         metadata: const <String, Object?>{'state': 'continue-reading-no-cover'},
         verify: (tester) async {
-          // The placeholder keeps the reference's 72x100 continue box.
+          // The typographic cover keeps the hero's 168 px box at 2:3.
+          final cover = find.descendant(
+            of: find.byType(LibraryContinueCard),
+            matching: find.byType(LibraryBookCover),
+          );
+          expect(tester.getSize(cover), const Size(168, 252));
           expect(
-            tester.getSize(
-              find.descendant(
-                of: find.byType(LibraryContinueCard),
-                matching: find.byType(LibraryBookCover),
-              ),
+            find.descendant(
+              of: cover,
+              matching: find.byType(ShellGeneratedCover),
             ),
-            const Size(
-              ShosaiTokens.layoutContinueCardCoverWidth,
-              ShosaiTokens.layoutContinueCardCoverHeight,
-            ),
+            findsOneWidget,
           );
         },
       );
@@ -377,7 +379,9 @@ void main() {
       // loading line is the captured pending state.
       bridge.firstPageHasMore = true;
       bridge.gateAppends = true;
-      const view = HarnessView(size: Size(1280, 800));
+      // Tall enough that the hero and the first shelf row leave the paging
+      // row on screen.
+      const view = HarnessView(size: Size(1280, 1100));
       view.apply(tester);
       await renderHarnessState(
         tester,
@@ -413,7 +417,9 @@ void main() {
       // carry the recovery; the loaded grid stays below it.
       bridge.firstPageHasMore = true;
       bridge.failAppends = true;
-      const view = HarnessView(size: Size(1280, 800));
+      // Tall enough that the hero and the first shelf row leave the paging
+      // row on screen.
+      const view = HarnessView(size: Size(1280, 1100));
       view.apply(tester);
       await renderHarnessState(
         tester,

@@ -8,10 +8,11 @@ and can verify that the committed file still matches the source (`--check`).
 
 The generated Dart module holds `dart:ui` colors directly, because the Flutter
 themes consume them as colors. The Iced application that consumed a generated
-Rust module was removed on 2026-10-20; the token source still records its
-values as the `Iced` authority (the historical reference) and keeps the
-per-product `iced`/`flutter` font family keys, so the source schema is
-unchanged.
+Rust module was removed on 2026-10-20. Since 2026-10-21 the colors, radii and
+type families come from the Shōsai design system (`docs/design-system.md`);
+the type sizes and layout metrics keep the `Iced` authority (the historical
+reference), and a font family may still record the removed application's name
+under an `iced` key beside the required `flutter` one.
 
 Usage:
 
@@ -32,10 +33,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TOKENS_PATH = REPO_ROOT / "assets" / "theme" / "tokens.json"
 DART_PATH = REPO_ROOT / "flutter" / "lib" / "theme_tokens.dart"
 
-# The pinned Iced accent, and the historical #109 brown that plan decision 2
-# rejects. Both are checked so a future edit cannot silently reintroduce the
-# brown or drift the accent.
-EXPECTED_ACCENT = "#4D5E86"
+# The design system's slate accent (light grounds, decided 2026-10-20), and the
+# historical #109 brown that plan decision 2 rejects. Both are checked so a
+# future edit cannot silently reintroduce the brown or drift the accent.
+EXPECTED_ACCENT = "#2B3A5C"
 REJECTED_COLOR = "#8A6338"
 
 _HEX_COLOR = re.compile(r"^#(?P<hex>[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$")
@@ -46,6 +47,8 @@ _RGBA_COLOR = re.compile(
 _RGBA_FLOAT_COLOR = re.compile(
     r"^rgba\((?P<r>[^,]+),(?P<g>[^,]+),(?P<b>[^,]+),(?P<a>[^)]+)\)$"
 )
+# A value that names another token, as the design system writes `{surface}`.
+_REFERENCE = re.compile(r"^\{(?P<path>[A-Za-z0-9_.]+)\}$")
 
 
 class TokenError(Exception):
@@ -155,11 +158,14 @@ def _dart_member(name: str, value: str) -> list[str]:
     formatter's output. A declaration that fits the formatter's 80-column page
     stays on one line; otherwise the call's arguments are split one per line
     with a trailing comma, which is the formatter's only expansion for the
-    constructors this file uses.
+    constructors this file uses, and a bare reference to another constant moves
+    to a continuation line.
     """
     single = f"  static const {name} = {value};"
     if len(single) <= 80:
         return [single]
+    if "(" not in value:
+        return [f"  static const {name} =", f"      {value};"]
     open_paren = value.index("(")
     callee = value[:open_paren]
     arguments = value[open_paren + 1 : -1].split(", ")
@@ -216,6 +222,9 @@ class Token:
     path: tuple[str, ...]
     authority: str
     value: object
+    # The dotted path this token's source value referenced, if any; [value] is
+    # then the referenced token's resolved value.
+    reference: str | None = None
 
     @property
     def dotted(self) -> str:
@@ -252,11 +261,42 @@ def collect(tokens: dict, authority: dict[str, str]) -> list[Token]:
             return
         collected.append(Token(tuple(path), authority_for(tuple(path), authority), node))
 
-    for section in ("app", "reader", "radius", "type", "layout"):
+    sections = ("color", "app", "reader", "radius", "space", "size", "type", "layout")
+    for section in sections:
         if section not in tokens:
             raise TokenError(f"the token source is missing the {section!r} section")
         walk(tokens[section], [section])
-    return collected
+    return resolve(collected)
+
+
+def resolve(tokens: list[Token]) -> list[Token]:
+    """Replaces each `{path}` reference with the referenced token's value.
+
+    A reference keeps its target in [Token.reference] so the Dart module can
+    name the referenced constant instead of repeating its value. References
+    may chain; a missing target or a cycle is an error.
+    """
+    by_path = {token.dotted: token for token in tokens}
+
+    def value_of(path: str, seen: tuple[str, ...]) -> object:
+        if path in seen:
+            raise TokenError(f"{seen[0]}: reference cycle through {path}")
+        target = by_path.get(path)
+        if target is None:
+            raise TokenError(f"{seen[-1]}: references the missing token {path}")
+        if isinstance(target.value, str) and (match := _REFERENCE.match(target.value)):
+            return value_of(match.group("path"), seen + (path,))
+        return target.value
+
+    resolved: list[Token] = []
+    for token in tokens:
+        if isinstance(token.value, str) and (match := _REFERENCE.match(token.value)):
+            reference = match.group("path")
+            value = value_of(reference, (token.dotted,))
+            resolved.append(Token(token.path, token.authority, value, reference))
+        else:
+            resolved.append(token)
+    return resolved
 
 
 def token_colors(tokens: list[Token]) -> dict[str, Color]:
@@ -285,14 +325,14 @@ def validate(tokens: list[Token], document: dict) -> None:
     accent = colors.get("app.accent")
     if accent is None or _color_hex(accent).upper() != EXPECTED_ACCENT.upper():
         raise TokenError(
-            f"app.accent must stay {EXPECTED_ACCENT} (plan decision 2); got "
+            f"app.accent must stay {EXPECTED_ACCENT} (the design system slate); got "
             f"{None if accent is None else _color_hex(accent)}"
         )
     for name, color in colors.items():
         if _color_hex(color).upper().startswith(REJECTED_COLOR.upper()):
             raise TokenError(
                 f"{name} is the rejected #109 brown {REJECTED_COLOR}; plan "
-                "decision 2 requires the Iced accent instead"
+                "decision 2 rejects it"
             )
 
     reader_roles = {
@@ -319,7 +359,7 @@ def validate(tokens: list[Token], document: dict) -> None:
         ):
             raise TokenError(
                 f"{token.dotted}: font families are recorded per product with "
-                "'iced' and 'flutter' keys"
+                "a 'flutter' key and an optional historical 'iced' key"
             )
     family_paths = {
         token.path[:-1] for token in tokens if token.path[:2] == ("type", "family")
@@ -328,10 +368,10 @@ def validate(tokens: list[Token], document: dict) -> None:
         products = {
             token.path[-1] for token in tokens if token.path[:-1] == path
         }
-        if products != {"iced", "flutter"}:
+        if "flutter" not in products:
             raise TokenError(
-                f"{'.'.join(path)} must record both the 'iced' and 'flutter' "
-                f"family names; got {sorted(products)}"
+                f"{'.'.join(path)} must record the 'flutter' family name; got "
+                f"{sorted(products)}"
             )
 
 
@@ -343,13 +383,16 @@ def render_dart(tokens: list[Token], document: dict) -> str:
         "// source, generated by `scripts/generate-theme-tokens.py`. Do not edit",
         "// this file by hand; run `make theme-tokens` after changing the JSON.",
         "//",
-        f"// Values are transcribed from the pinned Iced reference",
+        "// Colors, radii and type families are the Shōsai design system",
+        "// (`docs/design-system.md`). Type sizes and layout metrics are",
+        "// transcribed from the pinned Iced reference",
         f"// `{document['meta']['reference_revision']}` and specified in",
         "// `docs/flutter-ui-reference-spec.md` §3.",
         "",
         "import 'dart:ui' show Color;",
         "",
-        "/// The shared design tokens, mapped from the pinned Iced reference.",
+        "/// The shared design tokens: the Shōsai design system's colors, radii and",
+        "/// type families, and the pinned Iced type sizes and layout metrics.",
         "abstract final class ShosaiTokens {",
     ]
     seen_sections: list[str] = []
@@ -367,7 +410,11 @@ def render_dart(tokens: list[Token], document: dict) -> str:
         value = token.value
         name = _dart_name(list(token.path))
         lines.extend(_dart_doc(token.dotted, token.authority))
-        if isinstance(value, str) and not value.startswith(("#", "rgb(", "rgba(")):
+        if token.reference is not None:
+            lines.extend(
+                _dart_member(name, _dart_name(token.reference.split(".")))
+            )
+        elif isinstance(value, str) and not value.startswith(("#", "rgb(", "rgba(")):
             lines.extend(_dart_member(name, f"'{value}'"))
         elif isinstance(value, str):
             lines.extend(

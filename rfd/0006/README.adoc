@@ -1,6 +1,6 @@
 :authors: Darwin D Wu <darwin67@users.noreply.github.com>
-:state: ideation
-:discussion:
+:state: published
+:discussion: https://github.com/chaba-dev/shosai/pull/148
 :labels: annotations, notes, search, epub, pdf, reader, accessibility
 
 = RFD 6 Cross-format highlighting, notes and search

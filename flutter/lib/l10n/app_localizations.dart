@@ -116,12 +116,6 @@ abstract class AppLocalizations {
   /// **'Search title or author'**
   String get searchLibraryPlaceholder;
 
-  /// Iced reference key: collection. Uppercase in both locales by reference design.
-  ///
-  /// In en, this message translates to:
-  /// **'COLLECTION'**
-  String get collectionLabel;
-
   /// Iced reference key: all (compact filter row).
   ///
   /// In en, this message translates to:
@@ -188,6 +182,12 @@ abstract class AppLocalizations {
   /// **'Not started'**
   String get cardNotStarted;
 
+  /// A book's reading status once it is read to the end.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished'**
+  String get cardFinished;
+
   /// Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.
   ///
   /// In en, this message translates to:
@@ -199,6 +199,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cover of {title}'**
   String cardCoverSemantics(String title);
+
+  /// Semantics label for a shelf card's title: the title with its author, which the card shows only on a generated cover.
+  ///
+  /// In en, this message translates to:
+  /// **'{title}, by {author}'**
+  String cardTitleByAuthorSemantics(String title, String author);
 
   /// Retained Flutter tooltip for the card's overflow action; no Iced counterpart (Iced draws a bare glyph).
   ///
@@ -236,10 +242,10 @@ abstract class AppLocalizations {
   /// **'Continue reading'**
   String get libraryContinueReading;
 
-  /// Iced reference key: continue. The continue card's right-hand link label; the two spaces before the chevron are the reference's own spacing.
+  /// The Continue reading hero's primary action, which opens the book at its saved place.
   ///
   /// In en, this message translates to:
-  /// **'Continue  ›'**
+  /// **'Continue'**
   String get libraryContinue;
 
   /// Iced reference key: percent-complete. The continue card's progress label; the placeholder is the rounded percentage, never concatenated in Dart.
@@ -871,6 +877,84 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This chapter is too long to scroll continuously, so it is shown as pages'**
   String get noticeReaderChapterPaginated;
+
+  /// The Bookshelf shell: accessible name of the sidebar, rail and bottom bar that hold the places.
+  ///
+  /// In en, this message translates to:
+  /// **'Places'**
+  String get shellPlacesLabel;
+
+  /// The Bookshelf shell: the Library place in the sidebar, rail and bottom bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Library'**
+  String get shellPlaceLibrary;
+
+  /// The Bookshelf shell: the Notes place (notes and highlights across all books).
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get shellPlaceNotes;
+
+  /// The Bookshelf shell: the Bookmarks place (bookmarks across all books).
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmarks'**
+  String get shellPlaceBookmarks;
+
+  /// The Bookshelf shell: the Search place and the sidebar's field-shaped search button.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get shellPlaceSearch;
+
+  /// The Bookshelf shell: heading of the open books in the sidebar and on the phone's library.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading now'**
+  String get shellReadingNow;
+
+  /// The Bookshelf shell: accessible name and tooltip of an open book's close button.
+  ///
+  /// In en, this message translates to:
+  /// **'Close {title}'**
+  String shellCloseBook(String title);
+
+  /// The Bookshelf shell: the Notes place before any note or highlight exists.
+  ///
+  /// In en, this message translates to:
+  /// **'No notes yet'**
+  String get shellNotesEmptyHeading;
+
+  /// The Bookshelf shell: the Notes place's empty state, saying what to do.
+  ///
+  /// In en, this message translates to:
+  /// **'Select text in a book to highlight it, or add a note to a page. Every note and highlight appears here.'**
+  String get shellNotesEmptyBody;
+
+  /// The Bookshelf shell: the Bookmarks place before any bookmark exists.
+  ///
+  /// In en, this message translates to:
+  /// **'No bookmarks yet'**
+  String get shellBookmarksEmptyHeading;
+
+  /// The Bookshelf shell: the Bookmarks place's empty state, saying what to do.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmark a page from the reader’s toolbar and it appears here.'**
+  String get shellBookmarksEmptyBody;
+
+  /// The Bookshelf shell: the Search place's title.
+  ///
+  /// In en, this message translates to:
+  /// **'Search books and notes'**
+  String get shellSearchEmptyHeading;
+
+  /// The Bookshelf shell: the Search place until the search palette (RFD 6) exists.
+  ///
+  /// In en, this message translates to:
+  /// **'Searching book text and notes across the library is coming. To find a book now, search the library by title or author.'**
+  String get shellSearchEmptyBody;
 }
 
 class _AppLocalizationsDelegate

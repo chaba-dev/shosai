@@ -7,6 +7,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
@@ -94,15 +95,15 @@ void main() {
     return bridge;
   }
 
-  /// The library chrome above the collection: the header, the wide sidebar and
-  /// the compact filter row.
+  /// The library chrome around the collection: the header, the filter row and
+  /// the shell's sidebar.
   ///
   /// Scoped this way because a card is a button too, and its format label
   /// carries the same text as a filter entry.
   final chrome = find.byWidgetPredicate(
     (widget) =>
         widget is LibraryHeader ||
-        widget is LibrarySidebar ||
+        widget is ShellSidebar ||
         widget is LibraryFilterRow,
   );
 
@@ -111,15 +112,16 @@ void main() {
     matching: find.widgetWithText(ShadButton, label),
   );
 
-  /// A grid card's own 13 px title line.
+  /// A shelf card's own title line.
   ///
-  /// The continue-reading section paints the same book's title in its own 16 px
-  /// line, so a bare text finder would match both.
-  Finder cardTitle(String title) => find.byWidgetPredicate(
-    (widget) =>
-        widget is Text &&
-        widget.data == title &&
-        widget.style?.fontSize == ShosaiTokens.typeSize13,
+  /// The hero and the generated covers paint the same title, so a bare text
+  /// finder would match several.
+  Finder cardTitle(String title) => find.byElementPredicate(
+    (element) =>
+        element.widget is Text &&
+        (element.widget as Text).data == title &&
+        element.findAncestorWidgetOfExactType<LibraryBookCard>() != null &&
+        element.findAncestorWidgetOfExactType<ShellGeneratedCover>() == null,
   );
 
   /// The label paragraph inside the chrome control labelled [label].
@@ -154,16 +156,16 @@ void main() {
         metadata: const <String, Object?>{'state': 'wide'},
       );
 
-      expect(find.byType(LibrarySidebar), findsOneWidget);
+      expect(find.byType(ShellSidebar), findsOneWidget);
       expect(
-        tester.getSize(find.byType(LibrarySidebar)).width,
-        ShosaiTokens.layoutLibrarySidebarWidth,
+        tester.getSize(find.byType(ShellSidebar)).width,
+        ShosaiTokens.sizeSidebarWidth,
       );
       expect(
         tester.getSize(find.byType(ShadInput)).width,
-        ShosaiTokens.layoutLibraryHeaderSearchMaxWidth,
+        lessThanOrEqualTo(ShosaiTokens.layoutLibraryHeaderSearchMaxWidth),
       );
-      expect(entry('All books'), findsOneWidget);
+      expect(entry('All'), findsOneWidget);
       expect(entry('Settings'), findsOneWidget);
     });
 
@@ -179,20 +181,21 @@ void main() {
         ready: () => harnessImagesReady(tester),
         verify: (tester) async {
           // The reference's Japanese strings, taken from the Iced catalogs.
-          expect(find.text('ライブラリ'), findsOneWidget);
+          // The header's title and the sidebar's place.
+          expect(find.text('ライブラリ'), findsNWidgets(2));
           expect(find.text('自分だけの読書室'), findsOneWidget);
-          expect(find.text('コレクション'), findsOneWidget);
-          expect(entry('すべての本'), findsOneWidget);
+          expect(find.text('読書中'), findsNothing);
+          expect(entry('すべて'), findsOneWidget);
           expect(entry('設定'), findsOneWidget);
           expect(entry('本を追加'), findsOneWidget);
           expect(find.text('タイトル・著者を検索...'), findsOneWidget);
           // Tooltips and accessibility text are translated too.
           expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
-          expect(find.bySemanticsLabel('本を追加'), findsOneWidget);
+          expect(find.bySemanticsLabel('本を追加'), findsWidgets);
           expect(
             find.descendant(
-              of: find.byType(LibrarySidebar),
-              matching: find.bySemanticsLabel('すべての本'),
+              of: find.byType(ShellSidebar),
+              matching: find.bySemanticsLabel('ライブラリ'),
             ),
             findsOneWidget,
           );
@@ -234,7 +237,7 @@ void main() {
       );
 
       expect(cardTitle('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsOneWidget);
-      expect(find.text('Library'), findsOneWidget);
+      expect(find.text('Library'), findsNWidgets(2));
       expect(entry('Settings'), findsOneWidget);
     });
 
@@ -266,10 +269,7 @@ void main() {
         tester.widget<ShadButton>(entry('PDF')).backgroundColor,
         ShosaiTokens.appAccentSoft,
       );
-      expect(
-        tester.widget<ShadButton>(entry('All books')).backgroundColor,
-        isNull,
-      );
+      expect(tester.widget<ShadButton>(entry('All')).backgroundColor, isNull);
       expect(
         find.text(
           'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
@@ -307,16 +307,16 @@ void main() {
         )).toARGB32(),
         scheme.card.toARGB32(),
       );
-      final sidebar = tester.getRect(find.byType(LibrarySidebar));
+      final sidebar = tester.getRect(find.byType(ShellSidebar));
       expect(
         (await paintedColorAt(
           tester,
           Offset(sidebar.left + 8, sidebar.bottom - 8),
         )).toARGB32(),
-        scheme.secondary.toARGB32(),
+        ShosaiTokens.colorDarkChrome.toARGB32(),
       );
       expect(
-        tester.widget<ShadButton>(entry('All books')).backgroundColor,
+        tester.widget<ShadButton>(entry('All')).backgroundColor,
         scheme.selection,
       );
     });
@@ -342,7 +342,7 @@ void main() {
 
       // Tab until the EPUB entry owns focus, so the captured frame shows the
       // focus ring on a known control.
-      for (var step = 0; step < 8; step += 1) {
+      for (var step = 0; step < 40; step += 1) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pump();
         if (tester
@@ -385,7 +385,7 @@ void main() {
           expect(header.bottom, lessThanOrEqualTo(grid.top));
           // The scaled Japanese interface stays translated rather than falling
           // back to English at 200% text.
-          expect(find.text('ライブラリ'), findsOneWidget);
+          expect(find.text('ライブラリ'), findsNWidgets(2));
           expect(entry('設定'), findsOneWidget);
           expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
           expect(find.text('Library'), findsNothing);
@@ -428,7 +428,8 @@ void main() {
           ready: () => harnessImagesReady(tester),
           verify: (tester) async {
             expect(find.byType(LibraryFilterRow), findsOneWidget);
-            expect(find.byType(LibrarySidebar), findsNothing);
+            expect(find.byType(ShellSidebar), findsNothing);
+            expect(find.byType(ShellBottomNav), findsOneWidget);
             final labels = japanese
                 ? const ['すべて', 'EPUB', 'PDF', '設定']
                 : const ['All', 'EPUB', 'PDF', 'Settings'];
@@ -439,7 +440,8 @@ void main() {
             if (japanese) {
               // A Japanese interface in the compact row, not English chrome
               // with Japanese metadata.
-              expect(find.text('ライブラリ'), findsOneWidget);
+              // The header's title and the bottom bar's place.
+              expect(find.text('ライブラリ'), findsNWidgets(2));
               expect(find.text('タイトル・著者を検索...'), findsOneWidget);
               expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
               expect(find.text('All'), findsNothing);
@@ -458,12 +460,12 @@ void main() {
   });
 
   group('breakpoint', () {
-    // Both locales cross the boundary identically: the probes check the layout
-    // switch, and the Japanese probes additionally keep the interface
-    // translated on both sides of it.
+    // Both locales cross the phone boundary identically: the probes check the
+    // shell's switch from the bottom bar to the sidebar, and the Japanese
+    // probes additionally keep the interface translated on both sides of it.
     for (final locale in const [Locale('en'), Locale('ja')]) {
-      for (final width in const [759.0, 760.0, 761.0]) {
-        testWidgets('B760± at ${width}px ${locale.languageCode}', (
+      for (final width in const [599.0, 600.0, 601.0]) {
+        testWidgets('B600± at ${width}px ${locale.languageCode}', (
           tester,
         ) async {
           final japanese = locale.languageCode == 'ja';
@@ -474,24 +476,25 @@ void main() {
             locale: locale,
             ready: () => harnessImagesReady(tester),
             verify: (tester) async {
-              final wide = width >= ShosaiTokens.layoutLibraryCompactBreakpoint;
+              final phone = ShellLayout.forWidth(width) == ShellLayout.phone;
               expect(
-                find.byType(LibrarySidebar),
-                wide ? findsOneWidget : findsNothing,
+                find.byType(ShellSidebar),
+                phone ? findsNothing : findsOneWidget,
               );
               expect(
-                find.byType(LibraryFilterRow),
-                wide ? findsNothing : findsOneWidget,
+                find.byType(ShellBottomNav),
+                phone ? findsOneWidget : findsNothing,
               );
+              expect(find.byType(LibraryFilterRow), findsOneWidget);
               if (japanese) {
-                expect(find.text('ライブラリ'), findsOneWidget);
-                expect(entry(wide ? 'すべての本' : 'すべて'), findsOneWidget);
+                expect(find.text('ライブラリ'), findsNWidgets(2));
+                expect(entry('すべて'), findsOneWidget);
                 expect(entry('設定'), findsOneWidget);
                 expect(find.text('Library'), findsNothing);
               }
             },
             metadata: <String, Object?>{
-              'config': 'B760±',
+              'config': 'B600±',
               'state': 'breakpoint',
               'clientWidth': width,
             },
@@ -501,7 +504,9 @@ void main() {
     }
   });
 
-  testWidgets('a short window scrolls the sidebar to Settings', (tester) async {
+  testWidgets('a short window keeps the places and Settings in reach', (
+    tester,
+  ) async {
     const view = HarnessView(size: Size(900, 400), textScale: 2);
     final bridge = HarnessBridge(
       books: harnessLibraryBooks(),
@@ -520,20 +525,22 @@ void main() {
       ready: () => harnessImagesReady(tester),
     );
 
-    expect(find.byType(LibrarySidebar), findsOneWidget);
-    await tester.scrollUntilVisible(
-      entry('Settings'),
-      80,
-      scrollable: find.descendant(
-        of: find.byType(LibrarySidebar),
-        matching: find.byType(Scrollable),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final sidebar = tester.getRect(find.byType(ShellSidebar));
+    for (final place in ['Library', 'Notes', 'Bookmarks', 'Search']) {
+      final label = find.descendant(
+        of: find.byType(ShellSidebar),
+        matching: find.text(place),
+      );
+      expect(
+        tester.getRect(label).bottom,
+        lessThanOrEqualTo(sidebar.bottom),
+        reason: '$place stays on screen in a short window',
+      );
+    }
     expect(
-      tester.getRect(entry('Settings')).top,
-      lessThan(tester.getRect(find.byType(LibrarySidebar)).bottom),
-      reason: 'Settings is reachable by scrolling the sidebar',
+      tester.getRect(entry('Settings')).bottom,
+      lessThanOrEqualTo(view.size.height),
+      reason: 'Settings stays on screen in the filter row',
     );
     await captureState(tester, '3a-library-short-900x400-t200', view, {
       'appLocale': renderedLocale(tester),
@@ -554,7 +561,7 @@ void main() {
       metadata: const <String, Object?>{'state': 'empty'},
     );
 
-    expect(find.byType(LibrarySidebar), findsOneWidget);
+    expect(find.byType(ShellSidebar), findsOneWidget);
     expect(entry('Settings'), findsOneWidget);
     expect(entry('Add books'), findsOneWidget);
   });

@@ -28,7 +28,7 @@ The previews with Japanese text also load Shippori Mincho from Google Fonts, so 
 
 ### Relationship to the application tokens
 
-`assets/theme/tokens.json` remains the source the Iced and Flutter frontends render from (see [assets/theme/README.md](../assets/theme/README.md)). This system started from those values and is the design target for the MVP. Moving the applications onto it, including the new page-theme, highlight and spacing tokens, is MVP implementation work and goes through the application token source and its tests, never by reading `docs/design-system/` at runtime.
+The Flutter application renders from `assets/theme/tokens.json` (see [assets/theme/README.md](../assets/theme/README.md)), never by reading `docs/design-system/` at runtime. Since 2026-10-21 that file transcribes this system's colors, radii, spacing and sizes under the same names in camelCase: `ink-muted` is `color.light.inkMuted` and `color.dark.inkMuted` there, and `ShosaiTokens.colorLightInkMuted` in Dart; `space-3` is `space.3`, `sidebar-width` is `size.sidebarWidth`. The application themes' roles (`app.*`, `reader.*`) reference those tokens, so the current screens already paint in D1 paper, and `scripts/tests/test_generate_theme_tokens.py` fails when the two files disagree. The type styles and layered shadows are not transcribed yet; the type sizes and layout metrics the current screens use are still the Iced-era values until the Bookshelf composition replaces them.
 
 ### Decisions
 
@@ -344,4 +344,4 @@ Short and functional: 150 ms for hover and toggles, 200 ms ease-out for popovers
 1. Edit `docs/design-system/tokens.json` and run `make design-system-css`; change `components.css` and the affected previews together.
 2. Update this document in the same change, and check both app themes in `make design-system`.
 3. A change to fonts is also a typography change: follow [typography.md](typography.md).
-4. A token the applications need goes into `assets/theme/tokens.json` through its own generator and tests.
+4. Copy every token change into `assets/theme/tokens.json` under the same camelCase name and run `make theme-tokens`; the generator's tests compare the two files.
