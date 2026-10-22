@@ -84,14 +84,12 @@ void main() {
     await Future.wait(bridges.map((bridge) => bridge.disposed.future));
   });
 
-  testWidgets('welcome panel describes the native bridge action', (
-    tester,
-  ) async {
+  testWidgets('welcome panel describes the path entry', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: WelcomePanel())),
     );
 
-    expect(find.textContaining('generated Rust bridge'), findsOneWidget);
+    expect(find.textContaining('local document path'), findsOneWidget);
   });
 
   test('page colors retain strong content contrast in dark mode', () {
@@ -663,7 +661,8 @@ void main() {
 
       expect(controller.model.busy, isFalse);
       expect(controller.model.document?.handle, _documentHandle);
-      expect(reported, hasLength(6));
+      // The six open transitions, then the Contents entries the open loads.
+      expect(reported, hasLength(7));
 
       controller.dispose();
       await bridge.disposed.future;
@@ -1728,6 +1727,7 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
+    await _openNotesPanel(tester);
     await tester.tap(
       find.byTooltip('Associate highlights from an earlier version…'),
     );
@@ -1789,15 +1789,10 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/changed.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    // The header is a bounded scroll region on a viewport this short with a
-    // scaled interface, so the recovery action is reachable by scrolling
-    // within the header rather than clipped.
-    await tester.ensureVisible(
-      find.byTooltip('Associate highlights from an earlier version…'),
-    );
-    // The header is a bounded scroll region on a viewport this short with a
-    // scaled interface, so the recovery action is reachable by scrolling
-    // within the header rather than clipped.
+    // The Notes sheet scrolls on a viewport this short with a scaled
+    // interface, so the recovery action is reachable by scrolling within it
+    // rather than clipped.
+    await _openNotesPanel(tester);
     await tester.ensureVisible(
       find.byTooltip('Associate highlights from an earlier version…'),
     );
@@ -2718,28 +2713,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The welcome body is document-area copy: it keeps the reader palette ink
-    // and paper (owner decision 2026-09-28) while the shared chrome stays on the
-    // light application palette.
+    // With no book the welcome body sits on the stage, which stays on the
+    // light application palette whatever the page theme: its ink is the
+    // stage's, not the dark page's, so it stays legible.
     final welcome = tester.widget<Text>(
-      find.textContaining('generated Rust bridge'),
+      find.textContaining('local document path'),
     );
-    expect(welcome.style?.color, ShosaiTokens.readerDarkText);
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is ColoredBox &&
-            widget.color == ShosaiTokens.readerDarkBackground,
-      ),
-      findsOneWidget,
-    );
-    expect(
-      ThemeData.estimateBrightnessForColor(welcome.style!.color!),
-      isNot(
-        ThemeData.estimateBrightnessForColor(ShosaiTokens.readerDarkBackground),
-      ),
-      reason: 'the no-document copy stays legible on the document paper',
-    );
+    expect(welcome.style?.color, ShosaiTokens.colorLightInkMuted);
     final scaffoldContext = tester.element(find.byType(Scaffold));
     expect(Theme.of(scaffoldContext).brightness, Brightness.light);
     await tester.pumpWidget(const SizedBox());
@@ -3867,6 +3847,7 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     bridge.updateCompleter = Completer<bool>();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Change color'));
     await tester.pump();
     expect(
@@ -4002,6 +3983,7 @@ void main() {
     await tester.pumpAndSettle();
     final selectionCalls = bridge.selectionCalls;
     bridge.updateCompleter = Completer<bool>();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Change color'));
     await tester.pump();
 
@@ -4044,6 +4026,7 @@ void main() {
       final displayedScale = tester.view.devicePixelRatio;
       final selectionCalls = bridge.selectionCalls;
       bridge.updateCompleter = Completer<bool>();
+      await _openNotesPanel(tester);
       await tester.tap(find.byTooltip('Change color'));
       await tester.pump();
 
@@ -4122,6 +4105,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/a.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
@@ -4204,40 +4188,37 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
-      // The document box is the viewport minus the two RD-06 edge columns;
-      // the columns are chrome and scale with the interface, so the width is
-      // measured from the rendered control rather than hardcoded. The page is
-      // laid out at the display scale it was opened with.
-      double edgeWidth() => tester
-          .getSize(find.byKey(const ValueKey('reader-edge-previous')))
-          .width;
+      // The document box spans the stage between the two RD-06 edge columns;
+      // the columns are chrome and scale with the interface, so the box is
+      // measured against the rendered controls rather than hardcoded. The page
+      // is laid out at the display scale it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 600 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
+      await _openNotesPanel(tester);
       expect(find.text('Highlight 1 — recovered'), findsOneWidget);
-      // Address the annotation strip's own scrollable: the reader chrome adds
-      // scroll regions of its own (the bounded header and the dev-only entry),
-      // so "the last scrollable in the tree" is not the strip any more.
-      final annotationStrip = find.descendant(
-        of: find.byType(ListView),
+      // Address the Notes panel's own scrollable: the reader chrome adds
+      // scroll regions of its own (the bounded header and the dev-only entry).
+      final notesScroll = find.descendant(
+        of: find.byKey(const ValueKey('reader-notes-scroll')),
         matching: find.byType(Scrollable),
       );
       await tester.scrollUntilVisible(
         find.text('Highlight 1 — ambiguous'),
         300,
-        scrollable: annotationStrip,
+        scrollable: notesScroll,
       );
       expect(find.text('Highlight 1 — ambiguous'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Highlight 1 — unavailable'),
         300,
-        scrollable: annotationStrip,
+        scrollable: notesScroll,
       );
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
       tester.view.physicalSize = const Size(1400, 1000);
       await tester.pumpAndSettle();
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
 
       final callsBeforeTheme = bridge.selectionCalls;
       await tester.pumpWidget(app(brightness: Brightness.dark));
@@ -4250,7 +4231,7 @@ void main() {
       // At `T200` the edge columns themselves are wider: only the chrome
       // scales.
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
 
       tester.view.devicePixelRatio = 3;
       tester.view.physicalSize = const Size(2100, 1500);
@@ -4258,7 +4239,7 @@ void main() {
       // A device pixel ratio change is not an interface text-scale change: the
       // scale of an already-open document stays the one it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
@@ -4288,8 +4269,9 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
-    // The reported reader viewport is the window minus the two RD-06 edge
-    // columns, at every device class and rotation.
+    // The reported reader viewport spans the stage between the two RD-06 edge
+    // columns, at every device class and rotation; on a phone the stage is
+    // the whole window.
     for (final size in const [
       Size(390, 844),
       Size(844, 390),
@@ -4299,14 +4281,13 @@ void main() {
     ]) {
       tester.view.physicalSize = size;
       await tester.pumpAndSettle();
-      final edgeWidth = tester
-          .getSize(find.byKey(const ValueKey('reader-edge-previous')))
-          .width;
-      expect(
-        tester.getSize(_documentArea).width,
-        size.width - 2 * edgeWidth,
-        reason: 'reader viewport at $size',
-      );
+      _expectViewportBetweenEdges(tester, reason: 'reader viewport at $size');
+      if (size.width < 600) {
+        expect(
+          tester.getSize(find.byKey(const ValueKey('reader-stage'))).width,
+          size.width,
+        );
+      }
     }
     expect(tester.takeException(), isNull);
 
@@ -4465,7 +4446,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final bridge = _ControlledBridge(
       initialAnnotations: List.generate(
-        8,
+        24,
         (index) => _annotation('$index', unit: index),
       ),
       immediateLists: true,
@@ -4482,27 +4463,23 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(-600, 0));
-    await tester.pumpAndSettle();
-    final listBefore = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(ListView),
-        matching: find.byType(Scrollable),
-      ),
+    await _openNotesPanel(tester);
+    // The Notes panel's own scrollable: the reader chrome has scroll regions
+    // of its own.
+    final notes = find.descendant(
+      of: find.byKey(const ValueKey('reader-notes-scroll')),
+      matching: find.byType(Scrollable),
     );
+    await tester.drag(notes, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    final listBefore = tester.state<ScrollableState>(notes);
     expect(listBefore.position.pixels, greaterThan(0));
 
-    tester.view.physicalSize = const Size(1144, 900);
+    // From the tablet's floating panel to the desktop's docked one: the panel
+    // keeps its scrollable, so the offset survives the move.
+    tester.view.physicalSize = const Size(1280, 900);
     await tester.pumpAndSettle();
-    // The highlight strip keeps its own scrollable across the breakpoint, so
-    // the offset survives the relayout; address it by the strip rather than by
-    // position, since the reader also has other scrollables.
-    final listAfter = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(ListView),
-        matching: find.byType(Scrollable),
-      ),
-    );
+    final listAfter = tester.state<ScrollableState>(notes);
     expect(listAfter, same(listBefore));
     expect(listAfter.position.pixels, greaterThan(0));
 
@@ -4533,18 +4510,22 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     final highlight = find.widgetWithText(ShadButton, 'Highlight 1');
-    for (var tabs = 0; tabs < 10; tabs += 1) {
-      final focus = FocusManager.instance.primaryFocus;
-      if (focus != null && focus.rect.overlaps(tester.getRect(highlight))) {
-        break;
-      }
+    // The button's own focus, not the panel's, which holds it.
+    bool onHighlight(FocusNode? focus) =>
+        focus != null &&
+        tester.getRect(highlight).inflate(1).contains(focus.rect.topLeft) &&
+        tester.getRect(highlight).inflate(1).contains(focus.rect.bottomRight);
+    for (var tabs = 0; tabs < 20; tabs += 1) {
+      if (onHighlight(FocusManager.instance.primaryFocus)) break;
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
     }
     final focusBefore = FocusManager.instance.primaryFocus!;
-    expect(focusBefore.rect.overlaps(tester.getRect(highlight)), isTrue);
-    tester.view.physicalSize = const Size(1144, 900);
+    expect(onHighlight(focusBefore), isTrue);
+    // From the tablet's floating panel to the desktop's docked one.
+    tester.view.physicalSize = const Size(1280, 900);
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus, same(focusBefore));
 
@@ -4622,7 +4603,7 @@ void main() {
               as BoxDecoration;
       for (
         var tabs = 0;
-        tabs < 5 && focusDecoration().border == null;
+        tabs < 15 && focusDecoration().border == null;
         tabs += 1
       ) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
@@ -4654,7 +4635,7 @@ void main() {
         focusBorder.top.color,
         Theme.of(tester.element(contentFinder)).colorScheme.primary,
       );
-      expect(focusBorder.top.width, 3);
+      expect(focusBorder.top.width, 2);
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -4967,6 +4948,7 @@ void main() {
         await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
         await tester.tap(find.text('Open document'));
         await tester.pumpAndSettle();
+        await _openNotesPanel(tester);
         await tester.tap(find.byTooltip('Change color'));
         await tester.pump();
 
@@ -5250,6 +5232,7 @@ void main() {
           await tester.pumpAndSettle();
           expect(bridge.createCalls, 1);
           expect(bridge.createdRanges.single, (BigInt.one, BigInt.from(8)));
+          await _openNotesPanel(tester);
           expect(find.text('Highlight 1'), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
@@ -5257,6 +5240,7 @@ void main() {
           await tester.enterText(find.byType(ShadInput), '/tmp/book');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
+          await _openNotesPanel(tester);
           expect(find.text('Highlight 1'), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
@@ -5620,8 +5604,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await tester.pump();
     await tester.pump();
-    // The location indicator is the restored status bar (RD-05).
-    expect(find.text('Page 2 · 100%'), findsOneWidget);
+    // The location indicator is the status line (RD-05).
+    expect(find.text('100% · page 2 of 2'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
     await held.moveTo(topLeft + Offset(side * .7, side * .7));
     await held.up();
@@ -5825,6 +5809,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(ShadInput).last, 'Updated note');
@@ -5847,6 +5832,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(bridge.listCalls, 3);
+    await _openNotesPanel(tester);
     expect(find.text('Highlight 1'), findsOneWidget);
     expect(find.textContaining('annotation list failed'), findsNothing);
     expect(
@@ -5932,6 +5918,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
     expect(find.text('Save'), findsOneWidget);
@@ -6030,13 +6017,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-bookmark')));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-more-bookmark')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('reader-panel-more')), findsNothing);
     toggle.completeError(StateError('bookmark commit failed'));
     await tester.pumpAndSettle();
 
@@ -6617,11 +6599,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // The tools surface is retired (contract §7.2 item 1); the live tools
-    // controls are retained inside the more panel and must stay inside the
+    // The page field lives in the Contents sheet and must stay inside the
     // usable viewport above the keyboard (640 logical height minus the 280
     // inset), not merely inside the window.
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
 
     expect(tester.takeException(), isNull);
@@ -6631,7 +6612,7 @@ void main() {
       find.byKey(const ValueKey('reader-page-input')),
     );
     final panelRect = tester.getRect(
-      find.byKey(const ValueKey('reader-panel-more')),
+      find.byKey(const ValueKey('reader-panel-contents')),
     );
     final contentRect = tester.getRect(
       find.byKey(const ValueKey('reader-content-semantics')),
@@ -6978,13 +6959,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-bookmark')));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-more-bookmark')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('reader-panel-more')), findsNothing);
 
     await tester.enterText(
       find.bySemanticsLabel('Document path'),
@@ -7066,6 +7042,27 @@ FlutterSelectionSurface _surface(
   ),
   visualLines: const [],
 );
+
+/// Expects the document box to fill the stage between the page-turn edges.
+void _expectViewportBetweenEdges(WidgetTester tester, {String? reason}) {
+  final document = tester.getRect(_documentArea);
+  final previous = tester.getRect(
+    find.byKey(const ValueKey('reader-edge-previous')),
+  );
+  final next = tester.getRect(find.byKey(const ValueKey('reader-edge-next')));
+  expect(document.left, previous.right, reason: reason);
+  expect(document.right, next.left, reason: reason);
+}
+
+/// Opens the reader's Notes panel, where the highlights and their recovery
+/// actions are listed, unless it is already open.
+Future<void> _openNotesPanel(WidgetTester tester) async {
+  if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isNotEmpty) {
+    return;
+  }
+  await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+  await tester.pumpAndSettle();
+}
 
 Future<void> _waitUntil(bool Function() condition) async {
   while (!condition()) {

@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
-import 'package:flutter/gestures.dart' show kSecondaryButton;
+import 'package:flutter/gestures.dart' show GestureBinding, kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -17,16 +17,19 @@ import 'package:shosai_flutter/reader/epub/continuous.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 part 'geometry.dart';
 part 'painting.dart';
 part 'view_chrome.dart';
-
 part 'view_dialogs.dart';
 part 'view_document.dart';
+part 'view_panels.dart';
 part 'view_selection.dart';
+part 'view_stage.dart';
+part 'view_toolbar.dart';
 
 /// Viewport shares that bound the fixed reader chrome rows.
 ///
@@ -35,9 +38,8 @@ part 'view_selection.dart';
 /// short window at a scaled interface), where the alternative is an overflow
 /// that pushes the document out of reach. The alert and error surfaces keep the
 /// pre-existing 0.15 bound.
-const double _readerTabStripBoundShare = 0.2;
 const double _readerHeaderBoundShare = 0.3;
-const double _readerPanelBoundShare = 0.4;
+const double _readerSearchBoundShare = 0.4;
 const double _readerAlertBoundShare = 0.15;
 const double _readerStatusBoundShare = 0.2;
 const double _readerDevEntryBoundShare = 0.4;
@@ -52,7 +54,6 @@ class ReaderScreen extends StatefulWidget {
     this.initialBookId,
     this.initialSettings,
     this.onLocatorChanged,
-    this.initialTabs = const [],
     this.progressSource,
     this.contentsLoader,
     this.externalLinkOpener,
@@ -64,6 +65,7 @@ class ReaderScreen extends StatefulWidget {
     this.debugEpubSessionObserver,
     this.debugContinuousStepObserver,
     this.debugPathEntry = false,
+    this.openBooksAction,
   }) : assert(
          (bridge == null) != (bridgeFactory == null),
          'a reader takes exactly one of bridge and bridgeFactory',
@@ -76,9 +78,6 @@ class ReaderScreen extends StatefulWidget {
   final int? initialBookId;
   final FlutterReaderSettings? initialSettings;
   final void Function(String path, int? bookId)? onLocatorChanged;
-
-  /// Fixture-injected tab strip entries (4B presentation; 5F owns sessions).
-  final List<ReaderTabPresentation> initialTabs;
 
   /// Fixture-supplied progress ordinals (RD-05); 5G supplies real values.
   final ReaderProgressSource? progressSource;
@@ -132,6 +131,12 @@ class ReaderScreen extends StatefulWidget {
   /// production renders, so it is off by default.
   final bool debugPathEntry;
 
+  /// The shell's open-books control, shown at the end of the phone toolbar.
+  ///
+  /// The reader only places it; on desktop and tablet the shell's sidebar
+  /// lists the open books instead, so the reader ignores it there.
+  final Widget? openBooksAction;
+
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
@@ -164,86 +169,35 @@ class _ReaderScreenState extends State<ReaderScreen>
   final RestorableIntN _openDocumentBookId = RestorableIntN(null);
   final GlobalKey _pathFieldKey = GlobalKey(debugLabel: 'document path');
   final GlobalKey _contentKey = GlobalKey(debugLabel: 'reader content');
+
+  /// One key per panel, so an open panel keeps its scroll position and focus
+  /// when a resize moves it between floating and docked.
+  final Map<ReaderPanel, GlobalKey> _panelKeys = {
+    for (final panel in ReaderPanel.values)
+      panel: GlobalKey(debugLabel: 'reader ${panel.name} panel'),
+  };
   final FocusNode _openFocus = FocusNode(debugLabel: 'open document');
   final FocusNode _readerFocus = FocusNode(debugLabel: 'reader surface');
   final FocusNode _actionFocus = FocusNode(debugLabel: 'selection actions');
   final FocusNode _backFocus = FocusNode(debugLabel: 'reader back');
   final FocusNode _contentsFocus = FocusNode(debugLabel: 'reader contents');
   final FocusNode _typographyFocus = FocusNode(debugLabel: 'reader typography');
-  final FocusNode _moreFocus = FocusNode(debugLabel: 'reader more');
+  final FocusNode _notesFocus = FocusNode(debugLabel: 'reader notes');
   final FocusNode _panelFocus = FocusNode(debugLabel: 'reader panel');
-  final ScrollController _tabScroll = ScrollController();
-  final Map<String, GlobalKey> _tabKeys = {};
-  final Map<String, FocusNode> _tabFocusNodes = {};
   ReaderPanel? _lastOpenPanel;
   ShadDialogRoute<String>? _noteDialogRoute;
   ShadDialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
   bool _controllerInitialized = false;
 
-  /// The stable key the reveal adapter scrolls into view for [tabId].
-  GlobalKey _tabKey(String tabId) => _tabKeys.putIfAbsent(
-    tabId,
-    () => GlobalKey(debugLabel: 'reader-tab-$tabId'),
-  );
-
-  /// The focus node the tab strip hands to the label control for [tabId].
-  FocusNode _tabFocusNode(String tabId) => _tabFocusNodes.putIfAbsent(
-    tabId,
-    () => FocusNode(debugLabel: 'reader-tab-label-$tabId'),
-  );
-
-  /// The focus node the tab strip hands to the close control for [tabId].
-  FocusNode _tabCloseFocusNode(String tabId) => _tabFocusNodes.putIfAbsent(
-    _tabCloseNodeKey(tabId),
-    () => FocusNode(debugLabel: 'reader-tab-close-$tabId'),
-  );
-
-  static String _tabCloseNodeKey(String tabId) => '$tabId::close';
-
-  void _pruneTabResources(ReaderModel model) {
-    final ids = {for (final tab in model.tabs) tab.id};
-    for (final key in _tabFocusNodes.keys.toList()) {
-      final id = key.endsWith('::close')
-          ? key.substring(0, key.length - '::close'.length)
-          : key;
-      if (!ids.contains(id)) {
-        _tabFocusNodes.remove(key)?.dispose();
-      }
-    }
-    for (final id in _tabKeys.keys.toList()) {
-      if (!ids.contains(id)) _tabKeys.remove(id);
-    }
-  }
-
-  /// Brings the tab into view; the controller decides when this runs.
-  Future<void> _revealTab(String tabId) async {
-    final context = _tabKeys[tabId]?.currentContext;
-    if (context == null || !mounted) return;
-    await Scrollable.ensureVisible(
-      context,
-      duration: Duration.zero,
-      alignment: 0,
-    );
-  }
-
   void _focusHeaderAction() {
     final focus = switch (_lastOpenPanel) {
       ReaderPanel.contents => _contentsFocus,
       ReaderPanel.typography => _typographyFocus,
-      ReaderPanel.more => _moreFocus,
+      ReaderPanel.notes => _notesFocus,
       null => _backFocus,
     };
     if (focus.canRequestFocus) focus.requestFocus();
-  }
-
-  void _focusActiveTab() {
-    for (final tab in _controller.model.tabs) {
-      if (tab.selected) {
-        _tabFocusNodes[tab.id]?.requestFocus();
-        return;
-      }
-    }
   }
 
   @override
@@ -284,13 +238,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           ReaderFocusTarget.actions => _actionFocus.requestFocus(),
           ReaderFocusTarget.header => _focusHeaderAction(),
           ReaderFocusTarget.panel => _panelFocus.requestFocus(),
-          ReaderFocusTarget.tabStrip => _focusActiveTab(),
         },
         navigationAdapter: () async {
           final navigator = Navigator.maybeOf(context);
           if (navigator != null && navigator.canPop()) navigator.pop();
         },
-        tabRevealAdapter: _revealTab,
         progressSource: widget.progressSource,
         contentsLoader: widget.contentsLoader,
         externalLinkOpener: widget.externalLinkOpener,
@@ -305,7 +257,6 @@ class _ReaderScreenState extends State<ReaderScreen>
         epubFontRegistrar: widget.epubFontRegistrar ?? _registerEpubFont,
         debugEpubSessionObserver: widget.debugEpubSessionObserver,
         debugContinuousStepObserver: widget.debugContinuousStepObserver,
-        initialTabs: widget.initialTabs,
         // A callback runs after the next frame, and asks for that frame: a
         // continuous window step that installs nothing new still runs.
         frameScheduler: (callback) {
@@ -440,7 +391,6 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _modelChanged() {
     final model = _controller.model;
     if (model.openPanel != null) _lastOpenPanel = model.openPanel;
-    _pruneTabResources(model);
     final openPath = model.openPath;
     if (openPath != null) {
       // Persist the accepted locator as one pair. In particular, clear a
@@ -490,14 +440,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     _backFocus.dispose();
     _contentsFocus.dispose();
     _typographyFocus.dispose();
-    _moreFocus.dispose();
+    _notesFocus.dispose();
     _panelFocus.dispose();
-    for (final node in _tabFocusNodes.values) {
-      node.dispose();
-    }
-    _tabFocusNodes.clear();
-    _tabKeys.clear();
-    _tabScroll.dispose();
     super.dispose();
   }
 
@@ -541,150 +485,158 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   Widget build(BuildContext context) {
     final model = _controller.model;
-    final compact =
-        MediaQuery.sizeOf(context).width <
-        ShosaiTokens.layoutReaderCompactBreakpoint;
+    final layout = ShellLayout.forWidth(MediaQuery.sizeOf(context).width);
+    final phone = layout == ShellLayout.phone;
     final theme = _readerTheme(context, model.typography.theme);
     final reader = Theme(
       data: theme,
       child: ShadTheme(
         data: shosaiReaderShadTheme(model.typography.theme),
-        child: Scaffold(
-          body: SafeArea(
-            child: _withChromeShortcuts(
-              // The chrome rows are bounded by the height the reader is
-              // actually laid out with, not by the ambient `MediaQuery`: a host
-              // may install a `MediaQuery` whose size does not match the
-              // reader's viewport (the widget tests do that to set a text
-              // scale), and a zero height there would collapse the chrome.
-              LayoutBuilder(
-                builder: (context, constraints) => Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Every fixed chrome row is bounded to a share of the
-                    // viewport and scrolls inside that bound. At a very short
-                    // viewport with a scaled interface the header alone would
-                    // otherwise be taller than the reader (the `T200` stacked
-                    // header wraps its action group), which would overflow the
-                    // column and push the document out of reach.
-                    _boundedChrome(
-                      viewportHeight: constraints.maxHeight,
-                      share: _readerTabStripBoundShare,
-                      child: _ReaderTabStrip(
-                        model: model,
-                        dispatch: _controller.dispatch,
-                        scrollController: _tabScroll,
-                        tabKey: _tabKey,
-                        tabFocusNode: _tabFocusNode,
-                        tabCloseFocusNode: _tabCloseFocusNode,
-                      ),
-                    ),
-                    _boundedChrome(
-                      viewportHeight: constraints.maxHeight,
-                      share: _readerHeaderBoundShare,
-                      child: _ReaderHeader(
-                        model: model,
-                        compact: compact,
-                        dispatch: _controller.dispatch,
-                        backFocus: _backFocus,
-                        contentsFocus: _contentsFocus,
-                        typographyFocus: _typographyFocus,
-                        moreFocus: _moreFocus,
-                      ),
-                    ),
-                    for (final row in _panelRows(model, compact: compact))
-                      _boundedChrome(
-                        viewportHeight: constraints.maxHeight,
-                        share: _readerPanelBoundShare,
-                        child: row,
-                      ),
-                    // The search bar is its own row below the panels (RD-11);
-                    // search is independent of the three exclusive panels.
-                    if (model.searchOpen &&
-                        model.document != null &&
-                        model.typography.searchable)
-                      _boundedChrome(
-                        viewportHeight: constraints.maxHeight,
-                        share: _readerPanelBoundShare,
-                        child: _ReaderSearchBar(
-                          model: model,
-                          compact: compact,
-                          dispatch: _controller.dispatch,
-                        ),
-                      ),
-                    // A content failure is shown inside the document view; the
-                    // alert is for an open that never produced one.
-                    if (model.error != null &&
-                        !(model.document != null &&
-                            model.contentState == ReaderContentState.failed))
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxHeight:
-                              constraints.maxHeight * _readerAlertBoundShare,
-                        ),
-                        child: SingleChildScrollView(
-                          child: _ReaderFailureAlert(
-                            error: model.error!,
-                            onRetry: model.openPath == null
-                                ? null
-                                : () => _controller.dispatch(
-                                    ReaderOpenRequested(
-                                      model.openPath!,
-                                      bookId: model.openBookId,
-                                    ),
+        // The palette follows the reader's own theme, not the app's: a reader
+        // may sit under no app theme at all.
+        child: Builder(
+          builder: (context) => Scaffold(
+            backgroundColor: ShellPalette.of(context).chrome,
+            body: SafeArea(
+              child: CallbackShortcuts(
+                // The retired more panel's Open book action lives on as a
+                // shortcut; the library is the usual way to open a book.
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.keyO, control: true):
+                      _openBook,
+                  const SingleActivator(LogicalKeyboardKey.keyO, meta: true):
+                      _openBook,
+                },
+                child: // The chrome rows are bounded by the height the reader is
+                    // actually laid out with, not by the ambient `MediaQuery`: a
+                    // host may install a `MediaQuery` whose size does not match
+                    // the reader's viewport (the widget tests do that to set a
+                    // text scale), and a zero height there would collapse the
+                    // chrome.
+                    LayoutBuilder(
+                      builder: (context, constraints) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Every fixed chrome row is bounded to a share of the
+                          // viewport and scrolls inside that bound, so a very
+                          // short viewport with a scaled interface cannot push
+                          // the document out of reach.
+                          _boundedChrome(
+                            viewportHeight: constraints.maxHeight,
+                            share: _readerHeaderBoundShare,
+                            child: _ReaderToolbar(
+                              model: model,
+                              layout: layout,
+                              dispatch: _controller.dispatch,
+                              backFocus: _backFocus,
+                              contentsFocus: _contentsFocus,
+                              typographyFocus: _typographyFocus,
+                              notesFocus: _notesFocus,
+                              openBooksAction: widget.openBooksAction,
+                            ),
+                          ),
+                          // The search bar is its own row under the toolbar
+                          // (RD-11); search is independent of the panels.
+                          if (model.searchOpen &&
+                              model.document != null &&
+                              model.typography.searchable)
+                            _boundedChrome(
+                              viewportHeight: constraints.maxHeight,
+                              share: _readerSearchBoundShare,
+                              child: _ReaderSearchBar(
+                                model: model,
+                                compact: phone,
+                                dispatch: _controller.dispatch,
+                              ),
+                            ),
+                          // A content failure is shown inside the document view;
+                          // the alert is for an open that never produced one.
+                          if (model.error != null &&
+                              !(model.document != null &&
+                                  model.contentState ==
+                                      ReaderContentState.failed))
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxHeight:
+                                    constraints.maxHeight *
+                                    _readerAlertBoundShare,
+                              ),
+                              child: SingleChildScrollView(
+                                child: _ReaderFailureAlert(
+                                  error: model.error!,
+                                  onRetry: model.openPath == null
+                                      ? null
+                                      : () => _controller.dispatch(
+                                          ReaderOpenRequested(
+                                            model.openPath!,
+                                            bookId: model.openBookId,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ),
+                          Expanded(child: _readerBody(model, layout)),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxHeight:
+                                  constraints.maxHeight *
+                                  _readerAlertBoundShare,
+                            ),
+                            child: _ReaderErrorSurfaces(model: model),
+                          ),
+                          // The place stays mounted while an open is in flight:
+                          // its `loading` wording is a live region, so the
+                          // opening state must not remove it.
+                          _boundedChrome(
+                            viewportHeight: constraints.maxHeight,
+                            share: _readerStatusBoundShare,
+                            child: phone
+                                ? _ReaderPhoneBar(
+                                    model: model,
+                                    dispatch: _controller.dispatch,
+                                    contentsFocus: _contentsFocus,
+                                    typographyFocus: _typographyFocus,
+                                    notesFocus: _notesFocus,
+                                  )
+                                : _ReaderStatusLine(
+                                    model: model,
+                                    dispatch: _controller.dispatch,
                                   ),
                           ),
-                        ),
-                      ),
-                    Expanded(child: _readerBody(model, compact: compact)),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight:
-                            constraints.maxHeight * _readerAlertBoundShare,
-                      ),
-                      child: _ReaderErrorSurfaces(model: model),
-                    ),
-                    // The status bar stays mounted while an open is in flight:
-                    // the `loading` wording is a live region and the bar itself
-                    // is hidden without a document (`hasDocument`), so the
-                    // opening state must not remove the status surface.
-                    _boundedChrome(
-                      viewportHeight: constraints.maxHeight,
-                      share: _readerStatusBoundShare,
-                      child: _ReaderStatusBar(model: model),
-                    ),
-                    if (widget.debugPathEntry) ...[
-                      const SizedBox(height: 12),
-                      // A dev/test-only entry, bounded so a short viewport at
-                      // a scaled interface cannot overflow the reader column.
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxHeight:
-                              constraints.maxHeight * _readerDevEntryBoundShare,
-                        ),
-                        child: SingleChildScrollView(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: ShosaiTokens
-                                  .layoutReaderChromeHeaderPaddingHorizontal,
+                          if (widget.debugPathEntry) ...[
+                            const SizedBox(height: 12),
+                            // A dev/test-only entry, bounded so a short viewport
+                            // at a scaled interface cannot overflow the reader
+                            // column.
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxHeight:
+                                    constraints.maxHeight *
+                                    _readerDevEntryBoundShare,
+                              ),
+                              child: SingleChildScrollView(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: ShosaiTokens.space4,
+                                  ),
+                                  child: _ReaderControls(
+                                    model: model,
+                                    path: _path.value,
+                                    pathFieldKey: _pathFieldKey,
+                                    openFocus: _openFocus,
+                                    open: _open,
+                                    // A single row keeps the dev-only entry short
+                                    // enough not to push the chrome out of a small
+                                    // viewport at a scaled interface.
+                                    horizontal: true,
+                                  ),
+                                ),
+                              ),
                             ),
-                            child: _ReaderControls(
-                              model: model,
-                              path: _path.value,
-                              pathFieldKey: _pathFieldKey,
-                              openFocus: _openFocus,
-                              open: _open,
-                              // A single row keeps the dev-only entry short
-                              // enough not to push the chrome out of a small
-                              // viewport at a scaled interface.
-                              horizontal: true,
-                            ),
-                          ),
-                        ),
+                          ],
+                        ],
                       ),
-                    ],
-                  ],
-                ),
+                    ),
               ),
             ),
           ),
@@ -694,82 +646,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     return _withReaderLocalizations(context, reader);
   }
 
-  /// Reader-chrome shortcuts: `Ctrl+W`, `Ctrl+Tab` and `Ctrl+1..9`.
-  ///
-  /// The modifier is platform-adapted (Command on macOS) and mirrors the Iced
-  /// reference. Chrome shortcuts must not fire while a text field has focus
-  /// (search input, page input, note editor), so the handler ignores them then.
-  Widget _withChromeShortcuts(Widget child) {
-    final primary = defaultTargetPlatform == TargetPlatform.macOS;
-    final digits = [
-      LogicalKeyboardKey.digit1,
-      LogicalKeyboardKey.digit2,
-      LogicalKeyboardKey.digit3,
-      LogicalKeyboardKey.digit4,
-      LogicalKeyboardKey.digit5,
-      LogicalKeyboardKey.digit6,
-      LogicalKeyboardKey.digit7,
-      LogicalKeyboardKey.digit8,
-      LogicalKeyboardKey.digit9,
-    ];
-    return CallbackShortcuts(
-      bindings: {
-        SingleActivator(
-          LogicalKeyboardKey.keyW,
-          control: !primary,
-          meta: primary,
-        ): _closeActiveTabShortcut,
-        SingleActivator(
-          LogicalKeyboardKey.tab,
-          control: !primary,
-          meta: primary,
-        ): _nextTabShortcut,
-        for (var index = 0; index < digits.length; index += 1)
-          SingleActivator(
-            digits[index],
-            control: !primary,
-            meta: primary,
-          ): () =>
-              _selectTabShortcut(index),
-      },
-      child: child,
-    );
-  }
-
-  void _closeActiveTabShortcut() => _chromeShortcut(() {
-    final tabs = _controller.model.tabs;
-    for (final tab in tabs) {
-      if (tab.selected) {
-        _controller.dispatch(ReaderTabCloseRequested(tab.id));
-        return;
-      }
-    }
-  });
-
-  void _nextTabShortcut() => _chromeShortcut(() {
-    final tabs = _controller.model.tabs;
-    final index = tabs.indexWhere((tab) => tab.selected);
-    if (tabs.length < 2 || index < 0) return;
-    _controller.dispatch(
-      ReaderTabActivated(tabs[(index + 1) % tabs.length].id),
-    );
-  });
-
-  void _selectTabShortcut(int index) => _chromeShortcut(() {
-    final tabs = _controller.model.tabs;
-    if (index < tabs.length) {
-      _controller.dispatch(ReaderTabActivated(tabs[index].id));
-    }
-  });
-
-  void _chromeShortcut(VoidCallback action) {
-    final focus = FocusManager.instance.primaryFocus;
-    final context = focus?.context;
-    if (context != null &&
-        context.findAncestorWidgetOfExactType<EditableText>() != null) {
-      return;
-    }
-    action();
+  void _openBook() {
+    final model = _controller.model;
+    if (model.busy || model.modalEffect != null) return;
+    _controller.dispatch(const ReaderOpenBookRequested());
   }
 
   /// Bounds a fixed chrome row to a share of the reader's own height and lets
@@ -792,26 +672,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     child: SingleChildScrollView(child: child),
   );
 
-  /// The full-width panel rows (RD-13).
-  ///
-  /// The Contents panel is a side panel at wide widths and replaces the body
-  /// in compact, mirroring the pinned reference; the typography and more panels
-  /// are rows below the header. Panel bodies are 4C's.
-  List<Widget> _panelRows(ReaderModel model, {required bool compact}) {
-    final panel = model.openPanel;
-    if (panel == null || panel == ReaderPanel.contents) return const [];
-    return [
-      _ReaderPanelHost(
-        panel: panel,
-        model: model,
-        compact: compact,
-        dispatch: _controller.dispatch,
-        focusNode: _panelFocus,
-      ),
-    ];
-  }
-
-  Widget _readerBody(ReaderModel model, {required bool compact}) {
+  /// The stage with the open panel: floating panels over it, the docked Notes
+  /// panel beside it.
+  Widget _readerBody(ReaderModel model, ShellLayout layout) {
     final content = _ReaderContentPane(
       key: _contentKey,
       model: model,
@@ -820,136 +683,63 @@ class _ReaderScreenState extends State<ReaderScreen>
       actionFocus: _actionFocus,
       debugPathEntry: widget.debugPathEntry,
     );
-    // The reader palette is the *document* palette (owner decision 2026-09-28):
-    // the surface the page (or the no-document welcome body) sits on follows the
-    // reader theme, while the shared chrome around it keeps the application
-    // palette. Painting it here preserves the pre-decision document-area
-    // backdrop — including behind the RD-06 edge columns — instead of letting
-    // the light chrome scaffold show through.
-    Widget surface() => ColoredBox(
-      color: pageColors(model.typography.theme).background,
-      child: _ReaderSurface(
-        model: model,
-        compact: compact,
-        dispatch: _controller.dispatch,
-        content: content,
-      ),
-    );
-    if (model.openPanel == ReaderPanel.contents) {
-      final panel = _ReaderPanelHost(
-        panel: ReaderPanel.contents,
-        model: model,
-        compact: compact,
-        dispatch: _controller.dispatch,
-        focusNode: _panelFocus,
-      );
-      if (compact) return panel;
-      // The pinned Iced composition keeps the reader surface (and therefore its
-      // edge navigation) beside the wide Contents panel; only compact replaces
-      // the body with the panel.
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    final openPanel = model.openPanel;
+    // A floating panel covers the page: the page leaves keyboard traversal
+    // and the semantics tree until it closes, so focus and a screen reader
+    // stay with the panel. The controller's requests for the document's focus
+    // while it is covered (a note chosen in the panel) fail, so focus stays on
+    // the chosen note; closing the panel returns it to the toolbar.
+    final covered =
+        openPanel != null &&
+        _readerPanelPresentation(openPanel, layout) !=
+            _ReaderPanelPresentation.docked;
+    final stage = LayoutBuilder(
+      builder: (context, constraints) => Stack(
         children: [
-          Expanded(child: surface()),
-          SizedBox(
-            width: ShosaiTokens.layoutReaderBookmarksPanelWidth,
-            child: panel,
+          Positioned.fill(
+            child: ExcludeFocus(
+              excluding: covered,
+              child: ExcludeSemantics(
+                excluding: covered,
+                child: _ReaderStage(
+                  model: model,
+                  layout: layout,
+                  dispatch: _controller.dispatch,
+                  content: content,
+                ),
+              ),
+            ),
+          ),
+          ..._readerPanelOverlay(
+            model: model,
+            layout: layout,
+            stage: constraints,
+            dispatch: _controller.dispatch,
+            focusNode: _panelFocus,
+            hostKeys: _panelKeys,
           ),
         ],
-      );
-    }
-    return surface();
-  }
-}
-
-/// The content area with the RD-06 edge navigation around it.
-class _ReaderSurface extends StatelessWidget {
-  const _ReaderSurface({
-    required this.model,
-    required this.compact,
-    required this.dispatch,
-    required this.content,
-  });
-
-  final ReaderModel model;
-  final bool compact;
-  final void Function(ReaderMessage) dispatch;
-  final Widget content;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final document = model.document;
-    final continuous = model.continuousPresentation;
-    // Edge navigation is hidden entirely in continuous mode and when no
-    // document is open (Iced returns the bare content). While no document is
-    // open the columns keep their space with the controls invisible, so the
-    // content area does not change width when the document arrives and the
-    // open is laid out for the width it will keep.
-    final showEdges = document != null && !continuous;
-    // Only a paginated reader reserves the columns: continuous mode has no
-    // edges at all, so reserving there would change the content width when a
-    // document arrives and cost a relayout for nothing.
-    final reserveSpace = document == null && !continuous;
-    final busy = model.busy || model.relayoutBusy;
-    final total = document?.logicalUnitCount.toInt() ?? 0;
+      ),
+    );
+    final panel = openPanel;
+    if (panel == null || covered) return stage;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _edge(
-          visible: showEdges || reserveSpace,
-          reserved: reserveSpace,
-          semanticsKey: const ValueKey('reader-edge-previous'),
-          glyph: '‹',
-          semanticsLabel: l10n.readerPreviousPage,
-          compact: compact,
-          onPressed: showEdges && !busy && _canStepPage(model, -1, total)
-              ? () => dispatch(pageStepMessage(model, -1))
-              : null,
-        ),
-        Expanded(child: content),
-        _edge(
-          visible: showEdges || reserveSpace,
-          reserved: reserveSpace,
-          semanticsKey: const ValueKey('reader-edge-next'),
-          glyph: '›',
-          semanticsLabel: l10n.readerNextPage,
-          compact: compact,
-          onPressed: showEdges && !busy && _canStepPage(model, 1, total)
-              ? () => dispatch(pageStepMessage(model, 1))
-              : null,
+        Expanded(child: stage),
+        SizedBox(
+          width: ShosaiTokens.sizePanelWidth,
+          child: _ReaderPanelHost(
+            key: _panelKeys[panel],
+            panel: panel,
+            presentation: _ReaderPanelPresentation.docked,
+            model: model,
+            dispatch: _controller.dispatch,
+            focusNode: _panelFocus,
+          ),
         ),
       ],
     );
-  }
-
-  Widget _edge({
-    required bool visible,
-    required bool reserved,
-    required Key semanticsKey,
-    required String glyph,
-    required String semanticsLabel,
-    required bool compact,
-    required VoidCallback? onPressed,
-  }) {
-    final button = _ReaderEdgeButton(
-      semanticsKey: semanticsKey,
-      glyph: glyph,
-      semanticsLabel: semanticsLabel,
-      compact: compact,
-      onPressed: onPressed,
-    );
-    if (visible && !reserved) return button;
-    if (reserved) {
-      return Visibility(
-        visible: false,
-        maintainSize: true,
-        maintainAnimation: true,
-        maintainState: true,
-        child: button,
-      );
-    }
-    return const SizedBox.shrink();
   }
 }
 
@@ -1080,14 +870,14 @@ class _ReaderContentPane extends StatelessWidget {
                           AppLocalizations.of(context).readerFallbackTitle,
                     )
                   : document == null
-                  // The retained welcome body: the no-document state keeps its
-                  // guidance until 4C lands the Iced welcome composition (title
-                  // + `Open File` picker action, RD-10). Its copy still
-                  // describes the retired path entry, which is recorded as a 4C
-                  // item; the production composition renders no path field
-                  // (contract §7.2 item 6).
+                  // The no-document body. The app always opens a book from
+                  // the library, so only a bare reader (the debug path entry)
+                  // shows it; it sits on the stage unless a failed EPUB open
+                  // left the page paper in place.
                   ? WelcomePanel(
-                      color: pageColors(model.typography.theme).foreground,
+                      color: _readerShowsPaper(model)
+                          ? pageColors(model.typography.theme).foreground
+                          : ShellPalette.of(context).inkMuted,
                     )
                   : _DocumentView(
                       document: document,
@@ -1099,8 +889,6 @@ class _ReaderContentPane extends StatelessWidget {
                     ),
             ),
           ),
-          if (model.annotations.isNotEmpty)
-            ReaderAnnotationStrip(model: model, dispatch: dispatch),
           Semantics(
             key: const ValueKey('reader-selection-status'),
             container: true,
@@ -1186,18 +974,16 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
 class WelcomePanel extends StatelessWidget {
   const WelcomePanel({super.key, this.color});
 
-  /// The document-area foreground for the active reader theme
-  /// ([pageColors]). The welcome body sits on the document backdrop, so its ink
-  /// follows the reader palette while the shared chrome stays on the
-  /// application palette (owner decision 2026-09-28); a caller that renders the
-  /// panel outside the reader keeps the ambient style.
+  /// The ink for what the panel sits on: the stage's muted ink, or the page's
+  /// foreground on page paper. A caller that renders the panel outside the
+  /// reader keeps the ambient style.
   final Color? color;
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Text(
-        'Enter a local document path to exercise the generated Rust bridge.',
+        'Enter a local document path to open it.',
         textAlign: TextAlign.center,
         style: color == null ? null : TextStyle(color: color),
       ),

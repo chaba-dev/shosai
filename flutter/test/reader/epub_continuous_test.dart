@@ -77,6 +77,13 @@ const _continuous = FlutterReaderSettings(
   pdfZoom: 0,
 );
 
+/// The Contents panel's own text: the toolbar and status line also name the
+/// current section.
+Finder inContents(String text) => find.descendant(
+  of: find.byKey(const ValueKey('reader-panel-contents')),
+  matching: find.text(text),
+);
+
 void main() {
   final bytes = navigationEpub();
   final book = openEpubBytes(bytes);
@@ -248,7 +255,7 @@ void main() {
   testWidgets('a location in the open chapter scrolls to its line', (
     tester,
   ) async {
-    // Wide enough that the contents panel sits beside the chapter.
+    // A desktop window, where Contents opens as a popover over the page.
     tester.view.physicalSize = const ui.Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -259,7 +266,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settle(tester);
-    await tester.tap(find.text('Chapter one deep'));
+    await tester.tap(inContents('Chapter one deep'));
     await settle(tester);
 
     final page = dartPage(tester)!;
@@ -285,13 +292,12 @@ void main() {
       .map((endpoint) => endpoint.rect.top)
       .first;
 
+  /// Opens Contents and chooses [title]; choosing closes the panel.
   Future<void> openContentsEntry(WidgetTester tester, String title) async {
-    if (find.text(title).evaluate().isEmpty) {
-      await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
-      await tester.pump();
-      await settle(tester);
-    }
-    await tester.tap(find.text(title));
+    await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+    await tester.pump();
+    await settle(tester);
+    await tester.tap(inContents(title));
     await settle(tester);
   }
 
@@ -643,10 +649,7 @@ void main() {
     await openReader(tester, harness);
     await settle(tester);
 
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-    await tester.pump();
-    await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('reader-more-search')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-search')));
     await tester.pump();
     await settle(tester);
     await tester.enterText(
@@ -681,8 +684,8 @@ void main() {
     await openReader(tester, harness);
     await settle(tester);
 
-    // Saved places are listed in the Contents panel.
-    await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+    // Saved places are listed in the Notes panel.
+    await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
     await tester.pump();
     await settle(tester);
     final open = find.byKey(const ValueKey('reader-saved-place-open-7'));
@@ -1086,7 +1089,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settle(tester);
-    await tester.tap(find.text('Tall'));
+    await tester.tap(inContents('Tall'));
     // Frame by frame, while the nodes above are measured: the target line
     // stays where the reader sees it.
     final shownAt = <double>[];

@@ -109,6 +109,12 @@ Future<ui.Image> _testImage() async {
   return recorder.endRecording().toImage(420, 560);
 }
 
+/// Opens the Notes panel, where the saved highlights are listed.
+Future<void> _openNotes(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+  await tester.pumpAndSettle();
+}
+
 bool _ready(WidgetTester tester) =>
     harnessReaderPageReady(tester) &&
     find
@@ -271,9 +277,7 @@ void main() {
     );
   });
 
-  testWidgets('annotation strip with saved highlights (EN, wide)', (
-    tester,
-  ) async {
+  testWidgets('notes panel with saved highlights (EN, wide)', (tester) async {
     await render(
       tester,
       'reader-annotations-1280-en',
@@ -299,6 +303,7 @@ void main() {
           ],
         locale: const Locale('en'),
       ),
+      after: _openNotes,
       metadata: const <String, Object?>{
         'state': 'annotations',
         'savedHighlights': 3,
@@ -306,7 +311,7 @@ void main() {
     );
   });
 
-  testWidgets('annotation strip (EN, wide, dark palette)', (tester) async {
+  testWidgets('notes panel (EN, wide, dark palette)', (tester) async {
     await render(
       tester,
       'reader-annotations-1280-en-dark',
@@ -323,6 +328,7 @@ void main() {
         locale: const Locale('en'),
         theme: 'dark',
       ),
+      after: _openNotes,
       metadata: const <String, Object?>{
         'state': 'annotations',
         'palette': 'dark',
@@ -330,7 +336,7 @@ void main() {
     );
   });
 
-  testWidgets('annotation strip (EN, wide, sepia palette)', (tester) async {
+  testWidgets('notes panel (EN, wide, sepia palette)', (tester) async {
     await render(
       tester,
       'reader-annotations-1280-en-sepia',
@@ -347,6 +353,7 @@ void main() {
         locale: const Locale('en'),
         theme: 'sepia',
       ),
+      after: _openNotes,
       metadata: const <String, Object?>{
         'state': 'annotations',
         'palette': 'sepia',
@@ -369,6 +376,7 @@ void main() {
             'secondary click on the annotation card (salvaged #114 action set)',
       },
       after: (tester) async {
+        await _openNotes(tester);
         await tester.tapAt(
           tester.getCenter(
             find.byKey(const ValueKey('reader-annotation-navigate-one')),
@@ -397,6 +405,7 @@ void main() {
         'textScale': 2,
       },
       after: (tester) async {
+        await _openNotes(tester);
         await tester.tapAt(
           tester.getCenter(
             find.byKey(const ValueKey('reader-annotation-navigate-one')),

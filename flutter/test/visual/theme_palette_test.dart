@@ -164,15 +164,20 @@ void main() {
         expect(painter.foregroundColor, entry.value.foreground);
         expect(painter.recolorImage, isTrue);
         // The reader palette is the document palette (owner decision
-        // 2026-09-28): the surface the page sits on follows it, while the
-        // shared chrome keeps the application palette in every reader theme.
+        // 2026-09-28): the page paper follows it, while the stage and the
+        // shared chrome keep the application palette in every reader theme.
+        final paper = tester.widget<DecoratedBox>(
+          find
+              .descendant(
+                of: find.byKey(const ValueKey('reader-page')),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        );
         expect(
-          find.byWidgetPredicate(
-            (widget) =>
-                widget is ColoredBox && widget.color == entry.value.background,
-          ),
-          findsOneWidget,
-          reason: 'the document area backdrop uses the ${entry.key} palette',
+          (paper.decoration as BoxDecoration).color,
+          entry.value.background,
+          reason: 'the page paper uses the ${entry.key} palette',
         );
         expect(
           Theme.of(context).colorScheme.surface,

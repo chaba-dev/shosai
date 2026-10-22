@@ -55,13 +55,23 @@ class _NavigationBridge extends HarnessBridge {
   final List<BigInt> cancelledCancellations = [];
   final List<BigInt> releasedCancellations = [];
 
-  /// How many `createCancellation` calls fail before succeeding again.
-  int createCancellationFailures = 0;
+  /// The tokens the Contents load created, which the reader starts on its own
+  /// once a document opens.
+  final List<BigInt> contentsCancellations = [];
+
+  /// How many Contents loads have their `createCancellation` refused.
+  int contentsCancellationFailures = 0;
 
   @override
   BigInt createCancellation() {
-    if (createCancellationFailures > 0) {
-      createCancellationFailures -= 1;
+    // The load runs right after the open, between the open's own scoped
+    // operations, so its call is told apart by its caller rather than by
+    // its position.
+    final contents = StackTrace.current.toString().contains(
+      '_contentsRequested',
+    );
+    if (contents && contentsCancellationFailures > 0) {
+      contentsCancellationFailures -= 1;
       throw const FlutterBridgeError(
         kind: FlutterBridgeErrorKind.invalidRequest,
         message: 'the harness refuses a cancellation',
@@ -69,6 +79,7 @@ class _NavigationBridge extends HarnessBridge {
     }
     final id = super.createCancellation();
     createdCancellations.add(id);
+    if (contents) contentsCancellations.add(id);
     return id;
   }
 
@@ -182,6 +193,13 @@ void main() {
     }
   }
 
+  /// The Contents panel's own text: the toolbar and status line also name
+  /// the current section.
+  Finder inContents(String text) => find.descendant(
+    of: find.byKey(const ValueKey('reader-panel-contents')),
+    matching: find.text(text),
+  );
+
   Future<void> openContents(WidgetTester tester) async {
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
@@ -242,20 +260,24 @@ void main() {
       await settleEpubPage(tester);
       await openContents(tester);
 
-      expect(find.text('Chapter one'), findsOneWidget);
-      expect(find.text('Chapter two target'), findsOneWidget);
-      expect(find.text('Chapter three deep'), findsOneWidget);
-      expect(find.text('Encoded path'), findsOneWidget);
+      expect(inContents('Chapter one'), findsOneWidget);
+      expect(inContents('Chapter two target'), findsOneWidget);
+      expect(inContents('Chapter three deep'), findsOneWidget);
+      expect(inContents('Encoded path'), findsOneWidget);
       // The title-only part heading resolves to no location and is not shown;
       // its child keeps the authored depth of one.
       expect(find.text(navigationFixturePartTitle), findsNothing);
       expect(find.text(navigationFixtureMissingTitle), findsNothing);
-      final nested = tester.getRect(
-        find.byKey(const ValueKey('reader-contents-entry-0')),
+      // The row keeps the panel's full width for its hover; its title is
+      // what indents.
+      Rect title(String key) => tester.getRect(
+        find.descendant(
+          of: find.byKey(ValueKey(key)),
+          matching: find.byType(Text),
+        ),
       );
-      final top = tester.getRect(
-        find.byKey(const ValueKey('reader-contents-entry-2')),
-      );
+      final nested = title('reader-contents-entry-0');
+      final top = title('reader-contents-entry-2');
       expect(
         nested.left - top.left,
         ShosaiTokens.layoutReaderPanelEntryIndent,
@@ -516,10 +538,10 @@ void main() {
     testWidgets('a refused cancellation fails the load without leaking', (
       tester,
     ) async {
-      final harness = bridge();
+      // The open's own load and the retry opening the panel starts.
+      final harness = bridge()..contentsCancellationFailures = 2;
       await openReader(tester, harness);
       await settleEpubPage(tester);
-      harness.createCancellationFailures = 1;
       await openContents(tester);
 
       expect(
@@ -541,11 +563,10 @@ void main() {
       final harness = bridge();
       await openReader(tester, harness);
       await settleEpubPage(tester);
-      final created = harness.createdCancellations.length;
       await openContents(tester);
-      expect(find.text('Chapter three deep'), findsOneWidget);
+      expect(inContents('Chapter three deep'), findsOneWidget);
 
-      final loadTokens = harness.createdCancellations.sublist(created);
+      final loadTokens = harness.contentsCancellations;
       expect(loadTokens, hasLength(1));
       for (final token in loadTokens) {
         expect(

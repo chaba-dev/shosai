@@ -2,8 +2,6 @@ import 'dart:async';
 
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart'
-    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -153,7 +151,6 @@ Widget _reader({
   String? initialPath = '/books/slow-rivers.epub',
   int? initialBookId,
   FlutterReaderSettings? settings = _epub,
-  List<ReaderTabPresentation> tabs = const [],
   ReaderProgressSource? progressSource,
   bool debugPathEntry = false,
 }) => productionShell(
@@ -165,7 +162,6 @@ Widget _reader({
     initialPath: initialPath,
     initialBookId: initialBookId,
     initialSettings: settings,
-    initialTabs: tabs,
     progressSource: progressSource,
     debugPathEntry: debugPathEntry,
   ),
@@ -226,10 +222,6 @@ bool _hasTapAction(WidgetTester tester, String key) {
 Semantics _controlSemantics(WidgetTester tester, String key) =>
     tester.widget<Semantics>(find.byKey(ValueKey(key)));
 
-/// Whether the control at [key] reports itself selected.
-bool _isSelected(WidgetTester tester, String key) =>
-    _controlSemantics(tester, key).properties.selected == true;
-
 Future<ui.Image> _testImage() async {
   final recorder = ui.PictureRecorder();
   ui.Canvas(recorder).drawColor(const ui.Color(0xffffffff), ui.BlendMode.src);
@@ -241,6 +233,17 @@ Future<ui.Image> _testImage() async {
   }
 }
 
+/// The toolbar actions on desktop and tablet.
+///
+/// Bookmark is left out: it also needs a library book (see the saved-place
+/// tests).
+const _headerActions = [
+  'reader-header-contents',
+  'reader-header-search',
+  'reader-header-typography',
+  'reader-header-notes',
+];
+
 ShadButton _button(WidgetTester tester, String key) =>
     tester.widget<ShadButton>(
       find.descendant(
@@ -248,21 +251,6 @@ ShadButton _button(WidgetTester tester, String key) =>
         matching: find.byType(ShadButton),
       ),
     );
-
-/// The label paragraph of the tab at [id]: the tab's first laid-out `RichText`.
-RenderParagraph _labelParagraph(WidgetTester tester, String id) =>
-    tester.renderObject<RenderParagraph>(
-      find.descendant(
-        of: find.byKey(ValueKey('reader-tab-$id')),
-        matching: find.byType(RichText),
-      ),
-    );
-
-bool _visible(WidgetTester tester, String key, String viewportKey) {
-  final rect = tester.getRect(find.byKey(ValueKey(key)));
-  final viewport = tester.getRect(find.byKey(ValueKey(viewportKey)));
-  return rect.left >= viewport.left - 0.5 && rect.right <= viewport.right + 0.5;
-}
 
 FlutterBookmark _bookmark({int id = 1, String? note}) => FlutterBookmark(
   id: id,
@@ -273,26 +261,12 @@ FlutterBookmark _bookmark({int id = 1, String? note}) => FlutterBookmark(
   createdAt: '2026-09-20T00:00:00Z',
 );
 
-List<ReaderTabPresentation> _manyTabs({int selected = 7}) => [
-  for (var index = 0; index < 8; index += 1)
-    ReaderTabPresentation(
-      id: 'tab-$index',
-      title: switch (index) {
-        0 => '短い',
-        1 => 'The Quiet Cartographer',
-        2 => '海辺の図書館 — 失われた書架をめぐる長い旅路',
-        _ => 'Tab $index with a deliberately long mixed 見出し label',
-      },
-      selected: index == selected,
-    ),
-];
-
 void main() {
   setUpAll(loadHarnessFonts);
 
   group('header', () {
-    testWidgets('shows the live title, truncates it, and keeps it in '
-        'semantics', (tester) async {
+    testWidgets('shows the live title on one ellipsized line and keeps it '
+        'in semantics', (tester) async {
       _setView(tester, const Size(1280, 800));
       const long =
           'A Field Guide to the Slow Rivers of the Northern '
@@ -300,21 +274,20 @@ void main() {
       final bridge = _ChromeBridge(title: long);
       await _open(tester, _reader(bridge: bridge));
 
-      // Wide: 58 characters plus an ellipsis, the full title in semantics.
       final semantics = tester.widget<Semantics>(
         find.byKey(const ValueKey('reader-header-title')),
       );
-      expect(semantics.properties.label, long);
-      expect(
-        find.text('A Field Guide to the Slow Rivers of the Northern Hemisphe…'),
-        findsOneWidget,
-      );
+      expect(semantics.properties.label, startsWith(long));
+      Text title() => tester.widget<Text>(find.text(long));
+      expect(title().maxLines, 1);
+      expect(title().overflow, TextOverflow.ellipsis);
 
-      // Compact: 24 characters.
+      // A phone keeps the same single line in the narrower toolbar.
       tester.view.physicalSize = const Size(390, 844);
       await tester.pump();
       await tester.pump();
-      expect(find.text('A Field Guide to the Sl…'), findsOneWidget);
+      expect(title().maxLines, 1);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets(
@@ -324,9 +297,9 @@ void main() {
         final bridge = _ChromeBridge();
         await _open(tester, _reader(bridge: bridge, initialPath: null));
 
-        expect(_button(tester, 'reader-header-contents').enabled, isFalse);
-        expect(_button(tester, 'reader-header-typography').enabled, isFalse);
-        expect(_button(tester, 'reader-header-more').enabled, isFalse);
+        for (final key in _headerActions) {
+          expect(_button(tester, key).enabled, isFalse, reason: key);
+        }
         await tester.tap(
           find.byKey(const ValueKey('reader-header-contents')),
           warnIfMissed: false,
@@ -338,16 +311,17 @@ void main() {
         );
 
         await _open(tester, _reader(bridge: _ChromeBridge()));
-        expect(_button(tester, 'reader-header-contents').enabled, isTrue);
-        expect(_button(tester, 'reader-header-typography').enabled, isTrue);
-        expect(_button(tester, 'reader-header-more').enabled, isTrue);
+        for (final key in _headerActions) {
+          expect(_button(tester, key).enabled, isTrue, reason: key);
+        }
       },
     );
 
-    testWidgets('back leaves the reader through the injected adapter', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
+    testWidgets('back on a phone leaves the reader through the injected '
+        'adapter', (tester) async {
+      // Desktop and tablet leave through the shell's sidebar; the phone
+      // toolbar has its own back control.
+      _setView(tester, const Size(390, 844));
       final bridge = _ChromeBridge();
       await tester.pumpWidget(
         productionShell(
@@ -386,13 +360,14 @@ void main() {
       for (final key in [
         'reader-header-contents',
         'reader-header-typography',
-        'reader-header-more',
+        'reader-header-notes',
       ]) {
         expect(_button(tester, key).enabled, isTrue, reason: key);
       }
-      await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
       await tester.pump();
-      expect(find.byKey(const ValueKey('reader-panel-more')), findsOneWidget);
+      expect(find.byKey(const ValueKey('reader-panel-notes')), findsOneWidget);
     });
 
     testWidgets('the retired path entry stays out of the reader composition', (
@@ -402,506 +377,6 @@ void main() {
       await _open(tester, _reader(bridge: _ChromeBridge()));
       expect(find.text('Open document'), findsNothing);
       expect(find.byKey(const ValueKey('reader-header')), findsOneWidget);
-    });
-  });
-
-  group('tab strip', () {
-    testWidgets('is hidden without tabs and renders fixture tabs with close '
-        'controls', (tester) async {
-      _setView(tester, const Size(1280, 800));
-      await _open(tester, _reader(bridge: _ChromeBridge()));
-      expect(
-        find.byKey(const ValueKey('reader-tab-strip-scroll')),
-        findsNothing,
-      );
-
-      await _open(
-        tester,
-        _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
-      );
-      expect(
-        find.byKey(const ValueKey('reader-tab-strip-scroll')),
-        findsOneWidget,
-      );
-      expect(find.byKey(const ValueKey('reader-tab-tab-0')), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('reader-tab-close-tab-3')),
-        findsOneWidget,
-      );
-      // Every tab is closable and the close control names its tab.
-      expect(
-        _controlSemantics(tester, 'reader-tab-close-tab-3').properties.label,
-        contains('Tab 3'),
-      );
-    });
-
-    testWidgets(
-      'the selected tab uses the on-accent-soft token and the others the '
-      'muted token',
-      (tester) async {
-        _setView(tester, const Size(1280, 800));
-        await _open(
-          tester,
-          _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
-        );
-
-        TextStyle? labelStyle(String key) => tester
-            .widget<Text>(
-              find
-                  .descendant(
-                    of: find.byKey(ValueKey(key)),
-                    matching: find.byType(Text),
-                  )
-                  .first,
-            )
-            .style;
-
-        expect(
-          labelStyle('reader-tab-tab-0')?.color,
-          ShosaiTokens.colorLightOnAccentSoft,
-        );
-        expect(
-          labelStyle('reader-tab-tab-1')?.color,
-          ShosaiTokens.appTextMuted,
-        );
-      },
-    );
-
-    testWidgets('activation and close run through rendered controls', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
-      await _open(
-        tester,
-        _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
-      );
-
-      await tester.tap(find.byKey(const ValueKey('reader-tab-tab-2')));
-      await tester.pump();
-      // The active tab carries the selected semantics state.
-      expect(_isSelected(tester, 'reader-tab-tab-2'), isTrue);
-
-      await tester.tap(find.byKey(const ValueKey('reader-tab-close-tab-2')));
-      await tester.pump();
-      expect(find.byKey(const ValueKey('reader-tab-tab-2')), findsNothing);
-      // The successor becomes active and takes focus.
-      expect(_isSelected(tester, 'reader-tab-tab-3'), isTrue);
-      await tester.pump();
-      expect(
-        FocusManager.instance.primaryFocus?.debugLabel,
-        'reader-tab-label-tab-3',
-      );
-    });
-
-    testWidgets('Ctrl+W, Ctrl+Tab and Ctrl+1..9 activate and close tabs', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
-      await _open(
-        tester,
-        _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
-      );
-
-      Future<void> chord(LogicalKeyboardKey key) async {
-        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-        await tester.sendKeyEvent(key);
-        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-        await tester.pump();
-      }
-
-      await chord(LogicalKeyboardKey.digit3);
-      expect(_isSelected(tester, 'reader-tab-tab-2'), isTrue);
-
-      await chord(LogicalKeyboardKey.tab);
-      expect(_isSelected(tester, 'reader-tab-tab-3'), isTrue);
-
-      await chord(LogicalKeyboardKey.keyW);
-      expect(find.byKey(const ValueKey('reader-tab-tab-3')), findsNothing);
-    });
-
-    testWidgets('one scrollable row with readable widths, active reveal and '
-        'keyboard access to offscreen tabs', (tester) async {
-      _setView(tester, const Size(1280, 800));
-      await _open(
-        tester,
-        _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 7)),
-      );
-      await tester.pump();
-
-      // One row: the strip holds a single horizontal scrollable, not a wrap
-      // and not an overflow menu. (The reader's bounded chrome rows add
-      // scroll regions of their own, so the count is scoped to the strip.)
-      expect(
-        find.byKey(const ValueKey('reader-tab-strip-scroll')),
-        findsOneWidget,
-      );
-      final stripScrollable = find.descendant(
-        of: find.byKey(const ValueKey('reader-tab-strip-scroll')),
-        matching: find.byType(Scrollable),
-      );
-      expect(stripScrollable, findsOneWidget);
-      expect(
-        tester.widget<Scrollable>(stripScrollable).axisDirection,
-        AxisDirection.right,
-      );
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('reader-tab-strip-scroll')),
-          matching: find.byType(Wrap),
-        ),
-        findsNothing,
-      );
-      final stripHeight = tester
-          .getSize(find.byKey(const ValueKey('reader-tab-strip-scroll')))
-          .height;
-      expect(stripHeight, lessThan(60));
-
-      // The initially offscreen active tab is revealed fully.
-      expect(
-        _visible(tester, 'reader-tab-tab-7', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-      expect(
-        _visible(tester, 'reader-tab-close-tab-7', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-
-      // Readable widths: a short label keeps the provisional floor, a long one
-      // is truncated at 34 characters and is wider than the floor.
-      final shortWidth = tester
-          .getSize(find.byKey(const ValueKey('reader-tab-tab-0')))
-          .width;
-      final longWidth = tester
-          .getSize(find.byKey(const ValueKey('reader-tab-tab-3')))
-          .width;
-      expect(shortWidth, greaterThanOrEqualTo(readerTabMinLabelWidth));
-      expect(longWidth, greaterThan(readerTabMinLabelWidth));
-
-      // Keyboard activation of an initially offscreen tab reveals it.
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pump();
-      await tester.pump();
-      expect(
-        _visible(tester, 'reader-tab-tab-0', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-
-      // A compact resize re-reveals the active tab.
-      tester.view.physicalSize = const Size(390, 844);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 32));
-      expect(
-        _visible(tester, 'reader-tab-tab-0', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-    });
-
-    testWidgets('a long active Japanese title is fully revealed at C390 T200', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      tester.platformDispatcher.textScaleFactorTestValue = 2;
-      addTearDown(tester.view.reset);
-      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-
-      const long = '海辺の図書館 — 失われた書架をめぐる長い旅路と、その先にある静かな読書室の記録';
-      final bridge = _ChromeBridge(title: long);
-      await _open(
-        tester,
-        _reader(
-          bridge: bridge,
-          tabs: [
-            for (var index = 0; index < 4; index += 1)
-              ReaderTabPresentation(
-                id: 'tab-$index',
-                title: '第$index巻 $long',
-                selected: index == 3,
-              ),
-          ],
-        ),
-      );
-
-      final strip = tester.getRect(
-        find.byKey(const ValueKey('reader-tab-strip-scroll')),
-      );
-      final label = tester.getRect(
-        find.byKey(const ValueKey('reader-tab-tab-3')),
-      );
-      final close = tester.getRect(
-        find.byKey(const ValueKey('reader-tab-close-tab-3')),
-      );
-
-      // The complete tab (label + close control) fits the strip viewport, so
-      // the active tab and its close control are both fully revealed.
-      expect(
-        close.right - label.left,
-        lessThanOrEqualTo(strip.width + 0.5),
-        reason: 'the complete tab must fit the strip viewport',
-      );
-      expect(
-        _visible(tester, 'reader-tab-tab-3', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-      expect(
-        _visible(tester, 'reader-tab-close-tab-3', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-
-      // Keyboard activation of an offscreen tab reveals it fully, including its
-      // close control.
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pump();
-      await tester.pump();
-      expect(
-        _visible(tester, 'reader-tab-tab-0', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-      expect(
-        _visible(tester, 'reader-tab-close-tab-0', 'reader-tab-strip-scroll'),
-        isTrue,
-      );
-    });
-
-    testWidgets('a truncated long label keeps its ink inside its line box at '
-        'C390 T200', (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      tester.platformDispatcher.textScaleFactorTestValue = 2;
-      addTearDown(tester.view.reset);
-      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-
-      await _open(
-        tester,
-        _reader(
-          bridge: _ChromeBridge(
-            // The active tab shows the live document title (RD-03), so the
-            // selected tab carries the long mixed label too.
-            title:
-                '海辺の図書館 — 失われた書架をめぐる長い旅路と '
-                'The Quiet Cartographer',
-          ),
-          locale: const Locale('ja'),
-          tabs: _manyTabs(selected: 7),
-        ),
-      );
-
-      // At 200 % text only part of a long label fits a bounded tab, so the
-      // label is ellipsized and the paragraph's own clip is active. The painted
-      // ink still has to stay inside the line box it is laid out in: the Shad
-      // interface style is leading-none (`height: 1`), which is shorter than
-      // the interface font's ink, so the reader tab label carries its own line
-      // metrics (owner-reported C390/T200 clipping).
-      final truncated = <String>[];
-      for (final id in ['tab-1', 'tab-2', 'tab-3', 'tab-7']) {
-        final paragraph = _labelParagraph(tester, id);
-        expect(
-          paragraph.size.height,
-          greaterThanOrEqualTo(paragraph.textSize.height - 0.01),
-          reason: 'the $id line box must hold its laid-out line',
-        );
-        final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
-        expect(ink, isNotNull);
-        expect(ink!.unmeasured, isFalse);
-        expect(ink.visible, isNotNull);
-        expect(ink.visible!.isEmpty, isFalse);
-        expect(
-          classifyInkOverhang(
-            visibleInk: ink.visible,
-            bodyInk: ink.body,
-            region: Offset.zero & paragraph.size,
-          ),
-          InkOverhangKind.none,
-          reason: 'the $id label ink must not leave its own line box',
-        );
-        if (paragraph.didExceedMaxLines) truncated.add(id);
-      }
-      expect(
-        truncated,
-        isNotEmpty,
-        reason:
-            'the state must really exercise an ellipsized label, or the ink '
-            'check proves nothing about the clipping path',
-      );
-
-      // The active tab is revealed with its close control, so the ink that was
-      // just asserted readable is actually on screen.
-      expect(
-        _visible(tester, 'reader-tab-tab-7', 'reader-tab-strip-scroll'),
-        isTrue,
-        reason: 'the active tab must be revealed inside the strip viewport',
-      );
-      expect(
-        _visible(tester, 'reader-tab-close-tab-7', 'reader-tab-strip-scroll'),
-        isTrue,
-        reason: 'the active tab close control must be revealed too',
-      );
-
-      // The active tab carries the long live title, and its close control is
-      // still hit-testable next to it.
-      expect(
-        tester.getSize(find.byKey(const ValueKey('reader-tab-tab-7'))).width,
-        greaterThan(readerTabMinLabelWidth),
-      );
-      await tester.tap(
-        find.byKey(const ValueKey('reader-tab-close-tab-7')),
-        warnIfMissed: true,
-      );
-      await tester.pump();
-      expect(
-        find.byKey(const ValueKey('reader-tab-tab-7')),
-        findsNothing,
-        reason: 'the revealed close control closes the active tab',
-      );
-    });
-
-    testWidgets('a fractional text scale keeps the label line box inside its '
-        'tab', (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      // 1.92 is not free of engine rounding: the nominal line box lands on a
-      // fraction (1.25 * 12 * 1.92 = 28.8), while the engine rounds the laid
-      // out line height up to a whole logical pixel (29). A budget that is not
-      // rounded up as well constrains the paragraph and switches its clip on.
-      tester.platformDispatcher.textScaleFactorTestValue = 1.92;
-      addTearDown(tester.view.reset);
-      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-
-      await _open(
-        tester,
-        _reader(
-          bridge: _ChromeBridge(
-            title:
-                '海辺の図書館 — 失われた書架をめぐる長い旅路と '
-                'The Quiet Cartographer',
-          ),
-          locale: const Locale('ja'),
-          tabs: _manyTabs(selected: 7),
-        ),
-      );
-
-      for (final id in ['tab-2', 'tab-7']) {
-        final paragraph = _labelParagraph(tester, id);
-        expect(
-          paragraph.size.height,
-          greaterThanOrEqualTo(paragraph.textSize.height - 0.01),
-          reason:
-              'the $id line box must round up with the engine, or the '
-              'fractional-scale paragraph is constrained and clipped',
-        );
-        final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
-        expect(ink, isNotNull);
-        expect(ink!.unmeasured, isFalse);
-        expect(ink.visible, isNotNull);
-        expect(ink.visible!.isEmpty, isFalse);
-        expect(
-          classifyInkOverhang(
-            visibleInk: ink.visible,
-            bodyInk: ink.body,
-            region: Offset.zero & paragraph.size,
-          ),
-          InkOverhangKind.none,
-          reason: 'the $id fractional-scale ink must stay inside its line box',
-        );
-      }
-    });
-
-    testWidgets('a non-linear text scaler keeps the label line box inside its '
-        'tab', (tester) async {
-      tester.view.physicalSize = const Size(390, 844);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-
-      // A deliberately adversarial, piecewise text scaler: small sizes scale
-      // hard and larger sizes barely at all (a shape chosen to separate the two
-      // budget formulas, not a claim about a platform curve). Scaling the
-      // *font size* first and applying the line-height multiplier after
-      // (2.5 * 12 * 1.25 = 37.5) is what the engine does; scaling the
-      // pre-multiplied 15 px size instead under-allocates here
-      // (15 * 1.02 = 15.3, and the shared button-height floor only supplies
-      // 28 px of content), which the ordered budget has to survive.
-      await _open(
-        tester,
-        MediaQuery(
-          data: const MediaQueryData(textScaler: _CurveTextScaler()),
-          child: _reader(
-            bridge: _ChromeBridge(
-              title:
-                  '海辺の図書館 — 失われた書架をめぐる長い旅路と '
-                  'The Quiet Cartographer',
-            ),
-            locale: const Locale('ja'),
-            tabs: _manyTabs(selected: 7),
-          ),
-        ),
-      );
-
-      final truncated = <String>[];
-      for (final id in ['tab-2', 'tab-7']) {
-        final paragraph = _labelParagraph(tester, id);
-        expect(
-          paragraph.textScaler.scale(ShosaiTokens.typeSize12),
-          closeTo(12 * 2.5, 0.01),
-          reason: 'the state must really exercise the non-linear scaler',
-        );
-        expect(
-          paragraph.size.height,
-          greaterThanOrEqualTo(paragraph.textSize.height - 0.01),
-          reason: 'the $id line box must be scaled like the engine scales it',
-        );
-        final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
-        expect(ink, isNotNull);
-        expect(ink!.unmeasured, isFalse);
-        expect(ink.visible, isNotNull);
-        expect(ink.visible!.isEmpty, isFalse);
-        expect(
-          classifyInkOverhang(
-            visibleInk: ink.visible,
-            bodyInk: ink.body,
-            region: Offset.zero & paragraph.size,
-          ),
-          InkOverhangKind.none,
-          reason: 'the $id non-linear ink must stay inside its line box',
-        );
-        if (paragraph.didExceedMaxLines) truncated.add(id);
-      }
-      expect(
-        truncated,
-        isNotEmpty,
-        reason: 'the state must really exercise an ellipsized label',
-      );
-    });
-
-    testWidgets('every tab and close control is reachable in order', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
-      await _open(
-        tester,
-        _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
-      );
-
-      // Every tab label and close control is focusable and reachable in the
-      // strip's own order (label then close, tab by tab).
-      final labels = <String>[];
-      for (var step = 0; step < 14; step += 1) {
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-        labels.add(FocusManager.instance.primaryFocus?.debugLabel ?? 'none');
-      }
-      expect(
-        labels,
-        containsAllInOrder([
-          'reader-tab-label-tab-0',
-          'reader-tab-close-tab-0',
-          'reader-tab-label-tab-1',
-          'reader-tab-close-tab-1',
-        ]),
-      );
     });
   });
 
@@ -948,7 +423,7 @@ void main() {
           ),
         ),
       );
-      expect(find.text('Page 4 · 42%'), findsOneWidget);
+      expect(find.text('42% · page 4'), findsOneWidget);
 
       await _open(
         tester,
@@ -963,7 +438,7 @@ void main() {
           ),
         ),
       );
-      expect(find.text('Pages 4–5 · 42%'), findsOneWidget);
+      expect(find.text('42% · pages 4–5'), findsOneWidget);
 
       await _open(
         tester,
@@ -978,7 +453,7 @@ void main() {
           ),
         ),
       );
-      expect(find.text('Chapter 3 · 33%'), findsOneWidget);
+      expect(find.text('33% · chapter 3 of 3'), findsOneWidget);
     });
 
     testWidgets('the bar is hidden without a document but the text is not', (
@@ -987,7 +462,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       await _open(tester, _reader(bridge: _ChromeBridge(), initialPath: null));
       expect(find.byKey(const ValueKey('reader-progress')), findsOneWidget);
-      expect(find.byType(FractionallySizedBox), findsNothing);
+      expect(find.byKey(const ValueKey('reader-progress-track')), findsNothing);
       expect(find.text('No book open'), findsOneWidget);
     });
 
@@ -1005,7 +480,7 @@ void main() {
           ),
         ),
       );
-      expect(find.text('Page 1 · 0%'), findsOneWidget);
+      expect(find.text('0% · page 1'), findsOneWidget);
     });
 
     testWidgets('the default source names the retained logical unit', (
@@ -1013,7 +488,7 @@ void main() {
     ) async {
       _setView(tester, const Size(1280, 800));
       await _open(tester, _reader(bridge: _ChromeBridge()));
-      expect(find.text('Chapter 1 · 33%'), findsOneWidget);
+      expect(find.text('33% · chapter 1 of 3'), findsOneWidget);
     });
   });
 
@@ -1038,7 +513,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       expect(bridge.events, isNotEmpty);
-      expect(find.text('Chapter 2 · 67%'), findsOneWidget);
+      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
       expect(_button(tester, 'reader-edge-previous').enabled, isTrue);
     });
 
@@ -1053,7 +528,7 @@ void main() {
       );
       await tester.pump();
       expect(bridge.events.length, before);
-      expect(find.text('Chapter 1 · 33%'), findsOneWidget);
+      expect(find.text('33% · chapter 1 of 3'), findsOneWidget);
     });
 
     testWidgets('reserves its columns invisibly without a document', (
@@ -1141,23 +616,33 @@ void main() {
       );
     });
 
-    testWidgets('opening the contents panel reports the content width change', (
-      tester,
-    ) async {
+    testWidgets('a popover floats over the page and the docked notes panel '
+        'narrows the stage', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();
       await _open(tester, _reader(bridge: bridge));
-      final before = tester.getSize(_documentArea).width;
+      final before = tester.getRect(_documentArea);
+      final stage = tester.getSize(find.byKey(const ValueKey('reader-stage')));
 
       await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
-      await tester.pump(const Duration(milliseconds: 32));
-
       expect(
-        tester.getSize(_documentArea).width,
-        lessThan(before),
-        reason: 'the side panel narrows the document box',
+        tester.getRect(_documentArea),
+        before,
+        reason: 'the Contents popover does not lay the book out again',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(
+        tester.getSize(find.byKey(const ValueKey('reader-stage'))).width,
+        stage.width - ShosaiTokens.sizePanelWidth,
+      );
+      expect(
+        tester.getSize(find.byKey(const ValueKey('reader-panel-notes'))).width,
+        ShosaiTokens.sizePanelWidth,
       );
     });
 
@@ -1168,18 +653,18 @@ void main() {
       final bridge = _ChromeBridge(books: harnessLibraryBooks())
         ..bookmarks = [_bookmark(id: 1)];
       await _open(tester, _reader(bridge: bridge, initialBookId: 1));
-      expect(_button(tester, 'reader-header-more').enabled, isTrue);
+      expect(_button(tester, 'reader-header-typography').enabled, isTrue);
 
       // The saved-place note control opens the controller-owned modal through
       // a rendered control (contract §3.1 `modalEffect`).
-      await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       await tester.tap(find.byKey(const ValueKey('reader-saved-place-note-1')));
       await tester.pumpAndSettle();
       expect(find.byType(ShadDialog), findsOneWidget);
       expect(
-        _button(tester, 'reader-header-more').enabled,
+        _button(tester, 'reader-header-typography').enabled,
         isFalse,
         reason: 'the header gates on the open modal',
       );
@@ -1189,13 +674,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ShadDialog), findsNothing);
       expect(
-        _button(tester, 'reader-header-more').enabled,
+        _button(tester, 'reader-header-typography').enabled,
         isTrue,
         reason: 'the modal slot is cleared when the dialog closes',
       );
     });
 
-    testWidgets('the wide contents panel keeps edge navigation and width', (
+    testWidgets('the docked notes panel keeps edge navigation beside it', (
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
@@ -1206,29 +691,27 @@ void main() {
       );
       expect(edges.width, greaterThan(0));
 
-      await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       await tester.pump(const Duration(milliseconds: 32));
 
-      // The pinned composition keeps the reader surface (and its edges) beside
-      // the wide panel; the document box loses the panel width and both edge
-      // columns, no more.
+      // The stage keeps its page and both page-turn margins beside the panel.
+      final panel = tester.getRect(
+        find.byKey(const ValueKey('reader-panel-notes')),
+      );
       expect(
         find.byKey(const ValueKey('reader-edge-previous')),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('reader-edge-next')), findsOneWidget);
       expect(
-        tester.getSize(_documentArea).width,
-        closeTo(
-          1280 - ShosaiTokens.layoutReaderBookmarksPanelWidth - 2 * edges.width,
-          1,
-        ),
+        tester.getRect(find.byKey(const ValueKey('reader-edge-next'))).right,
+        lessThanOrEqualTo(panel.left),
       );
+      expect(tester.getRect(_documentArea).right, lessThan(panel.left));
     });
 
-    testWidgets('a long saved note stays inside the contents panel', (
+    testWidgets('a long saved note stays inside the notes panel', (
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
@@ -1247,12 +730,12 @@ void main() {
         ];
       await _open(tester, _reader(bridge: bridge, initialBookId: 1));
 
-      await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
 
-      // No overflow: the Iced-shaped saved-place row keeps the note inside the
-      // bounded panel (the note paragraph ellipsizes).
+      // No overflow: the saved-place card keeps the note inside the panel
+      // (the note paragraph ellipsizes).
       expect(tester.takeException(), isNull);
       expect(
         find.textContaining('A deliberately long saved note'),
@@ -1263,7 +746,7 @@ void main() {
         findsOneWidget,
       );
       final panel = tester.getRect(
-        find.byKey(const ValueKey('reader-panel-contents')),
+        find.byKey(const ValueKey('reader-panel-notes')),
       );
       final row = tester.getRect(
         find.textContaining('A deliberately long saved note'),
@@ -1292,7 +775,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();
       await _open(tester, _reader(bridge: bridge));
-      await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+      await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
       await tester.pump();
       await tester.pump();
       expect(FocusManager.instance.primaryFocus?.debugLabel, 'reader panel');
@@ -1306,7 +789,10 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       await tester.pump();
-      expect(find.byKey(const ValueKey('reader-panel-more')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('reader-panel-typography')),
+        findsNothing,
+      );
     });
   });
 
@@ -1317,20 +803,9 @@ void main() {
       final semantics = tester.ensureSemantics();
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();
-      await _open(
-        tester,
-        _reader(bridge: bridge, tabs: _manyTabs(selected: 0)),
-      );
+      await _open(tester, _reader(bridge: bridge));
 
-      for (final key in const [
-        'reader-header-back',
-        'reader-header-contents',
-        'reader-header-typography',
-        'reader-header-more',
-        'reader-tab-tab-0',
-        'reader-tab-close-tab-0',
-        'reader-edge-next',
-      ]) {
+      for (final key in const [..._headerActions, 'reader-edge-next']) {
         expect(
           _hasTapAction(tester, key),
           isTrue,
@@ -1339,17 +814,17 @@ void main() {
       }
 
       // Activating the semantic action runs the control's intent.
-      final more = tester.getSemantics(
-        find.byKey(const ValueKey('reader-header-more')),
+      final notes = tester.getSemantics(
+        find.byKey(const ValueKey('reader-header-notes')),
       );
       // The semantics owner that owns the rendered tree (`RenderView.owner`),
       // the same one the semantics finders use.
       tester.binding.renderViews.first.owner!.semanticsOwner!.performAction(
-        more.id,
+        notes.id,
         SemanticsAction.tap,
       );
       await tester.pump();
-      expect(find.byKey(const ValueKey('reader-panel-more')), findsOneWidget);
+      expect(find.byKey(const ValueKey('reader-panel-notes')), findsOneWidget);
 
       // A rendered but disabled control has no activation action.
       expect(
@@ -1388,6 +863,8 @@ void main() {
           ),
         ];
       await _open(tester, _reader(bridge: bridge));
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+      await tester.pump();
 
       await tester.tap(find.widgetWithText(ShadButton, 'Highlight 1'));
       await tester.pump();
@@ -1660,55 +1137,6 @@ void main() {
       expect(controller.model.searchResults, isEmpty);
     },
   );
-
-  testWidgets('macOS uses the command modifier for the tab shortcuts', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    _setView(tester, const Size(1280, 800));
-    await _open(
-      tester,
-      _reader(bridge: _ChromeBridge(), tabs: _manyTabs(selected: 0)),
-    );
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump();
-    expect(_isSelected(tester, 'reader-tab-tab-1'), isTrue);
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump();
-    expect(find.byKey(const ValueKey('reader-tab-tab-1')), findsNothing);
-    debugDefaultTargetPlatformOverride = null;
-  });
-}
-
-/// A deliberately adversarial, piecewise [TextScaler]: small font sizes scale
-/// hard (×2.5) and larger ones barely (×1.02). It is shaped to separate the two
-/// possible tab-label line-box budgets, not to model a platform curve.
-///
-/// It discriminates the *ordering* of that budget: the budget has to scale the
-/// font size first and apply the line-height multiplier after
-/// (`scale(12) * 1.25`), like the engine lays the line out. A budget that scales
-/// the already-multiplied size instead (`scale(12 * 1.25)`) under-allocates
-/// under this scaler, and the ×2.5 small-size factor keeps the scaled line box
-/// (37.5 px) taller than the shared button-height floor, so the label's own
-/// budget is what has to accommodate it.
-class _CurveTextScaler extends TextScaler {
-  const _CurveTextScaler();
-
-  @override
-  double scale(double fontSize) =>
-      fontSize <= ShosaiTokens.typeSize12 ? fontSize * 2.5 : fontSize * 1.02;
-
-  @override
-  double get textScaleFactor => 2.5;
-
-  @override
-  String toString() => 'curve(2.5/1.02)';
 }
 
 /// Pushes [reader] onto the navigator so the reader can leave it.

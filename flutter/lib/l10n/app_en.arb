@@ -212,9 +212,9 @@
   "@noticeDismiss": {
     "description": "Package 2D notice copy: acknowledgement action label."
   },
-  "readerBackToLibrary": "‹ Library",
+  "readerBackToLibrary": "Back to library",
   "@readerBackToLibrary": {
-    "description": "Iced reference key: back-library."
+    "description": "The phone reader toolbar back control (a chevron); its accessible name and tooltip."
   },
   "readerFallbackTitle": "Reader",
   "@readerFallbackTitle": {
@@ -224,13 +224,25 @@
   "@readerContentsAction": {
     "description": "Iced reference key: contents."
   },
-  "readerAppearanceAction": "Reading appearance",
+  "readerAppearanceAction": "Display settings",
   "@readerAppearanceAction": {
-    "description": "Iced reference key: reading-appearance."
+    "description": "The reader toolbar Aa control and the popover it opens: page theme, text size, zoom."
   },
-  "readerMoreAction": "More",
-  "@readerMoreAction": {
-    "description": "NEW: no Iced string. Accessible name for the reader overflow control."
+  "readerNotesAction": "Notes",
+  "@readerNotesAction": {
+    "description": "The reader toolbar Notes control and the panel it opens: bookmarks and highlights in this book."
+  },
+  "readerCloseNotes": "Close notes",
+  "@readerCloseNotes": {
+    "description": "The Notes panel close control."
+  },
+  "readerBookmarkPage": "Bookmark this page",
+  "@readerBookmarkPage": {
+    "description": "The reader toolbar bookmark control while the page is not bookmarked."
+  },
+  "readerRemoveBookmark": "Remove bookmark",
+  "@readerRemoveBookmark": {
+    "description": "The reader toolbar bookmark control while the page is bookmarked."
   },
   "readerOpeningDocument": "Opening document…",
   "@readerOpeningDocument": {
@@ -240,72 +252,125 @@
   "@readerNoBookOpen": {
     "description": "Iced reference key: no-book-open."
   },
-  "readerPageStatus": "Page {page} · {percentage}%",
+  "readerPageStatus": "{percentage}% · page {page}",
   "@readerPageStatus": {
-    "description": "Iced reference key: single-page-status.",
+    "description": "The reader place under the page: percent read, then the page.",
     "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
+      "page": {
+        "type": "int"
+      }
+    }
+  },
+  "readerPageRangeStatus": "{percentage}% · pages {first}–{last}",
+  "@readerPageRangeStatus": {
+    "description": "The reader place under the page: percent read, then the pages shown.",
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
+      "first": {
+        "type": "int"
+      },
+      "last": {
+        "type": "int"
+      }
+    }
+  },
+  "readerChapterStatus": "{percentage}% · chapter {chapter}",
+  "@readerChapterStatus": {
+    "description": "The reader place under the page: percent read, then the chapter (EPUB without page numbers).",
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
+      "chapter": {
+        "type": "int"
+      }
+    }
+  },
+  "readerChapterRangeStatus": "{percentage}% · chapters {first}–{last}",
+  "@readerChapterRangeStatus": {
+    "description": "The reader place under the page: percent read, then the chapters shown.",
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
+      "first": {
+        "type": "int"
+      },
+      "last": {
+        "type": "int"
+      }
+    }
+  },
+  "readerPageOfStatus": "{percentage}% · page {page} of {total}",
+  "@readerPageOfStatus": {
+    "description": "The reader place under the page: percent read, then the page and the page count.",
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
       "page": {
         "type": "int"
       },
-      "percentage": {
+      "total": {
         "type": "int"
       }
     }
   },
-  "readerPageRangeStatus": "Pages {first}–{last} · {percentage}%",
-  "@readerPageRangeStatus": {
-    "description": "Iced reference key: page-range-status.",
+  "readerPageRangeOfStatus": "{percentage}% · pages {first}–{last} of {total}",
+  "@readerPageRangeOfStatus": {
+    "description": "The reader place under the page: percent read, then the pages shown and the page count.",
     "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
       "first": {
         "type": "int"
       },
       "last": {
         "type": "int"
       },
-      "percentage": {
+      "total": {
         "type": "int"
       }
     }
   },
-  "readerChapterStatus": "Chapter {chapter} · {percentage}%",
-  "@readerChapterStatus": {
-    "description": "NEW: no Iced string; names the logical-unit display kind, composed from Iced chapter-number.",
+  "readerChapterOfStatus": "{percentage}% · chapter {chapter} of {total}",
+  "@readerChapterOfStatus": {
+    "description": "The reader place under the page: percent read, then the chapter and the chapter count.",
     "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
       "chapter": {
         "type": "int"
       },
-      "percentage": {
+      "total": {
         "type": "int"
       }
     }
   },
-  "readerChapterRangeStatus": "Chapters {first}–{last} · {percentage}%",
-  "@readerChapterRangeStatus": {
-    "description": "NEW: no Iced string, same reason as readerChapterStatus.",
+  "readerChapterRangeOfStatus": "{percentage}% · chapters {first}–{last} of {total}",
+  "@readerChapterRangeOfStatus": {
+    "description": "The reader place under the page: percent read, then the chapters shown and the chapter count.",
     "placeholders": {
+      "percentage": {
+        "type": "int"
+      },
       "first": {
         "type": "int"
       },
       "last": {
         "type": "int"
       },
-      "percentage": {
+      "total": {
         "type": "int"
       }
     }
-  },
-  "readerCloseTab": "Close {title}",
-  "@readerCloseTab": {
-    "description": "NEW: no Iced string. The reader tab close control; Iced paints a × glyph (app.rs tabs_view), this is its accessible label.",
-    "placeholders": {
-      "title": {
-        "type": "String"
-      }
-    }
-  },
-  "readerTabsLabel": "Open books",
-  "@readerTabsLabel": {
-    "description": "NEW: no Iced string. The reader tab strip label; Iced renders the strip without an accessible label."
   },
   "readerPreviousPage": "Previous page",
   "@readerPreviousPage": {
@@ -360,6 +425,19 @@
         "type": "int"
       }
     }
+  },
+  "readerHighlightsHeading": "Highlights · {count}",
+  "@readerHighlightsHeading": {
+    "description": "Notes panel: the highlights section heading.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "readerNoHighlights": "Select text to highlight it.",
+  "@readerNoHighlights": {
+    "description": "Notes panel: the empty highlights section."
   },
   "readerNoBookmarks": "No bookmarks yet",
   "@readerNoBookmarks": {
@@ -478,17 +556,37 @@
   "@readerThemeCycle": {
     "description": "NEW: no Iced string. The theme cycle control's accessible label; Iced shows only the theme name (RD-09)."
   },
-  "readerThemeLight": "Light",
+  "readerThemeLight": "Paper",
   "@readerThemeLight": {
-    "description": "Iced reference key: light."
+    "description": "The default page theme: warm paper."
   },
-  "readerThemeDark": "Dark",
+  "readerThemeDark": "Night",
   "@readerThemeDark": {
-    "description": "Iced reference key: dark."
+    "description": "The dark page theme."
   },
   "readerThemeSepia": "Sepia",
   "@readerThemeSepia": {
     "description": "Iced reference key: sepia."
+  },
+  "readerProgressTrack": "Reading progress",
+  "@readerProgressTrack": {
+    "description": "The status line's progress track, read out as a slider; its value is the place."
+  },
+  "readerPageTheme": "Page theme",
+  "@readerPageTheme": {
+    "description": "Display settings: the page theme section heading."
+  },
+  "readerTextSize": "Text size",
+  "@readerTextSize": {
+    "description": "Display settings: the EPUB text size section heading."
+  },
+  "readerTextSizeHint": "Pages reflow; your place is kept.",
+  "@readerTextSizeHint": {
+    "description": "Display settings: under the text size stepper."
+  },
+  "readerZoom": "Zoom",
+  "@readerZoom": {
+    "description": "Display settings: the PDF zoom section heading."
   },
   "readerZoomOut": "Zoom out",
   "@readerZoomOut": {
@@ -528,17 +626,9 @@
       }
     }
   },
-  "readerSaved": "★ Saved",
-  "@readerSaved": {
-    "description": "Iced reference key: saved."
-  },
-  "readerBookmark": "☆ Bookmark",
-  "@readerBookmark": {
-    "description": "Iced reference key: bookmark."
-  },
-  "readerOpenBook": "Open book",
-  "@readerOpenBook": {
-    "description": "Iced reference key: open-book."
+  "readerGoToPage": "Go to page",
+  "@readerGoToPage": {
+    "description": "Contents: the label of the page field at the bottom."
   },
   "readerSearchAction": "Search",
   "@readerSearchAction": {

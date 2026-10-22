@@ -87,6 +87,8 @@ class _SelectionBridge extends HarnessBridge {
       body: body,
     );
     created.add(annotation);
+    // A store keeps what it created: a relayout lists it again.
+    annotations = [...annotations, annotation];
     return annotation;
   }
 
@@ -187,6 +189,15 @@ Future<ui.Image> _testImage() async {
 }
 
 /// Pumps until the fixture document is loaded and its surface is painted.
+/// Opens the Notes panel, where the saved highlights are listed.
+Future<void> _openNotes(WidgetTester tester) async {
+  if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isNotEmpty) {
+    return;
+  }
+  await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+  await settleReaderSelection(tester);
+}
+
 Future<void> _open(WidgetTester tester, Widget widget) async {
   await tester.pumpWidget(widget);
   for (var round = 0; round < 8; round += 1) {
@@ -343,9 +354,11 @@ void main() {
         );
         expect(bridge.created.single.textRange!.start.toInt(), 4);
         expect(bridge.created.single.textRange!.end.toInt(), 12);
-        // The commit leaves the action surface; the strip shows the highlight.
+        // The commit leaves the action surface; the notes panel lists the
+        // highlight.
         expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
-        expect(find.text('Highlight 1'), findsOneWidget);
+        await _openNotes(tester);
+        expect(find.text('HIGHLIGHTS · 1'), findsOneWidget);
       }
     });
 
@@ -760,45 +773,50 @@ void main() {
   });
 
   group('annotation actions', () {
-    testWidgets('navigation, recolor, note and delete run from the strip', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
-      final bridge = _SelectionBridge()
-        ..annotations = [
-          _annotation(
-            id: 'one',
-            color: FlutterHighlightColor.yellow,
-            body: 'old note',
-          ),
-        ];
-      await _open(tester, _reader(bridge: bridge));
+    testWidgets(
+      'navigation, recolor, note and delete run from the notes panel',
+      (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge()
+          ..annotations = [
+            _annotation(
+              id: 'one',
+              color: FlutterHighlightColor.yellow,
+              body: 'old note',
+            ),
+          ];
+        await _open(tester, _reader(bridge: bridge));
+        await _openNotes(tester);
 
-      expect(find.text('Highlight 1'), findsOneWidget);
+        expect(find.text('Highlight 1'), findsOneWidget);
 
-      // Recolor cycles yellow -> green and keeps the note.
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-color-one')),
-      );
-      await settleReaderSelection(tester);
-      expect(bridge.updated.single.color, FlutterHighlightColor.green);
-      expect(bridge.updated.single.body, 'old note');
+        // Recolor cycles yellow -> green and keeps the note.
+        await tester.tap(
+          find.byKey(const ValueKey('reader-annotation-color-one')),
+        );
+        await settleReaderSelection(tester);
+        expect(bridge.updated.single.color, FlutterHighlightColor.green);
+        expect(bridge.updated.single.body, 'old note');
 
-      // Navigation selects the range and focuses the surface.
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-navigate-one')),
-      );
-      await settleReaderSelection(tester);
-      expect(FocusManager.instance.primaryFocus?.debugLabel, 'reader surface');
+        // Navigation selects the range and focuses the surface.
+        await tester.tap(
+          find.byKey(const ValueKey('reader-annotation-navigate-one')),
+        );
+        await settleReaderSelection(tester);
+        expect(
+          FocusManager.instance.primaryFocus?.debugLabel,
+          'reader surface',
+        );
 
-      // Delete removes the highlight.
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-delete-one')),
-      );
-      await settleReaderSelection(tester);
-      expect(bridge.deleted, ['one']);
-      expect(find.text('Highlight 1'), findsNothing);
-    });
+        // Delete removes the highlight.
+        await tester.tap(
+          find.byKey(const ValueKey('reader-annotation-delete-one')),
+        );
+        await settleReaderSelection(tester);
+        expect(bridge.deleted, ['one']);
+        expect(find.text('Highlight 1'), findsNothing);
+      },
+    );
 
     testWidgets('the note action opens the editor with the existing body', (
       tester,
@@ -807,6 +825,7 @@ void main() {
       final bridge = _SelectionBridge()
         ..annotations = [_annotation(id: 'one', body: 'old note')];
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
       await tester.tap(
         find.byKey(const ValueKey('reader-annotation-note-one')),
       );
@@ -839,6 +858,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _SelectionBridge()..annotations = [_annotation(id: 'one')];
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
 
       await tester.tapAt(
         tester.getCenter(find.text('Highlight 1')),
@@ -866,6 +886,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _SelectionBridge()..annotations = [_annotation(id: 'one')];
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
 
       // Focus a control in the card through the rendered tree, then use the
       // keyboard equivalent of a secondary click.
@@ -898,6 +919,7 @@ void main() {
             _annotation(id: 'three', color: FlutterHighlightColor.blue),
           ];
         await _open(tester, _reader(bridge: bridge));
+        await _openNotes(tester);
 
         // Open the middle card's menu, then delete the first card: the cards are
         // keyed by annotation id, so the open menu must stay with 'two' rather
@@ -940,6 +962,7 @@ void main() {
           message: 'highlight write rejected',
         );
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
       await tester.tap(
         find.byKey(const ValueKey('reader-annotation-delete-one')),
       );

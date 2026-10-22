@@ -88,21 +88,6 @@ final class ReaderSearchToggled extends ReaderMessage {
   const ReaderSearchToggled();
 }
 
-/// Activates the tab with [tabId] (presentation-only in 4B).
-final class ReaderTabActivated extends ReaderMessage {
-  const ReaderTabActivated(this.tabId);
-  final String tabId;
-}
-
-/// Requests closing the tab with [tabId] (presentation-only in 4B).
-///
-/// Real close semantics (adjacent selection, last-tab return, pending saves,
-/// resource release) are 5F; 4B applies its documented fixture policy.
-final class ReaderTabCloseRequested extends ReaderMessage {
-  const ReaderTabCloseRequested(this.tabId);
-  final String tabId;
-}
-
 /// Leaves the reader. The controller invokes the injected navigation adapter;
 /// a widget never pops the route itself.
 final class ReaderBackRequested extends ReaderMessage {

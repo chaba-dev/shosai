@@ -374,10 +374,10 @@ abstract class AppLocalizations {
   /// **'Dismiss'**
   String get noticeDismiss;
 
-  /// Iced reference key: back-library.
+  /// The phone reader toolbar back control (a chevron); its accessible name and tooltip.
   ///
   /// In en, this message translates to:
-  /// **'‹ Library'**
+  /// **'Back to library'**
   String get readerBackToLibrary;
 
   /// Iced reference key: reader. The reader chrome title when no document title is available.
@@ -392,17 +392,35 @@ abstract class AppLocalizations {
   /// **'Contents'**
   String get readerContentsAction;
 
-  /// Iced reference key: reading-appearance.
+  /// The reader toolbar Aa control and the popover it opens: page theme, text size, zoom.
   ///
   /// In en, this message translates to:
-  /// **'Reading appearance'**
+  /// **'Display settings'**
   String get readerAppearanceAction;
 
-  /// NEW: no Iced string. Accessible name for the reader overflow control.
+  /// The reader toolbar Notes control and the panel it opens: bookmarks and highlights in this book.
   ///
   /// In en, this message translates to:
-  /// **'More'**
-  String get readerMoreAction;
+  /// **'Notes'**
+  String get readerNotesAction;
+
+  /// The Notes panel close control.
+  ///
+  /// In en, this message translates to:
+  /// **'Close notes'**
+  String get readerCloseNotes;
+
+  /// The reader toolbar bookmark control while the page is not bookmarked.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmark this page'**
+  String get readerBookmarkPage;
+
+  /// The reader toolbar bookmark control while the page is bookmarked.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove bookmark'**
+  String get readerRemoveBookmark;
 
   /// Iced reference key: opening-document.
   ///
@@ -416,41 +434,63 @@ abstract class AppLocalizations {
   /// **'No book open'**
   String get readerNoBookOpen;
 
-  /// Iced reference key: single-page-status.
+  /// The reader place under the page: percent read, then the page.
   ///
   /// In en, this message translates to:
-  /// **'Page {page} · {percentage}%'**
-  String readerPageStatus(int page, int percentage);
+  /// **'{percentage}% · page {page}'**
+  String readerPageStatus(int percentage, int page);
 
-  /// Iced reference key: page-range-status.
+  /// The reader place under the page: percent read, then the pages shown.
   ///
   /// In en, this message translates to:
-  /// **'Pages {first}–{last} · {percentage}%'**
-  String readerPageRangeStatus(int first, int last, int percentage);
+  /// **'{percentage}% · pages {first}–{last}'**
+  String readerPageRangeStatus(int percentage, int first, int last);
 
-  /// NEW: no Iced string; names the logical-unit display kind, composed from Iced chapter-number.
+  /// The reader place under the page: percent read, then the chapter (EPUB without page numbers).
   ///
   /// In en, this message translates to:
-  /// **'Chapter {chapter} · {percentage}%'**
-  String readerChapterStatus(int chapter, int percentage);
+  /// **'{percentage}% · chapter {chapter}'**
+  String readerChapterStatus(int percentage, int chapter);
 
-  /// NEW: no Iced string, same reason as readerChapterStatus.
+  /// The reader place under the page: percent read, then the chapters shown.
   ///
   /// In en, this message translates to:
-  /// **'Chapters {first}–{last} · {percentage}%'**
-  String readerChapterRangeStatus(int first, int last, int percentage);
+  /// **'{percentage}% · chapters {first}–{last}'**
+  String readerChapterRangeStatus(int percentage, int first, int last);
 
-  /// NEW: no Iced string. The reader tab close control; Iced paints a × glyph (app.rs tabs_view), this is its accessible label.
+  /// The reader place under the page: percent read, then the page and the page count.
   ///
   /// In en, this message translates to:
-  /// **'Close {title}'**
-  String readerCloseTab(String title);
+  /// **'{percentage}% · page {page} of {total}'**
+  String readerPageOfStatus(int percentage, int page, int total);
 
-  /// NEW: no Iced string. The reader tab strip label; Iced renders the strip without an accessible label.
+  /// The reader place under the page: percent read, then the pages shown and the page count.
   ///
   /// In en, this message translates to:
-  /// **'Open books'**
-  String get readerTabsLabel;
+  /// **'{percentage}% · pages {first}–{last} of {total}'**
+  String readerPageRangeOfStatus(
+    int percentage,
+    int first,
+    int last,
+    int total,
+  );
+
+  /// The reader place under the page: percent read, then the chapter and the chapter count.
+  ///
+  /// In en, this message translates to:
+  /// **'{percentage}% · chapter {chapter} of {total}'**
+  String readerChapterOfStatus(int percentage, int chapter, int total);
+
+  /// The reader place under the page: percent read, then the chapters shown and the chapter count.
+  ///
+  /// In en, this message translates to:
+  /// **'{percentage}% · chapters {first}–{last} of {total}'**
+  String readerChapterRangeOfStatus(
+    int percentage,
+    int first,
+    int last,
+    int total,
+  );
 
   /// NEW: no Iced string. The reader edge navigation; Iced paints ‹/› glyphs (app.rs reader_edge_button), these are their accessible labels.
   ///
@@ -517,6 +557,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Bookmarks · {count}'**
   String readerBookmarksHeading(int count);
+
+  /// Notes panel: the highlights section heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Highlights · {count}'**
+  String readerHighlightsHeading(int count);
+
+  /// Notes panel: the empty highlights section.
+  ///
+  /// In en, this message translates to:
+  /// **'Select text to highlight it.'**
+  String get readerNoHighlights;
 
   /// Iced reference key: no-bookmarks.
   ///
@@ -656,16 +708,16 @@ abstract class AppLocalizations {
   /// **'Reading theme'**
   String get readerThemeCycle;
 
-  /// Iced reference key: light.
+  /// The default page theme: warm paper.
   ///
   /// In en, this message translates to:
-  /// **'Light'**
+  /// **'Paper'**
   String get readerThemeLight;
 
-  /// Iced reference key: dark.
+  /// The dark page theme.
   ///
   /// In en, this message translates to:
-  /// **'Dark'**
+  /// **'Night'**
   String get readerThemeDark;
 
   /// Iced reference key: sepia.
@@ -673,6 +725,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Sepia'**
   String get readerThemeSepia;
+
+  /// The status line's progress track, read out as a slider; its value is the place.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading progress'**
+  String get readerProgressTrack;
+
+  /// Display settings: the page theme section heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Page theme'**
+  String get readerPageTheme;
+
+  /// Display settings: the EPUB text size section heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Text size'**
+  String get readerTextSize;
+
+  /// Display settings: under the text size stepper.
+  ///
+  /// In en, this message translates to:
+  /// **'Pages reflow; your place is kept.'**
+  String get readerTextSizeHint;
+
+  /// Display settings: the PDF zoom section heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom'**
+  String get readerZoom;
 
   /// NEW: no Iced string. The raster zoom-out control's accessible label (RD-09).
   ///
@@ -716,23 +798,11 @@ abstract class AppLocalizations {
   /// **'Enter a page between 1 and {total}.'**
   String readerPageInputInvalid(int total);
 
-  /// Iced reference key: saved.
+  /// Contents: the label of the page field at the bottom.
   ///
   /// In en, this message translates to:
-  /// **'★ Saved'**
-  String get readerSaved;
-
-  /// Iced reference key: bookmark.
-  ///
-  /// In en, this message translates to:
-  /// **'☆ Bookmark'**
-  String get readerBookmark;
-
-  /// Iced reference key: open-book.
-  ///
-  /// In en, this message translates to:
-  /// **'Open book'**
-  String get readerOpenBook;
+  /// **'Go to page'**
+  String get readerGoToPage;
 
   /// Iced reference key: search.
   ///

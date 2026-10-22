@@ -162,7 +162,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get noticeDismiss => '閉じる';
 
   @override
-  String get readerBackToLibrary => '‹ ライブラリ';
+  String get readerBackToLibrary => 'ライブラリに戻る';
 
   @override
   String get readerFallbackTitle => 'リーダー';
@@ -171,10 +171,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerContentsAction => '目次';
 
   @override
-  String get readerAppearanceAction => '読書画面の表示';
+  String get readerAppearanceAction => '表示設定';
 
   @override
-  String get readerMoreAction => 'その他';
+  String get readerNotesAction => 'ノート';
+
+  @override
+  String get readerCloseNotes => 'ノートを閉じる';
+
+  @override
+  String get readerBookmarkPage => 'このページをブックマーク';
+
+  @override
+  String get readerRemoveBookmark => 'ブックマークを外す';
 
   @override
   String get readerOpeningDocument => 'ドキュメントを開いています…';
@@ -183,32 +192,54 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerNoBookOpen => '本が開かれていません';
 
   @override
-  String readerPageStatus(int page, int percentage) {
-    return '$pageページ · $percentage%';
+  String readerPageStatus(int percentage, int page) {
+    return '$percentage% · $pageページ';
   }
 
   @override
-  String readerPageRangeStatus(int first, int last, int percentage) {
-    return '$first～$lastページ · $percentage%';
+  String readerPageRangeStatus(int percentage, int first, int last) {
+    return '$percentage% · $first～$lastページ';
   }
 
   @override
-  String readerChapterStatus(int chapter, int percentage) {
-    return '第$chapter章 · $percentage%';
+  String readerChapterStatus(int percentage, int chapter) {
+    return '$percentage% · 第$chapter章';
   }
 
   @override
-  String readerChapterRangeStatus(int first, int last, int percentage) {
-    return '$first～$last章 · $percentage%';
+  String readerChapterRangeStatus(int percentage, int first, int last) {
+    return '$percentage% · $first～$last章';
   }
 
   @override
-  String readerCloseTab(String title) {
-    return '$titleを閉じる';
+  String readerPageOfStatus(int percentage, int page, int total) {
+    return '$percentage% · $page / $totalページ';
   }
 
   @override
-  String get readerTabsLabel => '開いている本';
+  String readerPageRangeOfStatus(
+    int percentage,
+    int first,
+    int last,
+    int total,
+  ) {
+    return '$percentage% · $first～$last / $totalページ';
+  }
+
+  @override
+  String readerChapterOfStatus(int percentage, int chapter, int total) {
+    return '$percentage% · 第$chapter章 / 全$total章';
+  }
+
+  @override
+  String readerChapterRangeOfStatus(
+    int percentage,
+    int first,
+    int last,
+    int total,
+  ) {
+    return '$percentage% · $first～$last章 / 全$total章';
+  }
 
   @override
   String get readerPreviousPage => '前のページ';
@@ -246,6 +277,14 @@ class AppLocalizationsJa extends AppLocalizations {
   String readerBookmarksHeading(int count) {
     return 'ブックマーク · $count';
   }
+
+  @override
+  String readerHighlightsHeading(int count) {
+    return 'ハイライト · $count';
+  }
+
+  @override
+  String get readerNoHighlights => 'テキストを選ぶとハイライトできます。';
 
   @override
   String get readerNoBookmarks => 'ブックマークはありません';
@@ -327,13 +366,28 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerThemeCycle => '読書テーマ';
 
   @override
-  String get readerThemeLight => 'ライト';
+  String get readerThemeLight => '紙';
 
   @override
-  String get readerThemeDark => 'ダーク';
+  String get readerThemeDark => '夜';
 
   @override
   String get readerThemeSepia => 'セピア';
+
+  @override
+  String get readerProgressTrack => '読書の進み具合';
+
+  @override
+  String get readerPageTheme => 'ページの色';
+
+  @override
+  String get readerTextSize => '文字サイズ';
+
+  @override
+  String get readerTextSizeHint => 'ページは組み直されます。読んでいる場所はそのままです。';
+
+  @override
+  String get readerZoom => 'ズーム';
 
   @override
   String get readerZoomOut => '縮小';
@@ -361,13 +415,7 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get readerSaved => '★ 保存済み';
-
-  @override
-  String get readerBookmark => '☆ ブックマーク';
-
-  @override
-  String get readerOpenBook => '本を開く';
+  String get readerGoToPage => 'ページへ移動';
 
   @override
   String get readerSearchAction => '検索';
