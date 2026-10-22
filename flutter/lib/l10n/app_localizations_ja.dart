@@ -509,4 +509,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get cardOpenTag => '読書中';
+
+  @override
+  String shellOpenBooks(int count) {
+    return '読書中の本 $count冊';
+  }
+
+  @override
+  String get shellSwitcherDone => '完了';
 }

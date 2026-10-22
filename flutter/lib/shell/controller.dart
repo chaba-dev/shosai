@@ -114,8 +114,11 @@ ShellModel update(ShellModel model, ShellMessage message) {
       );
     case ShellBookActivated(:final id):
       if (model.indexOf(id) < 0) return model;
-      if (model.currentBookId == id && model.reading) return model;
-      return model.copyWith(currentBookId: id, reading: true);
+      if (model.currentBookId == id && model.reading && !model.switching) {
+        return model;
+      }
+      // Choosing a book in the switcher reads it.
+      return model.copyWith(currentBookId: id, reading: true, switching: false);
     case ShellBookClosed(:final id):
       final index = model.indexOf(id);
       if (index < 0) return model;
@@ -164,6 +167,12 @@ ShellModel update(ShellModel model, ShellMessage message) {
           open[i].book != model.openBooks[i].book,
       ].contains(true);
       return changed ? model.copyWith(openBooks: open) : model;
+    case ShellSwitcherOpened():
+      if (!model.reading || model.switching) return model;
+      return model.copyWith(switching: true);
+    case ShellSwitcherClosed():
+      if (!model.switching) return model;
+      return model.copyWith(switching: false);
     case ShellRestored(:final restored):
       if (model.openBooks.isNotEmpty || model.reading) return model;
       return restored.copyWith(reading: false);

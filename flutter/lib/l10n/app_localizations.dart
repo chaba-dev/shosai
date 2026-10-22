@@ -991,6 +991,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Open'**
   String get cardOpenTag;
+
+  /// The phone reader's open-book count button (its tooltip and accessible name) and the tab switcher's title.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 open book} other{{count} open books}}'**
+  String shellOpenBooks(int count);
+
+  /// The tab switcher's action that returns to the current book.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get shellSwitcherDone;
 }
 
 class _AppLocalizationsDelegate
