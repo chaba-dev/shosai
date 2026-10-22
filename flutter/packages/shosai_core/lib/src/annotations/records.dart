@@ -57,6 +57,9 @@ final class AnnotationRecords {
   Future<BookAnnotations> list(AnnotationOwner owner) =>
       _store.read((db) => _list(db, owner));
 
+  Future<NotesSummary> summary(int bookId) =>
+      _store.read((db) => _summary(db, bookId));
+
   Future<bool> update(
     AnnotationOwner owner,
     String id,
@@ -403,6 +406,31 @@ BookAnnotations _list(Database db, AnnotationOwner owner) {
   return BookAnnotations(book.hash, [
     for (final row in rows) _annotation(row, allowance),
   ], allowance.remaining);
+}
+
+NotesSummary _summary(Database db, int bookId) {
+  final hash = db
+      .select('SELECT content_hash FROM books WHERE id = ?', [bookId])
+      .firstOrNull
+      ?.columnAt(0);
+  final version = hash == null ? null : _version(db, hash as String);
+  if (version == null) return NotesSummary.empty;
+  const live = '''FROM annotations a
+       JOIN annotation_document_versions v ON v.id = a.version_id
+       WHERE v.document_id = ? AND a.deleted_at IS NULL''';
+  final count =
+      db.select('SELECT count(*) $live', [version.documentId]).first.columnAt(0)
+          as int;
+  final latest = db
+      .select(
+        '''SELECT coalesce(a.original_quote, a.normalized_exact, a.body) AS words
+           $live AND words IS NOT NULL
+           ORDER BY a.created_at DESC, a.rowid DESC LIMIT 1''',
+        [version.documentId],
+      )
+      .firstOrNull
+      ?.columnAt(0);
+  return NotesSummary(count, latest as String?);
 }
 
 /// The live annotation [id] of the book's document, as an update target.

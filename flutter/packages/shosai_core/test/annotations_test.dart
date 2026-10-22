@@ -193,6 +193,36 @@ void main() {
       );
     });
 
+    test('a summary counts live annotations and quotes the latest', () async {
+      final bookId = await book('epub');
+      expect(await annotations.summary(bookId), NotesSummary.empty);
+      expect(await annotations.summary(9999), NotesSummary.empty);
+
+      await annotations.create(bookId, _select(_text, 'lead'));
+      final cafe = await annotations.create(
+        bookId,
+        _select(_text, 'Café text'),
+        body: 'A thought',
+      );
+      expect(
+        await annotations.summary(bookId),
+        const NotesSummary(2, 'Café text'),
+        reason: 'a highlight is quoted, not its note',
+      );
+
+      await annotations.delete(bookId, cafe.id);
+      expect(await annotations.summary(bookId), const NotesSummary(1, 'lead'));
+    });
+
+    test('a summary quotes the text as selected, not as normalized', () async {
+      final bookId = await book('epub');
+      // A decomposed é normalizes to the composed one.
+      const decomposed = 'The lead Café text tail of the chapter.';
+      await annotations.create(bookId, _select(decomposed, 'Café'));
+
+      expect((await annotations.summary(bookId)).latest, 'Café');
+    });
+
     test('delete leaves a hidden tombstone', () async {
       final bookId = await book('epub');
       final created = await annotations.create(bookId, _select(_text, 'lead'));
