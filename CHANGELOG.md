@@ -67,6 +67,9 @@ All notable changes to this project will be documented in this file.
 - *(core)* Port annotations onto the Dart store (#158)
 - *(core)* Port in-document search onto the Dart core (#159)
 - *(app)* Serve library and reader records from the Dart core (#161)
+- *(theme)* Paint the Flutter app with the Shōsai design system tokens (#153)
+- *(flutter)* Compose the library and reader in the Bookshelf shell (#157)
+- *(flutter)* Set the library on a shelf under a Continue reading hero (#160)
 
 ### 🐛 Bug Fixes
 
