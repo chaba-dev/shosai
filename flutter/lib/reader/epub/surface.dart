@@ -52,10 +52,18 @@ FlutterSelectionSurface buildPageSelectionSurface({
   required String canonicalText,
   required String resourcePath,
   required EpubPageBox box,
+  FlowPage? facing,
+  EpubPageBox? facingBox,
 }) {
   final geometry = pageSelectionGeometry(page, box);
+  // A spread's second page continues the first in the chapter's canonical
+  // stream, so its geometry follows the first page's in reading order and
+  // one surface spans both.
+  final facingGeometry = facing == null || facingBox == null
+      ? null
+      : pageSelectionGeometry(facing, facingBox);
   final start = page.canonicalStart;
-  final end = page.canonicalEnd;
+  final end = facingGeometry == null ? page.canonicalEnd : facing!.canonicalEnd;
   final boundaries = _boundariesFor(canonicalText, start, end);
   return FlutterSelectionSurface(
     width: box.size.width,
@@ -63,10 +71,10 @@ FlutterSelectionSurface buildPageSelectionSurface({
     text: canonicalText,
     copyEligible: true,
     resourcePath: resourcePath,
-    endpoints: geometry.endpoints,
+    endpoints: [...geometry.endpoints, ...?facingGeometry?.endpoints],
     graphemeBoundaries: Uint32List.fromList(boundaries.graphemes),
     wordBoundaries: Uint32List.fromList(boundaries.words),
-    visualLines: geometry.visualLines,
+    visualLines: [...geometry.visualLines, ...?facingGeometry?.visualLines],
   );
 }
 

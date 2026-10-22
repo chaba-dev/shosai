@@ -215,6 +215,16 @@ Future<void> _open(WidgetTester tester, Widget widget) async {
   await tester.pump(const Duration(milliseconds: 32));
 }
 
+/// Turns past the PDF's cover, which a spread shows alone, to the spread of
+/// its second and third pages.
+Future<void> _turnToSpread(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+  await tester.pump();
+  for (var round = 0; round < 4; round += 1) {
+    await tester.pump(const Duration(milliseconds: 32));
+  }
+}
+
 void _setView(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -327,6 +337,61 @@ void main() {
       await settleReaderSelection(tester);
 
       expect(copied, ['river ru']);
+    });
+
+    testWidgets(
+      'a highlight on a spread\'s second page is saved on that page',
+      (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge(unitCount: 3);
+        await _open(tester, _reader(bridge: bridge));
+        await _turnToSpread(tester);
+        expect(find.textContaining('pages 2–3 of 3'), findsOneWidget);
+
+        // The second page's text follows the first page's and a line break.
+        final shift = selectionFixtureText.runes.length + 1;
+        await dragReaderSelectionBetween(
+          tester,
+          renderedEndpointCenter(tester, shift + 4),
+          renderedEndpointCenter(tester, shift + 12),
+        );
+        await settleReaderSelection(tester);
+        await tester.tap(find.text('Yellow'));
+        await settleReaderSelection(tester);
+
+        final created = bridge.created.single;
+        expect(created.unit.toInt(), 2);
+        expect(created.textRange!.start.toInt(), 4);
+        expect(created.textRange!.end.toInt(), 12);
+      },
+    );
+
+    testWidgets('a selection stays on the spread page it started on', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge(unitCount: 3);
+      await _open(tester, _reader(bridge: bridge));
+      await _turnToSpread(tester);
+
+      final shift = selectionFixtureText.runes.length + 1;
+      await dragReaderSelectionBetween(
+        tester,
+        renderedEndpointCenter(tester, 40),
+        renderedEndpointCenter(tester, shift + 12),
+      );
+      await settleReaderSelection(tester);
+      await tester.tap(find.text('Yellow'));
+      await settleReaderSelection(tester);
+
+      final created = bridge.created.single;
+      expect(created.unit.toInt(), 1);
+      expect(created.textRange!.start.toInt(), 40);
+      expect(
+        created.textRange!.end.toInt(),
+        selectionFixtureText.runes.length,
+        reason: "the selection ends at the first page's last character",
+      );
     });
 
     testWidgets('each of the five colors commits the selected range', (

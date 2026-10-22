@@ -609,10 +609,14 @@ class _AnnotationCardState extends State<_AnnotationCard> {
 /// On the Dart EPUB path a step turns a page inside the chapter; every other
 /// document and the retained EPUB path keep the logical-unit semantics, which
 /// is what the edge columns and PageUp/PageDown have always dispatched.
-ReaderMessage pageStepMessage(ReaderModel model, int delta) =>
-    model.epubPage == null
-    ? ReaderUnitRequested(model.unit + delta)
-    : ReaderPageStepRequested(delta);
+ReaderMessage pageStepMessage(ReaderModel model, int delta) {
+  if (model.epubPage != null) return ReaderPageStepRequested(delta);
+  // A PDF read in spreads turns both pages of the spread.
+  if (model.layout.spread && model.document?.format == FlutterBookFormat.pdf) {
+    return ReaderUnitRequested(pdfSpreadStep(model.unit, delta));
+  }
+  return ReaderUnitRequested(model.unit + delta);
+}
 
 /// Whether a page step in [delta]'s direction can move the reader.
 ///
@@ -624,7 +628,8 @@ bool _canStepPage(ReaderModel model, int delta, int total) {
   if (page != null) {
     return delta < 0 ? page.canGoBackward : page.canGoForward;
   }
-  return delta < 0 ? model.unit > 0 : model.unit + 1 < total;
+  final last = model.pdfSpread?.facingUnit ?? model.unit;
+  return delta < 0 ? model.unit > 0 : last + 1 < total;
 }
 
 BoxFit _readerFit(ReaderTypographyPresentation typography) {

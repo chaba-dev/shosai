@@ -72,6 +72,30 @@ void main() {
       expect(readingProgress(0, 1), 1);
     });
 
+    test('the last unit in view counts toward progress', () async {
+      final state = ReadingState(t.store);
+
+      // A four-page spread's last two pages: the position is the first.
+      await state.save(
+        epub.id,
+        const ReadingPosition(unit: 2),
+        unitCount: 4,
+        lastUnit: 3,
+      );
+      expect((await t.library.get(epub.id))!.progress, 1);
+      expect(await state.load(epub.id), const ReadingPosition(unit: 2));
+
+      await expectLater(
+        state.save(
+          epub.id,
+          const ReadingPosition(unit: 2),
+          unitCount: 4,
+          lastUnit: 1,
+        ),
+        throwsA(isA<CoreException>()),
+      );
+    });
+
     test('a failed progress update rolls back the whole save', () async {
       final state = ReadingState(t.store);
       await state.save(

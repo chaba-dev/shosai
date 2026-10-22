@@ -2816,6 +2816,158 @@ void main() {
     await bridge.disposed.future;
   });
 
+  group('PDF spreads', () {
+    Future<void> drain() async {
+      for (var turn = 0; turn < 30; turn += 1) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    Future<ReaderController> openSpread(_ControlledBridge bridge) async {
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      controller.dispatch(
+        const ReaderViewportChanged(
+          ReaderLayout(width: 1000, spread: true),
+          height: 600,
+          devicePixelRatio: 1,
+        ),
+      );
+      controller.dispatch(
+        ReaderOpenRequested('/tmp/book.pdf', bookId: bridge.bookId),
+      );
+      await bridge.waitForOp(1);
+      await drain();
+      return controller;
+    }
+
+    test('a spread whose text cannot be read still shows and counts both '
+        'pages', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+        selectionFailure: true,
+      );
+      final controller = await openSpread(bridge);
+      // The cover is shown alone; pages 2 and 3 make the first spread.
+      controller.dispatch(const ReaderUnitRequested(1));
+      await drain();
+      expect(controller.model.selectionError, isNotNull);
+      expect(bridge.renderUnits, containsAll([1, 2]));
+      expect(controller.model.pdfSpread?.facingUnit, 2);
+      expect(controller.model.progress.lastOrdinal, 3);
+
+      controller.dispatch(const ReaderUnitRequested(3));
+      await drain();
+      expect(controller.model.unit, 3);
+      expect(controller.model.progress.percentage, 100);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    // With no text, a spread has no offsets to tell its pages apart: a place
+    // in the first page's text must not read as a place on the second.
+    for (final failing in ['opening', 'a relayout']) {
+      test('a place on a spread\'s first page stays there when its text '
+          'cannot be read on $failing', () async {
+        final bridge = _ControlledBridge(
+          bookId: 7,
+          logicalUnitCount: 4,
+          immediateLists: true,
+          selectionFailure: failing == 'opening',
+          initialReadingState: FlutterReadingState(
+            unit: BigInt.one,
+            offset: BigInt.from(10),
+            zoom: 1,
+          ),
+        );
+        final controller = await openSpread(bridge);
+        expect(controller.model.pdfSpread?.facingUnit, 2);
+        bridge.selectionFailure = true;
+        controller.dispatch(
+          const ReaderViewportChanged(
+            ReaderLayout(width: 1100, spread: true),
+            height: 600,
+            devicePixelRatio: 1,
+          ),
+        );
+        await drain();
+        expect(controller.model.selectionError, isNotNull);
+        expect(controller.model.pdfSpread?.textShift, 0);
+        expect(controller.model.readingLocation.unit, 1);
+        expect(bridge.savedReadingStates.last.unit.toInt(), 1);
+        controller.dispose();
+        await bridge.disposed.future;
+      });
+    }
+
+    test('a fitted render retry on a spread\'s second page finishes while '
+        'its box moves', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+      );
+      final controller = await openSpread(bridge);
+      controller.dispatch(const ReaderUnitRequested(2));
+      await drain();
+      expect(controller.model.unit, 1);
+      expect(controller.model.readingLocation.unit, 2);
+      void report(double height) => controller.dispatch(
+        ReaderViewportChanged(
+          const ReaderLayout(width: 2000, spread: true),
+          height: height,
+          devicePixelRatio: 1,
+        ),
+      );
+
+      // Two 612 × 792 pt pages 2000 px wide are fitted to the box height.
+      report(400);
+      await drain();
+      bridge.renderFailure = true;
+      report(700);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+      bridge.renderFailure = false;
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      final failed = bridge.renderScales.length;
+      report(630);
+      await drain();
+      expect(bridge.renderScales.length, greaterThan(failed));
+      final retried = bridge.renderScales.length;
+      // A box 4 px shorter while the retry renders waits for it.
+      report(626);
+      await drain();
+      expect(bridge.renderScales, hasLength(retried));
+      expect(controller.model.relayoutError, isNotNull);
+      held.complete(_buffer(BigInt.from(40)));
+      await drain();
+      expect(controller.model.readingLocation.unit, 2);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('the last spread of an odd-page PDF is saved as finished', () async {
+      final bridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 5,
+        immediateLists: true,
+      );
+      final controller = await openSpread(bridge);
+      controller.dispatch(const ReaderUnitRequested(3));
+      await drain();
+      expect(controller.model.progress.percentage, 100);
+      final saved = bridge.savedReadingStates.last;
+      expect(saved.unit.toInt(), 3);
+      expect(saved.lastUnit?.toInt(), 4);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+  });
+
   group('fitted PDF rasters', () {
     // The fixture page is 612 × 792 pt. A box 5000 px wide is limited by its
     // height, so the fitted scale is the height over 792 at the pixel ratio.
@@ -7402,6 +7554,9 @@ final class _ControlledBridge
   FlutterBookFormat format;
   int logicalUnitCount;
   final int? bookId;
+
+  @override
+  int get pdfEnginePageCount => logicalUnitCount;
   final List<FlutterAnnotation> initialAnnotations;
   final List<FlutterAnnotation> storedAnnotations;
   final List<FlutterAnnotationAssociationSource> associationSources;

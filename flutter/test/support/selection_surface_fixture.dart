@@ -198,8 +198,17 @@ Offset readerSurfaceToGlobal(
 }
 
 /// The rendered centre of the fixture character [offset].
+///
+/// The character's own endpoint places it when the surface has one, so a
+/// surface that shows two fixture pages side by side (a PDF spread) addresses
+/// the first page's character.
 Offset renderedFixtureOffset(WidgetTester tester, int offset) {
   final painted = paintedReaderSurface(tester);
+  if (painted.surface.endpoints.any(
+    (endpoint) => endpoint.offset.toInt() == offset,
+  )) {
+    return renderedEndpointCenter(tester, offset);
+  }
   final geometry = SelectionFixtureGeometry(
     width: painted.surface.width,
     height: painted.surface.height,

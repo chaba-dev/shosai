@@ -16,6 +16,7 @@ import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/continuous.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
+import 'package:shosai_flutter/reader/pdf/spread.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
@@ -952,6 +953,7 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
         // contract §2.3 item 5b). The EPUB font size is the reader preference.
         fontSize: typography.epubFontSize,
         lineSpacing: typography.epubLineSpacing,
+        spread: _ReaderSpreadScope.of(context),
       );
       final observedHeight = availableHeight;
       final pixelRatio = MediaQuery.devicePixelRatioOf(context);

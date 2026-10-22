@@ -43,6 +43,58 @@ List<BoxShadow> _readerPageShadow(ShellPalette palette) => [
   ),
 ];
 
+/// The narrowest book-text column a spread may give each page, in ems of the
+/// book's text size: below it the reader shows one page rather than shrink
+/// the text to fit two.
+const double _readerSpreadMinColumnEms = 12;
+
+/// Whether the stage shows two pages side by side (`docs/design-system.md`,
+/// Reading surfaces).
+///
+/// Two pages need the Pages setting, a paginated reader off the phone, a page
+/// area at least `spread-min-width` wide and wider than it is tall, and for
+/// EPUB a text column of at least [_readerSpreadMinColumnEms] on each page.
+bool _readerShowsSpread(
+  ReaderModel model,
+  ShellLayout layout,
+  BoxConstraints area,
+) {
+  final typography = model.typography;
+  if (layout == ShellLayout.phone ||
+      !typography.twoPages ||
+      model.continuousPresentation ||
+      area.maxWidth < ShosaiTokens.sizeSpreadMinWidth ||
+      area.maxWidth < area.maxHeight) {
+    return false;
+  }
+  // A PDF page without a partner (the last of an odd count, or a document of
+  // one page) is shown alone in the spread's box.
+  if (!_readerShowsPaper(model)) return true;
+  final paper = math.min(area.maxWidth, 2 * _readerEpubPageMaxWidth);
+  final column =
+      epubSpreadPageWidth(paper - 2 * ShosaiTokens.space5) -
+      2 * kEpubPageMargin;
+  return column >= _readerSpreadMinColumnEms * typography.epubFontSize;
+}
+
+/// Tells the layout reporter under the stage whether the stage shows a
+/// spread, so the page is laid out for the slots the stage draws.
+class _ReaderSpreadScope extends InheritedWidget {
+  const _ReaderSpreadScope({required this.spread, required super.child});
+
+  final bool spread;
+
+  static bool of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<_ReaderSpreadScope>()
+          ?.spread ??
+      false;
+
+  @override
+  bool updateShouldNotify(_ReaderSpreadScope oldWidget) =>
+      spread != oldWidget.spread;
+}
+
 /// Whether the reader lays its document out as EPUB pages on paper.
 ///
 /// Before a document arrives the open's path decides, so the page box the open
@@ -111,8 +163,15 @@ class _ReaderStage extends StatelessWidget {
 
     final pageArea = LayoutBuilder(
       builder: (context, constraints) {
-        if (phone || !paper) return content;
-        final width = math.min(constraints.maxWidth, _readerEpubPageMaxWidth);
+        final spread = _readerShowsSpread(model, layout, constraints);
+        final scoped = _ReaderSpreadScope(spread: spread, child: content);
+        if (phone || !paper) return scoped;
+        // A spread is two pages of paper side by side, each as wide as a
+        // single page may be, under one `shadow-page`.
+        final width = math.min(
+          constraints.maxWidth,
+          (spread ? 2 : 1) * _readerEpubPageMaxWidth,
+        );
         return Center(
           child: SizedBox(
             key: const ValueKey('reader-page'),
@@ -126,14 +185,27 @@ class _ReaderStage extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(3),
-                // The page's own margins around the layout's: a page on the
-                // stage reads with wider margins than a full-bleed phone page.
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: ShosaiTokens.space5,
-                    vertical: ShosaiTokens.space4,
-                  ),
-                  child: content,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // The page's own margins around the layout's: a page on
+                    // the stage reads with wider margins than a full-bleed
+                    // phone page.
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: ShosaiTokens.space5,
+                        vertical: ShosaiTokens.space4,
+                      ),
+                      child: scoped,
+                    ),
+                    if (spread)
+                      Center(
+                        child: _ReaderSpreadGutter(
+                          shade: palette.shadowBase,
+                          dark: palette.dark,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -233,4 +305,35 @@ class _ReaderEdgeButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The fold between the two pages of a spread: the second page darkens toward
+/// its inner edge, as `sh-spread`'s inset shadow does.
+class _ReaderSpreadGutter extends StatelessWidget {
+  const _ReaderSpreadGutter({required this.shade, required this.dark});
+
+  final Color shade;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: SizedBox(
+      key: const ValueKey('reader-spread-gutter'),
+      width: 32,
+      height: double.infinity,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              shade.withValues(alpha: 0),
+              shade.withValues(alpha: 0),
+              shade.withValues(alpha: dark ? .3 : .16),
+              shade.withValues(alpha: 0),
+            ],
+            stops: const [0, .5, .5, 1],
+          ),
+        ),
+      ),
+    ),
+  );
 }

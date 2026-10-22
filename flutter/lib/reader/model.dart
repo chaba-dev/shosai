@@ -232,6 +232,7 @@ final class ReaderTypographyPresentation {
     required this.epubLineSpacing,
     required this.rasterFit,
     required this.rasterZoom,
+    this.twoPages = true,
   });
 
   final FlutterBookFormat format;
@@ -245,6 +246,11 @@ final class ReaderTypographyPresentation {
   /// and the reader's base density for the fit modes. Applying a real fit-page
   /// or fit-width computation from page geometry is 5A/6B.
   final double rasterZoom;
+
+  /// The Pages setting: two pages side by side where the stage has room for
+  /// them (the default), or always one. Phones and narrow stages show one page
+  /// either way.
+  final bool twoPages;
 
   /// Whether the document is reflowable (EPUB), so the EPUB controls apply.
   bool get reflowable => format == FlutterBookFormat.epub;
@@ -263,6 +269,7 @@ final class ReaderTypographyPresentation {
     double? epubLineSpacing,
     ReaderRasterFit? rasterFit,
     double? rasterZoom,
+    bool? twoPages,
   }) => ReaderTypographyPresentation(
     format: format ?? this.format,
     continuous: continuous ?? this.continuous,
@@ -271,6 +278,7 @@ final class ReaderTypographyPresentation {
     epubLineSpacing: epubLineSpacing ?? this.epubLineSpacing,
     rasterFit: rasterFit ?? this.rasterFit,
     rasterZoom: rasterZoom ?? this.rasterZoom,
+    twoPages: twoPages ?? this.twoPages,
   );
 
   @override
@@ -282,7 +290,8 @@ final class ReaderTypographyPresentation {
       other.epubFontSize == epubFontSize &&
       other.epubLineSpacing == epubLineSpacing &&
       other.rasterFit == rasterFit &&
-      other.rasterZoom == rasterZoom;
+      other.rasterZoom == rasterZoom &&
+      other.twoPages == twoPages;
 
   @override
   int get hashCode => Object.hash(
@@ -293,6 +302,7 @@ final class ReaderTypographyPresentation {
     epubLineSpacing,
     rasterFit,
     rasterZoom,
+    twoPages,
   );
 }
 
@@ -350,12 +360,17 @@ final class ReaderLayout {
     this.width = 680,
     this.fontSize = 18,
     this.lineSpacing = 1.5,
+    this.spread = false,
   });
 
   final double scale;
   final double width;
   final double fontSize;
   final double lineSpacing;
+
+  /// Whether the view shows two pages side by side in [width]; the view
+  /// decides from the Pages setting and the room on the stage.
+  final bool spread;
 
   bool get isValid =>
       scale.isFinite &&
@@ -374,10 +389,11 @@ final class ReaderLayout {
       scale == other.scale &&
       width == other.width &&
       fontSize == other.fontSize &&
-      lineSpacing == other.lineSpacing;
+      lineSpacing == other.lineSpacing &&
+      spread == other.spread;
 
   @override
-  int get hashCode => Object.hash(scale, width, fontSize, lineSpacing);
+  int get hashCode => Object.hash(scale, width, fontSize, lineSpacing, spread);
 }
 
 final class ReaderModel {
@@ -389,6 +405,8 @@ final class ReaderModel {
     this.readingOffset,
     this.pageImage,
     this.epubPage,
+    this.pdfSpread,
+    this.readingPage,
     this.locationRequestRevision = 0,
     FlutterSelectionSurface? selectionSurface,
     this.selectionPhase = ReaderSelectionPhase.idle,
@@ -463,6 +481,31 @@ final class ReaderModel {
   /// The Dart-engine page window currently rendered, or null when the page is
   /// the retained renderer's raster.
   final ReaderEpubPage? epubPage;
+
+  /// The second page shown beside [unit] when a PDF is read in spreads, or
+  /// null for one page. [selectionSurface] and [pageImage] then span both.
+  final ReaderPdfSpread? pdfSpread;
+
+  /// The page being read when a PDF is read in spreads: [unit] or the
+  /// spread's second page. A place on the second page may have no offset (a
+  /// bookmark made with the page shown alone, say), so the page is kept apart
+  /// from [readingOffset]. Null when the PDF is not read in spreads.
+  final int? readingPage;
+
+  /// The durable reading location: the page being read and an offset in that
+  /// page's own text.
+  ///
+  /// [unit] and [readingOffset] address what the reader shows; on a PDF
+  /// spread that is the spread's first page, and an offset on its second page
+  /// lies past the first page's text. Bookmarks, saved positions and a layout
+  /// that shows the page alone use this location instead.
+  ({int unit, int? offset}) get readingLocation {
+    final spread = pdfSpread;
+    final offset = readingOffset;
+    final page = readingPage ?? unit;
+    if (spread == null || offset == null) return (unit: page, offset: offset);
+    return (unit: page, offset: spread.pageOffset(offset));
+  }
 
   /// Revision of the latest explicit location request [epubPage] answers.
   ///
@@ -592,6 +635,8 @@ final class ReaderModel {
     Object? readingOffset = _unchanged,
     Object? pageImage = _unchanged,
     Object? epubPage = _unchanged,
+    Object? pdfSpread = _unchanged,
+    Object? readingPage = _unchanged,
     int? locationRequestRevision,
     Object? selectionSurface = _unchanged,
     ReaderSelectionPhase? selectionPhase,
@@ -654,6 +699,12 @@ final class ReaderModel {
       epubPage: identical(epubPage, _unchanged)
           ? this.epubPage
           : epubPage as ReaderEpubPage?,
+      pdfSpread: identical(pdfSpread, _unchanged)
+          ? this.pdfSpread
+          : pdfSpread as ReaderPdfSpread?,
+      readingPage: identical(readingPage, _unchanged)
+          ? this.readingPage
+          : readingPage as int?,
       locationRequestRevision:
           locationRequestRevision ?? this.locationRequestRevision,
       selectionSurface: identical(selectionSurface, _unchanged)
