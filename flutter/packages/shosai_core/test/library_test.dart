@@ -948,8 +948,12 @@ void main() {
         // open. The other, sharing that lock, must not open the file: in one
         // process its file lock would be granted at once.
         final holder = await _holdFileLock(t, lockFile);
+        // Not following links: an fd (the listing's own, say) can close
+        // mid-listing, and resolving its gone link would throw.
         int openLockFiles() => [
-          for (final entry in Directory('/proc/self/fd').listSync())
+          for (final entry in Directory(
+            '/proc/self/fd',
+          ).listSync(followLinks: false))
             if (_linkTarget(entry.path) == lockFile) entry,
         ].length;
 
