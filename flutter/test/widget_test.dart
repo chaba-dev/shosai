@@ -11,8 +11,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
+import 'support/bridge_pdf_engine.dart';
+import 'support/bridge_records.dart';
 
 final _documentHandle = FlutterDocumentHandle(
   registry: BigInt.one,
@@ -137,7 +140,6 @@ void main() {
       PagePainter(
         image: null,
         surface: FlutterSelectionSurface(
-          handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.one),
           width: 100,
           height: 100,
           text: '',
@@ -190,7 +192,6 @@ void main() {
     PagePainter(
       image: null,
       surface: FlutterSelectionSurface(
-        handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.one),
         width: 40,
         height: 40,
         text: 'x',
@@ -279,7 +280,6 @@ void main() {
     ];
     final model = ReaderModel(
       selectionSurface: FlutterSelectionSurface(
-        handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.one),
         width: 1,
         height: 1,
         text: 'a',
@@ -406,7 +406,7 @@ void main() {
     bridge.openCompleter.complete(
       FlutterDocumentSummary(
         handle: _documentHandle,
-        format: FlutterBookFormat.epub,
+        format: FlutterBookFormat.pdf,
         logicalUnitCount: BigInt.one,
       ),
     );
@@ -461,7 +461,6 @@ void main() {
       'cancel',
       'buffer',
       'cancellation',
-      'selection',
       'document',
       'dispose',
     ]);
@@ -536,7 +535,6 @@ void main() {
       'cancel',
       'buffer',
       'cancellation',
-      'selection',
       'document',
       'dispose',
     ]);
@@ -544,8 +542,11 @@ void main() {
 
   for (final disposedDuringDecode in [false, true]) {
     for (final decodeFails in [false, true]) {
+      // The PDF engine owns the rendered pixels: the bridge buffer behind the
+      // fake engine is copied and released before the decoder runs, and the
+      // decode outcome cannot change that ownership.
       test(
-        'PDF buffer stays retained through ${disposedDuringDecode ? 'disposed ' : ''}${decodeFails ? 'failed' : 'successful'} decoding',
+        'PDF render pixels are engine-owned through ${disposedDuringDecode ? 'disposed ' : ''}${decodeFails ? 'failed' : 'successful'} decoding',
         () async {
           final bridge = _FakeBridge()..completeOpen(FlutterBookFormat.pdf);
           final decoded = Completer<ui.Image>();
@@ -568,11 +569,10 @@ void main() {
             ),
           );
           await decodeStarted.future;
-          expect(bridge.releasedBuffers, isEmpty);
+          expect(bridge.releasedBuffers, [_bufferHandle]);
           if (disposedDuringDecode) {
             controller.dispose();
             expect(bridge.disposeCount, 0);
-            expect(bridge.releasedBuffers, isEmpty);
           }
 
           if (decodeFails) {
@@ -602,155 +602,6 @@ void main() {
     }
   }
 
-  test(
-    'EPUB raster handle remains retained until decoding completes',
-    () async {
-      final bridge = _FakeBridge(selectionRaster: true)
-        ..completeOpen(FlutterBookFormat.epub);
-      final decoded = Completer<ui.Image>();
-      final controller = ReaderController(
-        bridge: bridge,
-        decoder: (pixels, {required width, required height}) {
-          expect(width, 2);
-          expect(height, 1);
-          return decoded.future;
-        },
-      );
-
-      controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.model.contentState, ReaderContentState.loading);
-      expect(controller.model.selectionSurface, isNull);
-      expect(bridge.releasedBuffers, isEmpty);
-      decoded.complete(await _testImage());
-      await bridge.operationFinished.future;
-      expect(bridge.releasedBuffers, [_bufferHandle]);
-      controller.dispose();
-      await bridge.disposed.future;
-    },
-  );
-
-  test('EPUB raster releases exactly once on decode failure', () async {
-    final bridge = _FakeBridge(selectionRaster: true)
-      ..completeOpen(FlutterBookFormat.epub);
-    final controller = ReaderController(
-      bridge: bridge,
-      decoder: (pixels, {required width, required height}) =>
-          Future.error(StateError('EPUB decode failed')),
-    );
-
-    controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-    await bridge.operationFinished.future;
-    expect(controller.model.error, contains('EPUB decode failed'));
-    expect(bridge.releasedBuffers, [_bufferHandle]);
-    controller.dispose();
-    await bridge.disposed.future;
-  });
-
-  testWidgets('missing mandatory EPUB raster is a terminal content failure', (
-    tester,
-  ) async {
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final bridge = _FakeBridge()..missingSelectionRaster = true;
-    bridge.completeOpen(FlutterBookFormat.epub);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ReaderScreen(
-          debugPathEntry: true,
-          bridge: bridge,
-          decoder: (pixels, {required width, required height}) => _testImage(),
-        ),
-      ),
-    );
-    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
-    await tester.tap(find.text('Open document'));
-    await bridge.operationFinished.future;
-    await tester.pump();
-
-    expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.textContaining('missing its raster'), findsWidgets);
-
-    final originalScale = tester.view.devicePixelRatio;
-    final desiredScale = originalScale == 2 ? 3.0 : 2.0;
-    tester.view.devicePixelRatio = desiredScale;
-    await tester.pump();
-    await tester.pump();
-    bridge.missingSelectionRaster = false;
-    await tester.enterText(find.byType(ShadInput), '/tmp/retry.epub');
-    await tester.tap(find.text('Open document'));
-    await tester.pumpAndSettle();
-    expect(bridge.selectionLayouts.last.scale, originalScale);
-    await tester.pumpWidget(const SizedBox());
-    await bridge.disposed.future;
-  });
-
-  test(
-    'pending selection completion releases ownership after disposal',
-    () async {
-      final bridge = _FakeBridge();
-      bridge.selectionCompleter = Completer<FlutterSelectionSurface>();
-      bridge.completeOpen(FlutterBookFormat.epub);
-      final controller = ReaderController(
-        bridge: bridge,
-        decoder: (pixels, {required width, required height}) {
-          fail('stale selection must not decode');
-        },
-      );
-      controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-      await Future<void>.delayed(Duration.zero);
-      controller.dispose();
-      final selection = FlutterSelectionHandle(
-        registry: BigInt.one,
-        id: BigInt.from(9),
-      );
-      bridge.selectionCompleter!.complete(
-        FlutterSelectionSurface(
-          handle: selection,
-          width: 1,
-          height: 1,
-          text: 'x',
-          copyEligible: true,
-          raster: FlutterRenderedBuffer(
-            handle: _bufferHandle,
-            width: 1,
-            height: 1,
-            byteLen: BigInt.from(4),
-          ),
-          endpoints: const [],
-          graphemeBoundaries: Uint32List(0),
-          wordBoundaries: Uint32List(0),
-          visualLines: const [],
-        ),
-      );
-      await bridge.disposed.future;
-      expect(bridge.releasedBuffers, [_bufferHandle]);
-      expect(bridge.releasedSelections, [selection]);
-      expect(bridge.listCalls, 0);
-      expect(bridge.renderCalls, 0);
-    },
-  );
-
-  test(
-    'EPUB raster releases after stale disposal decoder completion',
-    () async {
-      final bridge = _FakeBridge(selectionRaster: true)
-        ..completeOpen(FlutterBookFormat.epub);
-      final decoded = Completer<ui.Image>();
-      final controller = ReaderController(
-        bridge: bridge,
-        decoder: (pixels, {required width, required height}) => decoded.future,
-      );
-
-      controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-      await Future<void>.delayed(Duration.zero);
-      controller.dispose();
-      expect(bridge.releasedBuffers, isEmpty);
-      decoded.complete(await _testImage());
-      await bridge.disposed.future;
-      expect(bridge.releasedBuffers, [_bufferHandle]);
-    },
-  );
-
   test('dispatch owns reader model transitions and async completion', () async {
     final bridge = _FakeBridge();
     final controller = ReaderController(
@@ -772,37 +623,31 @@ void main() {
     controller.dispatch(const ReaderOpenRequested('/tmp/ignored.epub'));
     expect(bridge.openRequests, hasLength(1));
 
-    bridge.completeOpen(FlutterBookFormat.epub);
+    bridge.completeOpen(FlutterBookFormat.pdf);
+    await bridge.completeRender();
     await bridge.operationFinished.future;
 
     expect(controller.model.busy, isFalse);
     expect(controller.model.document?.handle, _documentHandle);
     expect(controller.model.error, isNull);
-    expect(transitions, hasLength(5));
+    expect(transitions, hasLength(6));
     expect(transitions[0].busy, isTrue);
     expect(transitions[1].document?.handle, _documentHandle);
     expect(transitions[2].selectionSurface?.text, 'Selectable fixture text');
     expect(transitions[3].annotationsReady, isTrue);
-    expect(transitions[4].busy, isFalse);
+    expect(transitions[4].pageImage, isNotNull);
+    expect(transitions[5].busy, isFalse);
 
     controller.dispose();
     await bridge.disposed.future;
-    expect(bridge.events, [
-      'buffer',
-      'cancellation',
-      'selection',
-      'document',
-      'dispose',
-    ]);
+    expect(bridge.events, ['buffer', 'cancellation', 'document', 'dispose']);
   });
 
   test('throwing listeners cannot interrupt effect ownership', () async {
     final bridge = _FakeBridge();
     final controller = ReaderController(
       bridge: bridge,
-      decoder: (pixels, {required width, required height}) {
-        throw StateError('EPUB must not decode a raster');
-      },
+      decoder: (pixels, {required width, required height}) => _testImage(),
     );
     final reported = <Object>[];
     final previousErrorHandler = FlutterError.onError;
@@ -811,13 +656,14 @@ void main() {
 
     try {
       controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-      bridge.completeOpen(FlutterBookFormat.epub);
+      bridge.completeOpen(FlutterBookFormat.pdf);
+      await bridge.completeRender();
       await bridge.operationFinished.future;
       await Future<void>.delayed(Duration.zero);
 
       expect(controller.model.busy, isFalse);
       expect(controller.model.document?.handle, _documentHandle);
-      expect(reported, hasLength(5));
+      expect(reported, hasLength(6));
 
       controller.dispose();
       await bridge.disposed.future;
@@ -833,9 +679,7 @@ void main() {
     final bridge = _FakeBridge();
     final controller = ReaderController(
       bridge: bridge,
-      decoder: (pixels, {required width, required height}) {
-        throw StateError('EPUB must not decode a raster');
-      },
+      decoder: (pixels, {required width, required height}) => _testImage(),
     );
     final reported = <Object>[];
     final previousErrorHandler = FlutterError.onError;
@@ -844,7 +688,8 @@ void main() {
       FlutterError.onError = (details) => throw details.exception;
       controller.addListener(() => throw StateError('listener failed'));
       controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-      bridge.completeOpen(FlutterBookFormat.epub);
+      bridge.completeOpen(FlutterBookFormat.pdf);
+      await bridge.completeRender();
       await bridge.operationFinished.future;
       controller.dispose();
       await bridge.disposed.future;
@@ -852,7 +697,7 @@ void main() {
     }, (error, stackTrace) => reported.add(error));
     FlutterError.onError = previousErrorHandler;
 
-    expect(reported, hasLength(5));
+    expect(reported, hasLength(6));
     expect(bridge.releasedDocuments, [_documentHandle]);
     expect(bridge.releasedCancellations, [BigInt.one]);
     expect(bridge.disposeCount, 1);
@@ -1024,13 +869,13 @@ void main() {
           ),
           FlutterDocumentSummary(
             handle: secondDocument,
-            format: FlutterBookFormat.epub,
+            format: FlutterBookFormat.pdf,
             logicalUnitCount: BigInt.one,
           ),
           'replacement failed',
           FlutterDocumentSummary(
             handle: finalDocument,
-            format: FlutterBookFormat.epub,
+            format: FlutterBookFormat.pdf,
             logicalUnitCount: BigInt.one,
           ),
         ]),
@@ -1150,33 +995,14 @@ void main() {
     expect(image.debugDisposed, isTrue);
   });
 
-  test('premultiplies translucent RGBA pixels in place', () {
-    final pixels = Uint8List.fromList([
-      255,
-      64,
-      0,
-      128,
-      10,
-      20,
-      30,
-      255,
-      200,
-      100,
-      50,
-      0,
-    ]);
-
-    expect(premultiplyRgba(pixels), same(pixels));
-    expect(pixels, [128, 32, 0, 128, 10, 20, 30, 255, 0, 0, 0, 0]);
-  });
-
   test(
     'selection follows the shared interaction phases without bridge calls',
     () async {
       final bridge = _FakeBridge();
       final controller = _epubController(bridge);
       controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-      bridge.completeOpen(FlutterBookFormat.epub);
+      bridge.completeOpen(FlutterBookFormat.pdf);
+      await bridge.completeRender();
       await bridge.operationFinished.future;
 
       controller.dispatch(const ReaderSelectionStarted(12));
@@ -2183,7 +2009,7 @@ void main() {
     await bridge.disposed.future;
   });
 
-  for (final format in [FlutterBookFormat.epub, FlutterBookFormat.pdf]) {
+  for (final format in [FlutterBookFormat.pdf]) {
     test(
       '$format relayout preserves resolved highlights and layout inputs',
       () async {
@@ -2213,13 +2039,12 @@ void main() {
           ]),
         );
         expect(controller.model.savedSelections, hasLength(1));
-        expect(bridge.selectionLayouts, [const ReaderLayout(), layout]);
-        expect(bridge.listScales, [1, 2]);
-        if (format == FlutterBookFormat.pdf) {
-          expect(bridge.renderScales, [1, 2]);
-        } else {
-          expect(bridge.renderScales, isEmpty);
-        }
+        // A PDF surface is laid out by the engine from its scale alone.
+        expect(bridge.selectionLayouts, [
+          const ReaderLayout(),
+          const ReaderLayout(scale: 2),
+        ]);
+        expect(bridge.renderScales, [1, 2]);
         controller.dispatch(const ReaderSelectionStarted(1));
         controller.dispatch(const ReaderSelectionExtended(3));
         controller.dispatch(const ReaderSelectionEnded());
@@ -2232,46 +2057,6 @@ void main() {
       },
     );
   }
-
-  test('stale EPUB relayout releases its effect-owned raster once', () async {
-    final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
-      immediateLists: true,
-    );
-    final controller = _epubController(bridge);
-    await _openControlled(controller, bridge, '/tmp/book.epub');
-    final staleSelection = Completer<FlutterSelectionSurface>();
-    bridge.selectionCompleters.add(staleSelection);
-    const first = ReaderLayout(scale: 2, width: 300, fontSize: 20);
-    const second = ReaderLayout(scale: 3, width: 400, fontSize: 22);
-
-    controller.dispatch(const ReaderLayoutChanged(first));
-    await _waitUntil(() => bridge.selectionCalls == 2);
-    controller.dispatch(const ReaderLayoutChanged(second));
-    await bridge.waitForOp(2);
-    staleSelection.complete(_surface(BigInt.from(20), raster: true));
-    await bridge.waitForOp(3);
-
-    final raster = FlutterBufferHandle(
-      registry: BigInt.one,
-      id: BigInt.from(20),
-    );
-    final surface = FlutterSelectionHandle(
-      registry: BigInt.one,
-      id: BigInt.from(20),
-    );
-    expect(
-      bridge.releasedBuffers.where((item) => item == raster),
-      hasLength(1),
-    );
-    expect(
-      bridge.releasedSelections.where((item) => item == surface),
-      hasLength(1),
-    );
-    expect(controller.model.layout, second);
-    controller.dispose();
-    await bridge.disposed.future;
-  });
 
   test('stale PDF render is released without transfer or decode', () async {
     final bridge = _ControlledBridge(
@@ -2301,7 +2086,8 @@ void main() {
     await bridge.waitForOp(3);
 
     expect(decodeCalls, 2, reason: 'only open and current relayout decode');
-    expect(bridge.takenBuffers, isNot(contains(staleBuffer.handle)));
+    // The engine copies and releases its buffer before the reader can tell
+    // the render is stale; the stale pixels are then dropped undecoded.
     expect(
       bridge.releasedBuffers.where((item) => item == staleBuffer.handle),
       hasLength(1),
@@ -2369,12 +2155,10 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(bridge.selectionCalls, 2);
     expect(controller.model.relayoutBusy, isFalse);
-    // A failed page layout is recorded as a layout failure, not as a selection
-    // failure (the retained reader reused `selectionError`, which mislabelled it
-    // in the error surface). The assertion still discriminates: the failure is
-    // recorded once and not retried.
-    expect(controller.model.relayoutError, contains('persistent failure'));
-    expect(controller.model.selectionError, isNull);
+    // The rendered page stays up, so a PDF page whose text layout failed
+    // reports a selection failure, recorded once and not retried.
+    expect(controller.model.selectionError, contains('persistent failure'));
+    expect(controller.model.relayoutError, isNull);
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -2392,7 +2176,7 @@ void main() {
     controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
     await bridge.waitForOp(2);
 
-    expect(bridge.selectionLayouts.last, desired);
+    expect(bridge.selectionLayouts.last.scale, desired.scale);
     // The layout failure belonged to the replaced document: the release path
     // clears it, so the new document cannot inherit a stale "Layout failed"
     // alert (a successful open whose requested layout already matches the
@@ -2413,7 +2197,10 @@ void main() {
       controller.dispatch(const ReaderLayoutChanged(layout));
       await bridge.waitForOp(2);
 
-      expect(bridge.selectionLayouts, [const ReaderLayout(), layout]);
+      expect(bridge.selectionLayouts.map((layout) => layout.scale), [
+        1,
+        layout.scale,
+      ]);
       expect(controller.model.layout, layout);
       controller.dispose();
       await bridge.disposed.future;
@@ -2443,7 +2230,7 @@ void main() {
     bridge.failCancellationCreation = false;
     controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
     await bridge.waitForOp(3);
-    expect(bridge.selectionLayouts.last, rejected);
+    expect(bridge.selectionLayouts.last.scale, rejected.scale);
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -2485,10 +2272,7 @@ void main() {
       controller.model.layout,
       const ReaderLayout(scale: 2.5, width: 320, fontSize: 24),
     );
-    expect(bridge.selectionLayouts, [
-      const ReaderLayout(scale: 2.5, width: 680, fontSize: 18),
-      const ReaderLayout(scale: 2.5, width: 320, fontSize: 24),
-    ]);
+    expect(bridge.selectionLayouts.map((layout) => layout.scale), [2.5, 2.5]);
     controller.dispatch(
       const ReaderViewportChanged(
         ReaderLayout(scale: 1, width: 400, fontSize: 26),
@@ -2608,10 +2392,6 @@ void main() {
         immediateLists: true,
       );
       FlutterSelectionSurface largeSurface(int id) => FlutterSelectionSurface(
-        handle: FlutterSelectionHandle(
-          registry: BigInt.one,
-          id: BigInt.from(id),
-        ),
         width: 800,
         height: 1200,
         text: 'large page',
@@ -2684,88 +2464,6 @@ void main() {
     await verify(zoom: 2, continuous: false);
   });
 
-  testWidgets('continuous EPUB preserves tall chapter scroll extent', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(400, 600);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
-      immediateLists: true,
-    );
-    FlutterSelectionSurface tallSurface(int id) => FlutterSelectionSurface(
-      handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.from(id)),
-      width: 352,
-      height: 1200,
-      text: 'tall chapter',
-      copyEligible: true,
-      raster: FlutterRenderedBuffer(
-        handle: FlutterBufferHandle(
-          registry: BigInt.one,
-          id: BigInt.from(id + 100),
-        ),
-        width: 1,
-        height: 1,
-        byteLen: BigInt.from(4),
-      ),
-      endpoints: const [],
-      graphemeBoundaries: Uint32List.fromList([0, 12]),
-      wordBoundaries: Uint32List.fromList([0, 12]),
-      visualLines: const [],
-    );
-    bridge.selectionCompleters
-      ..add(Completer<FlutterSelectionSurface>()..complete(tallSurface(32)))
-      ..add(Completer<FlutterSelectionSurface>()..complete(tallSurface(33)));
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ReaderScreen(
-          debugPathEntry: true,
-          bridge: bridge,
-          initialPath: '/books/book.epub',
-          initialSettings: const FlutterReaderSettings(
-            continuous: true,
-            theme: 'light',
-            epubFontSize: 18,
-            epubLineSpacing: 1.5,
-            pdfZoom: 0,
-          ),
-          decoder: (pixels, {required width, required height}) => _testImage(),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(const ValueKey('reader-continuous-presentation')),
-      findsOneWidget,
-    );
-    final verticalScrollView = find.byWidgetPredicate(
-      (widget) =>
-          widget is SingleChildScrollView &&
-          widget.key.toString().contains('reader-vertical-scroll'),
-    );
-    expect(verticalScrollView, findsOneWidget);
-    final verticalScroll = find.descendant(
-      of: verticalScrollView,
-      matching: find.byType(Scrollable),
-    );
-    expect(verticalScroll, findsOneWidget);
-    expect(
-      tester.state<ScrollableState>(verticalScroll).position.maxScrollExtent,
-      greaterThan(0),
-    );
-    expect(
-      tester
-          .getSize(find.byKey(const ValueKey('reader-selection-surface')))
-          .height,
-      1200,
-    );
-
-    await tester.pumpWidget(const SizedBox());
-    await bridge.disposed.future;
-  });
-
   testWidgets(
     'fit-width PDF maps pointer input on a scrolled asymmetric page',
     (tester) async {
@@ -2779,10 +2477,6 @@ void main() {
       );
       FlutterSelectionSurface asymmetricSurface(int id) =>
           FlutterSelectionSurface(
-            handle: FlutterSelectionHandle(
-              registry: BigInt.one,
-              id: BigInt.from(id),
-            ),
             width: 200,
             height: 600,
             text: 'lower-page text',
@@ -2941,20 +2635,10 @@ void main() {
     bridge.selectionCompleters.add(
       Completer<FlutterSelectionSurface>()..complete(
         FlutterSelectionSurface(
-          handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.one),
           width: 352,
           height: 1200,
           text: 'dark chapter',
           copyEligible: true,
-          raster: FlutterRenderedBuffer(
-            handle: FlutterBufferHandle(
-              registry: BigInt.one,
-              id: BigInt.from(101),
-            ),
-            width: 1,
-            height: 1,
-            byteLen: BigInt.from(4),
-          ),
           endpoints: const [],
           graphemeBoundaries: Uint32List.fromList([0, 12]),
           wordBoundaries: Uint32List.fromList([0, 12]),
@@ -3062,78 +2746,6 @@ void main() {
     await bridge.disposed.future;
   });
 
-  testWidgets('dark reader keeps the failed-document message legible', (
-    tester,
-  ) async {
-    final bridge = _ControlledBridge(
-      immediateLists: true,
-      selectionFailure: true,
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ReaderScreen(
-          debugPathEntry: true,
-          bridge: bridge,
-          initialPath: '/books/book.epub',
-          initialSettings: const FlutterReaderSettings(
-            continuous: false,
-            theme: 'dark',
-            epubFontSize: 18,
-            epubLineSpacing: 1.5,
-            pdfZoom: 0,
-          ),
-          decoder: (pixels, {required width, required height}) => _testImage(),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    // A failed chapter is still document-area copy: the message follows the
-    // reader palette ink over the reader paper.
-    final message = tester.widget<Text>(
-      find.text('Bad state: selection failed'),
-    );
-    expect(message.style?.color, ShosaiTokens.readerDarkText);
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is ColoredBox &&
-            widget.color == ShosaiTokens.readerDarkBackground,
-      ),
-      findsOneWidget,
-    );
-    await tester.pumpWidget(const SizedBox());
-    await bridge.disposed.future;
-  });
-
-  testWidgets('persisted EPUB line spacing reaches native layout', (
-    tester,
-  ) async {
-    final bridge = _ControlledBridge(immediateLists: true);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ReaderScreen(
-          debugPathEntry: true,
-          bridge: bridge,
-          initialPath: '/books/book.epub',
-          initialSettings: const FlutterReaderSettings(
-            continuous: false,
-            theme: 'light',
-            epubFontSize: 18,
-            epubLineSpacing: 2.25,
-            pdfZoom: 0,
-          ),
-          decoder: (pixels, {required width, required height}) => _testImage(),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(bridge.selectionLayouts.first.lineSpacing, 2.25);
-    await tester.pumpWidget(const SizedBox());
-    await bridge.disposed.future;
-  });
-
   testWidgets('automatic PDF open defaults to the initial device pixel ratio', (
     tester,
   ) async {
@@ -3193,52 +2805,6 @@ void main() {
     controller.dispose();
     await bridge.disposed.future;
   });
-
-  test(
-    'a chrome height jitter does not cancel the layout installing a chapter',
-    () async {
-      // The document box moves by a few pixels while a chapter is being laid
-      // out (the relayout progress bar is 4 logical px, and the loading body is
-      // a different height than the document body). Such a report must not
-      // cancel the relayout that is installing the chapter: the reader would be
-      // left with nothing on screen and no successor to replay it.
-      final bridge = _ControlledBridge(immediateLists: true);
-      final pendingLayout = Completer<FlutterSelectionSurface>();
-      bridge.selectionCompleters.add(pendingLayout);
-      final controller = ReaderController(
-        bridge: bridge,
-        decoder: (pixels, {required width, required height}) => _testImage(),
-      );
-      // The view reports its box before the document is opened, so the open
-      // lays the chapter out itself (the Dart EPUB path, which falls back to
-      // the retained surface when the archive cannot be read).
-      controller.dispatch(
-        ReaderViewportChanged(controller.model.layout, height: 500),
-      );
-      controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
-      await _waitUntil(() => controller.model.relayoutBusy);
-      final installing = bridge.createdCancellations.last;
-      final layout = controller.model.layout;
-
-      controller.dispatch(ReaderViewportChanged(layout, height: 504));
-      expect(
-        bridge.cancelled,
-        isNot(contains(installing)),
-        reason: 'a chrome jitter is not a layout change',
-      );
-      expect(controller.model.relayoutBusy, isTrue);
-      expect(controller.model.contentState, ReaderContentState.loading);
-
-      pendingLayout.complete(_surface(BigInt.from(1), raster: true));
-      await _waitUntil(
-        () => controller.model.contentState == ReaderContentState.ready,
-      );
-      expect(controller.model.selectionSurface, isNotNull);
-      expect(controller.model.relayoutBusy, isFalse);
-      controller.dispose();
-      await bridge.disposed.future;
-    },
-  );
 
   test('note completion during relayout reports a retryable error', () async {
     final bridge = _ControlledBridge(
@@ -3320,7 +2886,7 @@ void main() {
 
   test('relayout publishes image surface and annotations atomically', () async {
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       immediateLists: true,
     );
     final oldImage = await _testImage();
@@ -3362,10 +2928,6 @@ void main() {
     expect(controller.model.selectionSurface!.text, 'new surface');
     expect(controller.model.annotations.single.id, 'new');
     expect(oldImage.debugDisposed, isTrue);
-    expect(
-      bridge.releasedSelections.where((item) => item == oldSurface.handle),
-      hasLength(1),
-    );
     expect(
       observed.where(
         (model) =>
@@ -3424,7 +2986,7 @@ void main() {
     await _waitUntil(() => bridge.selectionCalls == 3);
 
     expect(controller.model.layout, desired);
-    expect(bridge.selectionLayouts.last, desired);
+    expect(bridge.selectionLayouts.last.scale, desired.scale);
     pendingLayout.complete(_surface(BigInt.from(20), raster: true));
     await bridge.waitForOp(3);
     controller.dispose();
@@ -3645,14 +3207,12 @@ void main() {
     final controller = _epubController(bridge);
     await _openControlled(controller, bridge, '/tmp/a.epub');
     final firstDocument = controller.model.document!.handle;
-    final firstSurface = controller.model.selectionSurface!.handle;
 
     controller.dispatch(const ReaderMemoryPressureReceived());
     await bridge.waitForOp(2);
 
     expect(bridge.openCalls, 2);
     expect(bridge.releasedDocuments, [firstDocument]);
-    expect(bridge.releasedSelections, contains(firstSurface));
     expect(controller.model.document, isNotNull);
     expect(controller.model.contentState, ReaderContentState.ready);
 
@@ -3739,7 +3299,7 @@ void main() {
     controller.dispatch(const ReaderResumed());
     await bridge.waitForOp(2);
 
-    expect(bridge.selectionLayouts.last, resumedLayout);
+    expect(bridge.selectionLayouts.last.scale, resumedLayout.scale);
     expect(controller.model.layout, resumedLayout);
 
     controller.dispose();
@@ -4644,18 +4204,15 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
-      // The reported width is the viewport minus the two RD-06 edge columns;
+      // The document box is the viewport minus the two RD-06 edge columns;
       // the columns are chrome and scale with the interface, so the width is
-      // measured from the rendered control rather than hardcoded. The book font
-      // is the reader preference and does not scale with the interface text
-      // scale (contract §2.3 item 5b), so `fontSize` stays 18 at `T150`.
+      // measured from the rendered control rather than hardcoded. The page is
+      // laid out at the display scale it was opened with.
       double edgeWidth() => tester
           .getSize(find.byKey(const ValueKey('reader-edge-previous')))
           .width;
-      expect(
-        bridge.selectionLayouts.single,
-        ReaderLayout(scale: 2, width: 600 - 2 * edgeWidth(), fontSize: 18),
-      );
+      expect(bridge.selectionLayouts.last.scale, 2);
+      expect(tester.getSize(_documentArea).width, 600 - 2 * edgeWidth());
       expect(find.text('Highlight 1 — recovered'), findsOneWidget);
       // Address the annotation strip's own scrollable: the reader chrome adds
       // scroll regions of its own (the bounded header and the dev-only entry),
@@ -4679,10 +4236,8 @@ void main() {
 
       tester.view.physicalSize = const Size(1400, 1000);
       await tester.pumpAndSettle();
-      expect(
-        bridge.selectionLayouts.last,
-        ReaderLayout(scale: 2, width: 700 - 2 * edgeWidth(), fontSize: 18),
-      );
+      expect(bridge.selectionLayouts.last.scale, 2);
+      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
 
       final callsBeforeTheme = bridge.selectionCalls;
       await tester.pumpWidget(app(brightness: Brightness.dark));
@@ -4692,22 +4247,18 @@ void main() {
 
       await tester.pumpWidget(app(brightness: Brightness.dark, textScale: 2));
       await tester.pumpAndSettle();
-      // At `T200` the edge columns themselves are wider, and the book font
-      // still does not scale: only the chrome does.
-      expect(
-        bridge.selectionLayouts.last,
-        ReaderLayout(scale: 2, width: 700 - 2 * edgeWidth(), fontSize: 18),
-      );
+      // At `T200` the edge columns themselves are wider: only the chrome
+      // scales.
+      expect(bridge.selectionLayouts.last.scale, 2);
+      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
 
       tester.view.devicePixelRatio = 3;
       tester.view.physicalSize = const Size(2100, 1500);
       await tester.pumpAndSettle();
       // A device pixel ratio change is not an interface text-scale change: the
       // scale of an already-open document stays the one it was opened with.
-      expect(
-        bridge.selectionLayouts.last,
-        ReaderLayout(scale: 2, width: 700 - 2 * edgeWidth(), fontSize: 18),
-      );
+      expect(bridge.selectionLayouts.last.scale, 2);
+      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
@@ -4752,9 +4303,9 @@ void main() {
           .getSize(find.byKey(const ValueKey('reader-edge-previous')))
           .width;
       expect(
-        bridge.selectionLayouts.last.width,
+        tester.getSize(_documentArea).width,
         size.width - 2 * edgeWidth,
-        reason: 'reported reader viewport at $size',
+        reason: 'reader viewport at $size',
       );
     }
     expect(tester.takeException(), isNull);
@@ -4799,7 +4350,7 @@ void main() {
     expect(previous.left, 20);
     expect(next.right, 360);
     expect(
-      bridge.selectionLayouts.single.width,
+      tester.getSize(_documentArea).width,
       340 - previous.width - next.width,
     );
     expect(tester.takeException(), isNull);
@@ -5018,7 +4569,7 @@ void main() {
       },
     );
     try {
-      final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+      final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
@@ -5168,7 +4719,7 @@ void main() {
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     final surface = Completer<FlutterSelectionSurface>()
       ..complete(_surface(BigInt.from(90), raster: true, text: 'A😀B'));
     bridge.selectionCompleters.add(surface);
@@ -5238,7 +4789,7 @@ void main() {
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     final surface = Completer<FlutterSelectionSurface>()
       ..complete(_surface(BigInt.from(91), raster: true, text: ''));
     bridge.selectionCompleters.add(surface);
@@ -5276,7 +4827,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final semantics = tester.ensureSemantics();
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       immediateLists: true,
     );
     final pending = Completer<FlutterSelectionSurface>();
@@ -5328,7 +4879,7 @@ void main() {
   test(
     'cancelled screen-reader focus cannot steal a later selection',
     () async {
-      final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+      final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
       final scheduled = <VoidCallback>[];
       final focusTargets = <ReaderFocusTarget>[];
       final controller = ReaderController(
@@ -5361,7 +4912,7 @@ void main() {
   );
 
   test('replaced screen-reader focus cannot steal a later selection', () async {
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     final scheduled = <VoidCallback>[];
     final focusTargets = <ReaderFocusTarget>[];
     final controller = ReaderController(
@@ -5398,7 +4949,7 @@ void main() {
       final semantics = tester.ensureSemantics();
       final update = Completer<bool>();
       final bridge = _ControlledBridge(
-        format: FlutterBookFormat.epub,
+        format: FlutterBookFormat.pdf,
         initialAnnotations: [_annotation('one')],
         immediateLists: true,
       )..updateCompleter = update;
@@ -5455,7 +5006,7 @@ void main() {
         );
         final semantics = tester.ensureSemantics();
         final bridge = _ControlledBridge(
-          format: FlutterBookFormat.epub,
+          format: FlutterBookFormat.pdf,
           immediateLists: true,
         );
         final surface = Completer<FlutterSelectionSurface>()
@@ -5555,7 +5106,7 @@ void main() {
         final semantics = tester.ensureSemantics();
         debugDefaultTargetPlatformOverride = platform;
         try {
-          final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+          final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
           await tester.pumpWidget(
             MaterialApp(
               home: ReaderScreen(
@@ -5624,7 +5175,7 @@ void main() {
     );
   }
 
-  for (final format in [FlutterBookFormat.pdf, FlutterBookFormat.epub]) {
+  for (final format in [FlutterBookFormat.pdf]) {
     for (final device in [
       ui.PointerDeviceKind.mouse,
       ui.PointerDeviceKind.touch,
@@ -5724,7 +5275,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
@@ -5785,7 +5336,7 @@ void main() {
         null,
       ),
     );
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
@@ -5950,7 +5501,7 @@ void main() {
   testWidgets('a second touch inside cannot steal the owning drag', (
     tester,
   ) async {
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
@@ -5999,7 +5550,7 @@ void main() {
   testWidgets('touch cancellation releases selection pointer ownership', (
     tester,
   ) async {
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
@@ -6044,7 +5595,7 @@ void main() {
     tester,
   ) async {
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       logicalUnitCount: 2,
       immediateLists: true,
     );
@@ -6070,7 +5621,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     // The location indicator is the restored status bar (RD-05).
-    expect(find.text('Chapter 2 · 100%'), findsOneWidget);
+    expect(find.text('Page 2 · 100%'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
     await held.moveTo(topLeft + Offset(side * .7, side * .7));
     await held.up();
@@ -6145,7 +5696,7 @@ void main() {
   });
 
   testWidgets('selection note action saves the entered note', (tester) async {
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
@@ -6186,7 +5737,7 @@ void main() {
     tester,
   ) async {
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       immediateLists: true,
     );
     final pendingCreate = Completer<FlutterAnnotation>();
@@ -6258,7 +5809,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       initialAnnotations: [_annotation('one')],
       immediateLists: true,
     );
@@ -6312,7 +5863,7 @@ void main() {
   testWidgets('suspension dismisses a note draft with actionable feedback', (
     tester,
   ) async {
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
@@ -6400,8 +5951,8 @@ void main() {
       );
       final controller = _epubController(bridge);
       await _openControlled(controller, bridge, '/tmp/book.epub');
-      final failed = Completer<FlutterSelectionSurface>();
-      bridge.selectionCompleters.add(failed);
+      final failed = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(failed);
 
       controller.dispatch(const ReaderUnitRequested(1));
       failed.completeError(StateError('page two failed'));
@@ -6415,7 +5966,7 @@ void main() {
       controller.dispatch(const ReaderUnitRequested(1));
       await bridge.waitForOp(3);
       expect(controller.model.unit, 1);
-      expect(bridge.selectionUnits, [0, 1, 1]);
+      expect(bridge.renderUnits, [0, 1, 1]);
       controller.dispose();
       await bridge.disposed.future;
     },
@@ -6963,7 +6514,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       bookId: 7,
       logicalUnitCount: 2,
       immediateLists: true,
@@ -7050,7 +6601,7 @@ void main() {
     tester.view.viewInsets = const FakeViewPadding(bottom: 280);
     addTearDown(tester.view.reset);
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       bookId: 7,
       immediateLists: true,
     );
@@ -7112,10 +6663,10 @@ void main() {
       );
       await bridge.waitForOp(1);
 
-      bridge.selectionFailure = true;
+      bridge.renderFailure = true;
       controller.dispatch(const ReaderUnitRequested(1));
       await bridge.waitForOp(2);
-      bridge.selectionFailure = false;
+      bridge.renderFailure = false;
       controller.dispatch(
         const ReaderViewportChanged(ReaderLayout(width: 520)),
       );
@@ -7408,7 +6959,7 @@ void main() {
     // dev-only path entry requests the replacement open. The rejected open must
     // be visible, not silent.
     final bridge = _ControlledBridge(
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       bookId: 7,
       immediateLists: true,
     );
@@ -7482,7 +7033,7 @@ FlutterBookmark _bookmark(int id, {String? note}) => FlutterBookmark(
 FlutterAnnotationAssociationSource _associationSource([String suffix = '']) =>
     FlutterAnnotationAssociationSource(
       versionId: 'source-version${suffix.isEmpty ? '' : '-$suffix'}',
-      format: FlutterBookFormat.epub,
+      format: FlutterBookFormat.pdf,
       localPath: '/tmp/original.epub',
       fingerprintAlgorithm: 'blake3',
       fingerprintVersion: 1,
@@ -7502,12 +7053,10 @@ FlutterSelectionSurface _surface(
   required bool raster,
   String text = 'x',
 }) => FlutterSelectionSurface(
-  handle: FlutterSelectionHandle(registry: BigInt.one, id: id),
   width: 1,
   height: 1,
   text: text,
   copyEligible: true,
-  raster: raster ? _buffer(id) : null,
   endpoints: const [],
   graphemeBoundaries: Uint32List.fromList(
     List.generate(text.runes.length + 1, (index) => index),
@@ -7559,9 +7108,11 @@ Future<void> _openControlled(
   await bridge.waitForOp(target);
 }
 
-final class _ControlledBridge implements FlutterBridge {
+final class _ControlledBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _ControlledBridge({
-    this.format = FlutterBookFormat.epub,
+    this.format = FlutterBookFormat.pdf,
     this.logicalUnitCount = 1,
     this.bookId,
     List<FlutterAnnotation> initialAnnotations = const [],
@@ -7591,6 +7142,7 @@ final class _ControlledBridge implements FlutterBridge {
   final List<FlutterAnnotation> associatedAnnotations;
   final Object? associationFailure;
   bool selectionFailure;
+  var renderFailure = false;
   bool listFailure;
   final bool immediateLists;
   final Completer<List<FlutterAnnotation>>? initialListCompleter;
@@ -7609,7 +7161,6 @@ final class _ControlledBridge implements FlutterBridge {
   final takenBuffers = <FlutterBufferHandle>[];
   final releasedBuffers = <FlutterBufferHandle>[];
   final releasedDocuments = <FlutterDocumentHandle>[];
-  final releasedSelections = <FlutterSelectionHandle>[];
   final events = <String>[];
   Completer<bool>? updateCompleter = Completer<bool>();
   Completer<bool>? deleteCompleter;
@@ -7685,7 +7236,7 @@ final class _ControlledBridge implements FlutterBridge {
   final List<BigInt> epubSourceCancellations = <BigInt>[];
 
   @override
-  Future<Uint8List> epubSourceBytes({
+  Future<EpubBook> epubBook({
     required FlutterDocumentHandle document,
     required BigInt cancellationId,
   }) async {
@@ -7696,11 +7247,6 @@ final class _ControlledBridge implements FlutterBridge {
       message: 'the controlled bridge serves no EPUB archive',
     );
   }
-
-  @override
-  FlutterSelectionSurface roundTripVisibleScene({
-    required FlutterSelectionSurface scene,
-  }) => scene;
 
   @override
   BigInt createCancellation() {
@@ -7863,22 +7409,10 @@ final class _ControlledBridge implements FlutterBridge {
       return selectionCompleters.removeFirst().future;
     }
     return FlutterSelectionSurface(
-      handle: FlutterSelectionHandle(registry: BigInt.one, id: cancellationId),
       width: 100,
       height: 100,
       text: 'Selectable fixture text',
       copyEligible: copyEligible,
-      raster: format == FlutterBookFormat.epub
-          ? FlutterRenderedBuffer(
-              handle: FlutterBufferHandle(
-                registry: BigInt.one,
-                id: cancellationId,
-              ),
-              width: 1,
-              height: 1,
-              byteLen: BigInt.from(4),
-            )
-          : null,
       endpoints: [
         FlutterSelectionEndpoint(
           offset: BigInt.one,
@@ -8116,6 +7650,7 @@ final class _ControlledBridge implements FlutterBridge {
     renderCalls += 1;
     renderUnits.add(page.toInt());
     renderScales.add(scale);
+    if (renderFailure) throw StateError('render failed');
     if (renderCompleters.isNotEmpty) {
       return renderCompleters.removeFirst().future;
     }
@@ -8136,12 +7671,6 @@ final class _ControlledBridge implements FlutterBridge {
   @override
   bool releaseBuffer({required FlutterBufferHandle handle}) {
     releasedBuffers.add(handle);
-    return true;
-  }
-
-  @override
-  bool releaseSelection({required FlutterSelectionHandle handle}) {
-    releasedSelections.add(handle);
     return true;
   }
 
@@ -8176,8 +7705,8 @@ final class _ControlledBridge implements FlutterBridge {
   }
 }
 
-class _FakeBridge implements FlutterBridge {
-  _FakeBridge({Uint8List? pixels, this.selectionRaster = false})
+class _FakeBridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
+  _FakeBridge({Uint8List? pixels})
     : pixels = pixels ?? Uint8List.fromList(List.filled(8, 255));
 
   final openCompleter = Completer<FlutterDocumentSummary>();
@@ -8186,17 +7715,14 @@ class _FakeBridge implements FlutterBridge {
   final operationFinished = Completer<void>();
   final disposed = Completer<void>();
   final Uint8List pixels;
-  final bool selectionRaster;
   final openRequests = <FlutterOpenRequest>[];
   final releasedDocuments = <FlutterDocumentHandle>[];
   final releasedBuffers = <FlutterBufferHandle>[];
-  final releasedSelections = <FlutterSelectionHandle>[];
   final releasedCancellations = <BigInt>[];
   final events = <String>[];
   var disposeCount = 0;
   var failCancellationCreation = false;
   var failBufferTransfer = false;
-  var missingSelectionRaster = false;
   var listCalls = 0;
   var renderCalls = 0;
   var updateCalls = 0;
@@ -8219,17 +7745,25 @@ class _FakeBridge implements FlutterBridge {
     );
   }
 
+  /// Answer the page render once the reader has asked for it.
+  Future<void> completeRender() async {
+    await renderStarted.future;
+    renderCompleter.complete(
+      FlutterRenderedBuffer(
+        handle: _bufferHandle,
+        width: 1,
+        height: 1,
+        byteLen: BigInt.from(4),
+      ),
+    );
+  }
+
   void _ensureAlive() {
     if (isDisposed) throw StateError('bridge used after disposal');
   }
 
   @override
   bool get isDisposed => disposeCount != 0;
-
-  @override
-  FlutterSelectionSurface roundTripVisibleScene({
-    required FlutterSelectionSurface scene,
-  }) => scene;
 
   @override
   Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
@@ -8340,14 +7874,6 @@ class _FakeBridge implements FlutterBridge {
   }
 
   @override
-  bool releaseSelection({required FlutterSelectionHandle handle}) {
-    _ensureAlive();
-    releasedSelections.add(handle);
-    events.add('selection');
-    return true;
-  }
-
-  @override
   bool releaseCancellation({required BigInt id}) {
     _ensureAlive();
     releasedCancellations.add(id);
@@ -8397,21 +7923,10 @@ class _FakeBridge implements FlutterBridge {
     );
     if (selectionCompleter case final pending?) return pending.future;
     return FlutterSelectionSurface(
-      handle: FlutterSelectionHandle(registry: BigInt.one, id: cancellationId),
       width: 100,
       height: 100,
       text: 'Selectable fixture text',
       copyEligible: true,
-      raster:
-          !missingSelectionRaster &&
-              (selectionRaster || completedFormat == FlutterBookFormat.epub)
-          ? FlutterRenderedBuffer(
-              handle: _bufferHandle,
-              width: 2,
-              height: 1,
-              byteLen: BigInt.from(8),
-            )
-          : null,
       endpoints: [],
       graphemeBoundaries: Uint32List(0),
       wordBoundaries: Uint32List(0),
@@ -8427,7 +7942,9 @@ class _FakeBridge implements FlutterBridge {
   }
 }
 
-final class _SequentialBridge implements FlutterBridge {
+final class _SequentialBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _SequentialBridge(this.openResults);
 
   final Queue<Object> openResults;
@@ -8455,11 +7972,6 @@ final class _SequentialBridge implements FlutterBridge {
 
   @override
   bool get isDisposed => disposeCount != 0;
-
-  @override
-  FlutterSelectionSurface roundTripVisibleScene({
-    required FlutterSelectionSurface scene,
-  }) => scene;
 
   @override
   Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
@@ -8553,9 +8065,6 @@ final class _SequentialBridge implements FlutterBridge {
   }
 
   @override
-  bool releaseSelection({required FlutterSelectionHandle handle}) => true;
-
-  @override
   bool releaseCancellation({required BigInt id}) {
     _ensureAlive();
     releasedCancellations.add(id);
@@ -8598,22 +8107,10 @@ final class _SequentialBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     return FlutterSelectionSurface(
-      handle: FlutterSelectionHandle(registry: BigInt.one, id: cancellationId),
       width: 100,
       height: 100,
       text: 'Selectable fixture text',
       copyEligible: true,
-      raster: currentFormat == FlutterBookFormat.epub
-          ? FlutterRenderedBuffer(
-              handle: FlutterBufferHandle(
-                registry: BigInt.one,
-                id: cancellationId,
-              ),
-              width: 1,
-              height: 1,
-              byteLen: BigInt.from(4),
-            )
-          : null,
       endpoints: [],
       graphemeBoundaries: Uint32List(0),
       wordBoundaries: Uint32List(0),
@@ -8627,6 +8124,9 @@ final class _SequentialBridge implements FlutterBridge {
     return Uint8List.fromList([255, 255, 255, 255]);
   }
 }
+
+/// The document box between the reader's edge columns.
+final _documentArea = find.byKey(const ValueKey('reader-document-semantics'));
 
 ReaderController _epubController(FlutterBridge bridge) {
   return ReaderController(

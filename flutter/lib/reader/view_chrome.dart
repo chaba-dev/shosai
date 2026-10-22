@@ -2385,10 +2385,16 @@ class _ReaderErrorSurfaces extends StatelessWidget {
     final persistenceError = model.persistenceError;
     final toolError = model.toolError;
     final relayoutError = model.relayoutError;
+    // A refused chapter with no page installed is the content area's own
+    // error; over a page still shown it is an alert here.
+    final layoutRefusal = model.contentState == ReaderContentState.failed
+        ? null
+        : model.layoutRefusal?.message;
     final entries = <String>[
       // A failed page layout is not a selection problem: it is rendered as its
       // own message instead of the retained "Selection unavailable" prefix.
       ?relayoutError,
+      ?layoutRefusal,
       if (model.selectionError != null && document != null)
         'Selection unavailable: ${model.selectionError}',
       if (model.selectionActionError != null && document != null)
@@ -2417,6 +2423,8 @@ class _ReaderErrorSurfaces extends StatelessWidget {
                   ? const ValueKey('reader-tool-error')
                   : entry == relayoutError
                   ? const ValueKey('reader-relayout-error')
+                  : entry == layoutRefusal
+                  ? const ValueKey('reader-layout-refusal')
                   : null,
               liveRegion: true,
               child: Text(

@@ -32,8 +32,8 @@ fi
 
 if [[ "$flake_root" != "$repo_root" ]]; then
   # These are the local inputs to the current dev shell. Fail rather than use
-  # another workspace's toolchain when its flake or package metadata differs.
-  for input in flake.nix flake.lock Cargo.toml; do
+  # another workspace's toolchain when its flake differs.
+  for input in flake.nix flake.lock; do
     if ! cmp -s "$repo_root/$input" "$flake_root/$input"; then
       echo "Cannot reuse dev shell: $input differs from $flake_root. Use a Git-backed checkout with matching inputs." >&2
       exit 1

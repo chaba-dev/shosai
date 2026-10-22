@@ -37,7 +37,7 @@ String _fixturePath(String name) {
   final local = File('fixtures/$name');
   return local.existsSync()
       ? local.path
-      : '../../crates/shosai-core/tests/fixtures/epub-conformance/$name';
+      : '../../fixtures/epub-conformance/$name';
 }
 
 void main() {

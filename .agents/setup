@@ -77,8 +77,8 @@ $profile_end
 EOF
 
 cd "$repo_root"
-run_step "Fetching locked Cargo dependencies through the Nix development shell" \
-  .agents/dev cargo fetch --locked
+run_step "Fetching locked Flutter dependencies through the Nix development shell" \
+  .agents/dev bash -c 'cd flutter && flutter pub get --enforce-lockfile'
 
 if [[ ! -d "$repo_root/.jj" ]]; then
   run_step "Initializing colocated Jujutsu repository" .agents/dev jj git init --colocate

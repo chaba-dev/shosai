@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/production_shell_harness.dart';
 import '../support/selection_surface_fixture.dart';
@@ -98,7 +98,7 @@ Widget _reader(HarnessBridge bridge) => productionShell(
     key: ValueKey('walkthrough-${_readerKeyCounter++}'),
     bridge: bridge,
     decoder: (pixels, {required width, required height}) => _testImage(),
-    initialPath: '/books/slow-rivers.epub',
+    initialPath: '/books/slow-rivers.pdf',
     initialSettings: const FlutterReaderSettings(
       continuous: false,
       theme: 'light',

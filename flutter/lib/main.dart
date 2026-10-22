@@ -1,20 +1,20 @@
 import 'dart:io';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
-    show ExternalLibrary;
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
+import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
-import 'package:shosai_flutter/src/rust/frb_generated.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 export 'package:shosai_flutter/reader/view.dart'
     show
@@ -97,51 +97,66 @@ export 'package:shosai_flutter/reader/controller.dart'
         ReaderModalEffect,
         ReaderNavigationAdapter,
         ReaderTabRevealAdapter,
-        ReaderProgressSource,
-        premultiplyRgba;
+        ReaderProgressSource;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await RustLib.init(externalLibrary: nativeLibrary());
-  final directory = await getApplicationSupportDirectory();
-  final databasePath = '${directory.path}/shosai.sqlite3';
-  runApp(
-    ShosaiApp(
-      productBridgeFactory: () =>
-          FlutterBridge.withDatabasePath(databasePath: databasePath),
-    ),
+  final owner = await applicationCoreOwner();
+  // The core outlives every reader and library bridge; it closes once, when
+  // the application exits, after the bridges have drained.
+  AppLifecycleListener(
+    onExitRequested: () async {
+      await closeApplicationCores();
+      return AppExitResponse.exit;
+    },
   );
+  runApp(ShosaiApp(productBridgeFactory: owner.bridge));
 }
 
-Future<FlutterBridge> createApplicationBridge({
+/// The owner of the Dart core opened in each application-support directory:
+/// one store owner per database, however many bridges share it.
+final Map<String, Future<CoreOwner>> _cores = {};
+
+/// The owner of the Dart core in [applicationSupportDirectory] (the
+/// platform's application-support directory by default), opened on first
+/// use and shared until [closeApplicationCores].
+Future<CoreOwner> applicationCoreOwner({
   Future<Directory> Function()? applicationSupportDirectory,
-  String databaseName = 'annotations.sqlite3',
 }) async {
   final directory =
       await (applicationSupportDirectory ?? getApplicationSupportDirectory)();
-  return FlutterBridge.withDatabasePath(
-    databasePath: '${directory.path}/$databaseName',
-  );
+  final pending = _cores[directory.path] ??= ShosaiCore.open(
+    directory.path,
+    pdfEngine: PdfrxPdfEngine(),
+  ).then(CoreOwner.new);
+  try {
+    return await pending;
+  } catch (_) {
+    if (identical(_cores[directory.path], pending)) {
+      _cores.remove(directory.path);
+    }
+    rethrow;
+  }
 }
 
-ExternalLibrary? nativeLibrary() {
-  final executableDirectory = File(Platform.resolvedExecutable).parent.path;
-  if (Platform.isLinux) {
-    return ExternalLibrary.open(
-      '$executableDirectory/lib/libshosai_flutter_bridge.so',
-    );
-  }
-  if (Platform.isMacOS) {
-    return ExternalLibrary.open(
-      '$executableDirectory/../Frameworks/libshosai_flutter_bridge.dylib',
-    );
-  }
-  if (Platform.isIOS) {
-    return ExternalLibrary.open(
-      'shosai_flutter_bridge.framework/shosai_flutter_bridge',
-    );
-  }
-  return null;
+/// An application bridge over the Dart core in the application-support
+/// directory, for tools that build their own bridges.
+Future<FlutterBridge> createApplicationBridge({
+  Future<Directory> Function()? applicationSupportDirectory,
+}) async => (await applicationCoreOwner(
+  applicationSupportDirectory: applicationSupportDirectory,
+)).bridge();
+
+/// Dispose every bridge over the cores [applicationCoreOwner] opened, wait
+/// for them to drain and close the cores. A later bridge opens its core
+/// again, so a test can check what a fresh store reads back.
+Future<void> closeApplicationCores() async {
+  final owners = List.of(_cores.values);
+  _cores.clear();
+  await Future.wait([
+    for (final owner in owners)
+      owner.then((owner) => owner.close(), onError: (_) {}),
+  ]);
 }
 
 /// The production application composition: Shad and Material themes, the
@@ -247,7 +262,10 @@ class ShosaiApp extends StatefulWidget {
     this.bridge,
     this.productBridgeFactory,
     this.locale,
-  });
+  }) : assert(
+         (bridge == null) != (productBridgeFactory == null),
+         'the app takes exactly one of bridge and productBridgeFactory',
+       );
 
   final FlutterBridge? bridge;
   final FlutterBridge Function()? productBridgeFactory;
@@ -279,7 +297,7 @@ class _ShosaiAppState extends State<ShosaiApp> {
       locale: widget.locale,
       noticeCenter: _noticeCenter,
       home: widget.productBridgeFactory == null
-          ? ReaderScreen(bridge: widget.bridge)
+          ? ReaderScreen(bridge: widget.bridge!)
           : ProductShell(
               bridgeFactory: widget.productBridgeFactory!,
               noticeReporter: _noticeCenter.reporter,

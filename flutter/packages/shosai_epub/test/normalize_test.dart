@@ -2186,9 +2186,7 @@ void main() {
 Directory _findConformanceFixtures() {
   var directory = Directory.current.absolute;
   while (true) {
-    final candidate = Directory(
-      '${directory.path}/crates/shosai-core/tests/fixtures/epub-conformance',
-    );
+    final candidate = Directory('${directory.path}/fixtures/epub-conformance');
     if (candidate.existsSync()) return candidate;
     final parent = directory.parent;
     if (parent.path == directory.path) {

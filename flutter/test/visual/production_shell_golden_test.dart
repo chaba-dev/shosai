@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -257,9 +257,7 @@ void main() {
       expect(bridge.pageCalls, greaterThan(0));
     });
 
-    testWidgets('EPUB surface raster renders on the production shell', (
-      tester,
-    ) async {
+    testWidgets('EPUB page renders on the production shell', (tester) async {
       final bridge = HarnessBridge(books: harnessLibraryBooks());
       await check(
         tester,
@@ -276,12 +274,7 @@ void main() {
           'state': 'epub-page',
           'format': 'epub',
         },
-        ready: () => harnessReaderPageReady(
-          tester,
-          surfaceWidth: bridge.selectionLayouts.isEmpty
-              ? null
-              : bridge.selectionLayouts.last.width,
-        ),
+        ready: () => harnessReaderPageReady(tester),
       );
     });
   });

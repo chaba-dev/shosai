@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -8,10 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
-import 'package:shosai_flutter/reader/epub/font_coverage.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/epub_navigation_fixture.dart';
@@ -97,21 +95,12 @@ void main() {
   final bytes = navigationEpub();
   final book = openEpubBytes(bytes);
 
-  // The routing gate asks the reader for the bundled faces' coverage; these
-  // tests answer with the shipped faces' own cmap tables, so the decision under
-  // test is the production one.
-  final coverage = EpubFontCoverage.fromFonts([
-    _repoFile('assets/fonts/InterVariable.ttf'),
-    _repoFile('assets/fonts/NotoSansJP-Variable.ttf'),
-  ])!;
-
   /// The harness bridge serving the navigation fixture.
   ///
   /// A second library book exists so a replacement document can be opened as a
   /// library book: its durable writes are recorded, which is what proves a
   /// stale navigation did not move it.
   _NavigationBridge bridge({
-    Map<int, String>? canonicalTexts,
     int unitCount = 3,
     FlutterReadingState? readingState,
   }) {
@@ -140,12 +129,6 @@ void main() {
       readingState: readingState,
     );
     harness.epubBytes = bytes;
-    harness.canonicalTexts =
-        canonicalTexts ??
-        {
-          for (var unit = 0; unit < book.chapters.length; unit += 1)
-            unit: book.chapters[unit].canonicalText,
-        };
     return harness;
   }
 
@@ -162,7 +145,6 @@ void main() {
           bridge: harness,
           initialPath: '/books/navigation.epub',
           initialBookId: 1,
-          fontCoverageLoader: () async => coverage,
           epubImageDecoder: (bytes) async => null,
           externalLinkOpener: (url) async => openedLinks?.add(url),
           documentPicker: picked == null ? null : () async => picked,
@@ -321,128 +303,30 @@ void main() {
       await drainHarness(tester);
     });
 
-    testWidgets('an unverified anchor keeps the title and the chapter target', (
-      tester,
-    ) async {
-      // The retained stream for unit 2 differs: the chapter is not servable by
-      // the engine, so its fragment offset must not be navigated.
-      final harness = bridge(
-        canonicalTexts: {
-          for (var unit = 0; unit < book.chapters.length; unit += 1)
-            unit: unit == 2
-                ? '${book.chapters[unit].canonicalText} diverged'
-                : book.chapters[unit].canonicalText,
-        },
-      );
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-      await openContents(tester);
-
-      expect(find.text('Chapter three deep'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('reader-contents-entry-2')));
-      await settleNative(tester);
-
-      expect(harness.savedReadingStates.last.unit.toInt(), 2);
-      expect(
-        harness.savedReadingStates.last.offset,
-        isNull,
-        reason:
-            'an unverified anchor keeps the chapter target and stores no '
-            'offset it cannot verify',
-      );
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a structurally shifted source falls back to chapters', (
-      tester,
-    ) async {
-      // The bridge reports one logical unit more than the engine's chapter
-      // list, so the engine's spine ordinals are not the retained units.
-      final harness = bridge(unitCount: 4);
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-      await openContents(tester);
-
-      expect(find.text('Chapter one'), findsNothing);
-      expect(find.text('Chapter three deep'), findsNothing);
-      // The fallback rows are the retained units, with the localized chapter
-      // number and no invented title.
-      expect(find.text('Chapter 4'), findsOneWidget);
-      expect(find.text('Chapter 1'), findsOneWidget);
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a source the engine cannot parse falls back to chapters', (
-      tester,
-    ) async {
+    testWidgets('disposal cancels the source read it owns', (tester) async {
       final harness = bridge();
-      harness.epubBytes = Uint8List(0);
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-      await openContents(tester);
-
-      expect(find.text('Chapter 1'), findsOneWidget);
-      expect(find.text('Chapter one'), findsNothing);
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a superseded Contents request keeps the shared source load', (
-      tester,
-    ) async {
-      final harness = bridge();
-      // The first open refuses the archive, so the reader holds no source yet.
-      harness.epubBytes = Uint8List(0);
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-
-      // The next read is held, then the panel is closed and reopened: the
-      // superseded request must not cancel the load the new one shares.
-      harness.epubBytes = bytes;
+      // The open's layout waits on the held archive read.
       final held = Completer<Uint8List>();
       harness.epubSourceCompleters.add(held);
-      await openContents(tester);
-      expect(harness.epubSourceCompleters, isEmpty, reason: 'the read is held');
-
-      await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
-      await tester.pump();
-      await settleNative(tester);
-      await openContents(tester);
-
-      final sourceToken = harness.epubSourceCancellations.last;
-      held.complete(bytes);
-      await settleNative(tester, rounds: 8);
-
-      expect(
-        harness.cancelledCancellations,
-        isNot(contains(sourceToken)),
-        reason: 'a superseded panel request does not cancel the shared load',
+      await tester.pumpWidget(
+        productionShell(
+          home: ReaderScreen(
+            bridge: harness,
+            initialPath: '/books/navigation.epub',
+            initialBookId: 1,
+            epubImageDecoder: (bytes) async => null,
+          ),
+        ),
       );
-      expect(find.text('Chapter three deep'), findsOneWidget);
-      expect(find.text('Chapter 1'), findsNothing);
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('disposal cancels the shared source read it inherited', (
-      tester,
-    ) async {
-      final harness = bridge();
-      harness.epubBytes = Uint8List(0);
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-
-      harness.epubBytes = bytes;
-      final held = Completer<Uint8List>();
-      harness.epubSourceCompleters.add(held);
-      await openContents(tester);
-      final sourceToken = harness.epubSourceCancellations.last;
+      for (
+        var round = 0;
+        round < 16 && harness.epubSourceCancellations.isEmpty;
+        round += 1
+      ) {
+        await settleNative(tester, rounds: 1);
+      }
+      expect(harness.epubSourceCancellations, hasLength(1));
+      final sourceToken = harness.epubSourceCancellations.single;
 
       await tester.pumpWidget(const SizedBox());
       expect(
@@ -470,48 +354,6 @@ void main() {
 
       expect(find.text('Chapter 1'), findsOneWidget);
       expect(find.text('Chapter 3'), findsOneWidget);
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a stale load cannot publish entries for a newer document', (
-      tester,
-    ) async {
-      final harness = bridge();
-      await openReader(
-        tester,
-        harness,
-        // The replacement is a raster document, so its Contents panel is the
-        // chapter fallback and a stale EPUB TOC cannot be mistaken for it.
-        picked: const ReaderPickedDocument('/books/other.pdf'),
-      );
-      await settleEpubPage(tester);
-      // The open compared the current chapter; the panel's comparisons are
-      // held from here on.
-      final compared = harness.epubCanonicalCalls;
-      final held = Completer<String>();
-      harness.epubCanonicalCompleters.add(held);
-      await openContents(tester);
-      expect(
-        harness.epubCanonicalCalls,
-        compared + 1,
-        reason: 'the first panel comparison is held',
-      );
-
-      // A new open through the rendered more panel replaces the generation
-      // while the comparison is still pending.
-      await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-      await settleNative(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await settleNative(tester);
-
-      // The stale comparison must not publish entries for the new document.
-      held.complete('other stream');
-      await settleNative(tester);
-      await openContents(tester);
-      expect(find.text('Chapter one'), findsNothing);
-      expect(find.text('Chapter 2'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);
@@ -666,41 +508,6 @@ void main() {
         reason: 'the chapter-level row stores no offset it does not have',
       );
       expect(harness.savedReadingStates.last.unit.toInt(), 0);
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a failed comparison keeps the title without an offset', (
-      tester,
-    ) async {
-      final harness = bridge();
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-      // The panel's first comparison fails: the chapter cannot be qualified.
-      // The open already verified the current chapter, so the held comparison
-      // is chapter two's.
-      final failing = Completer<String>();
-      harness.epubCanonicalCompleters.add(failing);
-      await openContents(tester);
-      failing.completeError(
-        const FlutterBridgeError(
-          kind: FlutterBridgeErrorKind.invalidRequest,
-          message: 'the harness cannot compare',
-        ),
-      );
-      await settleNative(tester);
-
-      expect(find.text('Chapter two target'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('reader-contents-entry-1')));
-      await settleNative(tester);
-
-      expect(harness.savedReadingStates.last.unit.toInt(), 1);
-      expect(
-        harness.savedReadingStates.last.offset,
-        isNull,
-        reason: 'an uncomparable anchor stores no offset',
-      );
 
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);
@@ -862,34 +669,6 @@ void main() {
       await drainHarness(tester);
     });
 
-    testWidgets('an unverified chapter keeps the link at the chapter level', (
-      tester,
-    ) async {
-      final harness = bridge(
-        canonicalTexts: {
-          for (var unit = 0; unit < book.chapters.length; unit += 1)
-            unit: unit == 1
-                ? '${book.chapters[unit].canonicalText} diverged'
-                : book.chapters[unit].canonicalText,
-        },
-      );
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-
-      await tapLink(tester, 'chapter-2.xhtml#two-target');
-      await settleEpubPage(tester);
-
-      expect(harness.savedReadingStates.last.unit.toInt(), 1);
-      expect(
-        harness.savedReadingStates.last.offset,
-        isNull,
-        reason: 'the unverified anchor stores no offset it cannot verify',
-      );
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
     testWidgets('a drag over a link selects instead of navigating', (
       tester,
     ) async {
@@ -1015,7 +794,6 @@ void main() {
             bridge: harness,
             initialPath: '/books/navigation.epub',
             initialBookId: 1,
-            fontCoverageLoader: () async => coverage,
             epubImageDecoder: (bytes) async => null,
             externalLinkOpener: (_) async => throw StateError('no handler'),
           ),
@@ -1043,7 +821,6 @@ void main() {
           home: ReaderScreen(
             bridge: harness,
             initialPath: '/books/replacement.pdf',
-            fontCoverageLoader: () async => coverage,
             externalLinkOpener: (url) async => opened.add(url),
           ),
         ),
@@ -1119,209 +896,6 @@ void main() {
 
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);
-    });
-
-    testWidgets('a newer link supersedes a pending one', (tester) async {
-      final harness = bridge();
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-
-      // Hold the cross-chapter target's comparison, then navigate with a
-      // cached same-chapter link whose layout completes first.
-      final held = Completer<String>();
-      harness.epubCanonicalCompleters.add(held);
-      await tapLink(tester, 'chapter-2.xhtml#two-target');
-      expect(
-        harness.savedReadingStates.last.unit.toInt(),
-        0,
-        reason: 'the held comparison has not navigated yet',
-      );
-
-      await tapLink(tester, '#one-deep');
-      expect(harness.savedReadingStates.last.unit.toInt(), 0);
-      expect(
-        harness.savedReadingStates.last.offset?.toInt(),
-        book.chapters[0].anchors['one-deep'],
-        reason: 'the newer same-chapter link won',
-      );
-      final saved = harness.savedReadingStates.length;
-
-      // The superseded completion must not move the reader back to chapter 2.
-      held.complete(book.chapters[1].canonicalText);
-      await settleNative(tester);
-
-      expect(
-        harness.savedReadingStates,
-        hasLength(saved),
-        reason: 'a superseded link completion never navigates',
-      );
-      expect(
-        harness.savedReadingStates.last.offset?.toInt(),
-        book.chapters[0].anchors['one-deep'],
-      );
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a completed link releases its cancellation exactly once', (
-      tester,
-    ) async {
-      final harness = bridge();
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-      final created = harness.createdCancellations.length;
-
-      await tapLink(tester, 'chapter-2.xhtml#two-target');
-      await settleEpubPage(tester);
-
-      // The activation creates the link's comparison token and the relayout
-      // token its navigation starts; both are released exactly once.
-      final linkTokens = harness.createdCancellations.sublist(created);
-      expect(linkTokens, isNotEmpty);
-      for (final token in linkTokens) {
-        expect(
-          harness.releasedCancellations.where((id) => id == token),
-          hasLength(1),
-          reason: 'the link flow releases every token it created',
-        );
-      }
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a suspension drops a pending link comparison', (tester) async {
-      final harness = bridge();
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-      final held = Completer<String>();
-      harness.epubCanonicalCompleters.add(held);
-      final created = harness.createdCancellations.length;
-      await tapLink(tester, 'chapter-2.xhtml#two-target');
-      final token = harness.createdCancellations.sublist(created).single;
-      final saved = harness.savedReadingStates.length;
-
-      // Suspension cancels the pending comparison; completing it afterwards
-      // must not navigate.
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-      addTearDown(
-        () => tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.resumed,
-        ),
-      );
-      await settleNative(tester);
-      held.complete(book.chapters[1].canonicalText);
-      await settleNative(tester);
-
-      expect(tester.takeException(), isNull);
-      expect(harness.savedReadingStates, hasLength(saved));
-      expect(harness.cancelledCancellations, contains(token));
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a page turn supersedes a pending link', (tester) async {
-      final harness = bridge();
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-
-      final held = Completer<String>();
-      harness.epubCanonicalCompleters.add(held);
-      await tapLink(tester, 'chapter-2.xhtml#two-target');
-
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
-      await settleEpubPage(tester);
-      final turned = harness.savedReadingStates.last.offset?.toInt();
-      expect(turned, isNotNull, reason: 'the page turn moved the reader');
-      final saved = harness.savedReadingStates.length;
-
-      held.complete(book.chapters[1].canonicalText);
-      await settleNative(tester);
-
-      expect(
-        harness.savedReadingStates,
-        hasLength(saved),
-        reason: 'the superseded link never navigates after a page turn',
-      );
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a stale link completion cannot navigate a newer document', (
-      tester,
-    ) async {
-      final harness = bridge();
-      await openReader(
-        tester,
-        harness,
-        picked: const ReaderPickedDocument('/books/replacement.pdf', bookId: 2),
-      );
-      await settleEpubPage(tester);
-      // The open compared the current chapter; the next comparison is the
-      // clicked cross-chapter target's and is held here.
-      final held = Completer<String>();
-      harness.epubCanonicalCompleters.add(held);
-      await tapLink(tester, 'chapter-2.xhtml#two-target');
-
-      await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-      await settleNative(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await settleNative(tester);
-      // The replacement is a library book, so its durable writes are recorded.
-      final saved = harness.savedReadingStates.length;
-      expect(
-        harness.savedReadingStates.last.unit.toInt(),
-        0,
-        reason: 'the replacement opened at its own start',
-      );
-
-      held.complete(book.chapters[1].canonicalText);
-      await settleNative(tester);
-
-      expect(
-        harness.savedReadingStates,
-        hasLength(saved),
-        reason: 'the superseded link never navigates the replacement',
-      );
-      expect(harness.savedReadingStates.last.unit.toInt(), 0);
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-    });
-
-    testWidgets('a link completion after disposal is dropped', (tester) async {
-      final harness = bridge();
-      await openReader(tester, harness);
-      await settleEpubPage(tester);
-      final held = Completer<String>();
-      harness.epubCanonicalCompleters.add(held);
-      final created = harness.createdCancellations.length;
-      await tapLink(tester, 'chapter-2.xhtml#two-target');
-      expect(harness.epubCanonicalCalls, greaterThan(0));
-      expect(
-        harness.createdCancellations.length,
-        created + 1,
-        reason: 'the pending link owns one cancellation',
-      );
-
-      await tester.pumpWidget(const SizedBox());
-      await drainHarness(tester);
-      held.complete(book.chapters[1].canonicalText);
-      await drainHarness(tester);
-
-      expect(tester.takeException(), isNull);
-      expect(harness.isDisposed, isTrue);
-      // Disposal cancels the pending link and releases its token exactly once.
-      final pending = harness.createdCancellations.sublist(created);
-      expect(pending, hasLength(1));
-      expect(harness.cancelledCancellations, contains(pending.single));
-      expect(
-        harness.releasedCancellations.where((id) => id == pending.single),
-        hasLength(1),
-      );
     });
 
     testWidgets('a navigation keeps the selection lifecycle working', (
@@ -1445,7 +1019,3 @@ void main() {
     );
   });
 }
-
-/// The bytes of one repository file.
-Uint8List _repoFile(String path) =>
-    Uint8List.fromList(File('../$path').readAsBytesSync());

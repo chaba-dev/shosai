@@ -8,25 +8,26 @@ environment:
 
 dependencies:
   characters: ^1.4.1
+  ffi: ^2.2.0
   file_selector: ^1.0.3
   flutter:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  flutter_rust_bridge: 2.11.1
   path_provider: ^2.1.5
+  pdfium_dart: 0.2.5
+  pdfrx: 2.4.7
   shadcn_ui: ^0.56.3
+  shosai_core:
+    path: packages/shosai_core
   shosai_epub:
     path: packages/shosai_epub
-  shosai_flutter_bridge:
-    path: rust_builder
 
 dev_dependencies:
   # Reader tests build small in-memory EPUB archives (nested tables of
   # contents, fragment targets, painted links) instead of extending the shared
   # conformance corpus; the engine already depends on `archive`.
   archive: ^4.3.0
-  ffigen: ^20.1.1
   flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
@@ -44,16 +45,15 @@ flutter:
   generate: true
   fonts:
     # The faces' source of truth is the repository's `assets/fonts/` (used by
-    # the Rust app, the website and the packaging licenses); the `flutter/fonts`
+    # the website and the packaging licenses); the `flutter/fonts`
     # symlinks keep those files *inside* this project so the bundler places
     # them in `flutter_assets/fonts/`. A path that escapes the project
     # (`../assets/fonts/...`) is recorded in the manifests but never copied
-    # into a built bundle: `rootBundle.load` then fails, the bundled EPUB
-    # font-coverage gate reads null and every chapter stays on the retained
-    # renderer (2026-10-02 corpus pass, finding 1). A checkout that does not
-    # support symlinks (e.g. Windows with symlink creation disabled) must not
-    # be used to build or develop the Flutter host: the bundler would package
-    # the link's target path as the font's bytes. No Windows Flutter host
+    # into a built bundle: `rootBundle.load` then fails and EPUB chapters lose
+    # their bundled document faces (2026-10-02 corpus pass, finding 1). A
+    # checkout that does not support symlinks (e.g. Windows with symlink
+    # creation disabled) must not be used to build or develop the Flutter host:
+    # the bundler would package the link's target path as the font's bytes. No Windows Flutter host
     # exists today; keep it that way until a symlinked checkout is guaranteed.
     - family: Inter
       fonts:
@@ -68,3 +68,12 @@ flutter:
   licenses:
     - fonts/LICENSE-Inter
     - fonts/LICENSE-NotoSansJP.txt
+
+dependency_overrides:
+  # pdfrx_engine 0.4.5 with upstream's worker fix (espresso3389/pdfrx@e16a956,
+  # released in 0.4.7): a callback that throws on the PDFium worker isolate
+  # now fails the caller instead of leaving it waiting forever. 0.4.7 needs
+  # meta ^1.18.0, which Flutter 3.41.5 does not allow; drop this override when
+  # the SDK lets pdfrx move to 2.4.8. See third_party/pdfrx_engine/README.md.
+  pdfrx_engine:
+    path: third_party/pdfrx_engine

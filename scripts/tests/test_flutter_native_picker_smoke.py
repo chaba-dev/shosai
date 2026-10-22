@@ -210,7 +210,6 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         )
 
         self._write_tool("ps", f'exec {real_ps} "$@"\n')
-        self._write_tool("cargo", "exit 0\n")
         # The runner bounds every external command with GNU timeout. The real one
         # is preferred, so the controls exercise the same escalation the runner
         # relies on rather than an emulation.

@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/library/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
+import '../support/bridge_pdf_engine.dart';
+import '../support/bridge_records.dart';
 
 FlutterLibraryBook _book(int id, String title) => FlutterLibraryBook(
   bookId: id,
@@ -19,7 +21,9 @@ Future<void> _settle() async {
   await Future<void>.delayed(Duration.zero);
 }
 
-class _StubLibraryBridge implements FlutterBridge {
+class _StubLibraryBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   final pages = <Completer<FlutterLibraryPage>>[];
   final queries = <String?>[];
   final formats = <FlutterBookFormat?>[];

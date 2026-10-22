@@ -5,15 +5,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
-import 'package:shosai_flutter/src/rust/frb_generated.dart';
 
 /// Native add-books picker smoke test.
 ///
 /// Run by `scripts/flutter-native-picker-smoke.sh` on a real desktop with a
 /// disposable profile. The test drives the production application — real shell,
-/// real Rust bridge, disposable database — to the platform file picker. The
-/// runner script opens and dismisses the native dialog and captures the
+/// application bridge, disposable data directory — to the platform file
+/// picker. The runner script opens and dismisses the native dialog and captures the
 /// screenshots, because a native dialog is outside the Flutter view and cannot
 /// be driven by the widget tester.
 void main() {
@@ -32,9 +30,8 @@ void main() {
     // instead of by name, which another instance could share.
     File('${directory.path}/app-pid').writeAsStringSync('$pid');
 
-    await RustLib.init(externalLibrary: nativeLibrary());
-    final bridge = FlutterBridge.withDatabasePath(
-      databasePath: '${directory.path}/smoke.sqlite3',
+    final bridge = await createApplicationBridge(
+      applicationSupportDirectory: () async => directory,
     );
     addTearDown(bridge.dispose);
 

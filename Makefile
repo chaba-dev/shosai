@@ -1,39 +1,29 @@
-.PHONY: lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version theme-tokens check-theme-tokens design-system design-system-css check-design-system-css test-epub-prototype epub-prototype-fixtures measure-epub-prototype flutter-bundle-check-linux
+.PHONY: lint lint-flutter fmt fmt-flutter check-fmt-flutter test test-flutter test-scripts check-l10n-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release check-rfds changelog next-version theme-tokens check-theme-tokens design-system design-system-css check-design-system-css test-epub-prototype epub-prototype-fixtures measure-epub-prototype flutter-bundle-check-linux test-flutter-packaged-linux test-flutter-packaged-macos
 
-## Run clippy lints on the workspace
-lint: lint-rust lint-flutter
-
-## Run Rust lints
-lint-rust:
-	cargo clippy --workspace --all-targets -- -D warnings
+## Run the Flutter and Dart package lints
+lint: lint-flutter
 
 ## Run Flutter static analysis
-## The package's `pub get` must run before the app-root `flutter analyze`: that
-## command walks into flutter/packages and needs the nested package's own
+## The packages' `pub get` must run before the app-root `flutter analyze`: that
+## command walks into flutter/packages and needs each nested package's own
 ## package config to resolve its `package:test` imports on a fresh checkout.
 lint-flutter:
 	cd flutter/packages/shosai_epub && dart pub get
+	cd flutter/packages/shosai_core && dart pub get
 	cd flutter && flutter analyze
 	cd flutter/packages/shosai_epub && dart analyze
+	cd flutter/packages/shosai_core && dart analyze
 
-## Format all Rust and Dart source files
-fmt: fmt-rust fmt-flutter
-
-## Format Rust source files
-fmt-rust:
-	cargo fmt --all
+## Format all Dart source files
+fmt: fmt-flutter
 
 ## Format Dart source files
 fmt-flutter:
-	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test
-
-## Check Rust formatting without changing files
-check-fmt-rust:
-	cargo fmt --all -- --check
+	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Check Dart formatting without changing files
 check-fmt-flutter:
-	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test
+	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Regenerate the Flutter design-token module from assets/theme/tokens.json
 theme-tokens:
@@ -60,25 +50,18 @@ design-system-css:
 check-design-system-css:
 	python3 scripts/generate-design-system-css.py --check
 
-## Run all Rust, script, bridge, and Flutter tests
+## Run the script, generated-source, Flutter and Dart package tests
 test:
 	$(MAKE) check-theme-tokens
-	$(MAKE) test-rust
 	$(MAKE) test-scripts
-	$(MAKE) check-frb
-	$(MAKE) check-flutter-codegen
 	$(MAKE) check-l10n-codegen
 	$(MAKE) test-flutter
 
-## Run Rust workspace tests
-test-rust:
-	cargo test --workspace --no-fail-fast
-
-## Build the bridge and run Flutter unit and native bridge tests
+## Run the Flutter tests and the Dart packages' tests
 test-flutter:
-	cargo build --package shosai-flutter-bridge
 	cd flutter && flutter test
 	cd flutter/packages/shosai_epub && dart pub get && dart test
+	cd flutter/packages/shosai_core && dart pub get && dart test
 
 ## Run tests for repository scripts
 test-scripts:
@@ -107,30 +90,17 @@ epub-prototype-fixtures:
 measure-epub-prototype:
 	bash prototypes/epub-dart-eval/tool/measure.sh
 
-## Verify that the core bridge API is accepted by flutter_rust_bridge codegen
-check-frb:
-	@./scripts/check-frb-codegen.sh
-
-## Verify checked-in Flutter bindings match the bridge API
-check-flutter-codegen:
-	@./scripts/check-flutter-codegen.sh
-
 ## Verify generated Flutter localizations match the ARB catalogs
 check-l10n-codegen:
 	@./scripts/check-l10n-codegen.sh
 
-## Generate Rust/Dart bindings
-flutter-codegen:
-	cd flutter && flutter_rust_bridge_codegen generate
-	cargo fmt --package shosai-flutter-bridge
-
-## Validate generated bindings and the Flutter host
-check-flutter: check-flutter-codegen
+## Validate the generated localizations and the Flutter host
+check-flutter: check-l10n-codegen
 	$(MAKE) check-fmt-flutter lint-flutter
 	$(MAKE) test-flutter
 
 ## Run the Linux Flutter host in debug mode
-flutter-dev: flutter-codegen
+flutter-dev:
 	cd flutter && flutter run -d linux
 
 ## Build the Linux Flutter host in debug mode
@@ -142,6 +112,22 @@ flutter-linux-debug:
 flutter-bundle-check-linux:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_flutter_bundle.py \
 		flutter/build/linux/x64/debug/bundle
+
+## Run the packaged-host integration tests on the Linux host under Xvfb, on X11
+## with Mesa's EGL (from the Nix dev shell). No PDFium override is set, so the
+## bundle's own PDFium and SQLite must load.
+test-flutter-packaged-linux:
+	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
+		GDK_BACKEND=x11 \
+		__EGL_VENDOR_LIBRARY_FILENAMES="$${SHOSAI_TEST_EGL_VENDOR:?run in the Nix dev shell}" \
+		xvfb-run -a -s '-screen 0 1280x1024x24' \
+		flutter test -d linux integration_test/packaged_core_test.dart
+
+## Run the packaged-host integration tests on the macOS host, likewise with no
+## PDFium override
+test-flutter-packaged-macos:
+	env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY ./scripts/build-flutter-macos.sh \
+		test -d macos integration_test/packaged_core_test.dart
 
 ## Build the Android arm64 Flutter host in profile mode
 flutter-android-profile:
@@ -168,8 +154,6 @@ flutter-macos-smoke: flutter-macos-debug
 	@set -eu; \
 		app="flutter/build/macos/Build/Products/Debug/shosai_flutter.app"; \
 		verify_signatures() { \
-			/usr/bin/codesign --verify --strict "$$app/Contents/Frameworks/libshosai_flutter_bridge.dylib"; \
-			/usr/bin/codesign --verify --strict "$$app/Contents/Frameworks/libpdfium.dylib"; \
 			/usr/bin/codesign --verify --deep --strict --verbose=2 "$$app"; \
 		}; \
 		verify_signatures; \
@@ -185,14 +169,8 @@ flutter-macos-smoke: flutter-macos-debug
 		fi
 
 ## Build the Linux Flutter host in release mode
-flutter-release: flutter-codegen
+flutter-release:
 	cd flutter && flutter build linux --release
-
-## Run the RFD 4 M2 profile measurements (DEVICE must be a Flutter device ID)
-measure-flutter-m2:
-	@test -n "$(DEVICE)" || { echo "DEVICE is required" >&2; exit 2; }
-	@python3 scripts/m2-measurements.py --device "$(DEVICE)" \
-		--output "$(or $(OUTPUT),target/m2-measurements/$(DEVICE).json)"
 
 ## Validate RFD sources and the checker regression fixtures
 check-rfds:

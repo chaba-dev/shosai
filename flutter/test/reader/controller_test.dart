@@ -3,9 +3,13 @@ import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/reader/controller.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
+import '../support/bridge_pdf_engine.dart';
+import '../support/bridge_records.dart';
 
-class _ReaderBridge implements FlutterBridge {
+class _ReaderBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   var disposeCount = 0;
 
   @override

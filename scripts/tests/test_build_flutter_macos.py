@@ -72,7 +72,6 @@ class FlutterMacosBuildTest(unittest.TestCase):
 printf '%s\n' \\
   "$PWD" "$FLUTTER_ROOT" "$MACOSX_DEPLOYMENT_TARGET" "$PATH" \\
   {scrubbed_values} \\
-  "$SHOSAI_PDFIUM_LIBRARY" "$CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER" \\
   "$@" > "$CAPTURE"
 """,
         )
@@ -90,7 +89,7 @@ printf '%s\n' \\
         path.write_text(body)
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
-    def _run_builder(self, **overrides):
+    def _run_builder(self, *arguments, **overrides):
         environment = os.environ.copy()
         environment.pop("MACOSX_DEPLOYMENT_TARGET", None)
         environment.update(
@@ -100,20 +99,18 @@ printf '%s\n' \\
             {
                 "PATH": f"{self.sdk / 'bin'}:{environment['PATH']}",
                 "CAPTURE": str(self.capture),
-                "SHOSAI_PDFIUM_LIBRARY": "/pinned/libpdfium.dylib",
-                "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": "/usr/bin/clang",
             }
         )
         environment.update(overrides)
         return subprocess.run(
-            [self.scripts / BUILDER.name],
+            [self.scripts / BUILDER.name, *arguments],
             env=environment,
             capture_output=True,
             text=True,
             check=False,
         )
 
-    def test_scrubs_compiler_environment_and_preserves_pinned_tools(self):
+    def test_scrubs_compiler_environment(self):
         result = self._run_builder()
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -129,9 +126,18 @@ printf '%s\n' \\
         self.assertEqual(
             values[4:scrubbed_end], ["unset"] * len(self.SCRUBBED_VARIABLES)
         )
-        self.assertEqual(values[scrubbed_end], "/pinned/libpdfium.dylib")
-        self.assertEqual(values[scrubbed_end + 1], "/usr/bin/clang")
-        self.assertEqual(values[scrubbed_end + 2 :], ["build", "macos", "--debug"])
+        self.assertEqual(values[scrubbed_end:], ["build", "macos", "--debug"])
+
+    def test_runs_given_flutter_command_in_the_scrubbed_environment(self):
+        result = self._run_builder("test", "-d", "macos", "a test.dart")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        values = self.capture.read_text().splitlines()
+        scrubbed_end = 4 + len(self.SCRUBBED_VARIABLES)
+        self.assertEqual(
+            values[4:scrubbed_end], ["unset"] * len(self.SCRUBBED_VARIABLES)
+        )
+        self.assertEqual(values[scrubbed_end:], ["test", "-d", "macos", "a test.dart"])
 
     def test_preserves_explicit_deployment_target(self):
         result = self._run_builder(MACOSX_DEPLOYMENT_TARGET="14.2")

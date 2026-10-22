@@ -10,7 +10,7 @@ PRODUCT_NAME = shosai_flutter
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = dev.shosai.shosai-flutter
 
-// Keep the host and the Rust bridge on the same supported macOS baseline.
+// The supported macOS baseline; the build scripts default to the same value.
 MACOSX_DEPLOYMENT_TARGET = 13.0
 
 // The copyright displayed in application information

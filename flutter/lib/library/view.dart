@@ -8,13 +8,14 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/library/controller.dart';
@@ -280,15 +281,15 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     return LibraryImportSelection(
       paths: documents.map((item) => item.name).toList(growable: false),
       managed: true,
-      runner: (bridge, cancellation) =>
-          _importAndroidDocuments(documents, bridge, cancellation, revision),
+      runner: (records, cancellation) =>
+          _importAndroidDocuments(documents, records, cancellation, revision),
       cleanup: () => _discardProviderDocuments(documents),
     );
   }
 
   Future<FlutterImportReport> _importAndroidDocuments(
     List<SelectedProviderDocument> documents,
-    FlutterBridge bridge,
+    ShosaiRecords records,
     BigInt cancellation,
     int revision,
   ) async {
@@ -341,7 +342,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               );
             } else {
               try {
-                final importedReport = await bridge.importPaths(
+                final importedReport = await records.importPaths(
                   pathKeys: [acquisition.path],
                   managed: true,
                   cancellationId: cancellation,

@@ -19,8 +19,8 @@
 
 # Flutter architecture
 
-- Follow `docs/flutter-architecture.md` for Flutter reader and bridge work.
+- Follow `docs/flutter-architecture.md` for Flutter reader, engine and application-core work.
 - Preserve the Elm boundary: widgets render immutable model state and dispatch typed messages; message handling computes transitions and starts controller-owned effects; effects report results by dispatching typed completion messages.
 - Never mutate reader model state from a widget, timer, future completion, or bridge callback. Guard asynchronous completions with the document generation and operation revision that started them.
 - Route dialogs and other platform effects through controller-injected adapters. Widgets dispatch intent messages and never await effects themselves.
-- Keep document parsing, layout, durable anchors, persistence, and resource admission in Rust. Flutter owns presentation, gestures, focus, navigation, and platform UI adapters.
+- Keep document parsing, durable anchors, persistence, and resource admission in the Dart document engines and the Dart application core (`flutter/packages`, `flutter/lib/reader/pdf`, `flutter/lib/core`). Flutter widgets own presentation, gestures, focus, navigation, and platform UI adapters. The application is Dart only: do not add Rust code.

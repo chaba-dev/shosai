@@ -3,10 +3,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
+import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/notices/library_notice_text.dart';
 import 'package:shosai_flutter/notices/notices.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 part 'message.dart';
 part 'model.dart';
@@ -26,6 +27,7 @@ class LibraryController implements Listenable {
     LibraryCoverEvicter evictCover = _ignoreCoverEviction,
     NoticeReporter noticeReporter = ignoreNotice,
   }) : _bridge = bridge,
+       _records = recordsOf(bridge),
        _confirmRemoval = confirmRemoval,
        _pickImport = pickImport,
        _openBook = openBook,
@@ -37,6 +39,9 @@ class LibraryController implements Listenable {
        _reportNotice = noticeReporter;
 
   final FlutterBridge _bridge;
+
+  /// The library's books and settings, served beside [_bridge].
+  final ShosaiRecords _records;
   final LibraryRemovalConfirmer _confirmRemoval;
   final LibraryImportPicker _pickImport;
   final LibraryBookOpener _openBook;
@@ -364,7 +369,7 @@ class LibraryController implements Listenable {
     _activeEffects += 1;
     unawaited(() async {
       try {
-        final cover = await _bridge.libraryCover(
+        final cover = await _records.libraryCover(
           bookId: bookId,
           cancellationId: cancellation,
         );
@@ -436,7 +441,7 @@ class LibraryController implements Listenable {
     _emit(_model.copyWith(loading: true, loadingMore: append));
     unawaited(() async {
       try {
-        final page = await _bridge.libraryPage(
+        final page = await _records.libraryPage(
           query: query,
           format: format,
           limit: libraryPageSize,
@@ -444,7 +449,7 @@ class LibraryController implements Listenable {
           cancellationId: cancellation,
         );
         final settings = _model.settings == null
-            ? await _bridge.loadReaderSettings(cancellationId: cancellation)
+            ? await _records.loadReaderSettings(cancellationId: cancellation)
             : null;
         dispatch(
           _LibraryLoaded(revision, page, settings, append, cancellation),
@@ -487,13 +492,13 @@ class LibraryController implements Listenable {
         String? terminalStatus;
         NoticeRequest? successNotice;
         if (selection.runner case final runner?) {
-          final report = await runner(_bridge, cancellation);
+          final report = await runner(_records, cancellation);
           items = report.items;
           refresh = report.imported > BigInt.zero;
           terminalStatus = _importReportStatus(report);
           successNotice = _importSuccessNotice(report);
         } else if (selection.directory) {
-          final report = await _bridge.importDirectory(
+          final report = await _records.importDirectory(
             pathKey: selection.paths.single,
             managed: selection.managed,
             cancellationId: cancellation,
@@ -503,7 +508,7 @@ class LibraryController implements Listenable {
           terminalStatus = _importReportStatus(report);
           successNotice = _importSuccessNotice(report);
         } else {
-          final report = await _bridge.importPaths(
+          final report = await _records.importPaths(
             pathKeys: selection.paths,
             managed: selection.managed,
             cancellationId: cancellation,
@@ -589,7 +594,7 @@ class LibraryController implements Listenable {
   void _remove(FlutterLibraryBook book) {
     unawaited(() async {
       try {
-        final outcome = await _bridge.removeLibraryBook(bookId: book.bookId);
+        final outcome = await _records.removeLibraryBook(bookId: book.bookId);
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.removal,
@@ -635,7 +640,7 @@ class LibraryController implements Listenable {
         final settings = await _editSettings(initial);
         if (settings == null) return;
         if (!_ownsAdapter(adapterRevision)) return;
-        await _bridge.saveReaderSettings(value: settings);
+        await _records.saveReaderSettings(value: settings);
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.settings,

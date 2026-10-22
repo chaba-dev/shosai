@@ -1,13 +1,9 @@
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
-import 'package:shosai_flutter/reader/epub/font_coverage.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/epub_navigation_fixture.dart';
 import '../support/production_shell_harness.dart';
@@ -34,14 +30,6 @@ void main() {
 
   final bytes = navigationEpub();
   final book = openEpubBytes(bytes);
-  final coverage = EpubFontCoverage.fromFonts([
-    Uint8List.fromList(
-      File('../assets/fonts/InterVariable.ttf').readAsBytesSync(),
-    ),
-    Uint8List.fromList(
-      File('../assets/fonts/NotoSansJP-Variable.ttf').readAsBytesSync(),
-    ),
-  ])!;
 
   HarnessBridge bridge() {
     final harness = _NavigationRenderBridge(
@@ -59,10 +47,6 @@ void main() {
       ],
     );
     harness.epubBytes = bytes;
-    harness.canonicalTexts = {
-      for (var unit = 0; unit < book.chapters.length; unit += 1)
-        unit: book.chapters[unit].canonicalText,
-    };
     return harness;
   }
 
@@ -72,7 +56,6 @@ void main() {
       bridge: harness,
       initialPath: '/books/navigation.epub',
       initialBookId: 1,
-      fontCoverageLoader: () async => coverage,
       epubImageDecoder: (bytes) async => null,
     ),
   );

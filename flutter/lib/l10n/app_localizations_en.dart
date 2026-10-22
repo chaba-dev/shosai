@@ -441,4 +441,8 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noticeReaderExportFailed => 'Bookmarks could not be exported';
+
+  @override
+  String get noticeReaderChapterPaginated =>
+      'This chapter is too long to scroll continuously, so it is shown as pages';
 }

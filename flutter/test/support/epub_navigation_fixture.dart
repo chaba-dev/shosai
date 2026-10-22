@@ -60,7 +60,7 @@ Uint8List navigationEpub() {
       '<li><a href="../Text/chapter-3.xhtml#missing">Missing anchor</a></li>'
       '<li><a href="../Text/%63hapter-3.xhtml#three-deep">Encoded path</a></li>'
       '</ol>';
-  return _epub(chapters: chapters, nav: nav);
+  return buildTestEpub(chapters: chapters, nav: nav);
 }
 
 /// The title-only part heading the fixture keeps but never shows.
@@ -97,7 +97,7 @@ const canonicalParityChapterBody =
 /// disagree with the nav document's, so the Contents panel's source is
 /// observable. Building it here keeps the shared corpus untouched.
 Uint8List canonicalParityEpub() {
-  return _epub(
+  return buildTestEpub(
     chapters: const {'OPS/Text/chapter-1.xhtml': canonicalParityChapterBody},
     nav: '<ol><li><a href="../Text/chapter-1.xhtml">Nav One</a></li></ol>',
     ncx:
@@ -127,7 +127,7 @@ Uint8List admissionEpub({required int spanNesting}) {
   for (var i = 0; i < spanNesting; i += 1) {
     nested = '<span>$nested</span>';
   }
-  return _epub(
+  return buildTestEpub(
     chapters: {
       'OPS/Text/chapter-1.xhtml':
           '<table><tr><td>$nested</td></tr></table><p>After the cell.</p>',
@@ -159,7 +159,7 @@ Uint8List crlfPreEpub() {
   // above carries plain LF joins for readability; the real-world form has a
   // CRLF-terminated every line inside the code block.
   final crlfBody = body.replaceAll('\n', '\r\n');
-  return _epub(
+  return buildTestEpub(
     chapters: {'OPS/Text/chapter-1.xhtml': crlfBody},
     nav: '<ol><li><a href="../Text/chapter-1.xhtml">CRLF</a></li></ol>',
   );
@@ -205,7 +205,7 @@ Uint8List pageAnchorEpub() {
       '</table>'
       '$trailing'
       '</main>';
-  return _epub(
+  return buildTestEpub(
     chapters: {
       'OPS/Text/chapter-1.xhtml': body,
       'OPS/Text/chapter-2.xhtml':
@@ -219,7 +219,9 @@ Uint8List pageAnchorEpub() {
   );
 }
 
-Uint8List _epub({
+/// An EPUB 3 archive with [chapters] (archive path → body markup) in spine
+/// order and [nav] as its table of contents.
+Uint8List buildTestEpub({
   required Map<String, String> chapters,
   required String nav,
   String? ncx,
@@ -281,3 +283,16 @@ Uint8List _epub({
   }
   return Uint8List.fromList(ZipEncoder().encode(archive));
 }
+
+/// The harness book: [chapters] chapters, chapter `n` (from 1) reading "Page n
+/// of the deterministic harness document.", so a harness EPUB shows the same
+/// text in every render. Its table of contents is empty, so the Contents panel
+/// lists the chapter fallback.
+Uint8List harnessEpub(int chapters) => buildTestEpub(
+  chapters: {
+    for (var chapter = 1; chapter <= chapters; chapter += 1)
+      'OPS/Text/chapter-$chapter.xhtml':
+          '<p>Page $chapter of the deterministic harness document.</p>',
+  },
+  nav: '<ol></ol>',
+);

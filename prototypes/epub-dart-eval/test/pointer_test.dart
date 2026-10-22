@@ -39,7 +39,7 @@ Future<EpubReaderController> _open(
   final fallbacks = await loadPrototypeFonts(tester);
   final path = File('fixtures/rich-chapter.epub').existsSync()
       ? 'fixtures/rich-chapter.epub'
-      : '../../crates/shosai-core/tests/fixtures/epub-conformance/bionic.epub';
+      : '../../fixtures/epub-conformance/bionic.epub';
   final controller = EpubReaderController(
     source: _FixtureSource(path),
     positionStore: EpubMemoryPositionStore(),
@@ -287,7 +287,7 @@ void main() {
     final fallbacks = await loadPrototypeFonts(tester);
     final path = File('fixtures/rich-chapter.epub').existsSync()
         ? 'fixtures/rich-chapter.epub'
-        : '../../crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub';
+        : '../../fixtures/epub-conformance/bidi.epub';
     final store = EpubMemoryPositionStore();
     final controller = EpubReaderController(
       source: _FixtureSource(path),

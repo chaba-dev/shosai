@@ -6,13 +6,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
-    show ExternalLibrary;
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/controller.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
-import 'package:shosai_flutter/src/rust/frb_generated.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -20,14 +17,14 @@ import '../support/production_shell_harness.dart';
 ///
 /// Each capture reproduces a committed 1C reference state with the same fixture
 /// bytes, locale, viewport, DPR, panel, location and bookmark state, renders it
-/// through the production shell **and the real Rust bridge**, and compares
+/// through the production shell **and the application bridge**, and compares
 /// measurable panel geometry with the reference image using the same ink-profile
 /// algorithm on both sides. The reference ids, fixture paths and their SHA-256
 /// are recorded per capture in the artifact metadata; the fixture bytes are the
 /// committed 1C evidence files, opened by reference (never copied or modified).
 ///
 /// Known, disclosed capability gaps (not hidden by the comparison):
-/// - the Flutter reader renders the real Rust chapter surface, but it has no
+/// - the Flutter reader renders the real Dart EPUB page window, but it has no
 ///   paginated page box, spread, page footer or page number yet: those are
 ///   Stage 5 (5A/5B/5G/5H) capabilities, so the document area is not compared
 ///   with the reference's page composition;
@@ -49,17 +46,10 @@ void main() {
   setUpAll(() async {
     if (!supported) return;
     await loadHarnessFonts();
-    final library = Platform.isMacOS
-        ? '../target/debug/libshosai_flutter_bridge.dylib'
-        : '../target/debug/libshosai_flutter_bridge.so';
-    await RustLib.init(externalLibrary: ExternalLibrary.open(library));
     parityDataDirectory = await Directory.systemTemp.createTemp(
       'shosai-4c-parity-',
     );
-    parityDatabasePath = '${parityDataDirectory.path}/library.sqlite';
-    final bridge = FlutterBridge.withDatabasePath(
-      databasePath: parityDatabasePath,
-    );
+    final bridge = await _parityBridge();
     final cancellation = bridge.createCancellation();
     try {
       final report = await bridge.importPaths(
@@ -88,14 +78,13 @@ void main() {
 
   tearDownAll(() async {
     if (!supported) return;
-    RustLib.dispose();
     await parityDataDirectory.delete(recursive: true);
   });
 
   testWidgets('the document ink check rejects a blank raster', (tester) async {
     // Negative controls for the assertion above, through the same measurement
     // path: opaque paper, a fully transparent raster (what an uninitialised
-    // Rust page buffer looks like) and a transparent raster with one opaque
+    // page buffer looks like) and a transparent raster with one opaque
     // mark. Only the marked raster may measure ink.
     Future<int> inkOf(ui.Image image) async {
       final data = (await tester.runAsync(
@@ -157,9 +146,7 @@ void main() {
       final recorder = RenderErrorRecorder.install();
       addTearDown(recorder.dispose);
 
-      final bridge = FlutterBridge.withDatabasePath(
-        databasePath: parityDatabasePath,
-      );
+      final bridge = (await tester.runAsync(_parityBridge))!;
       // The reader disposes this bridge when it is torn down, so it is only
       // released here if the reader never got that far.
       addTearDown(() {
@@ -181,7 +168,7 @@ void main() {
       final defects = await findRenderDefects(tester);
       final geometry = _flutterGeometry(tester, capture);
       final spacing = _spacingComparison(capture, geometry);
-      // The document check reads the Rust chapter raster itself, so chrome,
+      // The document check reads the page paint itself, so chrome,
       // edge-navigation glyphs, the search bar or the note dialog's scrim can
       // never be mistaken for document content.
       final documentInk = await _documentBandInk(tester);
@@ -223,13 +210,10 @@ void main() {
           'fixturePresentation': capture.fixturePresentation,
           'documentCapability':
               'the document area is painted by the reader document renderer '
-              '(the Dart EPUB page window for a routed chapter, the retained '
-              'Rust chapter surface otherwise); no page box/spread/footer '
-              '(5A/5B/5G/5H). The retained rasterizer\'s disclosed CJK '
-              'fallback gap (5C/FM-22) is what the Dart renderer closes for a '
-              'routed chapter: it lays text out with the bundled document '
-              'family, so Japanese text paints real glyphs instead of '
-              'missing-glyph boxes',
+              '(the Dart EPUB page window); no page box/spread/footer '
+              '(5A/5B/5G/5H). The Dart renderer lays text out with the '
+              'bundled document family, so Japanese text paints real glyphs '
+              'instead of missing-glyph boxes',
           'referenceRow': capture.referenceRow,
           'flutterGeometry': geometry,
           'spacingComparison': spacing,
@@ -247,7 +231,7 @@ void main() {
       expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
 
       // Every capture in this suite is a loaded-document reference state, so
-      // the document surface has to paint real Rust ink: a placeholder-only
+      // the document surface has to paint real ink: a placeholder-only
       // capture cannot pass as parity evidence. (States that legitimately have
       // no document — welcome, opening, open failure — would be compared as
       // what they are instead.)
@@ -640,9 +624,7 @@ final _captures = <_Capture>[
 Future<void> _seedReaderState(_Capture capture) async {
   final bookId = bookIdsForTest[capture.fixture];
   expect(bookId, isNotNull, reason: 'the fixture was seeded');
-  final bridge = FlutterBridge.withDatabasePath(
-    databasePath: parityDatabasePath,
-  );
+  final bridge = await _parityBridge();
   final cancellation = bridge.createCancellation();
   try {
     final summary = await bridge.openLibraryBook(
@@ -959,13 +941,13 @@ bool _isInk(int r, int g, int b) =>
 /// Ink pixels in the rendered document area.
 ///
 /// The document area is the reader's own page box, painted by whichever
-/// document renderer is active (the Dart EPUB page window for a routed
-/// chapter, the retained Rust chapter surface otherwise); measuring the
+/// document renderer is active (the Dart EPUB page window, or the PDF page
+/// image); measuring the
 /// captured frame inside that box proves the document itself has content, so a
 /// blank page fails while the surrounding chrome stays irrelevant.
 /// The document area is the reader's own page box, painted by whichever
-/// document renderer is active (the Dart EPUB page window for a routed
-/// chapter, the retained Rust chapter surface otherwise).
+/// document renderer is active (the Dart EPUB page window, or the PDF page
+/// image).
 ///
 /// The measurement reads the page box's own repaint boundary rather than the
 /// composed frame: a selection overlay, a panel or a dialog that happens to sit
@@ -998,8 +980,8 @@ Future<int> _documentBandInk(WidgetTester tester) async {
 /// Ink pixels in raw (premultiplied) RGBA bytes.
 ///
 /// Each pixel is composited onto the light document paper first, so a
-/// transparent raster pixel counts as paper rather than ink: the Rust page
-/// buffer can carry transparent pixels, and a fully transparent raster must
+/// transparent raster pixel counts as paper rather than ink: a page buffer
+/// can carry transparent pixels, and a fully transparent raster must
 /// measure zero ink.
 int _inkPixels(Uint8List rgba, {int paper = 255}) {
   var count = 0;
@@ -1304,7 +1286,12 @@ final bookPathsForTest = <String, String>{};
 
 /// The disposable data root and database the suite seeds once.
 late Directory parityDataDirectory;
-late String parityDatabasePath;
+
+/// A bridge over the parity library: the Dart core in the data directory,
+/// shared by every bridge.
+Future<FlutterBridge> _parityBridge() => createApplicationBridge(
+  applicationSupportDirectory: () async => parityDataDirectory,
+);
 
 /// Crop of one widget for ink inspection (the delete control and similar).
 Future<Uint8List> _cropWidgetPng(

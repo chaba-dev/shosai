@@ -1,12 +1,9 @@
 /// Dart-engine EPUB content: the parsed book for one document generation, the
-/// canonical-parity gate, the windowed chapter layout session and page-window
-/// extraction.
+/// windowed chapter layout session and page-window extraction.
 ///
-/// The retained Rust bridge still owns storage, search, bookmarks, annotations
-/// and reading state. This module only decides what a chapter *looks like*: the
-/// canonical stream it renders is compared with the retained one before a
-/// chapter is routed, and a chapter whose streams differ (or whose stream the
-/// retained implementation cannot produce) stays on the retained renderer.
+/// This module only decides what a chapter *looks like*; the application core
+/// keeps the records, and its anchors and search index the same canonical
+/// stream the pages are laid out from.
 library;
 
 import 'dart:async';
@@ -17,10 +14,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
 import 'package:shosai_epub/shosai_epub.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import 'flow.dart';
-import 'font_coverage.dart';
 import 'pages.dart';
 import 'surface.dart';
 import 'text_style.dart';
@@ -116,15 +112,81 @@ const int kEpubDecodedImageBudget = 64 * 1024 * 1024;
 
 /// The most text one *indivisible* layout unit may carry.
 ///
-/// The windowed chapter session measures in bounded batches between frames, but
-/// a single unit — one paragraph, one list, one table, or one nested container —
-/// is measured by one call: a paragraph's `TextPainter.layout`, or a container's
-/// whole subtree. A chapter carrying such a unit is left to the retained
-/// renderer rather than measured in one unbounded call.
+/// The chapter session measures in bounded batches between frames, but a
+/// single unit — one paragraph, one list, one table, or one nested container —
+/// is measured by one call: a paragraph's `TextPainter.layout`, or a
+/// container's whole subtree. A chapter carrying a larger unit is refused
+/// before layout (see [EpubLayoutLimitExceeded]) instead of being measured in
+/// one unbounded call on the UI thread.
 const int kEpubIndivisibleScalarLimit = 32 * 1024;
 
-/// The most nodes one indivisible layout unit may contain.
+/// The most work units (see [EpubContentSource.layoutLimitExceeded]) one
+/// indivisible layout unit may contain.
 const int kEpubIndivisibleNodeLimit = 512;
+
+/// The longest chapter, in canonical scalars, read as one continuous page.
+///
+/// A continuous chapter is one page as tall as the chapter, and its selection
+/// surface (two endpoints and two carets per visible grapheme) is built for the
+/// whole chapter at once. A longer chapter is shown as pages instead, where the
+/// surface covers one page at a time.
+const int kEpubContinuousScalarLimit = 64 * 1024;
+
+/// The most work units (see [EpubContentSource.layoutLimitExceeded]) a
+/// chapter read as one continuous page may carry, counted through every
+/// nested container, list and table.
+///
+/// Bounds the continuous page's slices and height (an image-heavy chapter has
+/// few scalars but many tall blocks, and a few containers can hold many) the
+/// way [kEpubContinuousScalarLimit] bounds its text.
+const int kEpubContinuousNodeLimit = 2048;
+
+/// Which bounded-work ceiling an indivisible layout unit exceeds.
+enum EpubLayoutLimit {
+  /// The unit carries more than [kEpubIndivisibleScalarLimit] scalars.
+  blockText,
+
+  /// The unit contains more than [kEpubIndivisibleNodeLimit] work units.
+  blockNodes,
+}
+
+/// A chapter the reader refuses to lay out because one of its indivisible
+/// layout units exceeds a bounded-work ceiling.
+///
+/// The refusal is decided from the parsed chapter before any layout runs, and
+/// is reported to the reader as an error naming the chapter, so the reader can
+/// choose another chapter instead of blocking on one unbounded measurement.
+final class EpubLayoutLimitExceeded implements Exception {
+  const EpubLayoutLimitExceeded({
+    required this.unit,
+    required this.block,
+    required this.limit,
+  });
+
+  /// Spine ordinal of the refused chapter.
+  final int unit;
+
+  /// Index of the first top-level block over the ceiling.
+  final int block;
+
+  /// The ceiling it exceeds.
+  final EpubLayoutLimit limit;
+
+  /// The reader-facing explanation.
+  String get message => switch (limit) {
+    EpubLayoutLimit.blockText =>
+      'Chapter ${unit + 1} is too large to display: one of its paragraphs '
+          'is longer than $kEpubIndivisibleScalarLimit characters. '
+          'Choose another chapter from Contents.',
+    EpubLayoutLimit.blockNodes =>
+      'Chapter ${unit + 1} is too large to display: one of its lists, tables '
+          'or sections holds more than $kEpubIndivisibleNodeLimit parts. '
+          'Choose another chapter from Contents.',
+  };
+
+  @override
+  String toString() => message;
+}
 
 /// Decodes one encoded image resource, or null when it cannot be decoded.
 typedef EpubImageDecoder = Future<ui.Image?> Function(Uint8List bytes);
@@ -143,7 +205,6 @@ class EpubContentSource {
   EpubContentSource({
     required this.book,
     required this.embeddedFamilies,
-    required this.bytes,
     this.imageDecodeTimeout = kEpubImageDecodeTimeout,
     this.rasterBudgetBytes = kEpubDecodedImageBudget,
   });
@@ -152,11 +213,6 @@ class EpubContentSource {
 
   /// `@font-face` family name → registered Flutter family name.
   final Map<String, String> embeddedFamilies;
-
-  /// The archive bytes the book was parsed from, retained so a later
-  /// re-parse (a page-height change does not need one) or diagnostics can
-  /// reference the same input.
-  final Uint8List bytes;
 
   /// How long one image decode may take before it is refused.
   ///
@@ -184,65 +240,52 @@ class EpubContentSource {
   /// Whether the owner has released this source.
   bool get isDisposed => _disposed;
 
-  final Map<int, bool> _canonicalMatches = {};
-  final Map<int, bool> _fontCoverage = {};
+  final Map<int, EpubLayoutLimitExceeded?> _layoutLimits = {};
 
-  final Map<int, bool> _indivisibleBounded = {};
-
-  /// Whether every indivisible layout unit of [unit] fits the bounded-work
-  /// ceilings ([kEpubIndivisibleNodeLimit], [kEpubIndivisibleScalarLimit]).
+  /// The ceiling [unit]'s layout would exceed, or null when every indivisible
+  /// layout unit fits ([kEpubIndivisibleNodeLimit],
+  /// [kEpubIndivisibleScalarLimit]).
   ///
-  /// The chapter session's window/batch boundary works between top-level
-  /// blocks; one container is laid out in one call, so a chapter whose single
-  /// blockquote, list, table or paragraph is enormous cannot be measured
-  /// incrementally and is refused here (the retained renderer serves it).
-  bool indivisibleUnitsBounded(int unit) =>
-      _indivisibleBounded.putIfAbsent(unit, () {
-        for (final block in book.chapters[unit].blocks) {
-          final size = _indivisibleSize(block);
-          if (size.nodes > kEpubIndivisibleNodeLimit ||
-              size.scalars > kEpubIndivisibleScalarLimit) {
-            return false;
+  /// The chapter session's batch boundary works between top-level blocks; one
+  /// block is laid out in one call, so a chapter whose single paragraph,
+  /// blockquote, list or table is enormous cannot be measured incrementally.
+  EpubLayoutLimitExceeded? layoutLimitExceeded(int unit) =>
+      _layoutLimits.putIfAbsent(unit, () {
+        final blocks = book.chapters[unit].blocks;
+        for (var index = 0; index < blocks.length; index += 1) {
+          final size = _indivisibleSize(blocks[index]);
+          final limit = size.scalars > kEpubIndivisibleScalarLimit
+              ? EpubLayoutLimit.blockText
+              : size.nodes > kEpubIndivisibleNodeLimit
+              ? EpubLayoutLimit.blockNodes
+              : null;
+          if (limit != null) {
+            return EpubLayoutLimitExceeded(
+              unit: unit,
+              block: index,
+              limit: limit,
+            );
           }
         }
-        return true;
+        return null;
       });
 
-  /// Whether the chapter's text is covered by the reader's bundled faces.
-  ///
-  /// Only the bundled faces are consulted. A book's own `@font-face` faces are
-  /// admitted for *painting*, but they are not an admission guarantee: whether a
-  /// given face is registered (and whether a given span selects it) is decided
-  /// after this gate, so routing on embedded coverage alone could promise a
-  /// chapter the renderer then cannot draw. Extending the gate to embedded
-  /// faces needs the faces' actual selection to be validated first (5C/FM-22).
-  bool fontCovered(int unit, EpubFontCoverage? bundled) {
-    if (bundled == null) return false;
-    return _fontCoverage.putIfAbsent(
-      unit,
-      () => bundled.coversText(book.chapters[unit].canonicalText),
-    );
-  }
+  /// Whether [unit] fits the continuous-page ceilings
+  /// ([kEpubContinuousScalarLimit], [kEpubContinuousNodeLimit]).
+  bool continuousAdmitted(int unit) => _continuous.putIfAbsent(unit, () {
+    final chapter = book.chapters[unit];
+    if (chapter.scalarCount > kEpubContinuousScalarLimit) return false;
+    // Each block's count stops past [kEpubIndivisibleNodeLimit], and the sum
+    // stops past the ceiling, so the check reads a bounded number of nodes.
+    var nodes = 0;
+    for (final block in chapter.blocks) {
+      nodes += _indivisibleSize(block).nodes;
+      if (nodes > kEpubContinuousNodeLimit) return false;
+    }
+    return true;
+  });
 
-  /// Whether the canonical stream of [unit] was already compared with the
-  /// retained stream.
-  bool? canonicalMatch(int unit) => _canonicalMatches[unit];
-
-  /// Records the comparison result for [unit].
-  void recordCanonicalMatch(int unit, bool matches) {
-    _canonicalMatches[unit] = matches;
-  }
-
-  /// Whether [unit] may be served by the Dart engine.
-  ///
-  /// A chapter is servable only when its canonical stream was verified
-  /// identical to the retained one: the reader's durable offsets, search
-  /// results and stored annotations live in that stream, and rendering a
-  /// different stream would silently write incompatible anchors.
-  bool canServe(int unit) =>
-      unit >= 0 &&
-      unit < book.chapters.length &&
-      _canonicalMatches[unit] == true;
+  final Map<int, bool> _continuous = {};
 
   /// Bytes of decoded image rasters currently retained.
   int decodedImageBytes = 0;
@@ -369,7 +412,6 @@ class EpubContentSource {
   }
 }
 
-/// Every image resource path a chapter references, in document order.
 /// The work units and canonical scalars of one indivisible layout unit.
 ///
 /// A *work unit* is one thing the layout measures in a single call: a node, a
@@ -434,6 +476,7 @@ class EpubContentSource {
   return (nodes: nodes, scalars: scalars);
 }
 
+/// Every image resource path a chapter references, in document order.
 List<String> chapterImageSources(EpubChapter chapter) {
   final sources = <String>[];
   final seen = <String>{};
@@ -473,13 +516,6 @@ List<String> chapterImageSources(EpubChapter chapter) {
   return sources;
 }
 
-/// The bundled document faces' coverage, or null when it cannot be read.
-///
-/// The composition root loads and parses the reader's bundled faces; the reader
-/// gate refuses to route a chapter while the coverage is unknown, because it
-/// cannot then promise the chapter will be drawable.
-typedef EpubFontCoverageLoader = Future<EpubFontCoverage?> Function();
-
 /// One rendered page window of a Dart-engine EPUB chapter.
 ///
 /// The page window is what stays resident: its slices reference the measured
@@ -489,6 +525,8 @@ typedef EpubFontCoverageLoader = Future<EpubFontCoverage?> Function();
 class ReaderEpubPage {
   ReaderEpubPage({
     required this.unit,
+    required this.targetScalar,
+    this.continuous = false,
     required this.pageIndex,
     required this.pageCount,
     required this.layoutComplete,
@@ -507,6 +545,18 @@ class ReaderEpubPage {
 
   /// Spine ordinal of the chapter this page belongs to.
   final int unit;
+
+  /// Canonical scalar the window was requested for. A continuous page holds
+  /// the whole chapter, so this is the location the view scrolls to.
+  final int targetScalar;
+
+  /// Whether this page is a whole chapter read continuously (one page as tall
+  /// as the chapter, which the view scrolls) rather than one paginated page.
+  ///
+  /// A continuous reader shows a chapter over the continuous ceilings
+  /// ([kEpubContinuousScalarLimit], [kEpubContinuousNodeLimit]) as pages, so
+  /// the presentation follows the page, not only the reader setting.
+  final bool continuous;
 
   /// 0-based page ordinal inside the laid-out window.
   final int pageIndex;
@@ -559,30 +609,53 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
   contentHeight: math.max(40.0, windowSize.height - 2 * kEpubPageMargin),
 );
 
+/// Paginates [flow] for a page window of [windowSize]; a [continuous] chapter
+/// is one page of unbounded height.
+PaginatedChapter paginateWindow(
+  ChapterFlow flow,
+  Size windowSize, {
+  required bool continuous,
+}) {
+  final box = epubPageBoxFor(windowSize);
+  return paginateFlow(
+    flow: flow,
+    pageHeight: continuous ? double.infinity : box.contentHeight,
+    pageWidth: box.contentWidth,
+  );
+}
+
 /// Extracts the page window that contains [scalar].
 ///
 /// [windowSize] is the page window's own size (the reader's content box), and
 /// the content is laid out inset by [kEpubPageMargin] on every side. The
 /// surface's coordinate space is the whole window, so the retained fit
 /// transform is the identity for an un-resized page.
+///
+/// A [continuous] window is the whole laid-out chapter as one page: its box
+/// keeps the window's width and grows to the chapter's height (never shorter
+/// than the window), and the view scrolls it.
 ReaderEpubPage pageWindowFor({
   required ChapterLayoutSession session,
   required int scalar,
   required int unit,
   required int chapterCount,
   required Size windowSize,
+  bool continuous = false,
 }) {
-  final box = epubPageBoxFor(windowSize);
   final flow = session.snapshot();
-  final paginated = paginateFlow(
-    flow: flow,
-    pageHeight: box.contentHeight,
-    pageWidth: box.contentWidth,
-  );
+  final paginated = paginateWindow(flow, windowSize, continuous: continuous);
   final index = paginated
       .pageOfCanonical(scalar)
       .clamp(0, paginated.pages.length - 1);
   final page = paginated.pages[index];
+  final box = epubPageBoxFor(
+    continuous
+        ? Size(
+            windowSize.width,
+            math.max(windowSize.height, page.height + 2 * kEpubPageMargin),
+          )
+        : windowSize,
+  );
   final surface = buildPageSelectionSurface(
     page: page,
     canonicalText: session.chapter.canonicalText,
@@ -591,6 +664,8 @@ ReaderEpubPage pageWindowFor({
   );
   return ReaderEpubPage(
     unit: unit,
+    targetScalar: scalar,
+    continuous: continuous,
     pageIndex: index,
     pageCount: paginated.pages.length,
     layoutComplete: flow.layoutComplete,

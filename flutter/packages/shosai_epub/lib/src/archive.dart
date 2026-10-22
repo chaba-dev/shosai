@@ -22,55 +22,7 @@ EpubBook openEpubBytes(
   EpubLimits limits = const EpubLimits(),
 }) {
   final warnings = <String>[];
-  final Archive archive;
-  try {
-    archive = ZipDecoder().decodeBytes(bytes);
-  } catch (error) {
-    throw EpubFormatError('failed to read EPUB archive: $error');
-  }
-  if (archive.files.length > limits.maxArchiveEntries) {
-    throw EpubLimitError(
-      'archive entries',
-      limits.maxArchiveEntries,
-      archive.files.length,
-    );
-  }
-  final entries = <String, ArchiveFile>{};
-  _detectDuplicateEntries(bytes, limits, warnings);
-  for (final file in archive.files) {
-    if (!file.isFile) continue;
-    final name = file.name;
-    if (entries.containsKey(name)) {
-      throw EpubFormatError('duplicate EPUB archive entry: $name');
-    }
-    if (file.size > limits.maxEntryBytes) {
-      throw EpubLimitError(
-        'archive entry bytes',
-        limits.maxEntryBytes,
-        file.size,
-      );
-    }
-    entries[name] = file;
-  }
-  final totalUncompressed = entries.values.fold<int>(
-    0,
-    (sum, file) => sum + file.size,
-  );
-  if (totalUncompressed > limits.maxTotalUncompressedBytes) {
-    throw EpubLimitError(
-      'archive uncompressed bytes',
-      limits.maxTotalUncompressedBytes,
-      totalUncompressed,
-    );
-  }
-  if (bytes.isNotEmpty &&
-      totalUncompressed > bytes.length * limits.maxCompressionRatio) {
-    throw EpubLimitError(
-      'archive compression ratio',
-      limits.maxCompressionRatio,
-      totalUncompressed ~/ bytes.length,
-    );
-  }
+  final entries = _admittedEntries(bytes, limits, warnings);
 
   final mimetype = entries['mimetype'];
   if (mimetype == null) {
@@ -279,6 +231,185 @@ EpubBook openEpubBytes(
     embeddedFonts: embeddedFonts,
     warnings: allWarnings,
   );
+}
+
+/// Package metadata and the cover image, read without parsing any chapter.
+class EpubInspection {
+  const EpubInspection({
+    required this.title,
+    required this.author,
+    required this.coverPath,
+    required this.coverMediaType,
+    required this.cover,
+  });
+
+  /// `dc:title`, or null when the package has none.
+  final String? title;
+
+  /// The first `dc:creator`, or null.
+  final String? author;
+
+  /// Canonical archive path of the cover image, or null.
+  final String? coverPath;
+  final String? coverMediaType;
+
+  /// The cover image's admitted bytes, still encoded.
+  final Uint8List? cover;
+}
+
+/// Read an EPUB's title, author and cover for the library without parsing
+/// its chapters. The archive passes the same admission rules as
+/// [openEpubBytes].
+///
+/// The cover is the manifest item with the `cover-image` property (EPUB 3),
+/// else the item named by `<meta name="cover" content="…">` (EPUB 2). An image
+/// over [EpubLimits.maxImageBytes], or one that is not an image, is ignored.
+EpubInspection inspectEpubBytes(
+  Uint8List bytes, {
+  EpubLimits limits = const EpubLimits(),
+}) {
+  final entries = _admittedEntries(bytes, limits, <String>[]);
+  final containerFile = entries['META-INF/container.xml'];
+  if (containerFile == null) {
+    throw const EpubFormatError('EPUB archive has no META-INF/container.xml');
+  }
+  final container = _parseXml(containerFile.content, 'META-INF/container.xml');
+  final opfPath = container.descendants
+      .whereType<XmlElement>()
+      .where((element) => element.name.local == 'rootfile')
+      .firstOrNull
+      ?.getAttribute('full-path');
+  if (opfPath == null) {
+    throw const EpubFormatError('EPUB container has no rootfile');
+  }
+  final canonicalOpfPath = canonicalEpubPath(opfPath);
+  final opfFile = entries[canonicalOpfPath];
+  if (opfFile == null) {
+    throw EpubFormatError(
+      'EPUB package document is missing: $canonicalOpfPath',
+    );
+  }
+  final opf = _parseXml(opfFile.content, canonicalOpfPath);
+  XmlElement? child(XmlNode parent, String local) => parent.descendants
+      .whereType<XmlElement>()
+      .where((element) => element.name.local == local)
+      .firstOrNull;
+  final metadata = child(opf, 'metadata');
+  String? metadataValue(String local) {
+    final value = metadata == null ? null : child(metadata, local)?.innerText;
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  final manifest = child(opf, 'manifest');
+  final items = manifest == null
+      ? const <XmlElement>[]
+      : manifest.children
+            .whereType<XmlElement>()
+            .where((element) => element.name.local == 'item')
+            .toList();
+  final legacyCoverId = metadata?.descendants
+      .whereType<XmlElement>()
+      .where(
+        (element) =>
+            element.name.local == 'meta' &&
+            element.getAttribute('name') == 'cover',
+      )
+      .map((element) => element.getAttribute('content'))
+      .firstOrNull;
+  final coverItem =
+      items
+          .where(
+            (item) => (item.getAttribute('properties') ?? '')
+                .split(RegExp(r'\s+'))
+                .contains('cover-image'),
+          )
+          .firstOrNull ??
+      items
+          .where((item) => item.getAttribute('id') == legacyCoverId)
+          .firstOrNull;
+
+  String? coverPath;
+  String? coverMediaType;
+  Uint8List? cover;
+  final href = coverItem?.getAttribute('href');
+  final mediaType = coverItem?.getAttribute('media-type') ?? '';
+  if (href != null && mediaType.startsWith('image/')) {
+    final resolved = _tryResolve(directoryOf(canonicalOpfPath), href);
+    final file = resolved == null ? null : entries[resolved];
+    if (file != null && file.size <= limits.maxImageBytes) {
+      coverPath = resolved;
+      coverMediaType = mediaType;
+      cover = Uint8List.fromList(file.content);
+    }
+  }
+  return EpubInspection(
+    title: metadataValue('title'),
+    author: metadataValue('creator'),
+    coverPath: coverPath,
+    coverMediaType: coverMediaType,
+    cover: cover,
+  );
+}
+
+/// Decode the archive and apply the entry-count, entry-size, aggregate-size,
+/// compression-ratio and duplicate-name admission rules.
+Map<String, ArchiveFile> _admittedEntries(
+  Uint8List bytes,
+  EpubLimits limits,
+  List<String> warnings,
+) {
+  final Archive archive;
+  try {
+    archive = ZipDecoder().decodeBytes(bytes);
+  } catch (error) {
+    throw EpubFormatError('failed to read EPUB archive: $error');
+  }
+  if (archive.files.length > limits.maxArchiveEntries) {
+    throw EpubLimitError(
+      'archive entries',
+      limits.maxArchiveEntries,
+      archive.files.length,
+    );
+  }
+  final entries = <String, ArchiveFile>{};
+  _detectDuplicateEntries(bytes, limits, warnings);
+  for (final file in archive.files) {
+    if (!file.isFile) continue;
+    final name = file.name;
+    if (entries.containsKey(name)) {
+      throw EpubFormatError('duplicate EPUB archive entry: $name');
+    }
+    if (file.size > limits.maxEntryBytes) {
+      throw EpubLimitError(
+        'archive entry bytes',
+        limits.maxEntryBytes,
+        file.size,
+      );
+    }
+    entries[name] = file;
+  }
+  final totalUncompressed = entries.values.fold<int>(
+    0,
+    (sum, file) => sum + file.size,
+  );
+  if (totalUncompressed > limits.maxTotalUncompressedBytes) {
+    throw EpubLimitError(
+      'archive uncompressed bytes',
+      limits.maxTotalUncompressedBytes,
+      totalUncompressed,
+    );
+  }
+  if (bytes.isNotEmpty &&
+      totalUncompressed > bytes.length * limits.maxCompressionRatio) {
+    throw EpubLimitError(
+      'archive compression ratio',
+      limits.maxCompressionRatio,
+      totalUncompressed ~/ bytes.length,
+    );
+  }
+
+  return entries;
 }
 
 /// Bounded ZIP central-directory scan that rejects duplicate entry names.

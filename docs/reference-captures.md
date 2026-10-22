@@ -598,7 +598,7 @@ checking would fail the suite:
   half of the contract above runs in every `cargo test`, and `make
   reference-shots VERIFY=1` re-renders and re-checks the evidence on Linux.
 
-`crates/shosai-core/tests/fixtures/sample.*` remain unverified-provenance
+`fixtures/sample.*` remain unverified-provenance
 regression fixtures and are never overwritten by the generator.
 
 ## Package 1C: the reader captures
