@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import pathlib
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -89,6 +90,19 @@ class PinPdfiumTest(unittest.TestCase):
         notices = self.notices.read_text()
         for name in ("pdfium_dart", "pdfium", "pdfium-binaries", "zlib"):
             self.assertIn(f"\n{name}\n\n", "\n" + notices)
+
+    def test_the_committed_notices_stay_lf(self):
+        # Flutter's collector splits NOTICES on "\n" + 80 hyphens + "\n".
+        notices = ROOT / "flutter/third_party/pdfium_dart/NOTICES"
+        self.assertNotIn(b"\r", notices.read_bytes())
+        attributes = subprocess.run(
+            ["git", "check-attr", "eol", "--", str(notices.relative_to(ROOT))],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertTrue(attributes.stdout.strip().endswith("eol: lf"), attributes)
 
 
 if __name__ == "__main__":

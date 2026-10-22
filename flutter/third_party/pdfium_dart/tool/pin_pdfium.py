@@ -142,8 +142,11 @@ def main() -> int:
         *(notice(Path(name).stem, licenses[name]) for name in third_party),
     ]
 
-    (PACKAGE / "hook" / "pdfium_archives.dart").write_text("\n".join(lines))
-    (PACKAGE / "NOTICES").write_text(f"{SEPARATOR}\n".join(entries))
+    (PACKAGE / "hook" / "pdfium_archives.dart").write_text(
+        "\n".join(lines), newline="\n"
+    )
+    # Flutter splits NOTICES on an LF separator line.
+    (PACKAGE / "NOTICES").write_text(f"{SEPARATOR}\n".join(entries), newline="\n")
     return 0
 
 
