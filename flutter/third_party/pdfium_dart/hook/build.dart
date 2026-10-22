@@ -1,12 +1,11 @@
 import 'dart:io';
 
-import 'package:archive/archive_io.dart';
 import 'package:code_assets/code_assets.dart';
-import 'package:crypto/crypto.dart';
 import 'package:hooks/hooks.dart';
 import 'package:http/http.dart' as http;
 
 import 'pdfium_archives.dart';
+import 'verified_archive.dart';
 
 const _assetName = 'libpdfium';
 
@@ -23,8 +22,8 @@ void main(List<String> args) async {
         'see tool/pin_pdfium.py.',
       );
     }
-    // The directory names the archive's hash, so a library extracted before
-    // the hash was pinned, or from another archive, is never reused.
+    // The directory names the archive's hash, so a pin change never reuses
+    // another archive's cache; extractVerifiedPdfium rechecks the cache itself.
     final outputSubdir = pdfiumRelease.replaceAll('%2F', '_');
     final outputFile = input.outputDirectoryShared.resolve(
       '$outputSubdir/${target.archiveName}-${expectedSha256.substring(0, 16)}/${target.libraryFileName}',
@@ -54,38 +53,25 @@ Future<void> _downloadPdfium({
   required String pdfiumRelease,
   required String expectedSha256,
 }) async {
-  final output = File.fromUri(outputFile);
-  if (await output.exists()) return;
-
   final archiveUri = Uri.parse(
     'https://github.com/bblanchon/pdfium-binaries/releases/download/'
     '$pdfiumRelease/pdfium-${target.archivePlatform}-${target.archiveArch}.tgz',
   );
 
-  final response = await http.Client().get(archiveUri);
-  if (response.statusCode != 200) {
-    throw Exception('Failed to download PDFium: $archiveUri');
-  }
-  final digest = sha256.convert(response.bodyBytes).toString();
-  if (digest != expectedSha256) {
-    throw Exception(
-      'PDFium archive $archiveUri has SHA-256 $digest; '
-      'expected $expectedSha256.',
-    );
-  }
-
-  final archive = TarDecoder().decodeBytes(
-    GZipDecoder().decodeBytes(response.bodyBytes),
+  await extractVerifiedPdfium(
+    archive: File.fromUri(outputFile.resolve('pdfium.tgz')),
+    library: File.fromUri(outputFile),
+    expectedSha256: expectedSha256,
+    libraryPath: target.archiveLibraryPath,
+    source: archiveUri,
+    download: () async {
+      final response = await http.get(archiveUri);
+      if (response.statusCode != 200) {
+        throw Exception('Failed to download PDFium: $archiveUri');
+      }
+      return response.bodyBytes;
+    },
   );
-  final member = archive.findFile(target.archiveLibraryPath);
-  if (member == null) {
-    throw Exception(
-      'PDFium archive $archiveUri does not contain ${target.archiveLibraryPath}.',
-    );
-  }
-
-  await output.parent.create(recursive: true);
-  await output.writeAsBytes(member.content as List<int>);
 }
 
 final class _PdfiumTarget {

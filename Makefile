@@ -60,11 +60,12 @@ test:
 	$(MAKE) check-l10n-codegen
 	$(MAKE) test-app
 
-## Run the app and Dart packages' tests
+## Run the app and Dart packages' tests (and the vendored PDFium hook's)
 test-app:
 	cd flutter && flutter test
 	cd flutter/packages/shosai_epub && dart pub get && dart test
 	cd flutter/packages/shosai_core && dart pub get && dart test
+	cd flutter/third_party/pdfium_dart && dart pub get && dart test
 
 ## Run tests for repository scripts
 test-scripts:

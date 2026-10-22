@@ -302,7 +302,9 @@ before. A document that needs a user password fails to open.
 in `flutter/third_party/pdfium_dart`. Its build hook checks each
 pdfium-binaries archive against the SHA-256 pinned for its target
 (`hook/pdfium_archives.dart`, written by `tool/pin_pdfium.py`) and fails the
-build on a mismatch; `pdfium_flutter`'s podspec already pins the Apple
+build on a mismatch. It keeps the verified archive and rechecks it on every
+build, taking the library from it rather than trusting a cached copy;
+`pdfium_flutter`'s podspec already pins the Apple
 XCFramework's. The package's `NOTICES` carries PDFium's license and those of
 the third-party code compiled into it, which Flutter adds to every host's
 license notices; the Linux bundle check verifies them. SQLite is in the
