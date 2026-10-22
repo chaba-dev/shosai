@@ -124,23 +124,6 @@ const int kEpubIndivisibleScalarLimit = 32 * 1024;
 /// indivisible layout unit may contain.
 const int kEpubIndivisibleNodeLimit = 512;
 
-/// The longest chapter, in canonical scalars, read as one continuous page.
-///
-/// A continuous chapter is one page as tall as the chapter, and its selection
-/// surface (two endpoints and two carets per visible grapheme) is built for the
-/// whole chapter at once. A longer chapter is shown as pages instead, where the
-/// surface covers one page at a time.
-const int kEpubContinuousScalarLimit = 64 * 1024;
-
-/// The most work units (see [EpubContentSource.layoutLimitExceeded]) a
-/// chapter read as one continuous page may carry, counted through every
-/// nested container, list and table.
-///
-/// Bounds the continuous page's slices and height (an image-heavy chapter has
-/// few scalars but many tall blocks, and a few containers can hold many) the
-/// way [kEpubContinuousScalarLimit] bounds its text.
-const int kEpubContinuousNodeLimit = 2048;
-
 /// Which bounded-work ceiling an indivisible layout unit exceeds.
 enum EpubLayoutLimit {
   /// The unit carries more than [kEpubIndivisibleScalarLimit] scalars.
@@ -269,23 +252,6 @@ class EpubContentSource {
         }
         return null;
       });
-
-  /// Whether [unit] fits the continuous-page ceilings
-  /// ([kEpubContinuousScalarLimit], [kEpubContinuousNodeLimit]).
-  bool continuousAdmitted(int unit) => _continuous.putIfAbsent(unit, () {
-    final chapter = book.chapters[unit];
-    if (chapter.scalarCount > kEpubContinuousScalarLimit) return false;
-    // Each block's count stops past [kEpubIndivisibleNodeLimit], and the sum
-    // stops past the ceiling, so the check reads a bounded number of nodes.
-    var nodes = 0;
-    for (final block in chapter.blocks) {
-      nodes += _indivisibleSize(block).nodes;
-      if (nodes > kEpubContinuousNodeLimit) return false;
-    }
-    return true;
-  });
-
-  final Map<int, bool> _continuous = {};
 
   /// Bytes of decoded image rasters currently retained.
   int decodedImageBytes = 0;
@@ -541,22 +507,22 @@ class ReaderEpubPage {
     required this.box,
     required this.surface,
     required this.palette,
+    this.window,
   });
 
   /// Spine ordinal of the chapter this page belongs to.
   final int unit;
 
-  /// Canonical scalar the window was requested for. A continuous page holds
-  /// the whole chapter, so this is the location the view scrolls to.
+  /// Canonical scalar the window was requested for. On a continuous page this
+  /// is the location the view scrolls to.
   final int targetScalar;
 
-  /// Whether this page is a whole chapter read continuously (one page as tall
-  /// as the chapter, which the view scrolls) rather than one paginated page.
-  ///
-  /// A continuous reader shows a chapter over the continuous ceilings
-  /// ([kEpubContinuousScalarLimit], [kEpubContinuousNodeLimit]) as pages, so
-  /// the presentation follows the page, not only the reader setting.
+  /// Whether this page is a chapter read continuously (one column as tall as
+  /// the chapter, which the view scrolls) rather than one paginated page.
   final bool continuous;
+
+  /// The laid-out window of a continuous page, or null for a paginated one.
+  final ReaderEpubWindow? window;
 
   /// 0-based page ordinal inside the laid-out window.
   final int pageIndex;
@@ -573,7 +539,7 @@ class ReaderEpubPage {
   /// Whether a following page (or chapter) can be reached.
   final bool canGoForward;
 
-  /// Canonical scalar range this page covers.
+  /// Canonical scalar range this page covers (a continuous page: its window).
   final int canonicalStart;
   final int canonicalEnd;
 
@@ -601,6 +567,40 @@ class ReaderEpubPage {
   int get readingOffset => canonicalStart;
 }
 
+/// Where a continuous page's laid-out window sits in its chapter column.
+///
+/// A continuous page lays out only the chapter nodes near the viewport (see
+/// `continuous.dart`); every other node reserves its measured or estimated
+/// extent. The view reads the column tops to keep the content it shows in
+/// place when a measurement moves it.
+class ReaderEpubWindow {
+  const ReaderEpubWindow({
+    required this.firstNode,
+    required this.endNode,
+    required this.nodeTops,
+    this.restartedAt,
+    this.targetNode,
+  });
+
+  /// The laid-out nodes: `firstNode` up to, not including, `endNode`.
+  final int firstNode;
+  final int endNode;
+
+  /// The column top of every chapter node, then the column height, in content
+  /// coordinates (the page box adds [kEpubPageMargin] above).
+  final List<double> nodeTops;
+
+  /// The node this window was started again at, when it was: the view showed
+  /// none of the previous window, so it places this node at its top instead of
+  /// keeping laid-out text in place.
+  final int? restartedAt;
+
+  /// The node holding the page's target scalar, or null for the chapter
+  /// start: a reveal shows its line, or the node itself when the node has none
+  /// (an image, a rule).
+  final int? targetNode;
+}
+
 /// The page box of a page window of [windowSize].
 EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
   size: windowSize,
@@ -609,17 +609,12 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
   contentHeight: math.max(40.0, windowSize.height - 2 * kEpubPageMargin),
 );
 
-/// Paginates [flow] for a page window of [windowSize]; a [continuous] chapter
-/// is one page of unbounded height.
-PaginatedChapter paginateWindow(
-  ChapterFlow flow,
-  Size windowSize, {
-  required bool continuous,
-}) {
+/// Paginates [flow] for a page window of [windowSize].
+PaginatedChapter paginateWindow(ChapterFlow flow, Size windowSize) {
   final box = epubPageBoxFor(windowSize);
   return paginateFlow(
     flow: flow,
-    pageHeight: continuous ? double.infinity : box.contentHeight,
+    pageHeight: box.contentHeight,
     pageWidth: box.contentWidth,
   );
 }
@@ -631,31 +626,21 @@ PaginatedChapter paginateWindow(
 /// surface's coordinate space is the whole window, so the retained fit
 /// transform is the identity for an un-resized page.
 ///
-/// A [continuous] window is the whole laid-out chapter as one page: its box
-/// keeps the window's width and grows to the chapter's height (never shorter
-/// than the window), and the view scrolls it.
+/// A continuous chapter is not paginated; see `continuousWindowFor`.
 ReaderEpubPage pageWindowFor({
   required ChapterLayoutSession session,
   required int scalar,
   required int unit,
   required int chapterCount,
   required Size windowSize,
-  bool continuous = false,
 }) {
   final flow = session.snapshot();
-  final paginated = paginateWindow(flow, windowSize, continuous: continuous);
+  final paginated = paginateWindow(flow, windowSize);
   final index = paginated
       .pageOfCanonical(scalar)
       .clamp(0, paginated.pages.length - 1);
   final page = paginated.pages[index];
-  final box = epubPageBoxFor(
-    continuous
-        ? Size(
-            windowSize.width,
-            math.max(windowSize.height, page.height + 2 * kEpubPageMargin),
-          )
-        : windowSize,
-  );
+  final box = epubPageBoxFor(windowSize);
   final surface = buildPageSelectionSurface(
     page: page,
     canonicalText: session.chapter.canonicalText,
@@ -665,7 +650,6 @@ ReaderEpubPage pageWindowFor({
   return ReaderEpubPage(
     unit: unit,
     targetScalar: scalar,
-    continuous: continuous,
     pageIndex: index,
     pageCount: paginated.pages.length,
     layoutComplete: flow.layoutComplete,

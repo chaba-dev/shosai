@@ -53,6 +53,32 @@ FlutterSelectionSurface buildPageSelectionSurface({
   required String resourcePath,
   required EpubPageBox box,
 }) {
+  final geometry = pageSelectionGeometry(page, box);
+  final start = page.canonicalStart;
+  final end = page.canonicalEnd;
+  final boundaries = _boundariesFor(canonicalText, start, end);
+  return FlutterSelectionSurface(
+    width: box.size.width,
+    height: box.size.height,
+    text: canonicalText,
+    copyEligible: true,
+    resourcePath: resourcePath,
+    endpoints: geometry.endpoints,
+    graphemeBoundaries: Uint32List.fromList(boundaries.graphemes),
+    wordBoundaries: Uint32List.fromList(boundaries.words),
+    visualLines: geometry.visualLines,
+  );
+}
+
+/// The endpoints and visual lines of [page]'s text, placed by [box].
+///
+/// Shared by a page's own surface and by a continuous window, which builds
+/// this once per laid-out node and places the result at the node's top.
+({
+  List<FlutterSelectionEndpoint> endpoints,
+  List<FlutterSelectionVisualLine> visualLines,
+})
+pageSelectionGeometry(FlowPage page, EpubPageBox box) {
   final endpoints = <FlutterSelectionEndpoint>[];
   final visualLines = <FlutterSelectionVisualLine>[];
   for (final slice in page.slices) {
@@ -84,20 +110,7 @@ FlutterSelectionSurface buildPageSelectionSurface({
       }
     }
   }
-  final start = page.canonicalStart;
-  final end = page.canonicalEnd;
-  final boundaries = _boundariesFor(canonicalText, start, end);
-  return FlutterSelectionSurface(
-    width: box.size.width,
-    height: box.size.height,
-    text: canonicalText,
-    copyEligible: true,
-    resourcePath: resourcePath,
-    endpoints: endpoints,
-    graphemeBoundaries: Uint32List.fromList(boundaries.graphemes),
-    wordBoundaries: Uint32List.fromList(boundaries.words),
-    visualLines: visualLines,
-  );
+  return (endpoints: endpoints, visualLines: visualLines);
 }
 
 /// The link href at [position] in the page window's coordinates, or null.

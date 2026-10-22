@@ -13,6 +13,7 @@ import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
+import 'package:shosai_flutter/reader/epub/continuous.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
@@ -61,6 +62,7 @@ class ReaderScreen extends StatefulWidget {
     this.epubImageDecoder,
     this.epubFontRegistrar,
     this.debugEpubSessionObserver,
+    this.debugContinuousStepObserver,
     this.debugPathEntry = false,
   }) : assert(
          (bridge == null) != (bridgeFactory == null),
@@ -117,6 +119,10 @@ class ReaderScreen extends StatefulWidget {
   /// resource ownership (which session was released, and when) without reaching
   /// into the controller; production composition leaves it null.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
+
+  /// Measurement hook: the synchronous microseconds of each continuous window
+  /// step.
+  final void Function(int micros)? debugContinuousStepObserver;
 
   /// Renders the retired path entry for tests and development only.
   ///
@@ -298,9 +304,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         epubImageDecoder: widget.epubImageDecoder ?? _decodeEpubImage,
         epubFontRegistrar: widget.epubFontRegistrar ?? _registerEpubFont,
         debugEpubSessionObserver: widget.debugEpubSessionObserver,
+        debugContinuousStepObserver: widget.debugContinuousStepObserver,
         initialTabs: widget.initialTabs,
-        frameScheduler: (callback) =>
-            WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
+        // A callback runs after the next frame, and asks for that frame: a
+        // continuous window step that installs nothing new still runs.
+        frameScheduler: (callback) {
+          WidgetsBinding.instance
+            ..addPostFrameCallback((_) => callback())
+            ..scheduleFrame();
+        },
         selectionCopier: (text) => Clipboard.setData(ClipboardData(text: text)),
         selectionAnnouncer:
             usesExplicitSelectionAnnouncements(defaultTargetPlatform)
