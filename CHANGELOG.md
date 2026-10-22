@@ -71,6 +71,9 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Compose the library and reader in the Bookshelf shell (#157)
 - *(flutter)* Set the library on a shelf under a Continue reading hero (#160)
 - *(reader)* Lay continuous EPUB chapters out lazily (#167)
+- *(library)* Sort the shelf, count its books and tag the open ones (#172)
+- *(library)* Quote the latest note in the hero and count the notes (#173)
+- *(shell)* Add the phone tab switcher (#174)
 
 ### 🐛 Bug Fixes
 
@@ -164,6 +167,8 @@ All notable changes to this project will be documented in this file.
 - Remove the Rust core (M3.0 slice 3) (#162)
 - Simplify Make targets (#168)
 - Give CI a slimmer Nix shell (#170)
+- *(pdf)* Pin PDFium checksums and ship its licence notices (#169)
+- *(android)* Package every ABI and run the packaged check on Android and iOS (#171)
 
 ### 🛡️ Security
 
