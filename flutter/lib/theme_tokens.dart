@@ -1173,10 +1173,6 @@ abstract final class ShosaiTokens {
   /// (docs/flutter-ui-reference-spec.md 3.5)
   static const layoutLibraryCompactBreakpoint = 760.0;
 
-  /// `layout.library.sidebarWidth` — Iced (docs/flutter-ui-reference-spec.md
-  /// 3.5)
-  static const layoutLibrarySidebarWidth = 184.0;
-
   /// `layout.library.gridMinColumn` — Iced
   /// (docs/flutter-ui-reference-spec.md 3.5)
   static const layoutLibraryGridMinColumn = 220.0;

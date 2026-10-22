@@ -277,7 +277,6 @@ change any Iced UI size, and Flutter `T200` does not change them.
 | `layout.reader.pageGutter` | 20.0 | `app.rs:467` |
 | `layout.reader.bookmarksPanelWidth` | 300.0 | `app.rs:468` |
 | `layout.reader.pagePadding` | 20.0 | `app/epub_view.rs:402`, `417` |
-| `layout.library.sidebarWidth` | 184.0 | `app.rs:7086` |
 | `layout.library.gridMinColumn` | 220.0 (`grid(...).fluid(220)`) | `app.rs:7192` |
 | `layout.library.gridSpacing` | 18.0 | `app.rs:7192` |
 | `layout.library.headerSearchMaxWidth` | 380.0 | `app.rs:6566` |
