@@ -517,6 +517,48 @@ void main() {
       expect(_button(tester, 'reader-edge-previous').enabled, isTrue);
     });
 
+    testWidgets('a PDF spread turns both pages and ends on a lone page', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge();
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+      );
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('100% · page 3 of 3'), findsOneWidget);
+      expect(_button(tester, 'reader-edge-next').enabled, isFalse);
+
+      await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+    });
+
+    testWidgets('one page reads a PDF a page at a time', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge();
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+      );
+      await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('reader-typography-one-page')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('33% · page 1 of 3'), findsOneWidget);
+    });
+
     testWidgets('a disabled edge dispatches nothing', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();

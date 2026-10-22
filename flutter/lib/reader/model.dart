@@ -405,6 +405,7 @@ final class ReaderModel {
     this.readingOffset,
     this.pageImage,
     this.epubPage,
+    this.pdfSpread,
     this.locationRequestRevision = 0,
     FlutterSelectionSurface? selectionSurface,
     this.selectionPhase = ReaderSelectionPhase.idle,
@@ -479,6 +480,10 @@ final class ReaderModel {
   /// The Dart-engine page window currently rendered, or null when the page is
   /// the retained renderer's raster.
   final ReaderEpubPage? epubPage;
+
+  /// The second page shown beside [unit] when a PDF is read in spreads, or
+  /// null for one page. [selectionSurface] and [pageImage] then span both.
+  final ReaderPdfSpread? pdfSpread;
 
   /// Revision of the latest explicit location request [epubPage] answers.
   ///
@@ -608,6 +613,7 @@ final class ReaderModel {
     Object? readingOffset = _unchanged,
     Object? pageImage = _unchanged,
     Object? epubPage = _unchanged,
+    Object? pdfSpread = _unchanged,
     int? locationRequestRevision,
     Object? selectionSurface = _unchanged,
     ReaderSelectionPhase? selectionPhase,
@@ -670,6 +676,9 @@ final class ReaderModel {
       epubPage: identical(epubPage, _unchanged)
           ? this.epubPage
           : epubPage as ReaderEpubPage?,
+      pdfSpread: identical(pdfSpread, _unchanged)
+          ? this.pdfSpread
+          : pdfSpread as ReaderPdfSpread?,
       locationRequestRevision:
           locationRequestRevision ?? this.locationRequestRevision,
       selectionSurface: identical(selectionSurface, _unchanged)

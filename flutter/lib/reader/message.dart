@@ -598,9 +598,14 @@ final class _ReaderImageDecoded extends ReaderMessage {
 }
 
 final class _ReaderSurfaceLoaded extends ReaderMessage {
-  const _ReaderSurfaceLoaded({required this.generation, required this.surface});
+  const _ReaderSurfaceLoaded({
+    required this.generation,
+    required this.surface,
+    this.pdfSpread,
+  });
   final int generation;
   final FlutterSelectionSurface surface;
+  final ReaderPdfSpread? pdfSpread;
 }
 
 final class _ReaderSelectionSupportFailed extends ReaderMessage {
@@ -617,6 +622,7 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
     required this.unit,
     required this.layout,
     required this.surface,
+    this.pdfSpread,
     required this.pageImage,
     required this.annotations,
     required this.replaceReadingOffset,
@@ -633,6 +639,9 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
   final int unit;
   final ReaderLayout layout;
   final FlutterSelectionSurface? surface;
+
+  /// The spread [surface] and [pageImage] show, when they span two PDF pages.
+  final ReaderPdfSpread? pdfSpread;
   final ui.Image pageImage;
 
   /// The scale [pageImage] was rendered at.

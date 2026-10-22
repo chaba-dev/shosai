@@ -1073,7 +1073,10 @@ void main() {
       // The relayout is in flight; the control gates on `relayoutBusy`.
       expect(button().enabled, isFalse);
 
-      bridge.heldRenders.single.complete();
+      // A spread renders both of its pages.
+      for (final render in bridge.heldRenders) {
+        render.complete();
+      }
       await tester.pump();
       await _settle(tester);
       expect(button().enabled, isTrue);
