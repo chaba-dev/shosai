@@ -30,9 +30,13 @@ class NormalizedChapter {
     required this.nodes,
     required this.anchors,
     required this.warnings,
+    this.writingMode = EpubWritingMode.horizontalTb,
   });
 
   final List<EpubContentNode> nodes;
+
+  /// The chapter's principal writing mode; see [EpubChapter.writingMode].
+  final EpubWritingMode writingMode;
 
   /// Element id/name to canonical scalar offset, resolved after the canonical
   /// walk assigns offsets.
@@ -66,11 +70,16 @@ NormalizedChapter normalizeChapter({
     (element) => element.name.local == 'body',
     orElse: () => document.rootElement,
   );
+  // CSS takes the page's writing mode from the root element, or from the
+  // body when there is one (Writing Modes 3, "Principal Writing Mode").
+  final writingMode =
+      computed[body]?.writingMode ?? EpubWritingMode.horizontalTb;
   if (computed[body]?.display == EpubDisplay.none) {
     return NormalizedChapter(
       nodes: const [],
       anchors: const {},
       warnings: warnings,
+      writingMode: writingMode,
     );
   }
   final context = _NormalizeContext(
@@ -101,6 +110,7 @@ NormalizedChapter normalizeChapter({
     nodes: nodes,
     anchors: builder.anchors,
     warnings: warnings,
+    writingMode: writingMode,
   );
 }
 
@@ -648,6 +658,24 @@ EpubComputedStyle _applyDeclaration(
         'justify' => _copyWith(style, textAlign: EpubTextAlign.justify),
         _ => style,
       };
+    case 'writing-mode' || '-epub-writing-mode' || '-webkit-writing-mode':
+      return switch (lower) {
+        'vertical-rl' ||
+        'tb-rl' ||
+        'tb' => _copyWith(style, writingMode: EpubWritingMode.verticalRl),
+        // `vertical-lr` (Mongolian, rotated Latin titles) is not laid out
+        // vertically yet; it reads as horizontal text.
+        'horizontal-tb' ||
+        'lr-tb' ||
+        'lr' ||
+        'rl-tb' ||
+        'rl' ||
+        'vertical-lr' => _copyWith(
+          style,
+          writingMode: EpubWritingMode.horizontalTb,
+        ),
+        _ => style,
+      };
     case 'direction':
       if (lower == 'rtl') return _copyWith(style, direction: EpubDirection.rtl);
       if (lower == 'ltr') return _copyWith(style, direction: EpubDirection.ltr);
@@ -799,6 +827,7 @@ EpubComputedStyle _copyWith(
   EpubLength? width,
   EpubLength? height,
   EpubLength? maxWidth,
+  EpubWritingMode? writingMode,
 }) => EpubComputedStyle(
   display: display ?? style.display,
   bold: bold ?? style.bold,
@@ -816,6 +845,7 @@ EpubComputedStyle _copyWith(
   width: width ?? style.width,
   height: height ?? style.height,
   maxWidth: maxWidth ?? style.maxWidth,
+  writingMode: writingMode ?? style.writingMode,
 );
 
 // ---------------------------------------------------------------------------

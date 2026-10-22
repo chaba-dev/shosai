@@ -2094,6 +2094,86 @@ void main() {
     );
   });
 
+  group('writing mode', () {
+    EpubWritingMode modeOf(String xhtml, [String sheet = '']) =>
+        normalizeChapter(
+          xhtml: xhtml,
+          chapterPath: 'OPS/chapter.xhtml',
+          stylesheets: [CssStylesheet.parse(sheet, const EpubLimits())],
+          limits: const EpubLimits(),
+        ).writingMode;
+
+    test('an undeclared chapter is horizontal', () {
+      expect(
+        modeOf('<html><body><p>本文</p></body></html>'),
+        EpubWritingMode.horizontalTb,
+      );
+    });
+
+    test('the root element sets the mode, in any of its spellings', () {
+      for (final property in [
+        'writing-mode',
+        '-epub-writing-mode',
+        '-webkit-writing-mode',
+      ]) {
+        expect(
+          modeOf(
+            '<html class="vrtl"><body><p>本文</p></body></html>',
+            '.vrtl { $property: vertical-rl; }',
+          ),
+          EpubWritingMode.verticalRl,
+          reason: property,
+        );
+      }
+      expect(
+        modeOf(
+          '<html style="-epub-writing-mode: tb-rl"><body><p>本文</p></body>'
+          '</html>',
+        ),
+        EpubWritingMode.verticalRl,
+        reason: 'the legacy keyword',
+      );
+    });
+
+    test('the body decides over the root element', () {
+      expect(
+        modeOf(
+          '<html style="writing-mode: vertical-rl">'
+          '<body style="writing-mode: horizontal-tb"><p>Text</p></body></html>',
+        ),
+        EpubWritingMode.horizontalTb,
+      );
+      expect(
+        modeOf(
+          '<html><body class="v"><p>本文</p></body></html>',
+          'body.v { writing-mode: vertical-rl }',
+        ),
+        EpubWritingMode.verticalRl,
+      );
+    });
+
+    test('a vertical block inside a horizontal body leaves the page '
+        'horizontal', () {
+      expect(
+        modeOf(
+          '<html><body><div style="writing-mode: vertical-rl"><p>本文</p>'
+          '</div></body></html>',
+        ),
+        EpubWritingMode.horizontalTb,
+      );
+    });
+
+    test('vertical-lr is read as horizontal', () {
+      expect(
+        modeOf(
+          '<html style="writing-mode: vertical-lr"><body><p>Text</p></body>'
+          '</html>',
+        ),
+        EpubWritingMode.horizontalTb,
+      );
+    });
+  });
+
   group('fixtures', () {
     // The package lives under flutter/packages in the repository, but tests
     // must not depend on their own nesting depth: search upward for the

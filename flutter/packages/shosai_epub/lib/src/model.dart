@@ -12,6 +12,12 @@ enum EpubTextAlign { start, center, end, justify }
 
 enum EpubDirection { ltr, rtl }
 
+/// A chapter's writing mode, from CSS `writing-mode` (or its `-epub-` and
+/// `-webkit-` aliases). Only the modes the reader lays out are kept:
+/// `vertical-rl` (and its legacy `tb-rl`/`tb` spellings) sets lines top to
+/// bottom and stacks them right to left; anything else is horizontal.
+enum EpubWritingMode { horizontalTb, verticalRl }
+
 enum EpubFontStyle { normal, italic }
 
 enum EpubFontWeight { normal, bold }
@@ -521,6 +527,7 @@ class EpubChapter {
     required this.canonicalText,
     required this.anchors,
     required this.scalarCount,
+    this.writingMode = EpubWritingMode.horizontalTb,
   });
 
   /// Zero-based spine occurrence.
@@ -540,6 +547,10 @@ class EpubChapter {
   /// Element `id`/legacy anchor name to canonical scalar offset.
   final Map<String, int> anchors;
   final int scalarCount;
+
+  /// The chapter's principal writing mode: the `body` element's, as CSS
+  /// propagates it to the page (the root element's when there is no body).
+  final EpubWritingMode writingMode;
 }
 
 /// A parsed book. Resources are retained as admitted bytes.
