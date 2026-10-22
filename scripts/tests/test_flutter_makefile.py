@@ -186,6 +186,31 @@ class FlutterMakefileTest(unittest.TestCase):
             ],
         )
 
+    def test_packaged_android_tests_drive_a_profile_build(self):
+        result = self._run_packaged_target(
+            "test-packaged-android",
+            self.bin / "flutter",
+            ANDROID_DEVICE="emulator-5554",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.capture.read_text().splitlines(),
+            [
+                str(self.root / "flutter"),
+                "unset",
+                "unset",
+                "wayland",
+                "unset",
+                "drive",
+                "--profile",
+                "--driver=integration_test/driver.dart",
+                "--target=integration_test/packaged_core_test.dart",
+                "-d",
+                "emulator-5554",
+            ],
+        )
+
     def test_aggregate_tests_remain_sequential_with_parallel_make(self):
         overlap = self.root / "overlap"
         lock = self.root / "command-lock"
