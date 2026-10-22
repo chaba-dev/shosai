@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-21
+## [0.1.0] - 2026-10-22
 
 ### 🚀 Features
 
@@ -61,6 +61,12 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Add the production Dart EPUB engine module (#139)
 - *(reader)* Serve paginated EPUB chapters from the Dart engine (#141)
 - *(reader)* Serve EPUB contents and fragment navigation from the Dart engine (#142)
+- *(core)* Add the Dart SQLite store (#152)
+- *(core)* Port the library and import onto the Dart store (#154)
+- *(core)* Port reading state, reader settings and bookmarks (#155)
+- *(core)* Port annotations onto the Dart store (#158)
+- *(core)* Port in-document search onto the Dart core (#159)
+- *(app)* Serve library and reader records from the Dart core (#161)
 
 ### 🐛 Bug Fixes
 
@@ -148,6 +154,7 @@ All notable changes to this project will be documented in this file.
 - Change gh runners to github hosted ones (#18)
 - Update release PRs with append-only commits (#72)
 - *(nix)* Add Flutter mobile development tools (#77)
+- Remove the Rust core (M3.0 slice 3) (#162)
 
 ### 🛡️ Security
 
