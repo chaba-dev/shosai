@@ -293,4 +293,29 @@ ALTER TABLE annotations_v6 RENAME TO annotations;
 CREATE INDEX annotations_version_live_idx
     ON annotations(version_id, deleted_at, created_at, id);
 '''),
+  Migration(7, 'book texts', '''
+-- Each book's text as library search reads it, saved the first time the book
+-- is searched so later searches need not open it. Keyed by content like the
+-- reading state; text_version names the extraction that produced it, and a
+-- book whose extraction changed is read again.
+CREATE TABLE book_texts (
+    content_hash TEXT PRIMARY KEY NOT NULL
+                 CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    text_version TEXT NOT NULL CHECK (length(CAST(text_version AS BLOB)) BETWEEN 1 AND 256),
+    unit_count   INTEGER NOT NULL CHECK (unit_count >= 0),
+    -- UTF-8 bytes of the text kept, at most what one search covers.
+    text_bytes   INTEGER NOT NULL CHECK (text_bytes BETWEEN 0 AND 8388608),
+    -- Whether the book has more text than was kept.
+    truncated    INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+    indexed_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+) STRICT, WITHOUT ROWID;
+
+-- One unit's text, zlib-compressed UTF-8. Units without text have no row.
+CREATE TABLE book_text_units (
+    content_hash TEXT NOT NULL REFERENCES book_texts(content_hash) ON DELETE CASCADE,
+    unit         INTEGER NOT NULL CHECK (unit >= 0),
+    text         BLOB NOT NULL CHECK (length(text) BETWEEN 1 AND 16777216),
+    PRIMARY KEY (content_hash, unit)
+) STRICT;
+'''),
 ];

@@ -186,6 +186,25 @@ List<SearchMatch> searchTexts(
       .$1;
 }
 
+/// The first [maxMatches] matches of [query] in [units] (unit numbers and
+/// texts), on the calling isolate, and whether the units hold more. Unlike
+/// [searchTexts] it neither bounds the text nor fails at the match limit:
+/// the caller bounds the text it hands over.
+(List<SearchMatch>, bool) firstMatches(
+  Iterable<(int, String)> units,
+  String query, {
+  required int maxMatches,
+}) {
+  final search = _Search(
+    query,
+    SearchLimits(maxMatches: maxMatches),
+    stopAtLimit: true,
+  );
+  if (search.query.isEmpty) return (const [], false);
+  final (matches, _, more) = search.run(units.toList(), 0, 0);
+  return (matches, more);
+}
+
 /// The UTF-8 length of [text]; a lone surrogate counts as its replacement
 /// character.
 int utf8Length(String text) {
@@ -216,11 +235,18 @@ Future<(List<SearchMatch>, int)> _runBatch(
   List<(int, String)> batch,
   int matches,
   int resultBytes,
-) => Isolate.run(() => search.run(batch, matches, resultBytes));
+) => Isolate.run(() {
+  final (results, bytes, _) = search.run(batch, matches, resultBytes);
+  return (results, bytes);
+});
 
 /// A folded query and its limits.
 final class _Search {
-  factory _Search(String query, SearchLimits limits) {
+  factory _Search(
+    String query,
+    SearchLimits limits, {
+    bool stopAtLimit = false,
+  }) {
     limits._check();
     final bytes = utf8Length(query);
     if (bytes > limits.maxQueryBytes) {
@@ -231,10 +257,10 @@ final class _Search {
     final folded = Int32List.fromList([
       for (final scalar in query.runes) ...fullCaseFold(scalar),
     ]);
-    return _Search._(folded, _failures(folded), limits);
+    return _Search._(folded, _failures(folded), limits, stopAtLimit);
   }
 
-  const _Search._(this.query, this.failures, this.limits);
+  const _Search._(this.query, this.failures, this.limits, this.stopAtLimit);
 
   final Int32List query;
 
@@ -242,21 +268,30 @@ final class _Search {
   final Int32List failures;
   final SearchLimits limits;
 
-  /// The matches in [batch], given [matches] and [resultBytes] so far, and
-  /// the result bytes after them.
-  (List<SearchMatch>, int) run(
+  /// Whether reaching [SearchLimits.maxMatches] ends the search rather than
+  /// failing it.
+  final bool stopAtLimit;
+
+  /// The matches in [batch], given [matches] and [resultBytes] so far, the
+  /// result bytes after them, and whether the search stopped at its match
+  /// limit with more to find.
+  (List<SearchMatch>, int, bool) run(
     List<(int, String)> batch,
     int matches,
     int resultBytes,
   ) {
     final results = <SearchMatch>[];
     for (final (unit, text) in batch) {
-      resultBytes = _searchUnit(unit, text, matches, resultBytes, results);
+      final bytes = _searchUnit(unit, text, matches, resultBytes, results);
+      if (bytes == null) return (results, resultBytes, true);
+      resultBytes = bytes;
     }
-    return (results, resultBytes);
+    return (results, resultBytes, false);
   }
 
-  int _searchUnit(
+  /// The result bytes after [unit]'s matches; null when the search stopped
+  /// at its match limit.
+  int? _searchUnit(
     int unit,
     String text,
     int earlier,
@@ -309,6 +344,7 @@ final class _Search {
       final originalEnd = boundaries[end];
       if (start < keptEnd || originalStart < 0 || originalEnd < 0) continue;
       if (earlier + results.length >= limits.maxMatches) {
+        if (stopAtLimit) return null;
         throw CoreException.limitExceeded(
           'The search found more than ${limits.maxMatches} matches.',
         );
