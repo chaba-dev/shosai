@@ -262,4 +262,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(shelf(), [1, 2, 3, 4, 5, 6]);
   });
+
+  testWidgets('each sort option is a touch target on a phone', (tester) async {
+    await _pump(tester, const Size(390, 844));
+    for (final option in ['Recent', 'Title', 'Author']) {
+      final target = tester.getSize(
+        find.ancestor(of: find.text(option), matching: find.byType(InkWell)),
+      );
+      expect(target.height, greaterThanOrEqualTo(44), reason: option);
+      expect(target.width, greaterThanOrEqualTo(44), reason: option);
+    }
+  });
 }

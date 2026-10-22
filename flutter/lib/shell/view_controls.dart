@@ -9,7 +9,7 @@ typedef ShellSegment<T> = ({T value, String label});
 /// The options sit on `surface-sunken`; the chosen one is raised on
 /// `control-raised` under `shadow-menu`. Each option is a button inside a
 /// group named [label], and the chosen one reports itself selected. On touch
-/// layouts the control is `touch-target` tall.
+/// layouts each option is `touch-target` tall inside a 48 px track.
 ///
 /// The control renders [selected] and reports a choice through [onSelected];
 /// it holds no state of its own.
@@ -50,8 +50,9 @@ class ShellSegmentedControl<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
-    // The 2 px inset and the segment make up the whole control height.
-    final segmentHeight = touch ? ShosaiTokens.sizeTouchTarget - 4 : 28.0;
+    // The option is what takes the tap, so on touch it is the target; the
+    // 2 px inset around it is not.
+    final segmentHeight = touch ? ShosaiTokens.sizeTouchTarget : 28.0;
     return Semantics(
       container: true,
       explicitChildNodes: true,
