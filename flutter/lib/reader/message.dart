@@ -656,7 +656,7 @@ final class ReaderContinuousViewportChanged extends ReaderMessage {
 
   /// The window of the page the region was measured against. A report made
   /// before the view applied a newer window's correction is in that older
-  /// column's coordinates, and is ignored.
+  /// column's coordinates; the controller maps it into the current column.
   final ReaderEpubWindow? window;
 
   /// The [ReaderModel.locationRequestRevision] the view has revealed.
@@ -672,6 +672,24 @@ final class _ReaderContinuousWindowTick extends ReaderMessage {
   final int generation;
   final int revision;
   final int token;
+}
+
+/// A keyboard selection movement a continuous window could not complete in
+/// one bounded step, continued in the next frame.
+final class _ReaderSelectionMovementContinued extends ReaderMessage {
+  const _ReaderSelectionMovementContinued({
+    required this.generation,
+    required this.layoutRevision,
+    required this.selectionRevision,
+    required this.focus,
+    required this.movement,
+  });
+
+  final int generation;
+  final int layoutRevision;
+  final int selectionRevision;
+  final int focus;
+  final ReaderSelectionMovement movement;
 }
 
 /// One installed page window of the Dart EPUB renderer.

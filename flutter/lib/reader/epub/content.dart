@@ -579,6 +579,7 @@ class ReaderEpubWindow {
     required this.endNode,
     required this.nodeTops,
     this.restartedAt,
+    this.targetNode,
   });
 
   /// The laid-out nodes: `firstNode` up to, not including, `endNode`.
@@ -593,6 +594,11 @@ class ReaderEpubWindow {
   /// none of the previous window, so it places this node at its top instead of
   /// keeping laid-out text in place.
   final int? restartedAt;
+
+  /// The node holding the page's target scalar, or null for the chapter
+  /// start: a reveal shows its line, or the node itself when the node has none
+  /// (an image, a rule).
+  final int? targetNode;
 }
 
 /// The page box of a page window of [windowSize].

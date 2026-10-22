@@ -337,9 +337,15 @@ class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
     final restartedAt = after.restartedAt;
     if (restartedAt != null) {
       // The view showed none of the previous window: the new one starts at
-      // the view's top.
+      // the node under the view's top, which keeps its place in that node.
       position.correctBy(
-        after.nodeTops[restartedAt] + kEpubPageMargin - position.pixels,
+        continuousMapToColumn(
+              before.nodeTops,
+              after.nodeTops,
+              position.pixels - kEpubPageMargin,
+            ) +
+            kEpubPageMargin -
+            position.pixels,
       );
       WidgetsBinding.instance.addPostFrameCallback((_) => _report());
       return;
@@ -418,15 +424,24 @@ class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
 }
 
 /// The top, in page coordinates, of the line holding [page]'s target scalar
-/// (the first caret at or after it), or null when the page has none.
+/// (the first caret at or after it in the target's node), or of the target's
+/// node when it has no such line (an image, a rule); null when the page has
+/// no target node.
 double? _continuousTargetTop(ReaderEpubPage page) {
+  final window = page.window;
+  final node = window?.targetNode;
+  if (window == null || node == null || node >= window.nodeTops.length - 1) {
+    return null;
+  }
+  final nodeTop = window.nodeTops[node] + kEpubPageMargin;
+  final nodeEnd = window.nodeTops[node + 1] + kEpubPageMargin;
   final target = BigInt.from(page.targetScalar);
   FlutterSelectionEndpoint? best;
   for (final endpoint in page.surface.endpoints) {
-    if (endpoint.offset < target) continue;
+    if (endpoint.offset < target || endpoint.rect.top >= nodeEnd) continue;
     if (best == null || endpoint.offset < best.offset) best = endpoint;
   }
-  return best?.rect.top;
+  return best?.rect.top ?? nodeTop;
 }
 
 /// Reports the content box's laid-out size after it changes.

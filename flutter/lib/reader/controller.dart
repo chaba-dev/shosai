@@ -812,6 +812,8 @@ final class ReaderController implements Listenable {
         _continuousViewportChanged(message);
       case _ReaderContinuousWindowTick():
         _continuousWindowTick(message);
+      case _ReaderSelectionMovementContinued():
+        _selectionMovementContinued(message);
       case _ReaderRelayoutFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _layoutRevision) {
@@ -2998,31 +3000,36 @@ final class ReaderController implements Listenable {
   }
 
   /// Lays out the continuous geometry a keyboard movement from [focus] needs,
-  /// and installs it; false when there is nothing more to lay out.
+  /// one bounded step of it, and installs it; false when there is nothing more
+  /// to lay out.
   ///
   /// A focus outside the window restarts the window at the focus's node (one
   /// bounded batch, and the node before it) and reveals it, like a location
-  /// request that keeps the selection; a focus inside the window extends it by
-  /// one node in the movement's direction. Either is one bounded step per key
-  /// press, in the message handler, so no completion needs guarding.
+  /// request that keeps the selection. Inside the window, selection geometry
+  /// still pending is built nearest the focus first; otherwise the window
+  /// grows by one batch in the movement's direction. Each is one bounded step,
+  /// in the message handler; a movement that needs more steps continues in a
+  /// later frame ([_ReaderSelectionMovementContinued]).
   bool _continuousEnsureSelectionGeometry(int focus, bool forward) {
     final session = _epubSession;
     final key = _epubSessionKey;
     final page = _model.epubPage;
-    final surface = _model.selectionSurface;
     final extents = _continuousExtents;
     if (session == null ||
         key == null ||
         !key.continuous ||
         page == null ||
         !page.continuous ||
-        surface == null ||
         extents == null ||
         _continuousExtentsKey != key) {
       return false;
     }
-    final caret = _caretForOffset(surface.visualLines, focus, null);
-    final reveal = caret == null;
+    final node = session.nodeIndexForScalar(focus);
+    final reveal =
+        !session.started ||
+        node < session.firstNodeIndex ||
+        node > session.lastNodeIndex;
+    final pending = _continuousCaches[session]?.selectionPending ?? false;
     final ReaderEpubPage next;
     try {
       if (reveal) {
@@ -3033,31 +3040,25 @@ final class ReaderController implements Listenable {
           maxMicros: kContinuousBatchMicros,
         );
         session.layoutBackward(maxNodes: 1, maxMicros: kContinuousBatchMicros);
-      } else {
+      } else if (!pending) {
         final grown = forward
             ? session.layoutForward(
-                maxNodes: 1,
+                maxNodes: kContinuousBatchNodes,
                 maxMicros: kContinuousBatchMicros,
               )
             : session.layoutBackward(
-                maxNodes: 1,
+                maxNodes: kContinuousBatchNodes,
                 maxMicros: kContinuousBatchMicros,
               );
         if (grown == 0) return false;
       }
-      final focusTop = reveal
-          ? 0.0
-          : surface.visualLines
-                .expand((line) => line.carets)
-                .firstWhere((candidate) => candidate.offset.toInt() == focus)
-                .top;
       next = _continuousPage(
         session,
         key,
         reveal ? focus : page.targetScalar,
-        priorityTop: focusTop - kEpubPageMargin,
+        priorityTop: reveal ? 0.0 : extents.tops()[node],
         // A restarted window is one batch: all of its selection geometry is
-        // built, so the focus's caret exists.
+        // built, so the focus's caret exists when the focus has one.
         selectionBudgetMicros: reveal ? null : kContinuousSelectionMicros,
       );
     } catch (error) {
@@ -3085,16 +3086,29 @@ final class ReaderController implements Listenable {
 
   void _continuousViewportChanged(ReaderContinuousViewportChanged message) {
     final page = _model.epubPage;
+    final window = page?.window;
+    final reported = message.window;
     if (page == null ||
         !page.continuous ||
+        window == null ||
+        reported == null ||
         message.generation != _model.generation ||
         message.revision != _model.locationRequestRevision ||
-        !identical(message.window, page.window)) {
+        reported.nodeTops.length != window.nodeTops.length) {
       return;
     }
+    // The view reports in the column of the page it built; a tick may have
+    // installed a newer page since, in the same frame. The region is mapped
+    // into the current column, so a window that keeps changing still follows
+    // the view.
+    final top = continuousMapToColumn(
+      reported.nodeTops,
+      window.nodeTops,
+      message.top - kEpubPageMargin,
+    );
     _continuousViewport = (
-      top: message.top - kEpubPageMargin,
-      bottom: message.bottom - kEpubPageMargin,
+      top: top,
+      bottom: top + message.bottom - message.top,
     );
     _scheduleContinuousTick();
   }
@@ -3177,9 +3191,14 @@ final class ReaderController implements Listenable {
     // viewport follows it until the view reports again.
     final anchor = step.anchorNode;
     final restartedAt = step.restartedAt;
-    // A restarted window places its first node at the view's top.
+    // A restarted window keeps the view's place in the node under its top.
     final shift = restartedAt != null
-        ? next.window!.nodeTops[restartedAt] - viewport.top
+        ? continuousMapToColumn(
+                page.window!.nodeTops,
+                next.window!.nodeTops,
+                viewport.top,
+              ) -
+              viewport.top
         : anchor == null
         ? 0.0
         : next.window!.nodeTops[anchor] - step.anchorTop;
@@ -3627,8 +3646,11 @@ final class ReaderController implements Listenable {
     bool retried = false,
   }) {
     final surface = _model.selectionSurface;
+    // A continuous window may paint no text (a run of images) while the
+    // selection's focus is in text outside it.
+    final continuous = _model.epubPage?.continuous ?? false;
     if (surface == null ||
-        surface.graphemeBoundaries.length < 2 ||
+        (!continuous && surface.graphemeBoundaries.length < 2) ||
         _model.busy ||
         _model.relayoutBusy ||
         _model.relayoutPending ||
@@ -3678,7 +3700,7 @@ final class ReaderController implements Listenable {
     // A continuous page's surface covers its laid-out window only; a focus
     // outside it (or at its edge) still moves by the chapter's own boundaries
     // around it.
-    final around = current != null && (_model.epubPage?.continuous ?? false)
+    final around = current != null && continuous
         ? switch (_epubSession) {
             final session? => _continuousCaches[session]?.boundariesAround(
               current,
@@ -3692,18 +3714,36 @@ final class ReaderController implements Listenable {
         around?.words ?? surface.wordBoundaries.toList(growable: false),
       _ => around?.graphemes ?? graphemes,
     };
+    // A continuous focus with no caret of its own (the separator after a
+    // block, the chapter's end) moves visually to the nearest caret in the
+    // movement's direction, once the geometry around it is laid out.
+    final snapped =
+        continuous &&
+            current != null &&
+            lineMove == null &&
+            horizontalMove == null &&
+            _caretForOffset(surface.visualLines, current, null) == null &&
+            _continuousSelectionResolved(current)
+        ? switch (movement) {
+            ReaderSelectionMovement.previousGrapheme ||
+            ReaderSelectionMovement.nextGrapheme ||
+            ReaderSelectionMovement.previousWord ||
+            ReaderSelectionMovement.nextWord => null,
+            _ => _nearestCaret(surface.visualLines, current, forward),
+          }
+        : null;
     final next =
         lineMove?.offset ??
         horizontalMove?.offset ??
+        snapped?.offset ??
         switch (movement) {
           ReaderSelectionMovement.previousGrapheme ||
           ReaderSelectionMovement.nextGrapheme ||
           ReaderSelectionMovement.previousWord ||
-          ReaderSelectionMovement.nextWord => _adjacentOffset(
-            boundaries,
-            current,
-            forward,
-          ),
+          ReaderSelectionMovement.nextWord =>
+            current == null && boundaries.length < 2
+                ? null
+                : _adjacentOffset(boundaries, current, forward),
           ReaderSelectionMovement.previousLine ||
           ReaderSelectionMovement.nextLine ||
           ReaderSelectionMovement.lineStart ||
@@ -3713,12 +3753,23 @@ final class ReaderController implements Listenable {
         };
     if (next == null) {
       // A visual movement needs the focus's line and its neighbour laid out:
-      // a continuous window that lacks them lays them out, then the movement
-      // is tried once more.
-      if (!retried &&
-          current != null &&
+      // a continuous window that lacks them lays out one bounded step of
+      // them, then the movement is tried again; when that is not yet enough
+      // (a run of images, geometry still pending) it continues next frame.
+      if (current != null &&
           _continuousEnsureSelectionGeometry(current, forward)) {
-        _selectionKeyboardExtended(movement, retried: true);
+        if (!retried) {
+          _selectionKeyboardExtended(movement, retried: true);
+        } else {
+          final message = _ReaderSelectionMovementContinued(
+            generation: _model.generation,
+            layoutRevision: _layoutRevision,
+            selectionRevision: _selectionRevision,
+            focus: current,
+            movement: movement,
+          );
+          _frameScheduler(() => dispatch(message));
+        }
       }
       return;
     }
@@ -3735,6 +3786,7 @@ final class ReaderController implements Listenable {
                 line: horizontalMove.line,
                 preferredX: horizontalMove.preferredX,
               )) ??
+        snapped ??
         _caretForOffset(surface.visualLines, next, _model.selectionVisualLine);
     final vertical =
         movement == ReaderSelectionMovement.previousLine ||
@@ -3772,6 +3824,30 @@ final class ReaderController implements Listenable {
         keyboardActionInvocation: false,
       ),
     );
+  }
+
+  /// Continues a keyboard movement a continuous window could not complete in
+  /// the frame it was pressed in, unless the selection, the layout or the
+  /// document changed since.
+  void _selectionMovementContinued(_ReaderSelectionMovementContinued message) {
+    if (!_isCurrentLayout(message.generation, message.layoutRevision) ||
+        message.selectionRevision != _selectionRevision ||
+        message.focus != _model.focus) {
+      return;
+    }
+    _selectionKeyboardExtended(message.movement, retried: true);
+  }
+
+  /// Whether the continuous window holds [focus]'s node with all of its
+  /// selection geometry built, so a caret missing at [focus] is missing from
+  /// the chapter, not just from the window.
+  bool _continuousSelectionResolved(int focus) {
+    final session = _epubSession;
+    if (session == null || !session.started) return false;
+    final node = session.nodeIndexForScalar(focus);
+    return node >= session.firstNodeIndex &&
+        node <= session.lastNodeIndex &&
+        !(_continuousCaches[session]?.selectionPending ?? true);
   }
 
   void _selectionEnded() {
@@ -5300,6 +5376,27 @@ final class ReaderController implements Listenable {
   void dispose() {
     dispatch(const _ReaderDisposeRequested());
   }
+}
+
+/// The caret nearest [offset] strictly in the direction [forward], with its
+/// line and position along it.
+({int offset, int line, double preferredX})? _nearestCaret(
+  List<FlutterSelectionVisualLine> lines,
+  int offset,
+  bool forward,
+) {
+  ({int offset, int line, double preferredX})? best;
+  for (var line = 0; line < lines.length; line += 1) {
+    for (final caret in lines[line].carets) {
+      final candidate = caret.offset.toInt();
+      if (forward ? candidate <= offset : candidate >= offset) continue;
+      if (best == null ||
+          (forward ? candidate < best.offset : candidate > best.offset)) {
+        best = (offset: candidate, line: line, preferredX: caret.alongLine);
+      }
+    }
+  }
+  return best;
 }
 
 int? _adjacentOffset(List<int> offsets, int? current, bool forward) {

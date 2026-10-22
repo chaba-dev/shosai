@@ -1051,6 +1051,284 @@ void main() {
     await closeReader(tester);
   });
 
+  testWidgets('measuring above a node taller than the view does not move '
+      'what it shows', (tester) async {
+    wide(tester);
+    // Rules and short paragraphs whose estimates are far off, then one
+    // paragraph taller than the view and its lead together, so the window
+    // around its first lines is that paragraph alone.
+    final epub = buildTestEpub(
+      chapters: {
+        'OPS/Text/chapter-1.xhtml':
+            // The first window calibrates the estimate on long paragraphs.
+            '${'<p>${'A paragraph of the chapter start, long enough to '
+                        'wrap. ' * 6}</p>' * 40}'
+            '${'<p>x</p><hr/>' * 300}'
+            '<p>${'A sentence of a paragraph far taller than the view, '
+                    'which the window around its first lines is. ' * 4}'
+            '<span id="tall">A target a few lines into it.</span> '
+            '${'A sentence of a paragraph far taller than the view, which '
+                    'the window around its first lines is. ' * 200}'
+            '</p>'
+            '${'<p>After the tall paragraph.</p>' * 40}',
+        'OPS/Text/chapter-2.xhtml': '<p>A short chapter.</p>',
+      },
+      nav: '<ol><li><a href="../Text/chapter-1.xhtml#tall">Tall</a></li></ol>',
+    );
+    final target = openEpubBytes(epub).chapters.first.anchors['tall']!;
+    await openReader(tester, bridge(epub: epub, unitCount: 2));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+    await tester.pump();
+    await settle(tester);
+    await tester.tap(find.text('Tall'));
+    // Frame by frame, while the nodes above are measured: the target line
+    // stays where the reader sees it.
+    final shownAt = <double>[];
+    final firstNodes = <int>{};
+    for (var frame = 0; frame < 120; frame += 1) {
+      await pumpHarnessFrames(tester, frames: 1);
+      if (frame.isEven) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
+      final page = dartPage(tester);
+      final position = chapterScroll(tester);
+      if (page == null || page.targetScalar != target || position.pixels <= 0) {
+        continue;
+      }
+      shownAt.add(lineTop(page, target) - position.pixels);
+      firstNodes.add(page.window!.firstNode);
+    }
+    await settle(tester);
+    expect(
+      firstNodes.length,
+      greaterThan(2),
+      reason: 'nodes above were measured while the view was watched',
+    );
+    expect(shownAt.first, closeTo(kEpubPageMargin, 1), reason: 'revealed');
+    for (final at in shownAt) {
+      expect(at, closeTo(shownAt.first, 1));
+    }
+    expect(
+      lineTop(dartPage(tester)!, target) - chapterScroll(tester).pixels,
+      closeTo(shownAt.first, 1),
+    );
+
+    await closeReader(tester);
+  });
+
+  /// A chapter whose middle is a long run of rules, one of them a Contents
+  /// target: a window there has no text, so no line to reveal.
+  final ruleEpub = buildTestEpub(
+    chapters: {
+      'OPS/Text/chapter-1.xhtml':
+          '${'<p>A paragraph before the rules.</p>' * 80}'
+          '${'<hr/>' * 800}<hr id="rule-target"/>${'<hr/>' * 800}'
+          '${'<p>A paragraph after the rules.</p>' * 100}',
+      'OPS/Text/chapter-2.xhtml': '<p>A short chapter.</p>',
+    },
+    nav:
+        '<ol>'
+        '<li><a href="../Text/chapter-1.xhtml">Rule start</a></li>'
+        '<li><a href="../Text/chapter-1.xhtml#rule-target">Rule target</a></li>'
+        '</ol>',
+  );
+  final ruleChapter = openEpubBytes(ruleEpub).chapters.first;
+  final ruleTarget = ruleChapter.anchors['rule-target']!;
+
+  /// Asserts the rule target's node is laid out and in view.
+  void expectRuleShown(WidgetTester tester) {
+    final page = dartPage(tester)!;
+    expect(page.targetScalar, ruleTarget);
+    final window = page.window!;
+    final node = window.targetNode!;
+    expect(node, inInclusiveRange(window.firstNode, window.endNode - 1));
+    final view = shown(tester);
+    expect(
+      window.nodeTops[node],
+      inInclusiveRange(view.top - 0.5, view.bottom),
+      reason: 'the target rule is in view, not the chapter start',
+    );
+  }
+
+  testWidgets('a location on a node without text reveals the node', (
+    tester,
+  ) async {
+    wide(tester);
+    await openReader(
+      tester,
+      bridge(
+        epub: ruleEpub,
+        unitCount: 2,
+        readingState: FlutterReadingState(
+          unit: BigInt.zero,
+          offset: BigInt.from(ruleTarget),
+          zoom: 1,
+        ),
+      ),
+    );
+    await settle(tester);
+    await settle(tester);
+    expectRuleShown(tester);
+
+    // From the chapter start, by its Contents entry, and once more after
+    // scrolling away by hand.
+    await openContentsEntry(tester, 'Rule start');
+    expect(chapterScroll(tester).pixels, 0);
+    await openContentsEntry(tester, 'Rule target');
+    await settle(tester);
+    expectRuleShown(tester);
+    await scrollBy(tester, 4000);
+    await openContentsEntry(tester, 'Rule target');
+    await settle(tester);
+    expectRuleShown(tester);
+
+    await closeReader(tester);
+  });
+
+  Future<void> pressShifted(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(key);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await settle(tester);
+  }
+
+  /// Drags a selection on the page shown from [from] to [to].
+  Future<void> dragSelect(WidgetTester tester, int from, int to) async {
+    final page = dartPage(tester)!;
+    FlutterSelectionRect rectOf(int offset) => page.surface.endpoints
+        .firstWhere((endpoint) => endpoint.offset == BigInt.from(offset))
+        .rect;
+    final origin = tester.getTopLeft(
+      find.byKey(const ValueKey('reader-selection-surface')),
+    );
+    final a = rectOf(from);
+    final b = rectOf(to);
+    final gesture = await tester.startGesture(
+      origin + Offset(a.left + 1, (a.top + a.bottom) / 2),
+      kind: ui.PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await tester.pump();
+    await gesture.moveTo(origin + Offset(b.left + 1, (b.top + b.bottom) / 2));
+    await tester.pump();
+    await gesture.up();
+    await settle(tester);
+  }
+
+  testWidgets('a visual movement from the chapter end after Select All moves '
+      'back', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await openReader(tester, longBridge());
+    await settle(tester);
+    final node = tester.getSemantics(
+      find.byKey(const ValueKey('reader-content-semantics')),
+    );
+    tester.binding.performSemanticsAction(
+      ui.SemanticsActionEvent(
+        type: ui.SemanticsAction.tap,
+        viewId: tester.view.viewId,
+        nodeId: node.id,
+      ),
+    );
+    await settle(tester);
+    expect(highlightPainter(tester).focus, longChapter.scalarCount);
+    // Select All shows the actions; the reader returns to the text.
+    Focus.of(
+      tester.element(find.byKey(const ValueKey('reader-content-semantics'))),
+    ).requestFocus();
+    await tester.pump();
+
+    // The chapter's end is the separator after its last block: no caret is
+    // there, so the movement lands on the last one before it.
+    await pressShifted(tester, LogicalKeyboardKey.arrowLeft);
+    final focus = highlightPainter(tester).focus!;
+    expect(focus, lessThan(longChapter.scalarCount));
+    expect(focus, greaterThan(longChapter.scalarCount - 20));
+    expect(highlightPainter(tester).anchor, 0);
+    await pressShifted(tester, LogicalKeyboardKey.arrowLeft);
+    expect(highlightPainter(tester).focus, lessThan(focus));
+
+    await closeReader(tester);
+    semantics.dispose();
+  });
+
+  testWidgets('keyboard selection moves from text while the view shows only '
+      'rules, and across the rules', (tester) async {
+    final text = ruleChapter.canonicalText;
+    final from = text.indexOf('A paragraph before');
+    final to = from + 'A paragraph'.length;
+    await openReader(tester, bridge(epub: ruleEpub, unitCount: 2));
+    await settle(tester);
+    await dragSelect(tester, from, to);
+    expect(highlightPainter(tester).focus, to);
+
+    // Into the run of rules, until the window there paints no text.
+    for (
+      var jump = 0;
+      jump < 6 && dartPage(tester)!.window!.firstNode <= 80;
+      jump += 1
+    ) {
+      final tops = dartPage(tester)!.window!.nodeTops;
+      await scrollBy(
+        tester,
+        tops[80 + 800] + kEpubPageMargin - chapterScroll(tester).pixels,
+      );
+      await settle(tester);
+    }
+    expect(dartPage(tester)!.window!.firstNode, greaterThan(80));
+    expect(dartPage(tester)!.surface.visualLines, isEmpty);
+
+    // The focus is laid out again and moves.
+    await pressShifted(tester, LogicalKeyboardKey.arrowRight);
+    expect(highlightPainter(tester).focus, to + 1);
+    expect(highlightPainter(tester).anchor, from);
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a line movement crosses a run of rules it lays out over '
+      'several frames', (tester) async {
+    final text = ruleChapter.canonicalText;
+    final last = text.lastIndexOf('A paragraph before');
+    await openReader(
+      tester,
+      bridge(
+        epub: ruleEpub,
+        unitCount: 2,
+        readingState: FlutterReadingState(
+          unit: BigInt.zero,
+          offset: BigInt.from(last),
+          zoom: 1,
+        ),
+      ),
+    );
+    await settle(tester);
+    await dragSelect(tester, last, last + 'A paragraph'.length);
+    // Back to the start, so the rules and the text after them are released.
+    await scrollBy(tester, -chapterScroll(tester).pixels);
+    await settle(tester);
+    expect(dartPage(tester)!.window!.endNode, lessThan(80));
+
+    // The focus's window is laid out again a batch at a time; the movement
+    // waits for the line after the rules instead of being dropped.
+    await pressShifted(tester, LogicalKeyboardKey.arrowDown);
+    for (var round = 0; round < 12; round += 1) {
+      await settle(tester);
+    }
+    final after = text.indexOf('A paragraph after');
+    expect(
+      highlightPainter(tester).focus,
+      inInclusiveRange(after, after + 'A paragraph after the rules.'.length),
+      reason: 'the line after the rules',
+    );
+    expect(highlightPainter(tester).anchor, last);
+
+    await closeReader(tester);
+  });
+
   test('a window step measures one batch and keeps released nodes in '
       'place', () {
     final session = ChapterLayoutSession(

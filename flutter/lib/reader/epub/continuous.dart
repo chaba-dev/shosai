@@ -144,7 +144,7 @@ class ContinuousExtents {
 }
 
 /// The node whose column extent contains [y] (clamped to the chapter).
-int continuousNodeAt(Float64List tops, double y) {
+int continuousNodeAt(List<double> tops, double y) {
   final count = tops.length - 1;
   if (count <= 0) return 0;
   var low = 0;
@@ -160,14 +160,28 @@ int continuousNodeAt(Float64List tops, double y) {
   return low;
 }
 
+/// [y] in the column of [from], placed at the same point of the same node in
+/// the column of [to]: what was under [y] is under the result once [to] is
+/// installed. Within a node, the offset is clamped to the node's new extent.
+double continuousMapToColumn(List<double> from, List<double> to, double y) {
+  if (identical(from, to) || from.length != to.length || from.length < 2) {
+    return y;
+  }
+  final node = continuousNodeAt(from, y);
+  final within = y - from[node];
+  return to[node] + math.min(within, math.max(0.0, to[node + 1] - to[node]));
+}
+
 /// The node the view keeps in place when the column changes, or null when
 /// nothing laid out can be: the first laid-out node that starts at or below
-/// [y], within [firstLaidOut]..[endLaidOut].
+/// [y], within [firstLaidOut]..[endLaidOut], or else the laid-out node under
+/// [y] (a node taller than the rest of the view, the window's last).
 ///
-/// Not the node under [y]: that node is partly above the view, and when its
-/// own extent changes everything after it moves. Never a node outside the
-/// window: it paints nothing, and keeping an estimated node in place would
-/// move the view along with every measurement in front of it.
+/// The node under [y] only as the fallback: it is partly above the view, and
+/// a node starting in the view is what the reader reads next. Never a node
+/// outside the window: it paints nothing, and keeping an estimated node in
+/// place would move the view along with every measurement in front of it. A
+/// laid-out node's extent is measured, so keeping it in place is exact.
 int? continuousAnchorNode(
   List<double> tops,
   double y, {
@@ -186,7 +200,9 @@ int? continuousAnchorNode(
     }
   }
   final node = math.max(low, firstLaidOut);
-  return node < endLaidOut ? node : null;
+  if (node < endLaidOut) return node;
+  final under = low - 1;
+  return under >= firstLaidOut && under < endLaidOut ? under : null;
 }
 
 /// One laid-out node's page slices and selection geometry, placed at the
@@ -595,6 +611,7 @@ ReaderEpubPage continuousWindowFor({
       endNode: session.started ? session.lastNodeIndex + 1 : 0,
       nodeTops: tops,
       restartedAt: restartedAt,
+      targetNode: scalar <= 0 ? null : session.nodeIndexForScalar(scalar),
     ),
   );
 }
