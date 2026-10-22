@@ -1242,6 +1242,11 @@ final class ReaderController implements Listenable {
         offset: message.offset,
         height: _epubViewportHeight,
       );
+      // Starting a relayout records its layout as the requested one, but the
+      // viewport's layout is still the one wanted: keep it, so it replays when
+      // the first page finishes instead of leaving the book laid out for the
+      // window it was last read in.
+      _requestedLayout = requestedLayout;
     }
   }
 
