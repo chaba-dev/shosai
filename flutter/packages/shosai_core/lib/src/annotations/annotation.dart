@@ -279,8 +279,9 @@ final class NotesSummary {
   /// The book's live annotations.
   final int count;
 
-  /// The latest annotation's quote as it was selected, or its note when it
-  /// quotes nothing; null when no annotation has either.
+  /// The words of the latest annotation that has any: its quote as it was
+  /// selected, or its note when it quotes nothing. Blank text is no words;
+  /// null when no annotation has any.
   final String? latest;
 
   @override

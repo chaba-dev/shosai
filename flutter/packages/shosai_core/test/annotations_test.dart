@@ -223,6 +223,43 @@ void main() {
       expect((await annotations.summary(bookId)).latest, 'Café');
     });
 
+    test('a summary passes over annotations without words', () async {
+      final bookId = await book('pdf');
+      const page = 'Page two text with a quotable phrase.';
+      final start = page.indexOf('quotable');
+      await annotations.create(
+        bookId,
+        PdfSelection(
+          page: 1,
+          rectangles: _rectangles,
+          text: page,
+          start: start,
+          end: start + 'quotable phrase'.length,
+        ),
+      );
+      // Geometry quotes nothing, and these notes are blank.
+      for (final body in ['', ' \n\u3000']) {
+        await annotations.create(
+          bookId,
+          const PdfSelection(page: 0, rectangles: _rectangles),
+          body: body,
+        );
+      }
+
+      expect(
+        await annotations.summary(bookId),
+        const NotesSummary(3, 'quotable phrase'),
+      );
+
+      final blank = await book('pdf', title: 'Blank');
+      await annotations.create(
+        blank,
+        const PdfSelection(page: 0, rectangles: _rectangles),
+        body: ' ',
+      );
+      expect(await annotations.summary(blank), const NotesSummary(1, null));
+    });
+
     test('delete leaves a hidden tombstone', () async {
       final bookId = await book('epub');
       final created = await annotations.create(bookId, _select(_text, 'lead'));

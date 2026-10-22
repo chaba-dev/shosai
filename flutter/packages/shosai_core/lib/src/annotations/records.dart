@@ -423,7 +423,8 @@ NotesSummary _summary(Database db, int bookId) {
           as int;
   final latest = db
       .select(
-        '''SELECT coalesce(a.original_quote, a.normalized_exact, a.body) AS words
+        '''SELECT coalesce(${_words('a.original_quote')},
+             ${_words('a.normalized_exact')}, ${_words('a.body')}) AS words
            $live AND words IS NOT NULL
            ORDER BY a.created_at DESC, a.rowid DESC LIMIT 1''',
         [version.documentId],
@@ -432,6 +433,18 @@ NotesSummary _summary(Database db, int bookId) {
       ?.columnAt(0);
   return NotesSummary(count, latest as String?);
 }
+
+/// [column] when it has words: a geometry-only annotation's empty note and a
+/// note of spaces quote nothing.
+String _words(String column) =>
+    "CASE WHEN trim($column, $_whiteSpace) <> '' THEN $column END";
+
+/// Unicode's White_Space characters and the byte order mark, as Dart's
+/// `String.trim` takes them.
+const _whiteSpace =
+    'char(9, 10, 11, 12, 13, 32, 133, 160, 5760, 8192, 8193, 8194, 8195, '
+    '8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, '
+    '12288, 65279)';
 
 /// The live annotation [id] of the book's document, as an update target.
 const _ownedBy = '''id = ? AND deleted_at IS NULL AND version_id IN (
