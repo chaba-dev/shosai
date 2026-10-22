@@ -2876,6 +2876,44 @@ void main() {
       await bridge.disposed.future;
     });
 
+    test('a retry keeps its alert while the box moves under it, at a place '
+        'in the page', () async {
+      final (controller, bridge) = await open();
+      controller.dispatch(const ReaderBookmarkNavigated(0, offset: 5));
+      await drain();
+      expect(controller.model.readingOffset, 5);
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+
+      // The alert row takes a tenth of the box: one retry at the new size,
+      // held in flight while the progress bar takes 4 px more.
+      bridge.renderFailure = false;
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      final failed = bridge.renderScales.length;
+      report(controller, 712.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      report(controller, 708.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+
+      held.completeError(StateError('render failed'));
+      await drain();
+      for (final height in [712.8, 708.8, 712.8]) {
+        report(controller, height);
+        await drain();
+      }
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+      expect(controller.model.readingOffset, 5);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
     test('a resize waits for a highlight write, then renders the latest '
         'box', () async {
       final (controller, bridge) = await open(

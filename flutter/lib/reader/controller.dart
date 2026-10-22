@@ -1546,13 +1546,10 @@ final class ReaderController implements Listenable {
     _refitScale = scale;
     // The failed render's error stays up while the page renders again: the
     // alert row is part of the box the page is fitted to, so clearing it
-    // would change the fitted size the retry is for.
-    _startRelayout(
-      document,
-      _model.layout,
-      offset: _model.readingOffset,
-      keepRelayoutError: true,
-    );
+    // would change the fitted size the retry is for. The refit is not a
+    // navigation: its completion keeps the reading offset, and a box that
+    // moves while it renders waits for it instead of restarting it.
+    _startRelayout(document, _model.layout, keepRelayoutError: true);
   }
 
   /// Whether a fitted render near [scale] has just failed for the layout
