@@ -61,13 +61,34 @@ flutter:
     - family: Noto Sans JP
       fonts:
         - asset: fonts/NotoSansJP-Variable.ttf
-  # Both faces' licenses require the copyright notice and license text to
+    # The editorial face of the default type set (`docs/typography.md`): book,
+    # screen and section titles in the Bookshelf shell.
+    - family: Literata
+      fonts:
+        - asset: fonts/Literata-Variable.ttf
+    # Literata's Japanese partner in the editorial role. The shell sets every
+    # editorial style at 600, so only that static weight ships; add the other
+    # weights from `assets/fonts/` when a style needs them.
+    - family: Shippori Mincho
+      fonts:
+        - asset: fonts/ShipporiMincho-SemiBold.ttf
+          weight: 600
+    # The 書 of the brand mark only (U+66F8); see `assets/fonts/README.md`.
+    - family: Shosai Mark
+      fonts:
+        - asset: fonts/NotoSerifJP-ShosaiMark-Black.ttf
+          weight: 900
+  # Every face's license requires the copyright notice and license text to
   # accompany redistribution; Flutter collects `licenses:` entries into the
   # bundle's NOTICES.Z (`fonts/` is also where the symlinked license files
-  # live, and the bundle check verifies the notices carry both texts).
+  # live, and the bundle check verifies the notices carry the document
+  # faces' texts).
   licenses:
     - fonts/LICENSE-Inter
     - fonts/LICENSE-NotoSansJP.txt
+    - fonts/LICENSE-Literata.txt
+    - fonts/LICENSE-ShipporiMincho.txt
+    - fonts/LICENSE-NotoSerifJP.txt
 
 dependency_overrides:
   # pdfrx_engine 0.4.5 with upstream's worker fix (espresso3389/pdfrx@e16a956,

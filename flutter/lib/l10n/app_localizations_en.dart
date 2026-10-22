@@ -18,9 +18,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchLibraryPlaceholder => 'Search title or author';
 
   @override
-  String get collectionLabel => 'COLLECTION';
-
-  @override
   String get filterAll => 'All';
 
   @override
@@ -445,4 +442,48 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get noticeReaderChapterPaginated =>
       'This chapter is too long to scroll continuously, so it is shown as pages';
+
+  @override
+  String get shellPlacesLabel => 'Places';
+
+  @override
+  String get shellPlaceLibrary => 'Library';
+
+  @override
+  String get shellPlaceNotes => 'Notes';
+
+  @override
+  String get shellPlaceBookmarks => 'Bookmarks';
+
+  @override
+  String get shellPlaceSearch => 'Search';
+
+  @override
+  String get shellReadingNow => 'Reading now';
+
+  @override
+  String shellCloseBook(String title) {
+    return 'Close $title';
+  }
+
+  @override
+  String get shellNotesEmptyHeading => 'No notes yet';
+
+  @override
+  String get shellNotesEmptyBody =>
+      'Select text in a book to highlight it, or add a note to a page. Every note and highlight appears here.';
+
+  @override
+  String get shellBookmarksEmptyHeading => 'No bookmarks yet';
+
+  @override
+  String get shellBookmarksEmptyBody =>
+      'Bookmark a page from the reader’s toolbar and it appears here.';
+
+  @override
+  String get shellSearchEmptyHeading => 'Search books and notes';
+
+  @override
+  String get shellSearchEmptyBody =>
+      'Searching book text and notes across the library is coming. To find a book now, search the library by title or author.';
 }

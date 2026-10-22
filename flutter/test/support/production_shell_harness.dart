@@ -147,6 +147,12 @@ Future<void> loadHarnessFonts() async {
     FontLoader('Inter')..addFont(rootBundle.load('fonts/InterVariable.ttf')),
     FontLoader('Noto Sans JP')
       ..addFont(rootBundle.load('fonts/NotoSansJP-Variable.ttf')),
+    FontLoader('Literata')
+      ..addFont(rootBundle.load('fonts/Literata-Variable.ttf')),
+    FontLoader('Shippori Mincho')
+      ..addFont(rootBundle.load('fonts/ShipporiMincho-SemiBold.ttf')),
+    FontLoader('Shosai Mark')
+      ..addFont(rootBundle.load('fonts/NotoSerifJP-ShosaiMark-Black.ttf')),
     FontLoader('MaterialIcons')
       ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')),
     FontLoader('packages/lucide_icons_flutter/Lucide')..addFont(
@@ -412,6 +418,7 @@ class HarnessBridge
   int get pdfEnginePageCount => unitCount;
   final int unitCount;
 
+  int libraryCalls = 0;
   int pageCalls = 0;
   int surfaceCalls = 0;
 
@@ -447,6 +454,7 @@ class HarnessBridge
     required int offset,
     required BigInt cancellationId,
   }) async {
+    libraryCalls += 1;
     final filtered = books
         .where(
           (book) =>

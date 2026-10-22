@@ -1,0 +1,212 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderNoticeReporter;
+import 'package:shosai_flutter/shell/view.dart';
+import 'package:shosai_flutter/core/bridge.dart';
+
+import '../support/production_shell_harness.dart';
+
+/// The Bookshelf shell composed by the product shell: the library side in the
+/// sidebar, the reader beside the rail, and the open books between them.
+
+const _quiet = 'The Quiet Cartographer';
+const _atlas = 'Mixed Script Atlas: 東京・Wien・São Paulo';
+
+/// The library card for [bookId] (titles also appear in the sidebar).
+Finder _card(int bookId) => find.byWidgetPredicate(
+  (widget) => widget is LibraryBookCard && widget.book.bookId == bookId,
+);
+
+/// The reader stand-in, so a test sees which book and locator it opened.
+Widget _reader(
+  FlutterBridge _,
+  FlutterLibraryBook book,
+  FlutterReaderSettings? _,
+  String path,
+  int? bookId,
+  void Function(String path, int? bookId) locatorChanged,
+  ReaderNoticeReporter _,
+) => Scaffold(
+  body: Column(
+    children: [
+      Text('Reading ${book.title} at $path:$bookId'),
+      Builder(
+        builder: (context) => TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Back'),
+        ),
+      ),
+      TextButton(
+        onPressed: () => locatorChanged('${book.pathKey}#later', bookId),
+        child: const Text('Turn page'),
+      ),
+    ],
+  ),
+);
+
+Future<HarnessBridge> _pump(WidgetTester tester, Size size) async {
+  final bridge = HarnessBridge(
+    books: harnessLibraryBooks(),
+    covers: harnessCovers(),
+  );
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    productionShell(
+      home: ProductShell(bridgeFactory: () => bridge, readerBuilder: _reader),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return bridge;
+}
+
+Future<void> _open(WidgetTester tester, int bookId) async {
+  await tester.ensureVisible(_card(bookId));
+  await tester.pumpAndSettle();
+  await tester.tap(_card(bookId));
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  setUpAll(loadHarnessFonts);
+
+  testWidgets('a book opens beside the rail and stays in Reading now', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    expect(find.byType(ShellSidebar), findsOneWidget);
+    expect(find.text('READING NOW'), findsNothing);
+
+    await _open(tester, 1);
+    expect(
+      find.text('Reading $_quiet at /books/quiet-cartographer.epub:1'),
+      findsOneWidget,
+    );
+    expect(find.byType(ShellRail), findsOneWidget);
+    expect(find.byTooltip(_quiet), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellRail), findsNothing);
+    expect(find.text('READING NOW'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ShellSidebar),
+        matching: find.text(_quiet),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('the rail switches books and each keeps its place', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    await _open(tester, 1);
+    await tester.tap(find.text('Turn page'));
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    await _open(tester, 4);
+    expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+    expect(find.byTooltip(_quiet), findsOneWidget);
+    expect(find.byTooltip(_atlas), findsOneWidget);
+
+    await tester.tap(find.byTooltip(_quiet));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Reading $_quiet at /books/quiet-cartographer.epub#later:1'),
+      findsOneWidget,
+      reason: 'switching back reopens the book where it was left',
+    );
+  });
+
+  testWidgets('opening an open book focuses it instead of opening it twice', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    await _open(tester, 1);
+    expect(find.byTooltip(_quiet), findsOneWidget);
+    expect(find.byType(ShellRail), findsOneWidget);
+  });
+
+  testWidgets('the sidebar reopens a book and closes it', (tester) async {
+    await _pump(tester, const Size(1180, 820));
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Notes'));
+    await tester.pumpAndSettle();
+    expect(find.text('No notes yet'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ShellSidebar),
+        matching: find.text(_quiet),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellRail), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Close $_quiet'));
+    await tester.pumpAndSettle();
+    expect(find.text('READING NOW'), findsNothing);
+  });
+
+  testWidgets('the reader’s own back returns to the library', (tester) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    final loads = bridge.libraryCalls;
+    await _open(tester, 1);
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellSidebar), findsOneWidget);
+    expect(find.text('READING NOW'), findsOneWidget);
+    expect(
+      bridge.libraryCalls,
+      greaterThan(loads),
+      reason: 'the library refreshes once the reader has gone',
+    );
+  });
+
+  testWidgets('a phone reads full screen and lists open books as cards', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(390, 844));
+    expect(find.byType(ShellBottomNav), findsOneWidget);
+    await _open(tester, 1);
+    expect(find.byType(ShellBottomNav), findsNothing);
+    expect(find.byType(ShellRail), findsNothing);
+
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellReadingNowCards), findsOneWidget);
+    expect(find.text('Reading now'), findsOneWidget);
+  });
+
+  testWidgets('open books come back after a restoration', (tester) async {
+    await _pump(tester, const Size(1440, 900));
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    await _open(tester, 4);
+    await tester.tap(find.text('Turn page'));
+    await tester.pump();
+
+    await tester.restartAndRestore();
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Reading $_atlas at /books/atlas.pdf#later:4'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip(_quiet), findsOneWidget);
+    expect(find.byTooltip(_atlas), findsOneWidget);
+  });
+}

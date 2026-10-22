@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
@@ -116,10 +117,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'wide'},
         verify: (tester) async {
-          // LB-11: the reference's 5 columns at the wide window.
+          // LB-11: the reference's 5 columns beside the shell's sidebar.
           expect(
             tester.getRect(find.byType(LibraryBookCard).first).width,
-            closeTo(195.2, 0.6),
+            closeTo(184, 0.6),
           );
           expect(find.byType(LibraryBookCard), findsWidgets);
           // The longest status label is fully painted at 100% text.
@@ -148,7 +149,7 @@ void main() {
           expect(find.text('50%'), findsOneWidget);
           expect(find.byTooltip('本の操作'), findsWidgets);
           expect(find.byTooltip('Book actions'), findsNothing);
-          expect(find.text('ライブラリ'), findsOneWidget);
+          expect(find.text('ライブラリ'), findsNWidgets(2));
         },
       );
     });
@@ -162,10 +163,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'wide-900'},
         verify: (tester) async {
-          // LB-11 at 900: 3 columns of 210.7 px.
+          // LB-11 at 900: 3 columns of 198.7 px beside the tablet sidebar.
           expect(
             tester.getRect(find.byType(LibraryBookCard).first).width,
-            closeTo(210.7, 0.6),
+            closeTo(198.7, 0.6),
           );
         },
       );
@@ -203,7 +204,7 @@ void main() {
               );
             }
           }
-          expect(find.text('ライブラリ'), findsOneWidget);
+          expect(find.text('ライブラリ'), findsNWidgets(2));
         },
       );
     });
@@ -453,18 +454,34 @@ void main() {
           },
           verify: (tester) async {
             expect(find.byType(LibraryFilterRow), findsOneWidget);
-            expect(find.byType(LibrarySidebar), findsNothing);
+            expect(find.byType(ShellSidebar), findsNothing);
             if (japanese) {
-              expect(find.text('ライブラリ'), findsOneWidget);
+              // The header's title and the bottom bar's place.
+              expect(find.text('ライブラリ'), findsNWidgets(2));
               expect(find.text('Library'), findsNothing);
               if (t200) {
-                // The scaled status is fully painted, not ellipsized.
+                // The scaled status is fully painted, not ellipsized. The
+                // bottom bar leaves the cards below the fold, so each is
+                // scrolled in and the frame is returned to the top after.
+                final collection = find
+                    .descendant(
+                      of: find.byType(LibraryCollection),
+                      matching: find.byType(Scrollable),
+                    )
+                    .first;
                 for (final status in ['7%', '50%']) {
+                  await tester.scrollUntilVisible(
+                    find.text(status),
+                    120,
+                    scrollable: collection,
+                  );
                   final paragraph = tester.renderObject<RenderParagraph>(
                     find.text(status),
                   );
                   expect(paragraph.didExceedMaxLines, isFalse, reason: status);
                 }
+                tester.state<ScrollableState>(collection).position.jumpTo(0);
+                await tester.pumpAndSettle();
               }
             }
           },

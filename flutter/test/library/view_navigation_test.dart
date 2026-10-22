@@ -10,6 +10,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
@@ -215,13 +216,16 @@ void main() {
     return effective;
   }
 
-  /// The library chrome above the collection: the header, the wide sidebar and
-  /// the compact filter row.
+  /// The library chrome above the collection: the header and the filter row.
   final navigationChrome = find.byWidgetPredicate(
-    (widget) =>
-        widget is LibraryHeader ||
-        widget is LibrarySidebar ||
-        widget is LibraryFilterRow,
+    (widget) => widget is LibraryHeader || widget is LibraryFilterRow,
+  );
+
+  /// [label] inside the library header (the shell's places repeat some of its
+  /// words).
+  Finder headerText(String label) => find.descendant(
+    of: find.byType(LibraryHeader),
+    matching: find.text(label),
   );
 
   /// The chrome control labelled [label].
@@ -268,7 +272,7 @@ void main() {
 
   /// Tabs forward until [label]'s entry owns focus.
   Future<void> tabTo(WidgetTester tester, String label) async {
-    for (var step = 0; step < 12; step += 1) {
+    for (var step = 0; step < 60; step += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
       if (isFocused(tester, label)) return;
@@ -331,47 +335,39 @@ void main() {
   }
 
   group('wide layout', () {
-    testWidgets('the collection sidebar carries the filters and Settings', (
-      tester,
-    ) async {
-      await pumpLibrary(tester, const Size(1280, 800));
+    testWidgets(
+      'the shell sidebar leaves the filters and Settings to the row',
+      (tester) async {
+        await pumpLibrary(tester, const Size(1280, 800));
 
-      expect(find.byType(LibrarySidebar), findsOneWidget);
-      expect(find.byType(LibraryFilterRow), findsNothing);
-      expect(find.byType(Drawer), findsNothing);
+        expect(find.byType(ShellSidebar), findsOneWidget);
+        expect(find.byType(LibraryFilterRow), findsOneWidget);
+        expect(find.byType(Drawer), findsNothing);
 
-      final sidebar = tester.getRect(find.byType(LibrarySidebar));
-      expect(sidebar.width, ShosaiTokens.layoutLibrarySidebarWidth);
-      expect(find.text('COLLECTION'), findsOneWidget);
-
-      for (final label in ['All books', ...formatLabels, 'Settings']) {
+        for (final label in ['All', ...formatLabels, 'Settings']) {
+          expect(
+            navigationEntry(label),
+            findsOneWidget,
+            reason: '$label is reachable from the filter row',
+          );
+        }
+        final header = tester.getRect(find.byType(LibraryHeader));
+        final row = tester.getRect(find.byType(LibraryFilterRow));
+        expect(row.top, greaterThanOrEqualTo(header.bottom));
         expect(
-          navigationEntry(label),
-          findsOneWidget,
-          reason: '$label is reachable from the sidebar',
+          row.left,
+          tester.getRect(find.byType(ShellSidebar)).right,
+          reason: 'the row starts where the sidebar ends',
         );
-      }
-
-      // The format group sits under the collection label and Settings is
-      // pinned to the sidebar's bottom (Iced's composition).
-      final all = tester.getRect(navigationEntry('All books'));
-      final settings = tester.getRect(navigationEntry('Settings'));
-      final label = tester.getRect(find.text('COLLECTION'));
-      expect(label.bottom, lessThanOrEqualTo(all.top));
-      expect(settings.top, greaterThan(all.bottom));
-      expect(
-        sidebar.bottom - settings.bottom,
-        22,
-        reason: 'Settings sits inside the sidebar padding at its bottom',
-      );
-    });
+      },
+    );
 
     testWidgets('the header carries the title, subtitle, search and action', (
       tester,
     ) async {
       await pumpLibrary(tester, const Size(1280, 800));
 
-      final title = tester.renderObject<RenderParagraph>(find.text('Library'));
+      final title = tester.renderObject<RenderParagraph>(headerText('Library'));
       expect(title.text.style?.fontSize, ShosaiTokens.typeSize26);
       final subtitle = tester.renderObject<RenderParagraph>(
         find.text('Your private reading room'),
@@ -382,8 +378,8 @@ void main() {
       final search = tester.getRect(find.byType(ShadInput));
       expect(
         search.width,
-        ShosaiTokens.layoutLibraryHeaderSearchMaxWidth,
-        reason: 'the wide reference reaches the 380 px search cap',
+        lessThanOrEqualTo(ShosaiTokens.layoutLibraryHeaderSearchMaxWidth),
+        reason: 'the search stays capped at 380 px',
       );
       final header = tester.getRect(find.byType(LibraryHeader));
       expect(search.left, greaterThan(header.left + 100));
@@ -427,7 +423,8 @@ void main() {
       await pumpLibrary(tester, const Size(390, 780));
 
       expect(find.byType(LibraryFilterRow), findsOneWidget);
-      expect(find.byType(LibrarySidebar), findsNothing);
+      expect(find.byType(ShellSidebar), findsNothing);
+      expect(find.byType(ShellBottomNav), findsOneWidget);
       expect(find.byType(Drawer), findsNothing);
 
       for (final label in ['All', ...formatLabels, 'Settings']) {
@@ -464,25 +461,33 @@ void main() {
   });
 
   group('breakpoint', () {
-    for (final (width, wide) in const [
-      (759.0, false),
-      (760.0, true),
-      (761.0, true),
+    for (final (width, layout) in const [
+      (599.0, ShellLayout.phone),
+      (600.0, ShellLayout.tablet),
+      (1199.0, ShellLayout.tablet),
+      (1200.0, ShellLayout.desktop),
     ]) {
-      testWidgets('width $width switches at the 760 px breakpoint', (
+      testWidgets('width $width lays the shell out for a $layout', (
         tester,
       ) async {
         await pumpLibrary(tester, Size(width, 700));
 
+        final phone = layout == ShellLayout.phone;
         expect(
-          find.byType(LibrarySidebar),
-          wide ? findsOneWidget : findsNothing,
+          find.byType(ShellBottomNav),
+          phone ? findsOneWidget : findsNothing,
         );
         expect(
-          find.byType(LibraryFilterRow),
-          wide ? findsNothing : findsOneWidget,
+          find.byType(ShellSidebar),
+          phone ? findsNothing : findsOneWidget,
         );
-        expect(navigationEntry(wide ? 'All books' : 'All'), findsOneWidget);
+        if (!phone) {
+          expect(
+            tester.getSize(find.byType(ShellSidebar)).width,
+            layout.sidebarWidth,
+          );
+        }
+        expect(navigationEntry('All'), findsOneWidget);
         expect(navigationEntry('Settings'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
@@ -493,7 +498,9 @@ void main() {
     testWidgets('crossing the breakpoint keeps the search and its filter', (
       tester,
     ) async {
-      final bridge = await pumpLibrary(tester, const Size(760, 700));
+      // The header's breakpoint is measured on the content beside the
+      // 220 px tablet sidebar: 980 px leaves exactly 760.
+      final bridge = await pumpLibrary(tester, const Size(980, 700));
 
       // The book the query excludes is established as present first, so its
       // absence after the query is filtering rather than a lazy grid that has
@@ -508,9 +515,8 @@ void main() {
 
       // The layout switch recreates the input; the query it filters by has to
       // survive with it, or the field would look empty over a filtered list.
-      tester.view.physicalSize = const Size(759, 700);
+      tester.view.physicalSize = const Size(979, 700);
       await tester.pumpAndSettle();
-      expect(find.byType(LibraryFilterRow), findsOneWidget);
       expect(
         tester.widget<EditableText>(find.byType(EditableText)).controller.text,
         'Quiet',
@@ -519,9 +525,8 @@ void main() {
       expect(find.text('The Quiet Cartographer'), findsOneWidget);
       expect(find.text('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsNothing);
 
-      tester.view.physicalSize = const Size(760, 700);
+      tester.view.physicalSize = const Size(980, 700);
       await tester.pumpAndSettle();
-      expect(find.byType(LibrarySidebar), findsOneWidget);
       expect(
         tester.widget<EditableText>(find.byType(EditableText)).controller.text,
         'Quiet',
@@ -544,9 +549,6 @@ void main() {
           lessThanOrEqualTo(ShosaiTokens.layoutLibraryHeaderSearchMaxWidth),
           reason: 'the search is capped at the reference maximum',
         );
-        if (width == 1280) {
-          expect(search.width, ShosaiTokens.layoutLibraryHeaderSearchMaxWidth);
-        }
       });
     }
   });
@@ -575,14 +577,7 @@ void main() {
         scheme.card.toARGB32(),
         reason: 'the header paints the mapped dark surface, not the light one',
       );
-      final sidebarSurface = await paintedColorAt(
-        tester,
-        tester.getRect(find.byType(LibrarySidebar)).bottomLeft +
-            const Offset(8, -8),
-      );
-      expect(sidebarSurface.toARGB32(), scheme.secondary.toARGB32());
-
-      final selected = navigationButton(tester, 'All books');
+      final selected = navigationButton(tester, 'All');
       expect(selected.backgroundColor, scheme.selection);
       expect(selected.foregroundColor, scheme.accentForeground);
       expect(
@@ -693,15 +688,14 @@ void main() {
     ) async {
       await pumpLibrary(tester, const Size(1280, 800));
 
-      expectSelected(tester, 'All books');
+      expectSelected(tester, 'All');
       for (final label in [...formatLabels, 'Settings']) {
         expectUnselected(tester, label);
       }
 
       final selectedSurface = await paintedColorAt(
         tester,
-        tester.getRect(navigationEntry('All books')).centerRight -
-            const Offset(6, 0),
+        tester.getRect(navigationEntry('All')).centerRight - const Offset(6, 0),
       );
       final unselectedSurface = await paintedColorAt(
         tester,
@@ -715,8 +709,8 @@ void main() {
       );
       expect(
         unselectedSurface.toARGB32(),
-        ShosaiTokens.appSidebarBackground.toARGB32(),
-        reason: 'an unselected entry keeps the sidebar surface',
+        ShosaiTokens.appBackground.toARGB32(),
+        reason: 'an unselected entry keeps the library ground',
       );
     });
 
@@ -729,7 +723,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expectSelected(tester, 'PDF');
-      expectUnselected(tester, 'All books');
+      expectUnselected(tester, 'All');
       expectUnselected(tester, 'EPUB');
       expect(
         find.text(
@@ -747,15 +741,15 @@ void main() {
     ) async {
       await pumpLibrary(tester, const Size(1280, 800));
 
-      // The entries are reached in the reference's order. The collection's own
-      // controls sit between them in the traversal (reading order interleaves
-      // the sidebar with the grid), so the order is asserted over the sequence
-      // the traversal produces rather than over consecutive Tabs.
-      final order = ['All books', ...formatLabels, 'Settings'];
+      // The entries are reached in the reference's order. The shell's sidebar
+      // and the header come first in the traversal, so the order is asserted
+      // over the sequence the traversal produces rather than over consecutive
+      // Tabs.
+      final order = ['All', ...formatLabels, 'Settings'];
       final reached = <String>[];
       for (
         var step = 0;
-        step < 26 && reached.length < order.length;
+        step < 40 && reached.length < order.length;
         step += 1
       ) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
@@ -1158,104 +1152,13 @@ void main() {
   });
 
   group('short windows', () {
-    testWidgets('keyboard focus reaches Settings and paints its ring', (
-      tester,
-    ) async {
+    testWidgets('a short window keeps Settings reachable', (tester) async {
       await pumpLibrary(tester, const Size(900, 400), textScale: 2);
 
-      // Traversal scrolls the focused entry into view; the ring it paints is
-      // outside the entry, so it must not be clipped by the sidebar viewport.
-      for (var step = 0; step < 26; step += 1) {
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-        if (isFocused(tester, 'Settings')) break;
-      }
-      expect(
-        isFocused(tester, 'Settings'),
-        isTrue,
-        reason: 'traversal reaches Settings without scrolling the sidebar',
-      );
-      final sidebar = tester.getRect(find.byType(LibrarySidebar));
-      final settings = tester.getRect(navigationEntry('Settings'));
-      expect(
-        sidebar.contains(settings.center),
-        isTrue,
-        reason: 'the focused entry is scrolled into view',
-      );
-      // The shared focus ring paints outside the entry, so the reveal has to
-      // leave clearance on every side the ring paints on.
-      final ring = ShosaiTokens.appAccent.toARGB32();
-      expect(
-        (await paintedColorAt(
-          tester,
-          Offset(settings.left - 3, settings.center.dy),
-        )).toARGB32(),
-        ring,
-        reason: 'the leading ring segment is painted, not clipped',
-      );
-      expect(
-        (await paintedColorAt(
-          tester,
-          Offset(settings.center.dx, settings.bottom + 3),
-        )).toARGB32(),
-        ring,
-        reason: 'the trailing ring segment is painted, not clipped',
-      );
-
-      // The reverse direction reveals an entry above the viewport, which is
-      // the other edge the ring can be clipped on.
-      String? reversed;
-      for (var step = 0; step < 8 && reversed == null; step += 1) {
-        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-        await tester.pump();
-        for (final label in ['Settings', ...formatLabels, 'All books']) {
-          if (isFocused(tester, label)) {
-            reversed = label;
-            break;
-          }
-        }
-      }
-      expect(reversed, isNotNull, reason: 'reverse traversal reaches an entry');
-      final reversedRect = tester.getRect(navigationEntry(reversed!));
-      expect(
-        (await paintedColorAt(
-          tester,
-          Offset(reversedRect.center.dx, reversedRect.top - 3),
-        )).toARGB32(),
-        ring,
-        reason: 'the leading ring segment of $reversed is painted',
-      );
-      expect(
-        sidebar.contains(reversedRect.center),
-        isTrue,
-        reason: '$reversed is scrolled into view',
-      );
-
-      await tabTo(tester, 'Settings');
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Reader theme'), findsOneWidget);
-    });
-
-    testWidgets('a short sidebar keeps Settings reachable', (tester) async {
-      await pumpLibrary(tester, const Size(900, 400), textScale: 2);
-
-      expect(find.byType(LibrarySidebar), findsOneWidget);
       expect(navigationEntry('Settings'), findsOneWidget);
       final defects = await findRenderDefects(tester);
       expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
 
-      await tester.scrollUntilVisible(
-        navigationEntry('Settings'),
-        80,
-        scrollable: find.descendant(
-          of: find.byType(LibrarySidebar),
-          matching: find.byType(Scrollable),
-        ),
-      );
-      await tester.pumpAndSettle();
       await tester.tap(navigationEntry('Settings'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Reader theme'), findsOneWidget);
@@ -1272,13 +1175,12 @@ void main() {
           locale: const Locale('ja'),
         );
 
-        // Header, sidebar, actions and the search placeholder come from the
+        // Header, filters, actions and the search placeholder come from the
         // generated catalogs.
-        expect(find.text('ライブラリ'), findsOneWidget);
+        expect(headerText('ライブラリ'), findsOneWidget);
         expect(find.text('自分だけの読書室'), findsOneWidget);
         expect(find.text('タイトル・著者を検索...'), findsOneWidget);
-        expect(find.text('コレクション'), findsOneWidget);
-        expect(navigationEntry('すべての本'), findsOneWidget);
+        expect(navigationEntry('すべて'), findsOneWidget);
         expect(navigationEntry('設定'), findsOneWidget);
         expect(navigationEntry('本を追加'), findsOneWidget);
         expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
@@ -1290,7 +1192,6 @@ void main() {
         for (final label in const [
           'Library',
           'Your private reading room',
-          'COLLECTION',
           'All books',
           'Settings',
           'Add books',
@@ -1302,11 +1203,17 @@ void main() {
           );
         }
         // Controls announce themselves in the selected language.
-        expect(find.bySemanticsLabel('本を追加'), findsOneWidget);
         expect(
           find.descendant(
             of: navigationChrome,
-            matching: find.bySemanticsLabel('すべての本'),
+            matching: find.bySemanticsLabel('本を追加'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: navigationChrome,
+            matching: find.bySemanticsLabel('すべて'),
           ),
           findsOneWidget,
         );
@@ -1345,7 +1252,7 @@ void main() {
 
       await pumpLibrary(tester, const Size(1280, 800));
 
-      expect(find.text('Library'), findsOneWidget);
+      expect(headerText('Library'), findsOneWidget);
       expect(navigationEntry('Settings'), findsOneWidget);
       expect(find.text('ライブラリ'), findsNothing);
     });
@@ -1358,7 +1265,7 @@ void main() {
 
       await pumpLibrary(tester, const Size(1280, 800));
 
-      expect(find.text('ライブラリ'), findsOneWidget);
+      expect(headerText('ライブラリ'), findsOneWidget);
       expect(navigationEntry('設定'), findsOneWidget);
     });
 
@@ -1394,7 +1301,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(navigationEntry('PDF'));
       await tester.pumpAndSettle();
-      expect(find.text('Library'), findsOneWidget);
+      expect(headerText('Library'), findsOneWidget);
       expect(
         find.text(
           'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
@@ -1412,7 +1319,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // The interface changed, and the query and the filter survived it.
-      expect(find.text('ライブラリ'), findsOneWidget);
+      expect(headerText('ライブラリ'), findsOneWidget);
       expect(find.text('Library'), findsNothing);
       expect(
         tester.widget<EditableText>(find.byType(EditableText)).controller.text,
@@ -1442,7 +1349,7 @@ void main() {
         reason: 'the selected format survives the language change',
       );
       expect(
-        tester.widget<ShadButton>(navigationEntry('すべての本')).backgroundColor,
+        tester.widget<ShadButton>(navigationEntry('すべて')).backgroundColor,
         isNull,
         reason: 'the selection stays exclusive after the change',
       );

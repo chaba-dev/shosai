@@ -18,9 +18,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get searchLibraryPlaceholder => 'タイトル・著者を検索...';
 
   @override
-  String get collectionLabel => 'コレクション';
-
-  @override
   String get filterAll => 'すべて';
 
   @override
@@ -440,4 +437,47 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get noticeReaderChapterPaginated =>
       'この章は連続スクロールで表示するには長すぎるため、ページ単位で表示します';
+
+  @override
+  String get shellPlacesLabel => '場所';
+
+  @override
+  String get shellPlaceLibrary => 'ライブラリ';
+
+  @override
+  String get shellPlaceNotes => 'ノート';
+
+  @override
+  String get shellPlaceBookmarks => 'ブックマーク';
+
+  @override
+  String get shellPlaceSearch => '検索';
+
+  @override
+  String get shellReadingNow => '読書中';
+
+  @override
+  String shellCloseBook(String title) {
+    return '$titleを閉じる';
+  }
+
+  @override
+  String get shellNotesEmptyHeading => 'ノートはまだありません';
+
+  @override
+  String get shellNotesEmptyBody =>
+      '本の文章を選んでハイライトするか、ページにノートを追加してください。すべてのノートとハイライトがここに並びます。';
+
+  @override
+  String get shellBookmarksEmptyHeading => 'ブックマークはまだありません';
+
+  @override
+  String get shellBookmarksEmptyBody => 'リーダーのツールバーからページをブックマークすると、ここに表示されます。';
+
+  @override
+  String get shellSearchEmptyHeading => '本とノートを検索';
+
+  @override
+  String get shellSearchEmptyBody =>
+      'ライブラリ全体の本文とノートの検索は準備中です。今はライブラリでタイトルや著者から本を探せます。';
 }

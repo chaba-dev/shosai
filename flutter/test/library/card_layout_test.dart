@@ -201,6 +201,25 @@ class _HeldRemovalBridge extends _RecordingBridge {
   }
 }
 
+/// Scrolls the collection until its first card is built: on a phone at 200%
+/// text the header, the filter row and the bottom bar leave the grid below the
+/// fold.
+Future<void> revealFirstCard(WidgetTester tester) async {
+  await tester.scrollUntilVisible(
+    find.byWidgetPredicate(
+      (widget) => widget is LibraryBookCard && widget.book.bookId == 1,
+    ),
+    120,
+    scrollable: find
+        .descendant(
+          of: find.byType(LibraryCollection),
+          matching: find.byType(Scrollable),
+        )
+        .first,
+  );
+  await tester.pumpAndSettle();
+}
+
 Future<HarnessBridge> pumpLibrary(
   WidgetTester tester, {
   Size size = const Size(1280, 800),
@@ -258,8 +277,10 @@ void main() {
 
     testWidgets('the rendered grid divides the width equally', (tester) async {
       await pumpLibrary(tester);
+      // 1280 px is a tablet window: 1280 - 220 sidebar - 48 collection
+      // padding leaves 992 px, five columns of 184 px.
       final wide = tester.getRect(find.byType(LibraryBookCard).first);
-      expect(wide.width, closeTo(195.2, 0.6));
+      expect(wide.width, closeTo(184, 0.6));
       expect(
         tester.getRect(find.byType(LibraryBookCard).at(1)).left - wide.left,
         closeTo(wide.width + ShosaiTokens.layoutLibraryGridSpacing, 0.6),
@@ -268,9 +289,10 @@ void main() {
 
       await tester.pumpWidget(const SizedBox.shrink());
       await pumpLibrary(tester, size: const Size(900, 700));
+      // 900 - 220 - 48 leaves 632 px: three columns of 198.7 px.
       expect(
         tester.getRect(find.byType(LibraryBookCard).first).width,
-        closeTo(210.7, 0.6),
+        closeTo(198.7, 0.6),
       );
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -316,6 +338,7 @@ void main() {
 
     testWidgets('a scaled card grows its text, not its cover', (tester) async {
       await pumpLibrary(tester, size: const Size(390, 844), textScale: 2);
+      await revealFirstCard(tester);
       final card = tester.getRect(find.byType(LibraryBookCard).first);
       final extent = libraryCardTileExtent(
         tester.element(find.byType(LibraryBookCard).first),
@@ -603,7 +626,7 @@ void main() {
               ),
             )
             .width,
-        closeTo(195.2, 0.6),
+        closeTo(184, 0.6),
         reason: 'the long token does not widen the card',
       );
     });
@@ -673,6 +696,7 @@ void main() {
         textScale: 2,
         bridge: bridge,
       );
+      await revealFirstCard(tester);
 
       // Book 1 is managed, so the removal goes through the confirmation the
       // application renders; the confirmation is what starts the pending state.
@@ -779,6 +803,7 @@ void main() {
         textScale: 2,
         locale: const Locale('ja'),
       );
+      await revealFirstCard(tester);
       await tester.tap(find.byTooltip('本の操作').first);
       await tester.pumpAndSettle();
 
