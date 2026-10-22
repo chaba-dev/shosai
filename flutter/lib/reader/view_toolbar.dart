@@ -261,9 +261,10 @@ class _ReaderToolbarTitle extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              // 22 rather than 21: the book face's descenders need the
-              // room at a scaled interface.
-              style: shellEditorialStyle(17, 22).copyWith(color: palette.ink),
+              // A taller line than the 21 of the type scale: Literata's
+              // descenders fall below a 21 line box at a scaled interface,
+              // and further on macOS than on Linux.
+              style: shellEditorialStyle(17, 24).copyWith(color: palette.ink),
             ),
             if (section != null)
               Text(
