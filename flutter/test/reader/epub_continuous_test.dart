@@ -1648,10 +1648,12 @@ void main() {
     expect(released, isNotEmpty);
     disposeFlowBlocks(released);
 
-    // Back to the start: the probe is laid out again, at the same top.
-    for (var step = 0; step < 400 && session.firstNodeIndex > 0; step += 1) {
+    // Back to the start: the probe is laid out again, at the same top. A batch
+    // is bounded by time as well as nodes, so the window can reach the first
+    // node before it covers the probe; step until it covers the viewport.
+    for (var step = 0; step < 400; step += 1) {
       final detached = <FlowBlock>[];
-      advanceContinuousWindow(
+      final result = advanceContinuousWindow(
         session: session,
         extents: extents,
         viewportTop: 0,
@@ -1660,6 +1662,7 @@ void main() {
       );
       window();
       disposeFlowBlocks(detached);
+      if (session.firstNodeIndex == 0 && !result.pending) break;
     }
     expect(session.firstNodeIndex, 0);
     expect(topOf(window()), probeTop);
