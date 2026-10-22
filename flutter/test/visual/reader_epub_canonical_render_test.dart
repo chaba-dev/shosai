@@ -114,11 +114,7 @@ void main() {
                 .page
                 .page
                 .slices)
-          for (final placed in placedPageText(
-            slice,
-            (painter.painter as ReaderEpubPageContentPainter).page.box,
-          ))
-            placed.block.map.text,
+          for (final placed in placedPageText(slice)) placed.block.map.text,
   ];
 
   /// The Contents panel's own text: the toolbar and status line also name

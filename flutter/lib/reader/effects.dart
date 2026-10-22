@@ -177,6 +177,7 @@ final class _EpubLayoutKey {
     required this.theme,
     required this.continuous,
     this.spread = false,
+    this.vertical = false,
   });
 
   /// The document generation the session belongs to.
@@ -200,6 +201,10 @@ final class _EpubLayoutKey {
   /// [epubSpreadPageWidth] of it.
   final bool spread;
 
+  /// Whether the chapter is vertical, so its pages are turned a quarter turn
+  /// and its lines run down the page (see `EpubPageBox`).
+  final bool vertical;
+
   /// The width one page is laid out at.
   double get pageWidth => spread ? epubSpreadPageWidth(width) : width;
 
@@ -214,7 +219,8 @@ final class _EpubLayoutKey {
       other.lineSpacing == lineSpacing &&
       other.theme == theme &&
       other.continuous == continuous &&
-      other.spread == spread;
+      other.spread == spread &&
+      other.vertical == vertical;
 
   @override
   int get hashCode => Object.hash(
@@ -227,6 +233,7 @@ final class _EpubLayoutKey {
     theme,
     continuous,
     spread,
+    vertical,
   );
 }
 

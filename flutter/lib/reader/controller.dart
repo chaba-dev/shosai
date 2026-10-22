@@ -1935,6 +1935,7 @@ final class ReaderController implements Listenable {
       final paginated = paginateWindow(
         session.snapshot(),
         ui.Size(key.pageWidth, key.height),
+        vertical: key.vertical,
       );
       if (paginated.pageOfCanonical(scalar) + 1 < paginated.pages.length ||
           session.complete ||
@@ -1951,6 +1952,7 @@ final class ReaderController implements Listenable {
     return paginateWindow(
       session.snapshot(),
       ui.Size(key.pageWidth, key.height),
+      vertical: key.vertical,
     );
   }
 
@@ -1991,7 +1993,12 @@ final class ReaderController implements Listenable {
             chapterCount: document.logicalUnitCount.toInt(),
             windowSize: ui.Size(layout.width, height),
             spread: _ensureFacingPage(pageSession, pageKey, scalar),
-            rightToLeft: _epubSource?.book.pageProgression == EpubDirection.rtl,
+            // A vertical chapter's columns run right to left, and so do its
+            // pages, whatever the spine declares.
+            rightToLeft:
+                _epubSource?.book.pageProgression == EpubDirection.rtl ||
+                (pageKey?.vertical ?? false),
+            vertical: pageKey?.vertical ?? false,
           );
     final oldImage = _model.pageImage;
     final changedLocation =
@@ -2924,10 +2931,12 @@ final class ReaderController implements Listenable {
     // the typed refusal.
     final refusal = source.layoutLimitExceeded(unit);
     if (refusal != null) throw refusal;
-    // A continuous chapter lays out only a window around the viewport, so any
-    // admitted chapter reads continuously however long it is.
-    final continuous = _typographyContinuous;
     final chapter = source.book.chapters[unit];
+    final vertical = chapter.writingMode == EpubWritingMode.verticalRl;
+    // A continuous chapter lays out only a window around the viewport, so any
+    // admitted chapter reads continuously however long it is. A vertical
+    // chapter is read in pages: its columns would scroll sideways.
+    final continuous = _typographyContinuous && !vertical;
     try {
       await source.ensureImages(chapter, _epubImageDecoder);
     } catch (_) {
@@ -2945,12 +2954,17 @@ final class ReaderController implements Listenable {
       continuous: continuous,
       // A continuous chapter is one scrolled column; only pages pair up.
       spread: layout.spread && !continuous,
+      vertical: vertical,
     );
-    final pageBox = epubPageBoxFor(ui.Size(key.pageWidth, pageHeight));
+    final pageBox = epubPageBoxFor(
+      ui.Size(key.pageWidth, pageHeight),
+      vertical: vertical,
+    );
     final spec = ChapterLayoutSpec(
-      width: pageBox.contentWidth,
-      height: pageBox.contentHeight,
+      width: pageBox.inlineExtent,
+      height: pageBox.blockExtent,
       typography: _epubTypography(layout, source),
+      vertical: vertical,
     );
     // An explicit replacement with no offset is a chapter-level target: the
     // caller is replacing the durable position, so the reader goes to the

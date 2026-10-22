@@ -220,14 +220,16 @@ void main() {
       paintBox.size,
     );
     for (final slice in page.page.slices) {
-      for (final placed in placedPageText(slice, page.box)) {
+      for (final placed in placedPageText(slice)) {
         for (final link in placed.block.links) {
           if (link.href != href) continue;
           final boxes = placed.block.painter.getBoxesForSelection(
             TextSelection(baseOffset: link.start, extentOffset: link.end),
           );
           if (boxes.isEmpty) continue;
-          final rect = boxes.first.toRect().shift(placed.origin);
+          final rect = page.box.rectToPage(
+            boxes.first.toRect().shift(placed.origin),
+          );
           final global =
               paintBox.localToGlobal(Offset.zero) +
               transform.toDestinationRect(rect).center;

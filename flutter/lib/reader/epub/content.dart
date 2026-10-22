@@ -629,13 +629,16 @@ class ReaderEpubWindow {
   final int? targetNode;
 }
 
-/// The page box of a page window of [windowSize].
-EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
-  size: windowSize,
-  origin: const Offset(kEpubPageMargin, kEpubPageMargin),
-  contentWidth: math.max(40.0, windowSize.width - 2 * kEpubPageMargin),
-  contentHeight: math.max(40.0, windowSize.height - 2 * kEpubPageMargin),
-);
+/// The page box of a page window of [windowSize]; a [vertical] box shows a
+/// vertical flow (see [EpubPageBox]).
+EpubPageBox epubPageBoxFor(Size windowSize, {bool vertical = false}) =>
+    EpubPageBox(
+      size: windowSize,
+      origin: const Offset(kEpubPageMargin, kEpubPageMargin),
+      contentWidth: math.max(40.0, windowSize.width - 2 * kEpubPageMargin),
+      contentHeight: math.max(40.0, windowSize.height - 2 * kEpubPageMargin),
+      vertical: vertical,
+    );
 
 /// The page boxes of a two-page spread of [spreadSize]: both span the spread,
 /// so one surface addresses both pages, and each places its content in its own
@@ -644,6 +647,7 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
 ({EpubPageBox first, EpubPageBox second}) epubSpreadBoxesFor(
   Size spreadSize, {
   bool rightToLeft = false,
+  bool vertical = false,
 }) {
   final page = epubPageBoxFor(
     Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
@@ -653,6 +657,7 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
     origin: Offset(x + kEpubPageMargin, kEpubPageMargin),
     contentWidth: page.contentWidth,
     contentHeight: page.contentHeight,
+    vertical: vertical,
   );
   final left = at(0);
   final right = at(page.size.width + kEpubSpreadGutter);
@@ -661,13 +666,18 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
       : (first: left, second: right);
 }
 
-/// Paginates [flow] for a page window of [windowSize].
-PaginatedChapter paginateWindow(ChapterFlow flow, Size windowSize) {
-  final box = epubPageBoxFor(windowSize);
+/// Paginates [flow] for a page window of [windowSize]; a [vertical] flow's
+/// pages hold as many lines as fit across the page.
+PaginatedChapter paginateWindow(
+  ChapterFlow flow,
+  Size windowSize, {
+  bool vertical = false,
+}) {
+  final box = epubPageBoxFor(windowSize, vertical: vertical);
   return paginateFlow(
     flow: flow,
-    pageHeight: box.contentHeight,
-    pageWidth: box.contentWidth,
+    pageHeight: box.blockExtent,
+    pageWidth: box.inlineExtent,
   );
 }
 
@@ -685,6 +695,10 @@ PaginatedChapter paginateWindow(ChapterFlow flow, Size windowSize) {
 /// slot and the page after it the second; with [rightToLeft] the first slot is
 /// the right one. The spread's surface covers both pages, so a selection can
 /// run from one page onto the next.
+///
+/// A [vertical] chapter's pages are turned a quarter turn (see
+/// [EpubPageBox]); its session is laid out with the page's height as its line
+/// length.
 ReaderEpubPage pageWindowFor({
   required ChapterLayoutSession session,
   required int scalar,
@@ -693,20 +707,25 @@ ReaderEpubPage pageWindowFor({
   required Size windowSize,
   bool spread = false,
   bool rightToLeft = false,
+  bool vertical = false,
 }) {
   final flow = session.snapshot();
   final pageSize = spread
       ? Size(epubSpreadPageWidth(windowSize.width), windowSize.height)
       : windowSize;
-  final paginated = paginateWindow(flow, pageSize);
+  final paginated = paginateWindow(flow, pageSize, vertical: vertical);
   final index = paginated
       .pageOfCanonical(scalar)
       .clamp(0, paginated.pages.length - 1);
   final page = paginated.pages[index];
   final boxes = spread
-      ? epubSpreadBoxesFor(windowSize, rightToLeft: rightToLeft)
+      ? epubSpreadBoxesFor(
+          windowSize,
+          rightToLeft: rightToLeft,
+          vertical: vertical,
+        )
       : null;
-  final box = boxes?.first ?? epubPageBoxFor(windowSize);
+  final box = boxes?.first ?? epubPageBoxFor(windowSize, vertical: vertical);
   final facing = spread && index + 1 < paginated.pages.length
       ? paginated.pages[index + 1]
       : null;
