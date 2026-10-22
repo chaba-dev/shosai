@@ -12,9 +12,12 @@ library integration, and explicit acceptance criteria. DRM circumvention is
 outside the project.
 
 NOTE: The `crates/shosai-core` paths below describe the Rust core that RFD 4
-replaces with Dart (decided 2026-10-21, milestone M3.0). Each format package
-is re-planned against the Dart engines and application core when this RFD
-leaves ideation; the gates and acceptance criteria are unchanged.
+replaced with Dart and removed on 2026-10-21 (milestone M3.0); they remain in
+the repository history, and the shared test fixtures moved to `fixtures/`.
+Each format package is re-planned against the Dart engines
+(`flutter/packages/shosai_epub`, `flutter/lib/reader/pdf`) and the application
+core (`flutter/packages/shosai_core`) when this RFD leaves ideation; the gates
+and acceptance criteria are unchanged.
 
 == Current Baseline and Prerequisites
 
@@ -92,7 +95,7 @@ choices unless project licensing policy is deliberately changed first.
 * [ ] Confirm parser/decoder maintenance and fuzz/security posture. Define input,
 decompression, image-dimension, allocation, nesting, and page-count limits.
 * [ ] Create minimal, feature-rich, malformed, truncated, and oversized-limit
-fixtures under `crates/shosai-core/tests/fixtures/`. Generate fixtures in-tree
+fixtures under `fixtures/`. Generate fixtures in-tree
 where practical; otherwise record provenance and redistribution permission.
 * [ ] Keep parsing/decoding off the UI executor and use cancellation/bounded caches
 for expensive page/image work.

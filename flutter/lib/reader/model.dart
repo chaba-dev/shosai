@@ -422,6 +422,7 @@ final class ReaderModel {
     this.readingOffset,
     this.pageImage,
     this.epubPage,
+    this.locationRequestRevision = 0,
     FlutterSelectionSurface? selectionSurface,
     this.selectionPhase = ReaderSelectionPhase.idle,
     this.anchor,
@@ -437,6 +438,7 @@ final class ReaderModel {
     Set<String> annotationOperations = const {},
     this.selectionError,
     this.relayoutError,
+    this.layoutRefusal,
     this.selectionActionError,
     this.annotationError,
     this.annotationsReady = false,
@@ -496,6 +498,22 @@ final class ReaderModel {
   /// The Dart-engine page window currently rendered, or null when the page is
   /// the retained renderer's raster.
   final ReaderEpubPage? epubPage;
+
+  /// Revision of the latest explicit location request [epubPage] answers.
+  ///
+  /// Advances whenever a page is installed for a navigation (a chapter change,
+  /// an offset target, a replaced position) and never for a passive relayout
+  /// (a resize or a height refresh), so a continuous view scrolls to
+  /// [ReaderEpubPage.targetScalar] once per request — including a repeated
+  /// request for the same location, or for the chapter start.
+  final int locationRequestRevision;
+
+  /// Whether the document area presents a continuous page the view scrolls.
+  ///
+  /// Follows the installed EPUB page: a continuous reader shows a chapter over
+  /// the continuous ceilings as pages, with page-turn edges.
+  bool get continuousPresentation =>
+      typography.continuous && (epubPage?.continuous ?? true);
   final FlutterSelectionSurface? selectionSurface;
   final ReaderSelectionPhase selectionPhase;
   final int? anchor;
@@ -517,6 +535,14 @@ final class ReaderModel {
   /// shared error surface labelled them "Selection unavailable"; a layout
   /// failure is not a selection problem and now has its own value.
   final String? relayoutError;
+
+  /// The typed refusal of the last chapter the reader asked to lay out, when
+  /// one of its indivisible blocks exceeds a bounded-work ceiling.
+  ///
+  /// Kept apart from [relayoutError]: a refusal is not transient, so a passive
+  /// relayout of the page still shown (a resize, the alert's own height) keeps
+  /// it, and only a new location request or document clears it.
+  final EpubLayoutLimitExceeded? layoutRefusal;
   final String? selectionActionError;
   final String? annotationError;
   final bool annotationsReady;
@@ -604,6 +630,7 @@ final class ReaderModel {
     Object? readingOffset = _unchanged,
     Object? pageImage = _unchanged,
     Object? epubPage = _unchanged,
+    int? locationRequestRevision,
     Object? selectionSurface = _unchanged,
     ReaderSelectionPhase? selectionPhase,
     Object? anchor = _unchanged,
@@ -619,6 +646,7 @@ final class ReaderModel {
     Set<String>? annotationOperations,
     Object? selectionError = _unchanged,
     Object? relayoutError = _unchanged,
+    Object? layoutRefusal = _unchanged,
     Object? selectionActionError = _unchanged,
     Object? annotationError = _unchanged,
     bool? annotationsReady,
@@ -665,6 +693,8 @@ final class ReaderModel {
       epubPage: identical(epubPage, _unchanged)
           ? this.epubPage
           : epubPage as ReaderEpubPage?,
+      locationRequestRevision:
+          locationRequestRevision ?? this.locationRequestRevision,
       selectionSurface: identical(selectionSurface, _unchanged)
           ? this.selectionSurface
           : selectionSurface as FlutterSelectionSurface?,
@@ -699,6 +729,9 @@ final class ReaderModel {
       relayoutError: identical(relayoutError, _unchanged)
           ? this.relayoutError
           : relayoutError as String?,
+      layoutRefusal: identical(layoutRefusal, _unchanged)
+          ? this.layoutRefusal
+          : layoutRefusal as EpubLayoutLimitExceeded?,
       selectionActionError: identical(selectionActionError, _unchanged)
           ? this.selectionActionError
           : selectionActionError as String?,

@@ -5,8 +5,7 @@ on:
     branches: [main]
     paths-ignore:
       - CHANGELOG.md
-      - Cargo.toml
-      - Cargo.lock
+      - flutter/pubspec.yaml
   workflow_dispatch:
 
 permissions:
@@ -94,21 +93,19 @@ jobs:
 
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      - name: Update workspace version
+      - name: Update application version
         if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
         env:
           RELEASE_TAG: ${{ steps.next-version.outputs.content }}
         run: |
           version="${RELEASE_TAG#v}"
-          sed -i.bak -E "s/^version = \".*\"/version = \"${version}\"/" Cargo.toml
-          rm Cargo.toml.bak
+          # The pubspec version is `<semver>+<build>`; the release sets the
+          # semantic version and keeps the build number.
+          sed -i.bak -E "s/^version: [^+]*(\+.*)?$/version: ${version}\1/" flutter/pubspec.yaml
+          rm flutter/pubspec.yaml.bak
 
-          sed -i.bak -E "/^name = \"shosai-(core|flutter-bridge)\"$/ { n; s/^version = \".*\"/version = \"${version}\"/; }" Cargo.lock
-          rm Cargo.lock.bak
-
-          updated="$(grep -A1 -E '^name = "shosai-(core|flutter-bridge)"$' Cargo.lock | grep -c "^version = \"${version}\"$")"
-          if [ "${updated}" -ne 2 ]; then
-            echo "Failed to update both workspace package versions in Cargo.lock"
+          if ! grep -Eq "^version: ${version}(\+.*)?$" flutter/pubspec.yaml; then
+            echo "Failed to update the application version in flutter/pubspec.yaml"
             exit 1
           fi
 
@@ -157,8 +154,8 @@ jobs:
 
           generated_dir="$(mktemp -d)"
           trap 'rm -rf "${generated_dir}"' EXIT
-          cp CHANGELOG.md Cargo.toml Cargo.lock RELEASE_NOTES.md "${generated_dir}/"
-          git restore CHANGELOG.md Cargo.toml Cargo.lock
+          cp CHANGELOG.md flutter/pubspec.yaml RELEASE_NOTES.md "${generated_dir}/"
+          git restore CHANGELOG.md flutter/pubspec.yaml
           rm RELEASE_NOTES.md
 
           if git ls-remote --exit-code --heads origin "${branch}" >/dev/null; then
@@ -188,20 +185,21 @@ jobs:
             fi
 
             conflicts="$(git diff --name-only --diff-filter=U)"
-            unexpected_conflicts="$(printf '%s\n' "${conflicts}" | grep -Ev '^(CHANGELOG\.md|Cargo\.toml|Cargo\.lock)$' || true)"
+            unexpected_conflicts="$(printf '%s\n' "${conflicts}" | grep -Ev '^(CHANGELOG\.md|flutter/pubspec\.yaml)$' || true)"
             if [ -n "${unexpected_conflicts}" ]; then
               echo "Unexpected conflicts while merging ${source_commit}:"
               printf '%s\n' "${unexpected_conflicts}"
               exit 1
             fi
 
-            git checkout "${source_commit}" -- CHANGELOG.md Cargo.toml Cargo.lock
-            git add CHANGELOG.md Cargo.toml Cargo.lock
+            git checkout "${source_commit}" -- CHANGELOG.md flutter/pubspec.yaml
+            git add CHANGELOG.md flutter/pubspec.yaml
             git commit --no-edit
           fi
 
-          cp "${generated_dir}"/* .
-          git add CHANGELOG.md Cargo.toml Cargo.lock
+          cp "${generated_dir}/CHANGELOG.md" "${generated_dir}/RELEASE_NOTES.md" .
+          cp "${generated_dir}/pubspec.yaml" flutter/pubspec.yaml
+          git add CHANGELOG.md flutter/pubspec.yaml
 
           if git diff --cached --quiet; then
             echo "Release branch already matches generated files"

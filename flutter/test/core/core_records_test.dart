@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -5,55 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 const _epubFixture = 'packages/shosai_core/test/fixtures/sample.epub';
 const _pdfFixture = 'packages/shosai_core/test/fixtures/sample.pdf';
-
-/// The Rust bridge's document side: opens report the requested path back.
-final class _Documents implements FlutterBridge {
-  final opened = <String>[];
-  var nextCancellation = BigInt.zero;
-  final cancelled = <BigInt>{};
-
-  @override
-  BigInt createCancellation() => nextCancellation += BigInt.one;
-
-  @override
-  bool cancel({required BigInt id}) => cancelled.add(id);
-
-  @override
-  bool releaseCancellation({required BigInt id}) => true;
-
-  @override
-  Future<FlutterDocumentSummary> openDocument({
-    required FlutterOpenRequest request,
-    required BigInt cancellationId,
-  }) async {
-    opened.add(request.pathKey);
-    return FlutterDocumentSummary(
-      handle: FlutterDocumentHandle(
-        registry: BigInt.one,
-        id: BigInt.from(opened.length),
-      ),
-      format: request.formatHint ?? FlutterBookFormat.epub,
-      title: 'Rust title',
-      logicalUnitCount: BigInt.from(3),
-    );
-  }
-
-  @override
-  bool releaseDocument({required FlutterDocumentHandle handle}) => true;
-
-  @override
-  void dispose() {}
-
-  @override
-  bool get isDisposed => false;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
 
 /// A PDF engine whose documents have a title and a one-colour first page.
 final class _PdfEngine implements PdfEngine {
@@ -109,13 +65,69 @@ final class _FailingPdfDocument extends _PdfDocument {
   Future<void> dispose() async => throw Exception('PDFium failed again');
 }
 
+/// A PDF engine whose documents read their file lazily, as PDFium does:
+/// each page's text is the file's content when the text is asked for. Tests
+/// gate opens, text reads and disposal with completers.
+final class _FilePdfEngine implements PdfEngine {
+  /// Runs before each open with the path being opened.
+  FutureOr<void> Function(String path)? onOpen;
+
+  /// When set, a text read waits for it.
+  Completer<void>? textGate;
+
+  /// Completes when a text read is waiting at [textGate].
+  Completer<void> textRequested = Completer<void>();
+
+  var failDispose = false;
+
+  /// When set, a disposal waits for it.
+  Completer<void>? disposeGate;
+  final opened = <String>[];
+  final documents = <_FilePdfDocument>[];
+
+  @override
+  Future<PdfEngineDocument> open(String path) async {
+    await onOpen?.call(path);
+    opened.add(path);
+    final document = _FilePdfDocument(this, path);
+    documents.add(document);
+    return document;
+  }
+}
+
+final class _FilePdfDocument extends _PdfDocument {
+  _FilePdfDocument(this._engine, this.path);
+
+  final _FilePdfEngine _engine;
+  final String path;
+  var disposals = 0;
+
+  @override
+  int get pageCount => 1;
+
+  @override
+  Future<String> pageText(int page) async {
+    if (_engine.textGate case final gate?) {
+      if (!_engine.textRequested.isCompleted) _engine.textRequested.complete();
+      await gate.future;
+    }
+    return File(path).readAsStringSync();
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposals += 1;
+    await _engine.disposeGate?.future;
+    if (_engine.failDispose) throw Exception('PDFium failed to close');
+  }
+}
+
 FlutterSelectionSurface _surface(
   String text, {
   String? resourcePath,
   bool copyEligible = true,
   List<FlutterSelectionEndpoint> endpoints = const [],
 }) => FlutterSelectionSurface(
-  handle: FlutterSelectionHandle(registry: BigInt.one, id: BigInt.one),
   width: 680,
   height: 900,
   text: text,
@@ -130,14 +142,12 @@ FlutterSelectionSurface _surface(
 void main() {
   late Directory directory;
   late ShosaiCore core;
-  late _Documents documents;
   late ApplicationBridge bridge;
 
   setUp(() async {
     directory = Directory.systemTemp.createTempSync('shosai_records');
     core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
-    documents = _Documents();
-    bridge = ApplicationBridge(core, documents);
+    bridge = ApplicationBridge(core);
   });
 
   tearDown(() async {
@@ -190,7 +200,14 @@ void main() {
     );
     expect(opened.bookId, epub.bookId);
     expect(opened.title, epub.title);
-    expect(documents.opened, [epub.pathKey]);
+    expect(opened.format, FlutterBookFormat.epub);
+    final book = await bridge.epubBook(
+      document: opened.handle,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(opened.logicalUnitCount, BigInt.from(book.chapters.length));
+    expect(bridge.releaseDocument(handle: opened.handle), isTrue);
+    expect(bridge.releaseDocument(handle: opened.handle), isFalse);
 
     final removed = await bridge.removeLibraryBook(bookId: epub.bookId);
     expect(removed.removed, isTrue);
@@ -223,7 +240,6 @@ void main() {
 
     expect(report.cancelled, isTrue);
     expect(report.imported, BigInt.zero);
-    expect(documents.cancelled, {cancellation});
   });
 
   test('a PDF engine failure fails only its own import item', () async {
@@ -234,7 +250,7 @@ void main() {
       pdfEngine: _FailingPdfEngine(),
     );
     addTearDown(failingCore.close);
-    final failingBridge = ApplicationBridge(failingCore, _Documents());
+    final failingBridge = ApplicationBridge(failingCore);
     final paths = [
       for (final (fixture, name) in [
         (_epubFixture, 'first.epub'),
@@ -464,41 +480,593 @@ void main() {
     );
   });
 
-  test('documents opened from a file keep no annotations', () async {
-    final document = await bridge.openDocument(
-      request: const FlutterOpenRequest(localId: 'x', pathKey: '/tmp/x.epub'),
-      cancellationId: bridge.createCancellation(),
+  test('a file opened directly keeps its annotations across close, a store '
+      'reopen and reopening the file', () async {
+    final data = Directory.systemTemp.createTempSync('shosai_records');
+    addTearDown(() => data.deleteSync(recursive: true));
+    final file = File(_epubFixture).copySync('${data.path}/direct.epub');
+    final request = FlutterOpenRequest(localId: 'd', pathKey: file.path);
+    final firstOwner = CoreOwner(
+      await ShosaiCore.open(data.path, pdfEngine: _PdfEngine()),
     );
-
+    final first = firstOwner.bridge();
+    final document = await first.openDocument(
+      request: request,
+      cancellationId: first.createCancellation(),
+    );
+    expect(document.bookId, isNull);
+    final created = await first.createAnnotation(
+      document: document.handle,
+      unit: BigInt.zero,
+      start: BigInt.zero,
+      end: BigInt.from(4),
+      displayScale: 1,
+      color: FlutterHighlightColor.blue,
+      body: 'Direct note',
+      cancellationId: first.createCancellation(),
+    );
+    expect(created.resolution, FlutterAnnotationResolution.exact);
     expect(
-      await bridge.records.listAnnotations(
-        document: document,
-        text: EpubReaderText(
-          unitCount: 1,
-          text: (_) async => '',
-          resourcePath: (_) async => null,
-        ),
+      await first.updateAnnotation(
+        document: document.handle,
+        id: created.id,
+        color: FlutterHighlightColor.green,
+        body: 'Direct note',
+      ),
+      isTrue,
+    );
+    expect(first.releaseDocument(handle: document.handle), isTrue);
+    first.dispose();
+    await firstOwner.close();
+
+    final owner = CoreOwner(
+      await ShosaiCore.open(data.path, pdfEngine: _PdfEngine()),
+    );
+    addTearDown(owner.close);
+    final reopenedBridge = owner.bridge();
+    final reopened = await reopenedBridge.openDocument(
+      request: request,
+      cancellationId: reopenedBridge.createCancellation(),
+    );
+    final [listed] = await reopenedBridge.listAnnotations(
+      document: reopened.handle,
+      scale: 1,
+      cancellationId: reopenedBridge.createCancellation(),
+    );
+    expect(listed.id, created.id);
+    expect(listed.resolution, FlutterAnnotationResolution.exact);
+    expect(listed.color, FlutterHighlightColor.green);
+    expect(listed.body, 'Direct note');
+
+    // Other bytes are another content, with none of these annotations.
+    final other = File('${data.path}/other.epub')
+      ..writeAsBytesSync([...file.readAsBytesSync(), 0]);
+    final otherDocument = await reopenedBridge.openDocument(
+      request: FlutterOpenRequest(localId: 'o', pathKey: other.path),
+      cancellationId: reopenedBridge.createCancellation(),
+    );
+    expect(
+      await reopenedBridge.listAnnotations(
+        document: otherDocument.handle,
         scale: 1,
-        cancellationId: bridge.createCancellation(),
+        cancellationId: reopenedBridge.createCancellation(),
       ),
       isEmpty,
     );
+
+    expect(
+      await reopenedBridge.deleteAnnotation(
+        document: reopened.handle,
+        id: created.id,
+      ),
+      isTrue,
+    );
+    expect(
+      await reopenedBridge.listAnnotations(
+        document: reopened.handle,
+        scale: 1,
+        cancellationId: reopenedBridge.createCancellation(),
+      ),
+      isEmpty,
+    );
+  });
+
+  group('snapshots', () {
+    late Directory data;
+    late _FilePdfEngine engine;
+    late CoreOwner owner;
+    late ApplicationBridge pdfBridge;
+    late File file;
+    const original = '%PDF-1.4 original text';
+    const replacement = '%PDF-1.4 replaced text';
+
+    setUp(() async {
+      data = Directory.systemTemp.createTempSync('shosai_snapshots');
+      engine = _FilePdfEngine();
+      owner = CoreOwner(await ShosaiCore.open(data.path, pdfEngine: engine));
+      pdfBridge = owner.bridge();
+      file = File('${data.path}/book.pdf')..writeAsStringSync(original);
+    });
+
+    tearDown(() async {
+      await owner.close();
+      data.deleteSync(recursive: true);
+    });
+
+    Future<int> importBook() async {
+      final report = await pdfBridge.importPaths(
+        pathKeys: [file.path],
+        managed: false,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      expect(report.items.single.error, isNull);
+      return report.items.single.book!.bookId;
+    }
+
+    Future<int> matches(FlutterDocumentSummary document, String query) async =>
+        (await pdfBridge.searchDocument(
+          document: document.handle,
+          query: query,
+          cancellationId: pdfBridge.createCancellation(),
+        )).length;
+
+    void replace() => file.writeAsStringSync(replacement);
+
+    /// The snapshots left in the process's directory, without its lock file.
+    Future<List<String>> snapshotFiles() async => [
+      for (final entry
+          in (await owner.core.snapshots.directory)?.listSync() ?? const [])
+        if (!entry.path.endsWith('/.lock')) entry.path,
+    ];
+
+    test('a library PDF reads the bytes it verified though its file is '
+        'replaced as the engine opens it', () async {
+      final bookId = await importBook();
+      engine.onOpen = (_) {
+        engine.onOpen = null;
+        replace();
+      };
+
+      final document = await pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+
+      expect(document.bookId, bookId);
+      expect(document.contentPath, isNot(file.path));
+      expect(File(document.contentPath!).readAsStringSync(), original);
+      expect(await matches(document, 'original'), 1);
+      expect(await matches(document, 'replaced'), 0);
+      expect(engine.opened.skip(1), everyElement(document.contentPath));
+      final snapshots = (await owner.core.snapshots.directory)!;
+      expect(
+        snapshots.parent.path,
+        await Directory('${data.path}/snapshots').resolveSymbolicLinks(),
+      );
+      if (!Platform.isWindows) {
+        expect(snapshots.statSync().mode & 0x3f, 0, reason: 'owner-only');
+      }
+    });
+
+    test(
+      'a sweep deletes only snapshot directories no running process holds',
+      () async {
+        final bookId = await importBook();
+        await pdfBridge.openLibraryBook(
+          bookId: bookId,
+          cancellationId: pdfBridge.createCancellation(),
+        );
+        final own = (await owner.core.snapshots.directory)!;
+        final parent = own.parent.path;
+        Directory directory(String name) {
+          final directory = Directory('$parent/$name')..createSync();
+          File('${directory.path}/.lock').createSync();
+          File('${directory.path}/snapshot-1').writeAsStringSync(original);
+          return directory;
+        }
+
+        final live = directory('process-live');
+        final left = directory('process-left');
+        final unlocked = Directory('$parent/process-unlocked')..createSync();
+
+        // Another instance holds its directory's lock until its input closes.
+        final script = File('${data.path}/hold_lock.dart')
+          ..writeAsStringSync("""
+import 'dart:io';
+
+Future<void> main(List<String> arguments) async {
+  final file = await File(arguments.single).open(mode: FileMode.append);
+  await file.lock(FileLock.exclusive);
+  stdout.writeln('locked');
+  await stdin.drain<void>();
+  await file.close();
+}
+""");
+        final holder = await Process.start('dart', [
+          script.path,
+          '${live.path}/.lock',
+        ]);
+        await holder.stdout
+            .transform(const SystemEncoding().decoder)
+            .firstWhere((line) => line.contains('locked'));
+
+        // Every directory looks long untouched; age decides nothing.
+        for (final path in [own.path, live.path, left.path, unlocked.path]) {
+          final touch = await Process.run('touch', ['-d', '2 days ago', path]);
+          expect(touch.exitCode, 0);
+        }
+        await owner.core.snapshots.sweep();
+
+        expect(own.existsSync(), isTrue, reason: 'this process holds it');
+        expect(live.existsSync(), isTrue, reason: 'another process holds it');
+        expect(left.existsSync(), isFalse);
+        expect(unlocked.existsSync(), isFalse);
+
+        await holder.stdin.close();
+        expect(await holder.exitCode, 0);
+        await Process.run('touch', ['-d', '2 days ago', live.path]);
+        await owner.core.snapshots.sweep();
+        expect(live.existsSync(), isFalse);
+        expect(own.existsSync(), isTrue);
+
+        // A directory without a lock file is an earlier version's, and goes
+        // only once it is old; one still being set up is never swept.
+        final fresh = Directory('$parent/process-fresh')..createSync();
+        final staging = Directory('$parent/staging-old')..createSync();
+        await Process.run('touch', ['-d', '2 days ago', staging.path]);
+        await owner.core.snapshots.sweep();
+        expect(fresh.existsSync(), isTrue);
+        expect(staging.existsSync(), isTrue);
+      },
+      skip: Platform.isWindows ? 'needs touch and POSIX locks' : false,
+    );
+
+    test('a second instance naming the data directory differently keeps '
+        'the first one\'s snapshots', () async {
+      final bookId = await importBook();
+      final document = await pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      final own = (await owner.core.snapshots.directory)!;
+      final alias = Directory('${data.path}-alias');
+      Link(alias.path).createSync(data.path);
+      addTearDown(() => Link(alias.path).deleteSync());
+      for (final spelling in ['${data.path}/.', alias.path]) {
+        await Process.run('touch', ['-d', '2 days ago', own.path]);
+        // Opening a core sweeps its snapshot parent.
+        final other = await ShosaiCore.open(spelling, pdfEngine: engine);
+        await other.close();
+        expect(own.existsSync(), isTrue, reason: spelling);
+      }
+      expect(File(document.contentPath!).readAsStringSync(), original);
+      expect(await matches(document, 'original'), 1);
+    }, skip: Platform.isWindows ? 'needs touch and links' : false);
+
+    test('a library PDF replaced after it opened keeps the verified text '
+        'until it is released, and its snapshot is then deleted', () async {
+      final bookId = await importBook();
+      final document = await pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      replace();
+
+      expect(await matches(document, 'original'), 1);
+      expect(await matches(document, 'replaced'), 0);
+
+      final snapshot = File(document.contentPath!);
+      expect(pdfBridge.releaseDocument(handle: document.handle), isTrue);
+      await pdfBridge.drain();
+      expect(snapshot.existsSync(), isFalse);
+      expect(engine.documents.last.disposals, 1);
+    });
+
+    test('a library book whose file was replaced is rejected without a '
+        'document or records', () async {
+      final bookId = await importBook();
+      replace();
+      final opens = engine.opened.length;
+
+      await expectLater(
+        pdfBridge.openLibraryBook(
+          bookId: bookId,
+          cancellationId: pdfBridge.createCancellation(),
+        ),
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.message,
+            'message',
+            contains('no longer match'),
+          ),
+        ),
+      );
+      expect(engine.opened.length, opens, reason: 'nothing was parsed');
+      expect(pdfBridge.openDocumentCount, 0);
+      expect(
+        await pdfBridge.loadReadingState(
+          bookId: bookId,
+          cancellationId: pdfBridge.createCancellation(),
+        ),
+        isNull,
+      );
+      expect(await snapshotFiles(), isEmpty);
+    });
+
+    test('an EPUB is parsed from the bytes its hash was checked on', () async {
+      final epub = File(_epubFixture).copySync('${data.path}/book.epub');
+      final report = await pdfBridge.importPaths(
+        pathKeys: [epub.path],
+        managed: false,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      final bookId = report.items.single.book!.bookId;
+      epub.writeAsBytesSync([...epub.readAsBytesSync(), 0]);
+
+      await expectLater(
+        pdfBridge.openLibraryBook(
+          bookId: bookId,
+          cancellationId: pdfBridge.createCancellation(),
+        ),
+        throwsA(isA<FlutterBridgeError>()),
+      );
+      expect(pdfBridge.openDocumentCount, 0);
+    });
+
+    test('disposing the bridge during an open rejects and releases the '
+        'document', () async {
+      final bookId = await importBook();
+      final gate = Completer<void>();
+      final entered = Completer<void>();
+      engine.onOpen = (_) {
+        entered.complete();
+        return gate.future;
+      };
+      final opening = pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      await entered.future;
+
+      pdfBridge.dispose();
+      var drained = false;
+      unawaited(pdfBridge.drain().then((_) => drained = true));
+      await pumpEventQueue();
+      expect(drained, isFalse, reason: 'the open is still running');
+      gate.complete();
+
+      await expectLater(
+        opening,
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.kind,
+            'kind',
+            FlutterBridgeErrorKind.cancelled,
+          ),
+        ),
+      );
+      await pdfBridge.drain();
+      expect(drained, isTrue);
+      expect(pdfBridge.openDocumentCount, 0);
+      expect(engine.documents.last.disposals, 1);
+      expect(await snapshotFiles(), isEmpty);
+      await expectLater(
+        pdfBridge.openLibraryBook(
+          bookId: bookId,
+          cancellationId: pdfBridge.createCancellation(),
+        ),
+        throwsA(isA<FlutterBridgeError>()),
+      );
+      expect(engine.documents, hasLength(2), reason: 'import and one open');
+    });
+
+    test('disposing the bridge during PDF use releases the document after '
+        'the use finishes', () async {
+      final bookId = await importBook();
+      final document = await pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      final gate = engine.textGate = Completer<void>();
+      final cancellation = pdfBridge.createCancellation();
+      final search = pdfBridge.searchDocument(
+        document: document.handle,
+        query: 'original',
+        cancellationId: cancellation,
+      );
+      await engine.textRequested.future;
+      final reading = engine.documents.last;
+
+      pdfBridge.dispose();
+      var drained = false;
+      unawaited(pdfBridge.drain().then((_) => drained = true));
+      await pumpEventQueue();
+      expect(reading.disposals, 0, reason: 'the text read is still running');
+      expect(File(document.contentPath!).existsSync(), isTrue);
+      expect(drained, isFalse);
+
+      gate.complete();
+      await expectLater(
+        search,
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.kind,
+            'kind',
+            FlutterBridgeErrorKind.cancelled,
+          ),
+        ),
+      );
+      await pdfBridge.drain();
+      expect(drained, isTrue);
+      expect(reading.disposals, 1);
+      expect(File(document.contentPath!).existsSync(), isFalse);
+    });
+
+    test('a failing engine disposal still deletes the snapshot', () async {
+      final bookId = await importBook();
+      final document = await pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: pdfBridge.createCancellation(),
+      );
+      expect(await matches(document, 'original'), 1);
+      engine.failDispose = true;
+      final gate = engine.disposeGate = Completer<void>();
+
+      expect(pdfBridge.releaseDocument(handle: document.handle), isTrue);
+      var drained = false;
+      unawaited(pdfBridge.drain().then((_) => drained = true));
+      await pumpEventQueue();
+      expect(drained, isFalse, reason: 'the drain observes the release');
+      expect(File(document.contentPath!).existsSync(), isTrue);
+      gate.complete();
+      await pdfBridge.drain();
+      expect(drained, isTrue);
+
+      expect(engine.documents.last.disposals, 1);
+      expect(File(document.contentPath!).existsSync(), isFalse);
+    });
+
+    test('the core owner closes the shared core once its bridges have '
+        'drained; one bridge closing leaves it open', () async {
+      final bookId = await importBook();
+      final second = owner.bridge();
+      pdfBridge.dispose();
+      await pdfBridge.drain();
+      await second.saveReadingState(
+        bookId: bookId,
+        value: FlutterReadingState(unit: BigInt.zero, zoom: 2),
+        unitCount: BigInt.one,
+      );
+      final document = await second.openLibraryBook(
+        bookId: bookId,
+        cancellationId: second.createCancellation(),
+      );
+      final snapshots = (await owner.core.snapshots.directory)!;
+
+      await owner.close();
+
+      expect(second.isDisposed, isTrue);
+      expect(second.openDocumentCount, 0);
+      expect(File(document.contentPath!).existsSync(), isFalse);
+      expect(snapshots.existsSync(), isFalse);
+      expect(() => owner.bridge(), throwsStateError);
+
+      final reopened = CoreOwner(
+        await ShosaiCore.open(data.path, pdfEngine: engine),
+      );
+      addTearDown(reopened.close);
+      expect(
+        await reopened.bridge().loadReadingState(
+          bookId: bookId,
+          cancellationId: BigInt.one,
+        ),
+        FlutterReadingState(unit: BigInt.zero, zoom: 2),
+      );
+    });
+
+    test('disposing a bridge cancels the operations it owns', () async {
+      final bookId = await importBook();
+      final cancellation = pdfBridge.createCancellation();
+      final gate = Completer<void>();
+      final entered = Completer<void>();
+      engine.onOpen = (_) {
+        entered.complete();
+        return gate.future;
+      };
+      final opening = pdfBridge.openLibraryBook(
+        bookId: bookId,
+        cancellationId: cancellation,
+      );
+      await entered.future;
+
+      pdfBridge.dispose();
+      gate.complete();
+
+      await expectLater(opening, throwsA(isA<FlutterBridgeError>()));
+      expect(pdfBridge.cancel(id: cancellation), isFalse, reason: 'forgotten');
+      await expectLater(
+        pdfBridge.libraryPage(
+          limit: 1,
+          offset: 0,
+          cancellationId: cancellation,
+        ),
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.kind,
+            'kind',
+            FlutterBridgeErrorKind.cancelled,
+          ),
+        ),
+      );
+    });
+  });
+
+  test('documents open by extension or content, and release', () async {
+    final pdf = await bridge.openDocument(
+      request: const FlutterOpenRequest(localId: 'p', pathKey: _pdfFixture),
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(pdf.format, FlutterBookFormat.pdf);
+    expect(pdf.title, 'Engine Title');
+    expect(pdf.logicalUnitCount, BigInt.two);
     await expectLater(
-      bridge.records.createAnnotation(
-        document: document,
-        surface: _surface('text', resourcePath: 'a.xhtml'),
-        unit: BigInt.zero,
-        start: BigInt.zero,
-        end: BigInt.one,
-        displayScale: 1,
-        color: FlutterHighlightColor.yellow,
+      bridge.epubBook(
+        document: pdf.handle,
         cancellationId: bridge.createCancellation(),
+      ),
+      throwsA(isA<FlutterBridgeError>()),
+    );
+
+    // No extension: the leading `mimetype` entry names the EPUB.
+    final bare = '${directory.path}/book';
+    File(_epubFixture).copySync(bare);
+    final epub = await bridge.openDocument(
+      request: FlutterOpenRequest(localId: 'e', pathKey: bare),
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(epub.format, FlutterBookFormat.epub);
+    expect(epub.bookId, isNull);
+
+    bridge.dispose();
+    expect(bridge.isDisposed, isTrue);
+    expect(bridge.releaseDocument(handle: epub.handle), isFalse);
+  });
+
+  test('a document that cannot be opened reports why', () async {
+    Future<FlutterBridgeErrorKind> failure(String path) async {
+      try {
+        await bridge.openDocument(
+          request: FlutterOpenRequest(localId: path, pathKey: path),
+          cancellationId: bridge.createCancellation(),
+        );
+      } on FlutterBridgeError catch (error) {
+        return error.kind;
+      }
+      fail('$path opened');
+    }
+
+    expect(
+      await failure('${directory.path}/missing.epub'),
+      FlutterBridgeErrorKind.notFound,
+    );
+    final broken = File('${directory.path}/broken.epub')
+      ..writeAsStringSync('not a zip');
+    expect(await failure(broken.path), FlutterBridgeErrorKind.malformed);
+    final text = File('${directory.path}/notes')..writeAsStringSync('notes');
+    expect(await failure(text.path), FlutterBridgeErrorKind.unsupported);
+
+    final cancelled = bridge.createCancellation();
+    bridge.cancel(id: cancelled);
+    await expectLater(
+      bridge.openDocument(
+        request: const FlutterOpenRequest(localId: 'e', pathKey: _epubFixture),
+        cancellationId: cancelled,
       ),
       throwsA(
         isA<FlutterBridgeError>().having(
           (error) => error.kind,
           'kind',
-          FlutterBridgeErrorKind.invalidRequest,
+          FlutterBridgeErrorKind.cancelled,
         ),
       ),
     );

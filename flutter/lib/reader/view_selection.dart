@@ -190,8 +190,6 @@ class _ReachableSelectableSurface extends StatelessWidget {
                 key: ValueKey((
                   model.generation,
                   model.unit,
-                  surface.handle.registry,
-                  surface.handle.id,
                   epubPage?.pageIndex,
                 )),
                 surface: surface,
@@ -204,14 +202,18 @@ class _ReachableSelectableSurface extends StatelessWidget {
             ),
           ),
         );
-        if (document.format == FlutterBookFormat.epub &&
-            model.typography.continuous) {
+        final continuousPage = model.continuousPresentation ? epubPage : null;
+        if (continuousPage != null) {
+          // A continuous chapter is one page as tall as the chapter: the view
+          // scrolls it, and starts at the location the page was requested for.
           return KeyedSubtree(
             key: presentationKey,
-            child: SingleChildScrollView(
+            child: _ContinuousEpubScroll(
               key: ValueKey(
                 'reader-vertical-scroll-${model.generation}-${model.unit}',
               ),
+              page: continuousPage,
+              revealRevision: model.locationRequestRevision,
               child: content(
                 Size(
                   constraints.maxWidth,
@@ -260,6 +262,94 @@ class _ReachableSelectableSurface extends StatelessWidget {
       },
     );
   }
+}
+
+/// Scrolls a continuous EPUB chapter, and brings the location each explicit
+/// request was for into view.
+///
+/// Every location request (an open, a chapter change, a Contents entry, a
+/// bookmark, a search hit, a link) advances [revealRevision], and its page's
+/// target line is scrolled to the top of the view — the chapter start
+/// included, and the same location again after the reader scrolled away. A
+/// passive relayout (a resize, a height refresh) installs a page with the same
+/// revision and keeps the scroll offset the reader has.
+class _ContinuousEpubScroll extends StatefulWidget {
+  const _ContinuousEpubScroll({
+    super.key,
+    required this.page,
+    required this.revealRevision,
+    required this.child,
+  });
+
+  final ReaderEpubPage page;
+
+  /// The model's [ReaderModel.locationRequestRevision] [page] answers.
+  final int revealRevision;
+  final Widget child;
+
+  @override
+  State<_ContinuousEpubScroll> createState() => _ContinuousEpubScrollState();
+}
+
+class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _revealTarget();
+  }
+
+  @override
+  void didUpdateWidget(_ContinuousEpubScroll oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.revealRevision != oldWidget.revealRevision) _revealTarget();
+  }
+
+  void _revealTarget() {
+    final revision = widget.revealRevision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // A newer request scheduled its own reveal: this one is superseded and
+      // must not move the view back. A passive relayout in between keeps the
+      // revision, so the target is read from the page installed now.
+      if (!mounted ||
+          !_scroll.hasClients ||
+          widget.revealRevision != revision) {
+        return;
+      }
+      final page = widget.page;
+      // The chapter start is a target like any other: it scrolls to the top.
+      final top = page.targetScalar <= page.canonicalStart
+          ? 0.0
+          : (_continuousTargetTop(page) ?? kEpubPageMargin) - kEpubPageMargin;
+      final position = _scroll.position;
+      _scroll.jumpTo(
+        top.clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      SingleChildScrollView(controller: _scroll, child: widget.child);
+}
+
+/// The top, in page coordinates, of the line holding [page]'s target scalar
+/// (the first caret at or after it), or null when the page has none.
+double? _continuousTargetTop(ReaderEpubPage page) {
+  final target = BigInt.from(page.targetScalar);
+  FlutterSelectionEndpoint? best;
+  for (final endpoint in page.surface.endpoints) {
+    if (endpoint.offset < target) continue;
+    if (best == null || endpoint.offset < best.offset) best = endpoint;
+  }
+  return best?.rect.top;
 }
 
 /// Reports the content box's laid-out size after it changes.

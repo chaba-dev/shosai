@@ -1361,9 +1361,7 @@ Uint8List _book({
 Directory _findFixtures() {
   var directory = Directory.current.absolute;
   while (true) {
-    final candidate = Directory(
-      '${directory.path}/crates/shosai-core/tests/fixtures',
-    );
+    final candidate = Directory('${directory.path}/fixtures');
     if (candidate.existsSync()) return candidate;
     final parent = directory.parent;
     if (parent.path == directory.path) {

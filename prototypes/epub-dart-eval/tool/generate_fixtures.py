@@ -8,10 +8,10 @@ Usage (from the repository root):
 Writes `rich-chapter.epub`, `long-chapter.epub`, `long-chapter-stress.epub` and
 `huge-paragraph.epub` next to this script's
 `../fixtures/` directory plus a SHA256SUMS file. The generator mirrors the
-conventions of `crates/shosai-core/tests/fixtures/epub-conformance/generate.py`:
+conventions of `fixtures/epub-conformance/generate.py`:
 fixed ZIP timestamps, stored entries, and a deterministic byte layout so the
 recorded hashes are reproducible. It reuses the repository's admitted font
-fixture (`crates/shosai-core/tests/fixtures/fonts/epub/book-a.ttf`) as the embedded font.
+fixture (`fixtures/fonts/epub/book-a.ttf`) as the embedded font.
 
 `--check` re-generates into a temporary directory and compares hashes instead of
 writing.
@@ -30,7 +30,7 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
-FONT_TTF = ROOT / "crates" / "shosai-core" / "tests" / "fixtures" / "fonts" / "epub" / "book-a.ttf"
+FONT_TTF = ROOT / "fixtures" / "fonts" / "epub" / "book-a.ttf"
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 
 

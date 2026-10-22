@@ -11,9 +11,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/view.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'bridge_pdf_engine.dart';
 import 'bridge_records.dart';
+import 'epub_navigation_fixture.dart';
+import 'package:shosai_epub/shosai_epub.dart' show EpubBook, openEpubBytes;
 
 /// Test support for rendering and inspecting the production shell.
 ///
@@ -428,8 +430,8 @@ class HarnessBridge
 
   /// Cancellation ids the bridge was asked to cancel.
   ///
-  /// The retained bridge refuses a read whose token was cancelled while it was
-  /// held; the harness models that for a held source read.
+  /// A source read whose token was cancelled while it was held fails; the
+  /// harness models that for a held source read.
   final Set<BigInt> cancelledIds = <BigInt>{};
   BigInt _nextBuffer = BigInt.one;
   bool _disposed = false;
@@ -613,14 +615,10 @@ class HarnessBridge
     // A PDF surface is its bitmap, as the Dart engine's is; an EPUB surface
     // is laid out to the requested width.
     return FlutterSelectionSurface(
-      handle: FlutterSelectionHandle(registry: BigInt.one, id: unit),
       width: format == FlutterBookFormat.pdf ? pageWidth.toDouble() : width,
       height: pageHeight.toDouble(),
       text: 'Page ${unit + BigInt.one} of the deterministic harness document.',
       copyEligible: true,
-      raster: format == FlutterBookFormat.epub
-          ? _rasterFor(unit.toInt())
-          : null,
       endpoints: const [],
       graphemeBoundaries: Uint32List(0),
       wordBoundaries: Uint32List(0),
@@ -630,20 +628,15 @@ class HarnessBridge
 
   /// The EPUB archive bytes the harness serves for an open document.
   ///
-  /// Empty by default: a harness reader without EPUB bytes keeps every chapter
-  /// on the retained renderer, which is what the existing surface fixtures
-  /// exercise.
-  Uint8List epubBytes = Uint8List(0);
-
-  /// The canonical stream the harness reports per unit, when the Dart engine
-  /// path asks for the comparison.
-  Map<int, String> canonicalTexts = const {};
+  /// [harnessEpub] by default: [unitCount] chapters, each one line of the
+  /// deterministic harness text.
+  late Uint8List epubBytes = harnessEpub(unitCount);
 
   /// Pending source-read answers, consumed before [epubBytes].
   ///
   /// A test uses one to hold the archive read open while it supersedes the
   /// request that started it; a read whose token is cancelled while it is held
-  /// then fails like the retained bridge's.
+  /// then fails.
   final List<Completer<Uint8List>> epubSourceCompleters =
       <Completer<Uint8List>>[];
 
@@ -651,27 +644,32 @@ class HarnessBridge
   final List<BigInt> epubSourceCancellations = <BigInt>[];
 
   int epubSourceCalls = 0;
-  int epubCanonicalCalls = 0;
 
-  /// Pending canonical-stream answers, consumed before [canonicalTexts].
-  ///
-  /// A test uses one to hold the comparison open while it supersedes the
-  /// layout that started it (a resize), which is how the retry path is
-  /// exercised.
-  final List<Completer<String>> epubCanonicalCompleters = <Completer<String>>[];
-
+  /// The book behind an open EPUB: [epubBytes] (or a held source read),
+  /// parsed on the calling isolate so fake-async tests finish it.
   @override
-  Future<Uint8List> epubSourceBytes({
+  Future<EpubBook> epubBook({
     required FlutterDocumentHandle document,
     required BigInt cancellationId,
   }) async {
+    final bytes = await _epubSourceBytes(cancellationId);
+    try {
+      return openEpubBytes(bytes);
+    } on Exception catch (error) {
+      throw FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.malformed,
+        message: 'The EPUB cannot be read: $error',
+      );
+    }
+  }
+
+  Future<Uint8List> _epubSourceBytes(BigInt cancellationId) async {
     epubSourceCalls += 1;
     epubSourceCancellations.add(cancellationId);
     if (epubSourceCompleters.isNotEmpty) {
       final bytes = await epubSourceCompleters.removeAt(0).future;
-      // A read whose token was cancelled while it was held fails, like the
-      // retained bridge; the caller then retries or keeps the retained
-      // renderer.
+      // A read whose token was cancelled while it was held fails; the caller
+      // then retries.
       if (cancelledIds.contains(cancellationId)) {
         throw const FlutterBridgeError(
           kind: FlutterBridgeErrorKind.cancelled,
@@ -687,26 +685,6 @@ class HarnessBridge
       );
     }
     return epubBytes;
-  }
-
-  @override
-  Future<String> epubCanonicalText({
-    required FlutterDocumentHandle document,
-    required BigInt unit,
-    required BigInt cancellationId,
-  }) async {
-    epubCanonicalCalls += 1;
-    if (epubCanonicalCompleters.isNotEmpty) {
-      return epubCanonicalCompleters.removeAt(0).future;
-    }
-    final text = canonicalTexts[unit.toInt()];
-    if (text == null) {
-      throw FlutterBridgeError(
-        kind: FlutterBridgeErrorKind.invalidRequest,
-        message: 'the harness has no canonical text for unit $unit',
-      );
-    }
-    return text;
   }
 
   @override
@@ -727,8 +705,6 @@ class HarnessBridge
   /// released that the reader was never given).
   final List<FlutterBufferHandle> takenBuffers = <FlutterBufferHandle>[];
   final List<FlutterBufferHandle> releasedBuffers = <FlutterBufferHandle>[];
-  final List<FlutterSelectionHandle> releasedSelections =
-      <FlutterSelectionHandle>[];
   final List<FlutterDocumentHandle> releasedDocuments =
       <FlutterDocumentHandle>[];
 
@@ -748,12 +724,6 @@ class HarnessBridge
   @override
   bool releaseDocument({required FlutterDocumentHandle handle}) {
     releasedDocuments.add(handle);
-    return true;
-  }
-
-  @override
-  bool releaseSelection({required FlutterSelectionHandle handle}) {
-    releasedSelections.add(handle);
     return true;
   }
 
@@ -854,11 +824,6 @@ class HarnessBridge
     required FlutterDocumentHandle target,
     required BigInt cancellationId,
   }) async => FlutterAnnotationAssociationOutcome.associated;
-
-  @override
-  FlutterSelectionSurface roundTripVisibleScene({
-    required FlutterSelectionSurface scene,
-  }) => scene;
 
   @override
   void dispose() {

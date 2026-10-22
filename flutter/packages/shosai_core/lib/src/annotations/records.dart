@@ -49,21 +49,23 @@ final class AnnotationRecords {
 
   final Store _store;
 
-  Future<StoredAnnotation> create(int bookId, NewAnnotation annotation) =>
-      _store.transaction((db) => _create(db, bookId, annotation));
+  Future<StoredAnnotation> create(
+    AnnotationOwner owner,
+    NewAnnotation annotation,
+  ) => _store.transaction((db) => _create(db, owner, annotation));
 
-  Future<BookAnnotations> list(int bookId) =>
-      _store.read((db) => _list(db, bookId));
+  Future<BookAnnotations> list(AnnotationOwner owner) =>
+      _store.read((db) => _list(db, owner));
 
   Future<bool> update(
-    int bookId,
+    AnnotationOwner owner,
     String id,
     HighlightColor color,
     String? body,
-  ) => _store.transaction((db) => _update(db, bookId, id, color, body));
+  ) => _store.transaction((db) => _update(db, owner, id, color, body));
 
-  Future<bool> delete(int bookId, String id) =>
-      _store.transaction((db) => _delete(db, bookId, id));
+  Future<bool> delete(AnnotationOwner owner, String id) =>
+      _store.transaction((db) => _delete(db, owner, id));
 
   Future<AssociationSourcePage> associationSources(
     int bookId,
@@ -98,6 +100,33 @@ const _nextModifiedAt = '''CASE WHEN $_now > modified_at THEN $_now
 
 typedef _Book = ({String hash, String format, String title});
 
+/// Whose annotations a query reaches: a library book, or a content opened
+/// outside the library. Holds only sendable values.
+sealed class AnnotationOwner {
+  const AnnotationOwner();
+}
+
+final class LibraryBookOwner extends AnnotationOwner {
+  const LibraryBookOwner(this.bookId);
+
+  final int bookId;
+}
+
+final class ContentOwner extends AnnotationOwner {
+  const ContentOwner(this.content);
+
+  final AnnotatedContent content;
+}
+
+_Book _owner(Database db, AnnotationOwner owner) => switch (owner) {
+  LibraryBookOwner(:final bookId) => _book(db, bookId),
+  ContentOwner(:final content) => (
+    hash: content.contentHash,
+    format: content.format.name,
+    title: content.title,
+  ),
+};
+
 _Book _book(Database db, int bookId) {
   final row = db.select(
     'SELECT content_hash, format, title FROM books WHERE id = ?',
@@ -113,16 +142,23 @@ _Book _book(Database db, int bookId) {
   );
 }
 
-typedef _Version = ({String id, String documentId});
+typedef _Version = ({String id, String documentId, String format});
 
 _Version? _version(Database db, String hash) {
-  final row = db.select(
-    'SELECT id, document_id FROM annotation_document_versions WHERE content_hash = ?',
-    [hash],
-  ).firstOrNull;
+  final row = db
+      .select(
+        '''SELECT id, document_id, format FROM annotation_document_versions
+       WHERE content_hash = ?''',
+        [hash],
+      )
+      .firstOrNull;
   return row == null
       ? null
-      : (id: row.columnAt(0) as String, documentId: row.columnAt(1) as String);
+      : (
+          id: row.columnAt(0) as String,
+          documentId: row.columnAt(1) as String,
+          format: row.columnAt(2) as String,
+        );
 }
 
 /// The book's version, created (with a new document) on its first
@@ -142,7 +178,7 @@ _Version _ensureVersion(Database db, _Book book) {
        VALUES (?, ?, ?, ?, ?)''',
     [versionId, documentId, book.format, book.hash, book.title],
   );
-  return (id: versionId, documentId: documentId);
+  return (id: versionId, documentId: documentId, format: book.format);
 }
 
 /// Throw unless the document's live annotations are within the snapshot
@@ -178,8 +214,12 @@ void _checkSnapshot(Database db, String documentId) {
   }
 }
 
-StoredAnnotation _create(Database db, int bookId, NewAnnotation annotation) {
-  final book = _book(db, bookId);
+StoredAnnotation _create(
+  Database db,
+  AnnotationOwner owner,
+  NewAnnotation annotation,
+) {
+  final book = _owner(db, owner);
   final anchor = annotation.anchor;
   final format = switch (anchor) {
     EpubAnchor() => 'epub',
@@ -192,6 +232,13 @@ StoredAnnotation _create(Database db, int bookId, NewAnnotation annotation) {
     );
   }
   final version = _ensureVersion(db, book);
+  if (version.format != format) {
+    // Only a content opened outside the library names its own format.
+    throw CoreException.invalidRequest(
+      'The content was annotated as ${version.format.toUpperCase()}, not '
+      '${format.toUpperCase()}.',
+    );
+  }
   final id = newUuid();
   final quote = annotation.quote;
   final epub = anchor is EpubAnchor ? anchor : null;
@@ -334,8 +381,8 @@ List<PageRect> decodeRectangles(Uint8List bytes) {
   return checkRectangles(rectangles, kind: CoreErrorKind.malformed);
 }
 
-BookAnnotations _list(Database db, int bookId) {
-  final book = _book(db, bookId);
+BookAnnotations _list(Database db, AnnotationOwner owner) {
+  final book = _owner(db, owner);
   final version = _version(db, book.hash);
   if (version == null) return BookAnnotations(book.hash, const []);
   final rows = db.select(
@@ -364,12 +411,12 @@ const _ownedBy = '''id = ? AND deleted_at IS NULL AND version_id IN (
 
 bool _update(
   Database db,
-  int bookId,
+  AnnotationOwner owner,
   String id,
   HighlightColor color,
   String? body,
 ) {
-  final version = _version(db, _book(db, bookId).hash);
+  final version = _version(db, _owner(db, owner).hash);
   if (version == null) return false;
   db.execute(
     '''UPDATE annotations SET color = ?, body = ?, modified_at = $_nextModifiedAt
@@ -381,8 +428,8 @@ bool _update(
   return true;
 }
 
-bool _delete(Database db, int bookId, String id) {
-  final version = _version(db, _book(db, bookId).hash);
+bool _delete(Database db, AnnotationOwner owner, String id) {
+  final version = _version(db, _owner(db, owner).hash);
   if (version == null) return false;
   db.execute(
     '''UPDATE annotations SET deleted_at = $_now, modified_at = $_nextModifiedAt

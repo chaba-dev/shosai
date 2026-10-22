@@ -11,9 +11,11 @@ artifacts record validated packaging techniques but do not constrain the
 unreleased Flutter host or its native-library layout.
 
 NOTE: Package items below that name a Rust library, bridge or Cargo toolchain
-predate RFD 4's 2026-10-21 decision for a Dart-only core (milestone M3.0);
-the artifact for each target is the Flutter host with the pinned PDFium and
-SQLite libraries its Dart bindings load.
+predate RFD 4's 2026-10-21 decision for a Dart-only core (milestone M3.0),
+which removed the Rust core the same day. The artifact for each target is the
+Flutter host with the pinned PDFium and SQLite libraries its Dart bindings
+bundle as native assets (`pdfrx` and `package:sqlite3` build hooks); the
+packaging work verifies those libraries, their checksums and their notices.
 
 == Current Repository State
 

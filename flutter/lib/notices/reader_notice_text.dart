@@ -27,3 +27,13 @@ final class ReaderExportFailedNotice implements NoticeText {
   String resolve(AppLocalizations localizations) =>
       localizations.noticeReaderExportFailed;
 }
+
+/// Brief notice when a continuous reader shows a chapter over the continuous
+/// ceilings as pages.
+final class ReaderChapterPaginatedNotice implements NoticeText {
+  const ReaderChapterPaginatedNotice();
+
+  @override
+  String resolve(AppLocalizations localizations) =>
+      localizations.noticeReaderChapterPaginated;
+}

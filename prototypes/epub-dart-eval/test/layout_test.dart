@@ -19,7 +19,7 @@ EpubBook _fixture(String name) {
   final local = File('fixtures/$name');
   final path = local.existsSync()
       ? local.path
-      : '../../crates/shosai-core/tests/fixtures/epub-conformance/$name';
+      : '../../fixtures/epub-conformance/$name';
   return openEpubBytes(Uint8List.fromList(File(path).readAsBytesSync()));
 }
 

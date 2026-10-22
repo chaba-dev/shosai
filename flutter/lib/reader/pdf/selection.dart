@@ -18,7 +18,7 @@ import 'dart:typed_data';
 
 import 'package:characters/characters.dart';
 import 'package:shosai_epub/shosai_epub.dart' show navigationBoundaries;
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 /// Maximum number of character endpoints retained for one selectable page.
 const int pdfSelectionMaxEndpoints = 65536;
@@ -284,13 +284,11 @@ PdfPageSelection buildPdfPageSelection({
   }
   return PdfPageSelection(
     surface: FlutterSelectionSurface(
-      handle: FlutterSelectionHandle(registry: BigInt.zero, id: BigInt.zero),
       width: bitmapWidth.toDouble(),
       height: bitmapHeight.toDouble(),
       text: ownedText,
       copyEligible: mappingComplete,
       resourcePath: null,
-      raster: null,
       endpoints: endpoints,
       graphemeBoundaries: Uint32List.fromList(boundaries.graphemes),
       wordBoundaries: Uint32List.fromList(boundaries.words),

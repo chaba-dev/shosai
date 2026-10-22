@@ -43,9 +43,9 @@ for width in 700 1000; do
   # The sample's two chapters can share one spread, so only single-page mode has
   # a stable transition between page-turn destinations.
   if [[ "$width" == 700 ]]; then
-    run "$root/crates/shosai-core/tests/fixtures/sample.epub" chapter "$width"
+    run "$root/fixtures/sample.epub" chapter "$width"
   fi
-  run "$root/crates/shosai-core/tests/fixtures/sample.epub" relayout "$width"
+  run "$root/fixtures/sample.epub" relayout "$width"
   for fixture in "$fixtures/large-text.epub" "$fixtures/large-image.epub"; do
     run "$fixture" warm "$width"
     run "$fixture" chapter "$width"

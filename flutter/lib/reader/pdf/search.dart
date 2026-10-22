@@ -7,7 +7,7 @@
 /// annotations do.
 library;
 
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 /// Search limits shared with the retained core's defaults.
 final class PdfSearchLimits {

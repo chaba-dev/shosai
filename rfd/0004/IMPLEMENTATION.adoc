@@ -29,6 +29,9 @@ back to. `crates/shosai-flutter-bridge` is the generated boundary.
 (link:PHASE-0.adoc[Phase 0], link:PHASE-1.adoc[Phase 1],
 link:PHASE-2.adoc[Phase 2]) stay as evidence. M3.1 delivered the library slice
 on it.
+* M3.0 slice 3 (2026-10-21) removed the Rust crates, the bridge and the Rust
+toolchain: the controllers above now run on `flutter/packages/shosai_core`,
+`pdfrx` and `shosai_epub`. The two bullets above describe the starting point.
 * The application is unreleased. Development databases, persisted anchors and
 internal APIs may be reset or replaced rather than carrying temporary
 compatibility machinery; no development data is deleted without an explicit
@@ -300,12 +303,18 @@ verifies no checksum; links and destinations are exposed by the engine and
 not yet navigable in the reader (outcome 5); the fixture corpus and the M0
 raster budgets on macOS and a physical Android device; `flutter test` loads
 PDFium from `SHOSAI_PDFIUM_LIBRARY` (the Nix shell) or `PDFIUM_PATH` because
-it does not link native assets. The Rust core's `pdfium-render` initialises
-PDFium before each call and destroys it after; where it and pdfrx load the same
-image (one `SHOSAI_PDFIUM_LIBRARY` in tests, likely one `lib/libpdfium.so` in
-the Linux bundle and the Android APK), a Rust PDF open tears PDFium down under
-pdfrx and the next page load crashes. pdfrx loads a private copy of an
-environment library; the packaged hosts are unproven until Removal.
+it does not link native assets.
+** [x] PDFium sharing (Removal, 2026-10-21): the Rust core's `pdfium-render`
+initialised PDFium before each call and destroyed it after, so a Rust PDF open
+tore PDFium down under pdfrx wherever both loaded the same image. With the
+Rust core gone pdfrx is the only PDFium user in the process and loads the
+environment library directly again (the private-copy workaround is removed).
+`flutter/integration_test/packaged_core_test.dart` imports a PDF (cover
+render), opens and searches it through the application bridge and renders it
+through a second engine document in one packaged process. CI runs it on the
+Linux debug bundle under Xvfb (`make test-flutter-packaged-linux`) and on the
+macOS host (`make test-flutter-packaged-macos`), with no PDFium override;
+Android is not run yet.
 * [ ] *Store.* Add the Dart SQLite binding (`sqlite3`; `drift` only if typed
 queries and migration tooling justify its code generation) in the application
 core package, with a single connection owner, ordered migrations written fresh
@@ -318,8 +327,14 @@ owns the only connection; ordered migrations stamp `user_version` and an
 `application_id`, and refuse foreign or newer databases untouched; WAL with a
 killed-writer recovery test. `package:sqlite3` 3.5.2 bundles SQLite 3.53.4
 through its build hook (the newest release Flutter 3.41.5 resolves). The app
-depends on the package and opens the store at launch. Open: the packaged-host
-and Android load proofs.
+depends on the package and opens the store at launch. The packaged Linux
+debug bundle loads its bundled `libsqlite3.so` and `libpdfium.so`
+(`flutter/integration_test/packaged_core_test.dart`, in CI). Both are mapped
+to bare-name `dlopen` calls from the engine library, which find them only
+through its `$ORIGIN` RUNPATH; the pinned nixpkgs dropped that, so before
+2026-10-21 no Linux bundle built in the Nix shell could load SQLite, and
+`flake.nix` now restores it. Open: the first passing macOS run and the
+Android load proof.
 * [ ] *Records.* Port library and import (referenced and private managed
 copies, bounded archive preflight, cover extraction, deferred cleanup,
 duplicate detection by content identity), open books and reading state,
@@ -339,15 +354,28 @@ orphaned resolution, bounded quote recovery in isolate batches) and search
 limits), with the Rust integration tests ported as Dart tests.
 ** [x] Controllers (2026-10-21): the library and reader controllers read
 records through `ShosaiRecords` (`flutter/lib/core/records.dart`); the app's
-`ApplicationBridge` serves them from the Dart core and still delegates
-documents to the Rust bridge. EPUB search runs in the Dart core; annotations
-read EPUB chapter text from the retained canonical stream, which both
-renderers' selection surfaces index, and PDF page text from the PDF engine.
-** [ ] Open: documents opened from a file outside the library keep no
-highlights (the Rust store keyed them by path); the Rust document session and
-canonical stream remain until Removal; PDF search is still duplicated in
+`ApplicationBridge` serves them from the Dart core. EPUB search runs in the
+Dart core; annotations read EPUB chapter text from the canonical stream and
+PDF page text from the PDF engine. Removal moved the documents too:
+`flutter/lib/core/documents.dart` opens EPUB books through `shosai_epub` and
+PDF documents through the PDF engine, and the reader reads an open EPUB's
+parsed book from the bridge instead of parsing the file again.
+** [x] Documents (2026-10-21): every document reads one immutable snapshot
+of its file, checked against the content hash before anything is parsed: an
+EPUB's bytes are read once (bounded and cancellable) and parsed from memory; a
+PDF is copied into a private per-process directory beside the database, and
+its metadata, rendering, text and annotations read that copy until the
+document is released. A library book whose file no longer holds its content
+is rejected without a document. Files opened outside the library keep their
+highlights and notes under the content hash of that snapshot, so they survive
+closing and reopening the same bytes and are the library book's own once the
+file is imported. A bridge that is disposed cancels its operations, rejects
+and releases documents that finish opening afterwards, and releases each
+document after the operations using it; the application's `CoreOwner` closes
+the shared core once its bridges have drained.
+** [ ] Open: PDF search is still duplicated in
 `flutter/lib/reader/pdf/search.dart`.
-* [ ] *Removal.* Delete `crates/`, `Cargo.toml`, `Cargo.lock`,
+* [x] *Removal.* Delete `crates/`, `Cargo.toml`, `Cargo.lock`,
 `flutter/rust_builder`, `flutter/lib/src/rust`, the `flutter_rust_bridge`
 and `ffigen` dependencies, the bridge codegen and `check-frb` Makefile
 targets, the Rust format, lint, test and bridge-codegen CI jobs, the Rust
@@ -355,9 +383,36 @@ toolchain and `pdfium-binaries` from the Nix flake and the Windows CI job,
 `scripts/generate-theme-tokens.py`'s Rust authority entries, and the
 retained-renderer routing gate in the EPUB reader. Rewrite the Makefile's
 `test`, `lint` and `fmt` targets around Flutter and the scripts.
-* [ ] *Documents.* Update the Flutter architecture contract, the roadmap, the
+** [x] Slice 3 (2026-10-21): the crates, the bridge package, the generated
+API, the bridge codegen and its checks, the Rust CI jobs (including Windows),
+the Rust toolchain in the flake and the M2 measurement tool that drove the
+Rust bridge are deleted; `flutter/lib/core/bridge.dart` keeps the bridge's
+Dart contract for the controllers and their fakes. The shared test fixtures
+moved from `crates/shosai-core/tests/fixtures` to `fixtures/`. The release
+version now lives in `flutter/pubspec.yaml`. Controller and reader tests that
+drove EPUB through the retained raster surface run on PDF fakes or on the Dart
+EPUB page. The flake keeps `pdfium-binaries` only to give `flutter test` a
+PDFium (`SHOSAI_PDFIUM_LIBRARY`). The theme token generator has no Rust
+authority entry; its remaining Iced references are the token source's
+historical authority, handled with the design tokens.
+** [x] Continuous EPUB reading (decided 2026-10-21: rebuild it rather than
+drop it with the retained renderer, which was the only one that drew it). A
+continuous chapter is measured whole, in the same bounded and yielding batches
+the paginated window fills with, and installed as one page of unbounded height
+that the reader scrolls (`paginateWindow` and `pageWindowFor` in
+`flutter/lib/reader/epub/content.dart`). PageDown and PageUp move between
+chapters, as they did on the retained renderer; a location inside the chapter
+(a restored position, a contents entry, a bookmark, a link) scrolls its line
+to the top of the view. The scroll offset itself is not durable: the reading
+state keeps the requested location. The prototype's continuous tiles, which
+bound the retained layout of a very long chapter, are not ported.
+** [ ] Open: the macOS baseline `flutter/test/goldens/macos/reader-epub-1280.png`
+still shows the retained raster and needs a re-capture on a Mac; the Android
+ABI filter and the PDFium and SQLite licence notices in the packaged hosts.
+* [x] *Documents.* Update the Flutter architecture contract, the roadmap, the
 design system's ownership notes, RFD 2, 3, 5 and 6 where they name the Rust
 core, and record the slice reports in the Dart document stack evaluation plan.
+The design system's ownership notes already name no Rust core.
 
 *Exit*: the Dart core gate in the RFD passes; no Rust remains in the build,
 the repository's checks or the packaged hosts, and M3.1's library slice and

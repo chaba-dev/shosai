@@ -81,7 +81,8 @@ the Dart application core; the PDF adapter maps through a Dart-owned PDFium
 binding's page text and character bounds instead of the Rust adapter; the
 Dart core becomes the only database writer. The layered anchor model, the
 resolution states and every rule in this RFD are unchanged; "Rust" in the
-sections below names the implementation this RFD was written against.
+sections below names the implementation this RFD was written against, which
+M3.0 removed on 2026-10-21.
 ====
 
 The first release uses each format's natural document boundary.  An EPUB

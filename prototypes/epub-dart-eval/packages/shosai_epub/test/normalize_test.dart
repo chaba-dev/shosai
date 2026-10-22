@@ -171,7 +171,7 @@ void main() {
 
   group('fixtures', () {
     final fixtureRoot = Directory(
-      '../../../../crates/shosai-core/tests/fixtures/epub-conformance',
+      '../../../../fixtures/epub-conformance',
     );
 
     Uint8List fixture(String name) =>

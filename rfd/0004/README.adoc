@@ -203,8 +203,8 @@ Footnotes whose text is already in the peek need no jump.
 
 Recorded from owner review on 2026-10-14 and 2026-10-20.
 
-* *EPUB defaults to paginated reading.* Continuous scrolling may follow as an
-  option but is not the default.
+* *EPUB defaults to paginated reading.* Continuous scrolling is an option, one
+  scrolled chapter at a time, but is not the default.
 * *Two-page spreads are the default for EPUB and PDF.* Readers can switch
   between one and two pages. Spreads follow the book's page progression, so a
   right-to-left book places its first page on the right. Where two pages would

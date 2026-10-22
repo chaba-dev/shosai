@@ -208,7 +208,6 @@
 				33CC10EA2044A3C60003C045 /* Frameworks */,
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
-				53484F534149425249444745 /* Build and Bundle Rust Bridge */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
 			);
 			buildRules = (
@@ -309,27 +308,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "echo \"$PRODUCT_NAME.app\" > \"$PROJECT_DIR\"/Flutter/ephemeral/.app_filename && \"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh embed\n";
-		};
-		53484F534149425249444745 /* Build and Bundle Rust Bridge */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Build and Bundle Rust Bridge";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libshosai_flutter_bridge.dylib",
-				"$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libpdfium.dylib",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -eu\nbridge_build=\"$PROJECT_TEMP_DIR/shosai-flutter-bridge\"\ncmake -S \"$SRCROOT/../rust_builder/macos\" -B \"$bridge_build\" -DCMAKE_BUILD_TYPE=\"$CONFIGURATION\"\ncmake --build \"$bridge_build\" --config \"$CONFIGURATION\"\nframeworks=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\nmkdir -p \"$frameworks\"\nidentity=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\nfor library in \"$bridge_build/bundle/libshosai_flutter_bridge.dylib\" \"$bridge_build/bundle/libpdfium.dylib\"; do\n  cp -f \"$library\" \"$frameworks/\"\n  codesign --force --sign \"$identity\" \"$frameworks/$(basename \"$library\")\"\ndone\n";
 		};
 		33CC111E2044C6BF0003C045 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;

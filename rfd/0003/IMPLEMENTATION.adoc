@@ -11,9 +11,10 @@ Dart-only since 2026-10-21) and exposes configuration and status through the
 Flutter frontend.
 
 NOTE: The `crates/shosai-core` paths below describe the Rust store this plan
-was written against; RFD 4's milestone M3.0 ports those records to Dart. The
-plan is re-pointed at the Dart core when this RFD leaves ideation; its
-identity, conflict and privacy rules are unchanged.
+was written against. RFD 4's milestone M3.0 ported those records to the Dart
+application core (`flutter/packages/shosai_core`) and removed the Rust core on
+2026-10-21. The plan is re-pointed at the Dart core when this RFD leaves
+ideation; its identity, conflict and privacy rules are unchanged.
 
 === Goals
 

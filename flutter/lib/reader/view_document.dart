@@ -65,6 +65,7 @@ class _DocumentViewState extends State<_DocumentView> {
       return Center(
         child: Text(
           model.error ?? 'Document content unavailable',
+          key: const ValueKey('reader-content-error'),
           style: TextStyle(
             color: pageColors(model.typography.theme).foreground,
           ),
@@ -313,7 +314,7 @@ class _DocumentViewState extends State<_DocumentView> {
                                   onContentGeometryChanged:
                                       _bumpContentGeometry,
                                   presentationKey: ValueKey(
-                                    model.typography.continuous
+                                    model.continuousPresentation
                                         ? 'reader-continuous-presentation'
                                         : 'reader-paginated-presentation',
                                   ),

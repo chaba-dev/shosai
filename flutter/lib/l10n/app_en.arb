@@ -632,5 +632,9 @@
   "noticeReaderExportFailed": "Bookmarks could not be exported",
   "@noticeReaderExportFailed": {
     "description": "Package 4C notice copy: persistent failure title after a failed Markdown bookmark export."
+  },
+  "noticeReaderChapterPaginated": "This chapter is too long to scroll continuously, so it is shown as pages",
+  "@noticeReaderChapterPaginated": {
+    "description": "Brief notice in continuous EPUB reading when a chapter is over the continuous-page ceiling and is shown as pages instead."
   }
 }

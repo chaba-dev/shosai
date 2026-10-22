@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Builds the macOS host in debug mode, or runs the given Flutter command (for
+# example `test -d macos ...`) in the same build environment.
+if [[ $# -eq 0 ]]; then
+  set -- build macos --debug
+fi
+
 if [[ "$(uname -s)" != Darwin ]]; then
   echo "error: the Flutter macOS host must be built on macOS" >&2
   exit 1
@@ -57,4 +63,4 @@ exec env \
   -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS \
   -u NIX_CFLAGS_COMPILE -u NIX_CFLAGS_COMPILE_FOR_BUILD \
   -u NIX_LDFLAGS -u NIX_LDFLAGS_FOR_BUILD \
-  "$flutter_executable" build macos --debug
+  "$flutter_executable" "$@"

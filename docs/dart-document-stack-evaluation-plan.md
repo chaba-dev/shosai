@@ -314,6 +314,33 @@ this evaluation.
   hook pins `chromium/7811` by name only), link navigation, the raster budget
   evidence on macOS and Android, and the store-side use of `pdf.rs` until the
   Records slice.
+- **Slice 2, store, records and controllers (2026-10-21).**
+  `flutter/packages/shosai_core` holds the SQLite store (`package:sqlite3`,
+  one worker isolate owning the only connection, ordered migrations stamping
+  `user_version` and an `application_id`, WAL with a killed-writer recovery
+  test) and the records: library and import, reading state, bookmarks and
+  settings keyed by content hash, annotations with layered anchors and bounded
+  quote recovery, and case-folded search, with the Rust integration tests
+  ported as Dart tests. The library and reader controllers read records
+  through `ShosaiRecords`. Closes: one writer, the record round-trips, the
+  anchor states. Leaves open: highlights for files outside the library (the
+  Rust store keyed them by path), the duplicated PDF search, and the packaged
+  SQLite load proofs on macOS and Android.
+- **Slice 3, removal (2026-10-21).** The Rust crates, the bridge package and
+  its codegen, the Rust CI jobs and the Rust toolchain are deleted; the
+  application bridge opens EPUB books through `shosai_epub` and PDF documents
+  through the PDF engine (`flutter/lib/core/documents.dart`), and the EPUB
+  reader takes the parsed book from it with no retained-renderer fallback.
+  Continuous EPUB reading, which only the retained renderer drew, is rebuilt
+  on the Dart layout as one scrolled page per chapter (owner decision,
+  2026-10-21); the prototype's continuous tiles are not ported.
+  The EPUB canonical-stream parity gate against the Rust stream is retired with
+  the Rust stream. Closes: no Rust in the build or the checks; the PDFium
+  sharing crash (pdfrx is the only PDFium user, and
+  `flutter/integration_test/packaged_core_test.dart` drives import, open,
+  search and render on the packaged Linux host with its bundled PDFium and
+  SQLite). Leaves open: the same packaged check on macOS and Android, PDFium
+  checksum verification, and the macOS EPUB shell baseline re-capture.
 
 The "Decisions still required" list below is updated in place; the remaining
 open items there are the ones M3.0 must answer with evidence.

@@ -593,7 +593,7 @@ at that setup must exceed 16,777,216 pixels; demonstrate it from measured extent
 without allocating it. Distinguish this from hostile input tests at each limit
 and +1, including one huge grapheme, image dimensions and page count.
 
-Reuse committed `crates/shosai-core/tests/fixtures/epub-conformance` bytes and
+Reuse committed `fixtures/epub-conformance` bytes and
 `SHA256SUMS` for `bidi`, `fonts`/`fonts-isolation`, `nested-image`, `mathml`, `table`,
 `links`, `css-cascade` and `conformance`. Their XHTML IDs and source assertions in
 `epub_conformance_tests.rs` are independent content oracles. Do not bless current

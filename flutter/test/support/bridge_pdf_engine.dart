@@ -1,18 +1,75 @@
 import 'dart:typed_data';
 
 import 'package:shosai_flutter/reader/pdf/engine.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
+
+/// A fake rendered page: [width] × [height] pixels a fake keeps behind
+/// [handle] until `takeBuffer` hands them over.
+class FlutterRenderedBuffer {
+  const FlutterRenderedBuffer({
+    required this.handle,
+    required this.width,
+    required this.height,
+    required this.byteLen,
+  });
+
+  final FlutterBufferHandle handle;
+  final int width;
+  final int height;
+  final BigInt byteLen;
+}
+
+/// The key of a fake's rendered pixels.
+class FlutterBufferHandle {
+  const FlutterBufferHandle({required this.registry, required this.id});
+
+  final BigInt registry;
+  final BigInt id;
+
+  @override
+  int get hashCode => Object.hash(registry, id);
+
+  @override
+  bool operator ==(Object other) =>
+      other is FlutterBufferHandle &&
+      registry == other.registry &&
+      id == other.id;
+}
 
 /// A [PdfEngine] for a fake bridge: the engine document it opens answers
-/// through the bridge's own `renderPage`, `selectionSurface` and
-/// `searchDocument` fakes, so a fixture bridge keeps one seam and its
-/// counters, completers and recorded layouts stay meaningful for PDFs.
+/// through the fake's [renderPage], [selectionSurface] and `searchDocument`,
+/// so a fixture bridge keeps one seam and its counters, completers and
+/// recorded layouts stay meaningful for PDFs.
 ///
 /// Mixed into a bridge fake: `class Fake with BridgePdfEngine implements
 /// FlutterBridge`. The reader controller uses a bridge that is also an engine
 /// as its engine.
 mixin BridgePdfEngine implements PdfEngine {
   FlutterBridge get _bridge => this as FlutterBridge;
+
+  /// Page [page] of the fake's document at [scale].
+  Future<FlutterRenderedBuffer> renderPage({
+    required FlutterDocumentHandle document,
+    required BigInt page,
+    required double scale,
+    required BigInt cancellationId,
+  });
+
+  /// The selection surface of page [unit] at [scale].
+  Future<FlutterSelectionSurface> selectionSurface({
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required double scale,
+    required double width,
+    required double fontSize,
+    required double lineSpacing,
+    required BigInt cancellationId,
+  });
+
+  /// The pixels behind [handle].
+  Uint8List takeBuffer({required FlutterBufferHandle handle});
+
+  bool releaseBuffer({required FlutterBufferHandle handle});
 
   /// The document handle the engine document passes back to the bridge fakes.
   FlutterDocumentHandle get pdfEngineHandle =>
@@ -73,7 +130,7 @@ final class BridgePdfDocument implements PdfEngineDocument {
 
   @override
   Future<PdfRenderedPage> render(int page, double scale) async {
-    final rendered = await _bridge.renderPage(
+    final rendered = await _engine.renderPage(
       document: _engine.pdfEngineHandle,
       page: BigInt.from(page),
       scale: scale,
@@ -81,9 +138,9 @@ final class BridgePdfDocument implements PdfEngineDocument {
     );
     final Uint8List pixels;
     try {
-      pixels = Uint8List.fromList(_bridge.takeBuffer(handle: rendered.handle));
+      pixels = Uint8List.fromList(_engine.takeBuffer(handle: rendered.handle));
     } finally {
-      _bridge.releaseBuffer(handle: rendered.handle);
+      _engine.releaseBuffer(handle: rendered.handle);
     }
     return PdfRenderedPage(
       width: rendered.width,
@@ -94,7 +151,7 @@ final class BridgePdfDocument implements PdfEngineDocument {
 
   @override
   Future<FlutterSelectionSurface> selectionSurface(int page, double scale) =>
-      _bridge.selectionSurface(
+      _engine.selectionSurface(
         document: _engine.pdfEngineHandle,
         unit: BigInt.from(page),
         scale: scale,

@@ -6,11 +6,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
-    show ExternalLibrary;
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
-import 'package:shosai_flutter/src/rust/frb_generated.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/production_shell_harness.dart';
 import '../support/selection_surface_fixture.dart';
@@ -22,7 +19,7 @@ import '../support/selection_surface_fixture.dart';
 /// What is compared is the chrome and palette the selection surface shares with
 /// the pinned captures: each capture reproduces a committed 1C reference state
 /// with the same fixture bytes, locale, viewport, DPR, document, location and
-/// palette, renders it through the production shell **and the real Rust
+/// palette, renders it through the production shell **and the application
 /// bridge**, then measures the same things on both rendered images — the
 /// center-column color runs (tab strip, header, document area, status row), the
 /// chrome surface, the document paper and the header action ink — with one
@@ -35,7 +32,7 @@ import '../support/selection_surface_fixture.dart';
 ///   cannot be satisfied by them;
 /// - the reference renders a two-page EPUB spread and a page footer; Flutter
 ///   has no pagination/page box yet (5A/5B/5G/5H), so the document area is
-///   compared by paper palette and rendered Rust ink, not by page composition;
+///   compared by paper palette and rendered ink, not by page composition;
 /// - the inherited 4B chrome offset (our document area starts above the
 ///   reference's page box) is measured and recorded, not hidden;
 /// - the chrome is the pinned Iced application palette in every reader theme
@@ -50,10 +47,6 @@ void main() {
   setUpAll(() async {
     if (!supported) return;
     await loadHarnessFonts();
-    final library = Platform.isMacOS
-        ? '../target/debug/libshosai_flutter_bridge.dylib'
-        : '../target/debug/libshosai_flutter_bridge.so';
-    await RustLib.init(externalLibrary: ExternalLibrary.open(library));
     parityDataDirectory = await Directory.systemTemp.createTemp(
       'shosai-4d-parity-',
     );
@@ -86,7 +79,6 @@ void main() {
 
   tearDownAll(() async {
     if (!supported) return;
-    RustLib.dispose();
     await parityDataDirectory.delete(recursive: true);
   });
 
@@ -224,8 +216,7 @@ void main() {
           'documentInkPixels': documentInk,
           'documentCapability':
               'the document band is painted by the reader document renderer '
-              '(the Dart EPUB page window for a routed chapter, the retained '
-              'Rust chapter surface otherwise); the reference spread, page box '
+              '(the Dart EPUB page window); the reference spread, page box '
               'and footer are still 5A/5B/5G/5H, so the document area is '
               'compared by paper palette and rendered ink, not by page '
               'composition',
@@ -1040,13 +1031,13 @@ List<int> _modalColor(
 /// Ink pixels in the rendered document area.
 ///
 /// The document area is the reader's own page box, painted by whichever
-/// document renderer is active (the Dart EPUB page window for a routed
-/// chapter, the retained Rust chapter surface otherwise); measuring the
+/// document renderer is active (the Dart EPUB page window, or the PDF page
+/// image); measuring the
 /// captured frame inside that box proves the document itself has content, so a
 /// placeholder-only capture still measures zero.
 /// The document area is the reader's own page box, painted by whichever
-/// document renderer is active (the Dart EPUB page window for a routed
-/// chapter, the retained Rust chapter surface otherwise).
+/// document renderer is active (the Dart EPUB page window, or the PDF page
+/// image).
 ///
 /// The measurement reads the page box's own repaint boundary rather than the
 /// composed frame: a selection overlay, a panel or a dialog that happens to sit
@@ -1120,8 +1111,7 @@ final bookPathsForTest = <String, String>{};
 late Directory parityDataDirectory;
 
 /// A bridge over the parity library: the Dart core in the data directory,
-/// shared by every bridge, and the Rust bridge's database beside it.
+/// shared by every bridge.
 Future<FlutterBridge> _parityBridge() => createApplicationBridge(
   applicationSupportDirectory: () async => parityDataDirectory,
-  databaseName: 'library.sqlite',
 );

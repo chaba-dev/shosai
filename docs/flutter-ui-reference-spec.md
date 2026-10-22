@@ -59,7 +59,7 @@ from that source, not from an Iced capture.
 | P2 | 1B/1C capture harness (`make reference-shots` or equivalent) | Not implemented | Every `1B-*`/`1C-*` evidence row |
 | P3 | Capture manifest (revision, fixture hash, fonts, size, DPR) | Does not exist | Reference approval, reproduction checks |
 | P4 | Library-state fixture or seed | Does not exist; `make reset` only deletes | Library capture rows |
-| P5 | Fixture provenance records for committed fixtures (`sample.*`, test-only fonts, perf fixtures) | Research complete in the [fixture record](../crates/shosai-core/tests/fixtures/README.md); `sample.*` origins remain unverified. 1B/1C own documented capture fixtures; 2C owns outstanding font records (§5.2). | Fixture citations; redistributability claims |
+| P5 | Fixture provenance records for committed fixtures (`sample.*`, test-only fonts, perf fixtures) | Research complete in the [fixture record](../fixtures/README.md); `sample.*` origins remain unverified. 1B/1C own documented capture fixtures; 2C owns outstanding font records (§5.2). | Fixture citations; redistributability claims |
 | P6 | 2B production-shell golden harness | Not implemented | Golden-based rows, clipping regression checks |
 | P7 | Reader compact breakpoint 860 reviewed against Iced fit | Provisional engineering default; no owner decision required (§3.5, §7.2) | 4B/4C composition rows (test and review, do not block) |
 | P8 | Tab-strip overflow policy | **RESOLVED** by plan decision 11 (2026-09-20); implementation owned by 4B/5F | — |
@@ -541,9 +541,9 @@ Hashes are SHA-256 and were computed from the working copy on 2026-09-20.
 
 | ID | Fixture | Size | Content | SHA-256 | Provenance status |
 | --- | --- | --- | --- | --- | --- |
-| `F1` | `crates/shosai-core/tests/fixtures/sample.epub` | 2,840 B | generated 2-chapter EPUB, 1 px PNG cover | `57875ecbc8b9656d3671f3384d366c89182ccff43df8ed9e5fa8f631d1b4bae6` | generated content; **no in-tree license/provenance record** |
-| `F2` | `crates/shosai-core/tests/fixtures/sample.pdf` | 865 B | 2 pages, Helvetica, "Hello World" | `6bc48cb51d339b242e11ed63dd257ee45f929127fb8ecf50e85d1307bf8b614d` | generated content; no in-tree record |
-| `F3` | `crates/shosai-core/tests/fixtures/sample.cbz` | 827 B | 3 tiny PNG pages, `ComicInfo.xml`, `__MACOSX/.DS_Store` | `1e184f5f978fc541757a9db748081903c6365832ba4f384da725fad0390669a5` | generated content; no in-tree record |
+| `F1` | `fixtures/sample.epub` | 2,840 B | generated 2-chapter EPUB, 1 px PNG cover | `57875ecbc8b9656d3671f3384d366c89182ccff43df8ed9e5fa8f631d1b4bae6` | generated content; **no in-tree license/provenance record** |
+| `F2` | `fixtures/sample.pdf` | 865 B | 2 pages, Helvetica, "Hello World" | `6bc48cb51d339b242e11ed63dd257ee45f929127fb8ecf50e85d1307bf8b614d` | generated content; no in-tree record |
+| `F3` | `fixtures/sample.cbz` | 827 B | 3 tiny PNG pages, `ComicInfo.xml`, `__MACOSX/.DS_Store` | `1e184f5f978fc541757a9db748081903c6365832ba4f384da725fad0390669a5` | generated content; no in-tree record |
 | `F4` | `.../epub-conformance/conformance.epub` | 16,289 B | 8 chapters: fonts, images, tables, math, links, bidi | `2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a` | documented redistribution-safe in `epub-conformance/README.md` |
 | `F5` | `.../epub-conformance/bidi.epub` | 2,492 B | Japanese, Hebrew, Arabic mixed text | `5af9e82d15fa0be324ef7e219ddfc0613cb54b9706addb161c83f188cf9b810d` | documented redistribution-safe |
 | `F6` | `.../epub-conformance/table.epub` | 2,977 B | table overflow and pagination | `9f54aac1fe4026cc06eb255a9d92a57d2d5dca7c7e6e38c8bb3bada847e48409` | documented redistribution-safe |
@@ -572,7 +572,7 @@ Bundled fonts (hashes match `assets/fonts/README.md`):
 `SourceSerif4Variable-Roman.ttf` `14d360ee1b76655da9276628b229e11671bc1f5d1083636144db6677d452cf55`;
 `NotoSerifJP-ShosaiMark-Black.ttf` `1f30507d5c2b12380d0e13883ebf7d9958d34fdf43c47ef071d368468c0f4c61`.
 
-Test-only fonts under `crates/shosai-core/tests/fixtures/fonts/` have licenses but no recorded
+Test-only fonts under `fixtures/fonts/` have licenses but no recorded
 source/version: `InterVariable-Italic.ttf`
 `d6f1f6a172d9e588438db9f986fd5cfad7b30f644374080a8a9d4d91e344586f`,
 `NotoSansArabic.ttf` `ee489b994b3e62def9874c918145e32b133b625abaf98cec60502bdb40102c56`,
@@ -582,7 +582,7 @@ plus generated `epub/book-a.{ttf,otf,woff,woff2}`, `book-b.ttf`, `other-family.t
 
 ### 5.2 Provenance (separately owned; citation rule here)
 
-The [fixture provenance record](../crates/shosai-core/tests/fixtures/README.md)
+The [fixture provenance record](../fixtures/README.md)
 documents the completed research: F1–F3 hashes and adding commits are verified, but
 their authoring tools and exact origins remain unknown. `sample.pdf` also has
 incorrect xref offsets and relies on reader recovery. Research completion is not
@@ -601,7 +601,7 @@ The citation rule this document needs is narrow: a fixture may be cited in a row
 when its SHA-256 recomputes and its record names a generator or documented source.
 Otherwise cite it as **unverified provenance** and keep the row's acceptance open on
 provenance. Only the conformance family carries an explicit redistribution statement
-today (`crates/shosai-core/tests/fixtures/epub-conformance/README.md` + `SHA256SUMS`,
+today (`fixtures/epub-conformance/README.md` + `SHA256SUMS`,
 verified in §5.1); no other asset may be called redistribution-safe.
 
 ### 5.3 Proposed fixture additions (not yet created)
@@ -616,7 +616,7 @@ verified in §5.1); no other asset may be called redistribution-safe.
 | `G6` | Failure-state fixtures (missing file, corrupt document, storage error, permission failure) | Reader, settings and notice failure states | Generated; documented | LB-20, RD-17, ST-06, NT-04, NT-08 |
 | `G7` | DPR 2 sharpness fixture (small text plus image) | Sharpness checks | Generated | FM-19, XA-09 |
 | `G8` | Capture manifest and reference baselines | Reproducible evidence set | Emitted by the 1B/1C capture runner | XA-10 |
-| `G9` | Decision-12 readability set: EN and JA books at `BF16`/`BF32`/`BF48` with measured page-column widths | Calibrates the `5A` minimum usable column-width rule; verifies single↔spread transitions never shrink book text | Generated from the conformance generator (`crates/shosai-core/tests/fixtures/epub-conformance/generate.py`); measurements recorded by 5B | FM-08, FM-09, FM-11, FM-12 |
+| `G9` | Decision-12 readability set: EN and JA books at `BF16`/`BF32`/`BF48` with measured page-column widths | Calibrates the `5A` minimum usable column-width rule; verifies single↔spread transitions never shrink book text | Generated from the conformance generator (`fixtures/epub-conformance/generate.py`); measurements recorded by 5B | FM-08, FM-09, FM-11, FM-12 |
 
 Every new fixture must record: generator path, deterministic inputs, SHA-256, whether
 any third-party content is present, and an explicit redistribution statement. Until

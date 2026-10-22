@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
-const _fixture = '../crates/shosai-core/tests/fixtures/sample.pdf';
+const _fixture = '../fixtures/sample.pdf';
 
 void main() {
   final engine = PdfrxPdfEngine();

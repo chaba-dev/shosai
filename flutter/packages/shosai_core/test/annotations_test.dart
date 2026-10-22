@@ -241,6 +241,90 @@ void main() {
       },
     );
 
+    test('a content opened outside the library keeps its annotations, '
+        'which its library book shares', () async {
+      final path = t.copyFixture('sample.epub', 'sample.epub');
+      final hash = (await fingerprintFile(path)).hash;
+      expect(await hashBookBytes(await readBookBytes(path)), hash);
+      final content = AnnotatedContent(
+        contentHash: hash,
+        format: BookFormat.epub,
+        title: 'sample.epub',
+      );
+      final other = AnnotatedContent(
+        contentHash: 'b' * 64,
+        format: BookFormat.epub,
+        title: 'other.epub',
+      );
+
+      final created = await annotations.createInContent(
+        content,
+        _select(_text, 'Café'),
+        body: 'Direct',
+      );
+      expect(created.annotation.contentHash, hash);
+      expect(await annotations.listInContent(content, _epubText(_text)), [
+        created,
+      ]);
+      expect(await annotations.listInContent(other, _epubText(_text)), isEmpty);
+      expect(
+        await annotations.updateInContent(
+          other,
+          created.id,
+          color: HighlightColor.green,
+        ),
+        isFalse,
+      );
+      expect(
+        await annotations.updateInContent(
+          content,
+          created.id,
+          color: HighlightColor.green,
+        ),
+        isTrue,
+      );
+      expect(
+        () => annotations.createInContent(
+          AnnotatedContent(
+            contentHash: hash,
+            format: BookFormat.pdf,
+            title: 'sample.epub',
+          ),
+          PdfSelection(page: 0, rectangles: _rectangles),
+        ),
+        throwsCoreError(CoreErrorKind.invalidRequest),
+      );
+
+      // Importing the same bytes later reaches the same annotations.
+      final imported = await t.importBook(path);
+      final [listed] = await annotations.list(imported.id, _epubText(_text));
+      expect(listed.id, created.id);
+      expect(listed.annotation.color, HighlightColor.green);
+
+      expect(await annotations.deleteInContent(other, created.id), isFalse);
+      expect(await annotations.deleteInContent(content, created.id), isTrue);
+      expect(await annotations.list(imported.id, _epubText(_text)), isEmpty);
+    });
+
+    test('annotated content is checked', () {
+      expect(
+        () => AnnotatedContent(
+          contentHash: 'A' * 64,
+          format: BookFormat.epub,
+          title: 'x',
+        ),
+        throwsCoreError(CoreErrorKind.invalidRequest),
+      );
+      expect(
+        () => AnnotatedContent(
+          contentHash: 'a' * 64,
+          format: BookFormat.epub,
+          title: '',
+        ),
+        throwsCoreError(CoreErrorKind.invalidRequest),
+      );
+    });
+
     test('concurrent first annotations create one document version', () async {
       final bookId = await book('epub');
 

@@ -183,6 +183,7 @@ final class _EpubLayoutKey {
     required this.fontSize,
     required this.lineSpacing,
     required this.theme,
+    required this.continuous,
   });
 
   /// The document generation the session belongs to.
@@ -198,6 +199,10 @@ final class _EpubLayoutKey {
   final double lineSpacing;
   final String theme;
 
+  /// Whether the chapter is presented as one continuous page: a continuous
+  /// reader shows a chapter over the continuous ceilings as pages.
+  final bool continuous;
+
   @override
   bool operator ==(Object other) =>
       other is _EpubLayoutKey &&
@@ -207,7 +212,8 @@ final class _EpubLayoutKey {
       other.height == height &&
       other.fontSize == fontSize &&
       other.lineSpacing == lineSpacing &&
-      other.theme == theme;
+      other.theme == theme &&
+      other.continuous == continuous;
 
   @override
   int get hashCode => Object.hash(
@@ -218,6 +224,7 @@ final class _EpubLayoutKey {
     fontSize,
     lineSpacing,
     theme,
+    continuous,
   );
 }
 

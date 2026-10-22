@@ -8,8 +8,9 @@ import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 
+import '../support/bridge_pdf_engine.dart';
 import '../support/production_shell_harness.dart';
 
 /// Package 4C reader panels: Contents/saved places, typography, more and

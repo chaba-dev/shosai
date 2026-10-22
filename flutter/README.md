@@ -1,21 +1,18 @@
 # Shōsai Flutter frontend
 
-This is the Flutter feasibility frontend from RFD 0004 M2. The Linux and macOS
-hosts load the generated `flutter_rust_bridge` bindings, open PDF and EPUB
-documents through `shosai-core`, and render selectable PDF and EPUB
-content. Rust extracts bounded, owned hit-test geometry once per visible
-surface; pointer and touch drags consume it locally while Flutter paints
-temporary and saved overlays without rerendering the document.
+This is the Shōsai application (RFD 4): one Dart and Flutter codebase for the
+document engines, the application core and the presentation. EPUB books are
+parsed by the Dart engine (`packages/shosai_epub`) and laid out and painted by
+Flutter; PDF documents are opened, rendered and measured by the Dart PDF
+engine over PDFium (`lib/reader/pdf`, through `pdfrx`). The library, reading
+state, bookmarks, annotations and search live in the Dart application core
+(`packages/shosai_core`) over one SQLite connection.
 
-Reader state follows the same Elm-style model/message/update flow as the Iced
-frontend. Widgets render the immutable `ReaderModel` and dispatch sealed
-`ReaderMessage` values; `ReaderController` runs bridge effects and dispatches
-their completion messages while retaining ownership of native resources. See
-the [Flutter architecture contract](../docs/flutter-architecture.md).
-The current slice persists PDF and EPUB highlights through the Rust SQLite
-annotation store and supports reopen, navigation, recoloring, notes, and
-deletion. Anchor recovery, responsive mobile hosts, and physical-device
-validation remain open M2 gates.
+Reader state follows an Elm-style model/message/update flow. Widgets render
+the immutable `ReaderModel` and dispatch sealed `ReaderMessage` values;
+`ReaderController` runs effects and dispatches their completion messages while
+retaining ownership of native resources. See the
+[Flutter architecture contract](../docs/flutter-architecture.md).
 
 Run commands from the repository root through the pinned development
 environment:
@@ -27,8 +24,8 @@ environment:
 .agents/dev make flutter-release
 ```
 
-The desktop hosts build `crates/shosai-flutter-bridge` directly with the pinned
-Cargo toolchain through CMake. Linux bundles are written below
-`flutter/build/linux/`, and macOS bundles below `flutter/build/macos/`. macOS
-feasibility builds intentionally target the active host architecture; universal
-distribution packaging is outside M2.
+The PDFium and SQLite libraries are fetched by the Dart bindings' build hooks
+and bundled as native assets. `flutter test` does not link native assets, so
+the tests load PDFium from `SHOSAI_PDFIUM_LIBRARY` (set by the Nix shell) or
+`PDFIUM_PATH`. Linux bundles are written below `flutter/build/linux/`, and
+macOS bundles below `flutter/build/macos/`.

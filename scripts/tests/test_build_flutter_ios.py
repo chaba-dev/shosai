@@ -74,10 +74,6 @@ class FlutterIosBuildTest(unittest.TestCase):
             self.flutter_sdk / "bin/flutter",
             f'printf \'%s\\n\' "$PWD" "$FLUTTER_ROOT" {scrubbed} "$@" > "$CAPTURE"',
         )
-        self.fetch_capture = self.repository / "fetch-capture"
-        self._write_executable(
-            self.scripts / "fetch-ios-pdfium.sh", 'printf fetched > "$FETCH_CAPTURE"'
-        )
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -95,7 +91,6 @@ class FlutterIosBuildTest(unittest.TestCase):
             {
                 "SHOSAI_FLUTTER_IOS_SDK": str(self.sdk_cache),
                 "CAPTURE": str(self.capture),
-                "FETCH_CAPTURE": str(self.fetch_capture),
                 "PATH": f"{self.tools}:{environment['PATH']}",
             }
         )
@@ -107,7 +102,7 @@ class FlutterIosBuildTest(unittest.TestCase):
             check=False,
         )
 
-    def test_simulator_build_scrubs_environment_and_fetches_pdfium(self):
+    def test_simulator_build_scrubs_environment(self):
         result = self._run("simulator", "debug")
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -119,7 +114,6 @@ class FlutterIosBuildTest(unittest.TestCase):
         self.assertEqual(
             values[scrubbed_end:], ["build", "ios", "--simulator", "--debug"]
         )
-        self.assertEqual(self.fetch_capture.read_text(), "fetched")
 
     def test_device_release_is_an_unsigned_build(self):
         result = self._run("device", "release")

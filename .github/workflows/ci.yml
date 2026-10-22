@@ -4,15 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - "crates/**"
       - "flutter/**"
+      - "fixtures/**"
       - "assets/**"
       - "rfd/**"
       - "scripts/**"
       - "benchmarks/**"
       - "docs/design-system/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
       - "Makefile"
       - "flake.nix"
       - "flake.lock"
@@ -21,15 +19,13 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "crates/**"
       - "flutter/**"
+      - "fixtures/**"
       - "assets/**"
       - "rfd/**"
       - "scripts/**"
       - "benchmarks/**"
       - "docs/design-system/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
       - "Makefile"
       - "flake.nix"
       - "flake.lock"
@@ -37,14 +33,6 @@ on:
       - ".github/workflows/release-pr.yml"
 
 jobs:
-  rust-format:
-    name: Rust format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make check-fmt-rust
-
   dart-format:
     name: Dart format
     runs-on: ubuntu-latest
@@ -52,26 +40,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop --command make check-fmt-flutter
-
-  rust-lint:
-    name: Rust lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-lint-cargo-
-            ${{ runner.os }}-cargo-
-      - run: nix develop --command make lint-rust
 
   flutter-analyze:
     name: Flutter analyze
@@ -88,53 +56,14 @@ jobs:
       - uses: actions/checkout@v4
       - run: make check-rfds
 
-  bridge-codegen:
-    name: Bridge codegen compatibility
+  generated-sources:
+    name: Generated sources
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-bridge-codegen-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bridge-codegen-cargo-
-            ${{ runner.os }}-cargo-
-      - run: nix develop --command make check-frb
-      - run: nix develop --command make check-flutter-codegen
       - run: nix develop --command make check-l10n-codegen
-
-  rust-test:
-    name: Rust tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      # Cache Cargo dependencies
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-rust-test-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-rust-test-cargo-
-            ${{ runner.os }}-cargo-
-      - run: nix develop --command make test-rust
+      - run: nix develop --command make check-theme-tokens
 
   flutter-test:
     name: Flutter tests (${{ matrix.os }})
@@ -146,18 +75,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-flutter-test-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-flutter-test-cargo-
-            ${{ runner.os }}-cargo-
       - run: nix develop --command make test-flutter
 
   script-test:
@@ -174,21 +91,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            flutter/build/**/cargo-target/
-          key: ${{ runner.os }}-flutter-host-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-flutter-host-cargo-
-            ${{ runner.os }}-cargo-
       - run: nix develop --command make flutter-linux-debug
       - name: Verify the Linux bundle carries the declared fonts
         run: nix develop --command make flutter-bundle-check-linux
+
+  flutter-packaged-linux:
+    name: Flutter packaged tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      # Unsets the PDFium overrides: the bundle's PDFium and SQLite must load.
+      - run: nix develop --command make test-flutter-packaged-linux
+
+  flutter-packaged-macos:
+    name: Flutter packaged tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - run: nix develop --command make test-flutter-packaged-macos
 
   flutter-macos-host:
     name: Flutter macOS host
@@ -196,66 +118,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            flutter/build/**/cargo-target/
-          key: ${{ runner.os }}-flutter-host-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-flutter-host-cargo-
-            ${{ runner.os }}-cargo-
       - run: nix develop --command make flutter-macos-smoke
       - name: Verify the macOS bundle carries the declared fonts
         run: |
           nix develop --command python3 scripts/check_flutter_bundle.py \
             "flutter/build/macos/Build/Products/Debug/shosai_flutter.app"
-
-  test-windows:
-    name: Rust tests (Windows)
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-
-      # Cache Cargo dependencies
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      # Cache Pdfium library
-      - name: Cache Pdfium library
-        id: cache-pdfium
-        uses: actions/cache@v4
-        with:
-          path: pdfium.dll
-          key: pdfium-win-x64-${{ hashFiles('.github/workflows/ci.yml') }}
-
-      # Download pre-built Pdfium library for Windows (only if not cached)
-      - name: Download Pdfium library
-        if: steps.cache-pdfium.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $url = "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz"
-          Invoke-WebRequest -Uri $url -OutFile "pdfium-win-x64.tgz"
-          tar -xzf pdfium-win-x64.tgz
-          Copy-Item "bin/pdfium.dll" -Destination "./"
-
-      # Add pdfium.dll to PATH so LoadLibraryExW can find it
-      - name: Add Pdfium to PATH
-        shell: pwsh
-        run: echo "${{ github.workspace }}" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      - run: cargo test

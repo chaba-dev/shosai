@@ -40,31 +40,6 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
-
-    sourceSets.getByName("main").jniLibs.srcDir(
-        rootProject.file("../../target/flutter-android-native"),
-    )
-    sourceSets.getByName("main").assets.srcDir(
-        rootProject.file("../../target/flutter-android-assets"),
-    )
-}
-
-val buildShosaiNative by tasks.registering(Exec::class) {
-    workingDir(rootProject.file("../.."))
-    commandLine(
-        rootProject.file("../../.agents/dev"),
-        "bash",
-        rootProject.file("../../scripts/build-flutter-android-native.sh"),
-    )
-}
-
-tasks.configureEach {
-    if (
-        name.startsWith("merge") &&
-        (name.endsWith("NativeLibs") || name.endsWith("Assets"))
-    ) {
-        dependsOn(buildShosaiNative)
-    }
 }
 
 flutter {

@@ -201,8 +201,8 @@ private object DocumentImportManager {
             val session = File(cacheDir, "$SESSION_PREFIX$releaseToken")
             ownership.register(releaseToken, session, acquisition.owner.id)
             if (!session.mkdir()) throw IOException()
-            // Provider names are display hints, not format authority. Rust performs bounded
-            // content detection on this deliberately extensionless staging path.
+            // Provider names are display hints, not format authority. The Dart core performs
+            // bounded content detection on this deliberately extensionless staging path.
             val stagedName = selection.displayName.substringBeforeLast('.', selection.displayName)
                 .ifBlank { "Document" }
             val stagedFile = File(session, stagedName)

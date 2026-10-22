@@ -7,21 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
-import 'package:shosai_flutter/src/rust/api.dart';
 
 const _epubFixture = 'packages/shosai_core/test/fixtures/sample.epub';
 const _pdfFixture = 'packages/shosai_core/test/fixtures/sample.pdf';
-
-/// The Rust bridge's cancellation side, which is all an import uses.
-final class _Cancellations implements FlutterBridge {
-  var _next = BigInt.zero;
-
-  @override
-  BigInt createCancellation() => _next += BigInt.one;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
 
 void main() {
   test(
@@ -38,7 +26,7 @@ void main() {
         pdfEngine: PdfrxPdfEngine(),
       );
       addTearDown(core.close);
-      final bridge = ApplicationBridge(core, _Cancellations());
+      final bridge = ApplicationBridge(core);
       final paths = [
         for (final (fixture, name) in [
           (_epubFixture, 'first.epub'),

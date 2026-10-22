@@ -177,5 +177,5 @@ dart test
 `dart pub get`) from the repository root.
 
 The fixture tests read the repository's committed conformance fixtures from
-`crates/shosai-core/tests/fixtures/epub-conformance/`, located by walking up from
+`fixtures/epub-conformance/`, located by walking up from
 the test working directory so the package can move.

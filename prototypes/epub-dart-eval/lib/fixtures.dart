@@ -54,7 +54,7 @@ List<PrototypeFixture> prototypeFixtures() {
       }
     }
     final conformanceRoot =
-        '$root/crates/shosai-core/tests/fixtures/epub-conformance';
+        '$root/fixtures/epub-conformance';
     for (final entry in [
       ('Conformance (all cases)', 'conformance.epub'),
       ('Bidirectional text', 'bidi.epub'),
