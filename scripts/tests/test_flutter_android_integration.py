@@ -1,4 +1,6 @@
 import pathlib
+import shutil
+import subprocess
 import unittest
 
 
@@ -21,6 +23,18 @@ class FlutterAndroidIntegrationTest(unittest.TestCase):
 
         self.assertNotIn("abiFilters", build)
         self.assertNotIn("disable-abi-filtering", properties)
+
+    @unittest.skipIf(shutil.which("git") is None, "git is not installed")
+    def test_gradle_build_output_is_ignored(self):
+        # Gradle writes reports/problems/problems-report.html here.
+        report = "flutter/android/build/reports/problems/problems-report.html"
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", "--quiet", report],
+            cwd=ROOT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, f"{report} is not ignored")
 
 
 if __name__ == "__main__":
