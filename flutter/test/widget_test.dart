@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -2039,7 +2040,13 @@ void main() {
           const ReaderLayout(),
           const ReaderLayout(scale: 2),
         ]);
-        expect(bridge.renderScales, [1, 2]);
+        // The raster is fitted to the box instead (fit page, with no height
+        // reported yet, fits the width): the 612 pt fixture page at the
+        // default width, then at the new one.
+        expect(bridge.renderScales, [
+          closeTo(680 / 612, .01),
+          closeTo(320 / 612, .01),
+        ]);
         controller.dispatch(const ReaderSelectionStarted(1));
         controller.dispatch(const ReaderSelectionExtended(3));
         controller.dispatch(const ReaderSelectionEnded());
@@ -2726,9 +2733,8 @@ void main() {
     await bridge.disposed.future;
   });
 
-  testWidgets('automatic PDF open defaults to the initial device pixel ratio', (
-    tester,
-  ) async {
+  testWidgets('automatic PDF open renders the fitted page at the device '
+      'pixel ratio', (tester) async {
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     final bridge = _ControlledBridge(
@@ -2754,7 +2760,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(bridge.renderScales.first, 3);
+    // The page is fitted to the document box and rendered at three device
+    // pixels per logical pixel, so it is sharp at the size it is shown.
+    final box = tester.getSize(_documentArea);
+    final fit = math.min(box.width / 612, box.height / 792);
+    expect(bridge.renderScales.last, closeTo(fit * 3, .011));
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
