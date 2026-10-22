@@ -264,4 +264,74 @@ void main() {
 
     await closeReader(tester);
   });
+
+  testWidgets('the arrows extend a selection along a column and across '
+      'columns', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await openReader(
+      tester,
+      bridge('rtl', epub: verticalJapaneseEpub(paragraphs: 30)),
+    );
+
+    const phrase = '名前はまだ無い';
+    final surface = paintedReaderSurface(tester).surface;
+    final runes = surface.text.runes.toList();
+    final start = runes.indexOf('名'.runes.single);
+    final end = start + phrase.runes.length;
+    await dragReaderSelectionBetween(
+      tester,
+      renderedEndpointCenter(tester, start),
+      renderedEndpointCenter(tester, end),
+    );
+    await settleReaderSelection(tester);
+
+    Future<void> shift(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await settleReaderSelection(tester);
+    }
+
+    Future<String> copy() async {
+      await tester.tap(find.text('Copy'));
+      await settleReaderSelection(tester);
+      return copied.last;
+    }
+
+    // Down moves one character down the column.
+    await shift(LogicalKeyboardKey.arrowDown);
+    expect(await copy(), phrase + String.fromCharCode(runes[end]));
+    await shift(LogicalKeyboardKey.arrowUp);
+    expect(await copy(), phrase);
+
+    // Left moves into the next column, to the left: the selection now runs
+    // through the end of this column and into that one.
+    final column = surface.visualLines.indexWhere(
+      (line) => line.carets.any((caret) => caret.offset.toInt() == end),
+    );
+    final columnEnd = surface.visualLines[column].carets.last.offset.toInt();
+    await shift(LogicalKeyboardKey.arrowLeft);
+    final across = await copy();
+    expect(across.runes.length, greaterThan(columnEnd - start));
+    expect(across, startsWith(phrase));
+    await shift(LogicalKeyboardKey.arrowRight);
+    expect(await copy(), phrase);
+
+    await closeReader(tester);
+  });
 }

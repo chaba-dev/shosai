@@ -710,7 +710,14 @@ final class ReaderController implements Listenable {
       case ReaderSelectionPointerCancelled():
         _selectionPointerCancelled(message.pointer);
       case ReaderSelectionKeyboardExtended():
-        _selectionKeyboardExtended(message.movement);
+        // The arrow keys are physical: in a vertical column Up and Down
+        // move along it, and Left moves to the next column, to its left.
+        final surface = _model.selectionSurface;
+        _selectionKeyboardExtended(
+          surface == null || !message.arrow
+              ? message.movement
+              : _physicalMovement(surface, _model.focus, message.movement),
+        );
       case ReaderSelectionEnded():
         _selectionEnded();
       case ReaderSelectionActionsRequested():
@@ -6028,6 +6035,35 @@ int? _adjacentOffset(List<int> offsets, int? current, bool forward) {
   final origin = _caretForOffset(lines, current, currentLine);
   if (origin == null) return null;
   return _lineEdge(lines, origin.line, !forward);
+}
+
+/// [movement], a physical arrow, as the logical movement it makes at
+/// [focus]: unchanged on a horizontal line; on a vertical column (whose
+/// columns run right to left) Up and Down move along the column, and Left and
+/// Right move to the next and the previous column.
+ReaderSelectionMovement _physicalMovement(
+  FlutterSelectionSurface surface,
+  int? focus,
+  ReaderSelectionMovement movement,
+) {
+  FlutterSelectionCaret? caret;
+  for (final line in surface.visualLines) {
+    for (final candidate in line.carets) {
+      if (candidate.offset.toInt() == focus) caret = candidate;
+    }
+    if (caret != null) break;
+  }
+  final vertical =
+      caret?.vertical ??
+      surface.visualLines.any((line) => line.carets.any((c) => c.vertical));
+  if (!vertical) return movement;
+  return switch (movement) {
+    ReaderSelectionMovement.previousLine => ReaderSelectionMovement.visualLeft,
+    ReaderSelectionMovement.nextLine => ReaderSelectionMovement.visualRight,
+    ReaderSelectionMovement.visualLeft => ReaderSelectionMovement.nextLine,
+    ReaderSelectionMovement.visualRight => ReaderSelectionMovement.previousLine,
+    _ => movement,
+  };
 }
 
 int? _navigableLine(List<FlutterSelectionVisualLine> lines, bool forward) {
