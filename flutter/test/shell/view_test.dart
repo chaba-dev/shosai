@@ -522,6 +522,35 @@ void main() {
     },
   );
 
+  testWidgets('the switcher fits 200% text in English and Japanese', (
+    tester,
+  ) async {
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    final switching = update(
+      _model(reading: true),
+      const ShellSwitcherOpened(),
+    );
+    for (final (locale, header) in const [
+      (Locale('en'), '3 open books'),
+      (Locale('ja'), '読書中の本 3冊'),
+    ]) {
+      await _pumpFrame(
+        tester,
+        size: const Size(360, 740),
+        model: switching,
+        recorder: _Recorder(),
+        locale: locale,
+      );
+      expect(find.text(header), findsOneWidget);
+      expectOnlyKnownDefects(
+        await findRenderDefects(tester),
+        const <KnownRenderDefect>[],
+      );
+      expect(tester.takeException(), isNull, reason: locale.languageCode);
+    }
+  });
+
   testWidgets('the open-book count is a labelled touch target', (tester) async {
     var presses = 0;
     await tester.pumpWidget(
