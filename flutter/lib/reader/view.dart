@@ -952,6 +952,7 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
         // contract §2.3 item 5b). The EPUB font size is the reader preference.
         fontSize: typography.epubFontSize,
         lineSpacing: typography.epubLineSpacing,
+        spread: _ReaderSpreadScope.of(context),
       );
       final observedHeight = availableHeight;
       final pixelRatio = MediaQuery.devicePixelRatioOf(context);

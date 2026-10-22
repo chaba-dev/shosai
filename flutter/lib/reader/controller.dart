@@ -1110,6 +1110,7 @@ final class ReaderController implements Listenable {
               width: layout.width,
               fontSize: layout.fontSize,
               lineSpacing: layout.lineSpacing,
+              spread: layout.spread,
             );
       List<FlutterBookmark> bookmarks = const [];
       if (bookId != null) {
@@ -1243,6 +1244,7 @@ final class ReaderController implements Listenable {
       width: _requestedLayout.width,
       fontSize: _requestedLayout.fontSize,
       lineSpacing: _requestedLayout.lineSpacing,
+      spread: _requestedLayout.spread,
     );
     _requestedLayout = requestedLayout;
     _readingStatePersistenceBlocked = message.restorationFailed;
@@ -1426,6 +1428,7 @@ final class ReaderController implements Listenable {
             width: observed.width,
             fontSize: observed.fontSize,
             lineSpacing: observed.lineSpacing,
+            spread: observed.spread,
           );
     final document = _model.document;
     final intent = _activeRelayoutIntent;
@@ -1692,9 +1695,18 @@ final class ReaderController implements Listenable {
       _unitRequested(_model.unit + delta);
       return;
     }
-    final step = delta < 0
+    // A spread turns both of its pages: forward from its second page, and
+    // back two pages so the page before it lands in the second slot.
+    var step = delta < 0
         ? _epubPageBefore(session, page.canonicalStart)
-        : _epubPageAfter(session, page.canonicalStart);
+        : _epubPageAfter(
+            session,
+            page.facing?.canonicalStart ?? page.canonicalStart,
+          );
+    if (delta < 0 && page.spread && step.scalar != null) {
+      final further = _epubPageBefore(session, step.scalar!);
+      if (further.scalar != null) step = further;
+    }
     final target = step.scalar;
     if (target == null) {
       if (step.complete) {
@@ -1777,10 +1789,36 @@ final class ReaderController implements Listenable {
     return (scalar: null, complete: session.complete);
   }
 
+  /// Whether [key] lays pages out as spreads, after extending [session] so
+  /// the page after the one holding [scalar] is laid out when the chapter has
+  /// one: the spread shows both.
+  bool _ensureFacingPage(
+    ChapterLayoutSession session,
+    _EpubLayoutKey? key,
+    int scalar,
+  ) {
+    if (key == null || !key.spread) return false;
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      final paginated = paginateWindow(
+        session.snapshot(),
+        ui.Size(key.pageWidth, key.height),
+      );
+      if (paginated.pageOfCanonical(scalar) + 1 < paginated.pages.length ||
+          session.complete ||
+          session.layoutForward(maxNodes: 12, maxMicros: 6000) == 0) {
+        break;
+      }
+    }
+    return true;
+  }
+
   PaginatedChapter? _paginatedWindow(ChapterLayoutSession session) {
     final key = _epubSessionKey;
     if (key == null) return null;
-    return paginateWindow(session.snapshot(), ui.Size(key.width, key.height));
+    return paginateWindow(
+      session.snapshot(),
+      ui.Size(key.pageWidth, key.height),
+    );
   }
 
   /// Derives the page window containing [scalar] and publishes it.
@@ -1819,6 +1857,7 @@ final class ReaderController implements Listenable {
             unit: unit,
             chapterCount: document.logicalUnitCount.toInt(),
             windowSize: ui.Size(layout.width, height),
+            spread: _ensureFacingPage(pageSession, pageKey, scalar),
           );
     final oldImage = _model.pageImage;
     final changedLocation =
@@ -2352,6 +2391,7 @@ final class ReaderController implements Listenable {
         width: _requestedLayout.width,
         fontSize: after.epubFontSize,
         lineSpacing: after.epubLineSpacing,
+        spread: _requestedLayout.spread,
       ),
       unit: _model.unit,
       offset: _model.readingOffset,
@@ -2752,11 +2792,6 @@ final class ReaderController implements Listenable {
       // A decode failure is not fatal: the layout paints the alt fallback.
     }
     if (!_isCurrentLayout(generation, revision)) return;
-    final spec = ChapterLayoutSpec(
-      width: epubPageBoxFor(ui.Size(layout.width, pageHeight)).contentWidth,
-      height: epubPageBoxFor(ui.Size(layout.width, pageHeight)).contentHeight,
-      typography: _epubTypography(layout, source),
-    );
     final key = _EpubLayoutKey(
       generation: generation,
       unit: unit,
@@ -2766,6 +2801,14 @@ final class ReaderController implements Listenable {
       lineSpacing: layout.lineSpacing,
       theme: _typographyTheme,
       continuous: continuous,
+      // A continuous chapter is one scrolled column; only pages pair up.
+      spread: layout.spread && !continuous,
+    );
+    final pageBox = epubPageBoxFor(ui.Size(key.pageWidth, pageHeight));
+    final spec = ChapterLayoutSpec(
+      width: pageBox.contentWidth,
+      height: pageBox.contentHeight,
+      typography: _epubTypography(layout, source),
     );
     // An explicit replacement with no offset is a chapter-level target: the
     // caller is replacing the durable position, so the reader goes to the

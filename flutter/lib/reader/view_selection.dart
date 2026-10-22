@@ -481,6 +481,9 @@ class ReaderEpubPageContentPainter extends CustomPainter {
     transform.apply(canvas);
     canvas.drawRect(source, Paint()..color = page.palette.background);
     paintPageSlices(canvas, page.page, page.palette, page.box);
+    if ((page.facing, page.facingBox) case (final facing?, final box?)) {
+      paintPageSlices(canvas, facing, page.palette, box);
+    }
     canvas.restore();
   }
 
@@ -571,7 +574,12 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     final page = widget.epubPage;
     if (page == null) return;
     final source = transform.toSource(event.localPosition);
-    final href = pageLinkAt(page.page, page.box, source);
+    final href =
+        pageLinkAt(page.page, page.box, source) ??
+        switch ((page.facing, page.facingBox)) {
+          (final facing?, final box?) => pageLinkAt(facing, box, source),
+          _ => null,
+        };
     if (href != null) widget.dispatch(ReaderLinkActivated(href));
   }
 

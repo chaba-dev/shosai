@@ -176,6 +176,7 @@ final class _EpubLayoutKey {
     required this.lineSpacing,
     required this.theme,
     required this.continuous,
+    this.spread = false,
   });
 
   /// The document generation the session belongs to.
@@ -195,6 +196,13 @@ final class _EpubLayoutKey {
   /// laid-out window follows the viewport.
   final bool continuous;
 
+  /// Whether [width] holds a two-page spread, so each page is laid out at
+  /// [epubSpreadPageWidth] of it.
+  final bool spread;
+
+  /// The width one page is laid out at.
+  double get pageWidth => spread ? epubSpreadPageWidth(width) : width;
+
   @override
   bool operator ==(Object other) =>
       other is _EpubLayoutKey &&
@@ -205,7 +213,8 @@ final class _EpubLayoutKey {
       other.fontSize == fontSize &&
       other.lineSpacing == lineSpacing &&
       other.theme == theme &&
-      other.continuous == continuous;
+      other.continuous == continuous &&
+      other.spread == spread;
 
   @override
   int get hashCode => Object.hash(
@@ -217,6 +226,7 @@ final class _EpubLayoutKey {
     lineSpacing,
     theme,
     continuous,
+    spread,
   );
 }
 

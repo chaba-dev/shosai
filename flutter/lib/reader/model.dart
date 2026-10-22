@@ -360,12 +360,17 @@ final class ReaderLayout {
     this.width = 680,
     this.fontSize = 18,
     this.lineSpacing = 1.5,
+    this.spread = false,
   });
 
   final double scale;
   final double width;
   final double fontSize;
   final double lineSpacing;
+
+  /// Whether the view shows two pages side by side in [width]; the view
+  /// decides from the Pages setting and the room on the stage.
+  final bool spread;
 
   bool get isValid =>
       scale.isFinite &&
@@ -384,10 +389,11 @@ final class ReaderLayout {
       scale == other.scale &&
       width == other.width &&
       fontSize == other.fontSize &&
-      lineSpacing == other.lineSpacing;
+      lineSpacing == other.lineSpacing &&
+      spread == other.spread;
 
   @override
-  int get hashCode => Object.hash(scale, width, fontSize, lineSpacing);
+  int get hashCode => Object.hash(scale, width, fontSize, lineSpacing, spread);
 }
 
 final class ReaderModel {
