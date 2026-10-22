@@ -12,6 +12,7 @@ publish_to: none
 dependencies:
   archive:
   code_assets:
+  crypto:
   ffi:
   hooks:
   http:

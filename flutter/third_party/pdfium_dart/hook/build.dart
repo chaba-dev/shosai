@@ -2,10 +2,12 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:code_assets/code_assets.dart';
+import 'package:crypto/crypto.dart';
 import 'package:hooks/hooks.dart';
 import 'package:http/http.dart' as http;
 
-const _pdfiumRelease = 'chromium%2F7811';
+import 'pdfium_archives.dart';
+
 const _assetName = 'libpdfium';
 
 void main(List<String> args) async {
@@ -14,15 +16,25 @@ void main(List<String> args) async {
     if (input.config.code.targetOS == OS.iOS) return;
 
     final target = _PdfiumTarget.fromCodeConfig(input.config.code);
-    final outputSubdir = _pdfiumRelease.replaceAll('%2F', '_');
+    final expectedSha256 = pdfiumArchiveSha256[target.archiveName];
+    if (expectedSha256 == null) {
+      throw UnsupportedError(
+        'No pinned PDFium archive for ${target.archiveName}; '
+        'see tool/pin_pdfium.py.',
+      );
+    }
+    // The directory names the archive's hash, so a library extracted before
+    // the hash was pinned, or from another archive, is never reused.
+    final outputSubdir = pdfiumRelease.replaceAll('%2F', '_');
     final outputFile = input.outputDirectoryShared.resolve(
-      '$outputSubdir/${target.archivePlatform}-${target.archiveArch}/${target.libraryFileName}',
+      '$outputSubdir/${target.archiveName}-${expectedSha256.substring(0, 16)}/${target.libraryFileName}',
     );
 
     await _downloadPdfium(
       outputFile: outputFile,
       target: target,
-      pdfiumRelease: _pdfiumRelease,
+      pdfiumRelease: pdfiumRelease,
+      expectedSha256: expectedSha256,
     );
 
     output.assets.code.add(
@@ -40,6 +52,7 @@ Future<void> _downloadPdfium({
   required Uri outputFile,
   required _PdfiumTarget target,
   required String pdfiumRelease,
+  required String expectedSha256,
 }) async {
   final output = File.fromUri(outputFile);
   if (await output.exists()) return;
@@ -52,6 +65,13 @@ Future<void> _downloadPdfium({
   final response = await http.Client().get(archiveUri);
   if (response.statusCode != 200) {
     throw Exception('Failed to download PDFium: $archiveUri');
+  }
+  final digest = sha256.convert(response.bodyBytes).toString();
+  if (digest != expectedSha256) {
+    throw Exception(
+      'PDFium archive $archiveUri has SHA-256 $digest; '
+      'expected $expectedSha256.',
+    );
   }
 
   final archive = TarDecoder().decodeBytes(
@@ -80,6 +100,8 @@ final class _PdfiumTarget {
   final String archiveArch;
   final String archiveLibraryPath;
   final String libraryFileName;
+
+  String get archiveName => '$archivePlatform-$archiveArch';
 
   static _PdfiumTarget fromCodeConfig(CodeConfig config) {
     final arch = switch (config.targetArchitecture) {
