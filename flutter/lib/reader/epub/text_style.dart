@@ -411,7 +411,11 @@ bool isUprightInVertical(int rune) {
   if (rune >= 0xAC00 && rune <= 0xD7FF) return true; // Hangul
   if (rune >= 0xF900 && rune <= 0xFAFF) return true;
   if (rune >= 0xFE10 && rune <= 0xFE1F) return true; // vertical forms
-  if (rune >= 0xFE30 && rune <= 0xFE6F) return true; // compatibility, small
+  if (rune >= 0xFE30 && rune <= 0xFE48) return true; // vertical compatibility
+  if (rune >= 0xFE50 && rune <= 0xFE6F) {
+    // The small em dash, hyphen-minus and comparison signs rotate (`R`).
+    return !(rune == 0xFE58 || (rune >= 0xFE63 && rune <= 0xFE66));
+  }
   if (rune >= 0xFF01 && rune <= 0xFF60) {
     // The full-width hyphen and comparison signs rotate (`R`).
     return !(rune == 0xFF0D || (rune >= 0xFF1C && rune <= 0xFF1E));

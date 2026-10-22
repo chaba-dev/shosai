@@ -81,7 +81,17 @@ void main() {
         reason: String.fromCharCode(upright),
       );
     }
-    for (final turned in 'Aa1 ,.…―－＜＞'.runes) {
+    for (final upright in '\uFE41\uFE48\uFE51\uFE59\uFE62'.runes) {
+      expect(
+        isUprightInVertical(upright),
+        isTrue,
+        reason: upright.toRadixString(16),
+      );
+    }
+    // The overlines and low lines, the small em dash, hyphen-minus and
+    // comparison signs are `R` too.
+    for (final turned
+        in 'Aa1 ,.…―－＜＞\uFE49\uFE4F\uFE58\uFE63\uFE64\uFE66'.runes) {
       expect(
         isUprightInVertical(turned),
         isFalse,
