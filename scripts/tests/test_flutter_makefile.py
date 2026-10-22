@@ -20,7 +20,7 @@ class FlutterMakefileTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         (self.root / "flutter").mkdir()
-        # `test-flutter` runs the engine and core packages' own suites after
+        # `test-app` runs the engine and core packages' own suites after
         # the app suite, so the fixture carries those package directories and
         # a `dart` stub: the real toolchain must never run inside the fixture.
         for package in ("shosai_epub", "shosai_core"):
@@ -62,7 +62,7 @@ class FlutterMakefileTest(unittest.TestCase):
         )
 
         result = subprocess.run(
-            [self.make, "test-flutter"],
+            [self.make, "test-app"],
             cwd=self.root,
             env=environment,
             capture_output=True,
@@ -127,7 +127,7 @@ class FlutterMakefileTest(unittest.TestCase):
             'done\nexec "$@"',
         )
         result = self._run_packaged_target(
-            "test-flutter-packaged-linux",
+            "test-packaged-linux",
             self.bin / "flutter",
             SHOSAI_TEST_EGL_VENDOR="/mesa/50_mesa.json",
         )
@@ -150,7 +150,7 @@ class FlutterMakefileTest(unittest.TestCase):
 
     def test_packaged_linux_tests_need_the_dev_shell_egl_vendor(self):
         result = self._run_packaged_target(
-            "test-flutter-packaged-linux",
+            "test-packaged-linux",
             self.bin / "flutter",
             SHOSAI_TEST_EGL_VENDOR="",
         )
@@ -161,7 +161,7 @@ class FlutterMakefileTest(unittest.TestCase):
 
     def test_packaged_macos_tests_run_without_pdfium_overrides(self):
         result = self._run_packaged_target(
-            "test-flutter-packaged-macos",
+            "test-packaged-macos",
             self.root / "scripts" / "build-flutter-macos.sh",
         )
 
@@ -227,12 +227,10 @@ class FlutterMakefileTest(unittest.TestCase):
 
     def test_macos_smoke_rebuilds_and_verifies_the_complete_app_signature(self):
         makefile = (ROOT / "Makefile").read_text()
-        smoke = makefile.split("flutter-macos-smoke:", 1)[1].split(
-            "\n## ", 1
-        )[0]
+        smoke = makefile.split("macos-smoke:", 1)[1].split("\n## ", 1)[0]
 
         self.assertIn("@set -eu;", smoke)
-        self.assertIn("$(MAKE) flutter-macos-debug", smoke)
+        self.assertIn("$(MAKE) macos-debug", smoke)
         self.assertEqual(smoke.count("verify_signatures;"), 2)
         self.assertIn("codesign --verify --deep --strict --verbose=2", smoke)
 

@@ -10,7 +10,7 @@ import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 /// Packaged-host check for the Dart core's native libraries.
 ///
 /// Run on a desktop host with no `SHOSAI_PDFIUM_LIBRARY` or `PDFIUM_PATH`
-/// (`make test-flutter-packaged-linux` or `make test-flutter-packaged-macos`
+/// (`make test-packaged-linux` or `make test-packaged-macos`
 /// unset both; CI runs each): the application bundle supplies PDFium and
 /// SQLite, so this proves both load there. The library import (cover
 /// rendering), the open and the reader's own engine document all use the one

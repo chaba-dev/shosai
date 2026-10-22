@@ -173,7 +173,7 @@ dart analyze
 dart test
 ```
 
-`make lint-flutter` and `make test-flutter` run the same steps (including
+`make lint` and `make test-app` run the same steps (including
 `dart pub get`) from the repository root.
 
 The fixture tests read the repository's committed conformance fixtures from

@@ -156,7 +156,7 @@
             ]);
 
             # Mesa as libglvnd's only EGL vendor, for headless runs under Xvfb
-            # (`make test-flutter-packaged-linux`). Not set shell-wide: it would
+            # (`make test-packaged-linux`). Not set shell-wide: it would
             # hide every other vendor, such as a desktop's NVIDIA driver.
             SHOSAI_TEST_EGL_VENDOR = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
 

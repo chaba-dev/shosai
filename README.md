@@ -23,12 +23,12 @@ platform build dependencies:
 
 ```sh
 nix develop
-make flutter-dev            # run the Linux host
+make dev                    # run the Linux host
 ```
 
-`make flutter-linux-debug` builds the Linux host without running it, and
-`make flutter-macos-debug`, `make flutter-android-profile` and the
-`flutter-ios-*` targets build the other hosts. Without Nix, install Flutter
+`make linux-debug` builds the Linux host without running it, and
+`make macos-debug`, `make android-profile` and the `ios-*` targets build the
+other hosts. Without Nix, install Flutter
 3.41 or newer and the native dependencies the Flutter host needs on your
 platform, then run the same Make targets; the PDFium and SQLite libraries are
 fetched by the Dart bindings' build hooks. `make test` also needs a PDFium
@@ -40,8 +40,7 @@ application is divided.
 
 ```sh
 nix develop
-make lint
-make test
+make check
 make check-rfds
 ```
 
@@ -59,8 +58,8 @@ The project is a Flutter application:
 - `website` contains the Hugo source for the project website.
 
 On Apple Silicon macOS, build the Flutter iOS host with
-`make flutter-ios-simulator-debug`, `make flutter-ios-device-profile`, or
-`make flutter-ios-device-release`. These targets download a checksum-pinned,
+`make ios-simulator-debug`, `make ios-device-profile`, or
+`make ios-device-release`. These targets download a checksum-pinned,
 writable Flutter SDK under `target` and remove Nix compiler and SDK variables
 before Xcode runs. Physical device builds are intentionally unsigned; local development
 signing must be configured in Xcode before installing them.

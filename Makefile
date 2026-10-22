@@ -1,13 +1,19 @@
-.PHONY: lint lint-flutter fmt fmt-flutter check-fmt-flutter test test-flutter test-scripts check-l10n-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release check-rfds changelog next-version theme-tokens check-theme-tokens design-system design-system-css check-design-system-css test-epub-prototype epub-prototype-fixtures measure-epub-prototype flutter-bundle-check-linux test-flutter-packaged-linux test-flutter-packaged-macos
+.PHONY: lint fmt check-fmt check
+.PHONY: test test-app test-scripts test-epub-prototype
+.PHONY: test-packaged-linux test-packaged-macos
+.PHONY: theme-tokens check-theme-tokens check-l10n-codegen
+.PHONY: design-system design-system-css check-design-system-css
+.PHONY: epub-prototype-fixtures measure-epub-prototype
+.PHONY: dev linux-debug linux-release check-linux-bundle
+.PHONY: android-profile macos-debug macos-smoke
+.PHONY: ios-simulator-debug ios-device-profile ios-device-release
+.PHONY: check-rfds changelog next-version
 
-## Run the Flutter and Dart package lints
-lint: lint-flutter
-
-## Run Flutter static analysis
+## Run static analysis for the app and Dart packages
 ## The packages' `pub get` must run before the app-root `flutter analyze`: that
 ## command walks into flutter/packages and needs each nested package's own
 ## package config to resolve its `package:test` imports on a fresh checkout.
-lint-flutter:
+lint:
 	cd flutter/packages/shosai_epub && dart pub get
 	cd flutter/packages/shosai_core && dart pub get
 	cd flutter && flutter analyze
@@ -15,14 +21,11 @@ lint-flutter:
 	cd flutter/packages/shosai_core && dart analyze
 
 ## Format all Dart source files
-fmt: fmt-flutter
-
-## Format Dart source files
-fmt-flutter:
+fmt:
 	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Check Dart formatting without changing files
-check-fmt-flutter:
+check-fmt:
 	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Regenerate the Flutter design-token module from assets/theme/tokens.json
@@ -55,10 +58,10 @@ test:
 	$(MAKE) check-theme-tokens
 	$(MAKE) test-scripts
 	$(MAKE) check-l10n-codegen
-	$(MAKE) test-flutter
+	$(MAKE) test-app
 
-## Run the Flutter tests and the Dart packages' tests
-test-flutter:
+## Run the app and Dart packages' tests
+test-app:
 	cd flutter && flutter test
 	cd flutter/packages/shosai_epub && dart pub get && dart test
 	cd flutter/packages/shosai_core && dart pub get && dart test
@@ -94,29 +97,29 @@ measure-epub-prototype:
 check-l10n-codegen:
 	@./scripts/check-l10n-codegen.sh
 
-## Validate the generated localizations and the Flutter host
-check-flutter: check-l10n-codegen
-	$(MAKE) check-fmt-flutter lint-flutter
-	$(MAKE) test-flutter
+## Run formatting, analysis, generated-source, script, app and package checks
+check:
+	$(MAKE) check-fmt lint
+	$(MAKE) test
 
-## Run the Linux Flutter host in debug mode
-flutter-dev:
+## Run the Linux host in debug mode
+dev:
 	cd flutter && flutter run -d linux
 
-## Build the Linux Flutter host in debug mode
-flutter-linux-debug:
+## Build the Linux host in debug mode
+linux-debug:
 	cd flutter && flutter build linux --debug
 
 ## Verify the built Linux Flutter host's bundle carries the declared fonts
-## (the packaged-font regression; needs `flutter-linux-debug` first)
-flutter-bundle-check-linux:
+## (the packaged-font regression; needs `linux-debug` first)
+check-linux-bundle:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_flutter_bundle.py \
 		flutter/build/linux/x64/debug/bundle
 
 ## Run the packaged-host integration tests on the Linux host under Xvfb, on X11
 ## with Mesa's EGL (from the Nix dev shell). No PDFium override is set, so the
 ## bundle's own PDFium and SQLite must load.
-test-flutter-packaged-linux:
+test-packaged-linux:
 	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
 		GDK_BACKEND=x11 \
 		__EGL_VENDOR_LIBRARY_FILENAMES="$${SHOSAI_TEST_EGL_VENDOR:?run in the Nix dev shell}" \
@@ -125,39 +128,39 @@ test-flutter-packaged-linux:
 
 ## Run the packaged-host integration tests on the macOS host, likewise with no
 ## PDFium override
-test-flutter-packaged-macos:
+test-packaged-macos:
 	env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY ./scripts/build-flutter-macos.sh \
 		test -d macos integration_test/packaged_core_test.dart
 
-## Build the Android arm64 Flutter host in profile mode
-flutter-android-profile:
+## Build the Android arm64 host in profile mode
+android-profile:
 	cd flutter && flutter build apk --profile --target-platform android-arm64
 
-## Build the macOS Flutter host in debug mode
-flutter-macos-debug:
+## Build the macOS host in debug mode
+macos-debug:
 	@./scripts/build-flutter-macos.sh
 
 ## Build the iOS host for an Apple Silicon simulator in debug mode
-flutter-ios-simulator-debug:
+ios-simulator-debug:
 	@./scripts/build-flutter-ios.sh simulator debug
 
 ## Build the iOS host for physical devices in unsigned profile mode
-flutter-ios-device-profile:
+ios-device-profile:
 	@./scripts/build-flutter-ios.sh device profile
 
 ## Build the iOS host for physical devices in unsigned release mode
-flutter-ios-device-release:
+ios-device-release:
 	@./scripts/build-flutter-ios.sh device release
 
 ## Launch the packaged macOS host and verify that it remains running
-flutter-macos-smoke: flutter-macos-debug
+macos-smoke: macos-debug
 	@set -eu; \
 		app="flutter/build/macos/Build/Products/Debug/shosai_flutter.app"; \
 		verify_signatures() { \
 			/usr/bin/codesign --verify --deep --strict --verbose=2 "$$app"; \
 		}; \
 		verify_signatures; \
-		$(MAKE) flutter-macos-debug; \
+		$(MAKE) macos-debug; \
 		verify_signatures; \
 		log="$$(mktemp)"; \
 		"$$app/Contents/MacOS/shosai_flutter" >"$$log" 2>&1 & pid=$$!; \
@@ -168,8 +171,8 @@ flutter-macos-smoke: flutter-macos-debug
 			exit 1; \
 		fi
 
-## Build the Linux Flutter host in release mode
-flutter-release:
+## Build the Linux host in release mode
+linux-release:
 	cd flutter && flutter build linux --release
 
 ## Validate RFD sources and the checker regression fixtures
