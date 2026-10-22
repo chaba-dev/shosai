@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart'
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
     show shosaiInterfaceFontFamily, shosaiJapaneseInterfaceFontFamily;
+import 'package:shosai_flutter/core/reader_text.dart';
+import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
 import 'package:shosai_flutter/notices/reader_notice_text.dart';
@@ -17,6 +19,9 @@ import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
+import 'pdf/engine.dart';
+import 'pdf/pdfrx_engine.dart';
+
 part 'effects.dart';
 part 'message.dart';
 part 'model.dart';
@@ -25,6 +30,7 @@ final class ReaderController implements Listenable {
   ReaderController({
     required FlutterBridge bridge,
     required PageDecoder decoder,
+    PdfEngine? pdfEngine,
     double initialScale = 1,
     double initialLineSpacing = 1.5,
     NoteEditor? noteEditor,
@@ -62,7 +68,13 @@ final class ReaderController implements Listenable {
         ),
     double? baseScale,
   }) : _bridge = bridge,
+       _records = recordsOf(bridge),
        _decoder = decoder,
+       // The PDF engine is the reader's own; a bridge that is also an engine
+       // (the test fakes) serves both so a fixture bridge keeps one seam.
+       _pdfEngine =
+           pdfEngine ??
+           (bridge is PdfEngine ? bridge as PdfEngine : PdfrxPdfEngine()),
        _noteEditor = noteEditor ?? ((_) async => null),
        _bookmarkNoteEditor =
            bookmarkNoteEditor ?? noteEditor ?? ((_) async => null),
@@ -102,7 +114,17 @@ final class ReaderController implements Listenable {
   }
 
   final FlutterBridge _bridge;
+
+  /// Books, reading state, bookmarks, annotations and book search, served
+  /// beside [_bridge].
+  final ShosaiRecords _records;
   final PageDecoder _decoder;
+  final PdfEngine _pdfEngine;
+
+  /// The engine document behind the current PDF, owned with the model's
+  /// document summary: opened by the open effect, released with the model's
+  /// resources.
+  PdfEngineDocument? _pdfDocument;
   final NoteEditor _noteEditor;
   final NoteEditor _bookmarkNoteEditor;
   final NoteEditorCanceller _noteEditorCanceller;
@@ -1026,6 +1048,7 @@ final class ReaderController implements Listenable {
     ReaderLayout layout,
   ) async {
     FlutterDocumentSummary? opened;
+    PdfEngineDocument? ownedPdf;
     try {
       if (bookId != null) await drainBookWrites(bookId);
       opened = bookId == null
@@ -1033,18 +1056,28 @@ final class ReaderController implements Listenable {
               request: FlutterOpenRequest(localId: path, pathKey: path),
               cancellationId: cancellation,
             )
-          : await _bridge.openLibraryBook(
+          : await _records.openLibraryBook(
               bookId: bookId,
               cancellationId: cancellation,
             );
       final document = opened;
+      // The Dart engine serves every PDF page operation; the retained handle
+      // stays open for the store (annotations, bookmarks, reading state) until
+      // the Dart store lands (RFD 4, M3.0).
+      final PdfEngineDocument? pdf;
+      if (document.format == FlutterBookFormat.pdf) {
+        pdf = await _pdfEngine.open(path);
+        ownedPdf = pdf;
+      } else {
+        pdf = null;
+      }
       FlutterReadingState? restored;
       String? toolError;
       String? restorationError;
       var restorationFailed = false;
       if (bookId != null) {
         try {
-          restored = await _bridge.loadReadingState(
+          restored = await _records.loadReadingState(
             bookId: bookId,
             cancellationId: cancellation,
           );
@@ -1069,7 +1102,7 @@ final class ReaderController implements Listenable {
       List<FlutterBookmark> bookmarks = const [];
       if (bookId != null) {
         try {
-          bookmarks = await _bridge.listBookmarks(
+          bookmarks = await _records.listBookmarks(
             bookId: bookId,
             cancellationId: cancellation,
           );
@@ -1081,6 +1114,7 @@ final class ReaderController implements Listenable {
         _ReaderDocumentOpened(
           generation: generation,
           document: document,
+          pdfDocument: pdf,
           unit: unit,
           bookmarks: bookmarks,
           layout: restoredLayout,
@@ -1092,6 +1126,7 @@ final class ReaderController implements Listenable {
         ),
       );
       opened = null;
+      ownedPdf = null;
       if (!_isCurrent(generation)) return;
 
       // A paginated EPUB chapter with a reported content-box height is served
@@ -1119,15 +1154,17 @@ final class ReaderController implements Listenable {
       } else {
         FlutterSelectionSurface? effectSurface;
         try {
-          final surface = await _bridge.selectionSurface(
-            document: document.handle,
-            unit: BigInt.from(unit),
-            scale: restoredLayout.scale,
-            width: restoredLayout.width,
-            fontSize: restoredLayout.fontSize,
-            lineSpacing: restoredLayout.lineSpacing,
-            cancellationId: cancellation,
-          );
+          final surface = pdf != null
+              ? await pdf.selectionSurface(unit, restoredLayout.scale)
+              : await _bridge.selectionSurface(
+                  document: document.handle,
+                  unit: BigInt.from(unit),
+                  scale: restoredLayout.scale,
+                  width: restoredLayout.width,
+                  fontSize: restoredLayout.fontSize,
+                  lineSpacing: restoredLayout.lineSpacing,
+                  cancellationId: cancellation,
+                );
           effectSurface = surface;
           if (!_isCurrent(generation)) {
             if (surface.raster case final raster?) {
@@ -1185,8 +1222,9 @@ final class ReaderController implements Listenable {
         }
         final revision = _annotationRevision;
         try {
-          final annotations = await _bridge.listAnnotations(
-            document: document.handle,
+          final annotations = await _records.listAnnotations(
+            document: document,
+            text: _readerText(document, cancellation, pdf: pdf),
             scale: restoredLayout.scale,
             cancellationId: cancellation,
           );
@@ -1212,52 +1250,31 @@ final class ReaderController implements Listenable {
         }
       }
 
-      if (document.format != FlutterBookFormat.epub) {
-        final rendered = await _bridge.renderPage(
-          document: document.handle,
-          page: BigInt.from(unit),
-          scale: restoredLayout.scale,
-          cancellationId: cancellation,
+      if (pdf != null) {
+        final rendered = await pdf.render(unit, restoredLayout.scale);
+        if (!_isCurrent(generation)) return;
+        final image = await _decoder(
+          rendered.pixels,
+          width: rendered.width,
+          height: rendered.height,
         );
-        if (!_isCurrent(generation)) {
-          _bridge.releaseBuffer(handle: rendered.handle);
-          return;
-        }
-        late final ui.Image image;
-        try {
-          final pixels = _bridge.takeBuffer(handle: rendered.handle);
-          image = await _decoder(
-            pixels,
-            width: rendered.width,
-            height: rendered.height,
-          );
-        } finally {
-          _bridge.releaseBuffer(handle: rendered.handle);
-        }
         if (!_isCurrent(generation)) {
           image.dispose();
           return;
         }
         dispatch(_ReaderImageDecoded(generation: generation, pageImage: image));
       }
-    } on FlutterBridgeError catch (error) {
-      dispatch(
-        _ReaderOpenFailed(
-          generation: generation,
-          document: opened,
-          error: _describeError(error),
-        ),
-      );
-      opened = null;
     } catch (error) {
       dispatch(
         _ReaderOpenFailed(
           generation: generation,
           document: opened,
+          pdfDocument: ownedPdf,
           error: _describeError(error),
         ),
       );
       opened = null;
+      ownedPdf = null;
     } finally {
       _bridge.releaseCancellation(id: cancellation);
       dispatch(
@@ -1272,8 +1289,10 @@ final class ReaderController implements Listenable {
   void _documentOpened(_ReaderDocumentOpened message) {
     if (!_isCurrent(message.generation)) {
       _bridge.releaseDocument(handle: message.document.handle);
+      unawaited(message.pdfDocument?.dispose());
       return;
     }
+    _pdfDocument = message.pdfDocument;
     final requestedLayout = ReaderLayout(
       scale: message.restoredLayout
           ? message.layout.scale
@@ -1941,9 +1960,29 @@ final class ReaderController implements Listenable {
       return;
     }
     if (document.format != FlutterBookFormat.epub) {
-      dispatch(
-        _ReaderContentsLoaded(generation, revision, _chapterFallback(document)),
-      );
+      final pdf = _pdfDocument;
+      if (pdf == null) {
+        dispatch(
+          _ReaderContentsLoaded(
+            generation,
+            revision,
+            _chapterFallback(document),
+          ),
+        );
+        return;
+      }
+      unawaited(() async {
+        try {
+          final entries = await _pdfContents(document, pdf);
+          if (!_isCurrent(generation) || revision != _contentsRevision) return;
+          dispatch(_ReaderContentsLoaded(generation, revision, entries));
+        } catch (error) {
+          if (!_isCurrent(generation) || revision != _contentsRevision) return;
+          dispatch(
+            _ReaderContentsFailed(generation, revision, _describeError(error)),
+          );
+        }
+      }());
       return;
     }
     final BigInt cancellation;
@@ -2160,6 +2199,33 @@ final class ReaderController implements Listenable {
   ///
   /// The panel renders the localized chapter number for an untitled entry, so
   /// no title is invented (contract §4.6).
+  /// The PDF Contents source: the document outline, or the page fallback when
+  /// the document has none.
+  ///
+  /// An outline entry without a page destination keeps its title and addresses
+  /// the page of the nearest preceding entry that has one (its section), or
+  /// the first page.
+  Future<List<ReaderContentsEntry>> _pdfContents(
+    FlutterDocumentSummary document,
+    PdfEngineDocument pdf,
+  ) async {
+    final outline = await pdf.outline();
+    if (outline.isEmpty) return _chapterFallback(document);
+    final pages = document.logicalUnitCount.toInt();
+    var unit = 0;
+    return [
+      for (final entry in outline)
+        ReaderContentsEntry(
+          depth: entry.depth,
+          title: entry.title,
+          unit: unit = switch (entry.page) {
+            final page? when page >= 0 && page < pages => page,
+            _ => unit,
+          },
+        ),
+    ];
+  }
+
   List<ReaderContentsEntry> _chapterFallback(FlutterDocumentSummary document) =>
       [
         for (var unit = 0; unit < document.logicalUnitCount.toInt(); unit += 1)
@@ -2408,14 +2474,20 @@ final class ReaderController implements Listenable {
     _searchCancellations.add(cancellation);
     _activeBridgeOperations += 1;
     final generation = _model.generation;
+    final pdf = _pdfDocument;
     _emit(_model.copyWith(searchBusy: true, toolError: null));
     unawaited(() async {
       try {
-        final results = await _bridge.searchDocument(
-          document: document.handle,
-          query: _searchQuery,
-          cancellationId: cancellation,
-        );
+        final results = document.format == FlutterBookFormat.pdf
+            ? await (pdf ??
+                      (throw StateError('PDF engine document is missing')))
+                  .search(_searchQuery)
+            : await _records.searchDocument(
+                document: document,
+                text: _readerText(document, cancellation),
+                query: _searchQuery,
+                cancellationId: cancellation,
+              );
         dispatch(_ReaderSearchCompleted(generation, revision, results));
       } catch (error) {
         dispatch(
@@ -2452,12 +2524,12 @@ final class ReaderController implements Listenable {
       revision: revision,
       bookId: bookId,
       mutation: () => existing == null
-          ? _bridge.toggleBookmark(
+          ? _records.toggleBookmark(
               bookId: bookId,
               unit: BigInt.from(unit),
               offset: offset == null ? null : BigInt.from(offset),
             )
-          : _bridge.deleteBookmark(id: existing.id),
+          : _records.deleteBookmark(id: existing.id),
     );
   }
 
@@ -2517,7 +2589,7 @@ final class ReaderController implements Listenable {
       revision: message.revision,
       bookId: message.bookId,
       mutation: () => message.bookmarkId == null
-          ? _bridge.toggleBookmark(
+          ? _records.toggleBookmark(
               bookId: message.bookId,
               unit: BigInt.from(message.unit),
               offset: message.offset == null
@@ -2525,7 +2597,7 @@ final class ReaderController implements Listenable {
                   : BigInt.from(message.offset!),
               note: message.note,
             )
-          : _bridge.updateBookmarkNote(
+          : _records.updateBookmarkNote(
               id: message.bookmarkId!,
               note: message.note,
             ),
@@ -2541,7 +2613,7 @@ final class ReaderController implements Listenable {
       generation: generation,
       revision: revision,
       bookId: bookId,
-      mutation: () => _bridge.deleteBookmark(id: id),
+      mutation: () => _records.deleteBookmark(id: id),
     );
   }
 
@@ -2571,7 +2643,7 @@ final class ReaderController implements Listenable {
       try {
         await mutation();
         mutationCommitted = true;
-        final items = await _bridge.listBookmarks(
+        final items = await _records.listBookmarks(
           bookId: bookId,
           cancellationId: cancellation,
         );
@@ -2622,7 +2694,7 @@ final class ReaderController implements Listenable {
     );
     unawaited(() async {
       try {
-        final markdown = await _bridge.exportBookmarks(bookId: bookId);
+        final markdown = await _records.exportBookmarks(bookId: bookId);
         // A stale export must not deliver its text: an older book's Markdown
         // would overwrite the newer export's clipboard/notice.
         if (!_isCurrent(generation) || revision != _exportRevision) {
@@ -2790,8 +2862,9 @@ final class ReaderController implements Listenable {
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {
-        annotations = await _bridge.listAnnotations(
-          document: document.handle,
+        annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation),
           scale: layout.scale,
           cancellationId: cancellation,
         );
@@ -2848,6 +2921,42 @@ final class ReaderController implements Listenable {
         replacement.dispose();
       }
     }
+  }
+
+  /// The open [document]'s text for annotations and book search: PDF pages
+  /// from [pdf] (the current engine document when null), EPUB chapters in the
+  /// retained canonical stream every selection surface indexes, with their
+  /// resource paths from the Dart engine's source.
+  ReaderText _readerText(
+    FlutterDocumentSummary document,
+    BigInt cancellation, {
+    PdfEngineDocument? pdf,
+  }) {
+    if (document.format == FlutterBookFormat.pdf) {
+      return PdfReaderText(
+        pdf ??
+            _pdfDocument ??
+            (throw StateError('PDF engine document is missing')),
+      );
+    }
+    final generation = _model.generation;
+    return EpubReaderText(
+      unitCount: document.logicalUnitCount.toInt(),
+      text: (unit) => _bridge.epubCanonicalText(
+        document: document.handle,
+        unit: BigInt.from(unit),
+        cancellationId: cancellation,
+      ),
+      resourcePath: (unit) async {
+        final chapters = (await _ensureEpubSource(
+          document,
+          generation,
+        ))?.book.chapters;
+        return chapters != null && unit < chapters.length
+            ? chapters[unit].resource
+            : null;
+      },
+    );
   }
 
   /// The parsed Dart-engine source for [document], opened once per generation.
@@ -3141,7 +3250,11 @@ final class ReaderController implements Listenable {
     FlutterSelectionSurface? ownedSurface;
     FlutterBufferHandle? ownedRaster;
     ui.Image? ownedImage;
+    final pdf = _pdfDocument;
     try {
+      if (document.format == FlutterBookFormat.pdf && pdf == null) {
+        throw StateError('PDF engine document is missing');
+      }
       if (document.format == FlutterBookFormat.epub) {
         final routed = await _epubRelayout(
           document,
@@ -3172,15 +3285,17 @@ final class ReaderController implements Listenable {
       FlutterSelectionSurface? surface;
       String? selectionError;
       try {
-        surface = await _bridge.selectionSurface(
-          document: document.handle,
-          unit: BigInt.from(unit),
-          scale: layout.scale,
-          width: layout.width,
-          fontSize: layout.fontSize,
-          lineSpacing: layout.lineSpacing,
-          cancellationId: cancellation,
-        );
+        surface = pdf != null
+            ? await pdf.selectionSurface(unit, layout.scale)
+            : await _bridge.selectionSurface(
+                document: document.handle,
+                unit: BigInt.from(unit),
+                scale: layout.scale,
+                width: layout.width,
+                fontSize: layout.fontSize,
+                lineSpacing: layout.lineSpacing,
+                cancellationId: cancellation,
+              );
         ownedSurface = surface;
         ownedRaster = surface.raster?.handle;
         if (!_isCurrentLayout(generation, revision)) {
@@ -3208,25 +3323,15 @@ final class ReaderController implements Listenable {
           ownedRaster = null;
         }
       } else {
-        final rendered = await _bridge.renderPage(
-          document: document.handle,
-          page: BigInt.from(unit),
-          scale: layout.scale,
-          cancellationId: cancellation,
-        );
-        try {
-          if (!_isCurrentLayout(generation, revision)) {
-            return;
-          }
-          final pixels = _bridge.takeBuffer(handle: rendered.handle);
-          ownedImage = await _decoder(
-            pixels,
-            width: rendered.width,
-            height: rendered.height,
-          );
-        } finally {
-          _bridge.releaseBuffer(handle: rendered.handle);
+        final rendered = await pdf!.render(unit, layout.scale);
+        if (!_isCurrentLayout(generation, revision)) {
+          return;
         }
+        ownedImage = await _decoder(
+          rendered.pixels,
+          width: rendered.width,
+          height: rendered.height,
+        );
       }
       if (!_isCurrentLayout(generation, revision)) {
         return;
@@ -3234,8 +3339,9 @@ final class ReaderController implements Listenable {
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {
-        annotations = await _bridge.listAnnotations(
-          document: document.handle,
+        annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation),
           scale: layout.scale,
           cancellationId: cancellation,
         );
@@ -3389,7 +3495,7 @@ final class ReaderController implements Listenable {
         run: () async {
           String? writeError;
           try {
-            await _bridge.saveReadingState(
+            await _records.saveReadingState(
               bookId: bookId,
               value: value,
               unitCount: unitCount,
@@ -3793,7 +3899,8 @@ final class ReaderController implements Listenable {
       anchor < focus ? focus : anchor,
     );
     final document = _model.document;
-    if (document == null) return;
+    final surface = _model.selectionSurface;
+    if (document == null || surface == null) return;
     final generation = _model.generation;
     final selectionRevision = _selectionRevision;
     if (_model.annotationOperations.isNotEmpty || _closing) return;
@@ -3824,8 +3931,9 @@ final class ReaderController implements Listenable {
       var succeeded = false;
       String? writeError;
       try {
-        final created = await _bridge.createAnnotation(
-          document: document.handle,
+        final created = await _records.createAnnotation(
+          document: document,
+          surface: surface,
           unit: BigInt.from(_model.unit),
           start: BigInt.from(selection.start),
           end: BigInt.from(selection.end),
@@ -3932,8 +4040,8 @@ final class ReaderController implements Listenable {
       ),
     );
     try {
-      final changed = await _bridge.updateAnnotation(
-        document: document.handle,
+      final changed = await _records.updateAnnotation(
+        document: document,
         id: message.id,
         color: message.color,
         body: message.body,
@@ -4033,8 +4141,8 @@ final class ReaderController implements Listenable {
     );
     String? writeError;
     try {
-      final changed = await _bridge.deleteAnnotation(
-        document: document.handle,
+      final changed = await _records.deleteAnnotation(
+        document: document,
         id: id,
       );
       if (!_isCurrent(generation)) return;
@@ -4361,8 +4469,9 @@ final class ReaderController implements Listenable {
       List<FlutterAnnotation>? annotations;
       String? error;
       try {
-        annotations = await _bridge.listAnnotations(
-          document: document.handle,
+        annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation),
           scale: _model.layout.scale,
           cancellationId: cancellation,
         );
@@ -4395,8 +4504,8 @@ final class ReaderController implements Listenable {
     String? cursor,
   ) async {
     try {
-      final page = await _bridge.listAnnotationAssociationSources(
-        target: document.handle,
+      final page = await _records.listAnnotationAssociationSources(
+        target: document,
         cursor: cursor,
         limit: BigInt.from(32),
         cancellationId: cancellation,
@@ -4543,9 +4652,9 @@ final class ReaderController implements Listenable {
     if (bookId != null) _beginBookWrite(bookId);
     String? writeError;
     try {
-      final outcome = await _bridge.associateAnnotationVersion(
+      final outcome = await _records.associateAnnotationVersion(
         sourceVersionId: selected.versionId,
-        target: sources.document.handle,
+        target: sources.document,
         cancellationId: sources.cancellation,
       );
       dispatch(_ReaderAssociationPersisted(sources: sources, outcome: outcome));
@@ -4591,8 +4700,9 @@ final class ReaderController implements Listenable {
     _ReaderAssociationSourcesLoaded sources,
   ) async {
     try {
-      final annotations = await _bridge.listAnnotations(
-        document: sources.document.handle,
+      final annotations = await _records.listAnnotations(
+        document: sources.document,
+        text: _readerText(sources.document, sources.cancellation),
         scale: _model.layout.scale,
         cancellationId: sources.cancellation,
       );
@@ -4667,6 +4777,7 @@ final class ReaderController implements Listenable {
     if (opened != null) {
       _bridge.releaseDocument(handle: opened.handle);
     }
+    unawaited(message.pdfDocument?.dispose());
     if (_isCurrent(message.generation)) {
       _releaseModelResources();
       _emit(
@@ -5050,6 +5161,9 @@ final class ReaderController implements Listenable {
     if (document != null) {
       _bridge.releaseDocument(handle: document.handle);
     }
+    final pdf = _pdfDocument;
+    _pdfDocument = null;
+    unawaited(pdf?.dispose());
   }
 
   void _releaseSurface(FlutterSelectionSurface surface) {

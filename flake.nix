@@ -102,6 +102,8 @@
             # Flutter Linux desktop build deps
             gtk3
             ninja
+            # Restores the engine library's $ORIGIN RUNPATH in release bundles
+            patchelf
 
             # Native windowing and GPU development files for the Flutter Linux
             # host and the tools that run under Xvfb below
@@ -175,6 +177,10 @@
                 vulkan-loader
               ])
             );
+
+            # The Flutter PDF engine tests load PDFium from here: `flutter test`
+            # does not link pdfrx's native asset.
+            SHOSAI_PDFIUM_LIBRARY = "${pkgs.pdfium-binaries}/lib/libpdfium.so";
 
             # Clang (in the shell's build deps) links the native Cargo targets
             # directly, matching the toolchain the Flutter host builds use.

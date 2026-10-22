@@ -22,7 +22,7 @@ import '../support/selection_surface_fixture.dart';
 /// `test/support/selection_surface_fixture.dart`; persistence, copy delivery
 /// and the note dialog run through the controller's production paths.
 class _SelectionBridge extends HarnessBridge {
-  _SelectionBridge({super.unitCount, super.pageHeight});
+  _SelectionBridge({super.unitCount, super.pageWidth, super.pageHeight});
 
   /// Whether the surface reports a complete Unicode mapping (RFD 6: copying is
   /// unavailable for a geometry-only highlight).
@@ -539,7 +539,7 @@ void main() {
       await _open(
         tester,
         _reader(
-          bridge: _SelectionBridge(pageHeight: 1200),
+          bridge: _SelectionBridge(pageWidth: 336, pageHeight: 1200),
           initialPath: '/books/atlas.pdf',
           settings: _pdfFitWidth,
         ),
@@ -562,6 +562,9 @@ void main() {
       expect(range.dy - surface.bottom, lessThan(60));
     });
 
+    // The scroll fixtures size their page to the 390 px phone's document pane
+    // (336 px), so the fit-width page is the one these scroll offsets were
+    // measured against.
     testWidgets('the surface follows the range when the content scrolls', (
       tester,
     ) async {
@@ -569,7 +572,7 @@ void main() {
       await _open(
         tester,
         _reader(
-          bridge: _SelectionBridge(pageHeight: 1200),
+          bridge: _SelectionBridge(pageWidth: 336, pageHeight: 1200),
           initialPath: '/books/atlas.pdf',
           settings: _pdfFitWidth,
         ),
@@ -624,7 +627,7 @@ void main() {
       await _open(
         tester,
         _reader(
-          bridge: _SelectionBridge(pageHeight: 700),
+          bridge: _SelectionBridge(pageWidth: 336, pageHeight: 700),
           initialPath: '/books/atlas.pdf',
           settings: _pdfFitWidth,
         ),

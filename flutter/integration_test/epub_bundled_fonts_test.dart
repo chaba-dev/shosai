@@ -161,8 +161,10 @@ void main() {
     // observer records each relayout's gate outcome, so the painted page is
     // confirmed as a gate decision, not just an appearance.
     final coveredAttempts = <_RoutingAttempt>[];
-    final coveredBridge = FlutterBridge.withDatabasePath(
-      databasePath: '${directory.path}/covered.sqlite3',
+    final coveredBridge = await createApplicationBridge(
+      applicationSupportDirectory: () async =>
+          Directory('${directory.path}/covered')..createSync(),
+      databaseName: 'covered.sqlite3',
     );
     try {
       await _openBook(tester, coveredBridge, coveredPath, coveredAttempts);
@@ -194,8 +196,10 @@ void main() {
     // real retained canonical stream (the one the routing gate compares) must
     // equal the engine's, and must carry the rune through both parsers.
     final uncoveredAttempts = <_RoutingAttempt>[];
-    final uncoveredBridge = FlutterBridge.withDatabasePath(
-      databasePath: '${directory.path}/uncovered.sqlite3',
+    final uncoveredBridge = await createApplicationBridge(
+      applicationSupportDirectory: () async =>
+          Directory('${directory.path}/uncovered')..createSync(),
+      databaseName: 'uncovered.sqlite3',
     );
     try {
       final cancellation = uncoveredBridge.createCancellation();

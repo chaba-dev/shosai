@@ -8,6 +8,7 @@ environment:
 
 dependencies:
   characters: ^1.4.1
+  ffi: ^2.2.0
   file_selector: ^1.0.3
   flutter:
     sdk: flutter
@@ -15,7 +16,11 @@ dependencies:
     sdk: flutter
   flutter_rust_bridge: 2.11.1
   path_provider: ^2.1.5
+  pdfium_dart: 0.2.5
+  pdfrx: 2.4.7
   shadcn_ui: ^0.56.3
+  shosai_core:
+    path: packages/shosai_core
   shosai_epub:
     path: packages/shosai_epub
   shosai_flutter_bridge:
@@ -68,3 +73,12 @@ flutter:
   licenses:
     - fonts/LICENSE-Inter
     - fonts/LICENSE-NotoSansJP.txt
+
+dependency_overrides:
+  # pdfrx_engine 0.4.5 with upstream's worker fix (espresso3389/pdfrx@e16a956,
+  # released in 0.4.7): a callback that throws on the PDFium worker isolate
+  # now fails the caller instead of leaving it waiting forever. 0.4.7 needs
+  # meta ^1.18.0, which Flutter 3.41.5 does not allow; drop this override when
+  # the SDK lets pdfrx move to 2.4.8. See third_party/pdfrx_engine/README.md.
+  pdfrx_engine:
+    path: third_party/pdfrx_engine

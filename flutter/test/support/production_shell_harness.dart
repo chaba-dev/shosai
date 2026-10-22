@@ -12,6 +12,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import 'bridge_pdf_engine.dart';
+import 'bridge_records.dart';
 
 /// Test support for rendering and inspecting the production shell.
 ///
@@ -379,7 +381,9 @@ Uint8List deterministicPageRgba({
 ///
 /// Every method returns fixed data derived from the constructor arguments, so
 /// repeated renders of the same state produce identical pixels.
-class HarnessBridge implements FlutterBridge {
+class HarnessBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   HarnessBridge({
     List<FlutterLibraryBook>? books,
     Map<int, Uint8List>? covers,
@@ -401,6 +405,9 @@ class HarnessBridge implements FlutterBridge {
   final FlutterReaderSettings settings;
   final int pageWidth;
   final int pageHeight;
+
+  @override
+  int get pdfEnginePageCount => unitCount;
   final int unitCount;
 
   int pageCalls = 0;
@@ -603,9 +610,11 @@ class HarnessBridge implements FlutterBridge {
       ),
     );
     final format = _documentFormats[document.id] ?? FlutterBookFormat.pdf;
+    // A PDF surface is its bitmap, as the Dart engine's is; an EPUB surface
+    // is laid out to the requested width.
     return FlutterSelectionSurface(
       handle: FlutterSelectionHandle(registry: BigInt.one, id: unit),
-      width: width,
+      width: format == FlutterBookFormat.pdf ? pageWidth.toDouble() : width,
       height: pageHeight.toDouble(),
       text: 'Page ${unit + BigInt.one} of the deterministic harness document.',
       copyEligible: true,

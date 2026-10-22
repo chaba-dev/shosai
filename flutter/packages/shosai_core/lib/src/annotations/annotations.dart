@@ -279,8 +279,9 @@ Future<List<ResolvedAnnotation>> _resolve(
         if (annotations[pending.index].anchor case EpubAnchor(
           :final resourcePath,
         ))
-          // A spine item that now holds another resource is another chapter.
-          if (resourcePath == epubPath) pending else null
+          // A spine item that now holds another resource is another chapter;
+          // an unknown path leaves the text to decide.
+          if (epubPath == null || resourcePath == epubPath) pending else null
         else
           pending,
     ].nonNulls.toList();

@@ -13,6 +13,8 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
+import 'support/bridge_pdf_engine.dart';
+import 'support/bridge_records.dart';
 
 final _documentHandle = FlutterDocumentHandle(
   registry: BigInt.one,
@@ -544,8 +546,11 @@ void main() {
 
   for (final disposedDuringDecode in [false, true]) {
     for (final decodeFails in [false, true]) {
+      // The PDF engine owns the rendered pixels: the bridge buffer behind the
+      // fake engine is copied and released before the decoder runs, and the
+      // decode outcome cannot change that ownership.
       test(
-        'PDF buffer stays retained through ${disposedDuringDecode ? 'disposed ' : ''}${decodeFails ? 'failed' : 'successful'} decoding',
+        'PDF render pixels are engine-owned through ${disposedDuringDecode ? 'disposed ' : ''}${decodeFails ? 'failed' : 'successful'} decoding',
         () async {
           final bridge = _FakeBridge()..completeOpen(FlutterBookFormat.pdf);
           final decoded = Completer<ui.Image>();
@@ -568,11 +573,10 @@ void main() {
             ),
           );
           await decodeStarted.future;
-          expect(bridge.releasedBuffers, isEmpty);
+          expect(bridge.releasedBuffers, [_bufferHandle]);
           if (disposedDuringDecode) {
             controller.dispose();
             expect(bridge.disposeCount, 0);
-            expect(bridge.releasedBuffers, isEmpty);
           }
 
           if (decodeFails) {
@@ -2213,11 +2217,15 @@ void main() {
           ]),
         );
         expect(controller.model.savedSelections, hasLength(1));
-        expect(bridge.selectionLayouts, [const ReaderLayout(), layout]);
-        expect(bridge.listScales, [1, 2]);
         if (format == FlutterBookFormat.pdf) {
+          // A PDF surface is laid out by the engine from its scale alone.
+          expect(bridge.selectionLayouts, [
+            const ReaderLayout(),
+            const ReaderLayout(scale: 2),
+          ]);
           expect(bridge.renderScales, [1, 2]);
         } else {
+          expect(bridge.selectionLayouts, [const ReaderLayout(), layout]);
           expect(bridge.renderScales, isEmpty);
         }
         controller.dispatch(const ReaderSelectionStarted(1));
@@ -2301,7 +2309,8 @@ void main() {
     await bridge.waitForOp(3);
 
     expect(decodeCalls, 2, reason: 'only open and current relayout decode');
-    expect(bridge.takenBuffers, isNot(contains(staleBuffer.handle)));
+    // The engine copies and releases its buffer before the reader can tell
+    // the render is stale; the stale pixels are then dropped undecoded.
     expect(
       bridge.releasedBuffers.where((item) => item == staleBuffer.handle),
       hasLength(1),
@@ -7559,7 +7568,9 @@ Future<void> _openControlled(
   await bridge.waitForOp(target);
 }
 
-final class _ControlledBridge implements FlutterBridge {
+final class _ControlledBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _ControlledBridge({
     this.format = FlutterBookFormat.epub,
     this.logicalUnitCount = 1,
@@ -8176,7 +8187,7 @@ final class _ControlledBridge implements FlutterBridge {
   }
 }
 
-class _FakeBridge implements FlutterBridge {
+class _FakeBridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
   _FakeBridge({Uint8List? pixels, this.selectionRaster = false})
     : pixels = pixels ?? Uint8List.fromList(List.filled(8, 255));
 
@@ -8427,7 +8438,9 @@ class _FakeBridge implements FlutterBridge {
   }
 }
 
-final class _SequentialBridge implements FlutterBridge {
+final class _SequentialBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _SequentialBridge(this.openResults);
 
   final Queue<Object> openResults;

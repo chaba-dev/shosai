@@ -14,6 +14,8 @@ import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import 'support/production_shell_harness.dart';
+import 'support/bridge_pdf_engine.dart';
+import 'support/bridge_records.dart';
 
 /// The card's own title line.
 ///
@@ -975,7 +977,7 @@ void main() {
         managed: true,
         runner: (runnerBridge, cancellation) async {
           runnerCalls += 1;
-          expect(runnerBridge, same(bridge));
+          expect(runnerBridge, same(bridge.records));
           return FlutterImportReport(
             imported: BigInt.one,
             failed: BigInt.zero,
@@ -1455,7 +1457,9 @@ Future<void> _waitUntil(bool Function() predicate) async {
   }
 }
 
-class _LibraryBridge implements FlutterBridge {
+class _LibraryBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _LibraryBridge({
     this.books = const [
       FlutterLibraryBook(
@@ -1593,7 +1597,9 @@ class _DisposeSignalState extends State<_DisposeSignal> {
   Widget build(BuildContext context) => widget.child;
 }
 
-class _ControlledLibraryBridge implements FlutterBridge {
+class _ControlledLibraryBridge
+    with BridgePdfEngine, BridgeRecords
+    implements FlutterBridge {
   _ControlledLibraryBridge({
     this.books = const [],
     this.removalOutcome = const FlutterLibraryRemoveOutcome(
