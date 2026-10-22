@@ -70,6 +70,7 @@ All notable changes to this project will be documented in this file.
 - *(theme)* Paint the Flutter app with the Shōsai design system tokens (#153)
 - *(flutter)* Compose the library and reader in the Bookshelf shell (#157)
 - *(flutter)* Set the library on a shelf under a Continue reading hero (#160)
+- *(reader)* Lay continuous EPUB chapters out lazily (#167)
 
 ### 🐛 Bug Fixes
 
