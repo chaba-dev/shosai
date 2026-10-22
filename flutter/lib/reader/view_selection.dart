@@ -334,13 +334,27 @@ class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
     }
     // Keep the first node the view shows in place where the reader sees it.
     final position = _scroll.position;
+    final restartedAt = after.restartedAt;
+    if (restartedAt != null) {
+      // The view showed none of the previous window: the new one starts at
+      // the view's top.
+      position.correctBy(
+        after.nodeTops[restartedAt] + kEpubPageMargin - position.pixels,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => _report());
+      return;
+    }
     final node = continuousAnchorNode(
       before.nodeTops,
       position.pixels - kEpubPageMargin,
       firstLaidOut: before.firstNode,
       endLaidOut: before.endNode,
     );
-    final shift = after.nodeTops[node] - before.nodeTops[node];
+    // Nothing laid out is in view (the window restarts there): no content
+    // the reader sees moves, so nothing is kept in place.
+    final shift = node == null
+        ? 0.0
+        : after.nodeTops[node] - before.nodeTops[node];
     // A correction, not a scroll: the new extent is applied at the next
     // layout, in the same frame the new window paints.
     if (shift != 0) position.correctBy(shift);
@@ -361,6 +375,7 @@ class _ContinuousEpubScrollState extends State<_ContinuousEpubScroll> {
         revision: widget.revealRevision,
         top: position.pixels,
         bottom: position.pixels + position.viewportDimension,
+        window: widget.page.window,
       ),
     );
   }

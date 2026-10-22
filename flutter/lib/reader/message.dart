@@ -649,9 +649,15 @@ final class ReaderContinuousViewportChanged extends ReaderMessage {
     required this.revision,
     required this.top,
     required this.bottom,
+    required this.window,
   });
 
   final int generation;
+
+  /// The window of the page the region was measured against. A report made
+  /// before the view applied a newer window's correction is in that older
+  /// column's coordinates, and is ignored.
+  final ReaderEpubWindow? window;
 
   /// The [ReaderModel.locationRequestRevision] the view has revealed.
   final int revision;

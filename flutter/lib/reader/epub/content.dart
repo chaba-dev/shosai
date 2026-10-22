@@ -578,6 +578,7 @@ class ReaderEpubWindow {
     required this.firstNode,
     required this.endNode,
     required this.nodeTops,
+    this.restartedAt,
   });
 
   /// The laid-out nodes: `firstNode` up to, not including, `endNode`.
@@ -587,6 +588,11 @@ class ReaderEpubWindow {
   /// The column top of every chapter node, then the column height, in content
   /// coordinates (the page box adds [kEpubPageMargin] above).
   final List<double> nodeTops;
+
+  /// The node this window was started again at, when it was: the view showed
+  /// none of the previous window, so it places this node at its top instead of
+  /// keeping laid-out text in place.
+  final int? restartedAt;
 }
 
 /// The page box of a page window of [windowSize].

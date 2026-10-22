@@ -89,6 +89,10 @@ class ContinuousExtents {
     return scalars == 0 ? _atomicExtent : (_density ?? 0) * scalars;
   }
 
+  /// The atomic estimate when no atomic node was measured yet: never zero, so
+  /// a run of unmeasured images still reserves space and a window step
+  /// measuring them is not hidden behind a column that does not move.
+
   int _scalars(int node) {
     final canonical = chapter.blocks[node].canonical;
     return canonical == null ? 0 : canonical.end - canonical.start;
@@ -98,7 +102,10 @@ class ContinuousExtents {
   void record(int node, double extent) => _measured[node] = extent;
 
   /// Fixes the estimate from the nodes measured so far.
-  void calibrate({required double fallbackDensity}) {
+  void calibrate({
+    required double fallbackDensity,
+    required double fallbackAtomicExtent,
+  }) {
     if (_density != null) return;
     var textExtent = 0.0;
     var textScalars = 0;
@@ -117,7 +124,9 @@ class ContinuousExtents {
       }
     }
     _density = textScalars == 0 ? fallbackDensity : textExtent / textScalars;
-    _atomicExtent = atomicNodes == 0 ? 0 : atomicExtent / atomicNodes;
+    _atomicExtent = atomicNodes == 0
+        ? fallbackAtomicExtent
+        : math.max(1.0, atomicExtent / atomicNodes);
   }
 
   /// The column top of every node, then the column's height: `nodeCount + 1`
@@ -151,22 +160,23 @@ int continuousNodeAt(Float64List tops, double y) {
   return low;
 }
 
-/// The node the view keeps in place when the column changes: the first node
-/// that starts at or below [y], and is laid out when the window reaches it.
+/// The node the view keeps in place when the column changes, or null when
+/// nothing laid out can be: the first laid-out node that starts at or below
+/// [y], within [firstLaidOut]..[endLaidOut].
 ///
 /// Not the node under [y]: that node is partly above the view, and when its
-/// own extent changes everything after it moves. Not a node above the window
-/// either: it paints nothing yet, and measuring it moves it — the laid-out
-/// text below it is what the reader sees.
-int continuousAnchorNode(
+/// own extent changes everything after it moves. Never a node outside the
+/// window: it paints nothing, and keeping an estimated node in place would
+/// move the view along with every measurement in front of it.
+int? continuousAnchorNode(
   List<double> tops,
   double y, {
-  int firstLaidOut = 0,
-  int endLaidOut = 0,
+  required int firstLaidOut,
+  required int endLaidOut,
 }) {
-  final count = tops.length - 1;
+  if (endLaidOut <= firstLaidOut) return null;
   var low = 0;
-  var high = count;
+  var high = tops.length - 1;
   while (low < high) {
     final middle = (low + high) >> 1;
     if (tops[middle] < y) {
@@ -175,8 +185,8 @@ int continuousAnchorNode(
       high = middle;
     }
   }
-  if (low < firstLaidOut && firstLaidOut < endLaidOut) low = firstLaidOut;
-  return math.min(low, math.max(0, count - 1));
+  final node = math.max(low, firstLaidOut);
+  return node < endLaidOut ? node : null;
 }
 
 /// One laid-out node's page slices and selection geometry, placed at the
@@ -321,6 +331,40 @@ class ContinuousGeometryCache {
     );
   }
 
+  /// Grapheme and word boundaries of the nodes around [scalar]: the node
+  /// holding it and one node either side.
+  ///
+  /// Keyboard selection moves by these, so a focus outside the laid-out window
+  /// still moves by one grapheme or word, and crosses into the next node.
+  ({List<int> graphemes, List<int> words}) boundariesAround(int scalar) {
+    final blocks = chapter.blocks;
+    var node = 0;
+    for (var index = 0; index < blocks.length; index += 1) {
+      final canonical = blocks[index].canonical;
+      if (canonical == null) continue;
+      if (canonical.start > scalar) break;
+      node = index;
+    }
+    int? start;
+    int? end;
+    for (
+      var index = math.max(0, node - 1);
+      index <= math.min(blocks.length - 1, node + 1);
+      index += 1
+    ) {
+      final canonical = blocks[index].canonical;
+      if (canonical == null) continue;
+      start = start == null
+          ? canonical.start
+          : math.min(start, canonical.start);
+      end = end == null ? canonical.end : math.max(end, canonical.end);
+    }
+    if (start == null || end == null) {
+      return (graphemes: <int>[scalar], words: <int>[scalar]);
+    }
+    return _scalars.boundaries(start, end);
+  }
+
   void _retainOnly(int first, int end) =>
       _nodes.removeWhere((node, _) => node < first || node >= end);
 }
@@ -406,6 +450,7 @@ ReaderEpubPage continuousWindowFor({
   required Size windowSize,
   double priorityTop = 0,
   int? selectionBudgetMicros,
+  int? restartedAt,
 }) {
   final chapter = session.chapter;
   final frame = epubPageBoxFor(windowSize);
@@ -472,6 +517,8 @@ ReaderEpubPage continuousWindowFor({
         typography.fontSize *
         typography.lineHeight /
         math.max(1.0, frame.contentWidth / (typography.fontSize * 0.5)),
+    // An image is commonly a good part of a page tall.
+    fallbackAtomicExtent: frame.contentHeight / 3,
   );
   final tops = extents.tops();
   final slices = <PageSlice>[];
@@ -547,6 +594,7 @@ ReaderEpubPage continuousWindowFor({
       firstNode: session.started ? session.firstNodeIndex : 0,
       endNode: session.started ? session.lastNodeIndex + 1 : 0,
       nodeTops: tops,
+      restartedAt: restartedAt,
     ),
   );
 }
@@ -577,17 +625,16 @@ bool continuousSurfaceFrozen(FlutterSelectionSurface surface) =>
 /// What one [advanceContinuousWindow] step did.
 class ContinuousWindowStep {
   const ContinuousWindowStep({
-    required this.released,
     required this.changed,
     required this.pending,
-    required this.anchorNode,
-    required this.anchorTop,
+    this.anchorNode,
+    this.anchorTop = 0,
+    this.restartedAt,
   });
 
-  /// Blocks the step detached from the session. They are no longer laid out,
-  /// but the page installed before the step still paints them: the owner
-  /// releases them once a page without them is shown.
-  final List<FlowBlock> released;
+  /// The node the window was started again at, when the viewport did not
+  /// intersect it: the view then places that node at its top.
+  final int? restartedAt;
 
   /// Whether the laid-out window changed, so a new page must be installed.
   final bool changed;
@@ -596,42 +643,45 @@ class ContinuousWindowStep {
   /// step is due.
   final bool pending;
 
-  /// The node under the viewport's top, and its column top before the step.
+  /// The laid-out node the view keeps in place ([continuousAnchorNode]), and
+  /// its column top before the step; null when the view shows no laid-out
+  /// node, and then nothing is kept in place.
   ///
   /// Measuring nodes above it moves it in the column; the view keeps it in
   /// place by scrolling by the same amount, which is its top in the next page
   /// minus [anchorTop].
-  final int anchorNode;
+  final int? anchorNode;
   final double anchorTop;
 }
 
 /// Moves [session]'s window one bounded step toward the viewport
 /// [viewportTop]..[viewportBottom] (column coordinates).
 ///
-/// A window that does not reach the viewport at all (a scrollbar drag, a
-/// resize) starts again at the node under the viewport's top; otherwise nodes
-/// beyond [kContinuousKeepViewports] are released and at most one batch of
-/// [kContinuousBatchNodes] nodes or [kContinuousBatchMicros] of layout is
-/// measured, before the viewport first, then after it.
+/// A window the viewport does not intersect (a scrollbar drag, a fast fling,
+/// a resize) starts again at the node under the viewport's top; otherwise
+/// nodes beyond [kContinuousKeepViewports] are released. Either way at most
+/// one batch of [kContinuousBatchNodes] nodes or [kContinuousBatchMicros] of
+/// layout is measured, before the viewport first, then after it.
+///
+/// Every block the step detaches is added to [released] as soon as it is
+/// detached, so the caller owns it even when a later part of the step throws:
+/// the page installed before the step may still paint it, and the caller
+/// releases it once a page without it is shown.
 ContinuousWindowStep advanceContinuousWindow({
   required ChapterLayoutSession session,
   required ContinuousExtents extents,
   required double viewportTop,
   required double viewportBottom,
+  required List<FlowBlock> released,
 }) {
   final count = session.totalNodes;
   if (count == 0) {
-    return const ContinuousWindowStep(
-      released: [],
-      changed: false,
-      pending: false,
-      anchorNode: 0,
-      anchorTop: 0,
-    );
+    return const ContinuousWindowStep(changed: false, pending: false);
   }
   final before = extents.tops();
   final span = math.max(1.0, viewportBottom - viewportTop);
   final visible = continuousNodeAt(before, viewportTop);
+  final bottom = continuousNodeAt(before, viewportBottom);
   final anchor = continuousAnchorNode(
     before,
     viewportTop,
@@ -642,14 +692,20 @@ ContinuousWindowStep advanceContinuousWindow({
   final keep = kContinuousKeepViewports * span;
   final first = continuousNodeAt(before, viewportTop - lead);
   final last = continuousNodeAt(before, viewportBottom + lead);
-  final released = <FlowBlock>[];
   var changed = false;
+  int? restartedAt;
   if (!session.started ||
-      session.lastNodeIndex < first ||
-      session.firstNodeIndex > last) {
+      session.lastNodeIndex < visible ||
+      session.firstNodeIndex > bottom) {
     released.addAll(session.releaseAll());
-    session.layoutWindowAt(0, node: visible);
     changed = true;
+    restartedAt = visible;
+    session.layoutWindowAt(
+      0,
+      node: visible,
+      maxNodes: kContinuousBatchNodes,
+      maxMicros: kContinuousBatchMicros,
+    );
   } else {
     final keepFirst = continuousNodeAt(before, viewportTop - keep);
     if (keepFirst > session.firstNodeIndex) {
@@ -661,7 +717,13 @@ ContinuousWindowStep advanceContinuousWindow({
       released.addAll(session.releaseFrom(keepEnd));
       changed = true;
     }
-    final grown = session.firstNodeIndex > first
+    // The viewport itself first, then the lead above it, then below.
+    final grown = session.lastNodeIndex < bottom
+        ? session.layoutForward(
+            maxNodes: kContinuousBatchNodes,
+            maxMicros: kContinuousBatchMicros,
+          )
+        : session.firstNodeIndex > first
         ? session.layoutBackward(
             maxNodes: kContinuousBatchNodes,
             maxMicros: kContinuousBatchMicros,
@@ -675,12 +737,12 @@ ContinuousWindowStep advanceContinuousWindow({
     if (grown > 0) changed = true;
   }
   return ContinuousWindowStep(
-    released: released,
     changed: changed,
     pending:
         changed &&
         (session.firstNodeIndex > first || session.lastNodeIndex < last),
-    anchorNode: anchor,
-    anchorTop: before[anchor],
+    anchorNode: restartedAt == null ? anchor : null,
+    anchorTop: anchor == null ? 0 : before[anchor],
+    restartedAt: restartedAt,
   );
 }

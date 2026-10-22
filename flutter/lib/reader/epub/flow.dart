@@ -517,7 +517,16 @@ class ChapterLayoutSession {
   /// the following page.
   ///
   /// It is the first range of a session, or the first after [releaseAll].
-  void layoutWindowAt(int scalar, {double viewports = 2.5, int? node}) {
+  ///
+  /// [maxNodes] and [maxMicros] bound the window the way they bound a batch
+  /// (at least one node is measured); the window is then extended by batches.
+  void layoutWindowAt(
+    int scalar, {
+    double viewports = 2.5,
+    int? node,
+    int? maxNodes,
+    int? maxMicros,
+  }) {
     assert(!_started, 'the priority window is the first range of a session');
     final context = _newContext();
     final stopwatch = Stopwatch()..start();
@@ -534,6 +543,10 @@ class ChapterLayoutSession {
         bounds.add(context.cursor);
         index++;
         if (context.cursor >= targetHeight) break;
+        if (maxNodes != null && index - target >= maxNodes) break;
+        if (maxMicros != null && stopwatch.elapsedMicroseconds >= maxMicros) {
+          break;
+        }
       }
     } catch (_) {
       // A window that throws before the session adopts it would otherwise leak

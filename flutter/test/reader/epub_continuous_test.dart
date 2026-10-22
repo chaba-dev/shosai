@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
@@ -690,6 +691,14 @@ void main() {
     await closeReader(tester);
   });
 
+  Set<TextPainter> collectedSlices(ReaderEpubPage page) {
+    final painters = <TextPainter>{};
+    collectPainters([
+      for (final slice in page.page.slices) slice.block,
+    ], painters);
+    return painters;
+  }
+
   PagePainter highlightPainter(WidgetTester tester) => tester
       .widgetList<CustomPaint>(find.byType(CustomPaint))
       .map((paint) => paint.painter)
@@ -817,6 +826,231 @@ void main() {
 
     await closeReader(tester);
   });
+  testWidgets('keyboard selection moves from a focus outside the window and '
+      'across its edges', (tester) async {
+    await openReader(tester, longBridge());
+    await settle(tester);
+
+    final page = dartPage(tester)!;
+    final text = longChapter.canonicalText;
+    final from = text.indexOf('Paragraph 3 ');
+    final to = text.indexOf('Paragraph 9 ');
+    FlutterSelectionRect rectOf(ReaderEpubPage page, int offset) => page
+        .surface
+        .endpoints
+        .firstWhere((endpoint) => endpoint.offset == BigInt.from(offset))
+        .rect;
+    final origin = tester.getTopLeft(
+      find.byKey(const ValueKey('reader-selection-surface')),
+    );
+    final a = rectOf(page, from);
+    final b = rectOf(page, to);
+    final gesture = await tester.startGesture(
+      origin + Offset(a.left + 1, (a.top + a.bottom) / 2),
+      kind: ui.PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await tester.pump();
+    await gesture.moveTo(origin + Offset(b.left + 1, (b.top + b.bottom) / 2));
+    await tester.pump();
+    await gesture.up();
+    await settle(tester);
+    int? focus() => highlightPainter(tester).focus;
+    expect(focus(), to);
+
+    // Scroll far enough that the selected nodes are released.
+    for (var drag = 0; drag < 12; drag += 1) {
+      await scrollBy(tester, 3000);
+    }
+    expect(dartPage(tester)!.window!.firstNode, greaterThan(9));
+
+    Future<void> press(LogicalKeyboardKey key, {bool alt = false}) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      if (alt) await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(key);
+      if (alt) await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await settle(tester);
+    }
+
+    // A word movement reads the chapter's own boundaries around the focus:
+    // the next word boundary, not the window's first one.
+    await press(LogicalKeyboardKey.arrowRight, alt: true);
+    expect(focus(), to + 'Paragraph'.length);
+    expect(highlightPainter(tester).anchor, from);
+
+    // A visual movement lays the focus out again, reveals it, and moves.
+    await press(LogicalKeyboardKey.arrowRight);
+    expect(focus(), to + 'Paragraph'.length + 1);
+    final position = chapterScroll(tester);
+    final caret = rectOf(dartPage(tester)!, focus()!);
+    expect(
+      caret.top >= position.pixels &&
+          caret.bottom <= position.pixels + position.viewportDimension,
+      isTrue,
+      reason: 'the focus is revealed',
+    );
+
+    // Line by line, past the edge of the restarted window: every press moves.
+    var previous = focus()!;
+    for (var line = 0; line < 30; line += 1) {
+      await press(LogicalKeyboardKey.arrowDown);
+      expect(focus(), greaterThan(previous), reason: 'line $line moves');
+      previous = focus()!;
+    }
+    for (var line = 0; line < 40; line += 1) {
+      await press(LogicalKeyboardKey.arrowUp);
+      expect(focus(), lessThan(previous), reason: 'line $line moves back');
+      previous = focus()!;
+    }
+    expect(highlightPainter(tester).anchor, from);
+
+    await closeReader(tester);
+  });
+
+  testWidgets('Select All selects and copies the whole chapter', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    MethodCall? clipboard;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') clipboard = call;
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await openReader(tester, longBridge());
+    await settle(tester);
+
+    // The document's own screen-reader action selects everything.
+    final node = tester.getSemantics(
+      find.byKey(const ValueKey('reader-content-semantics')),
+    );
+    tester.binding.performSemanticsAction(
+      ui.SemanticsActionEvent(
+        type: ui.SemanticsAction.tap,
+        viewId: tester.view.viewId,
+        nodeId: node.id,
+      ),
+    );
+    await settle(tester);
+    expect(
+      (highlightPainter(tester).anchor, highlightPainter(tester).focus),
+      (0, longChapter.scalarCount),
+    );
+    await tester.tap(find.text('Copy'));
+    await tester.pump();
+    expect((clipboard?.arguments as Map?)?['text'], longChapter.canonicalText);
+
+    await closeReader(tester);
+    semantics.dispose();
+  });
+
+  testWidgets('a jump into unmeasured atomic nodes lays out where the view '
+      'is, without chasing it', (tester) async {
+    // A text-only first window, then a long run of rules (no text, so their
+    // extent is the atomic estimate until measured), then text again.
+    final epub = buildTestEpub(
+      chapters: {
+        'OPS/Text/chapter-1.xhtml':
+            '${'<p>A paragraph before the rules, long enough to wrap onto a '
+                    'second line at this width, so the first window is text.</p>' * 80}'
+            '${'<hr/>' * 600}'
+            '${'<p>A paragraph after the rules.</p>' * 300}',
+        'OPS/Text/chapter-2.xhtml': '<p>A short chapter.</p>',
+      },
+      nav: '<ol></ol>',
+    );
+    final steps = <int>[];
+    await openReader(
+      tester,
+      bridge(epub: epub, unitCount: 2),
+      stepObserver: steps.add,
+    );
+    await settle(tester);
+    final tops = dartPage(tester)!.window!.nodeTops;
+    expect(dartPage(tester)!.window!.endNode, lessThan(80));
+
+    // Into the rule run, beyond the window.
+    final target = tops[120] + 100;
+    await scrollBy(
+      tester,
+      target + kEpubPageMargin - chapterScroll(tester).pixels,
+    );
+    // A rule is about a pixel tall in the column, so filling the view takes
+    // hundreds of them however the window starts: settle until it stops.
+    for (var round = 0, count = -1; round < 8 && count != steps.length;) {
+      count = steps.length;
+      round += 1;
+      await settle(tester);
+    }
+    expectWindowCoversView(tester);
+    expect(
+      dartPage(tester)!.window!.firstNode,
+      greaterThan(40),
+      reason: 'the window restarted at the view instead of walking to it',
+    );
+    // Measuring the rules above the view moves the column; the view keeps the
+    // node it jumped to on screen instead of being carried past the run.
+    final window = dartPage(tester)!.window!;
+    final atTop = continuousNodeAt(
+      Float64List.fromList(window.nodeTops),
+      chapterScroll(tester).pixels - kEpubPageMargin,
+    );
+    expect(atTop, inInclusiveRange(110, 130));
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a failed window step keeps the blocks its page paints, and '
+      'releases them once', (tester) async {
+    final sessions = <ChapterLayoutSession>[];
+    await openReader(
+      tester,
+      longBridge(),
+      sessionObserver: (session) {
+        session.debugObservePainters = true;
+        sessions.add(session);
+      },
+    );
+    await settle(tester);
+    final session = sessions.last;
+    final painted = <TextPainter>{};
+    collectPainters([
+      for (final slice in dartPage(tester)!.page.slices) slice.block,
+    ], painted);
+    expect(painted, isNotEmpty);
+
+    // A jump restarts the window; its first painter fails.
+    session.debugFailTextBlockAt = session.debugCreatedPainters.length + 1;
+    await scrollBy(tester, 60000);
+    expect(
+      painted.where((painter) => painter.debugDisposed),
+      isEmpty,
+      reason: 'the page still installed paints them',
+    );
+    expect(
+      collectedSlices(dartPage(tester)!).containsAll(painted),
+      isTrue,
+      reason: 'the failed step installed nothing',
+    );
+
+    // The next step succeeds and replaces the page: they are released.
+    session.debugFailTextBlockAt = null;
+    await scrollBy(tester, 400);
+    expectWindowCoversView(tester);
+    expect(painted.every((painter) => painter.debugDisposed), isTrue);
+
+    await closeReader(tester);
+  });
+
   test('a window step measures one batch and keeps released nodes in '
       'place', () {
     final session = ChapterLayoutSession(
@@ -871,8 +1105,8 @@ void main() {
         extents: extents,
         viewportTop: top,
         viewportBottom: top + 600,
+        released: released,
       );
-      released.addAll(step.released);
       expect(
         session.lastNodeIndex - beforeEnd,
         lessThanOrEqualTo(kContinuousBatchNodes),
@@ -889,13 +1123,16 @@ void main() {
 
     // Back to the start: the probe is laid out again, at the same top.
     for (var step = 0; step < 400 && session.firstNodeIndex > 0; step += 1) {
+      final detached = <FlowBlock>[];
       advanceContinuousWindow(
         session: session,
         extents: extents,
         viewportTop: 0,
         viewportBottom: 600,
-      ).released.forEach((block) => disposeFlowBlocks([block]));
+        released: detached,
+      );
       window();
+      disposeFlowBlocks(detached);
     }
     expect(session.firstNodeIndex, 0);
     expect(topOf(window()), probeTop);
