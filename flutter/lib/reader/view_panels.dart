@@ -1196,14 +1196,10 @@ class _ReaderNotesPanel extends StatelessWidget {
                       // must follow the annotation.
                       key: ValueKey(annotation.id),
                       alignment: AlignmentDirectional.centerStart,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: AlignmentDirectional.centerStart,
-                        child: _AnnotationCard(
-                          annotation: annotation,
-                          model: model,
-                          dispatch: dispatch,
-                        ),
+                      child: _AnnotationCard(
+                        annotation: annotation,
+                        model: model,
+                        dispatch: dispatch,
                       ),
                     ),
               ],

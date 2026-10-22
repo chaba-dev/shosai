@@ -538,8 +538,12 @@ class _AnnotationCardState extends State<_AnnotationCard> {
             child: ShadCard(
               key: ValueKey('reader-annotation-${annotation.id}'),
               padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              // The card lays out against the panel's width: the label
+              // ellipsizes inside it (the button's semantic label keeps the
+              // whole text) and the actions wrap under it, so a scaled
+              // interface keeps its text and target sizes (RD-15).
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   ShadButton.ghost(
                     key: ValueKey(
@@ -552,28 +556,43 @@ class _AnnotationCardState extends State<_AnnotationCard> {
                     onPressed: () => widget.dispatch(
                       ReaderAnnotationNavigated(annotation.id),
                     ),
-                    child: Text(
-                      '${l10n.readerHighlightLabel(annotation.unit.toInt() + 1)}'
-                      '${_annotationResolutionSuffix(l10n, annotation.resolution)}',
+                    child: Flexible(
+                      child: Text(
+                        '${l10n.readerHighlightLabel(annotation.unit.toInt() + 1)}'
+                        '${_annotationResolutionSuffix(l10n, annotation.resolution)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
-                  ShadIconAction(
-                    key: ValueKey('reader-annotation-color-${annotation.id}'),
-                    tooltip: l10n.readerChangeColor,
-                    onPressed: actionsDisabled ? null : recolor,
-                    icon: const Icon(LucideIcons.palette),
-                  ),
-                  ShadIconAction(
-                    key: ValueKey('reader-annotation-note-${annotation.id}'),
-                    tooltip: l10n.readerEditNote,
-                    onPressed: actionsDisabled ? null : editNote,
-                    icon: const Icon(LucideIcons.notebookPen),
-                  ),
-                  ShadIconAction(
-                    key: ValueKey('reader-annotation-delete-${annotation.id}'),
-                    tooltip: l10n.readerDeleteHighlight,
-                    onPressed: actionsDisabled ? null : delete,
-                    icon: const Icon(LucideIcons.trash2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ShadIconAction(
+                        key: ValueKey(
+                          'reader-annotation-color-${annotation.id}',
+                        ),
+                        tooltip: l10n.readerChangeColor,
+                        onPressed: actionsDisabled ? null : recolor,
+                        icon: const Icon(LucideIcons.palette),
+                      ),
+                      ShadIconAction(
+                        key: ValueKey(
+                          'reader-annotation-note-${annotation.id}',
+                        ),
+                        tooltip: l10n.readerEditNote,
+                        onPressed: actionsDisabled ? null : editNote,
+                        icon: const Icon(LucideIcons.notebookPen),
+                      ),
+                      ShadIconAction(
+                        key: ValueKey(
+                          'reader-annotation-delete-${annotation.id}',
+                        ),
+                        tooltip: l10n.readerDeleteHighlight,
+                        onPressed: actionsDisabled ? null : delete,
+                        icon: const Icon(LucideIcons.trash2),
+                      ),
+                    ],
                   ),
                 ],
               ),

@@ -35,6 +35,16 @@ class _PanelBridge extends HarnessBridge {
   List<FlutterBookmark> bookmarks;
   final bool failExport;
 
+  /// The book's highlights, as the Notes panel lists them.
+  List<FlutterAnnotation> annotations = const [];
+
+  @override
+  Future<List<FlutterAnnotation>> listAnnotations({
+    required FlutterDocumentHandle document,
+    required double scale,
+    required BigInt cancellationId,
+  }) async => annotations;
+
   /// Every `toggleBookmark` call as (unit, offset).
   final List<(int, int?)> toggles = [];
 
@@ -995,6 +1005,68 @@ void main() {
       await tester.pump();
       await _settle(tester);
       expect(button().enabled, isTrue);
+    });
+  });
+
+  group('notes panel', () {
+    testWidgets('highlight cards keep their size at 200% text and wrap '
+        'their actions inside the panel', (tester) async {
+      _setView(tester, const Size(1024, 800));
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final bridge = _PanelBridge(unitCount: 3)
+        ..annotations = [
+          for (final (id, resolution) in [
+            ('exact', FlutterAnnotationResolution.exact),
+            ('orphaned', FlutterAnnotationResolution.orphaned),
+          ])
+            FlutterAnnotation(
+              id: id,
+              unit: BigInt.one,
+              resolution: resolution,
+              color: FlutterHighlightColor.yellow,
+            ),
+        ];
+      await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
+
+      final panel = tester.getRect(
+        find.byKey(const ValueKey('reader-panel-notes')),
+      );
+      for (final id in ['exact', 'orphaned']) {
+        final card = find.byKey(ValueKey('reader-annotation-$id'));
+        expect(card, findsOneWidget);
+        final cardRect = tester.getRect(card);
+        expect(cardRect.left, greaterThanOrEqualTo(panel.left));
+        expect(cardRect.right, lessThanOrEqualTo(panel.right));
+        // Painted at its laid-out size: nothing scales the card down.
+        for (final action in ['navigate', 'color', 'note', 'delete']) {
+          final finder = find.byKey(ValueKey('reader-annotation-$action-$id'));
+          expect(
+            tester.getRect(finder).size,
+            tester.getSize(finder),
+            reason: '$action of $id is drawn at its own size',
+          );
+        }
+      }
+      // The scaled label pushes the actions under it.
+      expect(
+        tester
+            .getRect(
+              find.byKey(const ValueKey('reader-annotation-delete-orphaned')),
+            )
+            .top,
+        greaterThanOrEqualTo(
+          tester
+              .getRect(
+                find.byKey(
+                  const ValueKey('reader-annotation-navigate-orphaned'),
+                ),
+              )
+              .bottom,
+        ),
+      );
+      expect(tester.takeException(), isNull);
     });
   });
 
