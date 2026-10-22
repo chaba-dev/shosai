@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -13,6 +14,7 @@ import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
 import 'package:shosai_flutter/notices/reader_notice_text.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
+import 'package:shosai_flutter/reader/epub/continuous.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
@@ -52,6 +54,7 @@ final class ReaderController implements Listenable {
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
     this.debugEpubSessionObserver,
+    this.debugContinuousStepObserver,
     List<ReaderTabPresentation> initialTabs = const [],
     ReaderTypographyPresentation initialTypography =
         const ReaderTypographyPresentation(
@@ -149,6 +152,10 @@ final class ReaderController implements Listenable {
   /// one is not) needs to reach the session object itself.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
 
+  /// Test and measurement hook: the synchronous microseconds of each
+  /// continuous window step (layout, geometry and page derivation).
+  final void Function(int micros)? debugContinuousStepObserver;
+
   ReaderModel _model = ReaderModel();
   int _revealRevision = 0;
   double? _lastReportedWidth;
@@ -180,6 +187,45 @@ final class ReaderController implements Listenable {
   _EpubLayoutKey? _epubSessionKey;
   double? _epubLayoutHeight;
 
+  /// The column extents of the continuous chapter at [_continuousExtentsKey].
+  ///
+  /// Keyed by layout rather than by session: a navigation that replaces the
+  /// session keeps the chapter's measured column, so its nodes keep their
+  /// places.
+  ContinuousExtents? _continuousExtents;
+  _EpubLayoutKey? _continuousExtentsKey;
+
+  /// The per-node geometry of each continuous session's window.
+  final Expando<ContinuousGeometryCache> _continuousCaches = Expando();
+
+  /// The column region the continuous view last reported showing, for the
+  /// location request it answers; null until the view reports one.
+  ({double top, double bottom})? _continuousViewport;
+
+  /// The pending window step, if any, and the layout it was scheduled for: a
+  /// step is one bounded batch per frame.
+  int _continuousTickToken = 0;
+  ({int generation, int revision})? _continuousTickFor;
+
+  /// Blocks a window step released whose page may still be on screen; each
+  /// list is released after the frame that replaces its page.
+  final List<List<FlowBlock>> _releasedEpubBlocks = [];
+
+  /// Blocks window steps detached from the session that the installed page may
+  /// still paint. They are owned here from the moment they are detached, so a
+  /// step that throws after detaching them loses nothing: they are released
+  /// after the next page is shown, or when the session is retired.
+  List<FlowBlock> _detachedEpubBlocks = [];
+
+  /// Hands the detached blocks to the after-frame release: the page that
+  /// painted them has just been replaced.
+  void _releaseDetachedEpubBlocks() {
+    if (_detachedEpubBlocks.isEmpty) return;
+    final blocks = _detachedEpubBlocks;
+    _detachedEpubBlocks = [];
+    _releaseEpubBlocksAfterFrame(blocks);
+  }
+
   /// Whether an EPUB layout waits for the first reported page height. The
   /// first report then lays the chapter out.
   bool _epubHeightPending = false;
@@ -206,6 +252,10 @@ final class ReaderController implements Listenable {
   int _annotationRevision = 0;
   int _layoutRevision = 0;
   int _selectionRevision = 0;
+
+  /// The keyboard movement a continuous window is still laying out for, if
+  /// any; it owns the window until it lands or is superseded.
+  _ReaderSelectionMovementContinued? _continuousMovement;
   int _nextOperationId = 0;
   int _noteRevision = 0;
   int _searchRevision = 0;
@@ -747,7 +797,6 @@ final class ReaderController implements Listenable {
         if (_isCurrentLayout(message.generation, message.revision) &&
             _relayoutCancellations.contains(message.cancellation)) {
           _activeRelayoutIntent = null;
-          final previousPage = _model.epubPage;
           _applyEpubPage(
             generation: message.generation,
             revision: message.revision,
@@ -763,24 +812,13 @@ final class ReaderController implements Listenable {
             session: message.session,
             sessionKey: message.sessionKey,
           );
-          final page = _model.epubPage;
-          if (_typographyContinuous &&
-              page != null &&
-              !page.continuous &&
-              (previousPage == null ||
-                  previousPage.unit != page.unit ||
-                  previousPage.continuous)) {
-            // The chapter is over the continuous ceilings and is shown as
-            // pages: the reader is told once, when it enters the chapter.
-            _reportNotice(
-              const NoticeRequest(
-                text: ReaderChapterPaginatedNotice(),
-                kind: NoticeKind.info,
-                lifetime: NoticeLifetime.brief,
-              ),
-            );
-          }
         }
+      case ReaderContinuousViewportChanged():
+        _continuousViewportChanged(message);
+      case _ReaderContinuousWindowTick():
+        _continuousWindowTick(message);
+      case _ReaderSelectionMovementContinued():
+        _selectionMovementContinued(message);
       case _ReaderRelayoutFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _layoutRevision) {
@@ -1515,6 +1553,11 @@ final class ReaderController implements Listenable {
     final layout = _model.layout;
     final height = _epubLayoutHeight;
     if (height == null) return;
+    if (page.continuous) {
+      // A continuous chapter scrolls; a page step moves between chapters.
+      _unitRequested(_model.unit + delta);
+      return;
+    }
     final step = delta < 0
         ? _epubPageBefore(session, page.canonicalStart)
         : _epubPageAfter(session, page.canonicalStart);
@@ -1603,11 +1646,7 @@ final class ReaderController implements Listenable {
   PaginatedChapter? _paginatedWindow(ChapterLayoutSession session) {
     final key = _epubSessionKey;
     if (key == null) return null;
-    return paginateWindow(
-      session.snapshot(),
-      ui.Size(key.width, key.height),
-      continuous: key.continuous,
-    );
+    return paginateWindow(session.snapshot(), ui.Size(key.width, key.height));
   }
 
   /// Derives the page window containing [scalar] and publishes it.
@@ -1636,19 +1675,26 @@ final class ReaderController implements Listenable {
     final document = _model.document;
     if ((installed == null && session == null) || document == null) return;
     final previousSession = installed;
-    final page = pageWindowFor(
-      session: session ?? installed!,
-      scalar: scalar,
-      unit: unit,
-      chapterCount: document.logicalUnitCount.toInt(),
-      windowSize: ui.Size(layout.width, height),
-      continuous:
-          (sessionKey ?? _epubSessionKey)?.continuous ?? _typographyContinuous,
-    );
+    final pageSession = session ?? installed!;
+    final pageKey = sessionKey ?? _epubSessionKey;
+    final page = pageKey != null && pageKey.continuous
+        ? _continuousPage(pageSession, pageKey, scalar)
+        : pageWindowFor(
+            session: pageSession,
+            scalar: scalar,
+            unit: unit,
+            chapterCount: document.logicalUnitCount.toInt(),
+            windowSize: ui.Size(layout.width, height),
+          );
     final oldImage = _model.pageImage;
     final changedLocation =
         unit != _model.unit || offset != null || replaceReadingOffset;
-    if (changedLocation) _readingStatePersistenceBlocked = false;
+    if (changedLocation) {
+      _readingStatePersistenceBlocked = false;
+      // The view reveals the new location before it reports what it shows:
+      // the region reported for the previous location is not this one's.
+      _continuousViewport = null;
+    }
     final readingOffset = changedLocation ? offset : _model.readingOffset;
     // The ownership transfer is the commit, and it happens after the next model
     // is derived but before it is published: a failure in the injected progress
@@ -1699,6 +1745,8 @@ final class ReaderController implements Listenable {
     }
     _publish(next);
     oldImage?.dispose();
+    // The page that painted any window-detached blocks is replaced.
+    _releaseDetachedEpubBlocks();
     // The page carried its own session, adopted above before publication; the
     // session the model painted until this frame is retired after it. A
     // document's first page has no predecessor, and `_retireEpubSession` with no
@@ -1706,6 +1754,7 @@ final class ReaderController implements Listenable {
     if (adopting && previousSession != null) {
       _retireEpubSession(previousSession);
     }
+    if (page.continuous) _scheduleContinuousTick();
     if (length != null) {
       _frameScheduler(
         () => dispatch(_ReaderSurfaceFocusReady(generation, revision)),
@@ -2617,10 +2666,9 @@ final class ReaderController implements Listenable {
     // the typed refusal.
     final refusal = source.layoutLimitExceeded(unit);
     if (refusal != null) throw refusal;
-    // A continuous reader scrolls a chapter as one page whose selection
-    // surface covers the whole chapter; a chapter over the continuous ceilings
-    // is shown as pages instead, so that surface stays bounded.
-    final continuous = _typographyContinuous && source.continuousAdmitted(unit);
+    // A continuous chapter lays out only a window around the viewport, so any
+    // admitted chapter reads continuously however long it is.
+    final continuous = _typographyContinuous;
     final chapter = source.book.chapters[unit];
     try {
       await source.ensureImages(chapter, _epubImageDecoder);
@@ -2680,19 +2728,6 @@ final class ReaderController implements Listenable {
     var adopted = replacement == null;
     try {
       if (!active.started) active.layoutWindowAt(target);
-      if (continuous) {
-        // A continuous chapter is one scrolled page, so it is installed whole:
-        // the rest of the chapter is measured first, in the same bounded,
-        // yielding batches the paginated window fills with afterwards.
-        while (!active.complete) {
-          await Future<void>.delayed(const Duration(milliseconds: 1));
-          if (!_isCurrentLayout(generation, revision)) return;
-          final progressed = active.lastNodeIndex + 1 < active.totalNodes
-              ? active.layoutForward(maxNodes: 24, maxMicros: 8000)
-              : active.layoutBackward(maxNodes: 24, maxMicros: 8000);
-          if (progressed == 0) break;
-        }
-      }
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {
@@ -2736,7 +2771,9 @@ final class ReaderController implements Listenable {
         // effect must never release a session the controller now owns.
         adopted = replacement == null || identical(_epubSession, replacement);
       }
-      if (!adopted) return;
+      // A continuous window grows and shrinks with the viewport instead (see
+      // [_continuousWindowTick]): measuring the whole chapter would retain it.
+      if (!adopted || continuous) return;
       while (!active.complete) {
         // A real event-loop turn: frames and input run between batches.
         await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -2932,6 +2969,326 @@ final class ReaderController implements Listenable {
     return 'shosai-epub-$hash-${safe.isEmpty ? 'face' : safe}';
   }
 
+  /// The continuous page of [session]'s window at [key], answering [scalar].
+  ReaderEpubPage _continuousPage(
+    ChapterLayoutSession session,
+    _EpubLayoutKey key,
+    int scalar, {
+    double priorityTop = 0,
+    int? selectionBudgetMicros,
+    int? restartedAt,
+  }) {
+    var extents = _continuousExtents;
+    if (extents == null || _continuousExtentsKey != key) {
+      extents = ContinuousExtents(session.chapter);
+      _continuousExtents = extents;
+      _continuousExtentsKey = key;
+      // The column is new, so the region the view reported is in the old
+      // one's coordinates: the window waits for the view's next report.
+      _continuousViewport = null;
+    }
+    final cache = _continuousCaches[session] ??= ContinuousGeometryCache(
+      session.chapter,
+    );
+    return continuousWindowFor(
+      session: session,
+      extents: extents,
+      cache: cache,
+      scalar: scalar,
+      unit: key.unit,
+      chapterCount: _model.document?.logicalUnitCount.toInt() ?? key.unit + 1,
+      windowSize: ui.Size(key.width, key.height),
+      priorityTop: priorityTop,
+      selectionBudgetMicros: selectionBudgetMicros,
+      restartedAt: restartedAt,
+    );
+  }
+
+  /// Lays out the continuous geometry a keyboard movement from [focus] needs,
+  /// one bounded step of it, and installs it; false when there is nothing more
+  /// to lay out.
+  ///
+  /// A focus outside the window restarts the window at the focus's node (one
+  /// bounded batch, and the node before it) and reveals it, like a location
+  /// request that keeps the selection. Inside the window, selection geometry
+  /// still pending is built nearest the focus first; otherwise the window
+  /// grows by one batch in the movement's direction. Each is one bounded step,
+  /// in the message handler; a movement that needs more steps continues in a
+  /// later frame ([_ReaderSelectionMovementContinued]).
+  ///
+  /// A continued movement ([probe]) is searching past the focus for the next
+  /// caret: it never restarts at the focus, and once the window is
+  /// [_kContinuousProbeViewports] tall it restarts at the node just past the
+  /// window's edge instead of growing, and reveals that frontier. The search is then
+  /// bounded in memory however far the next text is.
+  bool _continuousEnsureSelectionGeometry(
+    int focus,
+    bool forward, {
+    bool probe = false,
+  }) {
+    final session = _epubSession;
+    final key = _epubSessionKey;
+    final page = _model.epubPage;
+    final extents = _continuousExtents;
+    if (session == null ||
+        key == null ||
+        !key.continuous ||
+        page == null ||
+        !page.continuous ||
+        extents == null ||
+        _continuousExtentsKey != key) {
+      return false;
+    }
+    var node = session.nodeIndexForScalar(focus);
+    final outside =
+        !session.started ||
+        node < session.firstNodeIndex ||
+        node > session.lastNodeIndex;
+    final pending = _continuousCaches[session]?.selectionPending ?? false;
+    final tops = extents.tops();
+    // The node a probe restarts at, past the window's edge, when the window
+    // is as tall as a probe may make it.
+    int? frontier;
+    if (probe && !pending && session.started) {
+      final height =
+          tops[session.lastNodeIndex + 1] - tops[session.firstNodeIndex];
+      if (height > _kContinuousProbeViewports * key.height) {
+        if (forward) {
+          if (session.lastNodeIndex + 1 >= session.totalNodes) return false;
+          frontier = session.lastNodeIndex + 1;
+        } else {
+          if (session.firstNodeIndex == 0) return false;
+          frontier = session.firstNodeIndex - 1;
+        }
+      }
+    }
+    final restart = outside && !probe;
+    final reveal = restart || frontier != null;
+    var target = page.targetScalar;
+    final ReaderEpubPage next;
+    try {
+      if (restart) {
+        _detachedEpubBlocks.addAll(session.releaseAll());
+        session.layoutWindowAt(
+          focus,
+          maxNodes: kContinuousBatchNodes,
+          maxMicros: kContinuousBatchMicros,
+        );
+        session.layoutBackward(maxNodes: 1, maxMicros: kContinuousBatchMicros);
+        target = focus;
+      } else if (frontier != null) {
+        _detachedEpubBlocks.addAll(session.releaseAll());
+        // The frontier adjoins what the probe has searched: forward, the
+        // window is laid out from it; backward, it is the frontier node alone
+        // and grows backward, since a window laid out forward from further
+        // back could stop at a tall node and leave the nodes before the
+        // frontier unexamined.
+        session.layoutWindowAt(
+          0,
+          node: frontier,
+          maxNodes: forward ? _kContinuousProbeNodes : 1,
+          maxMicros: kContinuousBatchMicros,
+        );
+        node = frontier;
+        target = session.chapter.blocks[frontier].canonical?.start ?? focus;
+      } else if (!pending) {
+        // A probe grows by more nodes per step: the nodes it crosses have no
+        // text, so the time budget bounds the step.
+        final nodes = probe ? _kContinuousProbeNodes : kContinuousBatchNodes;
+        final grown = forward
+            ? session.layoutForward(
+                maxNodes: nodes,
+                maxMicros: kContinuousBatchMicros,
+              )
+            : session.layoutBackward(
+                maxNodes: nodes,
+                maxMicros: kContinuousBatchMicros,
+              );
+        if (grown == 0) return false;
+      }
+      next = _continuousPage(
+        session,
+        key,
+        target,
+        priorityTop: restart
+            ? 0.0
+            : extents.tops()[math.min(
+                math.max(node, session.firstNodeIndex),
+                session.lastNodeIndex,
+              )],
+        // A restarted window is one batch: all of its selection geometry is
+        // built, so the focus's caret exists when the focus has one.
+        selectionBudgetMicros: restart ? null : kContinuousSelectionMicros,
+      );
+    } catch (error) {
+      // Detached blocks stay owned until the page painting them is replaced.
+      _emit(_model.copyWith(relayoutError: 'Layout failed: $error'));
+      return false;
+    }
+    if (reveal) _continuousViewport = null;
+    _publish(
+      _deriveModel(
+        _model.copyWith(
+          epubPage: next,
+          selectionSurface: _freezeSurface(next.surface),
+          selectionVisualLine: null,
+          locationRequestRevision: reveal
+              ? _model.locationRequestRevision + 1
+              : _model.locationRequestRevision,
+        ),
+      ),
+    );
+    _releaseDetachedEpubBlocks();
+    _scheduleContinuousTick();
+    return true;
+  }
+
+  void _continuousViewportChanged(ReaderContinuousViewportChanged message) {
+    final page = _model.epubPage;
+    final window = page?.window;
+    final reported = message.window;
+    if (page == null ||
+        !page.continuous ||
+        window == null ||
+        reported == null ||
+        message.generation != _model.generation ||
+        message.revision != _model.locationRequestRevision ||
+        reported.nodeTops.length != window.nodeTops.length) {
+      return;
+    }
+    // The view reports in the column of the page it built; a tick may have
+    // installed a newer page since, in the same frame. The region is mapped
+    // into the current column by the correction the view applies to it, so
+    // a window that keeps changing still follows the view.
+    final top = continuousCorrectedTop(
+      reported,
+      window,
+      message.top - kEpubPageMargin,
+    );
+    _continuousViewport = (
+      top: top,
+      bottom: top + message.bottom - message.top,
+    );
+    _scheduleContinuousTick();
+  }
+
+  /// Schedules one window step after the next frame, unless one is pending.
+  void _scheduleContinuousTick() {
+    final generation = _model.generation;
+    final revision = _layoutRevision;
+    if (_closing ||
+        _continuousTickFor == (generation: generation, revision: revision)) {
+      return;
+    }
+    // A step pending for an older layout is superseded, not waited for.
+    _continuousTickFor = (generation: generation, revision: revision);
+    final token = ++_continuousTickToken;
+    _frameScheduler(
+      () => dispatch(_ReaderContinuousWindowTick(generation, revision, token)),
+    );
+  }
+
+  /// Moves the continuous window one bounded step toward the viewport and
+  /// installs the page of the new window.
+  ///
+  /// The step is the window's only layout work in a frame; when the window
+  /// still does not cover the viewport's lead, the next step is scheduled for
+  /// the next frame. Blocks the step released stay alive until the page that
+  /// still paints them has been replaced on screen.
+  void _continuousWindowTick(_ReaderContinuousWindowTick message) {
+    if (message.token != _continuousTickToken) return;
+    _continuousTickFor = null;
+    final session = _epubSession;
+    final key = _epubSessionKey;
+    final page = _model.epubPage;
+    final viewport = _continuousViewport;
+    final extents = _continuousExtents;
+    if (!_isCurrentLayout(message.generation, message.revision) ||
+        session == null ||
+        key == null ||
+        !key.continuous ||
+        page == null ||
+        !page.continuous ||
+        viewport == null ||
+        extents == null ||
+        _continuousExtentsKey != key ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _closing ||
+        _suspended ||
+        _continuousMovement != null) {
+      // A relayout in flight installs its own page and schedules a step then;
+      // a keyboard movement owns the window until it lands, then schedules
+      // one.
+      return;
+    }
+    final stopwatch = Stopwatch()..start();
+    final ContinuousWindowStep step;
+    final ReaderEpubPage next;
+    try {
+      step = advanceContinuousWindow(
+        session: session,
+        extents: extents,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom,
+        released: _detachedEpubBlocks,
+      );
+      final cache = _continuousCaches[session];
+      if (!step.changed && !(cache?.selectionPending ?? false)) return;
+      next = _continuousPage(
+        session,
+        key,
+        page.targetScalar,
+        priorityTop: viewport.top,
+        selectionBudgetMicros: kContinuousSelectionMicros,
+        restartedAt: step.restartedAt,
+      );
+    } catch (error) {
+      // A failed batch adopted nothing; the page on screen stays valid.
+      _emit(_model.copyWith(relayoutError: 'Layout failed: $error'));
+      return;
+    }
+    // The content under the viewport's top keeps its place: the view scrolls
+    // by the shift the measurement made ([continuousCorrectedTop]), and the
+    // controller's copy of the viewport follows it until the view reports
+    // again.
+    final shift =
+        continuousCorrectedTop(page.window!, next.window!, viewport.top) -
+        viewport.top;
+    _continuousViewport = (
+      top: viewport.top + shift,
+      bottom: viewport.bottom + shift,
+    );
+    _publish(
+      _deriveModel(
+        _model.copyWith(
+          epubPage: next,
+          selectionSurface: _freezeSurface(next.surface),
+          // Line indexes change with the window; the preferred x does not.
+          selectionVisualLine: null,
+        ),
+      ),
+    );
+    _releaseDetachedEpubBlocks();
+    debugContinuousStepObserver?.call(stopwatch.elapsedMicroseconds);
+    if (step.pending || _continuousCaches[session]!.selectionPending) {
+      _scheduleContinuousTick();
+    }
+  }
+
+  /// Releases [blocks] after the frame that stops painting them.
+  void _releaseEpubBlocksAfterFrame(List<FlowBlock> blocks) {
+    _releasedEpubBlocks.add(blocks);
+    try {
+      _frameScheduler(() {
+        if (_releasedEpubBlocks.remove(blocks)) disposeFlowBlocks(blocks);
+      });
+    } catch (_) {
+      _releasedEpubBlocks.remove(blocks);
+      disposeFlowBlocks(blocks);
+    }
+  }
+
   /// Retires the active chapter session after the current frame.
   ///
   /// Deferred through the injected frame scheduler, so a page the model still
@@ -2952,8 +3309,18 @@ final class ReaderController implements Listenable {
     // platform's finalizers.
     if (immediate) {
       retired.dispose();
+      // No frame is coming: blocks the window released wait for none.
+      _releasedEpubBlocks.add(_detachedEpubBlocks);
+      _detachedEpubBlocks = [];
+      for (final blocks in _releasedEpubBlocks) {
+        disposeFlowBlocks(blocks);
+      }
+      _releasedEpubBlocks.clear();
       return;
     }
+    // Blocks the window detached belong to the installed session only, so
+    // they are released with it, after the frame that stops painting its page.
+    _releaseDetachedEpubBlocks();
     try {
       _frameScheduler(retired.dispose);
     } catch (_) {
@@ -3327,10 +3694,19 @@ final class ReaderController implements Listenable {
     _selectionCancelled();
   }
 
-  void _selectionKeyboardExtended(ReaderSelectionMovement movement) {
+  void _selectionKeyboardExtended(
+    ReaderSelectionMovement movement, {
+    bool retried = false,
+    bool probing = false,
+  }) {
+    // A key press supersedes a movement still continuing.
+    if (!probing) _continuousMovement = null;
     final surface = _model.selectionSurface;
+    // A continuous window may paint no text (a run of images) while the
+    // selection's focus is in text outside it.
+    final continuous = _model.epubPage?.continuous ?? false;
     if (surface == null ||
-        surface.graphemeBoundaries.length < 2 ||
+        (!continuous && surface.graphemeBoundaries.length < 2) ||
         _model.busy ||
         _model.relayoutBusy ||
         _model.relayoutPending ||
@@ -3377,25 +3753,62 @@ final class ReaderController implements Listenable {
       ),
       _ => null,
     };
+    // A continuous page's surface covers its laid-out window only; a focus
+    // outside it (or at its edge) still moves by the chapter's own boundaries
+    // around it.
+    final around = current != null && continuous
+        ? switch (_epubSession) {
+            final session? => _continuousCaches[session]?.boundariesAround(
+              current,
+            ),
+            null => null,
+          }
+        : null;
     final boundaries = switch (movement) {
       ReaderSelectionMovement.previousWord ||
-      ReaderSelectionMovement.nextWord => surface.wordBoundaries.toList(
-        growable: false,
-      ),
-      _ => graphemes,
+      ReaderSelectionMovement.nextWord =>
+        around?.words ?? surface.wordBoundaries.toList(growable: false),
+      _ => around?.graphemes ?? graphemes,
     };
+    // A continuous focus with no caret of its own (the separator after a
+    // block, the chapter's end) moves visually to the nearest caret in the
+    // movement's direction, once the geometry around it is laid out.
+    final snapped =
+        continuous &&
+            current != null &&
+            lineMove == null &&
+            horizontalMove == null &&
+            _caretForOffset(surface.visualLines, current, null) == null &&
+            (probing || _continuousSelectionResolved(current)) &&
+            !_continuousSelectionPending()
+        ? switch (movement) {
+            ReaderSelectionMovement.previousGrapheme ||
+            ReaderSelectionMovement.nextGrapheme ||
+            ReaderSelectionMovement.previousWord ||
+            ReaderSelectionMovement.nextWord => null,
+            _ => _nearestCaret(
+              surface.visualLines,
+              current,
+              forward,
+              movement == ReaderSelectionMovement.previousLine ||
+                      movement == ReaderSelectionMovement.nextLine
+                  ? _model.selectionPreferredX
+                  : null,
+            ),
+          }
+        : null;
     final next =
         lineMove?.offset ??
         horizontalMove?.offset ??
+        snapped?.offset ??
         switch (movement) {
           ReaderSelectionMovement.previousGrapheme ||
           ReaderSelectionMovement.nextGrapheme ||
           ReaderSelectionMovement.previousWord ||
-          ReaderSelectionMovement.nextWord => _adjacentOffset(
-            boundaries,
-            current,
-            forward,
-          ),
+          ReaderSelectionMovement.nextWord =>
+            current == null && boundaries.length < 2
+                ? null
+                : _adjacentOffset(boundaries, current, forward),
           ReaderSelectionMovement.previousLine ||
           ReaderSelectionMovement.nextLine ||
           ReaderSelectionMovement.lineStart ||
@@ -3403,7 +3816,35 @@ final class ReaderController implements Listenable {
           ReaderSelectionMovement.visualLeft ||
           ReaderSelectionMovement.visualRight => null,
         };
-    if (next == null) return;
+    if (next == null) {
+      // A visual movement needs the focus's line and its neighbour laid out:
+      // a continuous window that lacks them lays out one bounded step of
+      // them, then the movement is tried again; when that is not yet enough
+      // (a run of images, geometry still pending) it continues next frame.
+      if (current != null &&
+          _continuousEnsureSelectionGeometry(
+            current,
+            forward,
+            probe: probing,
+          )) {
+        if (!retried) {
+          _selectionKeyboardExtended(movement, retried: true);
+        } else {
+          // The movement owns the window until it lands: window steps toward
+          // the viewport wait for it, so they cannot release what it laid out.
+          final message = _ReaderSelectionMovementContinued(
+            generation: _model.generation,
+            layoutRevision: _layoutRevision,
+            selectionRevision: _selectionRevision,
+            focus: current,
+            movement: movement,
+          );
+          _continuousMovement = message;
+          _frameScheduler(() => dispatch(message));
+        }
+      }
+      return;
+    }
     final anchor =
         _model.anchor ??
         horizontalMove?.origin ??
@@ -3417,6 +3858,7 @@ final class ReaderController implements Listenable {
                 line: horizontalMove.line,
                 preferredX: horizontalMove.preferredX,
               )) ??
+        snapped ??
         _caretForOffset(surface.visualLines, next, _model.selectionVisualLine);
     final vertical =
         movement == ReaderSelectionMovement.previousLine ||
@@ -3456,6 +3898,43 @@ final class ReaderController implements Listenable {
     );
   }
 
+  /// Continues a keyboard movement a continuous window could not complete in
+  /// the frame it was pressed in, unless the selection, the layout or the
+  /// document changed since.
+  void _selectionMovementContinued(_ReaderSelectionMovementContinued message) {
+    if (!identical(message, _continuousMovement)) return;
+    _continuousMovement = null;
+    if (_isCurrentLayout(message.generation, message.layoutRevision) &&
+        message.selectionRevision == _selectionRevision &&
+        message.focus == _model.focus) {
+      _selectionKeyboardExtended(
+        message.movement,
+        retried: true,
+        probing: true,
+      );
+    }
+    // Landed or abandoned: the window follows the viewport again.
+    if (_continuousMovement == null) _scheduleContinuousTick();
+  }
+
+  /// Whether the continuous window still has selection geometry to build.
+  bool _continuousSelectionPending() => switch (_epubSession) {
+    final session? => _continuousCaches[session]?.selectionPending ?? true,
+    null => true,
+  };
+
+  /// Whether the continuous window holds [focus]'s node with all of its
+  /// selection geometry built, so a caret missing at [focus] is missing from
+  /// the chapter, not just from the window.
+  bool _continuousSelectionResolved(int focus) {
+    final session = _epubSession;
+    if (session == null || !session.started) return false;
+    final node = session.nodeIndexForScalar(focus);
+    return node >= session.firstNodeIndex &&
+        node <= session.lastNodeIndex &&
+        !(_continuousCaches[session]?.selectionPending ?? true);
+  }
+
   void _selectionEnded() {
     if (_model.selectionPhase != ReaderSelectionPhase.selecting) return;
     final anchor = _model.anchor;
@@ -3483,8 +3962,13 @@ final class ReaderController implements Listenable {
         _closing) {
       return;
     }
-    final start = surface.graphemeBoundaries.first;
-    final end = surface.graphemeBoundaries.last;
+    // A continuous page's surface covers its window; the chapter is the
+    // document the reader sees, so Select All selects all of it.
+    final continuous = _model.epubPage?.continuous ?? false;
+    final start = continuous ? 0 : surface.graphemeBoundaries.first;
+    final end = continuous
+        ? _epubSession?.chapter.scalarCount ?? surface.graphemeBoundaries.last
+        : surface.graphemeBoundaries.last;
     if (start == end) return;
     _cancelSelectionCreates();
     final revision = ++_selectionRevision;
@@ -4668,8 +5152,21 @@ final class ReaderController implements Listenable {
   );
 
   void _publish(ReaderModel derived, {bool notifyListeners = true}) {
+    // The description reads the selected text out of the surface's canonical
+    // stream (a whole chapter): skip it when nothing it depends on changed,
+    // as on a continuous window step.
+    final previous = _model;
     final selectionChanged =
-        _model.selectionDescription != derived.selectionDescription;
+        !(previous.selectionPhase == derived.selectionPhase &&
+            previous.anchor == derived.anchor &&
+            previous.focus == derived.focus &&
+            previous.selectionSurface?.copyEligible ==
+                derived.selectionSurface?.copyEligible &&
+            identical(
+              previous.selectionSurface?.text,
+              derived.selectionSurface?.text,
+            )) &&
+        previous.selectionDescription != derived.selectionDescription;
     _model = derived;
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
       unawaited(_announceSelection(derived.selectionDescription));
@@ -4855,6 +5352,10 @@ final class ReaderController implements Listenable {
     pageImage?.dispose();
     _retireEpubSession(null, _closing);
     _retireEpubSource(immediate: _closing);
+    // The column extents hold the chapter they measure.
+    _continuousExtents = null;
+    _continuousExtentsKey = null;
+    _continuousViewport = null;
     _epubLayoutHeight = null;
     _epubHeightPending = false;
     if (document != null) {
@@ -4960,6 +5461,47 @@ final class ReaderController implements Listenable {
   void dispose() {
     dispatch(const _ReaderDisposeRequested());
   }
+}
+
+/// The window height a continued keyboard movement grows the continuous
+/// window to before it restarts the window at its frontier.
+const double _kContinuousProbeViewports = 6;
+
+/// The most nodes one step of a continued keyboard movement lays out.
+const int _kContinuousProbeNodes = 64;
+
+/// The caret nearest [offset] strictly in the direction [forward], with its
+/// line and position along it; on that caret's line, the caret nearest
+/// [preferredX] when given (a line movement keeps its column).
+({int offset, int line, double preferredX})? _nearestCaret(
+  List<FlutterSelectionVisualLine> lines,
+  int offset,
+  bool forward, [
+  double? preferredX,
+]) {
+  ({int offset, int line, double preferredX})? best;
+  for (var line = 0; line < lines.length; line += 1) {
+    for (final caret in lines[line].carets) {
+      final candidate = caret.offset.toInt();
+      if (forward ? candidate <= offset : candidate >= offset) continue;
+      if (best == null ||
+          (forward ? candidate < best.offset : candidate > best.offset)) {
+        best = (offset: candidate, line: line, preferredX: caret.alongLine);
+      }
+    }
+  }
+  if (best == null || preferredX == null) return best;
+  final caret = lines[best.line].carets.reduce(
+    (a, b) =>
+        (b.alongLine - preferredX).abs() < (a.alongLine - preferredX).abs()
+        ? b
+        : a,
+  );
+  return (
+    offset: caret.offset.toInt(),
+    line: best.line,
+    preferredX: preferredX,
+  );
 }
 
 int? _adjacentOffset(List<int> offsets, int? current, bool forward) {
@@ -5187,7 +5729,9 @@ List<ReaderSelection> _savedSelections(
 );
 
 FlutterSelectionSurface _freezeSurface(FlutterSelectionSurface surface) {
-  if (_frozenSurfaces[surface] ?? false) return surface;
+  if ((_frozenSurfaces[surface] ?? false) || continuousSurfaceFrozen(surface)) {
+    return surface;
+  }
   final frozen = FlutterSelectionSurface(
     width: surface.width,
     height: surface.height,

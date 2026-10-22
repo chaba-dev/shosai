@@ -199,8 +199,8 @@ final class _EpubLayoutKey {
   final double lineSpacing;
   final String theme;
 
-  /// Whether the chapter is presented as one continuous page: a continuous
-  /// reader shows a chapter over the continuous ceilings as pages.
+  /// Whether the chapter is read continuously: one scrolled column whose
+  /// laid-out window follows the viewport.
   final bool continuous;
 
   @override

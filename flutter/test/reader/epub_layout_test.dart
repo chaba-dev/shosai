@@ -775,32 +775,6 @@ void main() {
     expect(bounded.layoutLimitExceeded(0), isNull);
   });
 
-  test('a continuous chapter counts work units inside its containers', () {
-    // Each figure stays under the per-block ceiling, but together they lay
-    // out far more slices than one continuous page admits.
-    final figures =
-        '<figure>${'<hr/>' * (kEpubIndivisibleNodeLimit - 1)}'
-        '</figure>';
-    EpubContentSource chapterOf(int count) => EpubContentSource(
-      book: openEpubBytes(
-        buildTestEpub(
-          chapters: {'OPS/Text/chapter-1.xhtml': figures * count},
-          nav: '<ol></ol>',
-        ),
-      ),
-      embeddedFamilies: const {},
-    );
-
-    final nested = chapterOf(128);
-    expect(nested.book.chapters.single.blocks, hasLength(128));
-    expect(nested.layoutLimitExceeded(0), isNull);
-    expect(nested.continuousAdmitted(0), isFalse);
-    // One figure's units are within the ceiling.
-    expect(chapterOf(1).continuousAdmitted(0), isTrue);
-    expect(chapterOf(4).continuousAdmitted(0), isTrue);
-    expect(chapterOf(5).continuousAdmitted(0), isFalse);
-  });
-
   test('a selection surface maps a span at the block ceiling in one pass', () {
     // Supplementary characters make code units and scalars differ, so a
     // mapping that counts either wrongly lands off the clusters.
@@ -828,7 +802,11 @@ void main() {
       ),
       images: const {},
     );
-    final page = paginateWindow(flow, window, continuous: true).pages.single;
+    final page = paginateFlow(
+      flow: flow,
+      pageHeight: double.infinity,
+      pageWidth: flow.width,
+    ).pages.single;
 
     final watch = Stopwatch()..start();
     final surface = buildPageSelectionSurface(

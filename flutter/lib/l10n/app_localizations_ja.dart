@@ -443,10 +443,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get noticeReaderExportFailed => 'ブックマークを書き出せませんでした';
 
   @override
-  String get noticeReaderChapterPaginated =>
-      'この章は連続スクロールで表示するには長すぎるため、ページ単位で表示します';
-
-  @override
   String get shellPlacesLabel => '場所';
 
   @override

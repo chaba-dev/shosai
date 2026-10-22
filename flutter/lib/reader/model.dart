@@ -510,8 +510,8 @@ final class ReaderModel {
 
   /// Whether the document area presents a continuous page the view scrolls.
   ///
-  /// Follows the installed EPUB page: a continuous reader shows a chapter over
-  /// the continuous ceilings as pages, with page-turn edges.
+  /// Follows the installed EPUB page, so a page laid out for the paginated
+  /// reader is never presented as a continuous one.
   bool get continuousPresentation =>
       typography.continuous && (epubPage?.continuous ?? true);
   final FlutterSelectionSurface? selectionSurface;

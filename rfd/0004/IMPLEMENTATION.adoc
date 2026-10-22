@@ -397,15 +397,21 @@ authority entry; its remaining Iced references are the token source's
 historical authority, handled with the design tokens.
 ** [x] Continuous EPUB reading (decided 2026-10-21: rebuild it rather than
 drop it with the retained renderer, which was the only one that drew it). A
-continuous chapter is measured whole, in the same bounded and yielding batches
-the paginated window fills with, and installed as one page of unbounded height
-that the reader scrolls (`paginateWindow` and `pageWindowFor` in
-`flutter/lib/reader/epub/content.dart`). PageDown and PageUp move between
-chapters, as they did on the retained renderer; a location inside the chapter
-(a restored position, a contents entry, a bookmark, a link) scrolls its line
-to the top of the view. The scroll offset itself is not durable: the reading
-state keeps the requested location. The prototype's continuous tiles, which
-bound the retained layout of a very long chapter, are not ported.
+continuous chapter is one scrolled column, laid out lazily: only a window of
+its top-level nodes around the viewport is measured, and every other node
+reserves its measured or estimated height (`flutter/lib/reader/epub/continuous.dart`).
+The view reports what it shows; the controller moves the window one bounded
+step per frame, builds selection geometry per node within its own budget,
+releases nodes more than three viewports away, and the view corrects its
+offset when nodes above it are measured, so the text in view does not move.
+Any chapter the per-block admission limits accept reads continuously, so no
+chapter falls back to pages; a 300K-scalar chapter scrolls with no frame over
+16.7 ms (`benchmarks/epub-continuous-long-chapter/2026-10-22`). PageDown and
+PageUp move between chapters, as they did on the retained renderer; a location
+inside the chapter (a restored position, a contents entry, a bookmark, a
+search hit, a link) lays out its region and scrolls its line to the top of the
+view. The scroll offset itself is not durable: the reading state keeps the
+requested location.
 ** [ ] Open: the macOS baseline `flutter/test/goldens/macos/reader-epub-1280.png`
 still shows the retained raster and needs a re-capture on a Mac; the Android
 ABI filter and the PDFium and SQLite licence notices in the packaged hosts.
