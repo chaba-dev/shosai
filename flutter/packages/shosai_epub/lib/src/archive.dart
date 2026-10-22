@@ -87,6 +87,10 @@ EpubBook openEpubBytes(
       .whereType<XmlElement>()
       .where((element) => element.name.local == 'spine')
       .firstOrNull;
+  final pageProgression =
+      spineElement?.getAttribute('page-progression-direction')?.trim() == 'rtl'
+      ? EpubDirection.rtl
+      : EpubDirection.ltr;
   final spineItems = <String>[];
   if (spineElement != null) {
     for (final itemref in spineElement.children.whereType<XmlElement>()) {
@@ -230,6 +234,7 @@ EpubBook openEpubBytes(
     chapters: chapters,
     embeddedFonts: embeddedFonts,
     warnings: allWarnings,
+    pageProgression: pageProgression,
   );
 }
 
