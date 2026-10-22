@@ -272,6 +272,10 @@ final class CoreRecords implements ShosaiRecords {
       limit: limit,
       offset: offset,
     );
+    final notes = switch (page.continueReading) {
+      final book? => await _core.annotations.summary(book.id),
+      null => null,
+    };
     _token(cancellationId).throwIfCancelled();
     return FlutterLibraryPage(
       books: [for (final book in page.books) _libraryBook(book)],
@@ -279,6 +283,13 @@ final class CoreRecords implements ShosaiRecords {
       bookCount: page.bookCount,
       continueReading: switch (page.continueReading) {
         final book? => _libraryBook(book),
+        null => null,
+      },
+      continueReadingNotes: switch (notes) {
+        final notes? => FlutterNotesSummary(
+          count: notes.count,
+          latest: notes.latest,
+        ),
         null => null,
       },
     );

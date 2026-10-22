@@ -233,6 +233,7 @@ class LibraryController implements Listenable {
                 final book? => _withoutCover(book),
                 null => null,
               },
+              continueReadingNotes: message.page.continueReadingNotes,
               loaded: true,
               loading: false,
               loadingMore: false,

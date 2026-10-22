@@ -269,6 +269,32 @@ final class PdfSelection extends AnnotationSelection {
   final int? end;
 }
 
+/// A book's notes at a glance: how many there are, and the words of the
+/// latest one.
+final class NotesSummary {
+  const NotesSummary(this.count, this.latest);
+
+  static const empty = NotesSummary(0, null);
+
+  /// The book's live annotations.
+  final int count;
+
+  /// The words of the latest annotation that has any: its quote as it was
+  /// selected, or its note when it quotes nothing. Blank text is no words;
+  /// null when no annotation has any.
+  final String? latest;
+
+  @override
+  bool operator ==(Object other) =>
+      other is NotesSummary && other.count == count && other.latest == latest;
+
+  @override
+  int get hashCode => Object.hash(count, latest);
+
+  @override
+  String toString() => 'NotesSummary($count, $latest)';
+}
+
 /// An annotation as stored.
 final class StoredAnnotation {
   const StoredAnnotation({

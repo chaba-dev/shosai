@@ -683,6 +683,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         padding: EdgeInsets.only(bottom: spacing),
                         child: LibraryContinueCard(
                           book: continueBook,
+                          notes: widget.model.continueReadingNotes,
                           cover: widget.model.covers[continueBook.bookId],
                           demandRevision: widget.model.coverRevision,
                           layout: layout,
@@ -1017,11 +1018,12 @@ class _LibraryEmptyCollection extends StatelessWidget {
 /// the one lifted card of the library canvas.
 ///
 /// The cover, the kicker, the title in `ed-screen`, the author and format, the
-/// place over a progress bar at most 480 px wide, then **Continue** beside
-/// **Notes**. A hero narrower than [compactWidth] takes the compact form: a
-/// 72 px cover and an 18 px title. The latest highlight or note will be quoted
-/// under the title once the notes surface exists (RFD 6); until then there is
-/// nothing to quote, and the hero never shows a placeholder.
+/// book's latest highlight or note quoted in the editorial face, the place
+/// over a progress bar at most 480 px wide, then **Continue** beside **Notes**
+/// with its count. A book with nothing to quote shows no quote, never a
+/// placeholder, and the count hides at zero. A hero narrower than
+/// [compactWidth] takes the compact form: a 72 px cover, an 18 px title and
+/// no quote.
 ///
 /// Continue dispatches [LibraryBookOpened] with the book the hero was built
 /// with, so the book and its saved position are the ones it showed even if a
@@ -1030,6 +1032,7 @@ class LibraryContinueCard extends StatelessWidget {
   const LibraryContinueCard({
     super.key,
     required this.book,
+    this.notes,
     required this.cover,
     required this.demandRevision,
     required this.layout,
@@ -1041,7 +1044,16 @@ class LibraryContinueCard extends StatelessWidget {
   static const double compactWidth = 560;
   static const double placeMaxWidth = 480;
 
+  /// The quote's longest run of lines before it ends in an ellipsis.
+  static const int quoteMaxLines = 3;
+
+  /// The quote's measure: 52 em at 18 px.
+  static const double quoteMaxWidth = 52 * 18;
+
   final FlutterLibraryBook book;
+
+  /// [book]'s notes: the quote and the Notes count; null while unknown.
+  final FlutterNotesSummary? notes;
   final Uint8List? cover;
   final int demandRevision;
   final ShellLayout layout;
@@ -1083,6 +1095,8 @@ class LibraryContinueCard extends StatelessWidget {
         18,
       ).copyWith(color: palette.inkMuted);
       final dark = palette.dark;
+      final quote = compact ? null : notes?.latest;
+      final noteCount = notes?.count ?? 0;
       final body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: compact ? 6 : 10,
@@ -1106,6 +1120,21 @@ class LibraryContinueCard extends StatelessWidget {
               ShellFormatBadge(format: book.format),
             ],
           ),
+          if (quote != null)
+            Container(
+              padding: const EdgeInsets.only(top: 4),
+              constraints: const BoxConstraints(maxWidth: quoteMaxWidth),
+              child: Text(
+                '“$quote”',
+                maxLines: quoteMaxLines,
+                overflow: TextOverflow.ellipsis,
+                style: shellEditorialStyle(
+                  18,
+                  27,
+                  weight: FontWeight.w400,
+                ).copyWith(color: palette.ink),
+              ),
+            ),
           Padding(
             padding: EdgeInsets.only(top: compact ? 0 : 4),
             child: Column(
@@ -1156,6 +1185,7 @@ class LibraryContinueCard extends StatelessWidget {
                   backgroundColor: palette.surface,
                   onPressed: openNotes,
                   leading: Icon(LucideIcons.messageSquareText, size: iconSize),
+                  trailing: noteCount > 0 ? ShellCount(count: noteCount) : null,
                   child: Text(l10n.shellPlaceNotes),
                 ),
               ],

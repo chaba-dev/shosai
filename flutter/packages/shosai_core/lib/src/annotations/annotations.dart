@@ -133,6 +133,11 @@ final class Annotations {
     return _resolve(book, text, cancellation);
   }
 
+  /// How many annotations book [bookId] has and the words of the latest one,
+  /// read from the store alone: nothing is resolved, so the book need not be
+  /// open. A book that is not in the library has none.
+  Future<NotesSummary> summary(int bookId) => _records.summary(bookId);
+
   /// Change annotation [id]'s color and body. Returns false when book
   /// [bookId] has no such live annotation.
   Future<bool> update(

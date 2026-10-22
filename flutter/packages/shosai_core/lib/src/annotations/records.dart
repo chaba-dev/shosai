@@ -57,6 +57,9 @@ final class AnnotationRecords {
   Future<BookAnnotations> list(AnnotationOwner owner) =>
       _store.read((db) => _list(db, owner));
 
+  Future<NotesSummary> summary(int bookId) =>
+      _store.read((db) => _summary(db, bookId));
+
   Future<bool> update(
     AnnotationOwner owner,
     String id,
@@ -404,6 +407,44 @@ BookAnnotations _list(Database db, AnnotationOwner owner) {
     for (final row in rows) _annotation(row, allowance),
   ], allowance.remaining);
 }
+
+NotesSummary _summary(Database db, int bookId) {
+  final hash = db
+      .select('SELECT content_hash FROM books WHERE id = ?', [bookId])
+      .firstOrNull
+      ?.columnAt(0);
+  final version = hash == null ? null : _version(db, hash as String);
+  if (version == null) return NotesSummary.empty;
+  const live = '''FROM annotations a
+       JOIN annotation_document_versions v ON v.id = a.version_id
+       WHERE v.document_id = ? AND a.deleted_at IS NULL''';
+  final count =
+      db.select('SELECT count(*) $live', [version.documentId]).first.columnAt(0)
+          as int;
+  final latest = db
+      .select(
+        '''SELECT coalesce(${_words('a.original_quote')},
+             ${_words('a.normalized_exact')}, ${_words('a.body')}) AS words
+           $live AND words IS NOT NULL
+           ORDER BY a.created_at DESC, a.rowid DESC LIMIT 1''',
+        [version.documentId],
+      )
+      .firstOrNull
+      ?.columnAt(0);
+  return NotesSummary(count, latest as String?);
+}
+
+/// [column] when it has words: a geometry-only annotation's empty note and a
+/// note of spaces quote nothing.
+String _words(String column) =>
+    "CASE WHEN trim($column, $_whiteSpace) <> '' THEN $column END";
+
+/// Unicode's White_Space characters and the byte order mark, as Dart's
+/// `String.trim` takes them.
+const _whiteSpace =
+    'char(9, 10, 11, 12, 13, 32, 133, 160, 5760, 8192, 8193, 8194, 8195, '
+    '8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, '
+    '12288, 65279)';
 
 /// The live annotation [id] of the book's document, as an update target.
 const _ownedBy = '''id = ? AND deleted_at IS NULL AND version_id IN (

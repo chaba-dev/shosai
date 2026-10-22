@@ -76,6 +76,7 @@ final class LibraryModel {
     this.sort = FlutterLibrarySort.recent,
     this.bookCount,
     this.continueReading,
+    this.continueReadingNotes,
     this.settings,
     this.busy = false,
     this.importing = false,
@@ -108,6 +109,9 @@ final class LibraryModel {
   /// The book last opened for reading and not yet finished, as the last page
   /// reported it, whatever the shelf's query, format and order.
   final FlutterLibraryBook? continueReading;
+
+  /// [continueReading]'s notes: the hero's quote and its Notes count.
+  final FlutterNotesSummary? continueReadingNotes;
 
   final FlutterReaderSettings? settings;
   final bool busy;
@@ -185,6 +189,7 @@ final class LibraryModel {
     FlutterLibrarySort? sort,
     Object? bookCount = _same,
     Object? continueReading = _same,
+    Object? continueReadingNotes = _same,
     Object? settings = _same,
     bool? busy,
     bool? importing,
@@ -212,6 +217,9 @@ final class LibraryModel {
     continueReading: identical(continueReading, _same)
         ? this.continueReading
         : continueReading as FlutterLibraryBook?,
+    continueReadingNotes: identical(continueReadingNotes, _same)
+        ? this.continueReadingNotes
+        : continueReadingNotes as FlutterNotesSummary?,
     settings: identical(settings, _same)
         ? this.settings
         : settings as FlutterReaderSettings?,
