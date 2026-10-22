@@ -367,11 +367,15 @@ final class CanonicalCursor {
 /// in the same line for their advance and line breaking, painted transparent,
 /// and drawn again upright over their own boxes (see
 /// [FlowTextBlock.paint]).
+///
+/// A [combined] run is tate-chū-yoko: its text is laid out one em long, and
+/// drawn upright and side by side in that em square.
 class UprightRun {
   const UprightRun({
     required this.start,
     required this.end,
     required this.style,
+    this.combined = false,
   });
 
   /// Painter code units of the run.
@@ -380,6 +384,9 @@ class UprightRun {
 
   /// The run's own style, with its ink: the laid-out text is transparent.
   final TextStyle style;
+
+  /// Whether the run is drawn as one unit, its characters side by side.
+  final bool combined;
 }
 
 /// Whether [rune] is drawn upright in vertical text.
@@ -471,9 +478,10 @@ bool isUprightInVertical(int rune) {
     var runStart = 0;
     bool? runUpright;
     void flush(int end) {
-      if (runUpright == null || end <= runStart) return;
+      final isUpright = runUpright;
+      if (isUpright == null || end <= runStart) return;
       final text = span.text.substring(runStart, end);
-      if (runUpright) {
+      if (isUpright) {
         children.add(TextSpan(text: text, style: hidden));
         upright.add(
           UprightRun(
@@ -488,11 +496,49 @@ bool isUprightInVertical(int rune) {
       runStart = end;
     }
 
+    void combine(int from, int to) {
+      final text = span.text.substring(from, to);
+      children.add(
+        TextSpan(
+          text: text,
+          style: hidden.copyWith(letterSpacing: _combinedSpacing(text, style)),
+        ),
+      );
+      upright.add(
+        UprightRun(
+          start: start + codeUnitOffset + from,
+          end: start + codeUnitOffset + to,
+          style: style,
+          combined: true,
+        ),
+      );
+      runStart = to;
+      runUpright = null;
+    }
+
+    final combined = span.combine;
+    if (combined != null && combined.all) {
+      combine(0, span.text.length);
+      continue;
+    }
     // Orientation applies to whole grapheme clusters (UAX #50, 3.2.1): a
     // variation selector, a combining mark or an emoji joined by ZWJ goes
     // with its base, so the upright repaint shapes what the line shaped.
+    final digits = combined == null
+        ? const <({int start, int end})>[]
+        : _digitRuns(span.text, combined.digits);
+    var nextDigits = 0;
     var unit = 0;
     for (final cluster in span.text.characters) {
+      if (nextDigits < digits.length && unit == digits[nextDigits].start) {
+        flush(unit);
+        combine(unit, digits[nextDigits].end);
+        nextDigits++;
+      }
+      if (unit < runStart) {
+        unit += cluster.length;
+        continue;
+      }
       final isUpright = isUprightInVertical(cluster.runes.first);
       if (runUpright != isUpright) {
         flush(unit);
@@ -511,6 +557,39 @@ bool isUprightInVertical(int rune) {
     ),
     upright: upright,
   );
+}
+
+/// The letter spacing that makes [text], set in [style], one em long, so a
+/// tate-chū-yoko run advances its column by one character.
+double _combinedSpacing(String text, TextStyle style) {
+  final measure = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: ui.TextDirection.ltr,
+  )..layout();
+  final width = measure.width;
+  measure.dispose();
+  final em = style.fontSize ?? 14;
+  return (em - width) / text.characters.length;
+}
+
+/// The runs of ASCII digits in [text] that `text-combine-upright: digits`
+/// combines: those no longer than [longest].
+List<({int start, int end})> _digitRuns(String text, int longest) {
+  bool isDigit(int unit) => unit >= 0x30 && unit <= 0x39;
+  final runs = <({int start, int end})>[];
+  var index = 0;
+  while (index < text.length) {
+    if (!isDigit(text.codeUnitAt(index))) {
+      index++;
+      continue;
+    }
+    final start = index;
+    while (index < text.length && isDigit(text.codeUnitAt(index))) {
+      index++;
+    }
+    if (index - start <= longest) runs.add((start: start, end: index));
+  }
+  return runs;
 }
 
 /// Flutter style for one engine span.

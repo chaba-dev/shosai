@@ -263,7 +263,11 @@ void main() {
           run.end - mixed.map.codeUnitOffset,
         ),
     ];
-    expect(runs, ['「', '」と書生は言った。明治', '年、', '年のことである。']);
+    expect(runs, ['「', '」と書生は言った。明治', '38', '年、', '年のことである。']);
+    expect(
+      [for (final run in mixed.upright) run.combined],
+      [false, false, true, false, false],
+    );
     for (final run in mixed.upright) {
       expect(run.style.color, typography.palette.foreground);
     }
@@ -281,6 +285,84 @@ void main() {
       expect(laidOut[run]!.a, 0, reason: run);
     }
     expect(laidOut['Hello, world'], typography.palette.foreground);
+  });
+
+  /// The laid-out width of each upright run of [spans], and whether it is
+  /// tate-chū-yoko.
+  List<(String, double, bool)> uprightWidths(List<EpubTextSpan> spans) {
+    final (:map, :upright, :span) = buildBlockText(
+      spans,
+      typography,
+      18,
+      vertical: true,
+    );
+    final painter = TextPainter(text: span, textDirection: TextDirection.ltr)
+      ..layout();
+    addTearDown(painter.dispose);
+    return [
+      for (final run in upright)
+        (
+          map.text.substring(run.start, run.end),
+          painter
+              .getBoxesForSelection(
+                TextSelection(baseOffset: run.start, extentOffset: run.end),
+              )
+              .fold(0.0, (width, box) => width + box.right - box.left),
+          run.combined,
+        ),
+    ];
+  }
+
+  test('tate-chū-yoko lays its text out one em long and draws it as one '
+      'upright unit', () {
+    final runs = uprightWidths([
+      EpubTextSpan(text: '明治'),
+      EpubTextSpan(text: '38', combine: const EpubTextCombine.all()),
+      EpubTextSpan(text: '年'),
+      EpubTextSpan(text: '!?', combine: const EpubTextCombine.all()),
+    ]);
+    expect(
+      [for (final run in runs) (run.$1, run.$3)],
+      [('明治', false), ('38', true), ('年', false), ('!?', true)],
+    );
+    expect(runs[1].$2, closeTo(18, 0.01));
+    expect(runs[3].$2, closeTo(18, 0.01));
+  });
+
+  test('text-combine-upright: digits combines only short digit runs', () {
+    final runs = uprightWidths([
+      EpubTextSpan(
+        text: '令和5年12月31日、2024年',
+        combine: const EpubTextCombine.digits(2),
+      ),
+    ]);
+    expect(
+      [
+        for (final run in runs)
+          if (run.$3) run.$1,
+      ],
+      ['5', '12', '31'],
+    );
+    for (final run in runs.where((run) => run.$3)) {
+      expect(run.$2, closeTo(18, 0.01), reason: run.$1);
+    }
+    // The long run turns with the line, as Latin digits do.
+    expect(
+      [
+        for (final run in runs)
+          if (!run.$3) run.$1,
+      ],
+      ['令和', '年', '月', '日、', '年'],
+    );
+  });
+
+  test('horizontal text ignores tate-chū-yoko', () {
+    final built = buildBlockText(
+      [EpubTextSpan(text: '38', combine: const EpubTextCombine.all())],
+      typography,
+      18,
+    );
+    expect(built.upright, isEmpty);
   });
 
   test('images in a vertical flow are measured turned', () async {

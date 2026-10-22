@@ -84,8 +84,9 @@ class FlowTextBlock {
   /// The upright glyphs of each line, measured when the line is first painted.
   final Map<int, List<_UprightGlyph>> _uprightLines = {};
 
-  /// One painter per upright grapheme and style, shared by the block's lines.
-  final Map<(String, TextStyle), TextPainter> _uprightPainters = {};
+  /// One painter per upright grapheme (or tate-chū-yoko run), style and use
+  /// of vertical forms, shared by the block's lines.
+  final Map<(String, TextStyle, bool), TextPainter> _uprightPainters = {};
 
   double get width => painter.width;
   double get height => painter.height;
@@ -132,6 +133,7 @@ class FlowTextBlock {
         canvas.save();
         canvas.translate(glyph.center.dx, glyph.center.dy);
         canvas.rotate(-math.pi / 2);
+        if (glyph.squeeze != 1) canvas.scale(glyph.squeeze, 1);
         glyphPainter.paint(
           canvas,
           Offset(-glyphPainter.width / 2, -glyphPainter.height / 2),
@@ -156,32 +158,73 @@ class FlowTextBlock {
         unit - markerOffset,
         runEnd - markerOffset,
       );
+      if (run.combined) {
+        final glyph = _uprightGlyph(
+          unit,
+          runEnd,
+          runText,
+          run.style,
+          verticalForms: false,
+        );
+        if (glyph == null) continue;
+        // Tate-chū-yoko: the run's text sits across the column, squeezed to
+        // the one em its laid-out letters were spaced to fill.
+        final advance = glyph.box.width;
+        final width = glyph.painter.width;
+        glyphs.add(
+          _UprightGlyph(
+            center: glyph.box.center,
+            painter: glyph.painter,
+            squeeze: width > advance && width > 0 ? advance / width : 1,
+          ),
+        );
+        continue;
+      }
       for (final grapheme in runText.characters) {
         final start = unit;
         unit += grapheme.length;
-        final boxes = painter.getBoxesForSelection(
-          TextSelection(baseOffset: start, extentOffset: unit),
+        final glyph = _uprightGlyph(start, unit, grapheme, run.style);
+        if (glyph == null) continue;
+        glyphs.add(
+          _UprightGlyph(center: glyph.box.center, painter: glyph.painter),
         );
-        if (boxes.isEmpty) continue;
-        var rect = boxes.first.toRect();
-        for (final box in boxes.skip(1)) {
-          rect = rect.expandToInclude(box.toRect());
-        }
-        final glyphPainter = _uprightPainters[(grapheme, run.style)] ??=
-            TextPainter(
-              text: TextSpan(
-                text: grapheme,
-                style: run.style.copyWith(
-                  fontFeatures: const [ui.FontFeature.enable('vert')],
-                  decoration: TextDecoration.none,
-                ),
-              ),
-              textDirection: ui.TextDirection.ltr,
-            )..layout();
-        glyphs.add(_UprightGlyph(center: rect.center, painter: glyphPainter));
       }
     }
     return glyphs;
+  }
+
+  /// The laid-out box of the code units [start] to [end], and a painter that
+  /// draws [text] upright in [style], in the font's vertical forms unless
+  /// [verticalForms] is false (tate-chū-yoko sets its text as horizontal).
+  ({Rect box, TextPainter painter})? _uprightGlyph(
+    int start,
+    int end,
+    String text,
+    TextStyle style, {
+    bool verticalForms = true,
+  }) {
+    final boxes = painter.getBoxesForSelection(
+      TextSelection(baseOffset: start, extentOffset: end),
+    );
+    if (boxes.isEmpty) return null;
+    var rect = boxes.first.toRect();
+    for (final box in boxes.skip(1)) {
+      rect = rect.expandToInclude(box.toRect());
+    }
+    final glyphPainter = _uprightPainters[(text, style, verticalForms)] ??=
+        TextPainter(
+          text: TextSpan(
+            text: text,
+            style: style.copyWith(
+              fontFeatures: [
+                if (verticalForms) const ui.FontFeature.enable('vert'),
+              ],
+              decoration: TextDecoration.none,
+            ),
+          ),
+          textDirection: ui.TextDirection.ltr,
+        )..layout();
+    return (box: rect, painter: glyphPainter);
   }
 
   /// Releases the measured paragraph behind this block.
@@ -198,10 +241,17 @@ class FlowTextBlock {
 /// One upright character of a vertical line: where its box's centre is, in
 /// block coordinates, and the painter that draws it.
 class _UprightGlyph {
-  const _UprightGlyph({required this.center, required this.painter});
+  const _UprightGlyph({
+    required this.center,
+    required this.painter,
+    this.squeeze = 1,
+  });
 
   final Offset center;
   final TextPainter painter;
+
+  /// How much a tate-chū-yoko run is narrowed to fit its em square.
+  final double squeeze;
 }
 
 /// A measured image block (or a visible alt-text fallback).
