@@ -18,7 +18,11 @@ final class ReaderLayoutChanged extends ReaderMessage {
 }
 
 final class ReaderViewportChanged extends ReaderMessage {
-  const ReaderViewportChanged(this.layout, {this.height});
+  const ReaderViewportChanged(
+    this.layout, {
+    this.height,
+    this.devicePixelRatio,
+  });
 
   final ReaderLayout layout;
 
@@ -27,6 +31,12 @@ final class ReaderViewportChanged extends ReaderMessage {
   /// EPUB pagination needs a page height: an EPUB document waits for its first
   /// reported height instead of paginating for a guessed box.
   final double? height;
+
+  /// The display's pixel ratio, when the reporter knows it.
+  ///
+  /// A PDF page in a fit mode renders at its fitted size in device pixels, so
+  /// moving the window to a display with another ratio renders it again.
+  final double? devicePixelRatio;
 }
 
 /// Steps the reader's page by [delta] (±1) (RD-06 edge navigation).
@@ -573,10 +583,14 @@ final class _ReaderImageDecoded extends ReaderMessage {
   const _ReaderImageDecoded({
     required this.generation,
     required this.pageImage,
+    this.rasterScale,
   });
 
   final int generation;
   final ui.Image? pageImage;
+
+  /// The scale [pageImage] was rendered at, for a PDF page.
+  final double? rasterScale;
 }
 
 final class _ReaderSurfaceLoaded extends ReaderMessage {
@@ -606,6 +620,7 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
     this.length,
     this.selectionError,
     this.annotationError,
+    this.rasterScale,
   });
 
   final int generation;
@@ -615,6 +630,9 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
   final ReaderLayout layout;
   final FlutterSelectionSurface? surface;
   final ui.Image pageImage;
+
+  /// The scale [pageImage] was rendered at.
+  final double? rasterScale;
   final List<FlutterAnnotation> annotations;
   final bool replaceReadingOffset;
   final int? offset;
