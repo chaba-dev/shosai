@@ -496,6 +496,7 @@ ReaderEpubPage continuousWindowFor({
   double priorityTop = 0,
   int? selectionBudgetMicros,
   int? restartedAt,
+  bool rightToLeft = false,
 }) {
   final chapter = session.chapter;
   final frame = epubPageBoxFor(windowSize);
@@ -669,6 +670,7 @@ ReaderEpubPage continuousWindowFor({
     box: box,
     surface: surface,
     palette: typography.palette,
+    rightToLeft: rightToLeft,
     window: ReaderEpubWindow(
       firstNode: session.started ? session.firstNodeIndex : 0,
       endNode: session.started ? session.lastNodeIndex + 1 : 0,

@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
@@ -44,7 +45,11 @@ void main() {
     }
   }
 
-  Future<void> openReader(WidgetTester tester, HarnessBridge harness) async {
+  Future<void> openReader(
+    WidgetTester tester,
+    HarnessBridge harness, {
+    FlutterReaderSettings? settings,
+  }) async {
     tester.view.physicalSize = const ui.Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -55,6 +60,7 @@ void main() {
           bridge: harness,
           initialPath: '/books/long.epub',
           initialBookId: 1,
+          initialSettings: settings,
           epubImageDecoder: (bytes) async => null,
         ),
       ),
@@ -112,6 +118,63 @@ void main() {
       reason: 'the left margin turns to the page after the spread',
     );
 
+    await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+    await settle(tester);
+    expect(
+      page(tester).canonicalStart,
+      first.canonicalStart,
+      reason: 'the right margin turns back to the first spread',
+    );
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a right-to-left book\'s progress track starts at its right '
+      'end', (tester) async {
+    await openReader(tester, bridge('rtl'));
+    final track = find.byKey(const ValueKey('reader-progress-track'));
+
+    // The left end of the track is the end of the book. The place beside the
+    // track changes its width, so each tap measures it again.
+    var rect = tester.getRect(track);
+    await tester.tapAt(Offset(rect.left + 4, rect.center.dy));
+    await settle(tester);
+    expect(page(tester).unit, 1);
+    rect = tester.getRect(track);
+    await tester.tapAt(Offset(rect.right - 4, rect.center.dy));
+    await settle(tester);
+    expect(page(tester).unit, 0);
+
+    // The left arrow steps toward the end, the right arrow back.
+    Focus.of(tester.element(track)).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await settle(tester);
+    expect(page(tester).unit, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await settle(tester);
+    expect(page(tester).unit, 0);
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a right-to-left book read continuously keeps its direction', (
+    tester,
+  ) async {
+    await openReader(
+      tester,
+      bridge('rtl'),
+      settings: const FlutterReaderSettings(
+        continuous: true,
+        theme: 'light',
+        epubFontSize: 18,
+        epubLineSpacing: 1.6,
+        pdfZoom: 0,
+      ),
+    );
+    final continuous = page(tester);
+    expect(continuous.continuous, isTrue);
+    expect(continuous.rightToLeft, isTrue);
     await closeReader(tester);
   });
 

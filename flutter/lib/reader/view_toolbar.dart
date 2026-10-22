@@ -614,6 +614,7 @@ class _ReaderStatusLine extends StatelessWidget {
                               ),
                             )
                           : null,
+                      rightToLeft: model.epubPage?.rightToLeft ?? false,
                       increasedValue: _unitStepValue(context, model, 1),
                       decreasedValue: _unitStepValue(context, model, -1),
                       onStep: total > 0 && !model.busy
@@ -750,6 +751,7 @@ class _ReaderProgressTrack extends StatefulWidget {
   const _ReaderProgressTrack({
     required this.value,
     required this.valueLabel,
+    required this.rightToLeft,
     required this.increasedValue,
     required this.decreasedValue,
     required this.marks,
@@ -759,6 +761,10 @@ class _ReaderProgressTrack extends StatefulWidget {
 
   final double value;
   final String valueLabel;
+
+  /// Whether the book reads right to left: the track then starts at its right
+  /// end, so it fills, seeks and steps from there.
+  final bool rightToLeft;
 
   /// The place one unit on or back, or null at that end of the book.
   final String? increasedValue;
@@ -779,13 +785,17 @@ class _ReaderProgressTrackState extends State<_ReaderProgressTrack> {
     final palette = ShellPalette.of(context);
     final onJump = widget.onJump;
     final onStep = widget.onStep;
+    final rightToLeft = widget.rightToLeft;
     void step(int delta) => onStep?.call(delta);
+    // The arrow toward the book's end steps forward.
+    final forward = rightToLeft ? -1 : 1;
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         void jump(Offset local) {
           if (width <= 0) return;
-          onJump?.call((local.dx / width).clamp(0.0, 1.0));
+          final fraction = (local.dx / width).clamp(0.0, 1.0);
+          onJump?.call(rightToLeft ? 1 - fraction : fraction);
         }
 
         return Semantics(
@@ -808,15 +818,15 @@ class _ReaderProgressTrackState extends State<_ReaderProgressTrack> {
                 : SystemMouseCursors.click,
             onShowFocusHighlight: (focused) =>
                 setState(() => _focused = focused),
-            shortcuts: const {
-              SingleActivator(LogicalKeyboardKey.arrowRight):
-                  _ReaderTrackStepIntent(1),
-              SingleActivator(LogicalKeyboardKey.arrowUp):
-                  _ReaderTrackStepIntent(1),
-              SingleActivator(LogicalKeyboardKey.arrowLeft):
-                  _ReaderTrackStepIntent(-1),
-              SingleActivator(LogicalKeyboardKey.arrowDown):
-                  _ReaderTrackStepIntent(-1),
+            shortcuts: {
+              const SingleActivator(LogicalKeyboardKey.arrowRight):
+                  _ReaderTrackStepIntent(forward),
+              const SingleActivator(LogicalKeyboardKey.arrowUp):
+                  const _ReaderTrackStepIntent(1),
+              const SingleActivator(LogicalKeyboardKey.arrowLeft):
+                  _ReaderTrackStepIntent(-forward),
+              const SingleActivator(LogicalKeyboardKey.arrowDown):
+                  const _ReaderTrackStepIntent(-1),
             },
             actions: {
               _ReaderTrackStepIntent: CallbackAction<_ReaderTrackStepIntent>(
@@ -847,6 +857,7 @@ class _ReaderProgressTrackState extends State<_ReaderProgressTrack> {
                   child: CustomPaint(
                     painter: _ProgressTrackPainter(
                       value: widget.value.clamp(0.0, 1.0),
+                      rightToLeft: rightToLeft,
                       marks: widget.marks,
                       track: palette.surfaceSunken,
                       fill: palette.accent,
@@ -873,6 +884,7 @@ class _ReaderTrackStepIntent extends Intent {
 class _ProgressTrackPainter extends CustomPainter {
   const _ProgressTrackPainter({
     required this.value,
+    required this.rightToLeft,
     required this.marks,
     required this.track,
     required this.fill,
@@ -880,6 +892,7 @@ class _ProgressTrackPainter extends CustomPainter {
   });
 
   final double value;
+  final bool rightToLeft;
   final List<double> marks;
   final Color track;
   final Color fill;
@@ -894,14 +907,24 @@ class _ProgressTrackPainter extends CustomPainter {
       Paint()..color = track,
     );
     if (value > 0) {
+      final filled = size.width * value;
       canvas.drawRRect(
-        RRect.fromLTRBR(0, top, size.width * value, top + 4, radius),
+        rightToLeft
+            ? RRect.fromLTRBR(
+                size.width - filled,
+                top,
+                size.width,
+                top + 4,
+                radius,
+              )
+            : RRect.fromLTRBR(0, top, filled, top + 4, radius),
         Paint()..color = fill,
       );
     }
     final tick = Paint()..color = mark;
     for (final position in marks) {
-      final x = (size.width * position.clamp(0.0, 1.0)).clamp(
+      final share = position.clamp(0.0, 1.0);
+      final x = (size.width * (rightToLeft ? 1 - share : share)).clamp(
         1.0,
         math.max(1.0, size.width - 1),
       );
@@ -921,6 +944,7 @@ class _ProgressTrackPainter extends CustomPainter {
   @override
   bool shouldRepaint(_ProgressTrackPainter oldDelegate) =>
       oldDelegate.value != value ||
+      oldDelegate.rightToLeft != rightToLeft ||
       !_sameMarks(oldDelegate.marks, marks) ||
       oldDelegate.track != track ||
       oldDelegate.fill != fill ||

@@ -3264,6 +3264,7 @@ final class ReaderController implements Listenable {
       priorityTop: priorityTop,
       selectionBudgetMicros: selectionBudgetMicros,
       restartedAt: restartedAt,
+      rightToLeft: _epubSource?.book.pageProgression == EpubDirection.rtl,
     );
   }
 
