@@ -1277,6 +1277,65 @@ void main() {
         }
       });
     }
+
+    // A place in one page's text, then the spread's other page by number.
+    for (final from in [0, 1]) {
+      final to = 1 - from;
+      testWidgets('page ${to + 1} asked for by number from page ${from + 1} '
+          'of a spread takes no offset with it', (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge =
+            _PanelBridge(
+                unitCount: 3,
+                bookmarks: [_bookmark(id: 7, unit: BigInt.from(to))],
+              )
+              ..readingState = FlutterReadingState(
+                unit: BigInt.from(from),
+                offset: BigInt.from(10),
+                zoom: 1,
+              );
+        await _open(
+          tester,
+          _reader(
+            bridge: bridge,
+            initialPath: '/books/atlas.pdf',
+            initialBookId: 1,
+          ),
+        );
+        final bookmark = find.byKey(const ValueKey('reader-header-bookmark'));
+        expect(tester.getSemantics(bookmark).label, 'Bookmark this page');
+
+        // The page field starts at the page being read.
+        await _openContents(tester);
+        final input = find.byKey(const ValueKey('reader-page-input'));
+        expect(
+          tester
+              .widget<EditableText>(
+                find.descendant(of: input, matching: find.byType(EditableText)),
+              )
+              .controller
+              .text,
+          '${from + 1}',
+        );
+        await tester.enterText(input, '${to + 1}');
+        await tester.testTextInput.receiveAction(TextInputAction.go);
+        await tester.pump();
+        await _settle(tester);
+
+        // The page alone is the place: its bookmark matches, and it is saved
+        // without the other page's offset, in two pages and in one.
+        expect(
+          tester.getSemantics(bookmark).label,
+          contains('Remove bookmark'),
+        );
+        expect(bridge.savedReadingStates.last.unit, BigInt.from(to));
+        expect(bridge.savedReadingStates.last.offset, isNull);
+        await choosePages(tester, 'one-page');
+        expect(find.textContaining(' · page ${to + 1} of 3'), findsOneWidget);
+        expect(bridge.savedReadingStates.last.unit, BigInt.from(to));
+        expect(bridge.savedReadingStates.last.offset, isNull);
+      });
+    }
   });
 
   testWidgets('an EPUB opened after a PDF spread reaches its second chapter', (

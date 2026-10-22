@@ -2439,7 +2439,9 @@ final class ReaderController implements Listenable {
     if (document == null) return;
     _emit(
       _model.copyWith(
-        pageInput: ReaderPageInputPresentation(draft: '${_model.unit + 1}'),
+        pageInput: ReaderPageInputPresentation(
+          draft: '${_model.readingLocation.unit + 1}',
+        ),
       ),
     );
   }
@@ -3757,14 +3759,22 @@ final class ReaderController implements Listenable {
     _activeRelayoutIntent = null;
     final explicitLocation =
         message.offset != null || message.replaceReadingOffset;
-    final changedLocation = message.unit != _model.unit || explicitLocation;
+    // The page read can change within a PDF spread, its unit staying put.
+    final readingPage = message.readingPage ?? message.unit;
+    final changedPage = readingPage != _model.readingLocation.unit;
+    final changedLocation =
+        message.unit != _model.unit || changedPage || explicitLocation;
     if (changedLocation) _readingStatePersistenceBlocked = false;
     final int? readingOffset;
     if (message.pdfSpread != null && message.surface == null) {
       // A spread without text has no offsets to place a reading position
       // by; its page alone keeps it.
       readingOffset = null;
-    } else if (!explicitLocation && message.pdfSpread != _model.pdfSpread) {
+    } else if (changedPage || explicitLocation) {
+      // Another page takes the offset asked for with it, or none: the old
+      // page's offset is not a place on the new one.
+      readingOffset = message.offset;
+    } else if (message.pdfSpread != _model.pdfSpread) {
       // The page being read keeps its place when a PDF spread is made or
       // undone: its own offset, moved past the first page's text when it is
       // now the spread's second page.
@@ -3779,7 +3789,7 @@ final class ReaderController implements Listenable {
           ? offset + spread!.textShift
           : null;
     } else {
-      readingOffset = changedLocation ? message.offset : _model.readingOffset;
+      readingOffset = _model.readingOffset;
     }
     _emit(
       _model.copyWith(
@@ -3788,7 +3798,7 @@ final class ReaderController implements Listenable {
         // The more panel's page input follows the reader's location, the way
         // the pinned reference syncs `page_input` on navigation (RD-10).
         pageInput: changedLocation
-            ? ReaderPageInputPresentation(draft: '${message.unit + 1}')
+            ? ReaderPageInputPresentation(draft: '${readingPage + 1}')
             : _model.pageInput,
         pageImage: message.pageImage,
         selectionSurface: message.surface == null
