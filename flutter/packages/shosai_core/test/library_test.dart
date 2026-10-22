@@ -395,6 +395,56 @@ void main() {
       expect(await ids(), [epub.id, pdf.id]);
     });
 
+    test('sorts by title and by author, with authorless books last', () async {
+      await t.executeMany(
+        '''INSERT INTO books (title, author, format, file_path, storage_kind,
+             original_path, content_hash, file_size)
+           VALUES (?, ?, 'pdf', ?, 'referenced', ?, ?, 1)''',
+        [
+          ['alpha', 'Zola', '/books/a.pdf', '/books/a.pdf', 'a' * 64],
+          ['Omega', null, '/books/o.pdf', '/books/o.pdf', '0' * 64],
+        ],
+      );
+      final books = {
+        for (final book in (await t.library.page()).books) book.title: book.id,
+      };
+
+      final byTitle = await t.library.page(sort: LibrarySort.title);
+      final byAuthor = await t.library.page(sort: LibrarySort.author);
+
+      expect(
+        [for (final book in byTitle.books) book.title],
+        orderedEquals(
+          [...books.keys]
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
+        ),
+      );
+      expect(byAuthor.books.first.author, 'Test Author');
+      expect(byAuthor.books[1].author, 'Zola');
+      expect(
+        byAuthor.books.skip(2).map((book) => book.author),
+        everyElement(isNull),
+      );
+    });
+
+    test('counts the whole library and finds the book to continue', () async {
+      final unread = await t.library.page(format: BookFormat.pdf);
+      expect(unread.bookCount, 2);
+      expect(unread.continueReading, isNull);
+
+      await t.library.updateProgress(epub.id, 0.5);
+      await t.library.updateProgress(pdf.id, 1);
+      final page = await t.library.page(
+        format: BookFormat.pdf,
+        sort: LibrarySort.title,
+      );
+
+      expect(page.bookCount, 2);
+      // A finished book is not continued, even though it was read last; the
+      // filter and the order do not hide the book either.
+      expect(page.continueReading?.id, epub.id);
+    });
+
     test('searches title and author, case-insensitively', () async {
       expect(await ids(query: 'sample book'), [epub.id]);
       expect(await ids(query: 'TEST AUTHOR'), [epub.id]);

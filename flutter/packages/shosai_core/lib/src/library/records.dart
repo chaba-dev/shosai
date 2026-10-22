@@ -41,9 +41,10 @@ final class LibraryRecords {
   Future<LibraryPage> page(
     String? query,
     BookFormat? format,
+    LibrarySort sort,
     int limit,
     int offset,
-  ) => _store.read((db) => _page(db, query, format?.name, limit, offset));
+  ) => _store.read((db) => _page(db, query, format?.name, sort, limit, offset));
 
   /// Record a referenced import of [path], or ask for its metadata first.
   Future<CommitOutcome> commitReferenced(
@@ -241,6 +242,7 @@ LibraryPage _page(
   Database db,
   String? query,
   String? format,
+  LibrarySort sort,
   int limit,
   int offset,
 ) {
@@ -259,13 +261,32 @@ LibraryPage _page(
   final rows = db.select(
     '''SELECT $_bookColumns FROM books
        ${where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}'}
-       ORDER BY last_read DESC, date_added DESC, id DESC
+       ORDER BY ${_orders[sort]}
        LIMIT ? OFFSET ?''',
     [...arguments, limit + 1, offset],
   );
   final books = rows.take(limit).map(_book).toList();
-  return LibraryPage(books, hasMore: rows.length > limit);
+  return LibraryPage(
+    books,
+    hasMore: rows.length > limit,
+    bookCount: db.select('SELECT count(*) FROM books').first.columnAt(0) as int,
+    continueReading: db
+        .select('''SELECT $_bookColumns FROM books
+             WHERE last_read IS NOT NULL AND progress < 1.0
+             ORDER BY last_read DESC, id DESC LIMIT 1''')
+        .map(_book)
+        .firstOrNull,
+  );
 }
+
+/// Each [LibrarySort] as an `ORDER BY` clause. Every one ends on the id, so
+/// paging through equal keys neither repeats nor skips a book.
+const _orders = {
+  LibrarySort.recent: 'last_read DESC, date_added DESC, id DESC',
+  LibrarySort.title: 'title COLLATE NOCASE, id',
+  LibrarySort.author:
+      'author IS NULL, author COLLATE NOCASE, title COLLATE NOCASE, id',
+};
 
 sealed class CommitOutcome {
   const CommitOutcome();
