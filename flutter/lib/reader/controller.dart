@@ -801,6 +801,7 @@ final class ReaderController implements Listenable {
             _model.copyWith(
               selectionSurface: _freezeSurface(message.surface),
               pdfSpread: message.pdfSpread,
+              readingOffset: message.readingOffset ?? _unchanged,
               savedSelections: _savedSelections(
                 _model.annotations,
                 _model.unit,
@@ -812,7 +813,12 @@ final class ReaderController implements Listenable {
         }
       case _ReaderSelectionSupportFailed():
         if (_isCurrent(message.generation)) {
-          _emit(_model.copyWith(selectionError: message.error));
+          _emit(
+            _model.copyWith(
+              selectionError: message.error,
+              pdfSpread: message.pdfSpread,
+            ),
+          );
         }
       case _ReaderRelayoutCompleted():
         _relayoutCompleted(message);
@@ -1016,6 +1022,7 @@ final class ReaderController implements Listenable {
         readingOffset: null,
         pageImage: null,
         epubPage: null,
+        pdfSpread: null,
         error: null,
         selectionSurface: null,
         selectionPhase: ReaderSelectionPhase.idle,
@@ -1165,17 +1172,30 @@ final class ReaderController implements Listenable {
           facing: facing,
         );
         if (!_isCurrent(generation)) return;
+        // A position saved on a spread's second page reopens there: its
+        // offset moves past the first page's text.
+        final restoredOffset = restored?.offset?.toInt();
         dispatch(
           _ReaderSurfaceLoaded(
             generation: generation,
             surface: surface,
             pdfSpread: spread,
+            readingOffset:
+                spread != null &&
+                    restoredOffset != null &&
+                    restoredUnit == spread.facingUnit
+                ? restoredOffset + spread.textShift
+                : null,
           ),
         );
       } catch (error) {
         if (!_isCurrent(generation)) return;
         dispatch(
-          _ReaderSelectionSupportFailed(generation, _describeError(error)),
+          _ReaderSelectionSupportFailed(
+            generation,
+            _describeError(error),
+            pdfSpread: _textlessSpread(facing),
+          ),
         );
       }
       final revision = _annotationRevision;
@@ -1529,8 +1549,10 @@ final class ReaderController implements Listenable {
     final scale = fit * _devicePixelRatio;
     if (!scale.isFinite || scale <= 0) return null;
     try {
-      pdf.bitmapSize(unit, scale);
-      if (facing != null) pdf.bitmapSize(facing, scale);
+      final first = pdf.bitmapSize(unit, scale);
+      if (facing != null) {
+        pdfSpreadBitmapSize(first, pdf.bitmapSize(facing, scale));
+      }
     } on PdfEngineLimitException {
       // A page too large to render at its fitted size keeps the zoom and is
       // scaled to fit instead.
@@ -1554,6 +1576,11 @@ final class ReaderController implements Listenable {
         _fittedRasterScale(pdf, unit, layout.width, facing: facing) ??
         layout.scale;
     if (facing == null) return (await pdf.render(unit, scale), scale);
+    // A spread too large to compose fails before either page renders.
+    pdfSpreadBitmapSize(
+      pdf.bitmapSize(unit, scale),
+      pdf.bitmapSize(facing, scale),
+    );
     // Both pages render at once; a failure reports the page's own error.
     final pages = await Future.wait([
       pdf.render(unit, scale),
@@ -1568,6 +1595,11 @@ final class ReaderController implements Listenable {
     if (!layout.spread || unit != pdfSpreadStart(unit)) return null;
     return unit + 1 < pdf.pageCount ? unit + 1 : null;
   }
+
+  /// The spread for [facing] when its pages' text could not be read: both
+  /// pages are still shown and turned together, but no offset lies on either.
+  ReaderPdfSpread? _textlessSpread(int? facing) =>
+      facing == null ? null : ReaderPdfSpread(facingUnit: facing, textShift: 0);
 
   /// The selection surface of [unit] at [scale], spanning [facing] too when
   /// the spread shows it.
@@ -1666,7 +1698,14 @@ final class ReaderController implements Listenable {
     bool keepRelayoutError = false,
   }) {
     final generation = _model.generation;
-    final targetUnit = unit ?? _model.unit;
+    // A relayout with no target of its own keeps the page being read: on a
+    // PDF spread that may be its second page, which a layout of one page
+    // shows alone.
+    final targetUnit =
+        unit ??
+        (document.format == FlutterBookFormat.pdf
+            ? _model.readingLocation.unit
+            : _model.unit);
     _requestedLayout = layout;
     if (document.format == FlutterBookFormat.epub) {
       // EPUB pages are paginated for the reported page height: before the
@@ -1967,6 +2006,7 @@ final class ReaderController implements Listenable {
             : _model.pageInput,
         pageImage: null,
         epubPage: page,
+        pdfSpread: null,
         locationRequestRevision: changedLocation
             ? _model.locationRequestRevision + 1
             : _model.locationRequestRevision,
@@ -2477,8 +2517,8 @@ final class ReaderController implements Listenable {
         lineSpacing: after.epubLineSpacing,
         spread: _requestedLayout.spread,
       ),
-      unit: _model.unit,
-      offset: _model.readingOffset,
+      unit: _model.readingLocation.unit,
+      offset: _model.readingLocation.offset,
     );
   }
 
@@ -2584,8 +2624,9 @@ final class ReaderController implements Listenable {
     }
     final revision = ++_bookmarkRevision;
     final generation = _model.generation;
-    final unit = _model.unit;
-    final offset = _model.readingOffset;
+    // A bookmark marks the page being read, in its own offsets, even when a
+    // PDF spread shows it beside another.
+    final (:unit, :offset) = _model.readingLocation;
     final existing = _model.bookmarks
         .where(
           (bookmark) =>
@@ -2612,8 +2653,7 @@ final class ReaderController implements Listenable {
     final generation = _model.generation;
     final revision = ++_bookmarkRevision;
     final bookId = _model.document?.bookId;
-    final unit = _model.unit;
-    final offset = _model.readingOffset;
+    final (:unit, :offset) = _model.readingLocation;
     if (bookId == null) return;
     final token = ++_noteEditorToken;
     _activeNoteEditor = _ReaderNoteTarget.bookmark;
@@ -3602,6 +3642,11 @@ final class ReaderController implements Listenable {
         }
       } catch (error) {
         selectionError = _describeError(error);
+        // The spread still shows and turns both pages; with no text, a
+        // location on either is the page's top.
+        spread = _textlessSpread(facing);
+        offset = null;
+        length = null;
       }
       if (offset != null && spread != null && target == spread.facingUnit) {
         offset += spread.textShift;
@@ -3610,7 +3655,7 @@ final class ReaderController implements Listenable {
         pdf,
         unit,
         layout,
-        facing: spread?.facingUnit,
+        facing: facing,
       );
       if (!_isCurrentLayout(generation, revision)) {
         return;
@@ -3692,14 +3737,28 @@ final class ReaderController implements Listenable {
     final oldImage = _model.pageImage;
     _renderedRasterScale = message.rasterScale;
     _activeRelayoutIntent = null;
-    final changedLocation =
-        message.unit != _model.unit ||
-        message.offset != null ||
-        message.replaceReadingOffset;
+    final explicitLocation =
+        message.offset != null || message.replaceReadingOffset;
+    final changedLocation = message.unit != _model.unit || explicitLocation;
     if (changedLocation) _readingStatePersistenceBlocked = false;
-    final readingOffset = changedLocation
-        ? message.offset
-        : _model.readingOffset;
+    final int? readingOffset;
+    if (!explicitLocation && message.pdfSpread != _model.pdfSpread) {
+      // The page being read keeps its place when a PDF spread is made or
+      // undone: its own offset, moved past the first page's text when it is
+      // now the spread's second page.
+      final location = _model.readingLocation;
+      final offset = location.offset;
+      final spread = message.pdfSpread;
+      readingOffset = offset == null
+          ? null
+          : location.unit == message.unit
+          ? offset
+          : location.unit == spread?.facingUnit
+          ? offset + spread!.textShift
+          : null;
+    } else {
+      readingOffset = changedLocation ? message.offset : _model.readingOffset;
+    }
     _emit(
       _model.copyWith(
         unit: message.unit,
@@ -3753,20 +3812,25 @@ final class ReaderController implements Listenable {
     if (bookId != null) {
       // A location on a spread's second page is saved on that page, in its
       // own offsets, so it reopens there in one page or two.
+      // Both of a spread's pages count as read, so its last spread finishes
+      // the book.
       final spread = message.pdfSpread;
+      final unit = readingOffset == null
+          ? message.unit
+          : spread?.unitOf(readingOffset, message.unit) ?? message.unit;
+      final lastUnit = spread?.facingUnit;
       _queueReadingStateSave(
         bookId,
         _model.document!.logicalUnitCount,
         FlutterReadingState(
-          unit: BigInt.from(
-            readingOffset == null
-                ? message.unit
-                : spread?.unitOf(readingOffset, message.unit) ?? message.unit,
-          ),
+          unit: BigInt.from(unit),
           offset: readingOffset == null
               ? null
               : BigInt.from(spread?.pageOffset(readingOffset) ?? readingOffset),
           zoom: message.layout.scale,
+          lastUnit: lastUnit != null && lastUnit > unit
+              ? BigInt.from(lastUnit)
+              : null,
         ),
       );
     }
@@ -5539,16 +5603,17 @@ final class ReaderController implements Listenable {
         entries: contents.entries,
       );
     }
-    final readingOffset = model.readingOffset ?? 0;
+    final location = model.readingLocation;
+    final readingOffset = location.offset ?? 0;
     var current = -1;
     for (var index = 0; index < contents.entries.length; index += 1) {
       final entry = contents.entries[index];
-      if (entry.unit != model.unit) continue;
+      if (entry.unit != location.unit) continue;
       if ((entry.offset ?? 0) <= readingOffset) current = index;
     }
     if (current < 0) {
       current = contents.entries.indexWhere(
-        (entry) => entry.unit == model.unit,
+        (entry) => entry.unit == location.unit,
       );
     }
     return ReaderContentsPresentation(
@@ -5612,6 +5677,9 @@ final class ReaderController implements Listenable {
       document: null,
       pageImage: null,
       epubPage: null,
+      // A PDF spread describes the released document's surface; a document
+      // opened through the same controller starts without one.
+      pdfSpread: null,
       selectionSurface: null,
       selectionPhase: ReaderSelectionPhase.idle,
       anchor: null,

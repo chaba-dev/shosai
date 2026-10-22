@@ -11,13 +11,16 @@ part of 'view.dart';
 // The same controls exist for EPUB and PDF; only their arrangement adapts.
 
 /// The bookmark that marks the reader's current place, if any.
-FlutterBookmark? _currentBookmark(ReaderModel model) => model.bookmarks
-    .where(
-      (bookmark) =>
-          bookmark.unit.toInt() == model.unit &&
-          bookmark.offset?.toInt() == model.readingOffset,
-    )
-    .firstOrNull;
+FlutterBookmark? _currentBookmark(ReaderModel model) {
+  final location = model.readingLocation;
+  return model.bookmarks
+      .where(
+        (bookmark) =>
+            bookmark.unit.toInt() == location.unit &&
+            bookmark.offset?.toInt() == location.offset,
+      )
+      .firstOrNull;
+}
 
 /// The title of the Contents entry the reader is in, when the entries are
 /// loaded and the entry has one.

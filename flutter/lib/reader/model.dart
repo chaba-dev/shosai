@@ -485,6 +485,23 @@ final class ReaderModel {
   /// null for one page. [selectionSurface] and [pageImage] then span both.
   final ReaderPdfSpread? pdfSpread;
 
+  /// The durable reading location: the page being read and an offset in that
+  /// page's own text.
+  ///
+  /// [unit] and [readingOffset] address what the reader shows; on a PDF
+  /// spread that is the spread's first page, and an offset on its second page
+  /// lies past the first page's text. Bookmarks, saved positions and a layout
+  /// that shows the page alone use this location instead.
+  ({int unit, int? offset}) get readingLocation {
+    final spread = pdfSpread;
+    final offset = readingOffset;
+    if (spread == null || offset == null) return (unit: unit, offset: offset);
+    return (
+      unit: spread.unitOf(offset, unit),
+      offset: spread.pageOffset(offset),
+    );
+  }
+
   /// Revision of the latest explicit location request [epubPage] answers.
   ///
   /// Advances whenever a page is installed for a navigation (a chapter change,

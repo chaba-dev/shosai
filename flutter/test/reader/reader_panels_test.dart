@@ -263,15 +263,20 @@ Future<ui.Image> _testImage() async {
   }
 }
 
-FlutterBookmark _bookmark({int id = 1, BigInt? unit, String? note}) =>
-    FlutterBookmark(
-      id: id,
-      bookId: 1,
-      unit: unit ?? BigInt.zero,
-      note: note,
-      color: 'yellow',
-      createdAt: '2026-09-20T00:00:00Z',
-    );
+FlutterBookmark _bookmark({
+  int id = 1,
+  BigInt? unit,
+  BigInt? offset,
+  String? note,
+}) => FlutterBookmark(
+  id: id,
+  bookId: 1,
+  unit: unit ?? BigInt.zero,
+  offset: offset,
+  note: note,
+  color: 'yellow',
+  createdAt: '2026-09-20T00:00:00Z',
+);
 
 List<ReaderContentsEntry> _fixtureEntries() => const [
   ReaderContentsEntry(depth: 0, title: 'Headwaters', unit: 0),
@@ -1143,6 +1148,94 @@ void main() {
       );
       expect(tester.takeException(), isNull);
     });
+  });
+
+  group('PDF spreads', () {
+    testWidgets('a place on a spread\'s second page stays on that page', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _PanelBridge(
+        unitCount: 3,
+        bookmarks: [
+          _bookmark(id: 7, unit: BigInt.one, offset: BigInt.from(10)),
+        ],
+      );
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/atlas.pdf',
+          initialBookId: 1,
+        ),
+      );
+      expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-saved-place-open-7')));
+      await tester.pump();
+      await _settle(tester);
+      await _openNotes(tester);
+
+      // The spread shows the bookmarked place, so the toolbar marks it.
+      final bookmark = find.byKey(const ValueKey('reader-header-bookmark'));
+      expect(tester.getSemantics(bookmark).label, contains('Remove bookmark'));
+
+      // One page shows the second page, where the place is.
+      await _openTypography(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('reader-typography-one-page')),
+      );
+      await tester.pump();
+      await _settle(tester);
+      await _openTypography(tester);
+      expect(find.text('67% · page 2 of 3'), findsOneWidget);
+      expect(tester.getSemantics(bookmark).label, contains('Remove bookmark'));
+
+      // Two pages again: still the same place, and its bookmark is the one
+      // removed.
+      await _openTypography(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('reader-typography-two-pages')),
+      );
+      await tester.pump();
+      await _settle(tester);
+      await _openTypography(tester);
+      expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+      await tester.tap(bookmark);
+      await tester.pump();
+      await _settle(tester);
+      expect(bridge.deletes, [7]);
+      expect(bridge.toggles, isEmpty);
+    });
+  });
+
+  testWidgets('an EPUB opened after a PDF spread reaches its second chapter', (
+    tester,
+  ) async {
+    _setView(tester, const Size(1280, 800));
+    final bridge = _PanelBridge(unitCount: 3);
+    await _open(
+      tester,
+      _reader(
+        bridge: bridge,
+        initialPath: '/books/atlas.pdf',
+        documentPicker: () async =>
+            const ReaderPickedDocument('/books/slow-rivers.epub'),
+      ),
+    );
+    expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+    await _pressOpenBook(tester);
+    await _settle(tester, frames: 8);
+    expect(find.text('slow-rivers.epub'), findsOneWidget);
+
+    // Chapter 2 is unit 1, the PDF spread's second page.
+    await _openContents(tester);
+    final input = find.byKey(const ValueKey('reader-page-input'));
+    await tester.enterText(input, '2');
+    await tester.testTextInput.receiveAction(TextInputAction.go);
+    await tester.pump();
+    await _settle(tester, frames: 8);
+    expect(find.textContaining('chapter 2 of 3'), findsOneWidget);
   });
 
   group('panel modality', () {

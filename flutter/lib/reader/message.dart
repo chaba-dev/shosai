@@ -602,16 +602,28 @@ final class _ReaderSurfaceLoaded extends ReaderMessage {
     required this.generation,
     required this.surface,
     this.pdfSpread,
+    this.readingOffset,
   });
   final int generation;
   final FlutterSelectionSurface surface;
   final ReaderPdfSpread? pdfSpread;
+
+  /// The restored reading offset in [surface]'s text, when it moved: a
+  /// position on a spread's second page lies past the first page's text.
+  final int? readingOffset;
 }
 
 final class _ReaderSelectionSupportFailed extends ReaderMessage {
-  const _ReaderSelectionSupportFailed(this.generation, this.error);
+  const _ReaderSelectionSupportFailed(
+    this.generation,
+    this.error, {
+    this.pdfSpread,
+  });
   final int generation;
   final String error;
+
+  /// The spread shown without text, when a PDF opened on one.
+  final ReaderPdfSpread? pdfSpread;
 }
 
 final class _ReaderRelayoutCompleted extends ReaderMessage {

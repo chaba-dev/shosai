@@ -2816,6 +2816,74 @@ void main() {
     await bridge.disposed.future;
   });
 
+  group('PDF spreads', () {
+    Future<void> drain() async {
+      for (var turn = 0; turn < 30; turn += 1) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    Future<ReaderController> openSpread(_ControlledBridge bridge) async {
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      controller.dispatch(
+        const ReaderViewportChanged(
+          ReaderLayout(width: 1000, spread: true),
+          height: 600,
+          devicePixelRatio: 1,
+        ),
+      );
+      controller.dispatch(
+        ReaderOpenRequested('/tmp/book.pdf', bookId: bridge.bookId),
+      );
+      await bridge.waitForOp(1);
+      await drain();
+      return controller;
+    }
+
+    test('a spread whose text cannot be read still shows and counts both '
+        'pages', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+        selectionFailure: true,
+      );
+      final controller = await openSpread(bridge);
+      expect(controller.model.selectionError, isNotNull);
+      expect(bridge.renderUnits, containsAll([0, 1]));
+      expect(controller.model.pdfSpread?.facingUnit, 1);
+      expect(controller.model.progress.lastOrdinal, 2);
+
+      controller.dispatch(const ReaderUnitRequested(2));
+      await drain();
+      expect(controller.model.unit, 2);
+      expect(bridge.renderUnits.skip(2), containsAll([2, 3]));
+      expect(controller.model.progress.percentage, 100);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('the last spread of an even-page PDF is saved as finished', () async {
+      final bridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 4,
+        immediateLists: true,
+      );
+      final controller = await openSpread(bridge);
+      controller.dispatch(const ReaderUnitRequested(2));
+      await drain();
+      expect(controller.model.progress.percentage, 100);
+      final saved = bridge.savedReadingStates.last;
+      expect(saved.unit.toInt(), 2);
+      expect(saved.lastUnit?.toInt(), 3);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+  });
+
   group('fitted PDF rasters', () {
     // The fixture page is 612 × 792 pt. A box 5000 px wide is limited by its
     // height, so the fitted scale is the height over 792 at the pixel ratio.
@@ -7402,6 +7470,9 @@ final class _ControlledBridge
   FlutterBookFormat format;
   int logicalUnitCount;
   final int? bookId;
+
+  @override
+  int get pdfEnginePageCount => logicalUnitCount;
   final List<FlutterAnnotation> initialAnnotations;
   final List<FlutterAnnotation> storedAnnotations;
   final List<FlutterAnnotationAssociationSource> associationSources;

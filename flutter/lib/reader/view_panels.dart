@@ -838,36 +838,39 @@ class _ReaderDisplayPanel extends StatelessWidget {
                 ],
               ),
             ),
-          _ReaderField(
-            label: l10n.readerPages,
-            hint: l10n.readerPagesHint,
-            child: _ReaderSegmented(
-              segments: [
-                (
-                  key: const ValueKey('reader-typography-one-page'),
-                  icon: LucideIcons.rectangleVertical,
-                  label: l10n.readerOnePage,
-                  selected: !typography.twoPages,
-                  onPressed: enabled
-                      ? () => dispatch(
-                          const ReaderTypographyChanged(twoPages: false),
-                        )
-                      : null,
-                ),
-                (
-                  key: const ValueKey('reader-typography-two-pages'),
-                  icon: LucideIcons.columns2,
-                  label: l10n.readerTwoPages,
-                  selected: typography.twoPages,
-                  onPressed: enabled
-                      ? () => dispatch(
-                          const ReaderTypographyChanged(twoPages: true),
-                        )
-                      : null,
-                ),
-              ],
+          // A phone in portrait never has room for two pages, so Pages is
+          // hidden there.
+          if (!_phonePortrait(context))
+            _ReaderField(
+              label: l10n.readerPages,
+              hint: l10n.readerPagesHint,
+              child: _ReaderSegmented(
+                segments: [
+                  (
+                    key: const ValueKey('reader-typography-one-page'),
+                    icon: LucideIcons.rectangleVertical,
+                    label: l10n.readerOnePage,
+                    selected: !typography.twoPages,
+                    onPressed: enabled
+                        ? () => dispatch(
+                            const ReaderTypographyChanged(twoPages: false),
+                          )
+                        : null,
+                  ),
+                  (
+                    key: const ValueKey('reader-typography-two-pages'),
+                    icon: LucideIcons.columns2,
+                    label: l10n.readerTwoPages,
+                    selected: typography.twoPages,
+                    onPressed: enabled
+                        ? () => dispatch(
+                            const ReaderTypographyChanged(twoPages: true),
+                          )
+                        : null,
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -910,6 +913,13 @@ class _ReaderField extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Whether the reader is on a phone held upright, where Pages is hidden.
+bool _phonePortrait(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  return ShellLayout.forWidth(size.width) == ShellLayout.phone &&
+      size.height >= size.width;
 }
 
 /// One page theme as a tile in its own colours (`sh-theme`).
