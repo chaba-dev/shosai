@@ -166,7 +166,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noticeDismiss => 'Dismiss';
 
   @override
-  String get readerBackToLibrary => '‹ Library';
+  String get readerBackToLibrary => 'Back to library';
 
   @override
   String get readerFallbackTitle => 'Reader';
@@ -175,10 +175,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerContentsAction => 'Contents';
 
   @override
-  String get readerAppearanceAction => 'Reading appearance';
+  String get readerAppearanceAction => 'Display settings';
 
   @override
-  String get readerMoreAction => 'More';
+  String get readerNotesAction => 'Notes';
+
+  @override
+  String get readerCloseNotes => 'Close notes';
+
+  @override
+  String get readerBookmarkPage => 'Bookmark this page';
+
+  @override
+  String get readerRemoveBookmark => 'Remove bookmark';
 
   @override
   String get readerOpeningDocument => 'Opening document…';
@@ -187,32 +196,54 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerNoBookOpen => 'No book open';
 
   @override
-  String readerPageStatus(int page, int percentage) {
-    return 'Page $page · $percentage%';
+  String readerPageStatus(int percentage, int page) {
+    return '$percentage% · page $page';
   }
 
   @override
-  String readerPageRangeStatus(int first, int last, int percentage) {
-    return 'Pages $first–$last · $percentage%';
+  String readerPageRangeStatus(int percentage, int first, int last) {
+    return '$percentage% · pages $first–$last';
   }
 
   @override
-  String readerChapterStatus(int chapter, int percentage) {
-    return 'Chapter $chapter · $percentage%';
+  String readerChapterStatus(int percentage, int chapter) {
+    return '$percentage% · chapter $chapter';
   }
 
   @override
-  String readerChapterRangeStatus(int first, int last, int percentage) {
-    return 'Chapters $first–$last · $percentage%';
+  String readerChapterRangeStatus(int percentage, int first, int last) {
+    return '$percentage% · chapters $first–$last';
   }
 
   @override
-  String readerCloseTab(String title) {
-    return 'Close $title';
+  String readerPageOfStatus(int percentage, int page, int total) {
+    return '$percentage% · page $page of $total';
   }
 
   @override
-  String get readerTabsLabel => 'Open books';
+  String readerPageRangeOfStatus(
+    int percentage,
+    int first,
+    int last,
+    int total,
+  ) {
+    return '$percentage% · pages $first–$last of $total';
+  }
+
+  @override
+  String readerChapterOfStatus(int percentage, int chapter, int total) {
+    return '$percentage% · chapter $chapter of $total';
+  }
+
+  @override
+  String readerChapterRangeOfStatus(
+    int percentage,
+    int first,
+    int last,
+    int total,
+  ) {
+    return '$percentage% · chapters $first–$last of $total';
+  }
 
   @override
   String get readerPreviousPage => 'Previous page';
@@ -251,6 +282,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String readerBookmarksHeading(int count) {
     return 'Bookmarks · $count';
   }
+
+  @override
+  String readerHighlightsHeading(int count) {
+    return 'Highlights · $count';
+  }
+
+  @override
+  String get readerNoHighlights => 'Select text to highlight it.';
 
   @override
   String get readerNoBookmarks => 'No bookmarks yet';
@@ -332,13 +371,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerThemeCycle => 'Reading theme';
 
   @override
-  String get readerThemeLight => 'Light';
+  String get readerThemeLight => 'Paper';
 
   @override
-  String get readerThemeDark => 'Dark';
+  String get readerThemeDark => 'Night';
 
   @override
   String get readerThemeSepia => 'Sepia';
+
+  @override
+  String get readerPageTheme => 'Page theme';
+
+  @override
+  String get readerTextSize => 'Text size';
+
+  @override
+  String get readerTextSizeHint => 'Pages reflow; your place is kept.';
+
+  @override
+  String get readerZoom => 'Zoom';
 
   @override
   String get readerZoomOut => 'Zoom out';
@@ -366,13 +417,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get readerSaved => '★ Saved';
-
-  @override
-  String get readerBookmark => '☆ Bookmark';
-
-  @override
-  String get readerOpenBook => 'Open book';
+  String get readerGoToPage => 'Go to page';
 
   @override
   String get readerSearchAction => 'Search';

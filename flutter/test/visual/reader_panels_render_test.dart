@@ -17,7 +17,7 @@ import '../support/production_shell_harness.dart';
 /// compare them with a committed baseline, because accepting a reader baseline
 /// is the owner's decision, not 4C's.
 ///
-/// The Contents entries, progress ordinals and tab list are fixture-injected
+/// The Contents entries and progress ordinals are fixture-injected
 /// presentation data (contract §2.2); the saved places, export, search and
 /// open-book paths run through the real controller and the harness bridge.
 class _PanelRenderBridge extends HarnessBridge {
@@ -480,10 +480,10 @@ void main() {
     expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
   });
 
-  testWidgets('more panel (EN, wide and compact)', (tester) async {
+  testWidgets('notes panel (EN, wide and compact)', (tester) async {
     await render(
       tester,
-      'reader-more-1280-en',
+      'reader-notes-1280-en',
       const HarnessView(size: Size(1280, 800)),
       _reader(
         bridge: _PanelRenderBridge(books: harnessLibraryBooks(), unitCount: 4),
@@ -493,30 +493,30 @@ void main() {
       ready: () => _chromeReady(tester),
       metadata: const <String, Object?>{'state': 'ready'},
     );
-    await _openPanel(tester, 'more');
+    await _openPanel(tester, 'notes');
     var defects = await findRenderDefects(tester);
     await captureHarnessArtifact(
       tester,
-      'reader-more-open-1280-en',
+      'reader-notes-open-1280-en',
       metadata: <String, Object?>{
         'state': 'panel-open',
-        'panel': 'more',
+        'panel': 'notes',
         'defects': defects.map((defect) => defect.toMetadata()).toList(),
       },
     );
     expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
 
-    // The compact composition stacks the location row above the actions.
+    // On a phone the docked panel becomes a bottom sheet.
     tester.view.physicalSize = const Size(390, 844);
     await tester.pump();
     await pumpHarnessFrames(tester, frames: 2);
     defects = await findRenderDefects(tester);
     await captureHarnessArtifact(
       tester,
-      'reader-more-open-390-en',
+      'reader-notes-open-390-en',
       metadata: <String, Object?>{
         'state': 'panel-open',
-        'panel': 'more',
+        'panel': 'notes',
         'chrome': 'compact',
         'defects': defects.map((defect) => defect.toMetadata()).toList(),
       },
@@ -524,12 +524,12 @@ void main() {
     expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
   });
 
-  testWidgets('more panel and search bar (JA, compact, 200% text)', (
+  testWidgets('notes panel and search bar (JA, compact, 200% text)', (
     tester,
   ) async {
     await render(
       tester,
-      'reader-more-390-ja-t200',
+      'reader-notes-390-ja-t200',
       const HarnessView(size: Size(390, 844), textScale: 2),
       _reader(
         bridge: _PanelRenderBridge(books: harnessLibraryBooks(), unitCount: 4),
@@ -539,21 +539,23 @@ void main() {
       ready: () => _chromeReady(tester),
       metadata: const <String, Object?>{'state': 'ready', 'textScale': 2},
     );
-    await _openPanel(tester, 'more');
+    await _openPanel(tester, 'notes');
     var defects = await findRenderDefects(tester);
     await captureHarnessArtifact(
       tester,
-      'reader-more-open-390-ja-t200',
+      'reader-notes-open-390-ja-t200',
       metadata: <String, Object?>{
         'state': 'panel-open',
-        'panel': 'more',
+        'panel': 'notes',
         'textScale': 2,
         'defects': defects.map((defect) => defect.toMetadata()).toList(),
       },
     );
     expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
 
-    await tester.tap(find.byKey(const ValueKey('reader-more-search')));
+    // Close the sheet, then search from the toolbar.
+    await _openPanel(tester, 'notes');
+    await tester.tap(find.byKey(const ValueKey('reader-header-search')));
     await pumpHarnessFrames(tester, frames: 2);
     await tester.enterText(
       find.byKey(const ValueKey('reader-search-input')),
@@ -587,8 +589,7 @@ void main() {
       ready: () => _chromeReady(tester),
       metadata: const <String, Object?>{'state': 'ready'},
     );
-    await _openPanel(tester, 'more');
-    await tester.tap(find.byKey(const ValueKey('reader-more-search')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-search')));
     await pumpHarnessFrames(tester, frames: 2);
     await tester.enterText(
       find.byKey(const ValueKey('reader-search-input')),

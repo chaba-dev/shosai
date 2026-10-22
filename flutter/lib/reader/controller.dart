@@ -439,6 +439,7 @@ final class ReaderController implements Listenable {
       case ReaderLinkActivated():
         _linkActivated(message.href);
       case ReaderLocationNavigated():
+        _closeContentsAfterChoice();
         _unitRequested(
           message.unit,
           offset: message.offset,
@@ -922,7 +923,6 @@ final class ReaderController implements Listenable {
         _model.copyWith(
           toolError:
               'Bookmark changes are still saving. Try opening again shortly.',
-          openPanel: ReaderPanel.more,
         ),
       );
       return;
@@ -1796,16 +1796,32 @@ final class ReaderController implements Listenable {
     final opening = _model.openPanel != panel;
     _emit(_model.copyWith(openPanel: opening ? panel : null));
     if (opening) {
-      // Opening changes the content area, so the layout reporter observes new
-      // constraints and Rust relayouts through the guarded path (§2.3 item 5).
+      // A docked panel narrows the content area, so the layout reporter
+      // observes new constraints and relayouts through the guarded path.
       _requestPanelFocus(panel);
-      // The Contents panel loads its entries when it opens (RD-07), and the
-      // more panel starts from the reader's current location (RD-10).
-      if (panel == ReaderPanel.contents) _contentsRequested();
-      if (panel == ReaderPanel.more) _syncPageInput();
+      // The Contents panel loads its entries when it opens unless the open
+      // already did (RD-07), and its page field starts from the reader's
+      // current location (RD-10).
+      if (panel == ReaderPanel.contents) {
+        final status = _model.contents.status;
+        if ((status == ReaderContentsStatus.loading ||
+                status == ReaderContentsStatus.failed) &&
+            !_contentsLoading) {
+          _contentsRequested();
+        }
+        _syncPageInput();
+      }
     } else {
       _requestHeaderFocus();
     }
+  }
+
+  /// Closes the Contents panel once a place in it is chosen: the panel floats
+  /// over the page, so it would hide the place the reader asked for.
+  void _closeContentsAfterChoice() {
+    if (_model.openPanel != ReaderPanel.contents) return;
+    _emit(_model.copyWith(openPanel: null));
+    _requestHeaderFocus();
   }
 
   /// Opens or closes the search bar and cancels an in-flight search on close.
@@ -2091,7 +2107,7 @@ final class ReaderController implements Listenable {
           ReaderContentsEntry(unit: unit),
       ];
 
-  /// Seeds the more panel's page input from the current location (RD-10).
+  /// Seeds the Contents panel's page input from the current location (RD-10).
   void _syncPageInput() {
     final document = _model.document;
     if (document == null) return;
@@ -2130,6 +2146,7 @@ final class ReaderController implements Listenable {
     _emit(
       _model.copyWith(pageInput: ReaderPageInputPresentation(draft: draft)),
     );
+    _closeContentsAfterChoice();
     _unitRequested(ordinal - 1);
   }
 

@@ -36,8 +36,31 @@ class _DocumentViewState extends State<_DocumentView> {
   /// selection was made.
   final ValueNotifier<int> _contentGeometry = ValueNotifier<int>(0);
 
+  /// Whether the last interaction was a key press: the focus ring only shows
+  /// then, so a click or a tap into the page does not frame it.
+  final ValueNotifier<bool> _keyboardHighlight = ValueNotifier<bool>(false);
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_keyPressed);
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_pointerEvent);
+  }
+
+  bool _keyPressed(KeyEvent event) {
+    if (event is KeyDownEvent) _keyboardHighlight.value = true;
+    return false;
+  }
+
+  void _pointerEvent(PointerEvent event) {
+    if (event is PointerDownEvent) _keyboardHighlight.value = false;
+  }
+
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_keyPressed);
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_pointerEvent);
+    _keyboardHighlight.dispose();
     _contentGeometry.dispose();
     super.dispose();
   }
@@ -276,7 +299,10 @@ class _DocumentViewState extends State<_DocumentView> {
                             focusNode: readerFocus,
                             autofocus: true,
                             child: AnimatedBuilder(
-                              animation: readerFocus,
+                              animation: Listenable.merge([
+                                readerFocus,
+                                _keyboardHighlight,
+                              ]),
                               builder: (context, child) => Semantics(
                                 key: const ValueKey('reader-content-semantics'),
                                 readOnly: true,
@@ -293,12 +319,14 @@ class _DocumentViewState extends State<_DocumentView> {
                                   key: const ValueKey('reader-focus-indicator'),
                                   position: DecorationPosition.foreground,
                                   decoration: BoxDecoration(
-                                    border: readerFocus.hasFocus
+                                    border:
+                                        readerFocus.hasFocus &&
+                                            _keyboardHighlight.value
                                         ? Border.all(
                                             color: Theme.of(
                                               context,
                                             ).colorScheme.primary,
-                                            width: 3,
+                                            width: 2,
                                           )
                                         : null,
                                   ),
@@ -410,44 +438,6 @@ class _DocumentViewState extends State<_DocumentView> {
   }
 }
 
-/// The reader's saved-highlight strip below the document area.
-///
-/// The strip is a sibling of the document surface, not a child of it: the
-/// reader's reported document box must be the box the page is rendered in, and
-/// a strip inside that box would silently shrink the page (and, on the Dart
-/// renderer, paginate it for a height it does not get).
-class ReaderAnnotationStrip extends StatelessWidget {
-  const ReaderAnnotationStrip({
-    super.key,
-    required this.model,
-    required this.dispatch,
-  });
-
-  final ReaderModel model;
-  final void Function(ReaderMessage) dispatch;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 64,
-    child: ListView(
-      scrollDirection: Axis.horizontal,
-      children: model.annotations
-          .map(
-            (annotation) => _AnnotationCard(
-              // The card owns its menu controller, so its identity must follow
-              // the annotation: an unkeyed card would hand an open menu to
-              // whichever annotation lands in its list position after a delete.
-              key: ValueKey(annotation.id),
-              annotation: annotation,
-              model: model,
-              dispatch: dispatch,
-            ),
-          )
-          .toList(),
-    ),
-  );
-}
-
 /// One saved highlight's actions: the retained inline controls plus the
 /// annotation context menu salvaged from #114.
 ///
@@ -460,7 +450,6 @@ class ReaderAnnotationStrip extends StatelessWidget {
 /// remain Tab-reachable.
 class _AnnotationCard extends StatefulWidget {
   const _AnnotationCard({
-    super.key,
     required this.annotation,
     required this.model,
     required this.dispatch,

@@ -53,9 +53,9 @@ void main() {
     expect(controller.model.openPanel, ReaderPanel.contents);
     controller.dispatch(const ReaderPanelToggled(ReaderPanel.typography));
     expect(controller.model.openPanel, ReaderPanel.typography);
-    controller.dispatch(const ReaderPanelToggled(ReaderPanel.more));
-    expect(controller.model.openPanel, ReaderPanel.more);
-    controller.dispatch(const ReaderPanelToggled(ReaderPanel.more));
+    controller.dispatch(const ReaderPanelToggled(ReaderPanel.notes));
+    expect(controller.model.openPanel, ReaderPanel.notes);
+    controller.dispatch(const ReaderPanelToggled(ReaderPanel.notes));
     expect(controller.model.openPanel, isNull);
 
     controller.dispatch(const ReaderSearchToggled());
@@ -81,7 +81,7 @@ void main() {
     var notifications = 0;
     controller.addListener(() => notifications += 1);
 
-    controller.dispatch(const ReaderPanelToggled(ReaderPanel.more));
+    controller.dispatch(const ReaderPanelToggled(ReaderPanel.notes));
 
     expect(notifications, 1);
   });
@@ -134,7 +134,7 @@ void main() {
     controller.addListener(() => notifications += 1);
     controller.dispose();
 
-    controller.dispatch(const ReaderPanelToggled(ReaderPanel.more));
+    controller.dispatch(const ReaderPanelToggled(ReaderPanel.notes));
 
     expect(notifications, 0);
   });

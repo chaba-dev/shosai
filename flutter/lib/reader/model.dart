@@ -37,7 +37,7 @@ final class AnnotationAssociationCancelled extends AnnotationAssociationChoice {
 /// The three reader panels that are mutually exclusive (RD-13).
 ///
 /// Search is deliberately not a member: it is an independent bar (RD-11).
-enum ReaderPanel { contents, typography, more }
+enum ReaderPanel { contents, typography, notes }
 
 /// Which ordinal the reader status text names (RD-05).
 ///

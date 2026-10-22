@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
@@ -13,8 +15,9 @@ import 'package:shosai_flutter/core/bridge.dart';
 import '../support/bridge_pdf_engine.dart';
 import '../support/production_shell_harness.dart';
 
-/// Package 4C reader panels: Contents/saved places, typography, more and
-/// search (rows RD-07…RD-11).
+/// The reader panels: Contents with its page field, Display settings, Notes
+/// with the saved places, the toolbar's bookmark and search, and the open-book
+/// shortcut (rows RD-07…RD-11).
 ///
 /// Interactions are driven through the rendered surface; the Contents entries,
 /// the progress ordinals and the tab list are fixture-injected presentation
@@ -225,6 +228,13 @@ void _setView(WidgetTester tester, Size size) {
   addTearDown(tester.view.reset);
 }
 
+/// [text] inside the open Contents panel; the toolbar and the status line
+/// also name the current section.
+Finder _inContents(String text) => find.descendant(
+  of: find.byKey(const ValueKey('reader-panel-contents')),
+  matching: find.text(text),
+);
+
 /// Pumps a fixed number of frames after an interaction.
 Future<void> _settle(WidgetTester tester, {int frames = 4}) async {
   for (var index = 0; index < frames; index += 1) {
@@ -271,11 +281,30 @@ Future<void> _openContents(WidgetTester tester) async {
   await _settle(tester);
 }
 
-Future<void> _openMore(WidgetTester tester) async {
-  await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+Future<void> _openNotes(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
   await tester.pump();
   await _settle(tester);
 }
+
+/// Ctrl+O, the open-book shortcut that replaced the more panel's action.
+Future<void> _pressOpenBook(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyO);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.pump();
+}
+
+/// Whether the chrome takes new actions; an open modal (a picker or a note
+/// editor) gates it.
+bool _chromeEnabled(WidgetTester tester) => tester
+    .widget<ShadButton>(
+      find.descendant(
+        of: find.byKey(const ValueKey('reader-header-contents')),
+        matching: find.byType(ShadButton),
+      ),
+    )
+    .enabled;
 
 Future<void> _openTypography(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
@@ -307,16 +336,17 @@ void main() {
         find.byKey(const ValueKey('reader-panel-contents')),
         findsOneWidget,
       );
-      expect(find.text('Headwaters'), findsOneWidget);
-      expect(find.text('The Long Meander'), findsOneWidget);
+      expect(_inContents('Headwaters'), findsOneWidget);
+      expect(_inContents('The Long Meander'), findsOneWidget);
       // The untitled entry renders the localized chapter fallback, not an
       // invented title (contract §4.6).
       expect(find.text('Chapter 4'), findsOneWidget);
-      // The 38-character truncation is applied to the long fixture title.
-      expect(
-        find.textContaining('A deliberately long chapter title tha…'),
-        findsOneWidget,
+      // A long title wraps to a second line and ellipsizes there.
+      final long = tester.widget<Text>(
+        find.textContaining('A deliberately long chapter title'),
       );
+      expect(long.maxLines, 2);
+      expect(long.overflow, TextOverflow.ellipsis);
       // The current entry (unit 0) is selected and reachable.
       final current = tester.getSemantics(
         find.byKey(const ValueKey('reader-contents-entry-0')),
@@ -330,7 +360,7 @@ void main() {
       await tester.pump();
       await _settle(tester);
       // The status wording follows the navigated unit.
-      expect(find.text('Chapter 2 · 50%'), findsOneWidget);
+      expect(find.text('50% · chapter 2 of 4'), findsOneWidget);
     });
 
     testWidgets('shows loading, empty, failed and retry states', (
@@ -400,25 +430,25 @@ void main() {
 
       await _openContents(tester);
       expect(completers, hasLength(1));
+      await _openContents(tester);
 
-      // A new open through the rendered more panel replaces the document
-      // generation while the first load is still pending.
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await tester.pump();
+      // A new open through the shortcut replaces the document generation
+      // while the first load is still pending; the new document starts its own
+      // load.
+      await _pressOpenBook(tester);
       await _settle(tester, frames: 6);
+      expect(completers, hasLength(2));
 
       // The stale completion must not publish entries for the new document.
       completers.first.complete(_fixtureEntries());
       await _settle(tester);
 
       await _openContents(tester);
-      expect(completers, hasLength(2));
       completers.last.complete(const [
         ReaderContentsEntry(depth: 0, title: 'Replacement chapter', unit: 0),
       ]);
       await _settle(tester);
-      expect(find.text('Replacement chapter'), findsOneWidget);
+      expect(_inContents('Replacement chapter'), findsOneWidget);
       expect(find.text('Headwaters'), findsNothing);
     });
 
@@ -438,9 +468,9 @@ void main() {
           contentsLoader: (_) async => const [],
         ),
       );
-      await _openContents(tester);
+      await _openNotes(tester);
 
-      expect(find.text('Bookmarks · 1'), findsOneWidget);
+      expect(find.text('BOOKMARKS · 1'), findsOneWidget);
       expect(find.text('A short note'), findsOneWidget);
       expect(find.text('Edit note'), findsOneWidget);
 
@@ -451,7 +481,7 @@ void main() {
       await _settle(tester);
       expect(bridge.deletes, [7]);
       expect(find.text('No bookmarks yet'), findsOneWidget);
-      expect(find.text('Bookmarks · 0'), findsOneWidget);
+      expect(find.text('BOOKMARKS · 0'), findsOneWidget);
     });
 
     testWidgets('the note editor runs through the controller-owned dialog', (
@@ -467,7 +497,7 @@ void main() {
           contentsLoader: (_) async => const [],
         ),
       );
-      await _openContents(tester);
+      await _openNotes(tester);
 
       await tester.tap(find.byKey(const ValueKey('reader-saved-place-note-7')));
       await tester.pumpAndSettle();
@@ -505,7 +535,7 @@ void main() {
           noticeReporter: notices.add,
         ),
       );
-      await _openContents(tester);
+      await _openNotes(tester);
 
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
@@ -517,7 +547,7 @@ void main() {
       expect(
         notices.single.text.resolve(
           AppLocalizations.of(
-            tester.element(find.byKey(const ValueKey('reader-panel-contents'))),
+            tester.element(find.byKey(const ValueKey('reader-panel-notes'))),
           ),
         ),
         'Bookmarks copied as Markdown',
@@ -547,7 +577,7 @@ void main() {
           noticeReporter: notices.add,
         ),
       );
-      await _openContents(tester);
+      await _openNotes(tester);
 
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
@@ -587,18 +617,13 @@ void main() {
           },
         ),
       );
-      ShadButton openBook() => tester.widget<ShadButton>(
-        find.descendant(
-          of: find.byKey(const ValueKey('reader-more-open-book')),
-          matching: find.byType(ShadButton),
-        ),
-      );
-
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await tester.pump();
+      await _pressOpenBook(tester);
       expect(pickers, hasLength(1));
-      expect(openBook().enabled, isFalse, reason: 'the picker owns the modal');
+      expect(
+        _chromeEnabled(tester),
+        isFalse,
+        reason: 'the picker owns the modal',
+      );
 
       // Suspension invalidates the picker: the slot is released by the
       // transition, not by a completion that would be rejected as stale.
@@ -609,10 +634,12 @@ void main() {
       await tester.pump();
       await _settle(tester, frames: 6);
 
-      await _openMore(tester);
-      expect(openBook().enabled, isTrue, reason: 'the modal slot was retired');
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await tester.pump();
+      expect(
+        _chromeEnabled(tester),
+        isTrue,
+        reason: 'the modal slot was retired',
+      );
+      await _pressOpenBook(tester);
       expect(pickers, hasLength(2));
 
       // The old completion is rejected and must not clear the newer slot or
@@ -624,7 +651,7 @@ void main() {
       await _settle(tester, frames: 6);
       expect(find.text('stale.epub'), findsNothing);
       expect(
-        openBook().enabled,
+        _chromeEnabled(tester),
         isFalse,
         reason: 'the new picker still owns it',
       );
@@ -632,7 +659,7 @@ void main() {
       pickers.last.complete(null);
       await tester.pump();
       await _settle(tester);
-      expect(openBook().enabled, isTrue);
+      expect(_chromeEnabled(tester), isTrue);
     });
 
     testWidgets('a stale export never reaches the sink', (tester) async {
@@ -656,15 +683,13 @@ void main() {
           exportSink: (markdown) async => sinkTexts.add(markdown),
         ),
       );
-      await _openContents(tester);
+      await _openNotes(tester);
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
       expect(bridge.heldExports, hasLength(1));
 
       // Replace the document while the export is pending.
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await tester.pump();
+      await _pressOpenBook(tester);
       await _settle(tester, frames: 6);
       expect(find.text('umibe.epub'), findsOneWidget);
 
@@ -674,7 +699,9 @@ void main() {
       expect(sinkTexts, isEmpty);
 
       // The replacement's own export still works.
-      await _openContents(tester);
+      if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isEmpty) {
+        await _openNotes(tester);
+      }
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
       expect(bridge.heldExports, hasLength(2));
@@ -702,9 +729,9 @@ void main() {
         ),
       );
 
-      // Move to a late unit through the rendered page input, then open the
-      // Contents panel while the load is still pending.
-      await _openMore(tester);
+      // Move to a late unit through the Contents page field while the load is
+      // still pending.
+      await _openContents(tester);
       await tester.enterText(
         find.byKey(const ValueKey('reader-page-input')),
         '25',
@@ -712,6 +739,9 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.go);
       await tester.pump();
       await _settle(tester, frames: 6);
+      expect(completers, hasLength(1));
+      // Choosing a page closed Contents; opening it again reuses the pending
+      // load.
       await _openContents(tester);
       expect(completers, hasLength(1));
 
@@ -740,9 +770,8 @@ void main() {
   });
 
   group('typography panel', () {
-    testWidgets('EPUB shows font size, line spacing and theme with clamps', (
-      tester,
-    ) async {
+    testWidgets('EPUB shows text size, line spacing and page theme with '
+        'clamps', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3);
       await _open(
@@ -752,7 +781,7 @@ void main() {
           settings: const FlutterReaderSettings(
             continuous: false,
             theme: 'light',
-            epubFontSize: 46,
+            epubFontSize: 27,
             epubLineSpacing: 1.6,
             pdfZoom: 0,
           ),
@@ -760,51 +789,61 @@ void main() {
       );
       await _openTypography(tester);
 
-      expect(find.text('46px'), findsOneWidget);
+      // Text size is a share of the 18 px default.
+      expect(find.text('150%'), findsOneWidget);
       expect(find.text('1.6×'), findsOneWidget);
-      expect(find.text('Light'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('reader-typography-fit-page')),
         findsNothing,
         reason: 'an EPUB has no raster fit controls',
       );
+      ShadButton button(String key) => tester.widget<ShadButton>(
+        find.descendant(
+          of: find.byKey(ValueKey(key)),
+          matching: find.byType(ShadButton),
+        ),
+      );
 
       await tester.tap(
         find.byKey(const ValueKey('reader-typography-font-increase')),
       );
       await tester.pump();
       await _settle(tester);
-      expect(find.text('48px'), findsOneWidget);
+      expect(find.text('160%'), findsOneWidget);
 
-      // The clamp is 8–48 (the pinned step ±2.0): another step stays at 48.
-      await tester.tap(
-        find.byKey(const ValueKey('reader-typography-font-increase')),
-      );
-      await tester.pump();
-      await _settle(tester);
-      expect(find.text('48px'), findsOneWidget);
+      // 160 % is the largest size: the step is disabled there.
+      expect(button('reader-typography-font-increase').enabled, isFalse);
+      expect(button('reader-typography-font-decrease').enabled, isTrue);
 
-      // Line spacing cycles through the pinned settings values.
+      // Line spacing steps through the pinned settings values.
       await tester.tap(
-        find.byKey(const ValueKey('reader-typography-line-spacing')),
+        find.byKey(const ValueKey('reader-typography-line-spacing-increase')),
       );
       await tester.pump();
       await _settle(tester);
       expect(find.text('1.8×'), findsOneWidget);
 
-      // The theme cycle is light → dark → sepia → light.
-      await tester.tap(find.byKey(const ValueKey('reader-typography-theme')));
-      await tester.pump();
-      await _settle(tester);
-      expect(find.text('Dark'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('reader-typography-theme')));
-      await tester.pump();
-      await _settle(tester);
+      // The page theme is one of three tiles; the chosen one is selected.
+      bool selected(String theme) =>
+          tester
+              .getSemantics(
+                find.byKey(ValueKey('reader-typography-theme-$theme')),
+              )
+              .getSemanticsData()
+              .flagsCollection
+              .isSelected ==
+          ui.Tristate.isTrue;
+      expect(selected('light'), isTrue);
+      expect(find.text('Paper'), findsOneWidget);
       expect(find.text('Sepia'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('reader-typography-theme')));
+      expect(find.text('Night'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('reader-typography-theme-dark')),
+      );
       await tester.pump();
       await _settle(tester);
-      expect(find.text('Light'), findsOneWidget);
+      expect(selected('dark'), isTrue);
+      expect(selected('light'), isFalse);
     });
 
     testWidgets('a raster document shows zoom and fit controls only', (
@@ -823,10 +862,6 @@ void main() {
         find.byKey(const ValueKey('reader-typography-font-increase')),
         findsNothing,
         reason: 'a raster document has no EPUB font-size control',
-      );
-      expect(
-        find.byKey(const ValueKey('reader-typography-theme')),
-        findsNothing,
       );
 
       await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-in')));
@@ -893,14 +928,14 @@ void main() {
     });
   });
 
-  group('more panel', () {
-    testWidgets('page input validates and converts the 1-based ordinal', (
+  group('page field, bookmark and open book', () {
+    testWidgets('the page field validates and converts the 1-based ordinal', (
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3);
       await _open(tester, _reader(bridge: bridge));
-      await _openMore(tester);
+      await _openContents(tester);
 
       expect(find.text('of 3'), findsOneWidget);
       // The open's relayout has settled, so the input is enabled: a pending
@@ -918,11 +953,14 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.go);
       await tester.pump();
       await _settle(tester);
-      expect(find.text('Chapter 2 · 67%'), findsOneWidget);
+      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('reader-page-input-error')),
         findsNothing,
       );
+      // Choosing a page closes Contents.
+      expect(find.byKey(const ValueKey('reader-panel-contents')), findsNothing);
+      await _openContents(tester);
 
       // An out-of-range submission stays inline and does not navigate.
       await tester.enterText(
@@ -937,7 +975,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Enter a page between 1 and 3.'), findsOneWidget);
-      expect(find.text('Chapter 2 · 67%'), findsOneWidget);
+      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
 
       // A non-numeric draft is rejected the same way.
       await tester.enterText(
@@ -956,24 +994,19 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3);
       await _open(tester, _reader(bridge: bridge, initialBookId: 1));
-      await _openMore(tester);
+      SemanticsData bookmark() => tester
+          .getSemantics(find.byKey(const ValueKey('reader-header-bookmark')))
+          .getSemanticsData();
 
-      expect(find.text('☆ Bookmark'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('reader-more-bookmark')));
+      expect(bookmark().label, 'Bookmark this page');
+      await tester.tap(find.byKey(const ValueKey('reader-header-bookmark')));
       await tester.pump();
       await _settle(tester);
       expect(bridge.toggles, [(0, null)]);
       // The bookmarks reloaded with the created entry, so the toggle now
       // reports the saved state.
-      expect(find.text('★ Saved'), findsOneWidget);
-      expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('reader-more-bookmark')))
-            .getSemanticsData()
-            .flagsCollection
-            .isSelected,
-        ui.Tristate.isTrue,
-      );
+      expect(bookmark().label, 'Remove bookmark');
+      expect(bookmark().flagsCollection.isSelected, ui.Tristate.isTrue);
     });
 
     testWidgets('open book uses the injected picker and opens the document', (
@@ -992,9 +1025,7 @@ void main() {
           },
         ),
       );
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await tester.pump();
+      await _pressOpenBook(tester);
       await _settle(tester, frames: 6);
 
       expect(picked, [1]);
@@ -1017,23 +1048,14 @@ void main() {
           },
         ),
       );
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-open-book')));
-      await tester.pump();
+      await _pressOpenBook(tester);
       await _settle(tester);
       expect(calls, 1);
       // The original document stays open and no error is reported.
       expect(find.text('slow-rivers.epub'), findsOneWidget);
       expect(find.byKey(const ValueKey('reader-tool-error')), findsNothing);
       expect(
-        tester
-            .widget<ShadButton>(
-              find.descendant(
-                of: find.byKey(const ValueKey('reader-more-open-book')),
-                matching: find.byType(ShadButton),
-              ),
-            )
-            .enabled,
+        _chromeEnabled(tester),
         isTrue,
         reason: 'the picker modal slot is cleared on cancellation',
       );
@@ -1047,8 +1069,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3);
       await _open(tester, _reader(bridge: bridge));
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-search')));
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
       await tester.pump();
       await _settle(tester);
       expect(find.byKey(const ValueKey('reader-search-input')), findsOneWidget);
@@ -1087,13 +1108,13 @@ void main() {
       await _settle(tester);
       expect(find.text('1 / 2'), findsOneWidget);
       // The pinned reference navigates to the first result on completion.
-      expect(find.text('Chapter 2 · 67%'), findsOneWidget);
+      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('reader-search-next')));
       await tester.pump();
       await _settle(tester);
       expect(find.text('2 / 2'), findsOneWidget);
-      expect(find.text('Chapter 3 · 100%'), findsOneWidget);
+      expect(find.text('100% · chapter 3 of 3'), findsOneWidget);
 
       // Stepping wraps.
       await tester.tap(find.byKey(const ValueKey('reader-search-next')));
@@ -1113,8 +1134,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3);
       await _open(tester, _reader(bridge: bridge));
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-search')));
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
       await tester.pump();
       await _settle(tester);
 
@@ -1163,8 +1183,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3);
       await _open(tester, _reader(bridge: bridge));
-      await _openMore(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-more-search')));
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
       await tester.pump();
       await _settle(tester);
 
