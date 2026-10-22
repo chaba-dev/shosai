@@ -209,7 +209,8 @@
 /* Library */
 .sh-book { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .sh-cover { position: relative; aspect-ratio: 2 / 3; width: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 14px 12px; border-radius: var(--radius-xs); box-shadow: var(--shadow-cover); color: #fffefb; font-family: var(--font-editorial); font-size: 15px; line-height: 19px; font-weight: 600; overflow: hidden; }
-.sh-cover small { font-family: var(--font-ui); font-size: 10px; line-height: 13px; font-weight: 500; letter-spacing: .06em; opacity: .85; }
+.sh-cover small { font-family: var(--font-ui); font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
+.sh-cover.ja small { font-size: 12px; line-height: 16px; font-weight: 400; letter-spacing: 0; text-transform: none; }
 .sh-book__title { font-family: var(--font-editorial); font-size: 14px; line-height: 18px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sh-book__meta { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--ink-muted); }
 .sh-book .sh-cover { padding: 12px 10px; font-size: 13px; line-height: 17px; }
