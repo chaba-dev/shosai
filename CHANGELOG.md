@@ -74,6 +74,11 @@ All notable changes to this project will be documented in this file.
 - *(library)* Sort the shelf, count its books and tag the open ones (#172)
 - *(library)* Quote the latest note in the hero and count the notes (#173)
 - *(shell)* Add the phone tab switcher (#174)
+- *(reader)* Bookshelf toolbar, stage and panels (#177)
+- *(reader)* Sharp PDF pages at their fitted size (#179)
+- *(reader)* Two-page spreads for EPUB and PDF (#180)
+- *(reader)* Read right-to-left books right to left (#181)
+- *(reader)* Set vertical Japanese in columns, right to left (#182)
 
 ### 🐛 Bug Fixes
 
