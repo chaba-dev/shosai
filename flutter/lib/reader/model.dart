@@ -406,6 +406,7 @@ final class ReaderModel {
     this.pageImage,
     this.epubPage,
     this.pdfSpread,
+    this.readingPage,
     this.locationRequestRevision = 0,
     FlutterSelectionSurface? selectionSurface,
     this.selectionPhase = ReaderSelectionPhase.idle,
@@ -485,6 +486,12 @@ final class ReaderModel {
   /// null for one page. [selectionSurface] and [pageImage] then span both.
   final ReaderPdfSpread? pdfSpread;
 
+  /// The page being read when a PDF is read in spreads: [unit] or the
+  /// spread's second page. A place on the second page may have no offset (a
+  /// bookmark made with the page shown alone, say), so the page is kept apart
+  /// from [readingOffset]. Null when the PDF is not read in spreads.
+  final int? readingPage;
+
   /// The durable reading location: the page being read and an offset in that
   /// page's own text.
   ///
@@ -495,11 +502,9 @@ final class ReaderModel {
   ({int unit, int? offset}) get readingLocation {
     final spread = pdfSpread;
     final offset = readingOffset;
-    if (spread == null || offset == null) return (unit: unit, offset: offset);
-    return (
-      unit: spread.unitOf(offset, unit),
-      offset: spread.pageOffset(offset),
-    );
+    final page = readingPage ?? unit;
+    if (spread == null || offset == null) return (unit: page, offset: offset);
+    return (unit: page, offset: spread.pageOffset(offset));
   }
 
   /// Revision of the latest explicit location request [epubPage] answers.
@@ -631,6 +636,7 @@ final class ReaderModel {
     Object? pageImage = _unchanged,
     Object? epubPage = _unchanged,
     Object? pdfSpread = _unchanged,
+    Object? readingPage = _unchanged,
     int? locationRequestRevision,
     Object? selectionSurface = _unchanged,
     ReaderSelectionPhase? selectionPhase,
@@ -696,6 +702,9 @@ final class ReaderModel {
       pdfSpread: identical(pdfSpread, _unchanged)
           ? this.pdfSpread
           : pdfSpread as ReaderPdfSpread?,
+      readingPage: identical(readingPage, _unchanged)
+          ? this.readingPage
+          : readingPage as int?,
       locationRequestRevision:
           locationRequestRevision ?? this.locationRequestRevision,
       selectionSurface: identical(selectionSurface, _unchanged)

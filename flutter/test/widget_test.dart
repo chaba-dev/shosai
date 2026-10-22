@@ -2866,6 +2866,88 @@ void main() {
       await bridge.disposed.future;
     });
 
+    // With no text, a spread has no offsets to tell its pages apart: a place
+    // in the first page's text must not read as a place on the second.
+    for (final failing in ['opening', 'a relayout']) {
+      test('a place on a spread\'s first page stays there when its text '
+          'cannot be read on $failing', () async {
+        final bridge = _ControlledBridge(
+          bookId: 7,
+          logicalUnitCount: 4,
+          immediateLists: true,
+          selectionFailure: failing == 'opening',
+          initialReadingState: FlutterReadingState(
+            unit: BigInt.zero,
+            offset: BigInt.from(10),
+            zoom: 1,
+          ),
+        );
+        final controller = await openSpread(bridge);
+        expect(controller.model.pdfSpread?.facingUnit, 1);
+        bridge.selectionFailure = true;
+        controller.dispatch(
+          const ReaderViewportChanged(
+            ReaderLayout(width: 1100, spread: true),
+            height: 600,
+            devicePixelRatio: 1,
+          ),
+        );
+        await drain();
+        expect(controller.model.selectionError, isNotNull);
+        expect(controller.model.pdfSpread?.textShift, 0);
+        expect(controller.model.readingLocation.unit, 0);
+        expect(bridge.savedReadingStates.last.unit.toInt(), 0);
+        controller.dispose();
+        await bridge.disposed.future;
+      });
+    }
+
+    test('a fitted render retry on a spread\'s second page finishes while '
+        'its box moves', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+      );
+      final controller = await openSpread(bridge);
+      controller.dispatch(const ReaderUnitRequested(1));
+      await drain();
+      expect(controller.model.unit, 0);
+      expect(controller.model.readingLocation.unit, 1);
+      void report(double height) => controller.dispatch(
+        ReaderViewportChanged(
+          const ReaderLayout(width: 2000, spread: true),
+          height: height,
+          devicePixelRatio: 1,
+        ),
+      );
+
+      // Two 612 × 792 pt pages 2000 px wide are fitted to the box height.
+      report(400);
+      await drain();
+      bridge.renderFailure = true;
+      report(700);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+      bridge.renderFailure = false;
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      final failed = bridge.renderScales.length;
+      report(630);
+      await drain();
+      expect(bridge.renderScales.length, greaterThan(failed));
+      final retried = bridge.renderScales.length;
+      // A box 4 px shorter while the retry renders waits for it.
+      report(626);
+      await drain();
+      expect(bridge.renderScales, hasLength(retried));
+      expect(controller.model.relayoutError, isNotNull);
+      held.complete(_buffer(BigInt.from(40)));
+      await drain();
+      expect(controller.model.readingLocation.unit, 1);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
     test('the last spread of an even-page PDF is saved as finished', () async {
       final bridge = _ControlledBridge(
         bookId: 7,

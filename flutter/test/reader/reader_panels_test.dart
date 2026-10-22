@@ -35,6 +35,15 @@ class _PanelBridge extends HarnessBridge {
   List<FlutterBookmark> bookmarks;
   final bool failExport;
 
+  /// The book's saved reading position, restored when it opens.
+  FlutterReadingState? readingState;
+
+  @override
+  Future<FlutterReadingState?> loadReadingState({
+    required int bookId,
+    required BigInt cancellationId,
+  }) async => readingState;
+
   /// The book's highlights, as the Notes panel lists them.
   List<FlutterAnnotation> annotations = const [];
 
@@ -1151,62 +1160,123 @@ void main() {
   });
 
   group('PDF spreads', () {
-    testWidgets('a place on a spread\'s second page stays on that page', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
-      final bridge = _PanelBridge(
-        unitCount: 3,
-        bookmarks: [
-          _bookmark(id: 7, unit: BigInt.one, offset: BigInt.from(10)),
-        ],
-      );
-      await _open(
-        tester,
-        _reader(
-          bridge: bridge,
-          initialPath: '/books/atlas.pdf',
-          initialBookId: 1,
-        ),
-      );
-      expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
-      await _openNotes(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-saved-place-open-7')));
+    Future<void> choosePages(WidgetTester tester, String key) async {
+      await _openTypography(tester);
+      await tester.tap(find.byKey(ValueKey('reader-typography-$key')));
       await tester.pump();
       await _settle(tester);
-      await _openNotes(tester);
+      await _openTypography(tester);
+    }
 
-      // The spread shows the bookmarked place, so the toolbar marks it.
-      final bookmark = find.byKey(const ValueKey('reader-header-bookmark'));
-      expect(tester.getSemantics(bookmark).label, contains('Remove bookmark'));
+    // A place on page 2 with no offset (a bookmark made with the page shown
+    // alone), at its start and in its text.
+    for (final offset in [null, 0, 10]) {
+      final place = offset == null ? 'no offset' : 'offset $offset';
+      final saved = offset == null ? null : BigInt.from(offset);
 
-      // One page shows the second page, where the place is.
-      await _openTypography(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('reader-typography-one-page')),
-      );
-      await tester.pump();
-      await _settle(tester);
-      await _openTypography(tester);
-      expect(find.text('67% · page 2 of 3'), findsOneWidget);
-      expect(tester.getSemantics(bookmark).label, contains('Remove bookmark'));
+      testWidgets('a place on a spread\'s second page stays on that page '
+          '($place)', (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _PanelBridge(
+          unitCount: 3,
+          bookmarks: [_bookmark(id: 7, unit: BigInt.one, offset: saved)],
+        );
+        await _open(
+          tester,
+          _reader(
+            bridge: bridge,
+            initialPath: '/books/atlas.pdf',
+            initialBookId: 1,
+          ),
+        );
+        expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+        await _openNotes(tester);
+        await tester.tap(
+          find.byKey(const ValueKey('reader-saved-place-open-7')),
+        );
+        await tester.pump();
+        await _settle(tester);
+        await _openNotes(tester);
 
-      // Two pages again: still the same place, and its bookmark is the one
-      // removed.
-      await _openTypography(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('reader-typography-two-pages')),
-      );
-      await tester.pump();
-      await _settle(tester);
-      await _openTypography(tester);
-      expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
-      await tester.tap(bookmark);
-      await tester.pump();
-      await _settle(tester);
-      expect(bridge.deletes, [7]);
-      expect(bridge.toggles, isEmpty);
-    });
+        // The spread shows the bookmarked place, so the toolbar marks it,
+        // and it is the place saved.
+        final bookmark = find.byKey(const ValueKey('reader-header-bookmark'));
+        expect(
+          tester.getSemantics(bookmark).label,
+          contains('Remove bookmark'),
+        );
+        expect(bridge.savedReadingStates.last.unit, BigInt.one);
+        expect(bridge.savedReadingStates.last.offset, saved);
+
+        // One page shows the second page, where the place is.
+        await choosePages(tester, 'one-page');
+        expect(find.text('67% · page 2 of 3'), findsOneWidget);
+        expect(
+          tester.getSemantics(bookmark).label,
+          contains('Remove bookmark'),
+        );
+        expect(bridge.savedReadingStates.last.unit, BigInt.one);
+        expect(bridge.savedReadingStates.last.offset, saved);
+
+        // Two pages again: still the same place, and its bookmark is the one
+        // removed.
+        await choosePages(tester, 'two-pages');
+        expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+        expect(bridge.savedReadingStates.last.unit, BigInt.one);
+        expect(bridge.savedReadingStates.last.offset, saved);
+        await tester.tap(bookmark);
+        await tester.pump();
+        await _settle(tester);
+        expect(bridge.deletes, [7]);
+        expect(bridge.toggles, isEmpty);
+      });
+
+      testWidgets('a saved place on a spread\'s second page reopens there '
+          '($place)', (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge =
+            _PanelBridge(
+                unitCount: 3,
+                bookmarks: [_bookmark(id: 7, unit: BigInt.one, offset: saved)],
+              )
+              ..readingState = FlutterReadingState(
+                unit: BigInt.one,
+                offset: saved,
+                zoom: 1,
+              );
+        await _open(
+          tester,
+          _reader(
+            bridge: bridge,
+            initialPath: '/books/atlas.pdf',
+            initialBookId: 1,
+          ),
+        );
+        expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+        final bookmark = find.byKey(const ValueKey('reader-header-bookmark'));
+        expect(
+          tester.getSemantics(bookmark).label,
+          contains('Remove bookmark'),
+        );
+
+        // One page, two and one again: page 2 throughout.
+        for (final (key, progress) in [
+          ('one-page', '67% · page 2 of 3'),
+          ('two-pages', '67% · pages 1–2 of 3'),
+          ('one-page', '67% · page 2 of 3'),
+        ]) {
+          await choosePages(tester, key);
+          expect(find.text(progress), findsOneWidget, reason: key);
+          expect(
+            tester.getSemantics(bookmark).label,
+            contains('Remove bookmark'),
+            reason: key,
+          );
+          expect(bridge.savedReadingStates.last.unit, BigInt.one);
+          expect(bridge.savedReadingStates.last.offset, saved);
+        }
+      });
+    }
   });
 
   testWidgets('an EPUB opened after a PDF spread reaches its second chapter', (

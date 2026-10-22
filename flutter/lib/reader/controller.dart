@@ -801,6 +801,9 @@ final class ReaderController implements Listenable {
             _model.copyWith(
               selectionSurface: _freezeSurface(message.surface),
               pdfSpread: message.pdfSpread,
+              readingPage: message.pdfSpread == null
+                  ? null
+                  : message.readingPage,
               readingOffset: message.readingOffset ?? _unchanged,
               savedSelections: _savedSelections(
                 _model.annotations,
@@ -817,6 +820,12 @@ final class ReaderController implements Listenable {
             _model.copyWith(
               selectionError: message.error,
               pdfSpread: message.pdfSpread,
+              readingPage: message.pdfSpread == null
+                  ? null
+                  : message.readingPage,
+              // A spread without text has no offsets to place a reading
+              // position by; the page alone keeps it.
+              readingOffset: message.pdfSpread == null ? _unchanged : null,
             ),
           );
         }
@@ -1023,6 +1032,7 @@ final class ReaderController implements Listenable {
         pageImage: null,
         epubPage: null,
         pdfSpread: null,
+        readingPage: null,
         error: null,
         selectionSurface: null,
         selectionPhase: ReaderSelectionPhase.idle,
@@ -1180,6 +1190,7 @@ final class ReaderController implements Listenable {
             generation: generation,
             surface: surface,
             pdfSpread: spread,
+            readingPage: restoredUnit,
             readingOffset:
                 spread != null &&
                     restoredOffset != null &&
@@ -1195,6 +1206,7 @@ final class ReaderController implements Listenable {
             generation,
             _describeError(error),
             pdfSpread: _textlessSpread(facing),
+            readingPage: restoredUnit,
           ),
         );
       }
@@ -1476,7 +1488,9 @@ final class ReaderController implements Listenable {
     final intent = _activeRelayoutIntent;
     final isNavigation =
         intent != null &&
-        (intent.unit != _model.unit ||
+        // A passive relayout targets the page being read, which on a PDF
+        // spread may be its second page.
+        (intent.unit != _model.readingLocation.unit ||
             intent.offset != null ||
             intent.length != null ||
             intent.replaceReadingOffset);
@@ -2007,6 +2021,7 @@ final class ReaderController implements Listenable {
         pageImage: null,
         epubPage: page,
         pdfSpread: null,
+        readingPage: null,
         locationRequestRevision: changedLocation
             ? _model.locationRequestRevision + 1
             : _model.locationRequestRevision,
@@ -2079,7 +2094,9 @@ final class ReaderController implements Listenable {
     if (document == null ||
         unit < 0 ||
         unit >= document.logicalUnitCount.toInt() ||
-        ((unit == _model.unit || unit == _model.pdfSpread?.facingUnit) &&
+        // The other page of a PDF spread is shown already, but asking for it
+        // makes it the page being read.
+        (unit == _model.readingLocation.unit &&
             offset == null &&
             !replaceReadingOffset) ||
         _model.busy ||
@@ -3692,6 +3709,7 @@ final class ReaderController implements Listenable {
           layout: layout,
           surface: surface,
           pdfSpread: spread,
+          readingPage: target,
           pageImage: ownedImage,
           annotations: annotations,
           offset: offset,
@@ -3742,7 +3760,11 @@ final class ReaderController implements Listenable {
     final changedLocation = message.unit != _model.unit || explicitLocation;
     if (changedLocation) _readingStatePersistenceBlocked = false;
     final int? readingOffset;
-    if (!explicitLocation && message.pdfSpread != _model.pdfSpread) {
+    if (message.pdfSpread != null && message.surface == null) {
+      // A spread without text has no offsets to place a reading position
+      // by; its page alone keeps it.
+      readingOffset = null;
+    } else if (!explicitLocation && message.pdfSpread != _model.pdfSpread) {
       // The page being read keeps its place when a PDF spread is made or
       // undone: its own offset, moved past the first page's text when it is
       // now the spread's second page.
@@ -3773,6 +3795,7 @@ final class ReaderController implements Listenable {
             ? null
             : _freezeSurface(message.surface!),
         pdfSpread: message.pdfSpread,
+        readingPage: message.pdfSpread == null ? null : message.readingPage,
         annotations: message.annotations,
         savedSelections: _savedSelections(
           message.annotations,
@@ -3814,19 +3837,14 @@ final class ReaderController implements Listenable {
       // own offsets, so it reopens there in one page or two.
       // Both of a spread's pages count as read, so its last spread finishes
       // the book.
-      final spread = message.pdfSpread;
-      final unit = readingOffset == null
-          ? message.unit
-          : spread?.unitOf(readingOffset, message.unit) ?? message.unit;
-      final lastUnit = spread?.facingUnit;
+      final (:unit, :offset) = _model.readingLocation;
+      final lastUnit = message.pdfSpread?.facingUnit;
       _queueReadingStateSave(
         bookId,
         _model.document!.logicalUnitCount,
         FlutterReadingState(
           unit: BigInt.from(unit),
-          offset: readingOffset == null
-              ? null
-              : BigInt.from(spread?.pageOffset(readingOffset) ?? readingOffset),
+          offset: offset == null ? null : BigInt.from(offset),
           zoom: message.layout.scale,
           lastUnit: lastUnit != null && lastUnit > unit
               ? BigInt.from(lastUnit)
@@ -5680,6 +5698,7 @@ final class ReaderController implements Listenable {
       // A PDF spread describes the released document's surface; a document
       // opened through the same controller starts without one.
       pdfSpread: null,
+      readingPage: null,
       selectionSurface: null,
       selectionPhase: ReaderSelectionPhase.idle,
       anchor: null,

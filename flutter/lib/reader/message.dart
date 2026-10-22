@@ -602,11 +602,15 @@ final class _ReaderSurfaceLoaded extends ReaderMessage {
     required this.generation,
     required this.surface,
     this.pdfSpread,
+    this.readingPage,
     this.readingOffset,
   });
   final int generation;
   final FlutterSelectionSurface surface;
   final ReaderPdfSpread? pdfSpread;
+
+  /// The spread's page the restored position is on, with [pdfSpread].
+  final int? readingPage;
 
   /// The restored reading offset in [surface]'s text, when it moved: a
   /// position on a spread's second page lies past the first page's text.
@@ -618,12 +622,16 @@ final class _ReaderSelectionSupportFailed extends ReaderMessage {
     this.generation,
     this.error, {
     this.pdfSpread,
+    this.readingPage,
   });
   final int generation;
   final String error;
 
   /// The spread shown without text, when a PDF opened on one.
   final ReaderPdfSpread? pdfSpread;
+
+  /// The spread's page the restored position is on, with [pdfSpread].
+  final int? readingPage;
 }
 
 final class _ReaderRelayoutCompleted extends ReaderMessage {
@@ -635,6 +643,7 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
     required this.layout,
     required this.surface,
     this.pdfSpread,
+    this.readingPage,
     required this.pageImage,
     required this.annotations,
     required this.replaceReadingOffset,
@@ -654,6 +663,10 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
 
   /// The spread [surface] and [pageImage] show, when they span two PDF pages.
   final ReaderPdfSpread? pdfSpread;
+
+  /// The spread's page being read, with [pdfSpread]: the page asked for, or
+  /// the one read before a relayout with no target of its own.
+  final int? readingPage;
   final ui.Image pageImage;
 
   /// The scale [pageImage] was rendered at.
