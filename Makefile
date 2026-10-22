@@ -1,6 +1,6 @@
 .PHONY: lint fmt check-fmt check
 .PHONY: test test-app test-scripts test-epub-prototype
-.PHONY: test-packaged-linux test-packaged-macos
+.PHONY: test-packaged-linux test-packaged-macos test-packaged-android
 .PHONY: theme-tokens check-theme-tokens check-l10n-codegen
 .PHONY: design-system design-system-css check-design-system-css
 .PHONY: epub-prototype-fixtures measure-epub-prototype
@@ -132,6 +132,16 @@ test-packaged-linux:
 test-packaged-macos:
 	env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY ./scripts/build-flutter-macos.sh \
 		test -d macos integration_test/packaged_core_test.dart
+
+## Run the packaged-host integration tests in a profile build (AOT, with the
+## release build's native libraries; Flutter Driver refuses release mode) on a
+## connected Android device or emulator (ANDROID_DEVICE picks one), likewise
+## with no PDFium override
+test-packaged-android:
+	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
+		flutter drive --profile --driver=integration_test/driver.dart \
+		--target=integration_test/packaged_core_test.dart \
+		$(if $(ANDROID_DEVICE),-d $(ANDROID_DEVICE))
 
 ## Build the Android arm64 host in profile mode
 android-profile:

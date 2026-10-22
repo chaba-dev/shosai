@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shosai_flutter/core/bridge.dart';
@@ -11,8 +13,9 @@ import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 ///
 /// Run on a desktop host with no `SHOSAI_PDFIUM_LIBRARY` or `PDFIUM_PATH`
 /// (`make test-packaged-linux` or `make test-packaged-macos`
-/// unset both; CI runs each): the application bundle supplies PDFium and
-/// SQLite, so this proves both load there. The library import (cover
+/// unset both; CI runs each), or on an Android device or emulator
+/// (`make test-packaged-android`): the application bundle supplies
+/// PDFium and SQLite, so this proves both load there. The library import (cover
 /// rendering), the open and the reader's own engine document all use the one
 /// PDFium in this process, the sharing that crashed while the Rust core loaded
 /// a second user of the same image.
@@ -65,6 +68,50 @@ void main() {
     final rendered = await document.render(0, 1);
     expect(rendered.width, greaterThan(0));
     expect(await document.pageText(0), contains('Hello'));
+    expect(
+      await bridge.searchDocument(
+        document: summary.handle,
+        query: 'hello',
+        cancellationId: bridge.createCancellation(),
+      ),
+      hasLength(1),
+    );
+    expect(bridge.releaseDocument(handle: summary.handle), isTrue);
+  });
+
+  testWidgets('the packaged SQLite serves an EPUB import and open', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('shosai-packaged-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final epub = File('${directory.path}/hello.epub')
+      ..writeAsBytesSync(_helloEpub());
+
+    final bridge = await createApplicationBridge(
+      applicationSupportDirectory: () async => directory,
+    );
+    addTearDown(closeApplicationCores);
+
+    final report = await bridge.importPaths(
+      pathKeys: [epub.path],
+      managed: false,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(report.imported, BigInt.one, reason: '${report.items}');
+    final page = await bridge.libraryPage(
+      limit: 10,
+      offset: 0,
+      cancellationId: bridge.createCancellation(),
+    );
+    final book = page.books.single;
+    expect(book.format, FlutterBookFormat.epub);
+    expect(book.title, 'Packaged Hello');
+
+    final summary = await bridge.openLibraryBook(
+      bookId: book.bookId,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(summary.logicalUnitCount, BigInt.one);
     expect(
       await bridge.searchDocument(
         document: summary.handle,
@@ -155,4 +202,45 @@ List<int> _helloPdf() {
     'startxref\n$xref\n%%EOF\n',
   );
   return ascii.encode(out.toString());
+}
+
+/// A one-chapter EPUB 3 whose text says "Hello".
+Uint8List _helloEpub() {
+  const files = {
+    'mimetype': 'application/epub+zip',
+    'META-INF/container.xml':
+        '<?xml version="1.0"?>'
+        '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" '
+        'version="1.0"><rootfiles><rootfile full-path="OPS/package.opf" '
+        'media-type="application/oebps-package+xml"/></rootfiles></container>',
+    'OPS/package.opf':
+        '<?xml version="1.0"?>'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" '
+        'unique-identifier="id"><metadata '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:identifier id="id">packaged-hello</dc:identifier>'
+        '<dc:title>Packaged Hello</dc:title><dc:language>en</dc:language>'
+        '</metadata><manifest>'
+        '<item id="chapter" href="chapter.xhtml" '
+        'media-type="application/xhtml+xml"/>'
+        '<item id="nav" href="nav.xhtml" '
+        'media-type="application/xhtml+xml" properties="nav"/>'
+        '</manifest><spine><itemref idref="chapter"/></spine></package>',
+    'OPS/chapter.xhtml':
+        '<?xml version="1.0"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        '<p>Hello from the packaged host.</p></body></html>',
+    'OPS/nav.xhtml':
+        '<?xml version="1.0"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml" '
+        'xmlns:epub="http://www.idpf.org/2007/ops"><body>'
+        '<nav epub:type="toc"><ol><li><a href="chapter.xhtml">Hello</a></li>'
+        '</ol></nav></body></html>',
+  };
+  final archive = Archive();
+  for (final entry in files.entries) {
+    final bytes = Uint8List.fromList(utf8.encode(entry.value));
+    archive.addFile(ArchiveFile(entry.key, bytes.length, bytes));
+  }
+  return Uint8List.fromList(ZipEncoder().encode(archive));
 }
