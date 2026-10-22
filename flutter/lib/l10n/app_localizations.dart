@@ -726,6 +726,12 @@ abstract class AppLocalizations {
   /// **'Sepia'**
   String get readerThemeSepia;
 
+  /// The status line's progress track, read out as a slider; its value is the place.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading progress'**
+  String get readerProgressTrack;
+
   /// Display settings: the page theme section heading.
   ///
   /// In en, this message translates to:

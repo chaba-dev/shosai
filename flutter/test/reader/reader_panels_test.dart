@@ -846,6 +846,76 @@ void main() {
       expect(selected('light'), isFalse);
     });
 
+    testWidgets('the page themes and the progress track work from the '
+        'keyboard and assistive technology', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final semantics = tester.ensureSemantics();
+      final bridge = _PanelBridge(unitCount: 3);
+      await _open(tester, _reader(bridge: bridge));
+      await _openTypography(tester);
+
+      // A theme tile takes focus and activates on Enter and Space.
+      FocusNode focusOf(Finder finder) => Focus.of(
+        tester.element(
+          find.descendant(of: finder, matching: find.byType(GestureDetector)),
+        ),
+      );
+      bool selected(String theme) =>
+          tester
+              .getSemantics(
+                find.byKey(ValueKey('reader-typography-theme-$theme')),
+              )
+              .getSemanticsData()
+              .flagsCollection
+              .isSelected ==
+          ui.Tristate.isTrue;
+      final night = focusOf(
+        find.byKey(const ValueKey('reader-typography-theme-dark')),
+      );
+      expect(night.canRequestFocus, isTrue);
+      night.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await _settle(tester);
+      expect(selected('dark'), isTrue);
+      focusOf(
+        find.byKey(const ValueKey('reader-typography-theme-sepia')),
+      ).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      await _settle(tester);
+      expect(selected('sepia'), isTrue);
+      await _openTypography(tester);
+
+      // The progress track is a slider: its value is the place, the arrow
+      // keys step one unit, and so do the semantic actions.
+      final trackFinder = find.byKey(const ValueKey('reader-progress-track'));
+      String value() => tester.getSemantics(trackFinder).value;
+      final opening = value();
+      expect(tester.getSemantics(trackFinder).label, 'Reading progress');
+      expect(opening, contains('of 3'));
+      Focus.of(tester.element(trackFinder)).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      await _settle(tester);
+      final stepped = value();
+      expect(stepped, isNot(opening));
+      tester.binding.performSemanticsAction(
+        ui.SemanticsActionEvent(
+          type: ui.SemanticsAction.decrease,
+          viewId: tester.view.viewId,
+          nodeId: tester.getSemantics(trackFinder).id,
+        ),
+      );
+      await tester.pump();
+      await _settle(tester);
+      expect(value(), opening);
+      semantics.dispose();
+    });
+
     testWidgets('a raster document shows zoom and fit controls only', (
       tester,
     ) async {

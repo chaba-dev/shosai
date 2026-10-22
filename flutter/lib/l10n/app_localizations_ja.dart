@@ -375,6 +375,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerThemeSepia => 'セピア';
 
   @override
+  String get readerProgressTrack => '読書の進み具合';
+
+  @override
   String get readerPageTheme => 'ページの色';
 
   @override

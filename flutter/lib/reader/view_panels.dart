@@ -844,7 +844,10 @@ class _ReaderField extends StatelessWidget {
 }
 
 /// One page theme as a tile in its own colours (`sh-theme`).
-class _ReaderThemeTile extends StatelessWidget {
+///
+/// The tile is a keyboard control like the toolbar's buttons: it takes focus,
+/// shows the 2 px `accent` focus ring and activates on Enter or Space.
+class _ReaderThemeTile extends StatefulWidget {
   const _ReaderThemeTile({
     required this.theme,
     required this.label,
@@ -858,7 +861,18 @@ class _ReaderThemeTile extends StatelessWidget {
   final VoidCallback? onPressed;
 
   @override
+  State<_ReaderThemeTile> createState() => _ReaderThemeTileState();
+}
+
+class _ReaderThemeTileState extends State<_ReaderThemeTile> {
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
+    final theme = widget.theme;
+    final label = widget.label;
+    final selected = widget.selected;
+    final onPressed = widget.onPressed;
     final palette = ShellPalette.of(context);
     final colors = pageColors(theme);
     final tile = AnimatedContainer(
@@ -910,11 +924,40 @@ class _ReaderThemeTile extends StatelessWidget {
       selected: selected,
       label: label,
       onPressed: onPressed,
-      child: MouseRegion(
-        cursor: onPressed == null
+      child: FocusableActionDetector(
+        enabled: onPressed != null,
+        mouseCursor: onPressed == null
             ? MouseCursor.defer
             : SystemMouseCursors.click,
-        child: GestureDetector(onTap: onPressed, child: tile),
+        onShowFocusHighlight: (focused) => setState(() => _focused = focused),
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              onPressed?.call();
+              return null;
+            },
+          ),
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          excludeFromSemantics: true,
+          onTap: onPressed,
+          child: Container(
+            foregroundDecoration: _focused && onPressed != null
+                ? BoxDecoration(
+                    border: Border.all(
+                      color: palette.accent,
+                      width: 2,
+                      strokeAlign: BorderSide.strokeAlignOutside,
+                    ),
+                    borderRadius: BorderRadius.circular(
+                      ShosaiTokens.radiusSm + 2,
+                    ),
+                  )
+                : null,
+            child: tile,
+          ),
+        ),
       ),
     );
   }

@@ -380,6 +380,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerThemeSepia => 'Sepia';
 
   @override
+  String get readerProgressTrack => 'Reading progress';
+
+  @override
   String get readerPageTheme => 'Page theme';
 
   @override

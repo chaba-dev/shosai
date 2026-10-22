@@ -568,6 +568,10 @@
   "@readerThemeSepia": {
     "description": "Iced reference key: sepia."
   },
+  "readerProgressTrack": "Reading progress",
+  "@readerProgressTrack": {
+    "description": "The status line's progress track, read out as a slider; its value is the place."
+  },
   "readerPageTheme": "Page theme",
   "@readerPageTheme": {
     "description": "Display settings: the page theme section heading."

@@ -598,12 +598,31 @@ class _ReaderStatusLine extends StatelessWidget {
                           for (final bookmark in model.bookmarks)
                             (bookmark.unit.toInt() + .5) / total,
                       ],
+                      valueLabel: _readerStatusLabel(
+                        AppLocalizations.of(context),
+                        model.progress,
+                        total: total,
+                        short: false,
+                      ),
                       onJump: total > 0 && !model.busy
                           ? (fraction) => dispatch(
                               ReaderUnitRequested(
                                 (fraction * total).floor().clamp(0, total - 1),
                               ),
                             )
+                          : null,
+                      increasedValue: _unitStepValue(context, model, 1),
+                      decreasedValue: _unitStepValue(context, model, -1),
+                      onStep: total > 0 && !model.busy
+                          ? (delta) {
+                              final unit = (model.unit + delta).clamp(
+                                0,
+                                total - 1,
+                              );
+                              if (unit != model.unit) {
+                                dispatch(ReaderUnitRequested(unit));
+                              }
+                            }
                           : null,
                     )
                   : const SizedBox.shrink(),
@@ -614,6 +633,22 @@ class _ReaderStatusLine extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What the progress track would read after a keyboard step of [delta] units,
+/// or null at either end of the book.
+///
+/// A step lands at the start of the neighbouring unit, so it names that unit
+/// with the share of the book read once it is.
+String? _unitStepValue(BuildContext context, ReaderModel model, int delta) {
+  final total = model.document?.logicalUnitCount.toInt() ?? 0;
+  final unit = model.unit + delta;
+  if (total <= 0 || unit < 0 || unit >= total) return null;
+  final l10n = AppLocalizations.of(context);
+  final percent = ((unit + 1) / total * 100).round();
+  return model.document?.format == FlutterBookFormat.epub
+      ? l10n.readerChapterOfStatus(percent, unit + 1, total)
+      : l10n.readerPageOfStatus(percent, unit + 1, total);
 }
 
 /// The place in the reader's terms: `4% · pages 18–19 of 502`, or the short
@@ -704,20 +739,44 @@ String _readerStatusLabel(
 
 /// The 4 px progress track: `accent` fill, bookmarks as `vermilion` ticks.
 /// Clicking or dragging it jumps there.
-class _ReaderProgressTrack extends StatelessWidget {
+///
+/// It is also a slider for the keyboard and assistive technology: it takes
+/// focus with the 2 px `accent` ring, and the arrow keys or the semantic
+/// increase and decrease actions step one unit through [onStep].
+class _ReaderProgressTrack extends StatefulWidget {
   const _ReaderProgressTrack({
     required this.value,
+    required this.valueLabel,
+    required this.increasedValue,
+    required this.decreasedValue,
     required this.marks,
     required this.onJump,
+    required this.onStep,
   });
 
   final double value;
+  final String valueLabel;
+
+  /// The place one unit on or back, or null at that end of the book.
+  final String? increasedValue;
+  final String? decreasedValue;
   final List<double> marks;
   final ValueChanged<double>? onJump;
+  final ValueChanged<int>? onStep;
+
+  @override
+  State<_ReaderProgressTrack> createState() => _ReaderProgressTrackState();
+}
+
+class _ReaderProgressTrackState extends State<_ReaderProgressTrack> {
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
+    final onJump = widget.onJump;
+    final onStep = widget.onStep;
+    void step(int delta) => onStep?.call(delta);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
@@ -726,29 +785,74 @@ class _ReaderProgressTrack extends StatelessWidget {
           onJump?.call((local.dx / width).clamp(0.0, 1.0));
         }
 
-        return MouseRegion(
-          cursor: onJump == null ? MouseCursor.defer : SystemMouseCursors.click,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            excludeFromSemantics: true,
-            onTapUp: onJump == null
-                ? null
-                : (details) => jump(details.localPosition),
-            // A drag jumps once, where it ends, rather than laying the book
-            // out again at every step.
-            onHorizontalDragEnd: onJump == null
-                ? null
-                : (details) => jump(details.localPosition),
-            child: SizedBox(
-              key: const ValueKey('reader-progress-track'),
-              height: 20,
-              child: CustomPaint(
-                painter: _ProgressTrackPainter(
-                  value: value.clamp(0.0, 1.0),
-                  marks: marks,
-                  track: palette.surfaceSunken,
-                  fill: palette.accent,
-                  mark: ShosaiTokens.colorLightVermilion,
+        return Semantics(
+          slider: true,
+          enabled: onStep != null,
+          label: AppLocalizations.of(context).readerProgressTrack,
+          value: widget.valueLabel,
+          increasedValue: onStep == null ? null : widget.increasedValue,
+          decreasedValue: onStep == null ? null : widget.decreasedValue,
+          onIncrease: onStep == null || widget.increasedValue == null
+              ? null
+              : () => step(1),
+          onDecrease: onStep == null || widget.decreasedValue == null
+              ? null
+              : () => step(-1),
+          child: FocusableActionDetector(
+            enabled: onStep != null,
+            mouseCursor: onJump == null
+                ? MouseCursor.defer
+                : SystemMouseCursors.click,
+            onShowFocusHighlight: (focused) =>
+                setState(() => _focused = focused),
+            shortcuts: const {
+              SingleActivator(LogicalKeyboardKey.arrowRight):
+                  _ReaderTrackStepIntent(1),
+              SingleActivator(LogicalKeyboardKey.arrowUp):
+                  _ReaderTrackStepIntent(1),
+              SingleActivator(LogicalKeyboardKey.arrowLeft):
+                  _ReaderTrackStepIntent(-1),
+              SingleActivator(LogicalKeyboardKey.arrowDown):
+                  _ReaderTrackStepIntent(-1),
+            },
+            actions: {
+              _ReaderTrackStepIntent: CallbackAction<_ReaderTrackStepIntent>(
+                onInvoke: (intent) {
+                  step(intent.delta);
+                  return null;
+                },
+              ),
+            },
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              excludeFromSemantics: true,
+              onTapUp: onJump == null
+                  ? null
+                  : (details) => jump(details.localPosition),
+              // A drag jumps once, where it ends, rather than laying the book
+              // out again at every step.
+              onHorizontalDragEnd: onJump == null
+                  ? null
+                  : (details) => jump(details.localPosition),
+              child: Container(
+                key: const ValueKey('reader-progress-track'),
+                height: 20,
+                foregroundDecoration: _focused && onStep != null
+                    ? BoxDecoration(
+                        border: Border.all(color: palette.accent, width: 2),
+                        borderRadius: BorderRadius.circular(
+                          ShosaiTokens.radiusSm,
+                        ),
+                      )
+                    : null,
+                child: CustomPaint(
+                  painter: _ProgressTrackPainter(
+                    value: widget.value.clamp(0.0, 1.0),
+                    marks: widget.marks,
+                    track: palette.surfaceSunken,
+                    fill: palette.accent,
+                    mark: ShosaiTokens.colorLightVermilion,
+                  ),
                 ),
               ),
             ),
@@ -757,6 +861,13 @@ class _ReaderProgressTrack extends StatelessWidget {
       },
     );
   }
+}
+
+/// A keyboard step along the progress track, in units.
+class _ReaderTrackStepIntent extends Intent {
+  const _ReaderTrackStepIntent(this.delta);
+
+  final int delta;
 }
 
 class _ProgressTrackPainter extends CustomPainter {

@@ -103,6 +103,7 @@
   "readerThemeLight": "紙",
   "readerThemeDark": "夜",
   "readerThemeSepia": "セピア",
+  "readerProgressTrack": "読書の進み具合",
   "readerPageTheme": "ページの色",
   "readerTextSize": "文字サイズ",
   "readerTextSizeHint": "ページは組み直されます。読んでいる場所はそのままです。",
