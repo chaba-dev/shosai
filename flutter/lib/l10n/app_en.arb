@@ -56,6 +56,10 @@
   "@cardNotStarted": {
     "description": "Iced reference key: not-started. The card's reading status at zero progress."
   },
+  "cardFinished": "Finished",
+  "@cardFinished": {
+    "description": "A book's reading status once it is read to the end."
+  },
   "cardPercentRead": "{percentage}%",
   "@cardPercentRead": {
     "description": "Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.",
@@ -70,6 +74,18 @@
     "description": "Retained Flutter semantics label for the card's cover image.",
     "placeholders": {
       "title": {
+        "type": "String"
+      }
+    }
+  },
+  "cardTitleByAuthorSemantics": "{title}, by {author}",
+  "@cardTitleByAuthorSemantics": {
+    "description": "Semantics label for a shelf card's title: the title with its author, which the card shows only on a generated cover.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "author": {
         "type": "String"
       }
     }
@@ -98,9 +114,9 @@
   "@libraryContinueReading": {
     "description": "Iced reference key: continue-reading. The collection section heading above the continue card."
   },
-  "libraryContinue": "Continue  ›",
+  "libraryContinue": "Continue",
   "@libraryContinue": {
-    "description": "Iced reference key: continue. The continue card's right-hand link label; the two spaces before the chevron are the reference's own spacing."
+    "description": "The Continue reading hero's primary action, which opens the book at its saved place."
   },
   "libraryPercentComplete": "{percentage}% complete",
   "@libraryPercentComplete": {

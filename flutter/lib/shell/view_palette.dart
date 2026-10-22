@@ -58,6 +58,8 @@ final class ShellPalette {
     required this.surfaceSunken,
     required this.hover,
     required this.line,
+    required this.lineStrong,
+    required this.shelf,
     required this.ink,
     required this.inkMuted,
     required this.accent,
@@ -78,6 +80,8 @@ final class ShellPalette {
     surfaceSunken: ShosaiTokens.colorLightSurfaceSunken,
     hover: ShosaiTokens.colorLightHover,
     line: ShosaiTokens.colorLightLine,
+    lineStrong: ShosaiTokens.colorLightLineStrong,
+    shelf: ShosaiTokens.colorLightShelf,
     ink: ShosaiTokens.colorLightInk,
     inkMuted: ShosaiTokens.colorLightInkMuted,
     accent: ShosaiTokens.colorLightAccent,
@@ -95,6 +99,8 @@ final class ShellPalette {
     surfaceSunken: ShosaiTokens.colorDarkSurfaceSunken,
     hover: ShosaiTokens.colorDarkHover,
     line: ShosaiTokens.colorDarkLine,
+    lineStrong: ShosaiTokens.colorDarkLineStrong,
+    shelf: ShosaiTokens.colorDarkShelf,
     ink: ShosaiTokens.colorDarkInk,
     inkMuted: ShosaiTokens.colorDarkInkMuted,
     accent: ShosaiTokens.colorDarkAccent,
@@ -130,6 +136,12 @@ final class ShellPalette {
 
   /// Decorative hairlines.
   final Color line;
+
+  /// Secondary buttons' borders.
+  final Color lineStrong;
+
+  /// The middle of the shelf edge under the library's covers.
+  final Color shelf;
   final Color ink;
   final Color inkMuted;
 
@@ -160,6 +172,71 @@ final class ShellPalette {
     BoxShadow(
       color: (dark ? ink : shadowBase).withValues(alpha: .06),
       spreadRadius: 1,
+    ),
+  ];
+
+  /// The ink of a generated cover's title and author, on every ground.
+  static const Color coverInk = ShosaiTokens.colorLightOnInverse;
+
+  /// The generated cover's sheen: a faint light from the spine, a faint shade
+  /// at the fore-edge.
+  static final List<Color> coverSheen = [
+    ShosaiTokens.colorLightOnInverse.withValues(alpha: .12),
+    ShosaiTokens.colorLightOnInverse.withValues(alpha: 0),
+    ShosaiTokens.colorDarkShelf.withValues(alpha: .08),
+  ];
+
+  /// `shadow-cover` on the shelf: the covers stand off the paper.
+  List<BoxShadow> get shelfCoverShadow => [
+    BoxShadow(
+      color: shadowBase.withValues(alpha: .6),
+      offset: const Offset(0, 18),
+      blurRadius: 22,
+      spreadRadius: -16,
+    ),
+    BoxShadow(
+      color: shadowBase.withValues(alpha: .35),
+      offset: const Offset(0, 4),
+      blurRadius: 8,
+      spreadRadius: -5,
+    ),
+  ];
+
+  /// The deep shadow under the Continue reading hero's cover.
+  List<BoxShadow> get heroCoverShadow => [
+    BoxShadow(
+      color: shadowBase.withValues(alpha: .55),
+      offset: const Offset(0, 24),
+      blurRadius: 30,
+      spreadRadius: -20,
+    ),
+    BoxShadow(
+      color: shadowBase.withValues(alpha: .35),
+      offset: const Offset(0, 6),
+      blurRadius: 12,
+      spreadRadius: -8,
+    ),
+  ];
+
+  /// The hero: `shadow-raised` under a soft ambient shadow, the one lifted
+  /// card on the library canvas.
+  List<BoxShadow> get hero => [
+    ...raised,
+    BoxShadow(
+      color: shadowBase.withValues(alpha: .35),
+      offset: const Offset(0, 12),
+      blurRadius: 30,
+      spreadRadius: -24,
+    ),
+  ];
+
+  /// The shelf edge's own shadow on the canvas below it.
+  List<BoxShadow> get shelfEdgeShadow => [
+    BoxShadow(
+      color: shadowBase.withValues(alpha: .45),
+      offset: const Offset(0, 10),
+      blurRadius: 18,
+      spreadRadius: -12,
     ),
   ];
 

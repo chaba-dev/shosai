@@ -10,6 +10,7 @@ import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/shell/controller.dart';
 
+part 'view_cover.dart';
 part 'view_navigation.dart';
 part 'view_palette.dart';
 part 'view_phone.dart';
@@ -146,14 +147,14 @@ class ShellFrame extends StatelessWidget {
   }
 }
 
-/// The reading status line: `21%`, or `Not started`.
+/// The reading status line: `21%`, `Not started` or `Finished`.
 ///
 /// The progress itself says whether a book is under way; only the shown
 /// percentage is rounded, and a book under way never rounds to 0% or 100%.
 String shellReadingStatus(AppLocalizations l10n, double progress) {
   if (progress <= 0) return l10n.cardNotStarted;
-  final percentage = (progress.clamp(0.0, 1.0) * 100).round();
-  return l10n.cardPercentRead(progress < 1 ? percentage.clamp(1, 99) : 100);
+  if (progress >= 1) return l10n.cardFinished;
+  return l10n.cardPercentRead((progress * 100).round().clamp(1, 99));
 }
 
 /// The 書 mark: the character inside a plain ring, in `brand-mark`

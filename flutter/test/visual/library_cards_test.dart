@@ -94,12 +94,13 @@ void main() {
     return bridge;
   }
 
-  /// A card's own title line, not the missing cover's placeholder copy.
-  Finder cardTitle(String title) => find.byWidgetPredicate(
-    (widget) =>
-        widget is Text &&
-        widget.data == title &&
-        widget.style?.fontSize == ShosaiTokens.typeSize13,
+  /// A card's own title line, not the generated cover's copy of it.
+  Finder cardTitle(String title) => find.byElementPredicate(
+    (element) =>
+        element.widget is Text &&
+        (element.widget as Text).data == title &&
+        element.findAncestorWidgetOfExactType<LibraryBookCard>() != null &&
+        element.findAncestorWidgetOfExactType<ShellGeneratedCover>() == null,
   );
 
   /// The harness books that exercise long Japanese and mixed-script metadata.
@@ -117,10 +118,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'wide'},
         verify: (tester) async {
-          // LB-11: the reference's 5 columns beside the shell's sidebar.
+          // The shelf: six columns of 134 px beside the sidebar.
           expect(
             tester.getRect(find.byType(LibraryBookCard).first).width,
-            closeTo(184, 0.6),
+            closeTo(134, 0.6),
           );
           expect(find.byType(LibraryBookCard), findsWidgets);
           // The longest status label is fully painted at 100% text.
@@ -163,10 +164,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'wide-900'},
         verify: (tester) async {
-          // LB-11 at 900: 3 columns of 198.7 px beside the tablet sidebar.
+          // At 900: four columns of 137.5 px beside the tablet sidebar.
           expect(
             tester.getRect(find.byType(LibraryBookCard).first).width,
-            closeTo(198.7, 0.6),
+            closeTo(137.5, 0.6),
           );
         },
       );
@@ -181,7 +182,7 @@ void main() {
         // scroll interaction, so a taller window is the only way to show every
         // card's scaled status without inventing a scroll position (the same
         // exception the 1B reference records for its tall states).
-        const HarnessView(size: Size(900, 1200), textScale: 2),
+        const HarnessView(size: Size(900, 1700), textScale: 2),
         locale: const Locale('ja'),
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{
@@ -241,7 +242,7 @@ void main() {
           // focus ring on a card. The card's own title is the label inside its
           // button semantics node.
           final title = cardTitle('The Quiet Cartographer');
-          for (var step = 0; step < 20; step += 1) {
+          for (var step = 0; step < 60; step += 1) {
             await tester.sendKeyEvent(LogicalKeyboardKey.tab);
             await tester.pump();
             if (tester
@@ -330,14 +331,13 @@ void main() {
             ),
           );
           expect(token.didExceedMaxLines, isTrue);
-          // The Japanese title fits its two lines at this width and is fully
-          // painted; its line box is taller than the 13 px type size, which is
-          // what the tile's measured reservation accounts for.
+          // The Japanese title fills its two whole lines at this width, the
+          // last keeping the face's own descent, which is what the tile's
+          // measured reservation accounts for.
           final japanese = tester.renderObject<RenderParagraph>(
             cardTitle('海辺の図書館 — 失われた書架をめぐる長い旅路'),
           );
-          expect(japanese.didExceedMaxLines, isFalse);
-          expect(japanese.size.height, greaterThan(ShosaiTokens.typeSize13));
+          expect(japanese.size.height, inInclusiveRange(2 * 18, 2 * 18 + 2));
         },
       );
     });
@@ -357,10 +357,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'missing-covers'},
         verify: (tester) async {
-          // LB-12: a missing cover shows the title placeholder and keeps the
-          // 210 px box, while the covered books keep their image. The
-          // continue-reading section paints the first book's cover in its own
-          // box, so the grid's images are counted.
+          // LB-12: a missing cover shows the typographic cover in the same
+          // 2:3 box, while the covered books keep their image. The hero paints
+          // the first book's cover in its own box, so the shelf's images are
+          // counted.
           expect(
             find.descendant(
               of: find.byType(LibraryBookCard),
@@ -379,7 +379,14 @@ void main() {
           );
           expect(
             tester.getSize(cover).height,
-            ShosaiTokens.layoutLibraryCardCoverHeight,
+            closeTo(tester.getSize(cover).width * 3 / 2, 0.01),
+          );
+          expect(
+            find.descendant(
+              of: cover,
+              matching: find.byType(ShellGeneratedCover),
+            ),
+            findsOneWidget,
           );
           expect(
             find.descendant(of: cover, matching: find.byType(Image)),
@@ -414,10 +421,10 @@ void main() {
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'long-metadata'},
         verify: (tester) async {
-          // LB-13 at the compact reference size: 2 columns, 162 px each.
+          // A phone's shelf is three columns, 110 px each at 390 px.
           expect(
             tester.getRect(find.byType(LibraryBookCard).first).width,
-            closeTo(162, 0.6),
+            closeTo(110, 0.6),
           );
         },
       );

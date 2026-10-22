@@ -182,6 +182,12 @@ abstract class AppLocalizations {
   /// **'Not started'**
   String get cardNotStarted;
 
+  /// A book's reading status once it is read to the end.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished'**
+  String get cardFinished;
+
   /// Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.
   ///
   /// In en, this message translates to:
@@ -193,6 +199,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cover of {title}'**
   String cardCoverSemantics(String title);
+
+  /// Semantics label for a shelf card's title: the title with its author, which the card shows only on a generated cover.
+  ///
+  /// In en, this message translates to:
+  /// **'{title}, by {author}'**
+  String cardTitleByAuthorSemantics(String title, String author);
 
   /// Retained Flutter tooltip for the card's overflow action; no Iced counterpart (Iced draws a bare glyph).
   ///
@@ -230,10 +242,10 @@ abstract class AppLocalizations {
   /// **'Continue reading'**
   String get libraryContinueReading;
 
-  /// Iced reference key: continue. The continue card's right-hand link label; the two spaces before the chevron are the reference's own spacing.
+  /// The Continue reading hero's primary action, which opens the book at its saved place.
   ///
   /// In en, this message translates to:
-  /// **'Continue  ›'**
+  /// **'Continue'**
   String get libraryContinue;
 
   /// Iced reference key: percent-complete. The continue card's progress label; the placeholder is the rounded percentage, never concatenated in Dart.

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/production_shell_harness.dart';
@@ -41,6 +42,7 @@ Widget _app(Widget child) => productionShell(home: Scaffold(body: child));
 LibraryCollection _collection(LibraryModel model) => LibraryCollection(
   model: model,
   openBook: (_) {},
+  openNotes: () {},
   removeBook: (_) {},
   loadMore: () {},
   retryPaging: () {},
@@ -124,50 +126,44 @@ void main() {
   });
 
   group('card metadata typography', () {
-    testWidgets('Japanese titles and authors use the bundled Japanese face', (
+    // Book titles are editorial: Literata, then Shippori Mincho for Japanese.
+    // The author is set on the generated cover in the interface face for its
+    // script.
+    testWidgets('Japanese titles and authors reach the bundled Japanese face', (
       tester,
     ) async {
       await tester.pumpWidget(
         _app(_collection(LibraryModel(books: [_japaneseBook], loaded: true))),
       );
 
-      final title = _paragraph(
-        tester,
-        _japaneseBook.title,
-        size: ShosaiTokens.typeSize13,
+      final title = _paragraph(tester, _japaneseBook.title, size: 14);
+      expect(title.text.style?.fontFamily, shellEditorialFontFamily);
+      expect(
+        title.text.style?.fontFamilyFallback?.first,
+        ShosaiTokens.typeFamilyEditorialJapaneseFlutter,
       );
-      expect(title.text.style?.fontFamily, shosaiJapaneseInterfaceFontFamily);
-      expect(title.text.style?.fontFamilyFallback, [shosaiInterfaceFontFamily]);
-      final author = _paragraph(
-        tester,
-        _japaneseBook.author!,
-        size: ShosaiTokens.typeSize11,
-      );
+      // A Japanese author is a `ui-caption` label.
+      final author = _paragraph(tester, _japaneseBook.author!, size: 12);
       expect(author.text.style?.fontFamily, shosaiJapaneseInterfaceFontFamily);
       expect(author.text.style?.fontFamilyFallback, [
         shosaiInterfaceFontFamily,
       ]);
     });
 
-    testWidgets('Latin titles and authors keep the Latin face', (tester) async {
+    testWidgets('Latin titles and authors keep the Latin faces', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _app(_collection(LibraryModel(books: [_latinBook], loaded: true))),
       );
 
-      final title = _paragraph(
-        tester,
-        _latinBook.title,
-        size: ShosaiTokens.typeSize13,
-      );
-      expect(title.text.style?.fontFamily, shosaiInterfaceFontFamily);
-      expect(
-        title.text.style?.fontFamilyFallback,
-        contains(shosaiJapaneseInterfaceFontFamily),
-      );
+      final title = _paragraph(tester, _latinBook.title, size: 14);
+      expect(title.text.style?.fontFamily, shellEditorialFontFamily);
+      // A generated cover sets a Latin author in capitals.
       final author = _paragraph(
         tester,
-        _latinBook.author!,
-        size: ShosaiTokens.typeSize11,
+        _latinBook.author!.toUpperCase(),
+        size: 11,
       );
       expect(author.text.style?.fontFamily, shosaiInterfaceFontFamily);
     });

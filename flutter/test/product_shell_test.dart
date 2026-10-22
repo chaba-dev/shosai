@@ -11,7 +11,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
-import 'package:shosai_flutter/theme_tokens.dart';
+import 'package:shosai_flutter/shell/view.dart';
 
 import 'support/production_shell_harness.dart';
 import 'support/bridge_pdf_engine.dart';
@@ -19,13 +19,16 @@ import 'support/bridge_records.dart';
 
 /// The card's own title line.
 ///
-/// A card without a cover shows the title in its placeholder too, so a bare
-/// text finder would match twice; the card's title is the 13 px line (LB-11).
-Finder _cardTitle(String title) => find.byWidgetPredicate(
-  (widget) =>
-      widget is Text &&
-      widget.data == title &&
-      widget.style?.fontSize == ShosaiTokens.typeSize13,
+/// A card without a cover shows the title on its generated cover too, so a
+/// bare text finder would match twice; the card's title is the one outside
+/// the cover.
+Finder _cardTitle(String title) => find.byElementPredicate(
+  (element) =>
+      element.widget is Text &&
+      (element.widget as Text).data == title &&
+      element.findAncestorWidgetOfExactType<LibraryBookCard>() != null &&
+      element.findAncestorWidgetOfExactType<ShellGeneratedCover>() == null,
+  description: 'the card title "$title"',
 );
 
 void main() {
@@ -204,7 +207,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_cardTitle('A Book'), findsOneWidget);
-    expect(find.text('Ada'), findsOneWidget);
+    expect(find.text('ADA'), findsOneWidget);
     expect(find.text('42%'), findsOneWidget);
     // The card's format label; the sidebar carries the same format name.
     expect(

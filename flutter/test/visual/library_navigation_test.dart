@@ -112,15 +112,16 @@ void main() {
     matching: find.widgetWithText(ShadButton, label),
   );
 
-  /// A grid card's own 13 px title line.
+  /// A shelf card's own title line.
   ///
-  /// The continue-reading section paints the same book's title in its own 16 px
-  /// line, so a bare text finder would match both.
-  Finder cardTitle(String title) => find.byWidgetPredicate(
-    (widget) =>
-        widget is Text &&
-        widget.data == title &&
-        widget.style?.fontSize == ShosaiTokens.typeSize13,
+  /// The hero and the generated covers paint the same title, so a bare text
+  /// finder would match several.
+  Finder cardTitle(String title) => find.byElementPredicate(
+    (element) =>
+        element.widget is Text &&
+        (element.widget as Text).data == title &&
+        element.findAncestorWidgetOfExactType<LibraryBookCard>() != null &&
+        element.findAncestorWidgetOfExactType<ShellGeneratedCover>() == null,
   );
 
   /// The label paragraph inside the chrome control labelled [label].

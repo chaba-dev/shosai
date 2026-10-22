@@ -51,6 +51,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cardNotStarted => 'Not started';
 
   @override
+  String get cardFinished => 'Finished';
+
+  @override
   String cardPercentRead(int percentage) {
     return '$percentage%';
   }
@@ -58,6 +61,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String cardCoverSemantics(String title) {
     return 'Cover of $title';
+  }
+
+  @override
+  String cardTitleByAuthorSemantics(String title, String author) {
+    return '$title, by $author';
   }
 
   @override
@@ -79,7 +87,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get libraryContinueReading => 'Continue reading';
 
   @override
-  String get libraryContinue => 'Continue  ›';
+  String get libraryContinue => 'Continue';
 
   @override
   String libraryPercentComplete(int percentage) {
