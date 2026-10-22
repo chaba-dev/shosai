@@ -1,0 +1,23 @@
+name: Nix CI shell
+description: >
+  Install Nix and restore the store for `nix develop .#ci` from the Actions
+  cache, falling back to the public binary cache on a miss.
+inputs:
+  save:
+    description: >
+      Save the store when the cache misses. One job per runner OS saves, so the
+      others do not each pack and race to upload the same multi-gigabyte cache.
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: DeterminateSystems/nix-installer-action@main
+    - uses: nix-community/cache-nix-action@v7
+      with:
+        primary-key: nix-ci-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+        save: ${{ inputs.save }}
+        # After saving, delete this ref's caches for older flake inputs.
+        purge: ${{ inputs.save }}
+        purge-prefixes: nix-ci-${{ runner.os }}-${{ runner.arch }}-
+        purge-created: 0
+        purge-primary-key: never

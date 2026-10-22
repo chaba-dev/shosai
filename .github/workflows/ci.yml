@@ -15,6 +15,7 @@ on:
       - "flake.nix"
       - "flake.lock"
       - ".github/workflows/ci.yml"
+      - ".github/actions/**"
       - ".github/workflows/release-pr.yml"
   pull_request:
     branches: [main]
@@ -30,6 +31,7 @@ on:
       - "flake.nix"
       - "flake.lock"
       - ".github/workflows/ci.yml"
+      - ".github/actions/**"
       - ".github/workflows/release-pr.yml"
 
 jobs:
@@ -38,16 +40,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make check-fmt
+      - uses: ./.github/actions/nix-ci
+        with:
+          save: "true"
+      - run: nix develop .#ci --command make check-fmt
 
   flutter-analyze:
     name: Flutter analyze
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make lint
+      - uses: ./.github/actions/nix-ci
+      - run: nix develop .#ci --command make lint
 
   rfd-validation:
     name: RFD validation
@@ -61,9 +65,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make check-l10n-codegen
-      - run: nix develop --command make check-theme-tokens
+      - uses: ./.github/actions/nix-ci
+      - run: nix develop .#ci --command make check-l10n-codegen
+      - run: nix develop .#ci --command make check-theme-tokens
 
   flutter-test:
     name: Flutter tests (${{ matrix.os }})
@@ -74,52 +78,54 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make test-app
+      - uses: ./.github/actions/nix-ci
+      - run: nix develop .#ci --command make test-app
 
   script-test:
     name: Script tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make test-scripts
+      - uses: ./.github/actions/nix-ci
+      - run: nix develop .#ci --command make test-scripts
 
   flutter-linux-host:
     name: Flutter Linux host
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make linux-debug
+      - uses: ./.github/actions/nix-ci
+      - run: nix develop .#ci --command make linux-debug
       - name: Verify the Linux bundle carries the declared fonts
-        run: nix develop --command make check-linux-bundle
+        run: nix develop .#ci --command make check-linux-bundle
 
   flutter-packaged-linux:
     name: Flutter packaged tests (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: ./.github/actions/nix-ci
       # Unsets the PDFium overrides: the bundle's PDFium and SQLite must load.
-      - run: nix develop --command make test-packaged-linux
+      - run: nix develop .#ci --command make test-packaged-linux
 
   flutter-packaged-macos:
     name: Flutter packaged tests (macOS)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make test-packaged-macos
+      - uses: ./.github/actions/nix-ci
+      - run: nix develop .#ci --command make test-packaged-macos
 
   flutter-macos-host:
     name: Flutter macOS host
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make macos-smoke
+      - uses: ./.github/actions/nix-ci
+        with:
+          save: "true"
+      - run: nix develop .#ci --command make macos-smoke
       - name: Verify the macOS bundle carries the declared fonts
         run: |
-          nix develop --command python3 scripts/check_flutter_bundle.py \
+          nix develop .#ci --command python3 scripts/check_flutter_bundle.py \
             "flutter/build/macos/Build/Products/Debug/shosai_flutter.app"

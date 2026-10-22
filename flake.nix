@@ -56,20 +56,22 @@
           else
             pkgs.flutter;
 
+        # CI builds and tests the host desktop only. The engine artifacts for
+        # Android alone are 757 MiB on Linux.
+        ciFlutter = flutter.override {
+          supportedTargetFlutterPlatforms = [
+            "universal"
+          ]
+          ++ pkgs.lib.optional pkgs.stdenv.isLinux "linux"
+          ++ pkgs.lib.optional pkgs.stdenv.isDarwin "macos";
+        };
+
         hostXcrun = pkgs.writeShellScriptBin "xcrun" ''
           exec /usr/bin/xcrun "$@"
         '';
 
-        # Common dependencies across all platforms
-        commonDeps = with pkgs; [
-          # tools
-          androidJdk
-          androidSdk
-          flutter # the `let` binding above, not pkgs.flutter
-          git-cliff
-          jujutsu
-          hugo
-
+        # What building and testing the application needs: all that CI installs
+        buildDeps = with pkgs; [
           # Flutter Linux host build deps
           pkg-config
           cmake
@@ -77,10 +79,30 @@
 
           # PDFium for `flutter test` (see SHOSAI_PDFIUM_LIBRARY below)
           pdfium-binaries
+        ];
+
+        # Android, release and editor tools for local development. CI builds no
+        # Android target, and the Android SDK and NDK are unfree, so the public
+        # binary cache does not carry them: every CI job would build them.
+        devDeps = with pkgs; [
+          androidJdk
+          androidSdk
+          git-cliff
+          jujutsu
+          hugo
 
           # LSP
           nodePackages.yaml-language-server
         ];
+
+        androidEnv = {
+          ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
+          ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";
+          ANDROID_NDK_HOME = "${androidSdk}/libexec/android-sdk/ndk-bundle";
+          ANDROID_NDK_ROOT = "${androidSdk}/libexec/android-sdk/ndk-bundle";
+          JAVA_HOME = androidJdk.home;
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidSdk}/libexec/android-sdk/build-tools/36.0.0/aapt2";
+        };
 
         # Linux-specific dependencies
         linuxDeps =
@@ -127,20 +149,14 @@
             # Windows system APIs are automatically available
             # No additional dependencies needed for native Windows builds
           ];
-      in
-      {
-        devShells.default = pkgs.mkShell (
-          {
-            nativeBuildInputs = commonDeps ++ linuxDeps ++ macosDevDeps ++ windowsDeps;
 
-            # Common environment variables
-            ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
-            ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";
-            ANDROID_NDK_HOME = "${androidSdk}/libexec/android-sdk/ndk-bundle";
-            ANDROID_NDK_ROOT = "${androidSdk}/libexec/android-sdk/ndk-bundle";
-            JAVA_HOME = androidJdk.home;
-            GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidSdk}/libexec/android-sdk/build-tools/36.0.0/aapt2";
-          }
+        mkDevShell =
+          flutter: extraDeps: extraEnv:
+          pkgs.mkShell (
+            {
+              nativeBuildInputs = [ flutter ] ++ buildDeps ++ linuxDeps ++ macosDevDeps ++ windowsDeps ++ extraDeps;
+            }
+            // extraEnv
           // (pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             # Linux: LD_LIBRARY_PATH for shared libraries
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
@@ -177,7 +193,13 @@
               export MACOSX_DEPLOYMENT_TARGET=13.0
             '';
           })
-        );
+          );
+      in
+      {
+        devShells.default = mkDevShell flutter devDeps androidEnv;
+
+        # The shell CI uses: `nix develop .#ci`
+        devShells.ci = mkDevShell ciFlutter [ ] { };
       }
     );
 }
