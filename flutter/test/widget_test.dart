@@ -663,7 +663,8 @@ void main() {
 
       expect(controller.model.busy, isFalse);
       expect(controller.model.document?.handle, _documentHandle);
-      expect(reported, hasLength(6));
+      // The six open transitions, then the Contents entries the open loads.
+      expect(reported, hasLength(7));
 
       controller.dispose();
       await bridge.disposed.future;

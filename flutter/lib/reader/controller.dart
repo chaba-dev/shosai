@@ -259,6 +259,10 @@ final class ReaderController implements Listenable {
   String? _searchError;
   int _searchCurrentIndex = 0;
   int _contentsRevision = 0;
+
+  /// Whether a Contents load is in flight, so the panel opening while the
+  /// open's own load runs does not start a second one.
+  bool _contentsLoading = false;
   int _exportRevision = 0;
   int _documentPickerRevision = 0;
   bool _documentPickerActive = false;
@@ -455,6 +459,7 @@ final class ReaderController implements Listenable {
       case _ReaderContentsLoaded():
         if (_isCurrent(message.generation) &&
             message.revision == _contentsRevision) {
+          _contentsLoading = false;
           _emit(
             _model.copyWith(
               contents: ReaderContentsPresentation(
@@ -469,6 +474,7 @@ final class ReaderController implements Listenable {
       case _ReaderContentsFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _contentsRevision) {
+          _contentsLoading = false;
           _emit(
             _model.copyWith(
               contents: ReaderContentsPresentation(
@@ -1872,14 +1878,18 @@ final class ReaderController implements Listenable {
     // the current revision, so a later cancel can invalidate it the same way.
     _cancelContentsEffects();
     final revision = _contentsRevision;
-    _emit(
-      _model.copyWith(
-        contents: ReaderContentsPresentation(
-          status: ReaderContentsStatus.loading,
-          entries: _model.contents.entries,
+    _contentsLoading = true;
+    // A fresh document already starts out loading; only a retry changes it.
+    if (_model.contents.status != ReaderContentsStatus.loading) {
+      _emit(
+        _model.copyWith(
+          contents: ReaderContentsPresentation(
+            status: ReaderContentsStatus.loading,
+            entries: _model.contents.entries,
+          ),
         ),
-      ),
-    );
+      );
+    }
     final loader = _contentsLoader;
     if (loader != null) {
       unawaited(() async {
@@ -1984,6 +1994,7 @@ final class ReaderController implements Listenable {
   /// Cancels every in-flight Contents load and drops its completion.
   void _cancelContentsEffects() {
     _contentsRevision += 1;
+    _contentsLoading = false;
     for (final cancellation in _contentsCancellations) {
       _bridge.cancel(id: cancellation);
     }
@@ -4904,6 +4915,13 @@ final class ReaderController implements Listenable {
               : [?_model.error, recoveryError].join('\n'),
         ),
       );
+      // The toolbar and status line name the current section, so an opened
+      // document loads its contents without waiting for the panel.
+      if (_model.document != null &&
+          _model.contents.status == ReaderContentsStatus.loading &&
+          !_contentsLoading) {
+        _contentsRequested();
+      }
       _startRequestedRelayoutIfReady();
     }
     _activeBridgeOperations -= 1;
