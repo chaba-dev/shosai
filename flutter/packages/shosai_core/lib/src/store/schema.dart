@@ -53,4 +53,36 @@ CREATE TABLE managed_file_deletion_debt (
     retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0)
 ) STRICT;
 '''),
+  Migration(3, 'reading state', '''
+-- Where the reader left each book. Keyed by content, so it survives removing
+-- and re-importing the book.
+CREATE TABLE reading_state (
+    content_hash    TEXT PRIMARY KEY NOT NULL
+                    CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    unit            INTEGER NOT NULL CHECK (unit >= 0),
+    location_offset INTEGER CHECK (location_offset IS NULL OR location_offset >= 0),
+    zoom            REAL NOT NULL CHECK (zoom > 0 AND zoom <= 1e300),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+) STRICT, WITHOUT ROWID;
+'''),
+  Migration(4, 'bookmarks', '''
+-- Point bookmarks, keyed by content like the reading state. AUTOINCREMENT
+-- keeps a deleted bookmark's id from being reused, so a late request for it
+-- cannot reach a newer bookmark.
+CREATE TABLE bookmarks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_hash    TEXT NOT NULL
+                    CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    unit            INTEGER NOT NULL CHECK (unit >= 0),
+    location_offset INTEGER CHECK (location_offset IS NULL OR location_offset >= 0),
+    title           TEXT CHECK (title IS NULL OR length(CAST(title AS BLOB)) <= 4096),
+    note            TEXT CHECK (note IS NULL OR length(CAST(note AS BLOB)) <= 65536),
+    color           TEXT NOT NULL DEFAULT 'yellow'
+                    CHECK (length(CAST(color AS BLOB)) BETWEEN 1 AND 64),
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+) STRICT;
+
+CREATE INDEX bookmarks_book_order_idx
+    ON bookmarks(content_hash, unit, coalesce(location_offset, 0), created_at, id);
+'''),
 ];
