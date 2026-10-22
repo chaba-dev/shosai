@@ -23,6 +23,7 @@
             android_sdk.accept_license = true;
           };
         };
+        inherit (pkgs) lib stdenv;
 
         androidSdk = (pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "35" "36" ];
@@ -41,7 +42,7 @@
         # the engine artifacts with auto-patchelf, which drops `$ORIGIN`.
         # Backport nixpkgs 90cf442 (#574475); drop this once the pin includes it.
         flutter =
-          if pkgs.stdenv.isLinux then
+          if stdenv.isLinux then
             pkgs.flutter.override (prev: {
               callPackage =
                 path: args:
@@ -62,8 +63,8 @@
           supportedTargetFlutterPlatforms = [
             "universal"
           ]
-          ++ pkgs.lib.optional pkgs.stdenv.isLinux "linux"
-          ++ pkgs.lib.optional pkgs.stdenv.isDarwin "macos";
+          ++ lib.optional stdenv.isLinux "linux"
+          ++ lib.optional stdenv.isDarwin "macos";
         };
 
         hostXcrun = pkgs.writeShellScriptBin "xcrun" ''
@@ -107,7 +108,7 @@
         # Linux-specific dependencies
         linuxDeps =
           with pkgs;
-          pkgs.lib.optionals pkgs.stdenv.isLinux [
+          lib.optionals stdenv.isLinux [
             # Flutter Linux desktop build deps
             gtk3
             ninja
@@ -135,31 +136,27 @@
 
         macosDevDeps =
           with pkgs;
-          pkgs.lib.optionals pkgs.stdenv.isDarwin [
+          lib.optionals stdenv.isDarwin [
             cocoapods
             hostXcrun
             # Flutter 3.41 relies on GNU rsync's --chmod before in-place lipo.
             rsync
           ];
 
-        # Windows-specific dependencies (when cross-compiling or running on Windows)
-        windowsDeps =
-          with pkgs;
-          pkgs.lib.optionals pkgs.stdenv.hostPlatform.isWindows [
-            # Windows system APIs are automatically available
-            # No additional dependencies needed for native Windows builds
-          ];
-
         mkDevShell =
-          flutter: extraDeps: extraEnv:
+          {
+            flutter,
+            extraDeps ? [ ],
+            env ? { },
+          }:
           pkgs.mkShell (
             {
-              nativeBuildInputs = [ flutter ] ++ buildDeps ++ linuxDeps ++ macosDevDeps ++ windowsDeps ++ extraDeps;
+              nativeBuildInputs = [ flutter ] ++ buildDeps ++ linuxDeps ++ macosDevDeps ++ extraDeps;
             }
-            // extraEnv
-          // (pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            // env
+          // (lib.optionalAttrs stdenv.isLinux {
             # Linux: LD_LIBRARY_PATH for shared libraries
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
+            LD_LIBRARY_PATH = lib.makeLibraryPath (with pkgs; [
               libxkbcommon
               wayland
               libx11
@@ -181,7 +178,7 @@
             # pdfrx's own PDFium.
             SHOSAI_PDFIUM_LIBRARY = "${pkgs.pdfium-binaries}/lib/libpdfium.so";
           })
-          // (pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+          // (lib.optionalAttrs stdenv.isDarwin {
             SHOSAI_PDFIUM_LIBRARY = "${pkgs.pdfium-binaries}/lib/libpdfium.dylib";
 
             # Builds use the host Apple SDK and system libraries rather than
@@ -196,10 +193,14 @@
           );
       in
       {
-        devShells.default = mkDevShell flutter devDeps androidEnv;
+        devShells.default = mkDevShell {
+          inherit flutter;
+          extraDeps = devDeps;
+          env = androidEnv;
+        };
 
         # The shell CI uses: `nix develop .#ci`
-        devShells.ci = mkDevShell ciFlutter [ ] { };
+        devShells.ci = mkDevShell { flutter = ciFlutter; };
       }
     );
 }
