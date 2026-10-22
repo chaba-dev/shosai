@@ -298,7 +298,10 @@ class ShellOpenBooksButton extends StatelessWidget {
 /// Each card shows the book's cover where the design system shows a
 /// miniature of the open page; the page's text is the reader's, and the
 /// switcher does not reach into it.
-class ShellTabSwitcher extends StatelessWidget {
+///
+/// It takes keyboard focus while it shows and gives it back to what had it,
+/// such as the count button, when it closes.
+class ShellTabSwitcher extends StatefulWidget {
   const ShellTabSwitcher({
     super.key,
     required this.model,
@@ -313,12 +316,31 @@ class ShellTabSwitcher extends StatelessWidget {
   final ShellActions actions;
 
   @override
+  State<ShellTabSwitcher> createState() => _ShellTabSwitcherState();
+}
+
+class _ShellTabSwitcherState extends State<ShellTabSwitcher> {
+  /// What had focus when the switcher opened.
+  final FocusNode? _restore = FocusManager.instance.primaryFocus;
+
+  @override
+  void dispose() {
+    final restore = _restore;
+    // The reader under the switcher becomes focusable again in this frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (restore?.context?.mounted ?? false) restore!.requestFocus();
+    });
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final ShellTabSwitcher(:model, :covers, :actions) = widget;
     final palette = ShellPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final title = l10n.shellOpenBooks(model.openBooks.length);
     final close = actions.closeSwitcher;
-    return PopScope(
+    final sheet = PopScope(
       canPop: close == null,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) close?.call();
@@ -391,13 +413,13 @@ class ShellTabSwitcher extends StatelessWidget {
                   builder: (context, constraints) {
                     final width = math.max(
                       0.0,
-                      (constraints.maxWidth - 32 - gap) / 2,
+                      (constraints.maxWidth - 32 - ShellTabSwitcher.gap) / 2,
                     );
                     return SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                       child: Wrap(
-                        spacing: gap,
-                        runSpacing: gap,
+                        spacing: ShellTabSwitcher.gap,
+                        runSpacing: ShellTabSwitcher.gap,
                         children: [
                           for (final entry in model.openBooks)
                             SizedBox(
@@ -427,6 +449,8 @@ class ShellTabSwitcher extends StatelessWidget {
         ),
       ),
     );
+    // Its own scope, so Tab moves among its controls only.
+    return FocusScope(autofocus: true, child: sheet);
   }
 }
 

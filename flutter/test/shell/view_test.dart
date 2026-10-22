@@ -66,6 +66,7 @@ Future<void> _pumpFrame(
   required _Recorder recorder,
   Locale? locale,
   Map<int, Uint8List> covers = const {},
+  Widget content = const SizedBox.expand(key: Key('content')),
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -79,7 +80,7 @@ Future<void> _pumpFrame(
           model: model,
           covers: covers,
           actions: recorder.actions,
-          child: const SizedBox.expand(key: Key('content')),
+          child: content,
         ),
       ),
     ),
@@ -455,6 +456,71 @@ void main() {
     );
     expect(find.byType(ShellTabSwitcher), findsNothing);
   });
+
+  testWidgets(
+    'the switcher keeps focus and assistive technology off the reader',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final recorder = _Recorder();
+      final reading = _model(reading: true);
+      final switching = update(reading, const ShellSwitcherOpened());
+      final readerFocus = FocusNode(debugLabel: 'reader');
+      addTearDown(readerFocus.dispose);
+      final reader = Center(
+        child: TextButton(
+          focusNode: readerFocus,
+          onPressed: () {},
+          child: const Text('Reader control'),
+        ),
+      );
+      Future<void> pump(ShellModel model, {Size size = const Size(390, 844)}) =>
+          _pumpFrame(
+            tester,
+            size: size,
+            model: model,
+            recorder: recorder,
+            content: reader,
+          );
+
+      await pump(reading);
+      readerFocus.requestFocus();
+      await tester.pump();
+      expect(readerFocus.hasPrimaryFocus, isTrue);
+
+      await pump(switching);
+      expect(
+        find.text('Reader control'),
+        findsOneWidget,
+        reason: 'still mounted',
+      );
+      expect(find.semantics.byLabel('Reader control'), findsNothing);
+      expect(readerFocus.hasFocus, isFalse);
+      expect(
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<ShellTabSwitcher>(),
+        isNotNull,
+        reason: 'focus moves into the switcher',
+      );
+      for (var i = 0; i < 12; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(readerFocus.hasFocus, isFalse, reason: 'tab $i');
+      }
+
+      // Leaving the phone layout hides the switcher but keeps it open: the
+      // sidebar's rail shows the open books there, and the reader is reachable.
+      await pump(switching, size: const Size(900, 700));
+      expect(find.byType(ShellTabSwitcher), findsNothing);
+      expect(find.semantics.byLabel('Reader control'), findsOneWidget);
+      await pump(switching);
+      expect(find.byType(ShellTabSwitcher), findsOneWidget);
+
+      await pump(reading);
+      expect(find.semantics.byLabel('Reader control'), findsOneWidget);
+      expect(readerFocus.hasPrimaryFocus, isTrue, reason: 'focus comes back');
+      semantics.dispose();
+    },
+  );
 
   testWidgets('the open-book count is a labelled touch target', (tester) async {
     var presses = 0;

@@ -116,11 +116,15 @@ class ShellFrame extends StatelessWidget {
     final palette = ShellPalette.of(context);
     if (layout == ShellLayout.phone) {
       if (model.reading) {
-        // The reader stays mounted under the switcher, so it keeps its place.
+        // The reader stays mounted under the switcher, so it keeps its place,
+        // but keyboard focus and assistive technology cannot reach it there.
         return Stack(
           fit: StackFit.expand,
           children: [
-            child,
+            ExcludeFocus(
+              excluding: model.switching,
+              child: ExcludeSemantics(excluding: model.switching, child: child),
+            ),
             if (model.switching)
               ShellTabSwitcher(model: model, covers: covers, actions: actions),
           ],
