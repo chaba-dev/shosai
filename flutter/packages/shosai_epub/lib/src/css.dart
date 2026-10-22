@@ -4,7 +4,9 @@
 /// lists, `!important`, inline `style`, source order, and the property subset
 /// the normalized model can express (display, font-size/-family/-weight/-style,
 /// text-align, direction, margins, text-indent, width/height/max-width,
-/// white-space, writing-mode and its `-epub-`/`-webkit-` aliases). `@font-face` is collected for embedded font admission.
+/// white-space, writing-mode and text-combine-upright with their `-epub-`,
+/// `-webkit-` and `-ms-` aliases). `@font-face` is collected for embedded font
+/// admission.
 ///
 /// Deliberately unsupported and reported as a warning, never silently applied:
 /// `@media` and other at-rules, attribute/pseudo-class/pseudo-element
@@ -594,6 +596,11 @@ const Set<String> kSupportedCssProperties = {
   'writing-mode',
   '-epub-writing-mode',
   '-webkit-writing-mode',
+  'text-combine-upright',
+  '-epub-text-combine',
+  '-epub-text-combine-horizontal',
+  '-webkit-text-combine',
+  '-ms-text-combine-horizontal',
 };
 
 List<CssDeclaration> _parseDeclarations(String body, [List<String>? warnings]) {
@@ -713,6 +720,7 @@ class EpubComputedStyle {
     required this.height,
     required this.maxWidth,
     this.writingMode = EpubWritingMode.horizontalTb,
+    this.combine,
   });
 
   final EpubDisplay display;
@@ -734,6 +742,10 @@ class EpubComputedStyle {
 
   /// Inherited, as CSS `writing-mode` is.
   final EpubWritingMode writingMode;
+
+  /// Tate-chū-yoko, or null for `none`. Inherited, as CSS
+  /// `text-combine-upright` is.
+  final EpubTextCombine? combine;
 
   bool get isBlockLike => display != EpubDisplay.inline;
 }

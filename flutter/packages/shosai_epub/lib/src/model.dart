@@ -18,6 +18,32 @@ enum EpubDirection { ltr, rtl }
 /// bottom and stacks them right to left; anything else is horizontal.
 enum EpubWritingMode { horizontalTb, verticalRl }
 
+/// Tate-chū-yoko: text a vertical line sets side by side in one upright em
+/// square, from CSS `text-combine-upright` (or its `-epub-`, `-webkit-` and
+/// `-ms-` spellings). Horizontal text ignores it.
+class EpubTextCombine {
+  /// Combines all of a box's text (`all`, or the legacy `horizontal`).
+  const EpubTextCombine.all() : digits = 0;
+
+  /// Combines each run of at most [digits] ASCII digits (`digits <n>`).
+  const EpubTextCombine.digits(this.digits) : assert(digits >= 2);
+
+  /// The longest digit run that combines, or 0 when all the text does.
+  final int digits;
+
+  bool get all => digits == 0;
+
+  @override
+  bool operator ==(Object other) =>
+      other is EpubTextCombine && other.digits == digits;
+
+  @override
+  int get hashCode => digits.hashCode;
+
+  @override
+  String toString() => all ? 'all' : 'digits $digits';
+}
+
 enum EpubFontStyle { normal, italic }
 
 enum EpubFontWeight { normal, bold }
@@ -117,6 +143,7 @@ class EpubTextSpan {
     this.link,
     this.math,
     this.canonical,
+    this.combine,
   });
 
   String text;
@@ -137,6 +164,10 @@ class EpubTextSpan {
 
   /// Canonical scalar mapping, assigned by [assignCanonicalOffsets].
   EpubCanonicalSpan? canonical;
+
+  /// Tate-chū-yoko for this span's text, or null. A span that combines all
+  /// its text is one unit and never merges with a neighbour.
+  EpubTextCombine? combine;
 
   /// Element ids/legacy anchor names that resolve to this span's start.
   List<String> anchorIds = const [];
@@ -163,6 +194,7 @@ class EpubTextSpan {
     link: link,
     math: math,
     canonical: canonical,
+    combine: combine,
   );
 }
 

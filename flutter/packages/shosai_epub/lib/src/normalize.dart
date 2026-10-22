@@ -687,6 +687,33 @@ EpubComputedStyle _applyDeclaration(
         ),
         _ => style,
       };
+    case 'text-combine-upright' ||
+        '-epub-text-combine-horizontal' ||
+        '-ms-text-combine-horizontal':
+      final words = lower.split(RegExp(r'\s+'));
+      return switch (words) {
+        ['none'] => _copyWith(style, noCombine: true),
+        ['all'] => _copyWith(style, combine: const EpubTextCombine.all()),
+        ['digits'] => _copyWith(
+          style,
+          combine: const EpubTextCombine.digits(2),
+        ),
+        ['digits', final count] => switch (int.tryParse(count)) {
+          final digits? when digits >= 2 && digits <= 4 => _copyWith(
+            style,
+            combine: EpubTextCombine.digits(digits),
+          ),
+          _ => style,
+        },
+        _ => style,
+      };
+    // The legacy property took `horizontal` for what is now `all`.
+    case '-epub-text-combine' || '-webkit-text-combine':
+      return switch (lower.split(RegExp(r'\s+')).first) {
+        'none' => _copyWith(style, noCombine: true),
+        'horizontal' => _copyWith(style, combine: const EpubTextCombine.all()),
+        _ => style,
+      };
     case 'direction':
       if (lower == 'rtl') return _copyWith(style, direction: EpubDirection.rtl);
       if (lower == 'ltr') return _copyWith(style, direction: EpubDirection.ltr);
@@ -839,6 +866,8 @@ EpubComputedStyle _copyWith(
   EpubLength? height,
   EpubLength? maxWidth,
   EpubWritingMode? writingMode,
+  EpubTextCombine? combine,
+  bool noCombine = false,
 }) => EpubComputedStyle(
   display: display ?? style.display,
   bold: bold ?? style.bold,
@@ -857,6 +886,7 @@ EpubComputedStyle _copyWith(
   height: height ?? style.height,
   maxWidth: maxWidth ?? style.maxWidth,
   writingMode: writingMode ?? style.writingMode,
+  combine: noCombine ? null : combine ?? style.combine,
 );
 
 // ---------------------------------------------------------------------------
@@ -1339,6 +1369,7 @@ class _NormalizeContext {
       fontSizeMultiplier: style.fontSizePx / baseFontSize,
       preserveWhitespace: style.preserveWhitespace,
       link: link,
+      combine: style.combine,
     );
   }
 
@@ -1588,7 +1619,9 @@ class _NormalizeContext {
           current.monospace == next.monospace &&
           current.fontSizeMultiplier == next.fontSizeMultiplier &&
           current.preserveWhitespace == next.preserveWhitespace &&
-          current.link == next.link) {
+          current.link == next.link &&
+          current.combine == next.combine &&
+          !(current.combine?.all ?? false)) {
         current.text = current.text + next.text;
         spans.removeAt(index + 1);
       } else {
