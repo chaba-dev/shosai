@@ -701,5 +701,43 @@
   "shellSearchEmptyBody": "Searching book text and notes across the library is coming. To find a book now, search the library by title or author.",
   "@shellSearchEmptyBody": {
     "description": "The Bookshelf shell: the Search place until the search palette (RFD 6) exists."
+  },
+  "libraryBookCount": "{count, plural, =1{1 book} other{{count} books}}",
+  "@libraryBookCount": {
+    "description": "The library title row: how many books the library holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "libraryOpenCount": "{count} open",
+  "@libraryOpenCount": {
+    "description": "The library title row, after the book count and a middle dot: how many books are open (Reading now). Hidden at zero.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "librarySortLabel": "Sort",
+  "@librarySortLabel": {
+    "description": "The accessible name of the library's sort control."
+  },
+  "librarySortRecent": "Recent",
+  "@librarySortRecent": {
+    "description": "The library's sort control: most recently read first."
+  },
+  "librarySortTitle": "Title",
+  "@librarySortTitle": {
+    "description": "The library's sort control: by title."
+  },
+  "librarySortAuthor": "Author",
+  "@librarySortAuthor": {
+    "description": "The library's sort control: by author."
+  },
+  "cardOpenTag": "Open",
+  "@cardOpenTag": {
+    "description": "The shelf card's meta line: the book is open (in Reading now)."
   }
 }

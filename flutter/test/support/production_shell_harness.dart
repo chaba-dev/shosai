@@ -450,6 +450,7 @@ class HarnessBridge
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
@@ -465,10 +466,31 @@ class HarnessBridge
               (format == null || book.format == format),
         )
         .toList();
+    // [books] is in recent order; the other orders sort a copy.
+    int compare(String? a, String? b) => (a ?? '\u{10FFFF}')
+        .toLowerCase()
+        .compareTo((b ?? '\u{10FFFF}').toLowerCase());
+    switch (sort) {
+      case FlutterLibrarySort.recent:
+        break;
+      case FlutterLibrarySort.title:
+        filtered.sort((a, b) => compare(a.title, b.title));
+      case FlutterLibrarySort.author:
+        filtered.sort(
+          (a, b) => switch (compare(a.author, b.author)) {
+            0 => compare(a.title, b.title),
+            final order => order,
+          },
+        );
+    }
     final end = (offset + limit).clamp(0, filtered.length);
     return FlutterLibraryPage(
       books: filtered.sublist(offset.clamp(0, end), end),
       hasMore: end < filtered.length,
+      bookCount: books.length,
+      continueReading: books
+          .where((book) => book.lastRead != null && book.progress < 1)
+          .firstOrNull,
     );
   }
 

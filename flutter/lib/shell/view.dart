@@ -10,6 +10,7 @@ import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/shell/controller.dart';
 
+part 'view_controls.dart';
 part 'view_cover.dart';
 part 'view_navigation.dart';
 part 'view_palette.dart';

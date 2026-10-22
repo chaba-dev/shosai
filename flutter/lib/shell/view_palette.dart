@@ -56,6 +56,7 @@ final class ShellPalette {
     required this.chrome,
     required this.surface,
     required this.surfaceSunken,
+    required this.controlRaised,
     required this.hover,
     required this.line,
     required this.lineStrong,
@@ -78,6 +79,7 @@ final class ShellPalette {
     chrome: ShosaiTokens.colorLightChrome,
     surface: ShosaiTokens.colorLightSurface,
     surfaceSunken: ShosaiTokens.colorLightSurfaceSunken,
+    controlRaised: ShosaiTokens.colorLightControlRaised,
     hover: ShosaiTokens.colorLightHover,
     line: ShosaiTokens.colorLightLine,
     lineStrong: ShosaiTokens.colorLightLineStrong,
@@ -97,6 +99,7 @@ final class ShellPalette {
     chrome: ShosaiTokens.colorDarkChrome,
     surface: ShosaiTokens.colorDarkSurface,
     surfaceSunken: ShosaiTokens.colorDarkSurfaceSunken,
+    controlRaised: ShosaiTokens.colorDarkControlRaised,
     hover: ShosaiTokens.colorDarkHover,
     line: ShosaiTokens.colorDarkLine,
     lineStrong: ShosaiTokens.colorDarkLineStrong,
@@ -132,6 +135,9 @@ final class ShellPalette {
 
   /// Progress tracks.
   final Color surfaceSunken;
+
+  /// The chosen segment of a segmented control.
+  final Color controlRaised;
   final Color hover;
 
   /// Decorative hairlines.
@@ -168,6 +174,20 @@ final class ShellPalette {
       color: shadowBase.withValues(alpha: dark ? .5 : .12),
       offset: const Offset(0, 1),
       blurRadius: 2,
+    ),
+    BoxShadow(
+      color: (dark ? ink : shadowBase).withValues(alpha: .06),
+      spreadRadius: 1,
+    ),
+  ];
+
+  /// `shadow-menu`: capsules and the chosen segment of a segmented control.
+  List<BoxShadow> get menu => [
+    BoxShadow(
+      color: shadowBase.withValues(alpha: dark ? .7 : .35),
+      offset: Offset(0, dark ? 12 : 8),
+      blurRadius: dark ? 32 : 24,
+      spreadRadius: dark ? -12 : -10,
     ),
     BoxShadow(
       color: (dark ? ink : shadowBase).withValues(alpha: .06),

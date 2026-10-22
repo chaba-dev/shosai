@@ -27,6 +27,7 @@ class _StubLibraryBridge
   final pages = <Completer<FlutterLibraryPage>>[];
   final queries = <String?>[];
   final formats = <FlutterBookFormat?>[];
+  final sorts = <FlutterLibrarySort>[];
   final offsets = <int>[];
   var disposeCount = 0;
   var removeCalls = 0;
@@ -58,12 +59,14 @@ class _StubLibraryBridge
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
   }) {
     queries.add(query);
     formats.add(format);
+    sorts.add(sort);
     offsets.add(offset);
     final completer = Completer<FlutterLibraryPage>();
     pages.add(completer);
@@ -204,6 +207,43 @@ void main() {
 
     expect(bridge.formats.last, FlutterBookFormat.epub);
     expect(controller.model.format, FlutterBookFormat.epub);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('changing the sort reloads page one in that order', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(
+        books: [_book(1, 'B Book')],
+        hasMore: true,
+        bookCount: 60,
+      ),
+    );
+    await _settle();
+    expect(controller.model.bookCount, 60);
+
+    controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
+    await _settle();
+    expect(bridge.sorts.last, FlutterLibrarySort.title);
+    expect(bridge.offsets.last, 0);
+    expect(controller.model.sort, FlutterLibrarySort.title);
+
+    // The shelf still shows the old order until its page arrives; the scroll
+    // trigger cannot append a page in either order meanwhile.
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.pages, hasLength(2));
+
+    // Choosing the order already shown asks for nothing.
+    controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
+    await _settle();
+    expect(bridge.pages, hasLength(2));
 
     controller.dispose();
     await _settle();
@@ -916,33 +956,33 @@ void main() {
       editSettings: (_) async => null,
     );
 
+    final firstResumable = FlutterLibraryBook(
+      bookId: 1,
+      title: 'Resumable',
+      format: FlutterBookFormat.pdf,
+      pathKey: '/books/1.pdf',
+      managed: true,
+      progress: 0.42,
+      dateAdded: '2026-09-10',
+      lastRead: '2026-09-19T08:12:00Z',
+    );
+    final secondResumable = FlutterLibraryBook(
+      bookId: 2,
+      title: 'Second resumable',
+      format: FlutterBookFormat.pdf,
+      pathKey: '/books/2.pdf',
+      managed: true,
+      progress: 0.07,
+      dateAdded: '2026-09-10',
+      lastRead: '2026-09-18T08:12:00Z',
+    );
     controller.dispatch(const LibraryStarted());
     await _settle();
     bridge.pages.single.complete(
       FlutterLibraryPage(
-        books: [
-          FlutterLibraryBook(
-            bookId: 1,
-            title: 'Resumable',
-            format: FlutterBookFormat.pdf,
-            pathKey: '/books/1.pdf',
-            managed: true,
-            progress: 0.42,
-            dateAdded: '2026-09-10',
-            lastRead: '2026-09-19T08:12:00Z',
-          ),
-          FlutterLibraryBook(
-            bookId: 2,
-            title: 'Second resumable',
-            format: FlutterBookFormat.pdf,
-            pathKey: '/books/2.pdf',
-            managed: true,
-            progress: 0.07,
-            dateAdded: '2026-09-10',
-            lastRead: '2026-09-18T08:12:00Z',
-          ),
-        ],
+        books: [firstResumable, secondResumable],
         hasMore: false,
+        continueReading: firstResumable,
       ),
     );
     await _settle();
@@ -957,19 +997,9 @@ void main() {
     await _settle();
     bridge.pages.last.complete(
       FlutterLibraryPage(
-        books: [
-          FlutterLibraryBook(
-            bookId: 2,
-            title: 'Second resumable',
-            format: FlutterBookFormat.pdf,
-            pathKey: '/books/2.pdf',
-            managed: true,
-            progress: 0.07,
-            dateAdded: '2026-09-10',
-            lastRead: '2026-09-18T08:12:00Z',
-          ),
-        ],
+        books: [secondResumable],
         hasMore: false,
+        continueReading: secondResumable,
       ),
     );
     await _settle();

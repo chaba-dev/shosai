@@ -209,4 +209,57 @@ void main() {
     expect(find.byTooltip(_quiet), findsOneWidget);
     expect(find.byTooltip(_atlas), findsOneWidget);
   });
+
+  testWidgets('the title counts the open books and their cards say Open', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    expect(find.text('6 books'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
+
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('6 books · 1 open'), findsOneWidget);
+    final meta = find.descendant(
+      of: _card(1),
+      matching: find.textContaining('Open', findRichText: true),
+    );
+    expect(meta, findsOneWidget);
+    expect(
+      find.descendant(
+        of: _card(4),
+        matching: find.textContaining('Open', findRichText: true),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('the sort control reorders the shelf and keeps the hero', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    List<int> shelf() => [
+      for (final card in tester.widgetList<LibraryBookCard>(
+        find.byType(LibraryBookCard),
+      ))
+        card.book.bookId,
+    ];
+    expect(shelf(), [1, 2, 3, 4, 5, 6]);
+
+    await tester.tap(find.text('Title'));
+    await tester.pumpAndSettle();
+    // A, D, M, T, then the Japanese titles after the Latin ones.
+    expect(shelf(), [5, 3, 4, 1, 2, 6]);
+    expect(find.byType(LibraryContinueCard), findsOneWidget);
+
+    await tester.tap(find.text('Author'));
+    await tester.pumpAndSettle();
+    expect(shelf().first, 1, reason: 'Ada Lovelace sorts first');
+
+    await tester.tap(find.text('Recent'));
+    await tester.pumpAndSettle();
+    expect(shelf(), [1, 2, 3, 4, 5, 6]);
+  });
 }

@@ -26,8 +26,8 @@ part of 'view.dart';
 // Every control here renders immutable [LibraryModel] state and dispatches a
 // typed message; no widget owns an effect.
 
-/// The library header: title, subtitle, constrained search and the add-books
-/// action.
+/// The library header: title with the book and open counts beside it,
+/// subtitle, constrained search and the add-books action.
 ///
 /// `compact` follows the shared 760 logical-pixel breakpoint: the reference
 /// stacks title, search and action in compact windows and places them in one
@@ -38,6 +38,7 @@ class LibraryHeader extends StatelessWidget {
     super.key,
     required this.compact,
     required this.model,
+    this.openCount = 0,
     required this.canCancelOperation,
     required this.onQueryChanged,
     required this.onImportRequested,
@@ -48,6 +49,9 @@ class LibraryHeader extends StatelessWidget {
 
   final bool compact;
   final LibraryModel model;
+
+  /// How many books are open in Reading now.
+  final int openCount;
 
   /// Whether a cancellable operation other than the add-books import is in
   /// flight, so the header keeps a cancel action for it.
@@ -76,12 +80,7 @@ class LibraryHeader extends StatelessWidget {
       spacing: 2,
       children: [
         // The library is a screen of its own, titled in `ed-display`.
-        Text(
-          l10n.libraryTitle,
-          style: shellScreenTitleStyle(
-            ShellLayout.forWidth(MediaQuery.sizeOf(context).width),
-          ).copyWith(color: scheme.foreground),
-        ),
+        _title(context, l10n, scheme),
         Text(
           l10n.librarySubtitle,
           style: Theme.of(
@@ -183,6 +182,62 @@ class LibraryHeader extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// The title with the counts beside it on its baseline; where the two do
+  /// not share the width, the counts take the line below.
+  Widget _title(
+    BuildContext context,
+    AppLocalizations l10n,
+    ShadColorScheme scheme,
+  ) {
+    final titleStyle = shellScreenTitleStyle(
+      ShellLayout.forWidth(MediaQuery.sizeOf(context).width),
+    ).copyWith(color: scheme.foreground);
+    final title = Text(l10n.libraryTitle, style: titleStyle);
+    final counts = _counts(l10n);
+    if (counts == null) return title;
+    final countsStyle = shosaiInterfaceStyleForText(
+      shellInterfaceStyle(12, 16).copyWith(
+        color: scheme.mutedForeground,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+      counts,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final countsText = Text(counts, style: countsStyle);
+        final width =
+            _textWidth(context, l10n.libraryTitle, titleStyle) +
+            _titleCountsGap +
+            _textWidth(context, counts, countsStyle);
+        if (width > constraints.maxWidth) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [title, countsText],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          spacing: _titleCountsGap,
+          children: [title, countsText],
+        );
+      },
+    );
+  }
+
+  static const double _titleCountsGap = 14;
+
+  /// `12 books · 2 open`: the library's size, then the open books when there
+  /// are any; null until the library has reported its size.
+  String? _counts(AppLocalizations l10n) {
+    final books = model.bookCount;
+    if (books == null) return null;
+    return [
+      l10n.libraryBookCount(books),
+      if (openCount > 0) l10n.libraryOpenCount(openCount),
+    ].join(' · ');
   }
 
   /// The add-books action, or the cancel action while the import is in flight.

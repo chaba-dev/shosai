@@ -490,4 +490,35 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get shellSearchEmptyBody =>
       'Searching book text and notes across the library is coming. To find a book now, search the library by title or author.';
+
+  @override
+  String libraryBookCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count books',
+      one: '1 book',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String libraryOpenCount(int count) {
+    return '$count open';
+  }
+
+  @override
+  String get librarySortLabel => 'Sort';
+
+  @override
+  String get librarySortRecent => 'Recent';
+
+  @override
+  String get librarySortTitle => 'Title';
+
+  @override
+  String get librarySortAuthor => 'Author';
+
+  @override
+  String get cardOpenTag => 'Open';
 }

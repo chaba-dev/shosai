@@ -567,6 +567,7 @@ class _GatedLibraryBridge extends HarnessBridge {
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
@@ -598,6 +599,7 @@ class _GatedLibraryBridge extends HarnessBridge {
       final page = await super.libraryPage(
         query: query,
         format: format,
+        sort: sort,
         limit: limit,
         offset: offset,
         cancellationId: cancellationId,
