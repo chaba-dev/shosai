@@ -13,12 +13,14 @@ class FlutterAndroidIntegrationTest(unittest.TestCase):
         self.assertIn("!flutter/android/app/src/debug/", ignore)
         self.assertIn("android.permission.INTERNET", manifest.read_text())
 
-    def test_host_rejects_abis_without_packaged_native_libraries(self):
+    def test_host_packages_every_abi(self):
+        # SQLite and PDFium come from build hooks for every Android ABI, so
+        # the host filters none (the arm64-only filter served the Rust core).
         build = (ROOT / "flutter/android/app/build.gradle.kts").read_text()
         properties = (ROOT / "flutter/android/gradle.properties").read_text()
 
-        self.assertIn('abiFilters.add("arm64-v8a")', build)
-        self.assertIn("disable-abi-filtering=true", properties)
+        self.assertNotIn("abiFilters", build)
+        self.assertNotIn("disable-abi-filtering", properties)
 
 
 if __name__ == "__main__":
