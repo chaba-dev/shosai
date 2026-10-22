@@ -298,8 +298,19 @@ it; the retained document handle stays open for the store. Permissions
 decision: the engine reports `isEncrypted` and `allowsCopying` and the reader
 does not enforce them; copy eligibility is text-mapping completeness, as
 before. A document that needs a user password fails to open.
-** [ ] Open gates: the binding's build hook pins the PDFium release but
-verifies no checksum; links and destinations are exposed by the engine and
+** [x] Checksums and notices (2026-10-22): `pdfium_dart` 0.2.5 is vendored
+in `flutter/third_party/pdfium_dart`. Its build hook checks each
+pdfium-binaries archive against the SHA-256 pinned for its target
+(`hook/pdfium_archives.dart`, written by `tool/pin_pdfium.py`) and fails the
+build on a mismatch. It keeps the verified archive and rechecks it whenever
+the hook runs, taking the library from it rather than trusting a cached copy,
+and declares both as dependencies so a changed copy reruns the hook;
+`pdfium_flutter`'s podspec already pins the Apple
+XCFramework's. The package's `NOTICES` carries PDFium's license and those of
+the third-party code compiled into it, which Flutter adds to every host's
+license notices; the Linux bundle check verifies them. SQLite is in the
+public domain and needs no notice (the engine's notices carry its statement).
+** [ ] Open gates: links and destinations are exposed by the engine and
 not yet navigable in the reader (outcome 5); the fixture corpus and the M0
 raster budgets on macOS and a physical Android device; `flutter test` loads
 PDFium from `SHOSAI_PDFIUM_LIBRARY` (the Nix shell) or `PDFIUM_PATH` because
@@ -414,7 +425,7 @@ view. The scroll offset itself is not durable: the reading state keeps the
 requested location.
 ** [ ] Open: the macOS baseline `flutter/test/goldens/macos/reader-epub-1280.png`
 still shows the retained raster and needs a re-capture on a Mac; the Android
-ABI filter and the PDFium and SQLite licence notices in the packaged hosts.
+ABI filter.
 * [x] *Documents.* Update the Flutter architecture contract, the roadmap, the
 design system's ownership notes, RFD 2, 3, 5 and 6 where they name the Rust
 core, and record the slice reports in the Dart document stack evaluation plan.
