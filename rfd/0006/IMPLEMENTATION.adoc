@@ -131,8 +131,10 @@ optional note creation, and cancellation with equivalent behavior in both
 formats.
 * [ ] Add an annotation list with navigate, recolor, note edit, and delete
 behavior alongside, but independent from, bookmarks.
-* [ ] Page notes and book notes in the annotation store: a location anchor or
+* [x] Page notes and book notes in the annotation store: a location anchor or
 none, same identity, timestamps, tombstones and provenance as highlights.
+Notes across the library are listed from the store alone, books most
+recently read first.
 * [ ] Notes surface scoped to this book or all books, grouped by place; open a
 note at its anchor.
 * [ ] Library-wide search over book text and notes from every screen, scoped

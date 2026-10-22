@@ -183,4 +183,114 @@ CREATE TABLE annotations (
 CREATE INDEX annotations_version_live_idx
     ON annotations(version_id, deleted_at, created_at, id);
 '''),
+  Migration(6, 'page and book notes', '''
+-- Page notes and book notes are annotations too (RFD 6, Notes and search): a
+-- page note is anchored at a place (an EPUB spine item's scalar offset or a
+-- PDF page) and a book note at nothing. Neither has a color or a quote, and
+-- both have a note. SQLite cannot change a table's CHECK, so the table is
+-- rebuilt with the same rows, all highlights.
+CREATE TABLE annotations_v6 (
+    id                    TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    version_id            TEXT NOT NULL,
+    format                TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
+    kind                  TEXT NOT NULL CHECK (kind IN ('highlight', 'page', 'book')),
+    anchor_version        INTEGER NOT NULL CHECK (anchor_version = 1),
+    original_quote        TEXT CHECK (original_quote IS NULL OR length(original_quote) <= 65536),
+    normalization_profile TEXT CHECK (normalization_profile IS NULL
+                                      OR normalization_profile = 'shosai-quote-v1'),
+    normalized_exact      TEXT CHECK (normalized_exact IS NULL
+                                      OR length(normalized_exact) BETWEEN 1 AND 65536),
+    normalized_prefix     TEXT CHECK (normalized_prefix IS NULL OR length(normalized_prefix) <= 32),
+    normalized_suffix     TEXT CHECK (normalized_suffix IS NULL OR length(normalized_suffix) <= 32),
+    color                 TEXT CHECK (color IS NULL
+                                      OR color IN ('yellow', 'green', 'blue', 'pink', 'purple')),
+    body                  TEXT CHECK (body IS NULL OR length(body) <= 65536),
+    source_system         TEXT CHECK (source_system IS NULL
+                                      OR length(CAST(source_system AS BLOB)) BETWEEN 1 AND 256),
+    source_id             TEXT CHECK (source_id IS NULL
+                                      OR length(CAST(source_id AS BLOB)) BETWEEN 1 AND 4096),
+    epub_spine_index      INTEGER CHECK (epub_spine_index IS NULL OR epub_spine_index >= 0),
+    epub_resource_path    TEXT CHECK (epub_resource_path IS NULL
+                                      OR length(CAST(epub_resource_path AS BLOB)) BETWEEN 1 AND 4096),
+    -- A highlight's range, or a page note's place (start alone).
+    epub_scalar_start     INTEGER CHECK (epub_scalar_start IS NULL OR epub_scalar_start >= 0),
+    epub_scalar_end       INTEGER,
+    pdf_page              INTEGER CHECK (pdf_page IS NULL OR pdf_page >= 0),
+    pdf_char_start        INTEGER CHECK (pdf_char_start IS NULL OR pdf_char_start >= 0),
+    pdf_char_end          INTEGER,
+    -- Little-endian float32 (left, top, right, bottom) quadruples in page space.
+    pdf_rectangles        BLOB CHECK (pdf_rectangles IS NULL
+                                      OR (length(pdf_rectangles) BETWEEN 16 AND 262144
+                                          AND length(pdf_rectangles) % 16 = 0)),
+    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    modified_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    deleted_at            TEXT,
+    -- A CHECK that evaluates to NULL passes, so nullable columns are tested
+    -- with IS NOT NULL before they are compared.
+    CHECK (
+        (kind = 'highlight' AND color IS NOT NULL
+         AND ((format = 'epub'
+               AND epub_spine_index IS NOT NULL AND epub_resource_path IS NOT NULL
+               AND epub_scalar_start IS NOT NULL AND epub_scalar_end IS NOT NULL
+               AND epub_scalar_end > epub_scalar_start
+               AND normalized_exact IS NOT NULL
+               AND pdf_page IS NULL AND pdf_char_start IS NULL AND pdf_char_end IS NULL
+               AND pdf_rectangles IS NULL)
+              OR
+              (format = 'pdf'
+               AND pdf_page IS NOT NULL AND pdf_rectangles IS NOT NULL
+               AND epub_spine_index IS NULL AND epub_resource_path IS NULL
+               AND epub_scalar_start IS NULL AND epub_scalar_end IS NULL
+               AND ((pdf_char_start IS NULL AND pdf_char_end IS NULL AND normalized_exact IS NULL)
+                    OR (pdf_char_start IS NOT NULL AND pdf_char_end IS NOT NULL
+                        AND pdf_char_end > pdf_char_start AND normalized_exact IS NOT NULL)))))
+        OR
+        (kind IN ('page', 'book') AND color IS NULL
+         AND body IS NOT NULL AND length(body) > 0
+         AND normalization_profile IS NULL
+         AND epub_scalar_end IS NULL AND pdf_char_start IS NULL AND pdf_char_end IS NULL
+         AND pdf_rectangles IS NULL
+         AND ((kind = 'book'
+               AND epub_spine_index IS NULL AND epub_resource_path IS NULL
+               AND epub_scalar_start IS NULL AND pdf_page IS NULL)
+              OR
+              (kind = 'page' AND format = 'epub'
+               AND epub_spine_index IS NOT NULL AND epub_scalar_start IS NOT NULL
+               AND pdf_page IS NULL)
+              OR
+              (kind = 'page' AND format = 'pdf'
+               AND pdf_page IS NOT NULL AND epub_spine_index IS NULL
+               AND epub_resource_path IS NULL AND epub_scalar_start IS NULL)))
+    ),
+    CHECK (
+        (normalization_profile IS NULL AND normalized_exact IS NULL
+         AND normalized_prefix IS NULL AND normalized_suffix IS NULL AND original_quote IS NULL)
+        OR
+        (normalization_profile IS NOT NULL AND normalized_exact IS NOT NULL
+         AND normalized_prefix IS NOT NULL AND normalized_suffix IS NOT NULL)
+    ),
+    CHECK (source_id IS NULL OR source_system IS NOT NULL),
+    FOREIGN KEY (version_id, format) REFERENCES annotation_document_versions(id, format)
+) STRICT;
+
+INSERT INTO annotations_v6 (id, version_id, format, kind, anchor_version,
+    original_quote, normalization_profile, normalized_exact, normalized_prefix,
+    normalized_suffix, color, body, source_system, source_id,
+    epub_spine_index, epub_resource_path, epub_scalar_start, epub_scalar_end,
+    pdf_page, pdf_char_start, pdf_char_end, pdf_rectangles,
+    created_at, modified_at, deleted_at)
+  SELECT id, version_id, format, 'highlight', anchor_version,
+    original_quote, normalization_profile, normalized_exact, normalized_prefix,
+    normalized_suffix, color, body, source_system, source_id,
+    epub_spine_index, epub_resource_path, epub_scalar_start, epub_scalar_end,
+    pdf_page, pdf_char_start, pdf_char_end, pdf_rectangles,
+    created_at, modified_at, deleted_at
+  FROM annotations ORDER BY rowid;
+
+DROP TABLE annotations;
+ALTER TABLE annotations_v6 RENAME TO annotations;
+
+CREATE INDEX annotations_version_live_idx
+    ON annotations(version_id, deleted_at, created_at, id);
+'''),
 ];

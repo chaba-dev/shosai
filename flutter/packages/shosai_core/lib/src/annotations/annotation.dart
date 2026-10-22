@@ -41,6 +41,19 @@ const maxProvenanceIdBytes = 4096;
 
 enum HighlightColor { yellow, green, blue, pink, purple }
 
+/// The three kinds of note (RFD 6, Notes and search), all stored and listed
+/// the same way.
+enum AnnotationKind {
+  /// A text range, with a color and an optional note.
+  highlight,
+
+  /// A place, an EPUB position or a PDF page, with a note and no text range.
+  pageNote,
+
+  /// The whole book, with a note.
+  bookNote,
+}
+
 /// A document's content that is not a library book, known by its content
 /// hash: what a file opened directly keeps its annotations under.
 ///
@@ -135,8 +148,10 @@ final class PageRect {
 sealed class AnnotationAnchor {
   const AnnotationAnchor();
 
-  /// The EPUB spine index or PDF page.
-  int get unit;
+  /// The EPUB spine index or PDF page; null for a book note.
+  int? get unit;
+
+  AnnotationKind get kind;
 }
 
 /// A half-open range of Unicode scalars in one EPUB spine item's canonical
@@ -159,6 +174,9 @@ final class EpubAnchor extends AnnotationAnchor {
 
   @override
   int get unit => spineIndex;
+
+  @override
+  AnnotationKind get kind => AnnotationKind.highlight;
 
   @override
   bool operator ==(Object other) =>
@@ -193,6 +211,9 @@ final class PdfAnchor extends AnnotationAnchor {
   int get unit => page;
 
   @override
+  AnnotationKind get kind => AnnotationKind.highlight;
+
+  @override
   bool operator ==(Object other) =>
       other is PdfAnchor &&
       other.page == page &&
@@ -202,6 +223,81 @@ final class PdfAnchor extends AnnotationAnchor {
 
   @override
   int get hashCode => Object.hash(page, start, end, Object.hashAll(rectangles));
+}
+
+/// Where a page note or a book note is attached: a place, or the whole book.
+sealed class NoteAnchor extends AnnotationAnchor {
+  const NoteAnchor();
+}
+
+/// A place in an EPUB spine item: a Unicode-scalar [offset] into its
+/// canonical text, where a page note sits.
+final class EpubPlaceAnchor extends NoteAnchor {
+  const EpubPlaceAnchor({
+    required this.spineIndex,
+    required this.resourcePath,
+    required this.offset,
+  });
+
+  final int spineIndex;
+
+  /// The spine item's canonical resource path; null only for a note whose
+  /// chapter path was never recorded, which then follows its spine index.
+  final String? resourcePath;
+  final int offset;
+
+  @override
+  int get unit => spineIndex;
+
+  @override
+  AnnotationKind get kind => AnnotationKind.pageNote;
+
+  @override
+  bool operator ==(Object other) =>
+      other is EpubPlaceAnchor &&
+      other.spineIndex == spineIndex &&
+      other.resourcePath == resourcePath &&
+      other.offset == offset;
+
+  @override
+  int get hashCode => Object.hash(spineIndex, resourcePath, offset);
+}
+
+/// A PDF page, where a page note sits.
+final class PdfPageAnchor extends NoteAnchor {
+  const PdfPageAnchor(this.page);
+
+  final int page;
+
+  @override
+  int get unit => page;
+
+  @override
+  AnnotationKind get kind => AnnotationKind.pageNote;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PdfPageAnchor && other.page == page;
+
+  @override
+  int get hashCode => page.hashCode;
+}
+
+/// The whole book: a book note's anchor.
+final class BookAnchor extends NoteAnchor {
+  const BookAnchor();
+
+  @override
+  int? get unit => null;
+
+  @override
+  AnnotationKind get kind => AnnotationKind.bookNote;
+
+  @override
+  bool operator ==(Object other) => other is BookAnchor;
+
+  @override
+  int get hashCode => (BookAnchor).hashCode;
 }
 
 bool _listEquals<T>(List<T> a, List<T> b) {
@@ -295,6 +391,91 @@ final class NotesSummary {
   String toString() => 'NotesSummary($count, $latest)';
 }
 
+/// One annotation as the notes surfaces list it across books: read from the
+/// store alone, so the book need not be open, and placed as it was made.
+final class NoteEntry {
+  const NoteEntry({
+    required this.id,
+    required this.kind,
+    required this.color,
+    required this.quote,
+    required this.body,
+    required this.unit,
+    required this.offset,
+    required this.createdAt,
+    required this.modifiedAt,
+  });
+
+  final String id;
+  final AnnotationKind kind;
+  final HighlightColor? color;
+
+  /// A highlight's text as it was selected; null for notes and for PDF
+  /// highlights of unmapped text.
+  final String? quote;
+  final String? body;
+
+  /// The EPUB spine index or PDF page it was made on; null for a book note.
+  final int? unit;
+
+  /// Where in [unit] it starts, in Unicode scalars of the unit's text: a
+  /// highlight's start or an EPUB page note's place. Null when unknown.
+  final int? offset;
+
+  /// ISO 8601 UTC timestamps.
+  final String createdAt;
+  final String modifiedAt;
+
+  @override
+  bool operator ==(Object other) =>
+      other is NoteEntry &&
+      other.id == id &&
+      other.kind == kind &&
+      other.color == color &&
+      other.quote == quote &&
+      other.body == body &&
+      other.unit == unit &&
+      other.offset == offset &&
+      other.createdAt == createdAt &&
+      other.modifiedAt == modifiedAt;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    kind,
+    color,
+    quote,
+    body,
+    unit,
+    offset,
+    createdAt,
+    modifiedAt,
+  );
+
+  @override
+  String toString() => 'NoteEntry($id, ${kind.name}, $unit, $offset)';
+}
+
+/// A library book's notes, in reading order: its book notes first, then
+/// each unit's notes by where they start.
+final class BookNotes {
+  const BookNotes(this.book, this.notes);
+
+  final Book book;
+  final List<NoteEntry> notes;
+}
+
+/// A page of the library's books that have notes, most recently read first.
+final class LibraryNotesPage {
+  const LibraryNotesPage(this.books, {required this.hasMore});
+
+  final List<BookNotes> books;
+  final bool hasMore;
+}
+
+/// Most books one [LibraryNotesPage] lists.
+const maxLibraryNotesBooksPerPage = 100;
+
 /// An annotation as stored.
 final class StoredAnnotation {
   const StoredAnnotation({
@@ -316,15 +497,21 @@ final class StoredAnnotation {
   final String contentHash;
   final AnnotationAnchor anchor;
 
-  /// Required for EPUB and for PDF text anchors.
+  /// Required for EPUB and for PDF text anchors; notes quote nothing.
   final QuoteSelector? quote;
-  final HighlightColor color;
+
+  /// A highlight's color; notes have none.
+  final HighlightColor? color;
+
+  /// The note: optional on a highlight, never blank on a page or book note.
   final String? body;
   final AnnotationProvenance? provenance;
 
   /// ISO 8601 UTC timestamps.
   final String createdAt;
   final String modifiedAt;
+
+  AnnotationKind get kind => anchor.kind;
 
   @override
   bool operator ==(Object other) =>
@@ -370,7 +557,8 @@ final class ResolvedAnnotation {
   final AnnotationResolution resolution;
 
   /// The half-open Unicode-scalar range the annotation covers now in its
-  /// unit's text, for text anchors that resolved.
+  /// unit's text, for text anchors that resolved. For an EPUB page note that
+  /// resolved, [start] is its place and [end] is null.
   final int? start;
   final int? end;
 
@@ -378,7 +566,7 @@ final class ResolvedAnnotation {
   final List<PageRect> rectangles;
 
   String get id => annotation.id;
-  int get unit => annotation.anchor.unit;
+  int? get unit => annotation.anchor.unit;
 
   @override
   bool operator ==(Object other) =>
@@ -459,6 +647,14 @@ void checkAnnotationBody(String? body) {
     throw const CoreException.limitExceeded(
       'An annotation body exceeds $maxAnnotationBodyScalars Unicode scalars.',
     );
+  }
+}
+
+/// Throw unless [body] is a note with words, as a page or book note needs.
+void checkNoteBody(String body) {
+  checkAnnotationBody(body);
+  if (body.trim().isEmpty) {
+    throw const CoreException.invalidRequest('A note needs some words.');
   }
 }
 

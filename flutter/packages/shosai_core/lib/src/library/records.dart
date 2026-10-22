@@ -203,11 +203,11 @@ final class LibraryRecords {
 
 const _managedDirectoryKey = 'library.managed_directory';
 
-const _bookColumns = '''id, title, author, format, file_path, storage_kind,
+const bookColumns = '''id, title, author, format, file_path, storage_kind,
   original_path, content_hash, file_size, cover IS NOT NULL, progress,
   date_added, last_read''';
 
-Book _book(Row row) => Book(
+Book bookFromRow(Row row) => Book(
   id: row.columnAt(0) as int,
   title: row.columnAt(1) as String,
   author: row.columnAt(2) as String?,
@@ -224,18 +224,18 @@ Book _book(Row row) => Book(
 );
 
 Book? _bookById(Database db, int id) => db
-    .select('SELECT $_bookColumns FROM books WHERE id = ?', [id])
-    .map(_book)
+    .select('SELECT $bookColumns FROM books WHERE id = ?', [id])
+    .map(bookFromRow)
     .firstOrNull;
 
 Book? _bookByPath(Database db, String path) => db
-    .select('SELECT $_bookColumns FROM books WHERE file_path = ?', [path])
-    .map(_book)
+    .select('SELECT $bookColumns FROM books WHERE file_path = ?', [path])
+    .map(bookFromRow)
     .firstOrNull;
 
 Book? _bookByHash(Database db, String hash) => db
-    .select('SELECT $_bookColumns FROM books WHERE content_hash = ?', [hash])
-    .map(_book)
+    .select('SELECT $bookColumns FROM books WHERE content_hash = ?', [hash])
+    .map(bookFromRow)
     .firstOrNull;
 
 LibraryPage _page(
@@ -259,22 +259,22 @@ LibraryPage _page(
     arguments.add(format);
   }
   final rows = db.select(
-    '''SELECT $_bookColumns FROM books
+    '''SELECT $bookColumns FROM books
        ${where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}'}
        ORDER BY ${_orders[sort]}
        LIMIT ? OFFSET ?''',
     [...arguments, limit + 1, offset],
   );
-  final books = rows.take(limit).map(_book).toList();
+  final books = rows.take(limit).map(bookFromRow).toList();
   return LibraryPage(
     books,
     hasMore: rows.length > limit,
     bookCount: db.select('SELECT count(*) FROM books').first.columnAt(0) as int,
     continueReading: db
-        .select('''SELECT $_bookColumns FROM books
+        .select('''SELECT $bookColumns FROM books
              WHERE last_read IS NOT NULL AND progress < 1.0
              ORDER BY last_read DESC, id DESC LIMIT 1''')
-        .map(_book)
+        .map(bookFromRow)
         .firstOrNull,
   );
 }

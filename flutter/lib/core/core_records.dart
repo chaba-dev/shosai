@@ -524,7 +524,12 @@ final class CoreRecords implements ShosaiRecords {
             text,
             cancellation: cancellation,
           );
-    return [for (final item in resolved) _annotation(item, scale)];
+    // The reader's surfaces draw highlights; notes have no range to draw.
+    return [
+      for (final item in resolved)
+        if (item.annotation.kind == AnnotationKind.highlight)
+          _annotation(item, scale),
+    ];
   });
 
   @override
@@ -1176,7 +1181,7 @@ FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
   final (start, end) = (resolved.start, resolved.end);
   return FlutterAnnotation(
     id: stored.id,
-    unit: BigInt.from(stored.anchor.unit),
+    unit: BigInt.from(stored.anchor.unit!),
     resolution: switch (resolved.resolution) {
       AnnotationResolution.exact => FlutterAnnotationResolution.exact,
       AnnotationResolution.recovered => FlutterAnnotationResolution.recovered,
@@ -1201,7 +1206,7 @@ FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
                 bottom: rectangle.bottom * scale,
               ),
           ],
-    color: _flutterColor(stored.color),
+    color: _flutterColor(stored.color!),
     body: stored.body,
   );
 }
