@@ -46,7 +46,41 @@ Widget _reader(
   ),
 );
 
-Future<HarnessBridge> _pump(WidgetTester tester, Size size) async {
+/// A reader stand-in that counts how often it is mounted and disposed.
+class _MountCounter extends StatefulWidget {
+  const _MountCounter({required this.child});
+
+  static int mounts = 0;
+  static int disposals = 0;
+
+  final Widget child;
+
+  @override
+  State<_MountCounter> createState() => _MountCounterState();
+}
+
+class _MountCounterState extends State<_MountCounter> {
+  @override
+  void initState() {
+    super.initState();
+    _MountCounter.mounts++;
+  }
+
+  @override
+  void dispose() {
+    _MountCounter.disposals++;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+Future<HarnessBridge> _pump(
+  WidgetTester tester,
+  Size size, {
+  ProductReaderBuilder readerBuilder = _reader,
+}) async {
   final bridge = HarnessBridge(
     books: harnessLibraryBooks(),
     covers: harnessCovers(),
@@ -56,7 +90,10 @@ Future<HarnessBridge> _pump(WidgetTester tester, Size size) async {
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     productionShell(
-      home: ProductShell(bridgeFactory: () => bridge, readerBuilder: _reader),
+      home: ProductShell(
+        bridgeFactory: () => bridge,
+        readerBuilder: readerBuilder,
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -123,6 +160,44 @@ void main() {
       findsOneWidget,
       reason: 'switching back reopens the book where it was left',
     );
+  });
+
+  testWidgets('a reader keeps its state when the window narrows to a phone', (
+    tester,
+  ) async {
+    _MountCounter.mounts = 0;
+    _MountCounter.disposals = 0;
+    await _pump(
+      tester,
+      const Size(1024, 800),
+      readerBuilder:
+          (bridge, book, settings, path, bookId, locatorChanged, notices) =>
+              _MountCounter(
+                child: _reader(
+                  bridge,
+                  book,
+                  settings,
+                  path,
+                  bookId,
+                  locatorChanged,
+                  notices,
+                ),
+              ),
+    );
+    await _open(tester, 1);
+    expect(find.byType(ShellRail), findsOneWidget);
+
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellRail), findsNothing);
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+    expect(_MountCounter.mounts, 1, reason: 'the reader moved, not remounted');
+    expect(_MountCounter.disposals, 0);
+
+    tester.view.physicalSize = const Size(1024, 800);
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellRail), findsOneWidget);
+    expect(_MountCounter.mounts, 1);
   });
 
   testWidgets('opening an open book focuses it instead of opening it twice', (

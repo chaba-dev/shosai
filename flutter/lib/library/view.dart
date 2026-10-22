@@ -270,8 +270,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return reader;
     }
     _shownBooks.add(open.id);
+    // A global key moves the reader when the layout changes (the rail beside
+    // it on a tablet, alone on a phone) instead of remounting it: the reader
+    // owns its bridge, and a remount would dispose it.
     final reader = KeyedSubtree(
-      key: ValueKey(open.id),
+      key: GlobalKey(debugLabel: 'reader ${open.id}'),
       child: widget.readerBuilder(
         widget.bridgeFactory(),
         open.book,
