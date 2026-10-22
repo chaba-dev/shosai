@@ -1540,11 +1540,29 @@ final class ReaderController implements Listenable {
         (rendered != null &&
             scale <= rendered * 1.05 &&
             scale * 2 > rendered) ||
-        (scale == _refitScale && _failedLayout == _model.layout)) {
+        _refitFailedNear(scale)) {
       return;
     }
     _refitScale = scale;
-    _startRelayout(document, _model.layout, offset: _model.readingOffset);
+    // The failed render's error stays up while the page renders again: the
+    // alert row is part of the box the page is fitted to, so clearing it
+    // would change the fitted size the retry is for.
+    _startRelayout(
+      document,
+      _model.layout,
+      offset: _model.readingOffset,
+      keepRelayoutError: true,
+    );
+  }
+
+  /// Whether a fitted render near [scale] has just failed for the layout
+  /// shown: a box that moves by a few pixels (the relayout progress bar, an
+  /// alert row) does not ask for it again until the layout changes.
+  bool _refitFailedNear(double scale) {
+    final failed = _refitScale;
+    return failed != null &&
+        _failedLayout == _model.layout &&
+        (scale - failed).abs() <= failed * 0.05;
   }
 
   void _setRelayoutPending(bool pending) {
@@ -1561,6 +1579,7 @@ final class ReaderController implements Listenable {
     int? length,
     bool replaceReadingOffset = false,
     double? height,
+    bool keepRelayoutError = false,
   }) {
     final generation = _model.generation;
     final targetUnit = unit ?? _model.unit;
@@ -1618,7 +1637,7 @@ final class ReaderController implements Listenable {
         relayoutBusy: true,
         relayoutPending: false,
         selectionError: null,
-        relayoutError: null,
+        relayoutError: keepRelayoutError ? _unchanged : null,
         // A chapter refusal outlives a passive relayout of the page still
         // shown (its own alert changes the page height); a new location
         // request replaces it.

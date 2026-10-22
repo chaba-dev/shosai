@@ -2845,6 +2845,37 @@ void main() {
       await bridge.disposed.future;
     });
 
+    test('a failed fitted render is not retried for every few pixels its '
+        'alert and progress bar move the box', () async {
+      final (controller, bridge) = await open();
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+      // The alert row takes a tenth of the box: one retry at the new size.
+      final failed = bridge.renderScales.length;
+      report(controller, 712.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(bridge.renderScales.last, closeTo(.9, 1e-9));
+      // The relayout progress bar comes and goes by 4 px; the alert stays.
+      for (final height in [708.8, 712.8, 708.8, 712.8]) {
+        report(controller, height);
+        await drain();
+      }
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+
+      // A real resize asks again, and a render that succeeds clears it.
+      bridge.renderFailure = false;
+      report(controller, 1584);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(2, 1e-9));
+      expect(controller.model.relayoutError, isNull);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
     test('a resize waits for a highlight write, then renders the latest '
         'box', () async {
       final (controller, bridge) = await open(
