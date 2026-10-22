@@ -5,7 +5,8 @@
 .PHONY: design-system design-system-css check-design-system-css
 .PHONY: epub-prototype-fixtures measure-epub-prototype
 .PHONY: dev linux-debug linux-release check-linux-bundle
-.PHONY: android-profile macos-debug macos-smoke
+.PHONY: android-profile android-release check-android-apk
+.PHONY: macos-debug macos-smoke
 .PHONY: ios-simulator-debug ios-device-profile ios-device-release
 .PHONY: check-rfds changelog next-version
 
@@ -146,6 +147,16 @@ test-packaged-android:
 ## Build the Android arm64 host in profile mode
 android-profile:
 	cd flutter && flutter build apk --profile --target-platform android-arm64
+
+## Build the universal Android APK (every ABI) in release mode
+android-release:
+	cd flutter && flutter build apk --release
+
+## Verify the universal release APK carries Flutter, the app, PDFium and SQLite
+## for every ABI (needs `android-release` first)
+check-android-apk:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_android_apk.py \
+		flutter/build/app/outputs/flutter-apk/app-release.apk
 
 ## Build the macOS host in debug mode
 macos-debug:
