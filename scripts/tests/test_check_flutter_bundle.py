@@ -100,12 +100,14 @@ class CheckFlutterBundleTest(unittest.TestCase):
             assets / "fonts" / "NotoSansJP-Variable.ttf",
         )
         (assets / "fonts" / "MaterialIcons-Regular.otf").write_bytes(b"icons")
-        # A NOTICES.Z whose text carries both redistributed licenses' stable
-        # markers, so a "valid bundle" fixture also satisfies the notice check.
+        # A NOTICES.Z whose text carries every redistributed license's stable
+        # marker, so a "valid bundle" fixture also satisfies the notice check.
         notices = "\n".join(
             [
                 "Copyright 2020 The Inter Project Authors",
                 "Copyright 2014-2021 Adobe",
+                "Copyright 2014 The PDFium Authors",
+                "The FreeType Project LICENSE",
             ]
         )
         with gzip.open(assets / "NOTICES.Z", "wb") as handle:
@@ -183,6 +185,19 @@ class CheckFlutterBundleTest(unittest.TestCase):
         result = self._run(str(self.root))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing from the bundle's license notices", result.stderr)
+
+    def test_missing_pdfium_notices_fail(self):
+        assets = self._write_bundle_with_faces(GOOD_FONT_MANIFEST)
+        with gzip.open(assets / "NOTICES.Z", "wb") as handle:
+            # The fonts' markers only: no PDFium notices.
+            handle.write(
+                b"Copyright 2020 The Inter Project Authors\n"
+                b"Copyright 2014-2021 Adobe\n"
+            )
+        result = self._run(str(self.root))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PDFium's license is missing", result.stderr)
+        self.assertIn("FreeType's license (part of PDFium) is missing", result.stderr)
 
     def test_a_valid_bundle_passes(self):
         self._write_bundle_with_faces(GOOD_FONT_MANIFEST)

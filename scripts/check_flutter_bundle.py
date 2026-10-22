@@ -26,6 +26,9 @@ one found, this check verifies that every font asset in `FontManifest.json`:
 - maps each bundled family name to its expected face file, so a manifest that
   swapped the two families' files cannot validate.
 
+It also checks that the bundle's `NOTICES.Z` carries the bundled faces'
+licenses and PDFium's notices.
+
 Exit codes: 0 when every bundle validates, 1 otherwise.
 """
 
@@ -67,6 +70,14 @@ NOTICE_MARKERS = {
         "the Noto Sans JP license",
     ),
 }
+
+# Likewise for the PDFium the bundle carries: its own and its third-party
+# notices come from the patched `pdfium_dart` package's NOTICES (FreeType
+# stands for the third-party ones). SQLite is in the public domain.
+NATIVE_NOTICE_MARKERS = (
+    ("Copyright 2014 The PDFium Authors", "PDFium's license"),
+    ("The FreeType Project LICENSE", "FreeType's license (part of PDFium)"),
+)
 
 
 def _inventory_face_hashes(inventory_root: Path) -> dict[str, str]:
@@ -182,11 +193,13 @@ def _check_flutter_assets(assets: Path, faces: dict[str, str]) -> list[str]:
 
 
 def _check_notices(assets: Path, faces: dict[str, str]) -> list[str]:
-    """Verify the bundle's license notices carry the redistributed fonts.
+    """Verify the bundle's license notices carry the redistributed fonts
+    and native libraries.
 
     Both bundled faces' licenses require the copyright notice and license text
     to accompany redistribution; Flutter collects them into `NOTICES.Z` only
-    when `pubspec.yaml` declares them under `licenses:`.
+    when `pubspec.yaml` declares them under `licenses:`. PDFium's BSD license
+    and those of the code compiled into it require the same of the binary.
     """
     notices = assets / "NOTICES.Z"
     if not notices.is_file():
@@ -206,6 +219,11 @@ def _check_notices(assets: Path, faces: dict[str, str]) -> list[str]:
             failures.append(
                 f"{description} ({filename}) is missing from the bundle's "
                 f"license notices"
+            )
+    for marker, description in NATIVE_NOTICE_MARKERS:
+        if marker not in text:
+            failures.append(
+                f"{description} is missing from the bundle's license notices"
             )
     return failures
 

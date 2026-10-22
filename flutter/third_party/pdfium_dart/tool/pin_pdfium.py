@@ -3,8 +3,12 @@
 
 Downloads every archive `hook/build.dart` can fetch from
 bblanchon/pdfium-binaries for one release, then writes
-`hook/pdfium_archives.dart`: the release and each archive's SHA-256, which the
-hook checks before it extracts the library.
+
+* `hook/pdfium_archives.dart`: the release and each archive's SHA-256, which
+  the hook checks before it extracts the library, and
+* `NOTICES`: this package's own license, PDFium's, pdfium-binaries' and every
+  third-party license the archives ship, in the form Flutter collects into an
+  application's license notices.
 
 Run it from any directory when the release changes:
 
@@ -15,7 +19,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
+import re
 import sys
+import tarfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -39,6 +46,10 @@ TARGETS = (
     "win-x86",
 )
 
+# Flutter splits a package's NOTICES on this line, so a license text must not
+# contain it (cpu_features' Apache license does).
+SEPARATOR = "-" * 80
+
 
 def archive_url(release: str, target: str) -> str:
     tag = urllib.parse.quote(release, safe="")
@@ -48,18 +59,54 @@ def archive_url(release: str, target: str) -> str:
     )
 
 
+def decode(data: bytes) -> str:
+    # FreeType's license is Latin-1 (its copyright sign), the rest UTF-8; some
+    # archives carry the same texts with CRLF line ends.
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")
+    return text.replace("\r\n", "\n")
+
+
+def words(text: str) -> list[str]:
+    return re.sub(r"[\s/*#]+", " ", text).split()
+
+
+def notice(names: str, text: str) -> str:
+    lines = [
+        "-" * 79 if line == SEPARATOR else line.rstrip()
+        for line in text.strip("\n").splitlines()
+    ]
+    return f"{names}\n\n" + "\n".join(lines) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("release", help="pdfium-binaries tag, e.g. chromium/7811")
     release = parser.parse_args().release
 
     hashes: dict[str, str] = {}
+    licenses: dict[str, str] = {}
     for target in TARGETS:
         url = archive_url(release, target)
         print(f"fetching {url}", file=sys.stderr)
         with urllib.request.urlopen(url) as response:
             data = response.read()
         hashes[target] = hashlib.sha256(data).hexdigest()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            for member in archive.getmembers():
+                name = member.name.removeprefix("./")
+                if name != "LICENSE" and not name.startswith("licenses/"):
+                    continue
+                if not member.isfile():
+                    continue
+                text = decode(archive.extractfile(member).read())
+                # Some archives set the same text as a comment block or
+                # rewrap it; the first copy (an Android archive's) is kept.
+                if words(licenses.setdefault(name, text)) != words(text):
+                    print(f"{target}: {name} differs between archives", file=sys.stderr)
+                    return 1
 
     tag = release.replace("/", "%2F")
     lines = [
@@ -75,6 +122,16 @@ def main() -> int:
         "",
     ]
     (PACKAGE / "hook" / "pdfium_archives.dart").write_text("\n".join(lines))
+
+    third_party = sorted(name for name in licenses if name.startswith("licenses/"))
+    third_party.remove("licenses/pdfium.txt")
+    entries = [
+        notice("pdfium_dart", (PACKAGE / "LICENSE").read_text()),
+        notice("pdfium", licenses["licenses/pdfium.txt"]),
+        notice("pdfium-binaries", licenses["LICENSE"]),
+        *(notice(Path(name).stem, licenses[name]) for name in third_party),
+    ]
+    (PACKAGE / "NOTICES").write_text(f"{SEPARATOR}\n".join(entries))
     return 0
 
 

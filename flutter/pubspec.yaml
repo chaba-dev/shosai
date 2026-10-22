@@ -82,7 +82,9 @@ flutter:
   # accompany redistribution; Flutter collects `licenses:` entries into the
   # bundle's NOTICES.Z (`fonts/` is also where the symlinked license files
   # live, and the bundle check verifies the notices carry the document
-  # faces' texts).
+  # faces' texts). PDFium's notices come with `pdfium_dart`
+  # (third_party/pdfium_dart/NOTICES); SQLite is in the public domain and
+  # needs none, though the engine's own notices already carry its statement.
   licenses:
     - fonts/LICENSE-Inter
     - fonts/LICENSE-NotoSansJP.txt
@@ -99,6 +101,7 @@ dependency_overrides:
   pdfrx_engine:
     path: third_party/pdfrx_engine
   # pdfium_dart 0.2.5 with a build hook that checks each PDFium archive's
-  # SHA-256 before using it. See third_party/pdfium_dart/README.md.
+  # SHA-256 before using it, and license notices for the PDFium it bundles.
+  # See third_party/pdfium_dart/README.md.
   pdfium_dart:
     path: third_party/pdfium_dart
