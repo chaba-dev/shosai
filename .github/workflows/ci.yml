@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make check-fmt
+      - run: nix develop .#ci --command make check-fmt
 
   flutter-analyze:
     name: Flutter analyze
@@ -47,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make lint
+      - run: nix develop .#ci --command make lint
 
   rfd-validation:
     name: RFD validation
@@ -62,8 +62,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make check-l10n-codegen
-      - run: nix develop --command make check-theme-tokens
+      - run: nix develop .#ci --command make check-l10n-codegen
+      - run: nix develop .#ci --command make check-theme-tokens
 
   flutter-test:
     name: Flutter tests (${{ matrix.os }})
@@ -75,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make test-app
+      - run: nix develop .#ci --command make test-app
 
   script-test:
     name: Script tests
@@ -83,7 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make test-scripts
+      - run: nix develop .#ci --command make test-scripts
 
   flutter-linux-host:
     name: Flutter Linux host
@@ -91,9 +91,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make linux-debug
+      - run: nix develop .#ci --command make linux-debug
       - name: Verify the Linux bundle carries the declared fonts
-        run: nix develop --command make check-linux-bundle
+        run: nix develop .#ci --command make check-linux-bundle
 
   flutter-packaged-linux:
     name: Flutter packaged tests (Linux)
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       # Unsets the PDFium overrides: the bundle's PDFium and SQLite must load.
-      - run: nix develop --command make test-packaged-linux
+      - run: nix develop .#ci --command make test-packaged-linux
 
   flutter-packaged-macos:
     name: Flutter packaged tests (macOS)
@@ -110,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make test-packaged-macos
+      - run: nix develop .#ci --command make test-packaged-macos
 
   flutter-macos-host:
     name: Flutter macOS host
@@ -118,8 +118,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command make macos-smoke
+      - run: nix develop .#ci --command make macos-smoke
       - name: Verify the macOS bundle carries the declared fonts
         run: |
-          nix develop --command python3 scripts/check_flutter_bundle.py \
+          nix develop .#ci --command python3 scripts/check_flutter_bundle.py \
             "flutter/build/macos/Build/Products/Debug/shosai_flutter.app"
