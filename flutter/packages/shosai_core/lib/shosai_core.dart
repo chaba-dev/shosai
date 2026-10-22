@@ -5,6 +5,16 @@
 /// of Flutter widgets so its behaviour is tested with `dart test`.
 library;
 
+export 'src/annotations/annotation.dart';
+export 'src/annotations/annotations.dart';
+export 'src/annotations/quote.dart'
+    hide
+        NormalizationAllowance,
+        forEachQuoteCluster,
+        nfcCluster,
+        normalizeQuoteText;
+export 'src/annotations/resolution.dart'
+    hide forEachBoundedGrapheme, resolveStoredAnchor;
 export 'src/cancellation.dart';
 export 'src/errors.dart';
 export 'src/library/book.dart';
@@ -17,3 +27,4 @@ export 'src/reading/reader_settings.dart';
 export 'src/reading/reading_state.dart';
 export 'src/store/schema.dart';
 export 'src/store/store.dart';
+export 'src/unit_text.dart';

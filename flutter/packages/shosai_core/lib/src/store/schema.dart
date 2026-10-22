@@ -85,4 +85,102 @@ CREATE TABLE bookmarks (
 CREATE INDEX bookmarks_book_order_idx
     ON bookmarks(content_hash, unit, coalesce(location_offset, 0), created_at, id);
 '''),
+  Migration(5, 'annotations', '''
+-- A work that annotations belong to. Its versions are the contents (by hash)
+-- it has been read in; annotations made on one version resolve against the
+-- others by quote (RFD 6).
+CREATE TABLE annotation_documents (
+    id     TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    format TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
+    UNIQUE (id, format)
+) STRICT;
+
+CREATE TABLE annotation_document_versions (
+    id                         TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    document_id                TEXT NOT NULL,
+    format                     TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
+    content_hash               TEXT NOT NULL UNIQUE
+                               CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    -- The book's title when this version was first annotated, to describe it
+    -- after the book is gone.
+    title                      TEXT NOT NULL
+                               CHECK (length(CAST(title AS BLOB)) BETWEEN 1 AND 4096),
+    associated_from_version_id TEXT REFERENCES annotation_document_versions(id),
+    associated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (id, format),
+    FOREIGN KEY (document_id, format) REFERENCES annotation_documents(id, format)
+) STRICT;
+
+CREATE INDEX annotation_document_versions_document_idx
+    ON annotation_document_versions(document_id);
+
+CREATE TABLE annotations (
+    id                    TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    -- The version whose text and geometry the anchor was captured from; the
+    -- annotation has that version's format.
+    version_id            TEXT NOT NULL,
+    format                TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
+    anchor_version        INTEGER NOT NULL CHECK (anchor_version = 1),
+    original_quote        TEXT CHECK (original_quote IS NULL OR length(original_quote) <= 65536),
+    normalization_profile TEXT CHECK (normalization_profile IS NULL
+                                      OR normalization_profile = 'shosai-quote-v1'),
+    normalized_exact      TEXT CHECK (normalized_exact IS NULL
+                                      OR length(normalized_exact) BETWEEN 1 AND 65536),
+    normalized_prefix     TEXT CHECK (normalized_prefix IS NULL OR length(normalized_prefix) <= 32),
+    normalized_suffix     TEXT CHECK (normalized_suffix IS NULL OR length(normalized_suffix) <= 32),
+    color                 TEXT NOT NULL
+                          CHECK (color IN ('yellow', 'green', 'blue', 'pink', 'purple')),
+    body                  TEXT CHECK (body IS NULL OR length(body) <= 65536),
+    source_system         TEXT CHECK (source_system IS NULL
+                                      OR length(CAST(source_system AS BLOB)) BETWEEN 1 AND 256),
+    source_id             TEXT CHECK (source_id IS NULL
+                                      OR length(CAST(source_id AS BLOB)) BETWEEN 1 AND 4096),
+    epub_spine_index      INTEGER CHECK (epub_spine_index IS NULL OR epub_spine_index >= 0),
+    epub_resource_path    TEXT CHECK (epub_resource_path IS NULL
+                                      OR length(CAST(epub_resource_path AS BLOB)) BETWEEN 1 AND 4096),
+    epub_scalar_start     INTEGER CHECK (epub_scalar_start IS NULL OR epub_scalar_start >= 0),
+    epub_scalar_end       INTEGER,
+    pdf_page              INTEGER CHECK (pdf_page IS NULL OR pdf_page >= 0),
+    pdf_char_start        INTEGER CHECK (pdf_char_start IS NULL OR pdf_char_start >= 0),
+    pdf_char_end          INTEGER,
+    -- Little-endian float32 (left, top, right, bottom) quadruples in page space.
+    pdf_rectangles        BLOB CHECK (pdf_rectangles IS NULL
+                                      OR (length(pdf_rectangles) BETWEEN 16 AND 262144
+                                          AND length(pdf_rectangles) % 16 = 0)),
+    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    modified_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    deleted_at            TEXT,
+    -- A CHECK that evaluates to NULL passes, so nullable columns are tested
+    -- with IS NOT NULL before they are compared.
+    CHECK (
+        (format = 'epub'
+         AND epub_spine_index IS NOT NULL AND epub_resource_path IS NOT NULL
+         AND epub_scalar_start IS NOT NULL AND epub_scalar_end IS NOT NULL
+         AND epub_scalar_end > epub_scalar_start
+         AND normalized_exact IS NOT NULL
+         AND pdf_page IS NULL AND pdf_char_start IS NULL AND pdf_char_end IS NULL
+         AND pdf_rectangles IS NULL)
+        OR
+        (format = 'pdf'
+         AND pdf_page IS NOT NULL AND pdf_rectangles IS NOT NULL
+         AND epub_spine_index IS NULL AND epub_resource_path IS NULL
+         AND epub_scalar_start IS NULL AND epub_scalar_end IS NULL
+         AND ((pdf_char_start IS NULL AND pdf_char_end IS NULL AND normalized_exact IS NULL)
+              OR (pdf_char_start IS NOT NULL AND pdf_char_end IS NOT NULL
+                  AND pdf_char_end > pdf_char_start AND normalized_exact IS NOT NULL)))
+    ),
+    CHECK (
+        (normalization_profile IS NULL AND normalized_exact IS NULL
+         AND normalized_prefix IS NULL AND normalized_suffix IS NULL AND original_quote IS NULL)
+        OR
+        (normalization_profile IS NOT NULL AND normalized_exact IS NOT NULL
+         AND normalized_prefix IS NOT NULL AND normalized_suffix IS NOT NULL)
+    ),
+    CHECK (source_id IS NULL OR source_system IS NOT NULL),
+    FOREIGN KEY (version_id, format) REFERENCES annotation_document_versions(id, format)
+) STRICT;
+
+CREATE INDEX annotations_version_live_idx
+    ON annotations(version_id, deleted_at, created_at, id);
+'''),
 ];
