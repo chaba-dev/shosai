@@ -9,12 +9,14 @@ import 'package:shosai_flutter/reader/view.dart';
 
 import '../support/epub_navigation_fixture.dart';
 import '../support/production_shell_harness.dart';
+import '../support/selection_surface_fixture.dart';
 
 /// The book's direction in the production reader: a right-to-left book (the
 /// spine's `page-progression-direction`) reads its spread's right page first
-/// and turns leftward; an undeclared book reads left to right.
+/// and turns leftward; an undeclared book reads left to right; a vertical
+/// book reads down its columns, right to left.
 void main() {
-  HarnessBridge bridge(String? pageProgression) {
+  HarnessBridge bridge(String? pageProgression, {Uint8List? epub}) {
     final harness = HarnessBridge(
       books: const [
         FlutterLibraryBook(
@@ -29,10 +31,9 @@ void main() {
       ],
       unitCount: 2,
     );
-    harness.epubBytes = longChapterEpub(
-      paragraphs: 80,
-      pageProgression: pageProgression,
-    );
+    harness.epubBytes =
+        epub ??
+        longChapterEpub(paragraphs: 80, pageProgression: pageProgression);
     return harness;
   }
 
@@ -188,6 +189,148 @@ void main() {
       centreOf(tester, 'reader-edge-next'),
       greaterThan(centreOf(tester, 'reader-edge-previous')),
     );
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a vertical book reads right to left even when its spine does '
+      'not say', (tester) async {
+    await openReader(
+      tester,
+      bridge(
+        null,
+        epub: verticalJapaneseEpub(paragraphs: 30, pageProgression: null),
+      ),
+    );
+
+    final first = page(tester);
+    expect(first.box.vertical, isTrue);
+    expect(first.rightToLeft, isTrue);
+    expect(first.box.origin.dx, greaterThan(first.facingBox!.origin.dx));
+    expect(
+      centreOf(tester, 'reader-edge-next'),
+      lessThan(centreOf(tester, 'reader-edge-previous')),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await settle(tester);
+    expect(
+      page(tester).pageIndex,
+      first.pageIndex + 2,
+      reason: 'the left margin turns to the next spread',
+    );
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a drag down a column selects and copies its text', (
+    tester,
+  ) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await openReader(
+      tester,
+      bridge('rtl', epub: verticalJapaneseEpub(paragraphs: 30)),
+    );
+
+    const phrase = '名前はまだ無い';
+    final text = paintedReaderSurface(tester).surface.text;
+    final start = text.runes.toList().indexOf('名'.runes.single);
+    final end = start + phrase.runes.length;
+    final from = renderedEndpointCenter(tester, start);
+    final to = renderedEndpointCenter(tester, end);
+    expect(to.dy, greaterThan(from.dy), reason: 'the phrase runs down');
+    expect((to.dx - from.dx).abs(), lessThan(1), reason: 'in one column');
+
+    await dragReaderSelectionBetween(tester, from, to);
+    await settleReaderSelection(tester);
+    await tester.tap(find.text('Copy'));
+    await settleReaderSelection(tester);
+    expect(copied, [phrase]);
+
+    await closeReader(tester);
+  });
+
+  testWidgets('the arrows extend a selection along a column and across '
+      'columns', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await openReader(
+      tester,
+      bridge('rtl', epub: verticalJapaneseEpub(paragraphs: 30)),
+    );
+
+    const phrase = '名前はまだ無い';
+    final surface = paintedReaderSurface(tester).surface;
+    final runes = surface.text.runes.toList();
+    final start = runes.indexOf('名'.runes.single);
+    final end = start + phrase.runes.length;
+    await dragReaderSelectionBetween(
+      tester,
+      renderedEndpointCenter(tester, start),
+      renderedEndpointCenter(tester, end),
+    );
+    await settleReaderSelection(tester);
+
+    Future<void> shift(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await settleReaderSelection(tester);
+    }
+
+    Future<String> copy() async {
+      await tester.tap(find.text('Copy'));
+      await settleReaderSelection(tester);
+      return copied.last;
+    }
+
+    // Down moves one character down the column.
+    await shift(LogicalKeyboardKey.arrowDown);
+    expect(await copy(), phrase + String.fromCharCode(runes[end]));
+    await shift(LogicalKeyboardKey.arrowUp);
+    expect(await copy(), phrase);
+
+    // Left moves into the next column, to the left: the selection now runs
+    // through the end of this column and into that one.
+    final column = surface.visualLines.indexWhere(
+      (line) => line.carets.any((caret) => caret.offset.toInt() == end),
+    );
+    final columnEnd = surface.visualLines[column].carets.last.offset.toInt();
+    await shift(LogicalKeyboardKey.arrowLeft);
+    final across = await copy();
+    expect(across.runes.length, greaterThan(columnEnd - start));
+    expect(across, startsWith(phrase));
+    await shift(LogicalKeyboardKey.arrowRight);
+    expect(await copy(), phrase);
 
     await closeReader(tester);
   });

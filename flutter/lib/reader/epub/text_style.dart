@@ -10,6 +10,7 @@ library;
 
 import 'dart:ui' as ui;
 
+import 'package:characters/characters.dart';
 import 'package:flutter/painting.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
@@ -356,20 +357,94 @@ final class CanonicalCursor {
   static bool _isHighSurrogate(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
 }
 
+/// A run of a vertical block's characters that stand upright in their column.
+///
+/// A vertical block is laid out as horizontal lines on a frame turned a
+/// quarter turn clockwise, so its text reads top to bottom and its lines stack
+/// right to left; Latin letters and the brackets and dashes that CSS rotates
+/// in vertical text come out sideways, as they should. Kanji, kana and the
+/// other characters that stand upright (UAX #50's `U` and `Tu`) are laid out
+/// in the same line for their advance and line breaking, painted transparent,
+/// and drawn again upright over their own boxes (see
+/// [FlowTextBlock.paint]).
+class UprightRun {
+  const UprightRun({
+    required this.start,
+    required this.end,
+    required this.style,
+  });
+
+  /// Painter code units of the run.
+  final int start;
+  final int end;
+
+  /// The run's own style, with its ink: the laid-out text is transparent.
+  final TextStyle style;
+}
+
+/// Whether [rune] is drawn upright in vertical text.
+///
+/// A compact reading of UAX #50 (Vertical Text Layout) for the scripts a
+/// vertical book sets. Upright (`U`) are CJK ideographs, kana, Hangul,
+/// full-width forms and the symbols set in an ideographic em square; Latin,
+/// digits and the dashes and ellipses (`R`) rotate with the line.
+///
+/// The `Tu` characters (the ideographic comma and full stop, the small kana)
+/// and the `Tr` ones (the CJK brackets, the wave dash, the long vowel mark,
+/// the full-width parentheses, colon and tilde) are drawn upright too: they
+/// take their vertical forms from the font's `vert` feature, which turns a
+/// `Tr` bracket or long vowel mark into its designed vertical glyph. Flutter's
+/// text API does not tell whether a font has those forms; Shippori Mincho, the
+/// fallback for Japanese, has them, as fonts made for vertical text do.
+bool isUprightInVertical(int rune) {
+  if (rune < 0x00A7) return false;
+  if (rune == 0x00A7 || rune == 0x00A9 || rune == 0x00AE) return true;
+  if (rune == 0x00B1 || rune == 0x00D7 || rune == 0x00F7) return true;
+  if (rune < 0x1100) return false;
+  if (rune <= 0x11FF) return true; // Hangul Jamo
+  if (rune == 0x203B || rune == 0x2020 || rune == 0x2021) return true;
+  if (rune >= 0x2460 && rune <= 0x24FF) return true; // enclosed numbers
+  if (rune >= 0x25A0 && rune <= 0x27BF) return true; // shapes, symbols
+  if (rune >= 0x2E80 && rune <= 0x2FFF) return true; // radicals
+  if (rune >= 0x3000 && rune <= 0x9FFF) return true; // CJK, kana, ideographs
+  if (rune >= 0xA960 && rune <= 0xA97F) return true;
+  if (rune >= 0xAC00 && rune <= 0xD7FF) return true; // Hangul
+  if (rune >= 0xF900 && rune <= 0xFAFF) return true;
+  if (rune >= 0xFE10 && rune <= 0xFE1F) return true; // vertical forms
+  if (rune >= 0xFE30 && rune <= 0xFE48) return true; // vertical compatibility
+  if (rune >= 0xFE50 && rune <= 0xFE6F) {
+    // The small em dash, hyphen-minus and comparison signs rotate (`R`).
+    return !(rune == 0xFE58 || (rune >= 0xFE63 && rune <= 0xFE66));
+  }
+  if (rune >= 0xFF01 && rune <= 0xFF60) {
+    // The full-width hyphen and comparison signs rotate (`R`).
+    return !(rune == 0xFF0D || (rune >= 0xFF1C && rune <= 0xFF1E));
+  }
+  if (rune >= 0xFFE0 && rune <= 0xFFE6) return true;
+  if (rune >= 0x1B000 && rune <= 0x1B2FF) return true; // kana supplements
+  if (rune >= 0x1F000 && rune <= 0x1FAFF) return true; // emoji
+  if (rune >= 0x20000 && rune <= 0x3FFFF) return true; // ideographs
+  return false;
+}
+
 /// Build the Flutter span tree for a list of engine spans.
 ///
 /// Each span's canonical mapping is preserved in [segments]; the returned
-/// [TextSpan] is the exact text laid out by the painter.
-({InlineSpan span, BlockTextMap map}) buildBlockText(
+/// [TextSpan] is the exact text laid out by the painter. With [vertical] the
+/// upright characters are laid out transparent and returned as [UprightRun]s
+/// for [FlowTextBlock.paint] to draw upright.
+({InlineSpan span, BlockTextMap map, List<UprightRun> upright}) buildBlockText(
   List<EpubTextSpan> spans,
   ReaderEpubTypography typography,
   double baseFontSize, {
   bool selectableOverride = true,
   int codeUnitOffset = 0,
+  bool vertical = false,
 }) {
   final buffer = StringBuffer();
   final segments = <TextMapSegment>[];
   final children = <TextSpan>[];
+  final upright = <UprightRun>[];
   for (final span in spans) {
     if (span.text.isEmpty) continue;
     final start = buffer.length;
@@ -385,12 +460,47 @@ final class CanonicalCursor {
         link: span.link,
       ),
     );
-    children.add(
-      TextSpan(
-        text: span.text,
-        style: spanStyle(span, typography, baseFontSize),
-      ),
+    final style = spanStyle(span, typography, baseFontSize);
+    if (!vertical) {
+      children.add(TextSpan(text: span.text, style: style));
+      continue;
+    }
+    final hidden = style.copyWith(
+      color: typography.palette.foreground.withValues(alpha: 0),
     );
+    var runStart = 0;
+    bool? runUpright;
+    void flush(int end) {
+      if (runUpright == null || end <= runStart) return;
+      final text = span.text.substring(runStart, end);
+      if (runUpright) {
+        children.add(TextSpan(text: text, style: hidden));
+        upright.add(
+          UprightRun(
+            start: start + codeUnitOffset + runStart,
+            end: start + codeUnitOffset + end,
+            style: style,
+          ),
+        );
+      } else {
+        children.add(TextSpan(text: text, style: style));
+      }
+      runStart = end;
+    }
+
+    // Orientation applies to whole grapheme clusters (UAX #50, 3.2.1): a
+    // variation selector, a combining mark or an emoji joined by ZWJ goes
+    // with its base, so the upright repaint shapes what the line shaped.
+    var unit = 0;
+    for (final cluster in span.text.characters) {
+      final isUpright = isUprightInVertical(cluster.runes.first);
+      if (runUpright != isUpright) {
+        flush(unit);
+        runUpright = isUpright;
+      }
+      unit += cluster.length;
+    }
+    flush(unit);
   }
   return (
     span: TextSpan(children: children),
@@ -399,6 +509,7 @@ final class CanonicalCursor {
       segments,
       codeUnitOffset: codeUnitOffset,
     ),
+    upright: upright,
   );
 }
 

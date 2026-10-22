@@ -220,6 +220,7 @@ EpubBook openEpubBytes(
         canonicalText: canonicalText,
         anchors: normalized.anchors,
         scalarCount: index.scalarCount,
+        writingMode: normalized.writingMode,
       ),
     );
   }

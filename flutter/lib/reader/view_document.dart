@@ -186,6 +186,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.visualLeft,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(
@@ -194,6 +195,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.visualRight,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(
@@ -238,6 +240,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.previousLine,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(
@@ -246,6 +249,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.nextLine,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(

@@ -710,7 +710,14 @@ final class ReaderController implements Listenable {
       case ReaderSelectionPointerCancelled():
         _selectionPointerCancelled(message.pointer);
       case ReaderSelectionKeyboardExtended():
-        _selectionKeyboardExtended(message.movement);
+        // The arrow keys are physical: in a vertical column Up and Down
+        // move along it, and Left moves to the next column, to its left.
+        final surface = _model.selectionSurface;
+        _selectionKeyboardExtended(
+          surface == null || !message.arrow
+              ? message.movement
+              : _physicalMovement(surface, _model.focus, message.movement),
+        );
       case ReaderSelectionEnded():
         _selectionEnded();
       case ReaderSelectionActionsRequested():
@@ -1935,6 +1942,7 @@ final class ReaderController implements Listenable {
       final paginated = paginateWindow(
         session.snapshot(),
         ui.Size(key.pageWidth, key.height),
+        vertical: key.vertical,
       );
       if (paginated.pageOfCanonical(scalar) + 1 < paginated.pages.length ||
           session.complete ||
@@ -1951,6 +1959,7 @@ final class ReaderController implements Listenable {
     return paginateWindow(
       session.snapshot(),
       ui.Size(key.pageWidth, key.height),
+      vertical: key.vertical,
     );
   }
 
@@ -1991,7 +2000,12 @@ final class ReaderController implements Listenable {
             chapterCount: document.logicalUnitCount.toInt(),
             windowSize: ui.Size(layout.width, height),
             spread: _ensureFacingPage(pageSession, pageKey, scalar),
-            rightToLeft: _epubSource?.book.pageProgression == EpubDirection.rtl,
+            // A vertical chapter's columns run right to left, and so do its
+            // pages, whatever the spine declares.
+            rightToLeft:
+                _epubSource?.book.pageProgression == EpubDirection.rtl ||
+                (pageKey?.vertical ?? false),
+            vertical: pageKey?.vertical ?? false,
           );
     final oldImage = _model.pageImage;
     final changedLocation =
@@ -2924,10 +2938,12 @@ final class ReaderController implements Listenable {
     // the typed refusal.
     final refusal = source.layoutLimitExceeded(unit);
     if (refusal != null) throw refusal;
-    // A continuous chapter lays out only a window around the viewport, so any
-    // admitted chapter reads continuously however long it is.
-    final continuous = _typographyContinuous;
     final chapter = source.book.chapters[unit];
+    final vertical = chapter.writingMode == EpubWritingMode.verticalRl;
+    // A continuous chapter lays out only a window around the viewport, so any
+    // admitted chapter reads continuously however long it is. A vertical
+    // chapter is read in pages: its columns would scroll sideways.
+    final continuous = _typographyContinuous && !vertical;
     try {
       await source.ensureImages(chapter, _epubImageDecoder);
     } catch (_) {
@@ -2945,12 +2961,17 @@ final class ReaderController implements Listenable {
       continuous: continuous,
       // A continuous chapter is one scrolled column; only pages pair up.
       spread: layout.spread && !continuous,
+      vertical: vertical,
     );
-    final pageBox = epubPageBoxFor(ui.Size(key.pageWidth, pageHeight));
+    final pageBox = epubPageBoxFor(
+      ui.Size(key.pageWidth, pageHeight),
+      vertical: vertical,
+    );
     final spec = ChapterLayoutSpec(
-      width: pageBox.contentWidth,
-      height: pageBox.contentHeight,
+      width: pageBox.inlineExtent,
+      height: pageBox.blockExtent,
       typography: _epubTypography(layout, source),
+      vertical: vertical,
     );
     // An explicit replacement with no offset is a chapter-level target: the
     // caller is replacing the durable position, so the reader goes to the
@@ -3198,10 +3219,14 @@ final class ReaderController implements Listenable {
     ReaderLayout layout,
     EpubContentSource source,
   ) => ReaderEpubTypography(
-    // The book face (`docs/typography.md`): Literata for Latin text. Japanese
-    // falls back to the interface face until the reading mincho is bundled.
+    // The book face (`docs/typography.md`): Literata for Latin text and
+    // Shippori Mincho for Japanese. The symbols and rarer ideographs neither
+    // carries still find the bundled Japanese interface face.
     fontFamily: ShosaiTokens.typeFamilyEditorialLatinFlutter,
-    fontFamilyFallback: const [shosaiJapaneseInterfaceFontFamily],
+    fontFamilyFallback: const [
+      ShosaiTokens.typeFamilyEditorialJapaneseFlutter,
+      shosaiJapaneseInterfaceFontFamily,
+    ],
     fontSize: layout.fontSize,
     lineHeight: layout.lineSpacing,
     palette: ReaderEpubPalette.of(_typographyTheme),
@@ -6010,6 +6035,35 @@ int? _adjacentOffset(List<int> offsets, int? current, bool forward) {
   final origin = _caretForOffset(lines, current, currentLine);
   if (origin == null) return null;
   return _lineEdge(lines, origin.line, !forward);
+}
+
+/// [movement], a physical arrow, as the logical movement it makes at
+/// [focus]: unchanged on a horizontal line; on a vertical column (whose
+/// columns run right to left) Up and Down move along the column, and Left and
+/// Right move to the next and the previous column.
+ReaderSelectionMovement _physicalMovement(
+  FlutterSelectionSurface surface,
+  int? focus,
+  ReaderSelectionMovement movement,
+) {
+  FlutterSelectionCaret? caret;
+  for (final line in surface.visualLines) {
+    for (final candidate in line.carets) {
+      if (candidate.offset.toInt() == focus) caret = candidate;
+    }
+    if (caret != null) break;
+  }
+  final vertical =
+      caret?.vertical ??
+      surface.visualLines.any((line) => line.carets.any((c) => c.vertical));
+  if (!vertical) return movement;
+  return switch (movement) {
+    ReaderSelectionMovement.previousLine => ReaderSelectionMovement.visualLeft,
+    ReaderSelectionMovement.nextLine => ReaderSelectionMovement.visualRight,
+    ReaderSelectionMovement.visualLeft => ReaderSelectionMovement.nextLine,
+    ReaderSelectionMovement.visualRight => ReaderSelectionMovement.previousLine,
+    _ => movement,
+  };
 }
 
 int? _navigableLine(List<FlutterSelectionVisualLine> lines, bool forward) {

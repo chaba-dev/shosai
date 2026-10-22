@@ -365,8 +365,13 @@ final class ReaderSelectionPointerCancelled extends ReaderMessage {
 }
 
 final class ReaderSelectionKeyboardExtended extends ReaderMessage {
-  const ReaderSelectionKeyboardExtended(this.movement);
+  const ReaderSelectionKeyboardExtended(this.movement, {this.arrow = false});
   final ReaderSelectionMovement movement;
+
+  /// Whether [movement] names the direction of an arrow key on screen
+  /// rather than a movement in the text: in a vertical column Up and Down
+  /// then move along it, and Left and Right across columns.
+  final bool arrow;
 }
 
 final class ReaderSelectionEnded extends ReaderMessage {

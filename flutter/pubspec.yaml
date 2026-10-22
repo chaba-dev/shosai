@@ -66,11 +66,14 @@ flutter:
     - family: Literata
       fonts:
         - asset: fonts/Literata-Variable.ttf
-    # Literata's Japanese partner in the editorial role. The shell sets every
-    # editorial style at 600, so only that static weight ships; add the other
-    # weights from `assets/fonts/` when a style needs them.
+    # Literata's Japanese partner in the editorial role and in the book face.
+    # The shell sets every editorial style at 600, and EPUB text at 400 (its
+    # bold takes the 600 face); add the other weights from `assets/fonts/`
+    # when a style needs them.
     - family: Shippori Mincho
       fonts:
+        - asset: fonts/ShipporiMincho-Regular.ttf
+          weight: 400
         - asset: fonts/ShipporiMincho-SemiBold.ttf
           weight: 600
     # The 書 of the brand mark only (U+66F8); see `assets/fonts/README.md`.

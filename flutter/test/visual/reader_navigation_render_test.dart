@@ -183,14 +183,16 @@ void main() {
     );
     Offset? point;
     for (final slice in painter.page.page.slices) {
-      for (final placed in placedPageText(slice, painter.page.box)) {
+      for (final placed in placedPageText(slice)) {
         for (final link in placed.block.links) {
           if (link.href != 'chapter-2.xhtml#two-target') continue;
           final boxes = placed.block.painter.getBoxesForSelection(
             TextSelection(baseOffset: link.start, extentOffset: link.end),
           );
           if (boxes.isEmpty) continue;
-          final rect = boxes.first.toRect().shift(placed.origin);
+          final rect = painter.page.box.rectToPage(
+            boxes.first.toRect().shift(placed.origin),
+          );
           point =
               paintBox.localToGlobal(Offset.zero) +
               transform.toDestinationRect(rect).center;

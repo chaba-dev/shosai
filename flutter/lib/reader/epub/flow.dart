@@ -14,6 +14,7 @@ library;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:characters/characters.dart';
 import 'package:flutter/painting.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 
@@ -63,6 +64,7 @@ class FlowTextBlock {
     required this.selectable,
     required this.textAlign,
     required this.textDirection,
+    this.upright = const [],
   });
 
   final TextPainter painter;
@@ -74,6 +76,16 @@ class FlowTextBlock {
   final bool selectable;
   final TextAlign textAlign;
   final ui.TextDirection textDirection;
+
+  /// The characters of a vertical block that [paint] draws upright; empty for
+  /// a horizontal block.
+  final List<UprightRun> upright;
+
+  /// The upright glyphs of each line, measured when the line is first painted.
+  final Map<int, List<_UprightGlyph>> _uprightLines = {};
+
+  /// One painter per upright grapheme and style, shared by the block's lines.
+  final Map<(String, TextStyle), TextPainter> _uprightPainters = {};
 
   double get width => painter.width;
   double get height => painter.height;
@@ -105,8 +117,91 @@ class FlowTextBlock {
     return null;
   }
 
+  /// Paints the block with its top-left corner at the canvas origin.
+  ///
+  /// A vertical block's canvas is turned a quarter turn clockwise, so each
+  /// upright character of the lines [lineStart] to [lineEnd] is drawn turned
+  /// back over its own transparent box, in its font's vertical forms.
+  void paint(Canvas canvas, {int lineStart = 0, int? lineEnd}) {
+    painter.paint(canvas, Offset.zero);
+    if (upright.isEmpty) return;
+    final end = math.min(lineEnd ?? lines.length, lines.length);
+    for (var line = lineStart; line < end; line++) {
+      for (final glyph in _uprightLines[line] ??= _measureUpright(line)) {
+        final glyphPainter = glyph.painter;
+        canvas.save();
+        canvas.translate(glyph.center.dx, glyph.center.dy);
+        canvas.rotate(-math.pi / 2);
+        glyphPainter.paint(
+          canvas,
+          Offset(-glyphPainter.width / 2, -glyphPainter.height / 2),
+        );
+        canvas.restore();
+      }
+    }
+  }
+
+  List<_UprightGlyph> _measureUpright(int line) {
+    final from = lines[line].codeUnitStart;
+    final to = lines[line].codeUnitEnd;
+    final glyphs = <_UprightGlyph>[];
+    final text = map.text;
+    final markerOffset = map.codeUnitOffset;
+    for (final run in upright) {
+      if (run.end <= from) continue;
+      if (run.start >= to) break;
+      var unit = math.max(run.start, from);
+      final runEnd = math.min(run.end, to);
+      final runText = text.substring(
+        unit - markerOffset,
+        runEnd - markerOffset,
+      );
+      for (final grapheme in runText.characters) {
+        final start = unit;
+        unit += grapheme.length;
+        final boxes = painter.getBoxesForSelection(
+          TextSelection(baseOffset: start, extentOffset: unit),
+        );
+        if (boxes.isEmpty) continue;
+        var rect = boxes.first.toRect();
+        for (final box in boxes.skip(1)) {
+          rect = rect.expandToInclude(box.toRect());
+        }
+        final glyphPainter = _uprightPainters[(grapheme, run.style)] ??=
+            TextPainter(
+              text: TextSpan(
+                text: grapheme,
+                style: run.style.copyWith(
+                  fontFeatures: const [ui.FontFeature.enable('vert')],
+                  decoration: TextDecoration.none,
+                ),
+              ),
+              textDirection: ui.TextDirection.ltr,
+            )..layout();
+        glyphs.add(_UprightGlyph(center: rect.center, painter: glyphPainter));
+      }
+    }
+    return glyphs;
+  }
+
   /// Releases the measured paragraph behind this block.
-  void dispose() => painter.dispose();
+  void dispose() {
+    painter.dispose();
+    for (final glyphPainter in _uprightPainters.values) {
+      glyphPainter.dispose();
+    }
+    _uprightPainters.clear();
+    _uprightLines.clear();
+  }
+}
+
+/// One upright character of a vertical line: where its box's centre is, in
+/// block coordinates, and the painter that draws it.
+class _UprightGlyph {
+  const _UprightGlyph({required this.center, required this.painter});
+
+  final Offset center;
+  final TextPainter painter;
 }
 
 /// A measured image block (or a visible alt-text fallback).
@@ -122,10 +217,16 @@ class FlowImageBlock {
     required this.caption,
     required this.canonicalStart,
     required this.canonicalEnd,
+    this.quarterTurned = false,
   });
 
   final String src;
   final String alt;
+
+  /// Whether the image is laid out in a vertical flow, which is turned a
+  /// quarter turn: [width] and [height] are then the flow's extents, and the
+  /// image is painted turned back so it stands upright.
+  final bool quarterTurned;
 
   /// Canonical range of the image's alt fallback and caption.
   final int canonicalStart;
@@ -373,24 +474,33 @@ class ChapterLayoutSpec {
     required this.width,
     required this.height,
     required this.typography,
+    this.vertical = false,
   });
 
-  /// Logical content width (already excludes chrome and page padding).
+  /// Logical content width (already excludes chrome and page padding): the
+  /// length of a line.
   final double width;
 
-  /// Logical content height available to one page.
+  /// Logical content height available to one page: the extent its lines
+  /// stack along.
   final double height;
   final ReaderEpubTypography typography;
+
+  /// Whether the chapter is vertical (`vertical-rl`). The flow is then laid
+  /// out as horizontal lines that a page turns a quarter turn clockwise:
+  /// [width] is the page's height and [height] its width.
+  final bool vertical;
 
   @override
   bool operator ==(Object other) =>
       other is ChapterLayoutSpec &&
       other.width == width &&
       other.height == height &&
-      other.typography == typography;
+      other.typography == typography &&
+      other.vertical == vertical;
 
   @override
-  int get hashCode => Object.hash(width, height, typography);
+  int get hashCode => Object.hash(width, height, typography, vertical);
 }
 
 /// Lay out one chapter into a flow.
@@ -1154,18 +1264,25 @@ class _FlowContext {
     final available = math.max(40.0, spec.width - indent);
     final image = images[node.src];
     if (image != null && image.width > 0 && image.height > 0) {
+      // A vertical flow is turned a quarter turn, so the image is measured
+      // turned too: its height runs along the line.
+      final turned = spec.vertical;
+      final imageWidth = turned ? image.height : image.width;
+      final imageHeight = turned ? image.width : image.height;
       var width = available.toDouble();
-      var height = width * image.height / image.width;
+      var height = width * imageHeight / imageWidth;
       if (node.intrinsicSize != null) {
         // Respect a smaller intrinsic size (no upscaling) while still
         // constraining large images to the content box and page height.
         final intrinsic = node.intrinsicSize!;
-        width = math.min(width, intrinsic.width.toDouble());
-        height = width * intrinsic.height / intrinsic.width;
+        final intrinsicWidth = turned ? intrinsic.height : intrinsic.width;
+        final intrinsicHeight = turned ? intrinsic.width : intrinsic.height;
+        width = math.min(width, intrinsicWidth.toDouble());
+        height = width * intrinsicHeight / intrinsicWidth;
       }
       if (height > maxBlockHeight) {
         height = maxBlockHeight;
-        width = height * image.width / image.height;
+        width = height * imageWidth / imageHeight;
       }
       if (height > maxBlockHeight) {
         overflowClippedBlocks++;
@@ -1196,6 +1313,7 @@ class _FlowContext {
           caption: caption,
           canonicalStart: node.canonical?.start ?? 0,
           canonicalEnd: node.canonical?.end ?? 0,
+          quarterTurned: turned,
         ),
       );
       cursor += style.blockAfterEm != null
@@ -1514,6 +1632,7 @@ class _FlowContext {
       typography,
       baseFontSize,
       codeUnitOffset: markerPrefix.length,
+      vertical: spec.vertical,
     );
     if (built.map.isEmpty && marker == null) return null;
     final children = <InlineSpan>[];
@@ -1591,6 +1710,7 @@ class _FlowContext {
       selectable: spans.any((span) => span.selectable),
       textAlign: textAlign,
       textDirection: flutterTextDirection(direction),
+      upright: built.upright,
     );
   }
 
