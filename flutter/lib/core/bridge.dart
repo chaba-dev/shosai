@@ -710,14 +710,20 @@ class FlutterReadingState {
   final BigInt? offset;
   final double zoom;
 
+  /// The last unit in view when it is past [unit], as on a PDF spread; the
+  /// library progress counts it as read. Not part of the restored position.
+  final BigInt? lastUnit;
+
   const FlutterReadingState({
     required this.unit,
     this.offset,
     required this.zoom,
+    this.lastUnit,
   });
 
   @override
-  int get hashCode => unit.hashCode ^ offset.hashCode ^ zoom.hashCode;
+  int get hashCode =>
+      unit.hashCode ^ offset.hashCode ^ zoom.hashCode ^ lastUnit.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -726,7 +732,8 @@ class FlutterReadingState {
           runtimeType == other.runtimeType &&
           unit == other.unit &&
           offset == other.offset &&
-          zoom == other.zoom;
+          zoom == other.zoom &&
+          lastUnit == other.lastUnit;
 }
 
 class FlutterSearchMatch {

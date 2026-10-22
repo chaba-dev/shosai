@@ -447,6 +447,7 @@ final class CoreRecords implements ShosaiRecords {
         zoom: value.zoom,
       ),
       unitCount: unitCount.toInt(),
+      lastUnit: value.lastUnit?.toInt(),
     ),
   );
 
