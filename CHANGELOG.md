@@ -98,6 +98,7 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Abandon a TOC candidate on one unusable entry like the retained parser (#144)
 - *(epub)* Anchor table rows at their own canonical position (#146)
 - *(flutter)* Package the declared fonts inside the host bundle (#147)
+- Packaged-host fixes from the Linux and macOS release checks (#165)
 
 ### 🚜 Refactor
 
