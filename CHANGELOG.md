@@ -79,6 +79,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Two-page spreads for EPUB and PDF (#180)
 - *(reader)* Read right-to-left books right to left (#181)
 - *(reader)* Set vertical Japanese in columns, right to left (#182)
+- *(shell)* Open the tab switcher from the reader toolbar (#178)
 
 ### 🐛 Bug Fixes
 
