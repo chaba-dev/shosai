@@ -373,6 +373,58 @@ void main() {
       expect(find.text('50% · chapter 2 of 4'), findsOneWidget);
     });
 
+    testWidgets('a short window at 200% text scrolls the whole panel and '
+        'keeps the page field and close reachable', (tester) async {
+      _setView(tester, const Size(1280, 480));
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final bridge = _PanelBridge(unitCount: 12);
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          contentsLoader: (_) async => [
+            for (var unit = 0; unit < 12; unit += 1)
+              ReaderContentsEntry(depth: 0, title: 'Chapter $unit', unit: unit),
+          ],
+        ),
+      );
+      await _openContents(tester);
+      expect(tester.takeException(), isNull);
+
+      // An invalid page adds the error under the field.
+      final input = find.byKey(const ValueKey('reader-page-input'));
+      await tester.ensureVisible(input);
+      await tester.enterText(input, '99');
+      await tester.testTextInput.receiveAction(TextInputAction.go);
+      await tester.pump();
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+      final error = find.byKey(const ValueKey('reader-page-input-error'));
+      await tester.ensureVisible(error);
+      await tester.pump();
+      expect(tester.getRect(error).bottom, lessThanOrEqualTo(480));
+
+      // The keyboard takes a third of the window.
+      tester.view.viewInsets = const FakeViewPadding(bottom: 160);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pump();
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(input);
+      await tester.pump();
+      expect(tester.getRect(input).bottom, lessThanOrEqualTo(480 - 160));
+
+      final close = find.byKey(const ValueKey('reader-contents-close'));
+      await tester.ensureVisible(close);
+      await tester.pump();
+      await tester.tap(close);
+      await tester.pump();
+      await _settle(tester);
+      expect(find.byKey(const ValueKey('reader-panel-contents')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('shows loading, empty, failed and retry states', (
       tester,
     ) async {

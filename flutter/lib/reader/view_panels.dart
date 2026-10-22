@@ -321,6 +321,10 @@ class _ReaderPanelGroup extends StatelessWidget {
   );
 }
 
+/// The height, at 100% text, below which the Contents panel scrolls as a
+/// whole: its heading, a few chapter rows, and the page field with its error.
+const double _contentsPanelMinHeight = 200;
+
 /// The Contents panel: the chapter list, then a field to go to a page
 /// (RD-07, RD-10).
 class _ReaderContentsPanel extends StatefulWidget {
@@ -385,6 +389,35 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
         contents.entries.any((entry) => entry.current)) {
       _scheduleReveal();
     }
+    // At ordinary heights only the chapter list scrolls, between the heading
+    // and the page field. In a short window (a scaled interface, a keyboard,
+    // the page field's error) the panel keeps room for a few rows and scrolls
+    // as a whole, so its heading and page field stay reachable. The tree is
+    // the same either way, so the page field keeps its focus as the keyboard
+    // opens.
+    final minHeight =
+        _contentsPanelMinHeight *
+        math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        key: const ValueKey('reader-contents-panel-scroll'),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: math.max(constraints.maxHeight, minHeight),
+          ),
+          child: _panelColumn(l10n, palette, model, contents, dispatch),
+        ),
+      ),
+    );
+  }
+
+  Widget _panelColumn(
+    AppLocalizations l10n,
+    ShellPalette palette,
+    ReaderModel model,
+    ReaderContentsPresentation contents,
+    void Function(ReaderMessage) dispatch,
+  ) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
