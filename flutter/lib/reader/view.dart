@@ -35,7 +35,6 @@ part 'view_selection.dart';
 /// short window at a scaled interface), where the alternative is an overflow
 /// that pushes the document out of reach. The alert and error surfaces keep the
 /// pre-existing 0.15 bound.
-const double _readerTabStripBoundShare = 0.2;
 const double _readerHeaderBoundShare = 0.3;
 const double _readerPanelBoundShare = 0.4;
 const double _readerAlertBoundShare = 0.15;
@@ -52,7 +51,6 @@ class ReaderScreen extends StatefulWidget {
     this.initialBookId,
     this.initialSettings,
     this.onLocatorChanged,
-    this.initialTabs = const [],
     this.progressSource,
     this.contentsLoader,
     this.externalLinkOpener,
@@ -76,9 +74,6 @@ class ReaderScreen extends StatefulWidget {
   final int? initialBookId;
   final FlutterReaderSettings? initialSettings;
   final void Function(String path, int? bookId)? onLocatorChanged;
-
-  /// Fixture-injected tab strip entries (4B presentation; 5F owns sessions).
-  final List<ReaderTabPresentation> initialTabs;
 
   /// Fixture-supplied progress ordinals (RD-05); 5G supplies real values.
   final ReaderProgressSource? progressSource;
@@ -172,60 +167,11 @@ class _ReaderScreenState extends State<ReaderScreen>
   final FocusNode _typographyFocus = FocusNode(debugLabel: 'reader typography');
   final FocusNode _moreFocus = FocusNode(debugLabel: 'reader more');
   final FocusNode _panelFocus = FocusNode(debugLabel: 'reader panel');
-  final ScrollController _tabScroll = ScrollController();
-  final Map<String, GlobalKey> _tabKeys = {};
-  final Map<String, FocusNode> _tabFocusNodes = {};
   ReaderPanel? _lastOpenPanel;
   ShadDialogRoute<String>? _noteDialogRoute;
   ShadDialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
   bool _controllerInitialized = false;
-
-  /// The stable key the reveal adapter scrolls into view for [tabId].
-  GlobalKey _tabKey(String tabId) => _tabKeys.putIfAbsent(
-    tabId,
-    () => GlobalKey(debugLabel: 'reader-tab-$tabId'),
-  );
-
-  /// The focus node the tab strip hands to the label control for [tabId].
-  FocusNode _tabFocusNode(String tabId) => _tabFocusNodes.putIfAbsent(
-    tabId,
-    () => FocusNode(debugLabel: 'reader-tab-label-$tabId'),
-  );
-
-  /// The focus node the tab strip hands to the close control for [tabId].
-  FocusNode _tabCloseFocusNode(String tabId) => _tabFocusNodes.putIfAbsent(
-    _tabCloseNodeKey(tabId),
-    () => FocusNode(debugLabel: 'reader-tab-close-$tabId'),
-  );
-
-  static String _tabCloseNodeKey(String tabId) => '$tabId::close';
-
-  void _pruneTabResources(ReaderModel model) {
-    final ids = {for (final tab in model.tabs) tab.id};
-    for (final key in _tabFocusNodes.keys.toList()) {
-      final id = key.endsWith('::close')
-          ? key.substring(0, key.length - '::close'.length)
-          : key;
-      if (!ids.contains(id)) {
-        _tabFocusNodes.remove(key)?.dispose();
-      }
-    }
-    for (final id in _tabKeys.keys.toList()) {
-      if (!ids.contains(id)) _tabKeys.remove(id);
-    }
-  }
-
-  /// Brings the tab into view; the controller decides when this runs.
-  Future<void> _revealTab(String tabId) async {
-    final context = _tabKeys[tabId]?.currentContext;
-    if (context == null || !mounted) return;
-    await Scrollable.ensureVisible(
-      context,
-      duration: Duration.zero,
-      alignment: 0,
-    );
-  }
 
   void _focusHeaderAction() {
     final focus = switch (_lastOpenPanel) {
@@ -235,15 +181,6 @@ class _ReaderScreenState extends State<ReaderScreen>
       null => _backFocus,
     };
     if (focus.canRequestFocus) focus.requestFocus();
-  }
-
-  void _focusActiveTab() {
-    for (final tab in _controller.model.tabs) {
-      if (tab.selected) {
-        _tabFocusNodes[tab.id]?.requestFocus();
-        return;
-      }
-    }
   }
 
   @override
@@ -284,13 +221,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           ReaderFocusTarget.actions => _actionFocus.requestFocus(),
           ReaderFocusTarget.header => _focusHeaderAction(),
           ReaderFocusTarget.panel => _panelFocus.requestFocus(),
-          ReaderFocusTarget.tabStrip => _focusActiveTab(),
         },
         navigationAdapter: () async {
           final navigator = Navigator.maybeOf(context);
           if (navigator != null && navigator.canPop()) navigator.pop();
         },
-        tabRevealAdapter: _revealTab,
         progressSource: widget.progressSource,
         contentsLoader: widget.contentsLoader,
         externalLinkOpener: widget.externalLinkOpener,
@@ -305,7 +240,6 @@ class _ReaderScreenState extends State<ReaderScreen>
         epubFontRegistrar: widget.epubFontRegistrar ?? _registerEpubFont,
         debugEpubSessionObserver: widget.debugEpubSessionObserver,
         debugContinuousStepObserver: widget.debugContinuousStepObserver,
-        initialTabs: widget.initialTabs,
         // A callback runs after the next frame, and asks for that frame: a
         // continuous window step that installs nothing new still runs.
         frameScheduler: (callback) {
@@ -440,7 +374,6 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _modelChanged() {
     final model = _controller.model;
     if (model.openPanel != null) _lastOpenPanel = model.openPanel;
-    _pruneTabResources(model);
     final openPath = model.openPath;
     if (openPath != null) {
       // Persist the accepted locator as one pair. In particular, clear a
@@ -492,12 +425,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     _typographyFocus.dispose();
     _moreFocus.dispose();
     _panelFocus.dispose();
-    for (final node in _tabFocusNodes.values) {
-      node.dispose();
-    }
-    _tabFocusNodes.clear();
-    _tabKeys.clear();
-    _tabScroll.dispose();
     super.dispose();
   }
 
@@ -551,225 +478,134 @@ class _ReaderScreenState extends State<ReaderScreen>
         data: shosaiReaderShadTheme(model.typography.theme),
         child: Scaffold(
           body: SafeArea(
-            child: _withChromeShortcuts(
-              // The chrome rows are bounded by the height the reader is
-              // actually laid out with, not by the ambient `MediaQuery`: a host
-              // may install a `MediaQuery` whose size does not match the
-              // reader's viewport (the widget tests do that to set a text
-              // scale), and a zero height there would collapse the chrome.
-              LayoutBuilder(
-                builder: (context, constraints) => Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Every fixed chrome row is bounded to a share of the
-                    // viewport and scrolls inside that bound. At a very short
-                    // viewport with a scaled interface the header alone would
-                    // otherwise be taller than the reader (the `T200` stacked
-                    // header wraps its action group), which would overflow the
-                    // column and push the document out of reach.
-                    _boundedChrome(
-                      viewportHeight: constraints.maxHeight,
-                      share: _readerTabStripBoundShare,
-                      child: _ReaderTabStrip(
-                        model: model,
-                        dispatch: _controller.dispatch,
-                        scrollController: _tabScroll,
-                        tabKey: _tabKey,
-                        tabFocusNode: _tabFocusNode,
-                        tabCloseFocusNode: _tabCloseFocusNode,
-                      ),
-                    ),
-                    _boundedChrome(
-                      viewportHeight: constraints.maxHeight,
-                      share: _readerHeaderBoundShare,
-                      child: _ReaderHeader(
-                        model: model,
-                        compact: compact,
-                        dispatch: _controller.dispatch,
-                        backFocus: _backFocus,
-                        contentsFocus: _contentsFocus,
-                        typographyFocus: _typographyFocus,
-                        moreFocus: _moreFocus,
-                      ),
-                    ),
-                    for (final row in _panelRows(model, compact: compact))
+            child: // The chrome rows are bounded by the height the reader is
+                // actually laid out with, not by the ambient `MediaQuery`: a host
+                // may install a `MediaQuery` whose size does not match the
+                // reader's viewport (the widget tests do that to set a text
+                // scale), and a zero height there would collapse the chrome.
+                LayoutBuilder(
+                  builder: (context, constraints) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Every fixed chrome row is bounded to a share of the
+                      // viewport and scrolls inside that bound. At a very short
+                      // viewport with a scaled interface the header alone would
+                      // otherwise be taller than the reader (the `T200` stacked
+                      // header wraps its action group), which would overflow the
+                      // column and push the document out of reach.
                       _boundedChrome(
                         viewportHeight: constraints.maxHeight,
-                        share: _readerPanelBoundShare,
-                        child: row,
-                      ),
-                    // The search bar is its own row below the panels (RD-11);
-                    // search is independent of the three exclusive panels.
-                    if (model.searchOpen &&
-                        model.document != null &&
-                        model.typography.searchable)
-                      _boundedChrome(
-                        viewportHeight: constraints.maxHeight,
-                        share: _readerPanelBoundShare,
-                        child: _ReaderSearchBar(
+                        share: _readerHeaderBoundShare,
+                        child: _ReaderHeader(
                           model: model,
                           compact: compact,
                           dispatch: _controller.dispatch,
+                          backFocus: _backFocus,
+                          contentsFocus: _contentsFocus,
+                          typographyFocus: _typographyFocus,
+                          moreFocus: _moreFocus,
                         ),
                       ),
-                    // A content failure is shown inside the document view; the
-                    // alert is for an open that never produced one.
-                    if (model.error != null &&
-                        !(model.document != null &&
-                            model.contentState == ReaderContentState.failed))
+                      for (final row in _panelRows(model, compact: compact))
+                        _boundedChrome(
+                          viewportHeight: constraints.maxHeight,
+                          share: _readerPanelBoundShare,
+                          child: row,
+                        ),
+                      // The search bar is its own row below the panels (RD-11);
+                      // search is independent of the three exclusive panels.
+                      if (model.searchOpen &&
+                          model.document != null &&
+                          model.typography.searchable)
+                        _boundedChrome(
+                          viewportHeight: constraints.maxHeight,
+                          share: _readerPanelBoundShare,
+                          child: _ReaderSearchBar(
+                            model: model,
+                            compact: compact,
+                            dispatch: _controller.dispatch,
+                          ),
+                        ),
+                      // A content failure is shown inside the document view; the
+                      // alert is for an open that never produced one.
+                      if (model.error != null &&
+                          !(model.document != null &&
+                              model.contentState == ReaderContentState.failed))
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight:
+                                constraints.maxHeight * _readerAlertBoundShare,
+                          ),
+                          child: SingleChildScrollView(
+                            child: _ReaderFailureAlert(
+                              error: model.error!,
+                              onRetry: model.openPath == null
+                                  ? null
+                                  : () => _controller.dispatch(
+                                      ReaderOpenRequested(
+                                        model.openPath!,
+                                        bookId: model.openBookId,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ),
+                      Expanded(child: _readerBody(model, compact: compact)),
                       ConstrainedBox(
                         constraints: BoxConstraints(
                           maxHeight:
                               constraints.maxHeight * _readerAlertBoundShare,
                         ),
-                        child: SingleChildScrollView(
-                          child: _ReaderFailureAlert(
-                            error: model.error!,
-                            onRetry: model.openPath == null
-                                ? null
-                                : () => _controller.dispatch(
-                                    ReaderOpenRequested(
-                                      model.openPath!,
-                                      bookId: model.openBookId,
-                                    ),
-                                  ),
+                        child: _ReaderErrorSurfaces(model: model),
+                      ),
+                      // The status bar stays mounted while an open is in flight:
+                      // the `loading` wording is a live region and the bar itself
+                      // is hidden without a document (`hasDocument`), so the
+                      // opening state must not remove the status surface.
+                      _boundedChrome(
+                        viewportHeight: constraints.maxHeight,
+                        share: _readerStatusBoundShare,
+                        child: _ReaderStatusBar(model: model),
+                      ),
+                      if (widget.debugPathEntry) ...[
+                        const SizedBox(height: 12),
+                        // A dev/test-only entry, bounded so a short viewport at
+                        // a scaled interface cannot overflow the reader column.
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight:
+                                constraints.maxHeight *
+                                _readerDevEntryBoundShare,
                           ),
-                        ),
-                      ),
-                    Expanded(child: _readerBody(model, compact: compact)),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight:
-                            constraints.maxHeight * _readerAlertBoundShare,
-                      ),
-                      child: _ReaderErrorSurfaces(model: model),
-                    ),
-                    // The status bar stays mounted while an open is in flight:
-                    // the `loading` wording is a live region and the bar itself
-                    // is hidden without a document (`hasDocument`), so the
-                    // opening state must not remove the status surface.
-                    _boundedChrome(
-                      viewportHeight: constraints.maxHeight,
-                      share: _readerStatusBoundShare,
-                      child: _ReaderStatusBar(model: model),
-                    ),
-                    if (widget.debugPathEntry) ...[
-                      const SizedBox(height: 12),
-                      // A dev/test-only entry, bounded so a short viewport at
-                      // a scaled interface cannot overflow the reader column.
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxHeight:
-                              constraints.maxHeight * _readerDevEntryBoundShare,
-                        ),
-                        child: SingleChildScrollView(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: ShosaiTokens
-                                  .layoutReaderChromeHeaderPaddingHorizontal,
-                            ),
-                            child: _ReaderControls(
-                              model: model,
-                              path: _path.value,
-                              pathFieldKey: _pathFieldKey,
-                              openFocus: _openFocus,
-                              open: _open,
-                              // A single row keeps the dev-only entry short
-                              // enough not to push the chrome out of a small
-                              // viewport at a scaled interface.
-                              horizontal: true,
+                          child: SingleChildScrollView(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: ShosaiTokens
+                                    .layoutReaderChromeHeaderPaddingHorizontal,
+                              ),
+                              child: _ReaderControls(
+                                model: model,
+                                path: _path.value,
+                                pathFieldKey: _pathFieldKey,
+                                openFocus: _openFocus,
+                                open: _open,
+                                // A single row keeps the dev-only entry short
+                                // enough not to push the chrome out of a small
+                                // viewport at a scaled interface.
+                                horizontal: true,
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ),
           ),
         ),
       ),
     );
     return _withReaderLocalizations(context, reader);
-  }
-
-  /// Reader-chrome shortcuts: `Ctrl+W`, `Ctrl+Tab` and `Ctrl+1..9`.
-  ///
-  /// The modifier is platform-adapted (Command on macOS) and mirrors the Iced
-  /// reference. Chrome shortcuts must not fire while a text field has focus
-  /// (search input, page input, note editor), so the handler ignores them then.
-  Widget _withChromeShortcuts(Widget child) {
-    final primary = defaultTargetPlatform == TargetPlatform.macOS;
-    final digits = [
-      LogicalKeyboardKey.digit1,
-      LogicalKeyboardKey.digit2,
-      LogicalKeyboardKey.digit3,
-      LogicalKeyboardKey.digit4,
-      LogicalKeyboardKey.digit5,
-      LogicalKeyboardKey.digit6,
-      LogicalKeyboardKey.digit7,
-      LogicalKeyboardKey.digit8,
-      LogicalKeyboardKey.digit9,
-    ];
-    return CallbackShortcuts(
-      bindings: {
-        SingleActivator(
-          LogicalKeyboardKey.keyW,
-          control: !primary,
-          meta: primary,
-        ): _closeActiveTabShortcut,
-        SingleActivator(
-          LogicalKeyboardKey.tab,
-          control: !primary,
-          meta: primary,
-        ): _nextTabShortcut,
-        for (var index = 0; index < digits.length; index += 1)
-          SingleActivator(
-            digits[index],
-            control: !primary,
-            meta: primary,
-          ): () =>
-              _selectTabShortcut(index),
-      },
-      child: child,
-    );
-  }
-
-  void _closeActiveTabShortcut() => _chromeShortcut(() {
-    final tabs = _controller.model.tabs;
-    for (final tab in tabs) {
-      if (tab.selected) {
-        _controller.dispatch(ReaderTabCloseRequested(tab.id));
-        return;
-      }
-    }
-  });
-
-  void _nextTabShortcut() => _chromeShortcut(() {
-    final tabs = _controller.model.tabs;
-    final index = tabs.indexWhere((tab) => tab.selected);
-    if (tabs.length < 2 || index < 0) return;
-    _controller.dispatch(
-      ReaderTabActivated(tabs[(index + 1) % tabs.length].id),
-    );
-  });
-
-  void _selectTabShortcut(int index) => _chromeShortcut(() {
-    final tabs = _controller.model.tabs;
-    if (index < tabs.length) {
-      _controller.dispatch(ReaderTabActivated(tabs[index].id));
-    }
-  });
-
-  void _chromeShortcut(VoidCallback action) {
-    final focus = FocusManager.instance.primaryFocus;
-    final context = focus?.context;
-    if (context != null &&
-        context.findAncestorWidgetOfExactType<EditableText>() != null) {
-      return;
-    }
-    action();
   }
 
   /// Bounds a fixed chrome row to a share of the reader's own height and lets

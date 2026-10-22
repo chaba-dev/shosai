@@ -22,14 +22,6 @@ typedef ReaderFrameScheduler = void Function(VoidCallback callback);
 /// The controller starts it; a widget never pops the route itself.
 typedef ReaderNavigationAdapter = Future<void> Function();
 
-/// Brings a tab strip entry fully into view.
-///
-/// The widget owns the Flutter `ScrollController` that implements this; the
-/// controller decides *when* a reveal happens (after the initial layout, after
-/// the active tab changes, after a close and after a resize) and never the
-/// widget.
-typedef ReaderTabRevealAdapter = Future<void> Function(String tabId);
-
 /// Supplies the 4B progress ordinals for a loaded document (RD-05).
 ///
 /// The fixture supplies them in 4B; 5G supplies real renderer values. The

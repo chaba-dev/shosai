@@ -64,39 +64,6 @@ enum ReaderModalEffect {
   documentPicker,
 }
 
-/// One tab strip entry (RD-03, RD-04).
-///
-/// Fixture-injected in 4B: the bridge has no session or tab API, and the real
-/// tab identity and lifecycle are 5F work.
-final class ReaderTabPresentation {
-  const ReaderTabPresentation({
-    required this.id,
-    required this.title,
-    this.selected = false,
-  });
-
-  final String id;
-  final String title;
-  final bool selected;
-
-  ReaderTabPresentation copyWith({String? title, bool? selected}) =>
-      ReaderTabPresentation(
-        id: id,
-        title: title ?? this.title,
-        selected: selected ?? this.selected,
-      );
-
-  @override
-  bool operator ==(Object other) =>
-      other is ReaderTabPresentation &&
-      other.id == id &&
-      other.title == title &&
-      other.selected == selected;
-
-  @override
-  int get hashCode => Object.hash(id, title, selected);
-}
-
 /// The progress bar and status wording inputs (RD-05).
 ///
 /// Ordinals are 1-based presentation data supplied by the fixture in 4B and by
@@ -448,7 +415,6 @@ final class ReaderModel {
     this.persistenceError,
     this.openPanel,
     this.searchOpen = false,
-    List<ReaderTabPresentation> tabs = const [],
     this.progress = const ReaderProgressPresentation(
       kind: ReaderProgressKind.none,
     ),
@@ -483,7 +449,6 @@ final class ReaderModel {
        annotations = List.unmodifiable(annotations.map(_freezeAnnotation)),
        searchResults = List.unmodifiable(searchResults),
        bookmarks = List.unmodifiable(bookmarks),
-       tabs = List.unmodifiable(tabs),
        annotationOperations = Set.unmodifiable(annotationOperations);
 
   final String? openPath;
@@ -558,9 +523,6 @@ final class ReaderModel {
 
   /// Whether the search bar is open. Search is independent of [openPanel].
   final bool searchOpen;
-
-  /// Ordered tab strip entries; empty hides the strip.
-  final List<ReaderTabPresentation> tabs;
 
   /// Progress bar and status wording inputs (RD-05).
   final ReaderProgressPresentation progress;
@@ -656,7 +618,6 @@ final class ReaderModel {
     Object? persistenceError = _unchanged,
     Object? openPanel = _unchanged,
     bool? searchOpen,
-    List<ReaderTabPresentation>? tabs,
     ReaderProgressPresentation? progress,
     ReaderContentsPresentation? contents,
     ReaderPageInputPresentation? pageInput,
@@ -751,7 +712,6 @@ final class ReaderModel {
           ? this.openPanel
           : openPanel as ReaderPanel?,
       searchOpen: searchOpen ?? this.searchOpen,
-      tabs: tabs == null ? this.tabs : List.unmodifiable(tabs),
       progress: progress ?? this.progress,
       contents: contents ?? this.contents,
       pageInput: pageInput ?? this.pageInput,
@@ -781,11 +741,10 @@ enum ReaderContentState { loading, ready, failed }
 
 /// Where a controller-requested focus handoff lands.
 ///
-/// `header` focuses the header action that opened the panel being closed,
-/// `panel` the open panel container and `tabStrip` the active tab's label; the
-/// widget resolves all three from its own focus nodes when the controller asks,
-/// and never moves focus on its own.
-enum ReaderFocusTarget { surface, actions, header, panel, tabStrip }
+/// `header` focuses the toolbar action that opened the panel being closed and
+/// `panel` the open panel container; the widget resolves both from its own
+/// focus nodes when the controller asks, and never moves focus on its own.
+enum ReaderFocusTarget { surface, actions, header, panel }
 
 enum _ReaderNoteTarget { selection, annotation, bookmark }
 

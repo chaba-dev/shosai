@@ -67,41 +67,6 @@ void main() {
     expect(controller.model.searchOpen, isFalse);
   });
 
-  test('tab activation and close follow the fixture policy', () {
-    final controller = ReaderController(
-      bridge: _ReaderBridge(),
-      decoder: _unusedDecoder,
-      initialTabs: const [
-        ReaderTabPresentation(id: 'a', title: 'A', selected: true),
-        ReaderTabPresentation(id: 'b', title: 'B'),
-        ReaderTabPresentation(id: 'c', title: 'C'),
-      ],
-    );
-    addTearDown(controller.dispose);
-
-    controller.dispatch(const ReaderTabActivated('b'));
-    expect(controller.model.tabs.map((tab) => tab.selected).toList(), [
-      false,
-      true,
-      false,
-    ]);
-
-    // Closing the active tab activates its successor; the last tab falls back
-    // to the previous one (5F owns the real lifecycle policy).
-    controller.dispatch(const ReaderTabCloseRequested('b'));
-    expect(controller.model.tabs.map((tab) => tab.id).toList(), ['a', 'c']);
-    expect(controller.model.tabs.last.selected, isTrue);
-    controller.dispatch(const ReaderTabCloseRequested('c'));
-    expect(controller.model.tabs.single.id, 'a');
-    expect(controller.model.tabs.single.selected, isTrue);
-    controller.dispatch(const ReaderTabCloseRequested('a'));
-    expect(controller.model.tabs, isEmpty);
-
-    // Unknown ids are ignored.
-    controller.dispatch(const ReaderTabActivated('missing'));
-    expect(controller.model.tabs, isEmpty);
-  });
-
   test('progress precedence is loading, none, then supplied data', () {
     final controller = _controller();
     addTearDown(controller.dispose);

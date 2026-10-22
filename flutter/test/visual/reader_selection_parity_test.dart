@@ -671,9 +671,6 @@ Widget _reader(_Capture capture, FlutterBridge bridge) => productionShell(
     // The reference state has one tab (the reference manifest records
     // `tabs: 1`); the label is fixture-injected presentation data (5F owns
     // sessions), so the chrome geometry is like-for-like.
-    initialTabs: const [
-      ReaderTabPresentation(id: 'tab-0', title: '', selected: true),
-    ],
     progressSource: (_) => const ReaderProgressPresentation(
       kind: ReaderProgressKind.range,
       hasDocument: true,

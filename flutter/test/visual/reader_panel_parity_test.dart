@@ -673,9 +673,6 @@ Widget _reader(_Capture capture, FlutterBridge bridge) => productionShell(
       epubLineSpacing: 1.6,
       pdfZoom: 0,
     ),
-    initialTabs: const [
-      ReaderTabPresentation(id: 'tab-0', title: '', selected: true),
-    ],
     progressSource: capture.progress == null ? null : (_) => capture.progress!,
     contentsLoader: capture.chapters.isEmpty
         ? (_) async => const []

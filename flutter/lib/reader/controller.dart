@@ -44,7 +44,6 @@ final class ReaderController implements Listenable {
     SelectionCopier? selectionCopier,
     ReaderSelectionAnnouncer? selectionAnnouncer,
     ReaderNavigationAdapter? navigationAdapter,
-    ReaderTabRevealAdapter? tabRevealAdapter,
     ReaderProgressSource? progressSource,
     ReaderContentsLoader? contentsLoader,
     ReaderExternalLinkOpener? externalLinkOpener,
@@ -55,7 +54,6 @@ final class ReaderController implements Listenable {
     EpubFontRegistrar? epubFontRegistrar,
     this.debugEpubSessionObserver,
     this.debugContinuousStepObserver,
-    List<ReaderTabPresentation> initialTabs = const [],
     ReaderTypographyPresentation initialTypography =
         const ReaderTypographyPresentation(
           format: FlutterBookFormat.epub,
@@ -89,7 +87,6 @@ final class ReaderController implements Listenable {
        _selectionCopier = selectionCopier ?? ((_) async {}),
        _selectionAnnouncer = selectionAnnouncer,
        _navigationAdapter = navigationAdapter ?? (() async {}),
-       _tabRevealAdapter = tabRevealAdapter ?? ((_) async {}),
        _progressSource = progressSource,
        _contentsLoader = contentsLoader,
        _externalLinkOpener = externalLinkOpener ?? ((_) async {}),
@@ -109,7 +106,7 @@ final class ReaderController implements Listenable {
          scale: initialScale,
          lineSpacing: initialLineSpacing,
        ) {
-    _model = ReaderModel(tabs: initialTabs, typography: initialTypography);
+    _model = ReaderModel(typography: initialTypography);
   }
 
   final FlutterBridge _bridge;
@@ -135,7 +132,6 @@ final class ReaderController implements Listenable {
   final SelectionCopier _selectionCopier;
   final ReaderSelectionAnnouncer? _selectionAnnouncer;
   final ReaderNavigationAdapter _navigationAdapter;
-  final ReaderTabRevealAdapter _tabRevealAdapter;
   final ReaderProgressSource? _progressSource;
   final ReaderContentsLoader? _contentsLoader;
   final ReaderExternalLinkOpener _externalLinkOpener;
@@ -157,8 +153,6 @@ final class ReaderController implements Listenable {
   final void Function(int micros)? debugContinuousStepObserver;
 
   ReaderModel _model = ReaderModel();
-  int _revealRevision = 0;
-  double? _lastReportedWidth;
 
   /// The last content-box height the view reported, or null before the first
   /// report. EPUB pages are paginated for it, so an EPUB waits for the first
@@ -550,10 +544,6 @@ final class ReaderController implements Listenable {
           _documentPickerActive = false;
           _emit(_model.copyWith(toolError: message.error));
         }
-      case ReaderTabActivated():
-        _tabActivated(message.tabId);
-      case ReaderTabCloseRequested():
-        _tabCloseRequested(message.tabId);
       case ReaderBackRequested():
         unawaited(_leaveReader());
       case _ReaderSearchCompleted():
@@ -1221,7 +1211,6 @@ final class ReaderController implements Listenable {
     );
     _requestedLayout = requestedLayout;
     _readingStatePersistenceBlocked = message.restorationFailed;
-    final title = message.document.title;
     _emit(
       _model.copyWith(
         document: message.document,
@@ -1234,13 +1223,6 @@ final class ReaderController implements Listenable {
         focus: message.offset,
         toolError: message.toolError,
         persistenceError: message.restorationError,
-        // The active tab shows the live document title (RD-03).
-        tabs: title == null
-            ? _model.tabs
-            : [
-                for (final tab in _model.tabs)
-                  tab.selected ? tab.copyWith(title: title) : tab,
-              ],
       ),
     );
     if (message.pdfDocument == null) {
@@ -1384,12 +1366,6 @@ final class ReaderController implements Listenable {
   }
 
   void _viewportChanged(ReaderLayout observed, {double? height}) {
-    // The strip re-reveals the active tab after a resize as well as after its
-    // initial layout; both arrive as a changed reported width.
-    if (_lastReportedWidth != observed.width) {
-      _lastReportedWidth = observed.width;
-      _scheduleTabReveal();
-    }
     if (height != null && height.isFinite && height > 0) {
       _epubViewportHeight = height;
     }
@@ -1802,14 +1778,6 @@ final class ReaderController implements Listenable {
     );
   }
 
-  /// The active tab id, or null when the strip has no tab.
-  String? get _activeTabId {
-    for (final tab in _model.tabs) {
-      if (tab.selected) return tab.id;
-    }
-    return null;
-  }
-
   /// Toggles one panel; at most one of the three is open (RD-13).
   void _panelToggled(ReaderPanel panel) {
     if (_closing) return;
@@ -2208,51 +2176,6 @@ final class ReaderController implements Listenable {
   /// The reader's supported theme values, in cycle order.
   static const List<String> _readerThemes = ['light', 'dark', 'sepia'];
 
-  void _tabActivated(String tabId) {
-    if (_closing) return;
-    if (!_model.tabs.any((tab) => tab.id == tabId)) return;
-    if (_activeTabId == tabId) return;
-    _emit(
-      _model.copyWith(
-        tabs: [
-          for (final tab in _model.tabs)
-            tab.copyWith(selected: tab.id == tabId),
-        ],
-      ),
-    );
-    _scheduleTabReveal();
-  }
-
-  /// Closes one tab with the documented 4B fixture policy.
-  ///
-  /// 5F owns the real lifecycle policy (duplicate-open, pending saves,
-  /// resource release); until then the next tab becomes active, else the
-  /// previous one, else the strip is empty and hidden.
-  void _tabCloseRequested(String tabId) {
-    if (_closing) return;
-    final tabs = _model.tabs;
-    final index = tabs.indexWhere((tab) => tab.id == tabId);
-    if (index < 0) return;
-    final closedSelected = tabs[index].selected;
-    final remaining = [...tabs]..removeAt(index);
-    var next = remaining;
-    if (remaining.isNotEmpty &&
-        (closedSelected || !remaining.any((tab) => tab.selected))) {
-      final nextIndex = closedSelected
-          ? (index < remaining.length ? index : remaining.length - 1)
-          : 0;
-      next = [
-        for (var position = 0; position < remaining.length; position += 1)
-          remaining[position].copyWith(selected: position == nextIndex),
-      ];
-    }
-    _emit(_model.copyWith(tabs: next));
-    if (_activeTabId != null) {
-      _focusAdapter(ReaderFocusTarget.tabStrip);
-      _scheduleTabReveal();
-    }
-  }
-
   Future<void> _leaveReader() async {
     if (_closing) return;
     try {
@@ -2287,38 +2210,6 @@ final class ReaderController implements Listenable {
       if (_closing) return;
       _focusAdapter(ReaderFocusTarget.header);
     });
-  }
-
-  /// Starts a reveal for the active tab; obsolete requests are ignored.
-  ///
-  /// The controller decides when a reveal happens (initial layout, active-tab
-  /// change, close and resize) and the injected adapter performs it.
-  void _scheduleTabReveal() {
-    if (_closing) return;
-    final active = _activeTabId;
-    if (active == null) return;
-    final revision = ++_revealRevision;
-    _frameScheduler(() {
-      if (_closing || revision != _revealRevision) return;
-      if (_activeTabId != active) return;
-      unawaited(_revealTab(active));
-    });
-  }
-
-  Future<void> _revealTab(String tabId) async {
-    try {
-      await _tabRevealAdapter(tabId);
-    } catch (error, stackTrace) {
-      if (!_closing) {
-        FlutterError.reportError(
-          FlutterErrorDetails(
-            exception: error,
-            stack: stackTrace,
-            library: 'shosai_flutter',
-          ),
-        );
-      }
-    }
   }
 
   void _searchRequested(String query) {
