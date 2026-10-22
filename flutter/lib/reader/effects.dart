@@ -22,14 +22,6 @@ typedef ReaderFrameScheduler = void Function(VoidCallback callback);
 /// The controller starts it; a widget never pops the route itself.
 typedef ReaderNavigationAdapter = Future<void> Function();
 
-/// Brings a tab strip entry fully into view.
-///
-/// The widget owns the Flutter `ScrollController` that implements this; the
-/// controller decides *when* a reveal happens (after the initial layout, after
-/// the active tab changes, after a close and after a resize) and never the
-/// widget.
-typedef ReaderTabRevealAdapter = Future<void> Function(String tabId);
-
 /// Supplies the 4B progress ordinals for a loaded document (RD-05).
 ///
 /// The fixture supplies them in 4B; 5G supplies real renderer values. The
@@ -184,6 +176,8 @@ final class _EpubLayoutKey {
     required this.lineSpacing,
     required this.theme,
     required this.continuous,
+    this.spread = false,
+    this.vertical = false,
   });
 
   /// The document generation the session belongs to.
@@ -203,6 +197,17 @@ final class _EpubLayoutKey {
   /// laid-out window follows the viewport.
   final bool continuous;
 
+  /// Whether [width] holds a two-page spread, so each page is laid out at
+  /// [epubSpreadPageWidth] of it.
+  final bool spread;
+
+  /// Whether the chapter is vertical, so its pages are turned a quarter turn
+  /// and its lines run down the page (see `EpubPageBox`).
+  final bool vertical;
+
+  /// The width one page is laid out at.
+  double get pageWidth => spread ? epubSpreadPageWidth(width) : width;
+
   @override
   bool operator ==(Object other) =>
       other is _EpubLayoutKey &&
@@ -213,7 +218,9 @@ final class _EpubLayoutKey {
       other.fontSize == fontSize &&
       other.lineSpacing == lineSpacing &&
       other.theme == theme &&
-      other.continuous == continuous;
+      other.continuous == continuous &&
+      other.spread == spread &&
+      other.vertical == vertical;
 
   @override
   int get hashCode => Object.hash(
@@ -225,6 +232,8 @@ final class _EpubLayoutKey {
     lineSpacing,
     theme,
     continuous,
+    spread,
+    vertical,
   );
 }
 

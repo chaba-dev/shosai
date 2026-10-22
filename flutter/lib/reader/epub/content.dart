@@ -89,6 +89,14 @@ bool _isSchemeCharacter(int unit, {required bool first}) {
 /// The page margin inside a page window.
 const double kEpubPageMargin = 24.0;
 
+/// The space between the two pages of a spread: the inner page padding of
+/// each page on the stage (`space-5`), so the gutter matches the outer margins.
+const double kEpubSpreadGutter = 48.0;
+
+/// The width of one page of a spread [spreadWidth] wide.
+double epubSpreadPageWidth(double spreadWidth) =>
+    math.max(1.0, (spreadWidth - kEpubSpreadGutter) / 2);
+
 /// Maximum images decoded for one chapter.
 const int kEpubChapterImageLimit = 32;
 
@@ -508,6 +516,10 @@ class ReaderEpubPage {
     required this.surface,
     required this.palette,
     this.window,
+    this.spread = false,
+    this.facing,
+    this.facingBox,
+    this.rightToLeft = false,
   });
 
   /// Spine ordinal of the chapter this page belongs to.
@@ -563,6 +575,22 @@ class ReaderEpubPage {
   /// The palette this page was laid out with.
   final ReaderEpubPalette palette;
 
+  /// Whether this page is the first page of a two-page spread. [box] and
+  /// [surface] then span the whole spread, and the page sits in its first
+  /// slot.
+  final bool spread;
+
+  /// The spread's second page, or null when the chapter has no page after
+  /// [page] (its slot stays blank paper, as at the end of a printed chapter).
+  final FlowPage? facing;
+
+  /// Where [facing] sits in the spread.
+  final EpubPageBox? facingBox;
+
+  /// Whether the book's pages turn right to left: a spread's first page sits
+  /// in its right slot, and the next page is to the left.
+  final bool rightToLeft;
+
   /// Canonical scalar the page starts at; the durable position of a page turn.
   int get readingOffset => canonicalStart;
 }
@@ -601,21 +629,55 @@ class ReaderEpubWindow {
   final int? targetNode;
 }
 
-/// The page box of a page window of [windowSize].
-EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
-  size: windowSize,
-  origin: const Offset(kEpubPageMargin, kEpubPageMargin),
-  contentWidth: math.max(40.0, windowSize.width - 2 * kEpubPageMargin),
-  contentHeight: math.max(40.0, windowSize.height - 2 * kEpubPageMargin),
-);
+/// The page box of a page window of [windowSize]; a [vertical] box shows a
+/// vertical flow (see [EpubPageBox]).
+EpubPageBox epubPageBoxFor(Size windowSize, {bool vertical = false}) =>
+    EpubPageBox(
+      size: windowSize,
+      origin: const Offset(kEpubPageMargin, kEpubPageMargin),
+      contentWidth: math.max(40.0, windowSize.width - 2 * kEpubPageMargin),
+      contentHeight: math.max(40.0, windowSize.height - 2 * kEpubPageMargin),
+      vertical: vertical,
+    );
 
-/// Paginates [flow] for a page window of [windowSize].
-PaginatedChapter paginateWindow(ChapterFlow flow, Size windowSize) {
-  final box = epubPageBoxFor(windowSize);
+/// The page boxes of a two-page spread of [spreadSize]: both span the spread,
+/// so one surface addresses both pages, and each places its content in its own
+/// slot, [kEpubSpreadGutter] apart. A right-to-left spread reads its right slot
+/// first.
+({EpubPageBox first, EpubPageBox second}) epubSpreadBoxesFor(
+  Size spreadSize, {
+  bool rightToLeft = false,
+  bool vertical = false,
+}) {
+  final page = epubPageBoxFor(
+    Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
+  );
+  EpubPageBox at(double x) => EpubPageBox(
+    size: spreadSize,
+    origin: Offset(x + kEpubPageMargin, kEpubPageMargin),
+    contentWidth: page.contentWidth,
+    contentHeight: page.contentHeight,
+    vertical: vertical,
+  );
+  final left = at(0);
+  final right = at(page.size.width + kEpubSpreadGutter);
+  return rightToLeft
+      ? (first: right, second: left)
+      : (first: left, second: right);
+}
+
+/// Paginates [flow] for a page window of [windowSize]; a [vertical] flow's
+/// pages hold as many lines as fit across the page.
+PaginatedChapter paginateWindow(
+  ChapterFlow flow,
+  Size windowSize, {
+  bool vertical = false,
+}) {
+  final box = epubPageBoxFor(windowSize, vertical: vertical);
   return paginateFlow(
     flow: flow,
-    pageHeight: box.contentHeight,
-    pageWidth: box.contentWidth,
+    pageHeight: box.blockExtent,
+    pageWidth: box.inlineExtent,
   );
 }
 
@@ -627,26 +689,56 @@ PaginatedChapter paginateWindow(ChapterFlow flow, Size windowSize) {
 /// transform is the identity for an un-resized page.
 ///
 /// A continuous chapter is not paginated; see `continuousWindowFor`.
+///
+/// With [spread] the window is a two-page spread of [windowSize]: each page is
+/// laid out at [epubSpreadPageWidth], the page holding [scalar] takes the first
+/// slot and the page after it the second; with [rightToLeft] the first slot is
+/// the right one. The spread's surface covers both pages, so a selection can
+/// run from one page onto the next.
+///
+/// A [vertical] chapter's pages are turned a quarter turn (see
+/// [EpubPageBox]); its session is laid out with the page's height as its line
+/// length.
 ReaderEpubPage pageWindowFor({
   required ChapterLayoutSession session,
   required int scalar,
   required int unit,
   required int chapterCount,
   required Size windowSize,
+  bool spread = false,
+  bool rightToLeft = false,
+  bool vertical = false,
 }) {
   final flow = session.snapshot();
-  final paginated = paginateWindow(flow, windowSize);
+  final pageSize = spread
+      ? Size(epubSpreadPageWidth(windowSize.width), windowSize.height)
+      : windowSize;
+  final paginated = paginateWindow(flow, pageSize, vertical: vertical);
   final index = paginated
       .pageOfCanonical(scalar)
       .clamp(0, paginated.pages.length - 1);
   final page = paginated.pages[index];
-  final box = epubPageBoxFor(windowSize);
+  final boxes = spread
+      ? epubSpreadBoxesFor(
+          windowSize,
+          rightToLeft: rightToLeft,
+          vertical: vertical,
+        )
+      : null;
+  final box = boxes?.first ?? epubPageBoxFor(windowSize, vertical: vertical);
+  final facing = spread && index + 1 < paginated.pages.length
+      ? paginated.pages[index + 1]
+      : null;
+  final facingBox = facing == null ? null : boxes!.second;
   final surface = buildPageSelectionSurface(
     page: page,
     canonicalText: session.chapter.canonicalText,
     resourcePath: session.chapter.resource,
     box: box,
+    facing: facing,
+    facingBox: facingBox,
   );
+  final last = facing == null ? index : index + 1;
   return ReaderEpubPage(
     unit: unit,
     targetScalar: scalar,
@@ -655,11 +747,11 @@ ReaderEpubPage pageWindowFor({
     layoutComplete: flow.layoutComplete,
     canGoBackward: index > 0 || flow.firstNodeIndex > 0 || unit > 0,
     canGoForward:
-        index + 1 < paginated.pages.length ||
+        last + 1 < paginated.pages.length ||
         !flow.layoutComplete ||
         unit + 1 < chapterCount,
     canonicalStart: page.canonicalStart,
-    canonicalEnd: page.canonicalEnd,
+    canonicalEnd: (facing ?? page).canonicalEnd,
     laidOutNodes: session.laidOutNodes,
     totalNodes: session.totalNodes,
     overflowPages: paginated.overflowPages,
@@ -667,6 +759,10 @@ ReaderEpubPage pageWindowFor({
     box: box,
     surface: surface,
     palette: session.spec.typography.palette,
+    spread: spread,
+    facing: facing,
+    facingBox: facingBox,
+    rightToLeft: rightToLeft,
   );
 }
 

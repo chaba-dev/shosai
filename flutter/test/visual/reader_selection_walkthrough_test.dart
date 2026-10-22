@@ -202,13 +202,16 @@ void main() {
     await settleReaderSelection(tester);
     expect(bridge.created.single.color, FlutterHighlightColor.green);
     expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+    await settleReaderSelection(tester);
     expect(find.text('Highlight 1'), findsOneWidget);
     await _frame(
       tester,
       'walkthrough-04-committed',
       step: '4. committed highlight',
       assertion:
-          'the green action committed the range and the strip shows Highlight 1',
+          'the green action committed the range and the Notes panel lists '
+          'Highlight 1',
     );
 
     await tester.tapAt(

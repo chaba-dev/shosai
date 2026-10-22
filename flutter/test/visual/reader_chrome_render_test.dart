@@ -88,27 +88,6 @@ class _RenderBridge extends HarnessBridge {
   }
 }
 
-List<ReaderTabPresentation> _overflowTabs({int selected = 7}) => [
-  for (var index = 0; index < 8; index += 1)
-    ReaderTabPresentation(
-      id: 'tab-$index',
-      title: switch (index) {
-        0 => '短い',
-        1 => 'The Quiet Cartographer',
-        2 => '海辺の図書館 — 失われた書架をめぐる長い旅路',
-        _ => 'Tab $index with a deliberately long mixed 見出し label',
-      },
-      selected: index == selected,
-    ),
-];
-
-/// One open tab, the state every 1C chrome capture shows (the reference is an
-/// open library book, which creates one tab). Tab sessions are 5F; this is the
-/// fixture-injected presentation state 4B renders (contract §2.2, §4.2).
-List<ReaderTabPresentation> _singleTab(String title) => [
-  ReaderTabPresentation(id: 'tab-0', title: title, selected: true),
-];
-
 /// The reference state's progress wording: `Pages 1–2 · 25%` for the wide
 /// paginated EPUB spread, `1ページ · 33%` for the compact single page. Ordinals
 /// and percentage are supplied presentation values (contract §3.4); producing
@@ -139,7 +118,6 @@ Widget _reader({
   Locale? locale,
   String? initialPath = '/books/quiet-cartographer.epub',
   int? initialBookId,
-  List<ReaderTabPresentation> tabs = const [],
   ReaderProgressSource? progressSource,
 }) => productionShell(
   locale: locale,
@@ -148,30 +126,9 @@ Widget _reader({
     initialPath: initialPath,
     initialBookId: initialBookId,
     initialSettings: _settings,
-    initialTabs: tabs,
     progressSource: progressSource,
   ),
 );
-
-/// The same overflow state with labels that fit one bounded tab at `T200`.
-///
-/// At 200 % text a complete tab is bounded by the strip viewport (RD-04), so
-/// the compact render uses labels a single tab can hold while the *strip* still
-/// overflows; the wide render keeps the long labels that exercise the 34
-/// character truncation.
-List<ReaderTabPresentation> _compactOverflowTabs({int selected = 7}) => [
-  for (var index = 0; index < 8; index += 1)
-    ReaderTabPresentation(
-      id: 'tab-$index',
-      title: switch (index) {
-        0 => '短い',
-        1 => 'Quiet Cartographer',
-        2 => '海辺の図書館',
-        _ => 'Tab $index label',
-      },
-      selected: index == selected,
-    ),
-];
 
 /// True when the reader page is painted and the chrome is settled.
 bool _chromeReady(WidgetTester tester) {
@@ -228,14 +185,12 @@ void main() {
       _reader(
         bridge: _RenderBridge(),
         locale: const Locale('en'),
-        tabs: _singleTab('A Field Guide to Slow Rivers'),
         progressSource: _referenceProgress(first: 1, last: 2, percentage: 25),
       ),
       ready: () => _chromeReady(tester),
       metadata: const <String, Object?>{
         'state': 'ready',
         'chrome': 'header+status+edges',
-        'tabs': 'fixture: 1 open tab (5F owns sessions)',
         'progress': 'fixture: pages 1-2 of 8, 25% (5G owns real ranges)',
       },
     );
@@ -249,14 +204,12 @@ void main() {
       _reader(
         bridge: _RenderBridge(),
         locale: const Locale('ja'),
-        tabs: _singleTab('水の記憶、砂の記録'),
         progressSource: _referenceProgress(first: 1, percentage: 33),
       ),
       ready: () => _chromeReady(tester),
       metadata: const <String, Object?>{
         'state': 'ready',
         'chrome': 'compact',
-        'tabs': 'fixture: 1 open tab (5F owns sessions)',
         'progress': 'fixture: page 1 of 3, 33% (5G owns real ranges)',
       },
     );
@@ -272,88 +225,12 @@ void main() {
       _reader(
         bridge: _RenderBridge(),
         locale: const Locale('ja'),
-        tabs: _singleTab('水の記憶、砂の記録'),
         progressSource: _referenceProgress(first: 1, percentage: 33),
       ),
       ready: () => _chromeReady(tester),
       metadata: const <String, Object?>{
         'state': 'ready',
         'textScale': 2,
-        'tabs': 'fixture: 1 open tab (5F owns sessions)',
-        'progress': 'fixture: page 1 of 3, 33% (5G owns real ranges)',
-      },
-    );
-  });
-
-  testWidgets('wide tab overflow with an initially offscreen active tab', (
-    tester,
-  ) async {
-    await render(
-      tester,
-      'reader-tab-overflow-900-ja',
-      const HarnessView(size: Size(900, 700)),
-      _reader(
-        bridge: _RenderBridge(),
-        locale: const Locale('ja'),
-        tabs: _overflowTabs(),
-        progressSource: _referenceProgress(first: 1, percentage: 33),
-      ),
-      ready: () => _chromeReady(tester),
-      metadata: const <String, Object?>{
-        'state': 'overflow',
-        'tabs': 8,
-        'activeTab': 'tab-7 (initially offscreen)',
-        'progress': 'fixture: page 1 of 3, 33% (5G owns real ranges)',
-      },
-    );
-  });
-
-  testWidgets('compact tab overflow at 200% with the long mixed labels', (
-    tester,
-  ) async {
-    // The owner-reported state: at 200 % text the long mixed labels are
-    // ellipsized, which turns the paragraph's own clip on, so the shared
-    // detector reported `clippedText` on the label paragraphs (the Shad
-    // interface style is leading-none, `height: 1`). This is the same fixture
-    // the wide T100 render keeps, at the compact viewport and 200 % text.
-    await render(
-      tester,
-      'reader-tab-overflow-390-ja-t200-long-labels',
-      const HarnessView(size: Size(390, 844), textScale: 2),
-      _reader(
-        bridge: _RenderBridge(),
-        locale: const Locale('ja'),
-        tabs: _overflowTabs(),
-        progressSource: _referenceProgress(first: 1, percentage: 33),
-      ),
-      ready: () => _chromeReady(tester),
-      metadata: const <String, Object?>{
-        'state': 'overflow',
-        'tabs': 8,
-        'labels': 'long mixed Latin/Japanese labels (34-character truncation)',
-        'regression':
-            '4B: an ellipsized label keeps its ink inside its line box at T200',
-        'progress': 'fixture: page 1 of 3, 33% (5G owns real ranges)',
-      },
-    );
-  });
-
-  testWidgets('compact tab overflow at 200% interface text', (tester) async {
-    await render(
-      tester,
-      'reader-tab-overflow-390-ja-t200',
-      const HarnessView(size: Size(390, 844), textScale: 2),
-      _reader(
-        bridge: _RenderBridge(),
-        locale: const Locale('ja'),
-        tabs: _compactOverflowTabs(),
-        progressSource: _referenceProgress(first: 1, percentage: 33),
-      ),
-      ready: () => _chromeReady(tester),
-      metadata: const <String, Object?>{
-        'state': 'overflow',
-        'tabs': 8,
-        'labels': 'compact fixture: one bounded tab holds a label at T200',
         'progress': 'fixture: page 1 of 3, 33% (5G owns real ranges)',
       },
     );

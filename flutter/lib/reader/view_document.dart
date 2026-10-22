@@ -36,8 +36,31 @@ class _DocumentViewState extends State<_DocumentView> {
   /// selection was made.
   final ValueNotifier<int> _contentGeometry = ValueNotifier<int>(0);
 
+  /// Whether the last interaction was a key press: the focus ring only shows
+  /// then, so a click or a tap into the page does not frame it.
+  final ValueNotifier<bool> _keyboardHighlight = ValueNotifier<bool>(false);
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_keyPressed);
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_pointerEvent);
+  }
+
+  bool _keyPressed(KeyEvent event) {
+    if (event is KeyDownEvent) _keyboardHighlight.value = true;
+    return false;
+  }
+
+  void _pointerEvent(PointerEvent event) {
+    if (event is PointerDownEvent) _keyboardHighlight.value = false;
+  }
+
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_keyPressed);
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_pointerEvent);
+    _keyboardHighlight.dispose();
     _contentGeometry.dispose();
     super.dispose();
   }
@@ -163,6 +186,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.visualLeft,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(
@@ -171,6 +195,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.visualRight,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(
@@ -215,6 +240,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.previousLine,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(
@@ -223,6 +249,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             ): () => dispatch(
                               const ReaderSelectionKeyboardExtended(
                                 ReaderSelectionMovement.nextLine,
+                                arrow: true,
                               ),
                             ),
                             const SingleActivator(
@@ -276,7 +303,10 @@ class _DocumentViewState extends State<_DocumentView> {
                             focusNode: readerFocus,
                             autofocus: true,
                             child: AnimatedBuilder(
-                              animation: readerFocus,
+                              animation: Listenable.merge([
+                                readerFocus,
+                                _keyboardHighlight,
+                              ]),
                               builder: (context, child) => Semantics(
                                 key: const ValueKey('reader-content-semantics'),
                                 readOnly: true,
@@ -293,12 +323,14 @@ class _DocumentViewState extends State<_DocumentView> {
                                   key: const ValueKey('reader-focus-indicator'),
                                   position: DecorationPosition.foreground,
                                   decoration: BoxDecoration(
-                                    border: readerFocus.hasFocus
+                                    border:
+                                        readerFocus.hasFocus &&
+                                            _keyboardHighlight.value
                                         ? Border.all(
                                             color: Theme.of(
                                               context,
                                             ).colorScheme.primary,
-                                            width: 3,
+                                            width: 2,
                                           )
                                         : null,
                                   ),
@@ -410,44 +442,6 @@ class _DocumentViewState extends State<_DocumentView> {
   }
 }
 
-/// The reader's saved-highlight strip below the document area.
-///
-/// The strip is a sibling of the document surface, not a child of it: the
-/// reader's reported document box must be the box the page is rendered in, and
-/// a strip inside that box would silently shrink the page (and, on the Dart
-/// renderer, paginate it for a height it does not get).
-class ReaderAnnotationStrip extends StatelessWidget {
-  const ReaderAnnotationStrip({
-    super.key,
-    required this.model,
-    required this.dispatch,
-  });
-
-  final ReaderModel model;
-  final void Function(ReaderMessage) dispatch;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 64,
-    child: ListView(
-      scrollDirection: Axis.horizontal,
-      children: model.annotations
-          .map(
-            (annotation) => _AnnotationCard(
-              // The card owns its menu controller, so its identity must follow
-              // the annotation: an unkeyed card would hand an open menu to
-              // whichever annotation lands in its list position after a delete.
-              key: ValueKey(annotation.id),
-              annotation: annotation,
-              model: model,
-              dispatch: dispatch,
-            ),
-          )
-          .toList(),
-    ),
-  );
-}
-
 /// One saved highlight's actions: the retained inline controls plus the
 /// annotation context menu salvaged from #114.
 ///
@@ -460,7 +454,6 @@ class ReaderAnnotationStrip extends StatelessWidget {
 /// remain Tab-reachable.
 class _AnnotationCard extends StatefulWidget {
   const _AnnotationCard({
-    super.key,
     required this.annotation,
     required this.model,
     required this.dispatch,
@@ -549,8 +542,12 @@ class _AnnotationCardState extends State<_AnnotationCard> {
             child: ShadCard(
               key: ValueKey('reader-annotation-${annotation.id}'),
               padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              // The card lays out against the panel's width: the label
+              // ellipsizes inside it (the button's semantic label keeps the
+              // whole text) and the actions wrap under it, so a scaled
+              // interface keeps its text and target sizes (RD-15).
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   ShadButton.ghost(
                     key: ValueKey(
@@ -563,28 +560,43 @@ class _AnnotationCardState extends State<_AnnotationCard> {
                     onPressed: () => widget.dispatch(
                       ReaderAnnotationNavigated(annotation.id),
                     ),
-                    child: Text(
-                      '${l10n.readerHighlightLabel(annotation.unit.toInt() + 1)}'
-                      '${_annotationResolutionSuffix(l10n, annotation.resolution)}',
+                    child: Flexible(
+                      child: Text(
+                        '${l10n.readerHighlightLabel(annotation.unit.toInt() + 1)}'
+                        '${_annotationResolutionSuffix(l10n, annotation.resolution)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
-                  ShadIconAction(
-                    key: ValueKey('reader-annotation-color-${annotation.id}'),
-                    tooltip: l10n.readerChangeColor,
-                    onPressed: actionsDisabled ? null : recolor,
-                    icon: const Icon(LucideIcons.palette),
-                  ),
-                  ShadIconAction(
-                    key: ValueKey('reader-annotation-note-${annotation.id}'),
-                    tooltip: l10n.readerEditNote,
-                    onPressed: actionsDisabled ? null : editNote,
-                    icon: const Icon(LucideIcons.notebookPen),
-                  ),
-                  ShadIconAction(
-                    key: ValueKey('reader-annotation-delete-${annotation.id}'),
-                    tooltip: l10n.readerDeleteHighlight,
-                    onPressed: actionsDisabled ? null : delete,
-                    icon: const Icon(LucideIcons.trash2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ShadIconAction(
+                        key: ValueKey(
+                          'reader-annotation-color-${annotation.id}',
+                        ),
+                        tooltip: l10n.readerChangeColor,
+                        onPressed: actionsDisabled ? null : recolor,
+                        icon: const Icon(LucideIcons.palette),
+                      ),
+                      ShadIconAction(
+                        key: ValueKey(
+                          'reader-annotation-note-${annotation.id}',
+                        ),
+                        tooltip: l10n.readerEditNote,
+                        onPressed: actionsDisabled ? null : editNote,
+                        icon: const Icon(LucideIcons.notebookPen),
+                      ),
+                      ShadIconAction(
+                        key: ValueKey(
+                          'reader-annotation-delete-${annotation.id}',
+                        ),
+                        tooltip: l10n.readerDeleteHighlight,
+                        onPressed: actionsDisabled ? null : delete,
+                        icon: const Icon(LucideIcons.trash2),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -601,10 +613,14 @@ class _AnnotationCardState extends State<_AnnotationCard> {
 /// On the Dart EPUB path a step turns a page inside the chapter; every other
 /// document and the retained EPUB path keep the logical-unit semantics, which
 /// is what the edge columns and PageUp/PageDown have always dispatched.
-ReaderMessage pageStepMessage(ReaderModel model, int delta) =>
-    model.epubPage == null
-    ? ReaderUnitRequested(model.unit + delta)
-    : ReaderPageStepRequested(delta);
+ReaderMessage pageStepMessage(ReaderModel model, int delta) {
+  if (model.epubPage != null) return ReaderPageStepRequested(delta);
+  // A PDF read in spreads turns both pages of the spread.
+  if (model.layout.spread && model.document?.format == FlutterBookFormat.pdf) {
+    return ReaderUnitRequested(pdfSpreadStep(model.unit, delta));
+  }
+  return ReaderUnitRequested(model.unit + delta);
+}
 
 /// Whether a page step in [delta]'s direction can move the reader.
 ///
@@ -616,7 +632,8 @@ bool _canStepPage(ReaderModel model, int delta, int total) {
   if (page != null) {
     return delta < 0 ? page.canGoBackward : page.canGoForward;
   }
-  return delta < 0 ? model.unit > 0 : model.unit + 1 < total;
+  final last = model.pdfSpread?.facingUnit ?? model.unit;
+  return delta < 0 ? model.unit > 0 : last + 1 < total;
 }
 
 BoxFit _readerFit(ReaderTypographyPresentation typography) {

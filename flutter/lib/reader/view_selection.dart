@@ -481,6 +481,9 @@ class ReaderEpubPageContentPainter extends CustomPainter {
     transform.apply(canvas);
     canvas.drawRect(source, Paint()..color = page.palette.background);
     paintPageSlices(canvas, page.page, page.palette, page.box);
+    if ((page.facing, page.facingBox) case (final facing?, final box?)) {
+      paintPageSlices(canvas, facing, page.palette, box);
+    }
     canvas.restore();
   }
 
@@ -571,7 +574,12 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     final page = widget.epubPage;
     if (page == null) return;
     final source = transform.toSource(event.localPosition);
-    final href = pageLinkAt(page.page, page.box, source);
+    final href =
+        pageLinkAt(page.page, page.box, source) ??
+        switch ((page.facing, page.facingBox)) {
+          (final facing?, final box?) => pageLinkAt(facing, box, source),
+          _ => null,
+        };
     if (href != null) widget.dispatch(ReaderLinkActivated(href));
   }
 
@@ -620,6 +628,11 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
         }
 
         final epubPage = widget.epubPage;
+        final pdfPageShadow =
+            epubPage == null &&
+            widget.model.document?.format == FlutterBookFormat.pdf &&
+            ShellLayout.forWidth(MediaQuery.sizeOf(context).width) !=
+                ShellLayout.phone;
         final contentPainter = epubPage == null
             ? _PageContentPainter(
                 image: widget.image,
@@ -754,6 +767,19 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             child: Stack(
               fit: StackFit.expand,
               children: [
+                // A PDF page lies on the stage like the EPUB page's paper,
+                // with `shadow-page` under the raster; a phone page is
+                // full-bleed and has none.
+                if (pdfPageShadow)
+                  Positioned.fromRect(
+                    rect: transform.destination,
+                    child: DecoratedBox(
+                      key: const ValueKey('reader-pdf-page-shadow'),
+                      decoration: BoxDecoration(
+                        boxShadow: _readerPageShadow(ShellPalette.of(context)),
+                      ),
+                    ),
+                  ),
                 RepaintBoundary(
                   key: const ValueKey('reader-page-paint'),
                   child: KeyedSubtree(

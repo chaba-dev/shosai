@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -226,6 +227,8 @@ Uint8List buildTestEpub({
   required String nav,
   String? ncx,
   Map<String, String> chapterNamespaces = const {},
+  String? pageProgression,
+  String bodyAttributes = '',
 }) {
   final files = <String, String>{
     'mimetype': 'application/epub+zip',
@@ -254,7 +257,7 @@ Uint8List buildTestEpub({
         '<?xml version="1.0"?>'
         '<html xmlns="http://www.w3.org/1999/xhtml"'
         '${chapterNamespaces.entries.map((entry) => ' xmlns:${entry.key}="${entry.value}"').join()}'
-        '><body>'
+        '><body$bodyAttributes>'
         '${chapters[path]}</body></html>';
     index += 1;
   }
@@ -266,7 +269,8 @@ Uint8List buildTestEpub({
       '<dc:identifier id="id">reader-navigation</dc:identifier>'
       '<dc:title>Reader Navigation</dc:title><dc:language>en</dc:language>'
       '</metadata><manifest>${manifest.join()}</manifest>'
-      '<spine>${spine.join()}</spine></package>';
+      '<spine${pageProgression == null ? '' : ' page-progression-direction="$pageProgression"'}>'
+      '${spine.join()}</spine></package>';
   files['OPS/Nav/toc.xhtml'] =
       '<?xml version="1.0"?>'
       '<html xmlns="http://www.w3.org/1999/xhtml" '
@@ -278,7 +282,7 @@ Uint8List buildTestEpub({
 
   final archive = Archive();
   for (final entry in files.entries) {
-    final bytes = Uint8List.fromList(entry.value.codeUnits);
+    final bytes = Uint8List.fromList(utf8.encode(entry.value));
     archive.addFile(ArchiveFile(entry.key, bytes.length, bytes));
   }
   return Uint8List.fromList(ZipEncoder().encode(archive));
@@ -300,7 +304,7 @@ Uint8List harnessEpub(int chapters) => buildTestEpub(
 /// A chapter of [paragraphs] numbered paragraphs (about 250K scalars at the
 /// default), alternating short and long so a node's estimated extent is not
 /// its measured one, with a link at the start to an anchor three quarters in.
-Uint8List longChapterEpub({int paragraphs = 2400}) {
+Uint8List longChapterEpub({int paragraphs = 2400, String? pageProgression}) {
   final deep = paragraphs * 3 ~/ 4;
   final body = StringBuffer(
     '<h1 id="long-start">Long chapter</h1>'
@@ -331,5 +335,48 @@ Uint8List longChapterEpub({int paragraphs = 2400}) {
         '<li><a href="../Text/chapter-1.xhtml#long-deep">Long deep</a></li>'
         '<li><a href="../Text/chapter-2.xhtml">Short chapter</a></li>'
         '</ol>',
+    pageProgression: pageProgression,
+  );
+}
+
+/// The opening of Natsume Sōseki's 吾輩は猫である (public domain), set
+/// vertically: [paragraphs] paragraphs that cycle through its first lines,
+/// with a Latin phrase and digits that turn with the line, brackets, the long
+/// vowel mark and small kana. The spine declares [pageProgression].
+Uint8List verticalJapaneseEpub({
+  int paragraphs = 12,
+  String? pageProgression = 'rtl',
+  String writingMode = 'vertical-rl',
+}) {
+  const lines = [
+    '吾輩は猫である。名前はまだ無い。',
+    'どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー'
+        '泣いていた事だけは記憶している。',
+    '吾輩はここで始めて人間というものを見た。しかもあとで聞くとそれは書生という'
+        '人間中で一番獰悪な種族であったそうだ。',
+    '「Hello, world」と書生は言った。明治38年、1905年のことである。',
+    'この書生というのは時々我々を捕えて煮て食うという話である。しかしその当時は'
+        '何という考もなかったから別段恐しいとも思わなかった。',
+    'ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じが'
+        'あったばかりである。',
+  ];
+  final body = StringBuffer('<h1 id="neko">吾輩は猫である</h1>');
+  for (var index = 0; index < paragraphs; index += 1) {
+    body.write('<p>${lines[index % lines.length]}</p>');
+  }
+  return buildTestEpub(
+    chapters: {
+      'OPS/Text/chapter-1.xhtml': body.toString(),
+      'OPS/Text/chapter-2.xhtml': '<p>第二章。</p>',
+    },
+    nav:
+        '<ol>'
+        '<li><a href="../Text/chapter-1.xhtml">吾輩は猫である</a></li>'
+        '<li><a href="../Text/chapter-2.xhtml">第二章</a></li>'
+        '</ol>',
+    pageProgression: pageProgression,
+    bodyAttributes:
+        ' style="-epub-writing-mode: $writingMode; '
+        'writing-mode: $writingMode"',
   );
 }

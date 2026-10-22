@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -84,14 +85,12 @@ void main() {
     await Future.wait(bridges.map((bridge) => bridge.disposed.future));
   });
 
-  testWidgets('welcome panel describes the native bridge action', (
-    tester,
-  ) async {
+  testWidgets('welcome panel describes the path entry', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: WelcomePanel())),
     );
 
-    expect(find.textContaining('generated Rust bridge'), findsOneWidget);
+    expect(find.textContaining('local document path'), findsOneWidget);
   });
 
   test('page colors retain strong content contrast in dark mode', () {
@@ -663,7 +662,8 @@ void main() {
 
       expect(controller.model.busy, isFalse);
       expect(controller.model.document?.handle, _documentHandle);
-      expect(reported, hasLength(6));
+      // The six open transitions, then the Contents entries the open loads.
+      expect(reported, hasLength(7));
 
       controller.dispose();
       await bridge.disposed.future;
@@ -1728,6 +1728,7 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
+    await _openNotesPanel(tester);
     await tester.tap(
       find.byTooltip('Associate highlights from an earlier version…'),
     );
@@ -1789,15 +1790,10 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/changed.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    // The header is a bounded scroll region on a viewport this short with a
-    // scaled interface, so the recovery action is reachable by scrolling
-    // within the header rather than clipped.
-    await tester.ensureVisible(
-      find.byTooltip('Associate highlights from an earlier version…'),
-    );
-    // The header is a bounded scroll region on a viewport this short with a
-    // scaled interface, so the recovery action is reachable by scrolling
-    // within the header rather than clipped.
+    // The Notes sheet scrolls on a viewport this short with a scaled
+    // interface, so the recovery action is reachable by scrolling within it
+    // rather than clipped.
+    await _openNotesPanel(tester);
     await tester.ensureVisible(
       find.byTooltip('Associate highlights from an earlier version…'),
     );
@@ -2044,7 +2040,13 @@ void main() {
           const ReaderLayout(),
           const ReaderLayout(scale: 2),
         ]);
-        expect(bridge.renderScales, [1, 2]);
+        // The raster is fitted to the box instead (fit page, with no height
+        // reported yet, fits the width): the 612 pt fixture page at the
+        // default width, then at the new one.
+        expect(bridge.renderScales, [
+          closeTo(680 / 612, .01),
+          closeTo(320 / 612, .01),
+        ]);
         controller.dispatch(const ReaderSelectionStarted(1));
         controller.dispatch(const ReaderSelectionExtended(3));
         controller.dispatch(const ReaderSelectionEnded());
@@ -2374,6 +2376,53 @@ void main() {
       fitKey: 'reader-fit-contain',
       modeKey: 'reader-continuous-presentation',
     );
+  });
+
+  testWidgets('the relayout progress row keeps its place above the page box', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 560);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          debugPathEntry: true,
+          bridge: bridge,
+          initialPath: '/books/book.pdf',
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final entry = find
+        .ancestor(of: find.byType(ShadInput), matching: find.byType(Column))
+        .first;
+    final idle = tester.getSize(entry).height;
+
+    // A larger window renders the fitted page again; the progress bar shows
+    // while it renders without taking room from the box it is fitted to.
+    final held = Completer<FlutterRenderedBuffer>();
+    bridge.renderCompleters.add(held);
+    final renders = bridge.renderCalls;
+    tester.view.physicalSize = const Size(900, 720);
+    for (var frame = 0; frame < 10; frame += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(bridge.renderCalls, greaterThan(renders));
+    expect(find.byType(ShadProgress), findsOneWidget);
+    expect(tester.getSize(entry).height, idle);
+
+    held.complete(_buffer(BigInt.from(40)));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShadProgress), findsNothing);
+    expect(tester.getSize(entry).height, idle);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
   });
 
   testWidgets('continuous fit-width and manual PDF content remain reachable', (
@@ -2718,37 +2767,21 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The welcome body is document-area copy: it keeps the reader palette ink
-    // and paper (owner decision 2026-09-28) while the shared chrome stays on the
-    // light application palette.
+    // With no book the welcome body sits on the stage, which stays on the
+    // light application palette whatever the page theme: its ink is the
+    // stage's, not the dark page's, so it stays legible.
     final welcome = tester.widget<Text>(
-      find.textContaining('generated Rust bridge'),
+      find.textContaining('local document path'),
     );
-    expect(welcome.style?.color, ShosaiTokens.readerDarkText);
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is ColoredBox &&
-            widget.color == ShosaiTokens.readerDarkBackground,
-      ),
-      findsOneWidget,
-    );
-    expect(
-      ThemeData.estimateBrightnessForColor(welcome.style!.color!),
-      isNot(
-        ThemeData.estimateBrightnessForColor(ShosaiTokens.readerDarkBackground),
-      ),
-      reason: 'the no-document copy stays legible on the document paper',
-    );
+    expect(welcome.style?.color, ShosaiTokens.colorLightInkMuted);
     final scaffoldContext = tester.element(find.byType(Scaffold));
     expect(Theme.of(scaffoldContext).brightness, Brightness.light);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
 
-  testWidgets('automatic PDF open defaults to the initial device pixel ratio', (
-    tester,
-  ) async {
+  testWidgets('automatic PDF open renders the fitted page at the device '
+      'pixel ratio', (tester) async {
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     final bridge = _ControlledBridge(
@@ -2774,9 +2807,377 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(bridge.renderScales.first, 3);
+    // The page is fitted to the document box and rendered at three device
+    // pixels per logical pixel, so it is sharp at the size it is shown.
+    final box = tester.getSize(_documentArea);
+    final fit = math.min(box.width / 612, box.height / 792);
+    expect(bridge.renderScales.last, closeTo(fit * 3, .011));
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
+  });
+
+  group('PDF spreads', () {
+    Future<void> drain() async {
+      for (var turn = 0; turn < 30; turn += 1) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    Future<ReaderController> openSpread(_ControlledBridge bridge) async {
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      controller.dispatch(
+        const ReaderViewportChanged(
+          ReaderLayout(width: 1000, spread: true),
+          height: 600,
+          devicePixelRatio: 1,
+        ),
+      );
+      controller.dispatch(
+        ReaderOpenRequested('/tmp/book.pdf', bookId: bridge.bookId),
+      );
+      await bridge.waitForOp(1);
+      await drain();
+      return controller;
+    }
+
+    test('a spread whose text cannot be read still shows and counts both '
+        'pages', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+        selectionFailure: true,
+      );
+      final controller = await openSpread(bridge);
+      // The cover is shown alone; pages 2 and 3 make the first spread.
+      controller.dispatch(const ReaderUnitRequested(1));
+      await drain();
+      expect(controller.model.selectionError, isNotNull);
+      expect(bridge.renderUnits, containsAll([1, 2]));
+      expect(controller.model.pdfSpread?.facingUnit, 2);
+      expect(controller.model.progress.lastOrdinal, 3);
+
+      controller.dispatch(const ReaderUnitRequested(3));
+      await drain();
+      expect(controller.model.unit, 3);
+      expect(controller.model.progress.percentage, 100);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    // With no text, a spread has no offsets to tell its pages apart: a place
+    // in the first page's text must not read as a place on the second.
+    for (final failing in ['opening', 'a relayout']) {
+      test('a place on a spread\'s first page stays there when its text '
+          'cannot be read on $failing', () async {
+        final bridge = _ControlledBridge(
+          bookId: 7,
+          logicalUnitCount: 4,
+          immediateLists: true,
+          selectionFailure: failing == 'opening',
+          initialReadingState: FlutterReadingState(
+            unit: BigInt.one,
+            offset: BigInt.from(10),
+            zoom: 1,
+          ),
+        );
+        final controller = await openSpread(bridge);
+        expect(controller.model.pdfSpread?.facingUnit, 2);
+        bridge.selectionFailure = true;
+        controller.dispatch(
+          const ReaderViewportChanged(
+            ReaderLayout(width: 1100, spread: true),
+            height: 600,
+            devicePixelRatio: 1,
+          ),
+        );
+        await drain();
+        expect(controller.model.selectionError, isNotNull);
+        expect(controller.model.pdfSpread?.textShift, 0);
+        expect(controller.model.readingLocation.unit, 1);
+        expect(bridge.savedReadingStates.last.unit.toInt(), 1);
+        controller.dispose();
+        await bridge.disposed.future;
+      });
+    }
+
+    test('a fitted render retry on a spread\'s second page finishes while '
+        'its box moves', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+      );
+      final controller = await openSpread(bridge);
+      controller.dispatch(const ReaderUnitRequested(2));
+      await drain();
+      expect(controller.model.unit, 1);
+      expect(controller.model.readingLocation.unit, 2);
+      void report(double height) => controller.dispatch(
+        ReaderViewportChanged(
+          const ReaderLayout(width: 2000, spread: true),
+          height: height,
+          devicePixelRatio: 1,
+        ),
+      );
+
+      // Two 612 × 792 pt pages 2000 px wide are fitted to the box height.
+      report(400);
+      await drain();
+      bridge.renderFailure = true;
+      report(700);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+      bridge.renderFailure = false;
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      final failed = bridge.renderScales.length;
+      report(630);
+      await drain();
+      expect(bridge.renderScales.length, greaterThan(failed));
+      final retried = bridge.renderScales.length;
+      // A box 4 px shorter while the retry renders waits for it.
+      report(626);
+      await drain();
+      expect(bridge.renderScales, hasLength(retried));
+      expect(controller.model.relayoutError, isNotNull);
+      held.complete(_buffer(BigInt.from(40)));
+      await drain();
+      expect(controller.model.readingLocation.unit, 2);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('the last spread of an odd-page PDF is saved as finished', () async {
+      final bridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 5,
+        immediateLists: true,
+      );
+      final controller = await openSpread(bridge);
+      controller.dispatch(const ReaderUnitRequested(3));
+      await drain();
+      expect(controller.model.progress.percentage, 100);
+      final saved = bridge.savedReadingStates.last;
+      expect(saved.unit.toInt(), 3);
+      expect(saved.lastUnit?.toInt(), 4);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+  });
+
+  group('fitted PDF rasters', () {
+    // The fixture page is 612 × 792 pt. A box 5000 px wide is limited by its
+    // height, so the fitted scale is the height over 792 at the pixel ratio.
+    const width = 5000.0;
+
+    Future<void> drain() async {
+      for (var turn = 0; turn < 30; turn += 1) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    Future<(ReaderController, _ControlledBridge)> open({
+      List<FlutterAnnotation> annotations = const [],
+    }) async {
+      final bridge = _ControlledBridge(
+        initialAnnotations: annotations,
+        immediateLists: true,
+      );
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      await _openControlled(controller, bridge, '/tmp/book.pdf');
+      controller.dispatch(
+        const ReaderViewportChanged(
+          ReaderLayout(width: width),
+          height: 396,
+          devicePixelRatio: 1,
+        ),
+      );
+      await drain();
+      expect(bridge.renderScales.last, closeTo(.5, 1e-9));
+      return (controller, bridge);
+    }
+
+    void report(
+      ReaderController controller,
+      double height, {
+      double devicePixelRatio = 1,
+    }) => controller.dispatch(
+      ReaderViewportChanged(
+        const ReaderLayout(width: width),
+        height: height,
+        devicePixelRatio: devicePixelRatio,
+      ),
+    );
+
+    test('a new pixel ratio renders the page again at it', () async {
+      final (controller, bridge) = await open();
+      report(controller, 396, devicePixelRatio: 2);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(1, 1e-9));
+      expect(controller.model.layout.scale, 1, reason: 'the zoom is kept');
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a failed render does not count as the displayed raster', () async {
+      final (controller, bridge) = await open();
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(1, 1e-9));
+      bridge.renderFailure = false;
+      final renders = bridge.renderScales.length;
+      // 0.75 needs a new raster over the displayed 0.5 one; measured against
+      // the failed 1.0 it would look sharp enough.
+      report(controller, 594);
+      await drain();
+      expect(bridge.renderScales, hasLength(renders + 1));
+      expect(bridge.renderScales.last, closeTo(.75, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a failed fitted render is not retried for every few pixels its '
+        'alert and progress bar move the box', () async {
+      final (controller, bridge) = await open();
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+      // The alert row takes a tenth of the box: one retry at the new size.
+      final failed = bridge.renderScales.length;
+      report(controller, 712.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(bridge.renderScales.last, closeTo(.9, 1e-9));
+      // The relayout progress bar comes and goes by 4 px; the alert stays.
+      for (final height in [708.8, 712.8, 708.8, 712.8]) {
+        report(controller, height);
+        await drain();
+      }
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+
+      // A real resize asks again, and a render that succeeds clears it.
+      bridge.renderFailure = false;
+      report(controller, 1584);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(2, 1e-9));
+      expect(controller.model.relayoutError, isNull);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a retry keeps its alert while the box moves under it, at a place '
+        'in the page', () async {
+      final (controller, bridge) = await open();
+      controller.dispatch(const ReaderBookmarkNavigated(0, offset: 5));
+      await drain();
+      expect(controller.model.readingOffset, 5);
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+
+      // The alert row takes a tenth of the box: one retry at the new size,
+      // held in flight while the progress bar takes 4 px more.
+      bridge.renderFailure = false;
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      final failed = bridge.renderScales.length;
+      report(controller, 712.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      report(controller, 708.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+
+      held.completeError(StateError('render failed'));
+      await drain();
+      for (final height in [712.8, 708.8, 712.8]) {
+        report(controller, height);
+        await drain();
+      }
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+      expect(controller.model.readingOffset, 5);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a resize waits for a highlight write, then renders the latest '
+        'box', () async {
+      final (controller, bridge) = await open(
+        annotations: _resolutionAnnotations(),
+      );
+      final annotation = controller.model.annotations.first;
+      controller.dispatch(
+        ReaderAnnotationUpdated(
+          annotation.id,
+          FlutterHighlightColor.green,
+          annotation.body,
+        ),
+      );
+      await drain();
+      expect(controller.model.annotationOperations, isNotEmpty);
+      final renders = bridge.renderScales.length;
+      report(controller, 792);
+      await drain();
+      report(controller, 990);
+      await drain();
+      expect(bridge.renderScales, hasLength(renders));
+      bridge.updateCompleter!.complete(true);
+      await drain();
+      expect(bridge.renderScales, hasLength(renders + 1));
+      expect(bridge.renderScales.last, closeTo(990 / 792, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a resize during a render is replayed when it finishes', () async {
+      final (controller, bridge) = await open();
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      report(controller, 792);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(1, 1e-9));
+      report(controller, 1584);
+      await drain();
+      held.complete(
+        FlutterRenderedBuffer(
+          handle: FlutterBufferHandle(
+            registry: BigInt.one,
+            id: BigInt.from(99),
+          ),
+          width: 1,
+          height: 1,
+          byteLen: BigInt.from(4),
+        ),
+      );
+      await drain();
+      expect(bridge.renderScales.last, closeTo(2, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a small fitted scale is not rounded away', () async {
+      final (controller, bridge) = await open();
+      // 11.6 / 792 is 0.0146…: rounded to hundredths it would be 0.01, a
+      // raster a third smaller than its box.
+      report(controller, 11.6);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(11.6 / 792, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
   });
 
   test('viewport changes preserve an in-flight navigation target', () async {
@@ -3867,6 +4268,7 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     bridge.updateCompleter = Completer<bool>();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Change color'));
     await tester.pump();
     expect(
@@ -4002,6 +4404,7 @@ void main() {
     await tester.pumpAndSettle();
     final selectionCalls = bridge.selectionCalls;
     bridge.updateCompleter = Completer<bool>();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Change color'));
     await tester.pump();
 
@@ -4044,6 +4447,7 @@ void main() {
       final displayedScale = tester.view.devicePixelRatio;
       final selectionCalls = bridge.selectionCalls;
       bridge.updateCompleter = Completer<bool>();
+      await _openNotesPanel(tester);
       await tester.tap(find.byTooltip('Change color'));
       await tester.pump();
 
@@ -4122,6 +4526,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/a.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
@@ -4204,40 +4609,37 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
-      // The document box is the viewport minus the two RD-06 edge columns;
-      // the columns are chrome and scale with the interface, so the width is
-      // measured from the rendered control rather than hardcoded. The page is
-      // laid out at the display scale it was opened with.
-      double edgeWidth() => tester
-          .getSize(find.byKey(const ValueKey('reader-edge-previous')))
-          .width;
+      // The document box spans the stage between the two RD-06 edge columns;
+      // the columns are chrome and scale with the interface, so the box is
+      // measured against the rendered controls rather than hardcoded. The page
+      // is laid out at the display scale it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 600 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
+      await _openNotesPanel(tester);
       expect(find.text('Highlight 1 — recovered'), findsOneWidget);
-      // Address the annotation strip's own scrollable: the reader chrome adds
-      // scroll regions of its own (the bounded header and the dev-only entry),
-      // so "the last scrollable in the tree" is not the strip any more.
-      final annotationStrip = find.descendant(
-        of: find.byType(ListView),
+      // Address the Notes panel's own scrollable: the reader chrome adds
+      // scroll regions of its own (the bounded header and the dev-only entry).
+      final notesScroll = find.descendant(
+        of: find.byKey(const ValueKey('reader-notes-scroll')),
         matching: find.byType(Scrollable),
       );
       await tester.scrollUntilVisible(
         find.text('Highlight 1 — ambiguous'),
         300,
-        scrollable: annotationStrip,
+        scrollable: notesScroll,
       );
       expect(find.text('Highlight 1 — ambiguous'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Highlight 1 — unavailable'),
         300,
-        scrollable: annotationStrip,
+        scrollable: notesScroll,
       );
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
       tester.view.physicalSize = const Size(1400, 1000);
       await tester.pumpAndSettle();
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
 
       final callsBeforeTheme = bridge.selectionCalls;
       await tester.pumpWidget(app(brightness: Brightness.dark));
@@ -4250,7 +4652,7 @@ void main() {
       // At `T200` the edge columns themselves are wider: only the chrome
       // scales.
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
 
       tester.view.devicePixelRatio = 3;
       tester.view.physicalSize = const Size(2100, 1500);
@@ -4258,7 +4660,7 @@ void main() {
       // A device pixel ratio change is not an interface text-scale change: the
       // scale of an already-open document stays the one it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
-      expect(tester.getSize(_documentArea).width, 700 - 2 * edgeWidth());
+      _expectViewportBetweenEdges(tester);
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
@@ -4288,8 +4690,9 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
-    // The reported reader viewport is the window minus the two RD-06 edge
-    // columns, at every device class and rotation.
+    // The reported reader viewport spans the stage between the two RD-06 edge
+    // columns, at every device class and rotation; on a phone the stage is
+    // the whole window.
     for (final size in const [
       Size(390, 844),
       Size(844, 390),
@@ -4299,14 +4702,13 @@ void main() {
     ]) {
       tester.view.physicalSize = size;
       await tester.pumpAndSettle();
-      final edgeWidth = tester
-          .getSize(find.byKey(const ValueKey('reader-edge-previous')))
-          .width;
-      expect(
-        tester.getSize(_documentArea).width,
-        size.width - 2 * edgeWidth,
-        reason: 'reader viewport at $size',
-      );
+      _expectViewportBetweenEdges(tester, reason: 'reader viewport at $size');
+      if (size.width < 600) {
+        expect(
+          tester.getSize(find.byKey(const ValueKey('reader-stage'))).width,
+          size.width,
+        );
+      }
     }
     expect(tester.takeException(), isNull);
 
@@ -4465,7 +4867,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final bridge = _ControlledBridge(
       initialAnnotations: List.generate(
-        8,
+        24,
         (index) => _annotation('$index', unit: index),
       ),
       immediateLists: true,
@@ -4482,27 +4884,23 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(-600, 0));
-    await tester.pumpAndSettle();
-    final listBefore = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(ListView),
-        matching: find.byType(Scrollable),
-      ),
+    await _openNotesPanel(tester);
+    // The Notes panel's own scrollable: the reader chrome has scroll regions
+    // of its own.
+    final notes = find.descendant(
+      of: find.byKey(const ValueKey('reader-notes-scroll')),
+      matching: find.byType(Scrollable),
     );
+    await tester.drag(notes, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    final listBefore = tester.state<ScrollableState>(notes);
     expect(listBefore.position.pixels, greaterThan(0));
 
-    tester.view.physicalSize = const Size(1144, 900);
+    // From the tablet's floating panel to the desktop's docked one: the panel
+    // keeps its scrollable, so the offset survives the move.
+    tester.view.physicalSize = const Size(1280, 900);
     await tester.pumpAndSettle();
-    // The highlight strip keeps its own scrollable across the breakpoint, so
-    // the offset survives the relayout; address it by the strip rather than by
-    // position, since the reader also has other scrollables.
-    final listAfter = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(ListView),
-        matching: find.byType(Scrollable),
-      ),
-    );
+    final listAfter = tester.state<ScrollableState>(notes);
     expect(listAfter, same(listBefore));
     expect(listAfter.position.pixels, greaterThan(0));
 
@@ -4533,18 +4931,22 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     final highlight = find.widgetWithText(ShadButton, 'Highlight 1');
-    for (var tabs = 0; tabs < 10; tabs += 1) {
-      final focus = FocusManager.instance.primaryFocus;
-      if (focus != null && focus.rect.overlaps(tester.getRect(highlight))) {
-        break;
-      }
+    // The button's own focus, not the panel's, which holds it.
+    bool onHighlight(FocusNode? focus) =>
+        focus != null &&
+        tester.getRect(highlight).inflate(1).contains(focus.rect.topLeft) &&
+        tester.getRect(highlight).inflate(1).contains(focus.rect.bottomRight);
+    for (var tabs = 0; tabs < 20; tabs += 1) {
+      if (onHighlight(FocusManager.instance.primaryFocus)) break;
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
     }
     final focusBefore = FocusManager.instance.primaryFocus!;
-    expect(focusBefore.rect.overlaps(tester.getRect(highlight)), isTrue);
-    tester.view.physicalSize = const Size(1144, 900);
+    expect(onHighlight(focusBefore), isTrue);
+    // From the tablet's floating panel to the desktop's docked one.
+    tester.view.physicalSize = const Size(1280, 900);
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus, same(focusBefore));
 
@@ -4622,7 +5024,7 @@ void main() {
               as BoxDecoration;
       for (
         var tabs = 0;
-        tabs < 5 && focusDecoration().border == null;
+        tabs < 15 && focusDecoration().border == null;
         tabs += 1
       ) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
@@ -4654,7 +5056,7 @@ void main() {
         focusBorder.top.color,
         Theme.of(tester.element(contentFinder)).colorScheme.primary,
       );
-      expect(focusBorder.top.width, 3);
+      expect(focusBorder.top.width, 2);
 
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -4967,6 +5369,7 @@ void main() {
         await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
         await tester.tap(find.text('Open document'));
         await tester.pumpAndSettle();
+        await _openNotesPanel(tester);
         await tester.tap(find.byTooltip('Change color'));
         await tester.pump();
 
@@ -5250,6 +5653,7 @@ void main() {
           await tester.pumpAndSettle();
           expect(bridge.createCalls, 1);
           expect(bridge.createdRanges.single, (BigInt.one, BigInt.from(8)));
+          await _openNotesPanel(tester);
           expect(find.text('Highlight 1'), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
@@ -5257,6 +5661,7 @@ void main() {
           await tester.enterText(find.byType(ShadInput), '/tmp/book');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
+          await _openNotesPanel(tester);
           expect(find.text('Highlight 1'), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
@@ -5620,8 +6025,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await tester.pump();
     await tester.pump();
-    // The location indicator is the restored status bar (RD-05).
-    expect(find.text('Page 2 · 100%'), findsOneWidget);
+    // The location indicator is the status line (RD-05).
+    expect(find.text('100% · page 2 of 2'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
     await held.moveTo(topLeft + Offset(side * .7, side * .7));
     await held.up();
@@ -5825,6 +6230,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(ShadInput).last, 'Updated note');
@@ -5841,12 +6247,13 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(bridge.listCalls, 2);
-    tester.view.physicalSize = const Size(900, 700);
+    tester.view.physicalSize = const Size(900, 560);
     await tester.pump();
     recoveryList.completeError(StateError('annotation list failed'));
     await tester.pumpAndSettle();
 
     expect(bridge.listCalls, 3);
+    await _openNotesPanel(tester);
     expect(find.text('Highlight 1'), findsOneWidget);
     expect(find.textContaining('annotation list failed'), findsNothing);
     expect(
@@ -5932,6 +6339,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await _openNotesPanel(tester);
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
     expect(find.text('Save'), findsOneWidget);
@@ -6030,13 +6438,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-bookmark')));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-more-bookmark')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('reader-panel-more')), findsNothing);
     toggle.completeError(StateError('bookmark commit failed'));
     await tester.pumpAndSettle();
 
@@ -6617,11 +7020,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // The tools surface is retired (contract §7.2 item 1); the live tools
-    // controls are retained inside the more panel and must stay inside the
+    // The page field lives in the Contents sheet and must stay inside the
     // usable viewport above the keyboard (640 logical height minus the 280
     // inset), not merely inside the window.
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
 
     expect(tester.takeException(), isNull);
@@ -6631,7 +7033,7 @@ void main() {
       find.byKey(const ValueKey('reader-page-input')),
     );
     final panelRect = tester.getRect(
-      find.byKey(const ValueKey('reader-panel-more')),
+      find.byKey(const ValueKey('reader-panel-contents')),
     );
     final contentRect = tester.getRect(
       find.byKey(const ValueKey('reader-content-semantics')),
@@ -6978,13 +7380,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+    await tester.tap(find.byKey(const ValueKey('reader-header-bookmark')));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-more-bookmark')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('reader-panel-more')), findsNothing);
 
     await tester.enterText(
       find.bySemanticsLabel('Document path'),
@@ -7067,6 +7464,27 @@ FlutterSelectionSurface _surface(
   visualLines: const [],
 );
 
+/// Expects the document box to fill the stage between the page-turn edges.
+void _expectViewportBetweenEdges(WidgetTester tester, {String? reason}) {
+  final document = tester.getRect(_documentArea);
+  final previous = tester.getRect(
+    find.byKey(const ValueKey('reader-edge-previous')),
+  );
+  final next = tester.getRect(find.byKey(const ValueKey('reader-edge-next')));
+  expect(document.left, previous.right, reason: reason);
+  expect(document.right, next.left, reason: reason);
+}
+
+/// Opens the reader's Notes panel, where the highlights and their recovery
+/// actions are listed, unless it is already open.
+Future<void> _openNotesPanel(WidgetTester tester) async {
+  if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isNotEmpty) {
+    return;
+  }
+  await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _waitUntil(bool Function() condition) async {
   while (!condition()) {
     await Future<void>.delayed(Duration.zero);
@@ -7136,6 +7554,9 @@ final class _ControlledBridge
   FlutterBookFormat format;
   int logicalUnitCount;
   final int? bookId;
+
+  @override
+  int get pdfEnginePageCount => logicalUnitCount;
   final List<FlutterAnnotation> initialAnnotations;
   final List<FlutterAnnotation> storedAnnotations;
   final List<FlutterAnnotationAssociationSource> associationSources;

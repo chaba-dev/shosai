@@ -18,7 +18,11 @@ final class ReaderLayoutChanged extends ReaderMessage {
 }
 
 final class ReaderViewportChanged extends ReaderMessage {
-  const ReaderViewportChanged(this.layout, {this.height});
+  const ReaderViewportChanged(
+    this.layout, {
+    this.height,
+    this.devicePixelRatio,
+  });
 
   final ReaderLayout layout;
 
@@ -27,6 +31,12 @@ final class ReaderViewportChanged extends ReaderMessage {
   /// EPUB pagination needs a page height: an EPUB document waits for its first
   /// reported height instead of paginating for a guessed box.
   final double? height;
+
+  /// The display's pixel ratio, when the reporter knows it.
+  ///
+  /// A PDF page in a fit mode renders at its fitted size in device pixels, so
+  /// moving the window to a display with another ratio renders it again.
+  final double? devicePixelRatio;
 }
 
 /// Steps the reader's page by [delta] (±1) (RD-06 edge navigation).
@@ -86,21 +96,6 @@ final class ReaderPanelToggled extends ReaderMessage {
 /// search and clears the query and results, mirroring the Iced reference.
 final class ReaderSearchToggled extends ReaderMessage {
   const ReaderSearchToggled();
-}
-
-/// Activates the tab with [tabId] (presentation-only in 4B).
-final class ReaderTabActivated extends ReaderMessage {
-  const ReaderTabActivated(this.tabId);
-  final String tabId;
-}
-
-/// Requests closing the tab with [tabId] (presentation-only in 4B).
-///
-/// Real close semantics (adjacent selection, last-tab return, pending saves,
-/// resource release) are 5F; 4B applies its documented fixture policy.
-final class ReaderTabCloseRequested extends ReaderMessage {
-  const ReaderTabCloseRequested(this.tabId);
-  final String tabId;
 }
 
 /// Leaves the reader. The controller invokes the injected navigation adapter;
@@ -174,6 +169,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
     this.theme,
     this.rasterFit,
     this.zoom,
+    this.twoPages,
   });
 
   final double? fontSize;
@@ -181,6 +177,9 @@ final class ReaderTypographyChanged extends ReaderMessage {
   final String? theme;
   final ReaderRasterFit? rasterFit;
   final double? zoom;
+
+  /// The Pages setting: two pages where they fit, or always one.
+  final bool? twoPages;
 }
 
 /// Requests the Markdown export of the current book's bookmarks (RD-08).
@@ -366,8 +365,13 @@ final class ReaderSelectionPointerCancelled extends ReaderMessage {
 }
 
 final class ReaderSelectionKeyboardExtended extends ReaderMessage {
-  const ReaderSelectionKeyboardExtended(this.movement);
+  const ReaderSelectionKeyboardExtended(this.movement, {this.arrow = false});
   final ReaderSelectionMovement movement;
+
+  /// Whether [movement] names the direction of an arrow key on screen
+  /// rather than a movement in the text: in a vertical column Up and Down
+  /// then move along it, and Left and Right across columns.
+  final bool arrow;
 }
 
 final class ReaderSelectionEnded extends ReaderMessage {
@@ -588,22 +592,51 @@ final class _ReaderImageDecoded extends ReaderMessage {
   const _ReaderImageDecoded({
     required this.generation,
     required this.pageImage,
+    this.rasterScale,
   });
 
   final int generation;
   final ui.Image? pageImage;
+
+  /// The scale [pageImage] was rendered at, for a PDF page.
+  final double? rasterScale;
 }
 
 final class _ReaderSurfaceLoaded extends ReaderMessage {
-  const _ReaderSurfaceLoaded({required this.generation, required this.surface});
+  const _ReaderSurfaceLoaded({
+    required this.generation,
+    required this.surface,
+    this.pdfSpread,
+    this.readingPage,
+    this.readingOffset,
+  });
   final int generation;
   final FlutterSelectionSurface surface;
+  final ReaderPdfSpread? pdfSpread;
+
+  /// The spread's page the restored position is on, with [pdfSpread].
+  final int? readingPage;
+
+  /// The restored reading offset in [surface]'s text, when it moved: a
+  /// position on a spread's second page lies past the first page's text.
+  final int? readingOffset;
 }
 
 final class _ReaderSelectionSupportFailed extends ReaderMessage {
-  const _ReaderSelectionSupportFailed(this.generation, this.error);
+  const _ReaderSelectionSupportFailed(
+    this.generation,
+    this.error, {
+    this.pdfSpread,
+    this.readingPage,
+  });
   final int generation;
   final String error;
+
+  /// The spread shown without text, when a PDF opened on one.
+  final ReaderPdfSpread? pdfSpread;
+
+  /// The spread's page the restored position is on, with [pdfSpread].
+  final int? readingPage;
 }
 
 final class _ReaderRelayoutCompleted extends ReaderMessage {
@@ -614,6 +647,8 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
     required this.unit,
     required this.layout,
     required this.surface,
+    this.pdfSpread,
+    this.readingPage,
     required this.pageImage,
     required this.annotations,
     required this.replaceReadingOffset,
@@ -621,6 +656,7 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
     this.length,
     this.selectionError,
     this.annotationError,
+    this.rasterScale,
   });
 
   final int generation;
@@ -629,7 +665,17 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
   final int unit;
   final ReaderLayout layout;
   final FlutterSelectionSurface? surface;
+
+  /// The spread [surface] and [pageImage] show, when they span two PDF pages.
+  final ReaderPdfSpread? pdfSpread;
+
+  /// The spread's page being read, with [pdfSpread]: the page asked for, or
+  /// the one read before a relayout with no target of its own.
+  final int? readingPage;
   final ui.Image pageImage;
+
+  /// The scale [pageImage] was rendered at.
+  final double? rasterScale;
   final List<FlutterAnnotation> annotations;
   final bool replaceReadingOffset;
   final int? offset;

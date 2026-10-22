@@ -23,7 +23,6 @@ export 'package:shosai_flutter/reader/view.dart'
         WelcomePanel,
         pageColors,
         pageImageSource,
-        readerTabMinLabelWidth,
         usesExplicitSelectionAnnouncements;
 
 export 'package:shosai_flutter/reader/controller.dart'
@@ -86,9 +85,6 @@ export 'package:shosai_flutter/reader/controller.dart'
         ReaderPanel,
         ReaderPanelToggled,
         ReaderSearchToggled,
-        ReaderTabPresentation,
-        ReaderTabActivated,
-        ReaderTabCloseRequested,
         ReaderBackRequested,
         ReaderPanelFocusRequested,
         ReaderDisplayUnit,
@@ -96,7 +92,6 @@ export 'package:shosai_flutter/reader/controller.dart'
         ReaderProgressPresentation,
         ReaderModalEffect,
         ReaderNavigationAdapter,
-        ReaderTabRevealAdapter,
         ReaderProgressSource;
 
 Future<void> main() async {

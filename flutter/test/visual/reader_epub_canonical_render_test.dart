@@ -114,12 +114,15 @@ void main() {
                 .page
                 .page
                 .slices)
-          for (final placed in placedPageText(
-            slice,
-            (painter.painter as ReaderEpubPageContentPainter).page.box,
-          ))
-            placed.block.map.text,
+          for (final placed in placedPageText(slice)) placed.block.map.text,
   ];
+
+  /// The Contents panel's own text: the toolbar and status line also name
+  /// the current section.
+  Finder inContents(String text) => find.descendant(
+    of: find.byKey(const ValueKey('reader-panel-contents')),
+    matching: find.text(text),
+  );
 
   Future<void> openContents(WidgetTester tester) async {
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
@@ -202,17 +205,17 @@ void main() {
     );
     await openContents(tester);
 
-    expect(find.text('NCX One'), findsOneWidget);
-    expect(find.text('NCX Two'), findsOneWidget);
+    expect(inContents('NCX One'), findsOneWidget);
+    expect(inContents('NCX Two'), findsOneWidget);
     expect(
-      find.text('Nav One'),
+      inContents('Nav One'),
       findsNothing,
       reason: 'the nav document loses to the NCX',
     );
 
     // Activating the NCX row navigates to the verified cell anchor through the
     // guarded layout path, not to an unverified position.
-    await tester.tap(find.text('NCX Two'));
+    await tester.tap(inContents('NCX Two'));
     for (var round = 0; round < 6; round += 1) {
       await pumpHarnessFrames(tester, frames: 4);
       await tester.runAsync(

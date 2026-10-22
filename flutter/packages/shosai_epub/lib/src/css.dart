@@ -4,7 +4,7 @@
 /// lists, `!important`, inline `style`, source order, and the property subset
 /// the normalized model can express (display, font-size/-family/-weight/-style,
 /// text-align, direction, margins, text-indent, width/height/max-width,
-/// white-space). `@font-face` is collected for embedded font admission.
+/// white-space, writing-mode and its `-epub-`/`-webkit-` aliases). `@font-face` is collected for embedded font admission.
 ///
 /// Deliberately unsupported and reported as a warning, never silently applied:
 /// `@media` and other at-rules, attribute/pseudo-class/pseudo-element
@@ -591,6 +591,9 @@ const Set<String> kSupportedCssProperties = {
   'text-indent',
   'white-space',
   'width',
+  'writing-mode',
+  '-epub-writing-mode',
+  '-webkit-writing-mode',
 };
 
 List<CssDeclaration> _parseDeclarations(String body, [List<String>? warnings]) {
@@ -709,6 +712,7 @@ class EpubComputedStyle {
     required this.width,
     required this.height,
     required this.maxWidth,
+    this.writingMode = EpubWritingMode.horizontalTb,
   });
 
   final EpubDisplay display;
@@ -727,6 +731,9 @@ class EpubComputedStyle {
   final EpubLength? width;
   final EpubLength? height;
   final EpubLength? maxWidth;
+
+  /// Inherited, as CSS `writing-mode` is.
+  final EpubWritingMode writingMode;
 
   bool get isBlockLike => display != EpubDisplay.inline;
 }

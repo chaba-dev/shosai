@@ -44,10 +44,15 @@ final class ReadingState {
 
   /// Save the position of book [bookId] and, from [unitCount], its library
   /// progress and reading time.
+  ///
+  /// [lastUnit] is the last unit in view when it is past the position's own,
+  /// as on a PDF spread: the progress counts it as read, so the last spread of
+  /// a book finishes it.
   Future<void> save(
     int bookId,
     ReadingPosition position, {
     required int unitCount,
+    int? lastUnit,
   }) async {
     _validate(position);
     if (unitCount < 1) {
@@ -55,7 +60,12 @@ final class ReadingState {
         'The unit count must be positive.',
       );
     }
-    final progress = readingProgress(position.unit, unitCount);
+    if (lastUnit != null && lastUnit < position.unit) {
+      throw const CoreException.invalidRequest(
+        'The last unit in view must not come before the position.',
+      );
+    }
+    final progress = readingProgress(lastUnit ?? position.unit, unitCount);
     return _store.transaction((db) => _save(db, bookId, position, progress));
   }
 }

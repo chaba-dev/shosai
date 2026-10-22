@@ -22,12 +22,19 @@ import 'pages.dart';
 import 'text_style.dart';
 
 /// The painted content box of one page inside the page window.
+///
+/// The flow a page shows is laid out in its own frame: lines run along its x
+/// axis and stack down its y axis, from the content's corner. A horizontal
+/// page places that frame at [origin]. A [vertical] page turns it a quarter
+/// turn clockwise, so lines run down the page and stack from its right edge
+/// to its left, as `vertical-rl` text does.
 class EpubPageBox {
   const EpubPageBox({
     required this.size,
     required this.origin,
     required this.contentWidth,
     required this.contentHeight,
+    this.vertical = false,
   });
 
   /// The page window's own size; the surface's coordinate space.
@@ -36,9 +43,48 @@ class EpubPageBox {
   /// Top-left of the laid-out content inside [size].
   final Offset origin;
 
-  /// The laid-out content extent.
+  /// The laid-out content extent, on the page.
   final double contentWidth;
   final double contentHeight;
+
+  /// Whether the page shows a vertical flow.
+  final bool vertical;
+
+  /// The length of a line: the flow's width.
+  double get inlineExtent => vertical ? contentHeight : contentWidth;
+
+  /// The extent lines stack along: the flow's height on one page.
+  double get blockExtent => vertical ? contentWidth : contentHeight;
+
+  /// The page point of [flow], a point in the flow's frame.
+  Offset toPage(Offset flow) => vertical
+      ? Offset(origin.dx + contentWidth - flow.dy, origin.dy + flow.dx)
+      : flow + origin;
+
+  /// The flow point under [page], a point on the page.
+  Offset toFlow(Offset page) => vertical
+      ? Offset(page.dy - origin.dy, origin.dx + contentWidth - page.dx)
+      : page - origin;
+
+  /// The page rectangle of [flow], a rectangle in the flow's frame.
+  Rect rectToPage(Rect flow) => vertical
+      ? Rect.fromLTRB(
+          origin.dx + contentWidth - flow.bottom,
+          origin.dy + flow.left,
+          origin.dx + contentWidth - flow.top,
+          origin.dy + flow.right,
+        )
+      : flow.shift(origin);
+
+  /// Moves [canvas] into the flow's frame.
+  void transformToFlow(Canvas canvas) {
+    if (!vertical) {
+      canvas.translate(origin.dx, origin.dy);
+      return;
+    }
+    canvas.translate(origin.dx + contentWidth, origin.dy);
+    canvas.rotate(math.pi / 2);
+  }
 }
 
 /// Builds the selection surface of one page window.
@@ -52,10 +98,18 @@ FlutterSelectionSurface buildPageSelectionSurface({
   required String canonicalText,
   required String resourcePath,
   required EpubPageBox box,
+  FlowPage? facing,
+  EpubPageBox? facingBox,
 }) {
   final geometry = pageSelectionGeometry(page, box);
+  // A spread's second page continues the first in the chapter's canonical
+  // stream, so its geometry follows the first page's in reading order and
+  // one surface spans both.
+  final facingGeometry = facing == null || facingBox == null
+      ? null
+      : pageSelectionGeometry(facing, facingBox);
   final start = page.canonicalStart;
-  final end = page.canonicalEnd;
+  final end = facingGeometry == null ? page.canonicalEnd : facing!.canonicalEnd;
   final boundaries = _boundariesFor(canonicalText, start, end);
   return FlutterSelectionSurface(
     width: box.size.width,
@@ -63,10 +117,10 @@ FlutterSelectionSurface buildPageSelectionSurface({
     text: canonicalText,
     copyEligible: true,
     resourcePath: resourcePath,
-    endpoints: geometry.endpoints,
+    endpoints: [...geometry.endpoints, ...?facingGeometry?.endpoints],
     graphemeBoundaries: Uint32List.fromList(boundaries.graphemes),
     wordBoundaries: Uint32List.fromList(boundaries.words),
-    visualLines: geometry.visualLines,
+    visualLines: [...geometry.visualLines, ...?facingGeometry?.visualLines],
   );
 }
 
@@ -82,7 +136,7 @@ pageSelectionGeometry(FlowPage page, EpubPageBox box) {
   final endpoints = <FlutterSelectionEndpoint>[];
   final visualLines = <FlutterSelectionVisualLine>[];
   for (final slice in page.slices) {
-    for (final placed in placedPageText(slice, box)) {
+    for (final placed in placedPageText(slice)) {
       // Lines come in text order, so one cursor maps the whole block.
       final cursor = placed.block.map.cursor();
       for (var line = placed.lineStart; line < placed.lineEnd; line++) {
@@ -96,9 +150,10 @@ pageSelectionGeometry(FlowPage page, EpubPageBox box) {
           placed.origin.dx,
           endpoints,
           cursor,
+          box,
         );
         if (carets.isEmpty) continue;
-        carets.sort((left, right) => left.x.compareTo(right.x));
+        carets.sort((left, right) => left.alongLine.compareTo(right.alongLine));
         final deduped = <FlutterSelectionCaret>[];
         for (final caret in carets) {
           if (deduped.isNotEmpty && deduped.last.offset == caret.offset) {
@@ -121,10 +176,11 @@ pageSelectionGeometry(FlowPage page, EpubPageBox box) {
 /// than the whole measured block, so a line that belongs to the next page
 /// cannot be hit from this one.
 String? pageLinkAt(FlowPage page, EpubPageBox box, Offset position) {
+  final flow = box.toFlow(position);
   for (final slice in page.slices) {
-    for (final placed in placedPageText(slice, box)) {
+    for (final placed in placedPageText(slice)) {
       final block = placed.block;
-      final local = position - placed.origin;
+      final local = flow - placed.origin;
       if (local.dx < 0 ||
           local.dy < 0 ||
           local.dx > block.width ||
@@ -156,7 +212,8 @@ class PlacedPageText {
 
   final FlowTextBlock block;
 
-  /// Page coordinates of the block's own top-left corner.
+  /// Where the block's own top-left corner is in the page's flow frame (see
+  /// [EpubPageBox]).
   final Offset origin;
 
   /// Line window of the block that this page places.
@@ -170,17 +227,13 @@ class PlacedPageText {
 /// walks it, so a pointer addresses the same glyphs the page painter draws —
 /// including table cell text, table captions, image captions and a missing
 /// image's visible alt fallback.
-List<PlacedPageText> placedPageText(PageSlice slice, EpubPageBox box) {
-  final origin = box.origin;
+List<PlacedPageText> placedPageText(PageSlice slice) {
   if (slice is TextPageSlice) {
     final text = slice.block.text!;
     return [
       PlacedPageText(
         block: text,
-        origin: Offset(
-          origin.dx,
-          origin.dy + slice.top - text.lines[slice.lineStart].top,
-        ),
+        origin: Offset(0, slice.top - text.lines[slice.lineStart].top),
         lineStart: slice.lineStart,
         lineEnd: slice.lineEnd,
       ),
@@ -192,7 +245,7 @@ List<PlacedPageText> placedPageText(PageSlice slice, EpubPageBox box) {
     placed.add(
       PlacedPageText(
         block: text,
-        origin: Offset(origin.dx + x, origin.dy + y),
+        origin: Offset(x, y),
         lineStart: 0,
         lineEnd: text.lines.length,
       ),
@@ -255,6 +308,10 @@ List<PlacedPageText> placedPageText(PageSlice slice, EpubPageBox box) {
 /// physical half of the cluster carries the caret at its own edge, so a click
 /// resolves to the boundary the user aimed at. A right-to-left run swaps which
 /// caret the physical left half carries.
+///
+/// The geometry is measured in the flow's frame and placed on the page by
+/// [box]; on a vertical page the halves are the top and bottom of the
+/// character and the carets are vertical.
 List<FlutterSelectionCaret> _lineCarets(
   FlowTextBlock text,
   FlowLine line,
@@ -262,7 +319,48 @@ List<FlutterSelectionCaret> _lineCarets(
   double originX,
   List<FlutterSelectionEndpoint> endpoints,
   CanonicalCursor cursor,
+  EpubPageBox box,
 ) {
+  FlutterSelectionRect pageRect(double left, double right) {
+    final rect = box.rectToPage(
+      Rect.fromLTRB(
+        left + originX,
+        lineTop,
+        right + originX,
+        lineTop + line.height,
+      ),
+    );
+    return FlutterSelectionRect(
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+    );
+  }
+
+  FlutterSelectionCaret caret(int offset, double along) {
+    final start = box.toPage(Offset(along + originX, lineTop));
+    final end = box.toPage(Offset(along + originX, lineTop + line.height));
+    if (box.vertical) {
+      return FlutterSelectionCaret(
+        offset: BigInt.from(offset),
+        x: (start.dx + end.dx) / 2,
+        alongLine: start.dy,
+        vertical: true,
+        top: start.dy,
+        bottom: start.dy,
+      );
+    }
+    return FlutterSelectionCaret(
+      offset: BigInt.from(offset),
+      x: start.dx,
+      alongLine: along,
+      vertical: false,
+      top: start.dy,
+      bottom: end.dy,
+    );
+  }
+
   final map = text.map;
   final painter = text.painter;
   final markerOffset = map.codeUnitOffset;
@@ -305,12 +403,7 @@ List<FlutterSelectionCaret> _lineCarets(
         offset: BigInt.from(leftOffset),
         rangeStart: BigInt.from(canonicalStart),
         rangeEnd: BigInt.from(canonicalEnd),
-        rect: FlutterSelectionRect(
-          left: left + originX,
-          top: lineTop,
-          right: mid + originX,
-          bottom: lineTop + line.height,
-        ),
+        rect: pageRect(left, mid),
       ),
     );
     endpoints.add(
@@ -318,34 +411,11 @@ List<FlutterSelectionCaret> _lineCarets(
         offset: BigInt.from(rightOffset),
         rangeStart: BigInt.from(canonicalStart),
         rangeEnd: BigInt.from(canonicalEnd),
-        rect: FlutterSelectionRect(
-          left: mid + originX,
-          top: lineTop,
-          right: right + originX,
-          bottom: lineTop + line.height,
-        ),
+        rect: pageRect(mid, right),
       ),
     );
-    carets.add(
-      FlutterSelectionCaret(
-        offset: BigInt.from(rtl ? canonicalEnd : canonicalStart),
-        x: (rtl ? right : left) + originX,
-        alongLine: rtl ? right : left,
-        vertical: false,
-        top: lineTop,
-        bottom: lineTop + line.height,
-      ),
-    );
-    carets.add(
-      FlutterSelectionCaret(
-        offset: BigInt.from(rtl ? canonicalStart : canonicalEnd),
-        x: (rtl ? left : right) + originX,
-        alongLine: rtl ? left : right,
-        vertical: false,
-        top: lineTop,
-        bottom: lineTop + line.height,
-      ),
-    );
+    carets.add(caret(rtl ? canonicalEnd : canonicalStart, rtl ? right : left));
+    carets.add(caret(rtl ? canonicalStart : canonicalEnd, rtl ? left : right));
   }
   return carets;
 }
@@ -392,11 +462,9 @@ void paintPageSlices(
   canvas.clipRect(
     Rect.fromLTWH(0, 0, box.contentWidth, box.contentHeight).shift(box.origin),
   );
+  box.transformToFlow(canvas);
   for (final slice in page.slices) {
-    canvas.save();
-    canvas.translate(box.origin.dx, box.origin.dy);
     _paintSlice(canvas, slice, palette);
-    canvas.restore();
   }
   canvas.restore();
 }
@@ -408,7 +476,7 @@ void _paintSlice(Canvas canvas, PageSlice slice, ReaderEpubPalette palette) {
     canvas.save();
     canvas.clipRect(Rect.fromLTWH(0, slice.top, text.width, slice.height));
     canvas.translate(0, offsetY);
-    text.painter.paint(canvas, Offset.zero);
+    text.paint(canvas, lineStart: slice.lineStart, lineEnd: slice.lineEnd);
     canvas.restore();
     return;
   }
@@ -432,7 +500,7 @@ void _paintTableSlice(
     if (table.caption != null) {
       canvas.save();
       canvas.translate(0, y);
-      table.caption!.painter.paint(canvas, Offset.zero);
+      table.caption!.paint(canvas);
       canvas.restore();
     }
     return;
@@ -469,7 +537,7 @@ void _paintTableRow(
         Rect.fromLTWH(cell.left + 6.0, cellY, cell.width - 12.0, text.height),
       );
       canvas.translate(cell.left + 6.0, cellY);
-      text.painter.paint(canvas, Offset.zero);
+      text.paint(canvas);
       canvas.restore();
       cellY += text.height;
     }
@@ -485,7 +553,7 @@ void _paintBlock(
   if (block.text != null) {
     canvas.save();
     canvas.translate(0, top);
-    block.text!.painter.paint(canvas, Offset.zero);
+    block.text!.paint(canvas);
     canvas.restore();
     return;
   }
@@ -498,23 +566,38 @@ void _paintBlock(
         image.image!.width.toDouble(),
         image.image!.height.toDouble(),
       );
-      canvas.drawImageRect(
-        image.image!,
-        source,
-        Rect.fromLTWH(0, top, image.width, image.height),
-        Paint()..filterQuality = FilterQuality.medium,
-      );
+      final target = Rect.fromLTWH(0, top, image.width, image.height);
+      final paint = Paint()..filterQuality = FilterQuality.medium;
+      if (image.quarterTurned) {
+        // The flow is turned a quarter turn clockwise; turn the image back.
+        canvas.save();
+        canvas.translate(target.center.dx, target.center.dy);
+        canvas.rotate(-math.pi / 2);
+        canvas.drawImageRect(
+          image.image!,
+          source,
+          Rect.fromCenter(
+            center: Offset.zero,
+            width: target.height,
+            height: target.width,
+          ),
+          paint,
+        );
+        canvas.restore();
+      } else {
+        canvas.drawImageRect(image.image!, source, target, paint);
+      }
     }
     if (image.fallbackText != null) {
       canvas.save();
       canvas.translate(0, top);
-      image.fallbackText!.painter.paint(canvas, Offset.zero);
+      image.fallbackText!.paint(canvas);
       canvas.restore();
     }
     if (image.caption != null) {
       canvas.save();
       canvas.translate(0, top + image.height + 0.4 * 16);
-      image.caption!.painter.paint(canvas, Offset.zero);
+      image.caption!.paint(canvas);
       canvas.restore();
     }
     return;
@@ -525,7 +608,7 @@ void _paintBlock(
     if (table.caption != null) {
       canvas.save();
       canvas.translate(0, y);
-      table.caption!.painter.paint(canvas, Offset.zero);
+      table.caption!.paint(canvas);
       canvas.restore();
       y += table.caption!.height;
     }

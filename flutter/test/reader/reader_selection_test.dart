@@ -87,6 +87,8 @@ class _SelectionBridge extends HarnessBridge {
       body: body,
     );
     created.add(annotation);
+    // A store keeps what it created: a relayout lists it again.
+    annotations = [...annotations, annotation];
     return annotation;
   }
 
@@ -187,6 +189,15 @@ Future<ui.Image> _testImage() async {
 }
 
 /// Pumps until the fixture document is loaded and its surface is painted.
+/// Opens the Notes panel, where the saved highlights are listed.
+Future<void> _openNotes(WidgetTester tester) async {
+  if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isNotEmpty) {
+    return;
+  }
+  await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+  await settleReaderSelection(tester);
+}
+
 Future<void> _open(WidgetTester tester, Widget widget) async {
   await tester.pumpWidget(widget);
   for (var round = 0; round < 8; round += 1) {
@@ -202,6 +213,16 @@ Future<void> _open(WidgetTester tester, Widget widget) async {
     if (painted && selectable) break;
   }
   await tester.pump(const Duration(milliseconds: 32));
+}
+
+/// Turns past the PDF's cover, which a spread shows alone, to the spread of
+/// its second and third pages.
+Future<void> _turnToSpread(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+  await tester.pump();
+  for (var round = 0; round < 4; round += 1) {
+    await tester.pump(const Duration(milliseconds: 32));
+  }
 }
 
 void _setView(WidgetTester tester, Size size) {
@@ -318,6 +339,61 @@ void main() {
       expect(copied, ['river ru']);
     });
 
+    testWidgets(
+      'a highlight on a spread\'s second page is saved on that page',
+      (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge(unitCount: 3);
+        await _open(tester, _reader(bridge: bridge));
+        await _turnToSpread(tester);
+        expect(find.textContaining('pages 2–3 of 3'), findsOneWidget);
+
+        // The second page's text follows the first page's and a line break.
+        final shift = selectionFixtureText.runes.length + 1;
+        await dragReaderSelectionBetween(
+          tester,
+          renderedEndpointCenter(tester, shift + 4),
+          renderedEndpointCenter(tester, shift + 12),
+        );
+        await settleReaderSelection(tester);
+        await tester.tap(find.text('Yellow'));
+        await settleReaderSelection(tester);
+
+        final created = bridge.created.single;
+        expect(created.unit.toInt(), 2);
+        expect(created.textRange!.start.toInt(), 4);
+        expect(created.textRange!.end.toInt(), 12);
+      },
+    );
+
+    testWidgets('a selection stays on the spread page it started on', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge(unitCount: 3);
+      await _open(tester, _reader(bridge: bridge));
+      await _turnToSpread(tester);
+
+      final shift = selectionFixtureText.runes.length + 1;
+      await dragReaderSelectionBetween(
+        tester,
+        renderedEndpointCenter(tester, 40),
+        renderedEndpointCenter(tester, shift + 12),
+      );
+      await settleReaderSelection(tester);
+      await tester.tap(find.text('Yellow'));
+      await settleReaderSelection(tester);
+
+      final created = bridge.created.single;
+      expect(created.unit.toInt(), 1);
+      expect(created.textRange!.start.toInt(), 40);
+      expect(
+        created.textRange!.end.toInt(),
+        selectionFixtureText.runes.length,
+        reason: "the selection ends at the first page's last character",
+      );
+    });
+
     testWidgets('each of the five colors commits the selected range', (
       tester,
     ) async {
@@ -343,9 +419,11 @@ void main() {
         );
         expect(bridge.created.single.textRange!.start.toInt(), 4);
         expect(bridge.created.single.textRange!.end.toInt(), 12);
-        // The commit leaves the action surface; the strip shows the highlight.
+        // The commit leaves the action surface; the notes panel lists the
+        // highlight.
         expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
-        expect(find.text('Highlight 1'), findsOneWidget);
+        await _openNotes(tester);
+        expect(find.text('HIGHLIGHTS · 1'), findsOneWidget);
       }
     });
 
@@ -760,45 +838,50 @@ void main() {
   });
 
   group('annotation actions', () {
-    testWidgets('navigation, recolor, note and delete run from the strip', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
-      final bridge = _SelectionBridge()
-        ..annotations = [
-          _annotation(
-            id: 'one',
-            color: FlutterHighlightColor.yellow,
-            body: 'old note',
-          ),
-        ];
-      await _open(tester, _reader(bridge: bridge));
+    testWidgets(
+      'navigation, recolor, note and delete run from the notes panel',
+      (tester) async {
+        _setView(tester, const Size(1280, 800));
+        final bridge = _SelectionBridge()
+          ..annotations = [
+            _annotation(
+              id: 'one',
+              color: FlutterHighlightColor.yellow,
+              body: 'old note',
+            ),
+          ];
+        await _open(tester, _reader(bridge: bridge));
+        await _openNotes(tester);
 
-      expect(find.text('Highlight 1'), findsOneWidget);
+        expect(find.text('Highlight 1'), findsOneWidget);
 
-      // Recolor cycles yellow -> green and keeps the note.
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-color-one')),
-      );
-      await settleReaderSelection(tester);
-      expect(bridge.updated.single.color, FlutterHighlightColor.green);
-      expect(bridge.updated.single.body, 'old note');
+        // Recolor cycles yellow -> green and keeps the note.
+        await tester.tap(
+          find.byKey(const ValueKey('reader-annotation-color-one')),
+        );
+        await settleReaderSelection(tester);
+        expect(bridge.updated.single.color, FlutterHighlightColor.green);
+        expect(bridge.updated.single.body, 'old note');
 
-      // Navigation selects the range and focuses the surface.
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-navigate-one')),
-      );
-      await settleReaderSelection(tester);
-      expect(FocusManager.instance.primaryFocus?.debugLabel, 'reader surface');
+        // Navigation selects the range and focuses the surface.
+        await tester.tap(
+          find.byKey(const ValueKey('reader-annotation-navigate-one')),
+        );
+        await settleReaderSelection(tester);
+        expect(
+          FocusManager.instance.primaryFocus?.debugLabel,
+          'reader surface',
+        );
 
-      // Delete removes the highlight.
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-delete-one')),
-      );
-      await settleReaderSelection(tester);
-      expect(bridge.deleted, ['one']);
-      expect(find.text('Highlight 1'), findsNothing);
-    });
+        // Delete removes the highlight.
+        await tester.tap(
+          find.byKey(const ValueKey('reader-annotation-delete-one')),
+        );
+        await settleReaderSelection(tester);
+        expect(bridge.deleted, ['one']);
+        expect(find.text('Highlight 1'), findsNothing);
+      },
+    );
 
     testWidgets('the note action opens the editor with the existing body', (
       tester,
@@ -807,6 +890,7 @@ void main() {
       final bridge = _SelectionBridge()
         ..annotations = [_annotation(id: 'one', body: 'old note')];
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
       await tester.tap(
         find.byKey(const ValueKey('reader-annotation-note-one')),
       );
@@ -839,6 +923,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _SelectionBridge()..annotations = [_annotation(id: 'one')];
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
 
       await tester.tapAt(
         tester.getCenter(find.text('Highlight 1')),
@@ -866,6 +951,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _SelectionBridge()..annotations = [_annotation(id: 'one')];
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
 
       // Focus a control in the card through the rendered tree, then use the
       // keyboard equivalent of a secondary click.
@@ -898,6 +984,7 @@ void main() {
             _annotation(id: 'three', color: FlutterHighlightColor.blue),
           ];
         await _open(tester, _reader(bridge: bridge));
+        await _openNotes(tester);
 
         // Open the middle card's menu, then delete the first card: the cards are
         // keyed by annotation id, so the open menu must stay with 'two' rather
@@ -940,6 +1027,7 @@ void main() {
           message: 'highlight write rejected',
         );
       await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
       await tester.tap(
         find.byKey(const ValueKey('reader-annotation-delete-one')),
       );
