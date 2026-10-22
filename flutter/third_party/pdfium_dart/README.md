@@ -9,12 +9,15 @@ published (`lib/`, `hook/build.dart`, `hook/link.dart`, `pubspec.yaml`,
   against the SHA-256 pinned in `hook/pdfium_archives.dart`, and fails the
   build on a mismatch or an unpinned target. Upstream pins the release but
   verifies nothing. `hook/verified_archive.dart` keeps the verified archive
-  beside the library and hashes it again on every build, downloading it
-  again when it no longer matches, and always takes the library from it, so
-  a cached library is never trusted for merely existing; both are written
-  under a temporary name and renamed into place. They live in a directory
-  named after the archive's hash, so a pin change never reuses another
-  archive's files. `test/` covers it (`make test-app` runs it).
+  beside the library and hashes it again each time the hook runs,
+  downloading it again when it no longer matches, and always takes the
+  library from it, so a cached library is never trusted for merely
+  existing; both are written under a temporary name and renamed into place.
+  The hook declares both files as dependencies, so the hooks runner, which
+  otherwise reuses the hook's last output without running it, runs it again
+  when either changes. They live in a directory named after the archive's
+  hash, so a pin change never reuses another archive's files. `test/`
+  covers it (`make test-app` runs it).
 - `NOTICES` replaces `LICENSE` in the application's license notices: Flutter
   reads a package's `NOTICES` in preference to its `LICENSE`, so the bundled
   PDFium's license and the licenses of the third-party code compiled into it

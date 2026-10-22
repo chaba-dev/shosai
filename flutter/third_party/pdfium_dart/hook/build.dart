@@ -10,68 +10,71 @@ import 'verified_archive.dart';
 const _assetName = 'libpdfium';
 
 void main(List<String> args) async {
-  await build(args, (input, output) async {
-    if (!input.config.buildCodeAssets) return;
-    if (input.config.code.targetOS == OS.iOS) return;
-
-    final target = _PdfiumTarget.fromCodeConfig(input.config.code);
-    final expectedSha256 = pdfiumArchiveSha256[target.archiveName];
-    if (expectedSha256 == null) {
-      throw UnsupportedError(
-        'No pinned PDFium archive for ${target.archiveName}; '
-        'see tool/pin_pdfium.py.',
-      );
-    }
-    // The directory names the archive's hash, so a pin change never reuses
-    // another archive's cache; extractVerifiedPdfium rechecks the cache itself.
-    final outputSubdir = pdfiumRelease.replaceAll('%2F', '_');
-    final outputFile = input.outputDirectoryShared.resolve(
-      '$outputSubdir/${target.archiveName}-${expectedSha256.substring(0, 16)}/${target.libraryFileName}',
-    );
-
-    await _downloadPdfium(
-      outputFile: outputFile,
-      target: target,
-      pdfiumRelease: pdfiumRelease,
-      expectedSha256: expectedSha256,
-    );
-
-    output.assets.code.add(
-      CodeAsset(
-        package: input.packageName,
-        name: _assetName,
-        linkMode: DynamicLoadingBundled(),
-        file: outputFile,
-      ),
-    );
-  });
+  await build(args, (input, output) => buildPdfium(input, output));
 }
 
-Future<void> _downloadPdfium({
-  required Uri outputFile,
-  required _PdfiumTarget target,
-  required String pdfiumRelease,
-  required String expectedSha256,
+/// The hook's body. [download] and [archiveSha256] default to the release
+/// pinned in `pdfium_archives.dart`; tests replace them.
+Future<void> buildPdfium(
+  BuildInput input,
+  BuildOutputBuilder output, {
+  Future<List<int>> Function(Uri) download = _download,
+  Map<String, String> archiveSha256 = pdfiumArchiveSha256,
 }) async {
+  if (!input.config.buildCodeAssets) return;
+  if (input.config.code.targetOS == OS.iOS) return;
+
+  final target = _PdfiumTarget.fromCodeConfig(input.config.code);
+  final expectedSha256 = archiveSha256[target.archiveName];
+  if (expectedSha256 == null) {
+    throw UnsupportedError(
+      'No pinned PDFium archive for ${target.archiveName}; '
+      'see tool/pin_pdfium.py.',
+    );
+  }
+  // The directory names the archive's hash, so a pin change never reuses
+  // another archive's cache; extractVerifiedPdfium rechecks the cache itself.
+  final outputSubdir = pdfiumRelease.replaceAll('%2F', '_');
+  final outputFile = input.outputDirectoryShared.resolve(
+    '$outputSubdir/${target.archiveName}-${expectedSha256.substring(0, 16)}/${target.libraryFileName}',
+  );
+  final archiveFile = outputFile.resolve('pdfium.tgz');
   final archiveUri = Uri.parse(
     'https://github.com/bblanchon/pdfium-binaries/releases/download/'
     '$pdfiumRelease/pdfium-${target.archivePlatform}-${target.archiveArch}.tgz',
   );
 
   await extractVerifiedPdfium(
-    archive: File.fromUri(outputFile.resolve('pdfium.tgz')),
+    archive: File.fromUri(archiveFile),
     library: File.fromUri(outputFile),
     expectedSha256: expectedSha256,
     libraryPath: target.archiveLibraryPath,
     source: archiveUri,
-    download: () async {
-      final response = await http.get(archiveUri);
-      if (response.statusCode != 200) {
-        throw Exception('Failed to download PDFium: $archiveUri');
-      }
-      return response.bodyBytes;
-    },
+    download: () => download(archiveUri),
   );
+
+  output.assets.code.add(
+    CodeAsset(
+      package: input.packageName,
+      name: _assetName,
+      linkMode: DynamicLoadingBundled(),
+      file: outputFile,
+    ),
+  );
+  // The runner reuses this output without running the hook until a declared
+  // dependency changes, so a cached file changed after the build sends the
+  // next build back through the verification above.
+  output.dependencies
+    ..add(archiveFile)
+    ..add(outputFile);
+}
+
+Future<List<int>> _download(Uri uri) async {
+  final response = await http.get(uri);
+  if (response.statusCode != 200) {
+    throw Exception('Failed to download PDFium: $uri');
+  }
+  return response.bodyBytes;
 }
 
 final class _PdfiumTarget {
