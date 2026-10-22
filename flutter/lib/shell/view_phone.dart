@@ -474,6 +474,12 @@ class _TabCard extends StatelessWidget {
                     book.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
+                    // Literata's descent reaches past the tight leading, and an
+                    // ellipsized title clips it to its box: on macOS the cut is
+                    // a visible pixel row.
+                    textHeightBehavior: const TextHeightBehavior(
+                      applyHeightToLastDescent: false,
+                    ),
                     style: shellEditorialStyle(
                       14,
                       19,
