@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -2039,7 +2040,13 @@ void main() {
           const ReaderLayout(),
           const ReaderLayout(scale: 2),
         ]);
-        expect(bridge.renderScales, [1, 2]);
+        // The raster is fitted to the box instead (fit page, with no height
+        // reported yet, fits the width): the 612 pt fixture page at the
+        // default width, then at the new one.
+        expect(bridge.renderScales, [
+          closeTo(680 / 612, .01),
+          closeTo(320 / 612, .01),
+        ]);
         controller.dispatch(const ReaderSelectionStarted(1));
         controller.dispatch(const ReaderSelectionExtended(3));
         controller.dispatch(const ReaderSelectionEnded());
@@ -2369,6 +2376,53 @@ void main() {
       fitKey: 'reader-fit-contain',
       modeKey: 'reader-continuous-presentation',
     );
+  });
+
+  testWidgets('the relayout progress row keeps its place above the page box', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 560);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          debugPathEntry: true,
+          bridge: bridge,
+          initialPath: '/books/book.pdf',
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final entry = find
+        .ancestor(of: find.byType(ShadInput), matching: find.byType(Column))
+        .first;
+    final idle = tester.getSize(entry).height;
+
+    // A larger window renders the fitted page again; the progress bar shows
+    // while it renders without taking room from the box it is fitted to.
+    final held = Completer<FlutterRenderedBuffer>();
+    bridge.renderCompleters.add(held);
+    final renders = bridge.renderCalls;
+    tester.view.physicalSize = const Size(900, 720);
+    for (var frame = 0; frame < 10; frame += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(bridge.renderCalls, greaterThan(renders));
+    expect(find.byType(ShadProgress), findsOneWidget);
+    expect(tester.getSize(entry).height, idle);
+
+    held.complete(_buffer(BigInt.from(40)));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShadProgress), findsNothing);
+    expect(tester.getSize(entry).height, idle);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
   });
 
   testWidgets('continuous fit-width and manual PDF content remain reachable', (
@@ -2726,9 +2780,8 @@ void main() {
     await bridge.disposed.future;
   });
 
-  testWidgets('automatic PDF open defaults to the initial device pixel ratio', (
-    tester,
-  ) async {
+  testWidgets('automatic PDF open renders the fitted page at the device '
+      'pixel ratio', (tester) async {
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     final bridge = _ControlledBridge(
@@ -2754,9 +2807,225 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(bridge.renderScales.first, 3);
+    // The page is fitted to the document box and rendered at three device
+    // pixels per logical pixel, so it is sharp at the size it is shown.
+    final box = tester.getSize(_documentArea);
+    final fit = math.min(box.width / 612, box.height / 792);
+    expect(bridge.renderScales.last, closeTo(fit * 3, .011));
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
+  });
+
+  group('fitted PDF rasters', () {
+    // The fixture page is 612 × 792 pt. A box 5000 px wide is limited by its
+    // height, so the fitted scale is the height over 792 at the pixel ratio.
+    const width = 5000.0;
+
+    Future<void> drain() async {
+      for (var turn = 0; turn < 30; turn += 1) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    Future<(ReaderController, _ControlledBridge)> open({
+      List<FlutterAnnotation> annotations = const [],
+    }) async {
+      final bridge = _ControlledBridge(
+        initialAnnotations: annotations,
+        immediateLists: true,
+      );
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      await _openControlled(controller, bridge, '/tmp/book.pdf');
+      controller.dispatch(
+        const ReaderViewportChanged(
+          ReaderLayout(width: width),
+          height: 396,
+          devicePixelRatio: 1,
+        ),
+      );
+      await drain();
+      expect(bridge.renderScales.last, closeTo(.5, 1e-9));
+      return (controller, bridge);
+    }
+
+    void report(
+      ReaderController controller,
+      double height, {
+      double devicePixelRatio = 1,
+    }) => controller.dispatch(
+      ReaderViewportChanged(
+        const ReaderLayout(width: width),
+        height: height,
+        devicePixelRatio: devicePixelRatio,
+      ),
+    );
+
+    test('a new pixel ratio renders the page again at it', () async {
+      final (controller, bridge) = await open();
+      report(controller, 396, devicePixelRatio: 2);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(1, 1e-9));
+      expect(controller.model.layout.scale, 1, reason: 'the zoom is kept');
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a failed render does not count as the displayed raster', () async {
+      final (controller, bridge) = await open();
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(1, 1e-9));
+      bridge.renderFailure = false;
+      final renders = bridge.renderScales.length;
+      // 0.75 needs a new raster over the displayed 0.5 one; measured against
+      // the failed 1.0 it would look sharp enough.
+      report(controller, 594);
+      await drain();
+      expect(bridge.renderScales, hasLength(renders + 1));
+      expect(bridge.renderScales.last, closeTo(.75, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a failed fitted render is not retried for every few pixels its '
+        'alert and progress bar move the box', () async {
+      final (controller, bridge) = await open();
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+      // The alert row takes a tenth of the box: one retry at the new size.
+      final failed = bridge.renderScales.length;
+      report(controller, 712.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(bridge.renderScales.last, closeTo(.9, 1e-9));
+      // The relayout progress bar comes and goes by 4 px; the alert stays.
+      for (final height in [708.8, 712.8, 708.8, 712.8]) {
+        report(controller, height);
+        await drain();
+      }
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+
+      // A real resize asks again, and a render that succeeds clears it.
+      bridge.renderFailure = false;
+      report(controller, 1584);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(2, 1e-9));
+      expect(controller.model.relayoutError, isNull);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a retry keeps its alert while the box moves under it, at a place '
+        'in the page', () async {
+      final (controller, bridge) = await open();
+      controller.dispatch(const ReaderBookmarkNavigated(0, offset: 5));
+      await drain();
+      expect(controller.model.readingOffset, 5);
+      bridge.renderFailure = true;
+      report(controller, 792);
+      await drain();
+      expect(controller.model.relayoutError, isNotNull);
+
+      // The alert row takes a tenth of the box: one retry at the new size,
+      // held in flight while the progress bar takes 4 px more.
+      bridge.renderFailure = false;
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      final failed = bridge.renderScales.length;
+      report(controller, 712.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      report(controller, 708.8);
+      await drain();
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+
+      held.completeError(StateError('render failed'));
+      await drain();
+      for (final height in [712.8, 708.8, 712.8]) {
+        report(controller, height);
+        await drain();
+      }
+      expect(bridge.renderScales, hasLength(failed + 1));
+      expect(controller.model.relayoutError, isNotNull);
+      expect(controller.model.readingOffset, 5);
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a resize waits for a highlight write, then renders the latest '
+        'box', () async {
+      final (controller, bridge) = await open(
+        annotations: _resolutionAnnotations(),
+      );
+      final annotation = controller.model.annotations.first;
+      controller.dispatch(
+        ReaderAnnotationUpdated(
+          annotation.id,
+          FlutterHighlightColor.green,
+          annotation.body,
+        ),
+      );
+      await drain();
+      expect(controller.model.annotationOperations, isNotEmpty);
+      final renders = bridge.renderScales.length;
+      report(controller, 792);
+      await drain();
+      report(controller, 990);
+      await drain();
+      expect(bridge.renderScales, hasLength(renders));
+      bridge.updateCompleter!.complete(true);
+      await drain();
+      expect(bridge.renderScales, hasLength(renders + 1));
+      expect(bridge.renderScales.last, closeTo(990 / 792, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a resize during a render is replayed when it finishes', () async {
+      final (controller, bridge) = await open();
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      report(controller, 792);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(1, 1e-9));
+      report(controller, 1584);
+      await drain();
+      held.complete(
+        FlutterRenderedBuffer(
+          handle: FlutterBufferHandle(
+            registry: BigInt.one,
+            id: BigInt.from(99),
+          ),
+          width: 1,
+          height: 1,
+          byteLen: BigInt.from(4),
+        ),
+      );
+      await drain();
+      expect(bridge.renderScales.last, closeTo(2, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
+    test('a small fitted scale is not rounded away', () async {
+      final (controller, bridge) = await open();
+      // 11.6 / 792 is 0.0146…: rounded to hundredths it would be 0.01, a
+      // raster a third smaller than its box.
+      report(controller, 11.6);
+      await drain();
+      expect(bridge.renderScales.last, closeTo(11.6 / 792, 1e-9));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
   });
 
   test('viewport changes preserve an in-flight navigation target', () async {
@@ -5826,7 +6095,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(bridge.listCalls, 2);
-    tester.view.physicalSize = const Size(900, 700);
+    tester.view.physicalSize = const Size(900, 560);
     await tester.pump();
     recoveryList.completeError(StateError('annotation list failed'));
     await tester.pumpAndSettle();

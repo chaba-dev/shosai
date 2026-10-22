@@ -812,7 +812,13 @@ class _ReaderControls extends StatelessWidget {
           const SizedBox(height: 12),
           Align(alignment: Alignment.centerLeft, child: button),
         ],
-        if (model.relayoutBusy) const ShadProgress(minHeight: 4),
+        // The progress row keeps its room when idle: the page below is fitted
+        // to the box that is left, which must not move as a relayout starts
+        // and ends.
+        SizedBox(
+          height: 4,
+          child: model.relayoutBusy ? const ShadProgress(minHeight: 4) : null,
+        ),
       ],
     );
   }
@@ -921,6 +927,7 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
   bool _scheduled = false;
   ReaderLayout? _observedLayout;
   double? _observedHeight;
+  double? _observedPixelRatio;
   ReaderLayout? _pendingLayout;
 
   @override
@@ -947,9 +954,13 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
         lineSpacing: typography.epubLineSpacing,
       );
       final observedHeight = availableHeight;
-      if (layout != _observedLayout || observedHeight != _observedHeight) {
+      final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+      if (layout != _observedLayout ||
+          observedHeight != _observedHeight ||
+          pixelRatio != _observedPixelRatio) {
         _observedLayout = layout;
         _observedHeight = observedHeight;
+        _observedPixelRatio = pixelRatio;
         _pendingLayout = layout;
       }
       if (_pendingLayout != null && !_scheduled) {
@@ -958,10 +969,15 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
           _scheduled = false;
           final pending = _pendingLayout;
           final pendingHeight = _observedHeight;
+          final pendingPixelRatio = _observedPixelRatio;
           _pendingLayout = null;
           if (mounted && pending != null) {
             widget.dispatch(
-              ReaderViewportChanged(pending, height: pendingHeight),
+              ReaderViewportChanged(
+                pending,
+                height: pendingHeight,
+                devicePixelRatio: pendingPixelRatio,
+              ),
             );
           }
         });

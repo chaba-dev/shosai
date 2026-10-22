@@ -260,6 +260,18 @@ final class ReaderController implements Listenable {
   int _searchCurrentIndex = 0;
   int _contentsRevision = 0;
 
+  /// The scale the displayed PDF page's raster was rendered at. Set only when
+  /// a rendered page is adopted, so failed or superseded renders leave it at
+  /// the image that is still shown.
+  double? _renderedRasterScale;
+
+  /// The display's current pixel ratio, which a fitted PDF raster renders at.
+  late double _devicePixelRatio = _baseScale;
+
+  /// The scale the latest fitted re-render asked for, so a render that fails
+  /// is not asked for again until the box or the display changes.
+  double? _refitScale;
+
   /// Whether a Contents load is in flight, so the panel opening while the
   /// open's own load runs does not start a second one.
   bool _contentsLoading = false;
@@ -403,7 +415,11 @@ final class ReaderController implements Listenable {
       case ReaderLayoutChanged():
         _layoutChanged(message.layout);
       case ReaderViewportChanged():
-        _viewportChanged(message.layout, height: message.height);
+        _viewportChanged(
+          message.layout,
+          height: message.height,
+          devicePixelRatio: message.devicePixelRatio,
+        );
       case ReaderUnitRequested():
         _unitRequested(
           message.unit,
@@ -1167,7 +1183,11 @@ final class ReaderController implements Listenable {
         );
       }
 
-      final rendered = await pdf.render(unit, restoredLayout.scale);
+      final (rendered, rasterScale) = await _renderPdfPage(
+        pdf,
+        unit,
+        restoredLayout,
+      );
       if (!_isCurrent(generation)) return;
       final image = await _decoder(
         rendered.pixels,
@@ -1178,7 +1198,13 @@ final class ReaderController implements Listenable {
         image.dispose();
         return;
       }
-      dispatch(_ReaderImageDecoded(generation: generation, pageImage: image));
+      dispatch(
+        _ReaderImageDecoded(
+          generation: generation,
+          pageImage: image,
+          rasterScale: rasterScale,
+        ),
+      );
     } catch (error) {
       dispatch(
         _ReaderOpenFailed(
@@ -1377,10 +1403,20 @@ final class ReaderController implements Listenable {
     return observed;
   }
 
-  void _viewportChanged(ReaderLayout observed, {double? height}) {
+  void _viewportChanged(
+    ReaderLayout observed, {
+    double? height,
+    double? devicePixelRatio,
+  }) {
     if (height != null && height.isFinite && height > 0) {
       _epubViewportHeight = height;
     }
+    final pixelRatioChanged =
+        devicePixelRatio != null &&
+        devicePixelRatio.isFinite &&
+        devicePixelRatio > 0 &&
+        devicePixelRatio != _devicePixelRatio;
+    if (pixelRatioChanged) _devicePixelRatio = devicePixelRatio;
     final layout = _model.document == null && !_model.busy
         ? observed
         : ReaderLayout(
@@ -1417,6 +1453,113 @@ final class ReaderController implements Listenable {
       return;
     }
     _layoutChanged(layout, height: height);
+    if (height != null || pixelRatioChanged) _refitPdfPage();
+  }
+
+  /// The scale a PDF page's raster renders at in a fit mode: the page fitted
+  /// to the content box at the display's pixel ratio, so it is re-rendered
+  /// sharp at the size it is shown (RFD 4, the first release) instead of
+  /// scaled from the zoom. Null when the zoom applies: a manual zoom, or a box
+  /// that is not measured yet.
+  ///
+  /// Only the raster follows the box. The selection surface, the annotation
+  /// geometry and the saved zoom stay at the layout's scale; the page painter
+  /// draws the raster into the surface's rectangle, whatever its pixel size.
+  /// The scale is kept exact, so the engine's pixel rounding sizes the bitmap;
+  /// [_refitPdfPage]'s relative tolerance keeps a small resize from rendering
+  /// the page again.
+  double? _fittedRasterScale(PdfEngineDocument pdf, int unit, double width) {
+    if (_rasterFit == ReaderRasterFit.manual) return null;
+    if (!width.isFinite || width <= 0) return null;
+    final PdfPageSize page;
+    try {
+      page = pdf.pageSize(unit);
+    } catch (_) {
+      return null;
+    }
+    if (page.width <= 0 || page.height <= 0) return null;
+    var fit = width / page.width;
+    final height = _epubViewportHeight;
+    if (_rasterFit == ReaderRasterFit.fitPage &&
+        height != null &&
+        height.isFinite &&
+        height > 0) {
+      fit = math.min(fit, height / page.height);
+    }
+    final scale = fit * _devicePixelRatio;
+    if (!scale.isFinite || scale <= 0) return null;
+    try {
+      pdf.bitmapSize(unit, scale);
+    } on PdfEngineLimitException {
+      // A page too large to render at its fitted size keeps the zoom and is
+      // scaled to fit instead.
+      return null;
+    }
+    return scale;
+  }
+
+  /// Renders [unit] of [pdf] for [layout]: at its fitted scale in a fit mode,
+  /// otherwise at the layout's. Returns the page with the scale it was
+  /// rendered at, which its completion carries to adoption.
+  Future<(PdfRenderedPage, double)> _renderPdfPage(
+    PdfEngineDocument pdf,
+    int unit,
+    ReaderLayout layout,
+  ) async {
+    final scale = _fittedRasterScale(pdf, unit, layout.width) ?? layout.scale;
+    return (await pdf.render(unit, scale), scale);
+  }
+
+  /// Renders the displayed PDF page again when a height report changes its
+  /// fitted scale enough to matter: the layout has no height, so the width
+  /// alone would not.
+  ///
+  /// A raster a little larger than its box is still sharp, so a box that
+  /// shrinks (an alert row appearing, say) keeps the page until the raster is
+  /// twice the size it needs; one that grows renders again past 5%.
+  ///
+  /// It is admitted like any relayout: while the reader is busy, laying out or
+  /// writing a highlight it waits, and [_startRequestedRelayoutIfReady] asks
+  /// again with the latest box when that work finishes.
+  void _refitPdfPage() {
+    final document = _model.document;
+    final pdf = _pdfDocument;
+    if (document == null ||
+        pdf == null ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _model.relayoutPending ||
+        _model.annotationOperations.isNotEmpty ||
+        _model.contentState != ReaderContentState.ready ||
+        _requestedLayout != _model.layout) {
+      return;
+    }
+    final scale = _fittedRasterScale(pdf, _model.unit, _model.layout.width);
+    final rendered = _renderedRasterScale;
+    if (scale == null ||
+        (rendered != null &&
+            scale <= rendered * 1.05 &&
+            scale * 2 > rendered) ||
+        _refitFailedNear(scale)) {
+      return;
+    }
+    _refitScale = scale;
+    // The failed render's error stays up while the page renders again: the
+    // alert row is part of the box the page is fitted to, so clearing it
+    // would change the fitted size the retry is for. The refit is not a
+    // navigation: its completion keeps the reading offset, and a box that
+    // moves while it renders waits for it instead of restarting it.
+    _startRelayout(document, _model.layout, keepRelayoutError: true);
+  }
+
+  /// Whether a fitted render near [scale] has just failed for the layout
+  /// shown: a box that moves by a few pixels (the relayout progress bar, an
+  /// alert row) does not ask for it again until the layout changes.
+  bool _refitFailedNear(double scale) {
+    final failed = _refitScale;
+    return failed != null &&
+        _failedLayout == _model.layout &&
+        (scale - failed).abs() <= failed * 0.05;
   }
 
   void _setRelayoutPending(bool pending) {
@@ -1433,6 +1576,7 @@ final class ReaderController implements Listenable {
     int? length,
     bool replaceReadingOffset = false,
     double? height,
+    bool keepRelayoutError = false,
   }) {
     final generation = _model.generation;
     final targetUnit = unit ?? _model.unit;
@@ -1490,7 +1634,7 @@ final class ReaderController implements Listenable {
         relayoutBusy: true,
         relayoutPending: false,
         selectionError: null,
-        relayoutError: null,
+        relayoutError: keepRelayoutError ? _unchanged : null,
         // A chapter refusal outlives a passive relayout of the page still
         // shown (its own alert changes the page height); a new location
         // request replaces it.
@@ -2191,6 +2335,7 @@ final class ReaderController implements Listenable {
         (before.epubFontSize == after.epubFontSize &&
             before.epubLineSpacing == after.epubLineSpacing &&
             before.rasterZoom == after.rasterZoom &&
+            before.rasterFit == after.rasterFit &&
             !themeChanged)) {
       return;
     }
@@ -3314,7 +3459,7 @@ final class ReaderController implements Listenable {
       } catch (error) {
         selectionError = _describeError(error);
       }
-      final rendered = await pdf.render(unit, layout.scale);
+      final (rendered, rasterScale) = await _renderPdfPage(pdf, unit, layout);
       if (!_isCurrentLayout(generation, revision)) {
         return;
       }
@@ -3356,6 +3501,7 @@ final class ReaderController implements Listenable {
           replaceReadingOffset: replaceReadingOffset,
           selectionError: selectionError,
           annotationError: annotationError,
+          rasterScale: rasterScale,
         ),
       );
       ownedImage = null;
@@ -3391,6 +3537,7 @@ final class ReaderController implements Listenable {
       return;
     }
     final oldImage = _model.pageImage;
+    _renderedRasterScale = message.rasterScale;
     _activeRelayoutIntent = null;
     final changedLocation =
         message.unit != _model.unit ||
@@ -3521,6 +3668,7 @@ final class ReaderController implements Listenable {
       message.pageImage?.dispose();
       return;
     }
+    _renderedRasterScale = message.rasterScale;
     _emit(
       _model.copyWith(
         pageImage: message.pageImage,
@@ -4457,7 +4605,11 @@ final class ReaderController implements Listenable {
     final height = _epubViewportHeight;
     if (_epubHeightNeedsLayout(document, _model.layout, height)) {
       _startRelayout(document, _model.layout, height: height);
+      return;
     }
+    // Likewise a PDF box or pixel ratio change that arrived while the reader
+    // was busy renders the page at its latest fitted size.
+    _refitPdfPage();
   }
 
   void _navigateAnnotation(String id) {
