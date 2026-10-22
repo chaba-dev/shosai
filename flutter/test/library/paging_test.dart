@@ -112,7 +112,7 @@ void main() {
       productionShell(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );

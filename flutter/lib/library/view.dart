@@ -34,6 +34,7 @@ typedef ProductReaderBuilder =
       int? initialBookId,
       void Function(String path, int? bookId) locatorChanged,
       ReaderNoticeReporter noticeReporter,
+      Widget openBooksAction,
     );
 
 class ProductShell extends StatefulWidget {
@@ -291,6 +292,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         // The reader route is pushed outside the shell's notice host, so the
         // composition root's reporter is handed to it (package 4C).
         widget.noticeReporter ?? ignoreNotice,
+        // The phone toolbar's open-book count; it opens the tab switcher.
+        ListenableBuilder(
+          listenable: _shell,
+          builder: (context, _) => ShellOpenBooksButton(
+            count: _shell.model.openBooks.length,
+            onPressed: () => _shell.dispatch(const ShellSwitcherOpened()),
+          ),
+        ),
       ),
     );
     _reader = (open.id, reader);
