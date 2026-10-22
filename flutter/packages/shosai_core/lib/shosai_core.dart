@@ -25,6 +25,8 @@ export 'src/preferences.dart';
 export 'src/reading/bookmarks.dart';
 export 'src/reading/reader_settings.dart';
 export 'src/reading/reading_state.dart';
+export 'src/search/case_fold.dart' show caseFold, caseFoldUnicodeVersion;
+export 'src/search/search.dart';
 export 'src/store/schema.dart';
 export 'src/store/store.dart';
 export 'src/unit_text.dart';
