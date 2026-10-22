@@ -18,10 +18,10 @@ Run commands from the repository root through the pinned development
 environment:
 
 ```sh
-.agents/dev make check-flutter
-.agents/dev make flutter-dev
-.agents/dev make flutter-macos-smoke
-.agents/dev make flutter-release
+.agents/dev make check
+.agents/dev make dev
+.agents/dev make macos-smoke
+.agents/dev make linux-release
 ```
 
 The PDFium and SQLite libraries are fetched by the Dart bindings' build hooks

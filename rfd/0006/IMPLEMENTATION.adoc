@@ -152,8 +152,8 @@ bidirectional and complex Unicode text.
 * [ ] Bound copied quote/context and exclude it from logs and diagnostics.
 * [ ] Verify database migration behavior, process interruption, unavailable
 files, malformed anchors, documents changed in place, and tab lifecycle.
-* [ ] Run `make lint-flutter`, targeted core-package and Flutter tests,
-`make test-flutter`, and `make check-rfds`.
+* [ ] Run `make lint`, targeted core-package and Flutter tests,
+`make test-app`, and `make check-rfds`.
 
 Phases 0 through 4 are complete only when all first-release acceptance criteria
 below pass on RFD 4's selected desktop and physical-device platform matrix.
