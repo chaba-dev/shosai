@@ -14,7 +14,10 @@ isolate never blocks on SQLite. `Store.transaction` wraps a body in
 `BEGIN IMMEDIATE … COMMIT` and rolls back on any exception.
 
 A body is sent across an isolate boundary: it may capture plain values (and a
-`Store` or a facade holding one), and it must return plain values. A write's
+`Store` or an object holding nothing else), and it must return plain values.
+A closure written in a method captures that method's object, so a facade that
+also holds locks, inspectors or cancellation tokens keeps its queries in a
+separate records class (as `Library` does with `LibraryRecords`). A write's
 result is sent before its `COMMIT`, so a result that cannot be sent rolls the
 write back. A body must be synchronous: an `async` body is refused, its
 transaction rolled back and the store closed before its continuation runs.
@@ -56,6 +59,64 @@ the one Flutter pins.
 | Module | Owns |
 | --- | --- |
 | `Preferences` | bounded key/value preferences (1 KiB keys, 64 KiB values, 1,024 rows, 1 MiB total) |
+| `Library` | books, import, covers, progress and private copies (below) |
+
+### Library
+
+A book's identity is its content (SHA-256). Importing content that is already
+in the library returns that book, so reading state follows the content: a
+referenced book whose file moved is repointed to the new path, and a managed
+import of a referenced book adopts it as a private copy.
+
+- **Referenced** books stay where the person keeps them; removing one never
+  touches the file.
+- **Managed** books are copied into the managed directory as
+  `<sha256>.<format>`. The copy is hashed while it is written, inspected, then
+  published and committed under one lock, so a deletion never races an import
+  that claims the same copy. A damaged copy is replaced on the next import.
+  Removing a managed book deletes the copy after the commit; a deletion that
+  fails is recorded in `managed_file_deletion_debt` and retried by
+  `retryManagedFileDeletions` (at start-up), and a deletion only ever renames
+  and unlinks a direct entry of the directory recorded when the copy was
+  imported, never a symlink's target or a path a book uses.
+- Publishing, claiming and deleting copies hold one lock per managed
+  directory: in-isolate for every `Library` over it, keyed by the directory's
+  resolved path so aliases share it (and taken before the lock file is
+  opened), and an exclusive file lock on `.shosai-lock` across processes. A
+  POSIX file lock belongs to the process, so two isolates of one process are
+  not excluded from each other: use a managed directory from one isolate per
+  process. A referenced import of a path inside the managed directory is
+  refused.
+- The managed directory's resolved path is recorded the first time it is
+  used. If it later resolves elsewhere (it or a parent was replaced by a
+  symlink), managed imports fail and nothing is published, swept or deleted
+  there; removals still commit and leave the copy's deletion pending. The
+  directory is checked again at selected points of an operation, but only as
+  a best effort: nothing guards against it being replaced while an operation
+  runs (`dart:io` has no directory-handle-relative operations), so the library
+  assumes nothing replaces its private directory, or a parent of it, while it
+  runs.
+- Removing a book never needs the managed directory: the removal commits
+  first, and only the copy's deletion needs the lock, so an unusable
+  directory leaves it pending. Deletion debt recorded in another directory
+  than the library's stays pending.
+- `retryManagedFileDeletions` also sweeps what a crash left behind: a
+  published copy no book or debt owns, set-aside damaged copies, and staging
+  files older than a day (a heuristic for an import that is no longer
+  running). Up to 100 unowned entries go per call; owned copies do not count
+  against that.
+- `verifiedPath` re-hashes the file before the reader opens it and fails with
+  `conflict` when the content changed.
+- Directory import follows symlinks only inside the chosen folder, visits each
+  folder once and skips files that are not regular or not EPUB/PDF. Walks are
+  bounded at 50,000 entries and 10,000 books; one selection is at most 256
+  paths, and a book file at most 512 MiB.
+- EPUB title, author and cover come from `shosai_epub`. PDF metadata comes
+  from a `BookInspector` the host supplies with its PDF engine; without one
+  the file name is the title. Covers are stored as PNG thumbnails of at most
+  300×400 pixels and 512 KiB.
+- Import takes a `CancellationToken`, checked between file chunks and books;
+  once a book's commit starts it finishes.
 
 Errors are `CoreException`s whose `CoreErrorKind` the controllers map to
 their own messages.

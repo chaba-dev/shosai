@@ -5,7 +5,12 @@
 /// of Flutter widgets so its behaviour is tested with `dart test`.
 library;
 
+export 'src/cancellation.dart';
 export 'src/errors.dart';
+export 'src/library/book.dart';
+export 'src/library/files.dart';
+export 'src/library/inspection.dart';
+export 'src/library/library.dart';
 export 'src/preferences.dart';
 export 'src/store/schema.dart';
 export 'src/store/store.dart';

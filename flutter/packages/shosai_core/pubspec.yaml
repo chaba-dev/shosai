@@ -10,6 +10,11 @@ environment:
   sdk: ^3.11.3
 
 dependencies:
+  crypto: ^3.0.6
+  image: ^4.12.0
+  path: ^1.9.1
+  shosai_epub:
+    path: ../shosai_epub
   # Bundles SQLite through its build hook (no system library); see the
   # package README for the pinned binary and the hosts it was proven on.
   sqlite3: 3.5.2

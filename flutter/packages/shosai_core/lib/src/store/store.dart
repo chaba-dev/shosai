@@ -40,8 +40,11 @@ final class Migration {
 /// The body runs synchronously against the only connection. It is sent to the
 /// worker, so it may capture only values that can cross an isolate boundary
 /// (strings, numbers, lists, records, plain data classes), and its result must
-/// be such a value too. A write's result is checked before its `COMMIT`: one
-/// that cannot be sent rolls the write back.
+/// be such a value too. A closure written in a method captures that method's
+/// object, so bodies belong in objects that hold only sendable state (such as
+/// a `Store`), never in one that also holds futures, ports or callbacks. A
+/// write's result is checked before its `COMMIT`: one that cannot be sent
+/// rolls the write back.
 ///
 /// The body must be synchronous. One that returns a `Future` (an `async`
 /// body) fails with [CoreErrorKind.storage], its transaction is rolled back,
