@@ -2378,6 +2378,53 @@ void main() {
     );
   });
 
+  testWidgets('the relayout progress row keeps its place above the page box', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 560);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          debugPathEntry: true,
+          bridge: bridge,
+          initialPath: '/books/book.pdf',
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final entry = find
+        .ancestor(of: find.byType(ShadInput), matching: find.byType(Column))
+        .first;
+    final idle = tester.getSize(entry).height;
+
+    // A larger window renders the fitted page again; the progress bar shows
+    // while it renders without taking room from the box it is fitted to.
+    final held = Completer<FlutterRenderedBuffer>();
+    bridge.renderCompleters.add(held);
+    final renders = bridge.renderCalls;
+    tester.view.physicalSize = const Size(900, 720);
+    for (var frame = 0; frame < 10; frame += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(bridge.renderCalls, greaterThan(renders));
+    expect(find.byType(ShadProgress), findsOneWidget);
+    expect(tester.getSize(entry).height, idle);
+
+    held.complete(_buffer(BigInt.from(40)));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShadProgress), findsNothing);
+    expect(tester.getSize(entry).height, idle);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
   testWidgets('continuous fit-width and manual PDF content remain reachable', (
     tester,
   ) async {
@@ -6048,7 +6095,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(bridge.listCalls, 2);
-    tester.view.physicalSize = const Size(900, 700);
+    tester.view.physicalSize = const Size(900, 560);
     await tester.pump();
     recoveryList.completeError(StateError('annotation list failed'));
     await tester.pumpAndSettle();

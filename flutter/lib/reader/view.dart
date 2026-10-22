@@ -812,7 +812,13 @@ class _ReaderControls extends StatelessWidget {
           const SizedBox(height: 12),
           Align(alignment: Alignment.centerLeft, child: button),
         ],
-        if (model.relayoutBusy) const ShadProgress(minHeight: 4),
+        // The progress row keeps its room when idle: the page below is fitted
+        // to the box that is left, which must not move as a relayout starts
+        // and ends.
+        SizedBox(
+          height: 4,
+          child: model.relayoutBusy ? const ShadProgress(minHeight: 4) : null,
+        ),
       ],
     );
   }
