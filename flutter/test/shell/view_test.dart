@@ -39,6 +39,7 @@ class _Recorder {
   final moves = <(int, int)>[];
   final covers = <int>[];
   var adds = 0;
+  var switcherCloses = 0;
 
   /// Whether the library admits a cover request, as its four slots do.
   bool Function() admitCover = () => true;
@@ -54,6 +55,7 @@ class _Recorder {
       covers.add(id);
       return true;
     },
+    closeSwitcher: () => switcherCloses += 1,
   );
 }
 
@@ -64,6 +66,7 @@ Future<void> _pumpFrame(
   required _Recorder recorder,
   Locale? locale,
   Map<int, Uint8List> covers = const {},
+  Widget content = const SizedBox.expand(key: Key('content')),
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -77,7 +80,7 @@ Future<void> _pumpFrame(
           model: model,
           covers: covers,
           actions: recorder.actions,
-          child: const SizedBox.expand(key: Key('content')),
+          child: content,
         ),
       ),
     ),
@@ -404,6 +407,169 @@ void main() {
     expect(find.byType(ShellBottomNav), findsNothing);
     expect(find.byType(ShellRail), findsNothing);
     expect(tester.getSize(find.byKey(const Key('content'))).width, 390);
+  });
+
+  testWidgets('the phone tab switcher lists the open books over the reader', (
+    tester,
+  ) async {
+    final recorder = _Recorder();
+    final reading = _model(reading: true);
+    await _pumpFrame(
+      tester,
+      size: const Size(390, 844),
+      model: update(reading, const ShellSwitcherOpened()),
+      recorder: recorder,
+    );
+    // The reader stays mounted under the switcher.
+    expect(find.byKey(const Key('content')), findsOneWidget);
+    expect(find.byType(ShellTabSwitcher), findsOneWidget);
+    expect(find.text('3 open books'), findsOneWidget);
+    final titles = [
+      for (final book in [_origin, _shannon, _neko])
+        tester.getTopLeft(find.text(book.title)),
+    ];
+    expect(titles[0].dy, titles[1].dy, reason: 'two cards across');
+    expect(titles[2].dy, greaterThan(titles[0].dy));
+
+    await tester.tap(find.text(_shannon.title));
+    await tester.tap(find.byTooltip('Close ${_neko.title}'));
+    await tester.tap(find.text('Library'));
+    await tester.tap(find.text('Done'));
+    expect(recorder.opened, [2]);
+    expect(recorder.closed, [3]);
+    expect(recorder.places, [ShellPlace.library]);
+    expect(recorder.switcherCloses, 1);
+
+    // The system back gesture closes it too.
+    await tester.binding.handlePopRoute();
+    expect(recorder.switcherCloses, 2);
+    expectOnlyKnownDefects(
+      await findRenderDefects(tester),
+      const <KnownRenderDefect>[],
+    );
+
+    await _pumpFrame(
+      tester,
+      size: const Size(390, 844),
+      model: reading,
+      recorder: recorder,
+    );
+    expect(find.byType(ShellTabSwitcher), findsNothing);
+  });
+
+  testWidgets(
+    'the switcher keeps focus and assistive technology off the reader',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final recorder = _Recorder();
+      final reading = _model(reading: true);
+      final switching = update(reading, const ShellSwitcherOpened());
+      final readerFocus = FocusNode(debugLabel: 'reader');
+      addTearDown(readerFocus.dispose);
+      final reader = Center(
+        child: TextButton(
+          focusNode: readerFocus,
+          onPressed: () {},
+          child: const Text('Reader control'),
+        ),
+      );
+      Future<void> pump(ShellModel model, {Size size = const Size(390, 844)}) =>
+          _pumpFrame(
+            tester,
+            size: size,
+            model: model,
+            recorder: recorder,
+            content: reader,
+          );
+
+      await pump(reading);
+      readerFocus.requestFocus();
+      await tester.pump();
+      expect(readerFocus.hasPrimaryFocus, isTrue);
+
+      await pump(switching);
+      expect(
+        find.text('Reader control'),
+        findsOneWidget,
+        reason: 'still mounted',
+      );
+      expect(find.semantics.byLabel('Reader control'), findsNothing);
+      expect(readerFocus.hasFocus, isFalse);
+      expect(
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<ShellTabSwitcher>(),
+        isNotNull,
+        reason: 'focus moves into the switcher',
+      );
+      for (var i = 0; i < 12; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(readerFocus.hasFocus, isFalse, reason: 'tab $i');
+      }
+
+      // Leaving the phone layout hides the switcher but keeps it open: the
+      // sidebar's rail shows the open books there, and the reader is reachable.
+      await pump(switching, size: const Size(900, 700));
+      expect(find.byType(ShellTabSwitcher), findsNothing);
+      expect(find.semantics.byLabel('Reader control'), findsOneWidget);
+      await pump(switching);
+      expect(find.byType(ShellTabSwitcher), findsOneWidget);
+
+      await pump(reading);
+      expect(find.semantics.byLabel('Reader control'), findsOneWidget);
+      expect(readerFocus.hasPrimaryFocus, isTrue, reason: 'focus comes back');
+      semantics.dispose();
+    },
+  );
+
+  testWidgets('the switcher fits 200% text in English and Japanese', (
+    tester,
+  ) async {
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    final switching = update(
+      _model(reading: true),
+      const ShellSwitcherOpened(),
+    );
+    for (final (locale, header) in const [
+      (Locale('en'), '3 open books'),
+      (Locale('ja'), '読書中の本 3冊'),
+    ]) {
+      await _pumpFrame(
+        tester,
+        size: const Size(360, 740),
+        model: switching,
+        recorder: _Recorder(),
+        locale: locale,
+      );
+      expect(find.text(header), findsOneWidget);
+      expectOnlyKnownDefects(
+        await findRenderDefects(tester),
+        const <KnownRenderDefect>[],
+      );
+      expect(tester.takeException(), isNull, reason: locale.languageCode);
+    }
+  });
+
+  testWidgets('the open-book count is a labelled touch target', (tester) async {
+    var presses = 0;
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: Center(
+            child: ShellOpenBooksButton(count: 3, onPressed: () => presses++),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('3'), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(ShellOpenBooksButton)),
+      const Size.square(44),
+    );
+    await tester.tap(find.byTooltip('3 open books'));
+    expect(presses, 1);
   });
 
   testWidgets('phone Reading now cards open and close books', (tester) async {

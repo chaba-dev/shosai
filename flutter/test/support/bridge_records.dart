@@ -28,12 +28,14 @@ final class BridgeForwardingRecords implements ShosaiRecords {
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
   }) => bridge.libraryPage(
     query: query,
     format: format,
+    sort: sort,
     limit: limit,
     offset: offset,
     cancellationId: cancellationId,

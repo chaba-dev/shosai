@@ -46,7 +46,41 @@ Widget _reader(
   ),
 );
 
-Future<HarnessBridge> _pump(WidgetTester tester, Size size) async {
+/// A reader stand-in that counts how often it is mounted and disposed.
+class _MountCounter extends StatefulWidget {
+  const _MountCounter({required this.child});
+
+  static int mounts = 0;
+  static int disposals = 0;
+
+  final Widget child;
+
+  @override
+  State<_MountCounter> createState() => _MountCounterState();
+}
+
+class _MountCounterState extends State<_MountCounter> {
+  @override
+  void initState() {
+    super.initState();
+    _MountCounter.mounts++;
+  }
+
+  @override
+  void dispose() {
+    _MountCounter.disposals++;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+Future<HarnessBridge> _pump(
+  WidgetTester tester,
+  Size size, {
+  ProductReaderBuilder readerBuilder = _reader,
+}) async {
   final bridge = HarnessBridge(
     books: harnessLibraryBooks(),
     covers: harnessCovers(),
@@ -56,7 +90,10 @@ Future<HarnessBridge> _pump(WidgetTester tester, Size size) async {
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     productionShell(
-      home: ProductShell(bridgeFactory: () => bridge, readerBuilder: _reader),
+      home: ProductShell(
+        bridgeFactory: () => bridge,
+        readerBuilder: readerBuilder,
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -123,6 +160,44 @@ void main() {
       findsOneWidget,
       reason: 'switching back reopens the book where it was left',
     );
+  });
+
+  testWidgets('a reader keeps its state when the window narrows to a phone', (
+    tester,
+  ) async {
+    _MountCounter.mounts = 0;
+    _MountCounter.disposals = 0;
+    await _pump(
+      tester,
+      const Size(1024, 800),
+      readerBuilder:
+          (bridge, book, settings, path, bookId, locatorChanged, notices) =>
+              _MountCounter(
+                child: _reader(
+                  bridge,
+                  book,
+                  settings,
+                  path,
+                  bookId,
+                  locatorChanged,
+                  notices,
+                ),
+              ),
+    );
+    await _open(tester, 1);
+    expect(find.byType(ShellRail), findsOneWidget);
+
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellRail), findsNothing);
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+    expect(_MountCounter.mounts, 1, reason: 'the reader moved, not remounted');
+    expect(_MountCounter.disposals, 0);
+
+    tester.view.physicalSize = const Size(1024, 800);
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellRail), findsOneWidget);
+    expect(_MountCounter.mounts, 1);
   });
 
   testWidgets('opening an open book focuses it instead of opening it twice', (
@@ -208,5 +283,69 @@ void main() {
     );
     expect(find.byTooltip(_quiet), findsOneWidget);
     expect(find.byTooltip(_atlas), findsOneWidget);
+  });
+
+  testWidgets('the title counts the open books and their cards say Open', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    expect(find.text('6 books'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
+
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('6 books · 1 open'), findsOneWidget);
+    final meta = find.descendant(
+      of: _card(1),
+      matching: find.textContaining('Open', findRichText: true),
+    );
+    expect(meta, findsOneWidget);
+    expect(
+      find.descendant(
+        of: _card(4),
+        matching: find.textContaining('Open', findRichText: true),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('the sort control reorders the shelf and keeps the hero', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    List<int> shelf() => [
+      for (final card in tester.widgetList<LibraryBookCard>(
+        find.byType(LibraryBookCard),
+      ))
+        card.book.bookId,
+    ];
+    expect(shelf(), [1, 2, 3, 4, 5, 6]);
+
+    await tester.tap(find.text('Title'));
+    await tester.pumpAndSettle();
+    // A, D, M, T, then the Japanese titles after the Latin ones.
+    expect(shelf(), [5, 3, 4, 1, 2, 6]);
+    expect(find.byType(LibraryContinueCard), findsOneWidget);
+
+    await tester.tap(find.text('Author'));
+    await tester.pumpAndSettle();
+    expect(shelf().first, 1, reason: 'Ada Lovelace sorts first');
+
+    await tester.tap(find.text('Recent'));
+    await tester.pumpAndSettle();
+    expect(shelf(), [1, 2, 3, 4, 5, 6]);
+  });
+
+  testWidgets('each sort option is a touch target on a phone', (tester) async {
+    await _pump(tester, const Size(390, 844));
+    for (final option in ['Recent', 'Title', 'Author']) {
+      final target = tester.getSize(
+        find.ancestor(of: find.text(option), matching: find.byType(InkWell)),
+      );
+      expect(target.height, greaterThanOrEqualTo(44), reason: option);
+      expect(target.width, greaterThanOrEqualTo(44), reason: option);
+    }
   });
 }

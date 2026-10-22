@@ -259,6 +259,7 @@ final class CoreRecords implements ShosaiRecords {
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
@@ -267,13 +268,30 @@ final class CoreRecords implements ShosaiRecords {
     final page = await _core.library.page(
       query: query,
       format: format == null ? null : _bookFormat(format),
+      sort: LibrarySort.values.byName(sort.name),
       limit: limit,
       offset: offset,
     );
+    final notes = switch (page.continueReading) {
+      final book? => await _core.annotations.summary(book.id),
+      null => null,
+    };
     _token(cancellationId).throwIfCancelled();
     return FlutterLibraryPage(
       books: [for (final book in page.books) _libraryBook(book)],
       hasMore: page.hasMore,
+      bookCount: page.bookCount,
+      continueReading: switch (page.continueReading) {
+        final book? => _libraryBook(book),
+        null => null,
+      },
+      continueReadingNotes: switch (notes) {
+        final notes? => FlutterNotesSummary(
+          count: notes.count,
+          latest: notes.latest,
+        ),
+        null => null,
+      },
     );
   });
 
@@ -789,6 +807,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   @override
   Future<FlutterLibraryPage> libraryPage({
     String? query,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     FlutterBookFormat? format,
     required int limit,
     required int offset,
@@ -796,6 +815,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   }) => records.libraryPage(
     query: query,
     format: format,
+    sort: sort,
     limit: limit,
     offset: offset,
     cancellationId: cancellationId,

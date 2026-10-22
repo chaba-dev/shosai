@@ -405,11 +405,15 @@ class HarnessBridge
     this.pageWidth = 420,
     this.pageHeight = 560,
     this.unitCount = 3,
+    this.notes = const {},
   }) : books = books ?? const [],
        covers = covers ?? const {};
 
   final List<FlutterLibraryBook> books;
   final Map<int, Uint8List> covers;
+
+  /// Each book's notes, by book id; a book without an entry has none.
+  final Map<int, FlutterNotesSummary> notes;
   final FlutterReaderSettings settings;
   final int pageWidth;
   final int pageHeight;
@@ -450,6 +454,7 @@ class HarnessBridge
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
@@ -465,10 +470,36 @@ class HarnessBridge
               (format == null || book.format == format),
         )
         .toList();
+    // [books] is in recent order; the other orders sort a copy.
+    int compare(String? a, String? b) => (a ?? '\u{10FFFF}')
+        .toLowerCase()
+        .compareTo((b ?? '\u{10FFFF}').toLowerCase());
+    switch (sort) {
+      case FlutterLibrarySort.recent:
+        break;
+      case FlutterLibrarySort.title:
+        filtered.sort((a, b) => compare(a.title, b.title));
+      case FlutterLibrarySort.author:
+        filtered.sort(
+          (a, b) => switch (compare(a.author, b.author)) {
+            0 => compare(a.title, b.title),
+            final order => order,
+          },
+        );
+    }
     final end = (offset + limit).clamp(0, filtered.length);
+    final continueReading = books
+        .where((book) => book.lastRead != null && book.progress < 1)
+        .firstOrNull;
     return FlutterLibraryPage(
       books: filtered.sublist(offset.clamp(0, end), end),
       hasMore: end < filtered.length,
+      bookCount: books.length,
+      continueReading: continueReading,
+      continueReadingNotes: continueReading == null
+          ? null
+          : notes[continueReading.bookId] ??
+                const FlutterNotesSummary(count: 0),
     );
   }
 

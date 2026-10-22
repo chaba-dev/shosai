@@ -484,4 +484,37 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get shellSearchEmptyBody =>
       'ライブラリ全体の本文とノートの検索は準備中です。今はライブラリでタイトルや著者から本を探せます。';
+
+  @override
+  String libraryBookCount(int count) {
+    return '$count冊';
+  }
+
+  @override
+  String libraryOpenCount(int count) {
+    return '$count冊を読書中';
+  }
+
+  @override
+  String get librarySortLabel => '並べ替え';
+
+  @override
+  String get librarySortRecent => '最近';
+
+  @override
+  String get librarySortTitle => 'タイトル';
+
+  @override
+  String get librarySortAuthor => '著者';
+
+  @override
+  String get cardOpenTag => '読書中';
+
+  @override
+  String shellOpenBooks(int count) {
+    return '読書中の本 $count冊';
+  }
+
+  @override
+  String get shellSwitcherDone => '完了';
 }

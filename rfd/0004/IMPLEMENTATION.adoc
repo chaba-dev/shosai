@@ -298,8 +298,19 @@ it; the retained document handle stays open for the store. Permissions
 decision: the engine reports `isEncrypted` and `allowsCopying` and the reader
 does not enforce them; copy eligibility is text-mapping completeness, as
 before. A document that needs a user password fails to open.
-** [ ] Open gates: the binding's build hook pins the PDFium release but
-verifies no checksum; links and destinations are exposed by the engine and
+** [x] Checksums and notices (2026-10-22): `pdfium_dart` 0.2.5 is vendored
+in `flutter/third_party/pdfium_dart`. Its build hook checks each
+pdfium-binaries archive against the SHA-256 pinned for its target
+(`hook/pdfium_archives.dart`, written by `tool/pin_pdfium.py`) and fails the
+build on a mismatch. It keeps the verified archive and rechecks it whenever
+the hook runs, taking the library from it rather than trusting a cached copy,
+and declares both as dependencies so a changed copy reruns the hook;
+`pdfium_flutter`'s podspec already pins the Apple
+XCFramework's. The package's `NOTICES` carries PDFium's license and those of
+the third-party code compiled into it, which Flutter adds to every host's
+license notices; the Linux bundle check verifies them. SQLite is in the
+public domain and needs no notice (the engine's notices carry its statement).
+** [ ] Open gates: links and destinations are exposed by the engine and
 not yet navigable in the reader (outcome 5); the fixture corpus and the M0
 raster budgets on macOS and a physical Android device; `flutter test` loads
 PDFium from `SHOSAI_PDFIUM_LIBRARY` (the Nix shell) or `PDFIUM_PATH` because
@@ -311,10 +322,13 @@ Rust core gone pdfrx is the only PDFium user in the process and loads the
 environment library directly again (the private-copy workaround is removed).
 `flutter/integration_test/packaged_core_test.dart` imports a PDF (cover
 render), opens and searches it through the application bridge and renders it
-through a second engine document in one packaged process. CI runs it on the
-Linux debug bundle under Xvfb (`make test-packaged-linux`) and on the macOS
-host (`make test-packaged-macos`), with no PDFium override;
-Android is not run yet.
+through a second engine document in one packaged process, and imports, opens
+and searches an EPUB. CI runs it on the Linux debug bundle under Xvfb
+(`make test-packaged-linux`) and on the macOS host (`make test-packaged-macos`),
+with no PDFium override. `make test-packaged-android` drives it on an Android
+device or emulator as a profile build (Flutter Driver refuses release mode); it
+passed on an Android 15 x86_64 emulator and a Pixel 5a (Android 14, arm64-v8a)
+on 2026-10-22.
 * [ ] *Store.* Add the Dart SQLite binding (`sqlite3`; `drift` only if typed
 queries and migration tooling justify its code generation) in the application
 core package, with a single connection owner, ordered migrations written fresh
@@ -333,8 +347,19 @@ debug bundle loads its bundled `libsqlite3.so` and `libpdfium.so`
 to bare-name `dlopen` calls from the engine library, which find them only
 through its `$ORIGIN` RUNPATH; the pinned nixpkgs dropped that, so before
 2026-10-21 no Linux bundle built in the Nix shell could load SQLite, and
-`flake.nix` now restores it. Open: the first passing macOS run and the
-Android load proof.
+`flake.nix` now restores it. The macOS host passes the same check in CI.
+Android (2026-10-22): the release APK carries `libsqlite3.so` and
+`libpdfium.so` for arm64-v8a, armeabi-v7a and x86_64 (the 64-bit ones 16 KB
+aligned); `make check-android-apk` checks the universal release APK
+(`make android-release`) for them, Flutter's engine and the app snapshot
+under every ABI, since a device run exercises only its own. The packaged check passes on an Android 15 x86_64 emulator and on
+a Pixel 5a (Android 14, arm64-v8a). On the emulator the release build
+launches, maps the APK's own `libsqlite3.so` at start and its `libpdfium.so`
+on the first PDF import, and imports and opens a PDF and an EPUB through the
+system picker. iOS (2026-10-22): the same check, driven as a profile
+build, passes on an iPhone 15 Pro Max (iOS 26.6); the app carries one
+`PDFium.framework` (from `pdfium_flutter`) and `package:sqlite3`'s
+`sqlite3.framework`, and the signed release build launches and stays up.
 * [ ] *Records.* Port library and import (referenced and private managed
 copies, bounded archive preflight, cover extraction, deferred cleanup,
 duplicate detection by content identity), open books and reading state,
@@ -413,8 +438,11 @@ search hit, a link) lays out its region and scrolls its line to the top of the
 view. The scroll offset itself is not durable: the reading state keeps the
 requested location.
 ** [ ] Open: the macOS baseline `flutter/test/goldens/macos/reader-epub-1280.png`
-still shows the retained raster and needs a re-capture on a Mac; the Android
-ABI filter and the PDFium and SQLite licence notices in the packaged hosts.
+still shows the retained raster and needs a re-capture on a Mac.
+** [x] Android ABIs (2026-10-22): the arm64-only `abiFilters` (and
+`disable-abi-filtering`) served the Rust core, which was only cross-built
+for arm64; with SQLite and PDFium coming from build hooks for every ABI the
+host filters none.
 * [x] *Documents.* Update the Flutter architecture contract, the roadmap, the
 design system's ownership notes, RFD 2, 3, 5 and 6 where they name the Rust
 core, and record the slice reports in the Dart document stack evaluation plan.

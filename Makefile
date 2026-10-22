@@ -1,11 +1,12 @@
 .PHONY: lint fmt check-fmt check
 .PHONY: test test-app test-scripts test-epub-prototype
-.PHONY: test-packaged-linux test-packaged-macos
+.PHONY: test-packaged-linux test-packaged-macos test-packaged-android
 .PHONY: theme-tokens check-theme-tokens check-l10n-codegen
 .PHONY: design-system design-system-css check-design-system-css
 .PHONY: epub-prototype-fixtures measure-epub-prototype
 .PHONY: dev linux-debug linux-release check-linux-bundle
-.PHONY: android-profile macos-debug macos-smoke
+.PHONY: android-profile android-release check-android-apk
+.PHONY: macos-debug macos-smoke
 .PHONY: ios-simulator-debug ios-device-profile ios-device-release
 .PHONY: check-rfds changelog next-version
 
@@ -60,11 +61,12 @@ test:
 	$(MAKE) check-l10n-codegen
 	$(MAKE) test-app
 
-## Run the app and Dart packages' tests
+## Run the app and Dart packages' tests (and the vendored PDFium hook's)
 test-app:
 	cd flutter && flutter test
 	cd flutter/packages/shosai_epub && dart pub get && dart test
 	cd flutter/packages/shosai_core && dart pub get && dart test
+	cd flutter/third_party/pdfium_dart && dart pub get && dart test
 
 ## Run tests for repository scripts
 test-scripts:
@@ -132,9 +134,29 @@ test-packaged-macos:
 	env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY ./scripts/build-flutter-macos.sh \
 		test -d macos integration_test/packaged_core_test.dart
 
+## Run the packaged-host integration tests in a profile build (AOT, with the
+## release build's native libraries; Flutter Driver refuses release mode) on a
+## connected Android device or emulator (ANDROID_DEVICE picks one), likewise
+## with no PDFium override
+test-packaged-android:
+	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
+		flutter drive --profile --driver=integration_test/driver.dart \
+		--target=integration_test/packaged_core_test.dart \
+		$(if $(ANDROID_DEVICE),-d $(ANDROID_DEVICE))
+
 ## Build the Android arm64 host in profile mode
 android-profile:
 	cd flutter && flutter build apk --profile --target-platform android-arm64
+
+## Build the universal Android APK (every ABI) in release mode
+android-release:
+	cd flutter && flutter build apk --release
+
+## Verify the universal release APK carries Flutter, the app, PDFium and SQLite
+## for every ABI (needs `android-release` first)
+check-android-apk:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_android_apk.py \
+		flutter/build/app/outputs/flutter-apk/app-release.apk
 
 ## Build the macOS host in debug mode
 macos-debug:

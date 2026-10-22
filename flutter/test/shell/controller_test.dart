@@ -121,6 +121,49 @@ void main() {
     });
   });
 
+  group('the tab switcher', () {
+    test('opens over the reader only', () {
+      expect(
+        update(
+          _open([1], reading: false),
+          const ShellSwitcherOpened(),
+        ).switching,
+        isFalse,
+      );
+      final open = update(_open([1, 2]), const ShellSwitcherOpened());
+      expect(open.switching, isTrue);
+      expect(update(open, const ShellSwitcherOpened()), same(open));
+      expect(update(open, const ShellSwitcherClosed()).switching, isFalse);
+    });
+
+    test('choosing a book reads it, the current one too', () {
+      final open = update(_open([1, 2]), const ShellSwitcherOpened());
+      final other = update(open, const ShellBookActivated(1));
+      expect(other.currentBookId, 1);
+      expect(other.switching, isFalse);
+      final same = update(open, const ShellBookActivated(2));
+      expect(same.currentBookId, 2);
+      expect(same.switching, isFalse);
+    });
+
+    test('closing a book stays in it until the last book goes', () {
+      final open = update(_open([1, 2]), const ShellSwitcherOpened());
+      final closed = update(open, const ShellBookClosed(1));
+      expect(closed.switching, isTrue);
+      final empty = update(closed, const ShellBookClosed(2));
+      expect(empty.reading, isFalse);
+      expect(empty.switching, isFalse);
+    });
+
+    test('leaving the reader closes it', () {
+      final open = update(_open([1]), const ShellSwitcherOpened());
+      expect(
+        update(open, const ShellPlaceSelected(ShellPlace.library)).switching,
+        isFalse,
+      );
+    });
+  });
+
   test('restoring brings back the open books without reading', () {
     final restored = _open([1, 2], current: 1);
     final model = update(const ShellModel(), ShellRestored(restored));

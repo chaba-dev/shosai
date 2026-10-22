@@ -949,6 +949,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Searching book text and notes across the library is coming. To find a book now, search the library by title or author.'**
   String get shellSearchEmptyBody;
+
+  /// The library title row: how many books the library holds.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 book} other{{count} books}}'**
+  String libraryBookCount(int count);
+
+  /// The library title row, after the book count and a middle dot: how many books are open (Reading now). Hidden at zero.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} open'**
+  String libraryOpenCount(int count);
+
+  /// The accessible name of the library's sort control.
+  ///
+  /// In en, this message translates to:
+  /// **'Sort'**
+  String get librarySortLabel;
+
+  /// The library's sort control: most recently read first.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get librarySortRecent;
+
+  /// The library's sort control: by title.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get librarySortTitle;
+
+  /// The library's sort control: by author.
+  ///
+  /// In en, this message translates to:
+  /// **'Author'**
+  String get librarySortAuthor;
+
+  /// The shelf card's meta line: the book is open (in Reading now).
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get cardOpenTag;
+
+  /// The phone reader's open-book count button (its tooltip and accessible name) and the tab switcher's title.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 open book} other{{count} open books}}'**
+  String shellOpenBooks(int count);
+
+  /// The tab switcher's action that returns to the current book.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get shellSwitcherDone;
 }
 
 class _AppLocalizationsDelegate

@@ -58,6 +58,7 @@ class _StubBridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,

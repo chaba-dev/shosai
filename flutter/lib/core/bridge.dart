@@ -47,6 +47,7 @@ abstract interface class FlutterBridge {
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
@@ -559,14 +560,58 @@ class FlutterLibraryBook {
           lastRead == other.lastRead;
 }
 
+/// The order a library page lists books in.
+enum FlutterLibrarySort { recent, title, author }
+
+/// A book's notes at a glance: how many there are, and the words of the
+/// latest one (its quote, or its note when it quotes nothing).
+class FlutterNotesSummary {
+  final int count;
+  final String? latest;
+
+  const FlutterNotesSummary({required this.count, this.latest});
+
+  @override
+  int get hashCode => count.hashCode ^ latest.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNotesSummary &&
+          count == other.count &&
+          latest == other.latest;
+}
+
 class FlutterLibraryPage {
   final List<FlutterLibraryBook> books;
   final bool hasMore;
 
-  const FlutterLibraryPage({required this.books, required this.hasMore});
+  /// How many books the whole library holds, or null when the source does
+  /// not say.
+  final int? bookCount;
+
+  /// The book last opened for reading and not yet finished, whatever the
+  /// page's query, format and order.
+  final FlutterLibraryBook? continueReading;
+
+  /// [continueReading]'s notes, for the Continue reading hero.
+  final FlutterNotesSummary? continueReadingNotes;
+
+  const FlutterLibraryPage({
+    required this.books,
+    required this.hasMore,
+    this.bookCount,
+    this.continueReading,
+    this.continueReadingNotes,
+  });
 
   @override
-  int get hashCode => books.hashCode ^ hasMore.hashCode;
+  int get hashCode =>
+      books.hashCode ^
+      hasMore.hashCode ^
+      bookCount.hashCode ^
+      continueReading.hashCode ^
+      continueReadingNotes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -574,7 +619,10 @@ class FlutterLibraryPage {
       other is FlutterLibraryPage &&
           runtimeType == other.runtimeType &&
           books == other.books &&
-          hasMore == other.hasMore;
+          hasMore == other.hasMore &&
+          bookCount == other.bookCount &&
+          continueReading == other.continueReading &&
+          continueReadingNotes == other.continueReadingNotes;
 }
 
 class FlutterLibraryRemoveOutcome {

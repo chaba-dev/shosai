@@ -1521,6 +1521,7 @@ class _LibraryBridge
   Future<FlutterLibraryPage> libraryPage({
     String? query,
     FlutterBookFormat? format,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     required int limit,
     required int offset,
     required BigInt cancellationId,
@@ -1639,6 +1640,7 @@ class _ControlledLibraryBridge
   @override
   Future<FlutterLibraryPage> libraryPage({
     String? query,
+    FlutterLibrarySort sort = FlutterLibrarySort.recent,
     FlutterBookFormat? format,
     required int limit,
     required int offset,

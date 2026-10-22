@@ -48,6 +48,50 @@ def _write_inventory(root: pathlib.Path, faces: dict[str, str]):
     )
 
 
+SEPARATOR = "\n" + "-" * 80 + "\n"
+
+# A vendored pdfium_dart NOTICES in Flutter's multi-entry form.
+PDFIUM_ENTRIES = [
+    ("pdfium_dart", "MIT License\nCopyright (c) 2025 @espresso3389"),
+    ("pdfium", "Copyright 2014 The PDFium Authors"),
+    ("zlib", "zlib License\nCopyright (C) 1995 Jean-loup Gailly and Mark Adler"),
+    ("freetype", "The FreeType Project LICENSE\nPDFium's copy"),
+    ("icu", "UNICODE LICENSE V3\nCopyright 2016 Unicode, Inc."),
+]
+
+# The engine's own notices: a different FreeType text (so its marker alone
+# proves nothing about PDFium's) and the same zlib text, whose names Flutter
+# merges with PDFium's.
+ENGINE_ENTRIES = [
+    ("freetype", "The FreeType Project LICENSE\nthe engine's copy"),
+    ("zlib", "zlib License\nCopyright (C) 1995 Jean-loup Gailly and Mark Adler"),
+    ("skia", "Copyright 2011 Google Inc."),
+]
+
+FONT_LICENSES = [
+    "Copyright 2020 The Inter Project Authors",
+    "Copyright 2014-2021 Adobe",
+]
+
+
+def _notices(entries: list[tuple[str, str]]) -> str:
+    return SEPARATOR.join(f"{names}\n\n{body}" for names, body in entries) + "\n"
+
+
+def _collect(packages: list[str], additional: list[str]) -> str:
+    """Flutter's license collector: split each package's NOTICES, merge the
+    names of identical texts, sort, then append the additional licenses."""
+    merged: dict[str, set[str]] = {}
+    for text in packages:
+        for raw in text.split(SEPARATOR):
+            names, _, body = raw.partition("\n\n")
+            merged.setdefault(body, set()).update(names.split("\n"))
+    entries = sorted(
+        "\n".join(sorted(names)) + "\n\n" + body for body, names in merged.items()
+    )
+    return SEPARATOR.join(entries + additional)
+
+
 def _face_bytes(count: int) -> bytes:
     return b"fake-font-bytes-" + bytes(range(256)) * count
 
@@ -88,6 +132,9 @@ class CheckFlutterBundleTest(unittest.TestCase):
                 "NotoSansJP-Variable.ttf": self.noto_digest,
             },
         )
+        pdfium_notices = self.inventory / "flutter/third_party/pdfium_dart/NOTICES"
+        pdfium_notices.parent.mkdir(parents=True)
+        pdfium_notices.write_text(_notices(PDFIUM_ENTRIES), encoding="utf-8")
 
     def _write_bundle_with_faces(self, manifest: str):
         assets = _write_manifest(self.root, manifest)
@@ -100,17 +147,17 @@ class CheckFlutterBundleTest(unittest.TestCase):
             assets / "fonts" / "NotoSansJP-Variable.ttf",
         )
         (assets / "fonts" / "MaterialIcons-Regular.otf").write_bytes(b"icons")
-        # A NOTICES.Z whose text carries both redistributed licenses' stable
-        # markers, so a "valid bundle" fixture also satisfies the notice check.
-        notices = "\n".join(
-            [
-                "Copyright 2020 The Inter Project Authors",
-                "Copyright 2014-2021 Adobe",
-            ]
+        # A NOTICES.Z collected from the engine's and PDFium's notices plus
+        # the fonts' licenses, so a "valid bundle" fixture also satisfies the
+        # notice check.
+        self._write_notices(
+            assets, [_notices(ENGINE_ENTRIES), _notices(PDFIUM_ENTRIES)]
         )
-        with gzip.open(assets / "NOTICES.Z", "wb") as handle:
-            handle.write(notices.encode("utf-8"))
         return assets
+
+    def _write_notices(self, assets: pathlib.Path, packages: list[str]):
+        with gzip.open(assets / "NOTICES.Z", "wb") as handle:
+            handle.write(_collect(packages, FONT_LICENSES).encode("utf-8"))
 
     def _run(self, *roots: str) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -183,6 +230,33 @@ class CheckFlutterBundleTest(unittest.TestCase):
         result = self._run(str(self.root))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing from the bundle's license notices", result.stderr)
+
+    def test_missing_pdfium_notices_fail(self):
+        # The engine's notices alone carry a FreeType license, but none of
+        # PDFium's.
+        assets = self._write_bundle_with_faces(GOOD_FONT_MANIFEST)
+        self._write_notices(assets, [_notices(ENGINE_ENTRIES)])
+        result = self._run(str(self.root))
+        self.assertNotEqual(result.returncode, 0)
+        for names in ("pdfium", "pdfium_dart", "freetype", "icu"):
+            self.assertIn(f"PDFium's notice for {names} is missing", result.stderr)
+
+    def test_one_missing_pdfium_third_party_notice_fails(self):
+        # PDFium's own license and FreeType markers are present; only ICU's
+        # entry is lost.
+        assets = self._write_bundle_with_faces(GOOD_FONT_MANIFEST)
+        collected = _collect(
+            [_notices(ENGINE_ENTRIES), _notices(PDFIUM_ENTRIES)], FONT_LICENSES
+        ).split(SEPARATOR)
+        without_icu = [entry for entry in collected if "UNICODE" not in entry]
+        self.assertEqual(len(without_icu), len(collected) - 1)
+        with gzip.open(assets / "NOTICES.Z", "wb") as handle:
+            handle.write(SEPARATOR.join(without_icu).encode("utf-8"))
+        result = self._run(str(self.root))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PDFium's notice for icu is missing", result.stderr)
+        self.assertNotIn("notice for freetype", result.stderr)
+        self.assertNotIn("notice for zlib", result.stderr)
 
     def test_a_valid_bundle_passes(self):
         self._write_bundle_with_faces(GOOD_FONT_MANIFEST)

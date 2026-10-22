@@ -193,6 +193,73 @@ void main() {
       );
     });
 
+    test('a summary counts live annotations and quotes the latest', () async {
+      final bookId = await book('epub');
+      expect(await annotations.summary(bookId), NotesSummary.empty);
+      expect(await annotations.summary(9999), NotesSummary.empty);
+
+      await annotations.create(bookId, _select(_text, 'lead'));
+      final cafe = await annotations.create(
+        bookId,
+        _select(_text, 'Café text'),
+        body: 'A thought',
+      );
+      expect(
+        await annotations.summary(bookId),
+        const NotesSummary(2, 'Café text'),
+        reason: 'a highlight is quoted, not its note',
+      );
+
+      await annotations.delete(bookId, cafe.id);
+      expect(await annotations.summary(bookId), const NotesSummary(1, 'lead'));
+    });
+
+    test('a summary quotes the text as selected, not as normalized', () async {
+      final bookId = await book('epub');
+      // A decomposed é normalizes to the composed one.
+      const decomposed = 'The lead Café text tail of the chapter.';
+      await annotations.create(bookId, _select(decomposed, 'Café'));
+
+      expect((await annotations.summary(bookId)).latest, 'Café');
+    });
+
+    test('a summary passes over annotations without words', () async {
+      final bookId = await book('pdf');
+      const page = 'Page two text with a quotable phrase.';
+      final start = page.indexOf('quotable');
+      await annotations.create(
+        bookId,
+        PdfSelection(
+          page: 1,
+          rectangles: _rectangles,
+          text: page,
+          start: start,
+          end: start + 'quotable phrase'.length,
+        ),
+      );
+      // Geometry quotes nothing, and these notes are blank.
+      for (final body in ['', ' \n\u3000']) {
+        await annotations.create(
+          bookId,
+          const PdfSelection(page: 0, rectangles: _rectangles),
+          body: body,
+        );
+      }
+
+      expect(
+        await annotations.summary(bookId),
+        const NotesSummary(3, 'quotable phrase'),
+      );
+
+      final blank = await book('pdf', title: 'Blank');
+      await annotations.create(
+        blank,
+        const PdfSelection(page: 0, rectangles: _rectangles),
+        body: ' ',
+      );
+      expect(await annotations.summary(blank), const NotesSummary(1, null));
+    });
+
     test('delete leaves a hidden tombstone', () async {
       final bookId = await book('epub');
       final created = await annotations.create(bookId, _select(_text, 'lead'));

@@ -428,6 +428,13 @@ Object _sendableError(Object error) => switch (error) {
     );
   }
   try {
+    // SQLite's NOCASE folds only ASCII letters; this folds every letter Dart
+    // lowercases, so `éclair` sorts before `École`.
+    db.createCollation(
+      name: 'unicode_nocase',
+      function: (a, b) =>
+          (a ?? '').toLowerCase().compareTo((b ?? '').toLowerCase()),
+    );
     db.execute('PRAGMA busy_timeout = ${storeBusyTimeout.inMilliseconds}');
     // One read snapshot, so another instance claiming a fresh file between
     // these reads cannot make Shōsai's own database look foreign.

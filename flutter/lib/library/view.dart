@@ -270,8 +270,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return reader;
     }
     _shownBooks.add(open.id);
+    // A global key moves the reader when the layout changes (the rail beside
+    // it on a tablet, alone on a phone) instead of remounting it: the reader
+    // owns its bridge, and a remount would dispose it.
     final reader = KeyedSubtree(
-      key: ValueKey(open.id),
+      key: GlobalKey(debugLabel: 'reader ${open.id}'),
       child: widget.readerBuilder(
         widget.bridgeFactory(),
         open.book,
@@ -310,6 +313,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         ? null
         : () => controller.dispatch(const LibraryImportRequested()),
     loadCover: controller.requestCover,
+    closeSwitcher: () => _shell.dispatch(const ShellSwitcherClosed()),
   );
 
   Future<LibraryImportSelection?> _pickImport() async {
@@ -708,6 +712,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 constraints.maxWidth <
                 ShosaiTokens.layoutLibraryCompactBreakpoint,
             model: model,
+            openCount: _shell.model.openBooks.length,
             // The header's add-books action is the import's cancel action;
             // every other cancellable operation keeps the separate cancel
             // action (the retained Flutter capability Iced has no
@@ -773,6 +778,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         Expanded(
           child: LibraryCollection(
             model: model,
+            openBookIds: {for (final open in _shell.model.openBooks) open.id},
+            sortBooks: (sort) => controller.dispatch(LibrarySortChanged(sort)),
             openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
             openNotes: () =>
                 _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),

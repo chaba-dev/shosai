@@ -20,11 +20,13 @@ class FlutterMakefileTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         (self.root / "flutter").mkdir()
-        # `test-app` runs the engine and core packages' own suites after
-        # the app suite, so the fixture carries those package directories and
-        # a `dart` stub: the real toolchain must never run inside the fixture.
+        # `test-app` runs the engine and core packages' own suites, and the
+        # vendored PDFium hook's, after the app suite, so the fixture carries
+        # those package directories and a `dart` stub: the real toolchain must
+        # never run inside the fixture.
         for package in ("shosai_epub", "shosai_core"):
             (self.root / "flutter" / "packages" / package).mkdir(parents=True)
+        (self.root / "flutter" / "third_party" / "pdfium_dart").mkdir(parents=True)
         scripts = self.root / "scripts"
         scripts.mkdir()
         shutil.copy2(ROOT / "Makefile", self.root / "Makefile")
@@ -78,6 +80,7 @@ class FlutterMakefileTest(unittest.TestCase):
         # The engine and core package legs run in the same target, each from
         # its package directory, after the app leg.
         packages = self.root / "flutter" / "packages"
+        pdfium_dart = self.root / "flutter" / "third_party" / "pdfium_dart"
         self.assertEqual(
             self.dart_capture.read_text().splitlines(),
             [
@@ -85,6 +88,8 @@ class FlutterMakefileTest(unittest.TestCase):
                 f"{packages / 'shosai_epub'}|test",
                 f"{packages / 'shosai_core'}|pub get",
                 f"{packages / 'shosai_core'}|test",
+                f"{pdfium_dart}|pub get",
+                f"{pdfium_dart}|test",
             ],
         )
 
@@ -178,6 +183,31 @@ class FlutterMakefileTest(unittest.TestCase):
                 "-d",
                 "macos",
                 "integration_test/packaged_core_test.dart",
+            ],
+        )
+
+    def test_packaged_android_tests_drive_a_profile_build(self):
+        result = self._run_packaged_target(
+            "test-packaged-android",
+            self.bin / "flutter",
+            ANDROID_DEVICE="emulator-5554",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.capture.read_text().splitlines(),
+            [
+                str(self.root / "flutter"),
+                "unset",
+                "unset",
+                "wayland",
+                "unset",
+                "drive",
+                "--profile",
+                "--driver=integration_test/driver.dart",
+                "--target=integration_test/packaged_core_test.dart",
+                "-d",
+                "emulator-5554",
             ],
         )
 
