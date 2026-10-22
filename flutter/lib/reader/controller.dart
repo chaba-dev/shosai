@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'
     show FlutterError, FlutterErrorDetails, Listenable, VoidCallback;
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
-    show shosaiInterfaceFontFamily, shosaiJapaneseInterfaceFontFamily;
+    show shosaiJapaneseInterfaceFontFamily;
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/notices/notice.dart';
@@ -19,6 +19,7 @@ import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
 
 import 'pdf/engine.dart';
 import 'pdf/pdfrx_engine.dart';
@@ -2833,7 +2834,9 @@ final class ReaderController implements Listenable {
     ReaderLayout layout,
     EpubContentSource source,
   ) => ReaderEpubTypography(
-    fontFamily: shosaiInterfaceFontFamily,
+    // The book face (`docs/typography.md`): Literata for Latin text. Japanese
+    // falls back to the interface face until the reading mincho is bundled.
+    fontFamily: ShosaiTokens.typeFamilyEditorialLatinFlutter,
     fontFamilyFallback: const [shosaiJapaneseInterfaceFontFamily],
     fontSize: layout.fontSize,
     lineHeight: layout.lineSpacing,
