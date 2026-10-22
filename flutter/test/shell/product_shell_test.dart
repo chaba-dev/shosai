@@ -28,10 +28,12 @@ Widget _reader(
   int? bookId,
   void Function(String path, int? bookId) locatorChanged,
   ReaderNoticeReporter _,
+  Widget openBooksAction,
 ) => Scaffold(
   body: Column(
     children: [
       Text('Reading ${book.title} at $path:$bookId'),
+      openBooksAction,
       Builder(
         builder: (context) => TextButton(
           onPressed: () => Navigator.pop(context),
@@ -171,18 +173,27 @@ void main() {
       tester,
       const Size(1024, 800),
       readerBuilder:
-          (bridge, book, settings, path, bookId, locatorChanged, notices) =>
-              _MountCounter(
-                child: _reader(
-                  bridge,
-                  book,
-                  settings,
-                  path,
-                  bookId,
-                  locatorChanged,
-                  notices,
-                ),
-              ),
+          (
+            bridge,
+            book,
+            settings,
+            path,
+            bookId,
+            locatorChanged,
+            notices,
+            openBooks,
+          ) => _MountCounter(
+            child: _reader(
+              bridge,
+              book,
+              settings,
+              path,
+              bookId,
+              locatorChanged,
+              notices,
+              openBooks,
+            ),
+          ),
     );
     await _open(tester, 1);
     expect(find.byType(ShellRail), findsOneWidget);
@@ -263,6 +274,39 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ShellReadingNowCards), findsOneWidget);
     expect(find.text('Reading now'), findsOneWidget);
+  });
+
+  testWidgets('the reader’s open-book count opens the tab switcher', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(390, 844));
+    await _open(tester, 1);
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    await _open(tester, 4);
+    expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('2 open books'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellTabSwitcher), findsOneWidget);
+
+    // The other book's card brings it forward and closes the switcher.
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ShellTabSwitcher),
+        matching: find.text(_quiet),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellTabSwitcher), findsNothing);
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('2 open books'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellTabSwitcher), findsNothing);
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
   });
 
   testWidgets('open books come back after a restoration', (tester) async {

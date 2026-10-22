@@ -43,7 +43,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -70,7 +70,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
           androidImport: AndroidDocumentImportAdapter(channel: channel),
         ),
       ),
@@ -197,7 +197,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, book, _, _, _, _, _) {
+          readerBuilder: (_, book, _, _, _, _, _, _) {
             opened = book;
             return Scaffold(body: Text('Reading ${book.title}'));
           },
@@ -250,7 +250,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -307,7 +307,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -338,7 +338,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -431,7 +431,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -481,7 +481,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -517,7 +517,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => _DisposeSignal(
+          readerBuilder: (_, _, _, _, _, _, _, _) => _DisposeSignal(
             disposed: disposed,
             child: Scaffold(
               body: Builder(
@@ -553,7 +553,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) =>
+          readerBuilder: (_, _, _, _, _, _, _, _) =>
               const Scaffold(body: Text('Open reader')),
         ),
       ),
@@ -576,17 +576,19 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, path, bookId, locatorChanged, _) => Scaffold(
-            body: Column(
-              children: [
-                Text('locator:$path:$bookId'),
-                TextButton(
-                  onPressed: () => locatorChanged('/replacement.epub', null),
-                  child: const Text('Replace'),
+          readerBuilder: (_, _, _, path, bookId, locatorChanged, _, _) =>
+              Scaffold(
+                body: Column(
+                  children: [
+                    Text('locator:$path:$bookId'),
+                    TextButton(
+                      onPressed: () =>
+                          locatorChanged('/replacement.epub', null),
+                      child: const Text('Replace'),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
         ),
       ),
     );
@@ -611,7 +613,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -637,7 +639,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -686,7 +688,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -711,7 +713,7 @@ void main() {
           child: _libraryApp(
             home: ProductShell(
               bridgeFactory: () => bridge,
-              readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+              readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
             ),
           ),
         ),
@@ -1270,7 +1272,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -1302,7 +1304,7 @@ void main() {
       _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );
@@ -1354,7 +1356,7 @@ void main() {
           locale: const Locale('ja'),
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
       ),
@@ -1396,7 +1398,7 @@ void main() {
             child: _libraryApp(
               home: ProductShell(
                 bridgeFactory: () => bridge,
-                readerBuilder: (_, _, _, _, _, _, _) => const SizedBox(),
+                readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
               ),
             ),
           ),

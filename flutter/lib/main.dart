@@ -305,6 +305,7 @@ class _ShosaiAppState extends State<ShosaiApp> {
                     bookId,
                     locatorChanged,
                     noticeReporter,
+                    openBooksAction,
                   ) => ReaderScreen(
                     bridge: bridge,
                     initialPath: path,
@@ -312,6 +313,7 @@ class _ShosaiAppState extends State<ShosaiApp> {
                     initialSettings: settings,
                     onLocatorChanged: locatorChanged,
                     noticeReporter: noticeReporter,
+                    openBooksAction: openBooksAction,
                     // The more panel's open-book action uses the same platform
                     // picker capability as the library import flow; the reader
                     // opens the picked document through its normal open path.
