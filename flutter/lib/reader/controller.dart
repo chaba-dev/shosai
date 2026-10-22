@@ -3212,10 +3212,14 @@ final class ReaderController implements Listenable {
     ReaderLayout layout,
     EpubContentSource source,
   ) => ReaderEpubTypography(
-    // The book face (`docs/typography.md`): Literata for Latin text. Japanese
-    // falls back to the interface face until the reading mincho is bundled.
+    // The book face (`docs/typography.md`): Literata for Latin text and
+    // Shippori Mincho for Japanese. The symbols and rarer ideographs neither
+    // carries still find the bundled Japanese interface face.
     fontFamily: ShosaiTokens.typeFamilyEditorialLatinFlutter,
-    fontFamilyFallback: const [shosaiJapaneseInterfaceFontFamily],
+    fontFamilyFallback: const [
+      ShosaiTokens.typeFamilyEditorialJapaneseFlutter,
+      shosaiJapaneseInterfaceFontFamily,
+    ],
     fontSize: layout.fontSize,
     lineHeight: layout.lineSpacing,
     palette: ReaderEpubPalette.of(_typographyTheme),
