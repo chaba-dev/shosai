@@ -83,7 +83,7 @@ tablet, iPhone, and Android phone.
 * [ ] Shared themes, including a night theme for PDF pages.
 * [ ] One size control: EPUB text size and PDF zoom.
 * [x] Two-page spreads by default for EPUB and PDF, with a one or two page
-setting; one page where two do not fit (PR #180; the setting is not saved yet).
+setting that is saved; one page where two do not fit (PR #180).
 * [ ] RFD 6 selection, highlights and notes in both formats.
 * [x] EPUB writing direction from the spine's page progression and CSS
 `writing-mode`, including vertical Japanese text; horizontal when undeclared

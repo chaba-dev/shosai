@@ -112,7 +112,7 @@ Future<void> _pumpShell(
       supportedLocales: AppLocalizations.supportedLocales,
       home: ProductShell(
         bridgeFactory: () => _Bridge(),
-        readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+        readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
       ),
     ),
   );

@@ -152,6 +152,7 @@ Widget _reader({
   int? initialBookId,
   FlutterReaderSettings? settings = _epub,
   ReaderProgressSource? progressSource,
+  void Function(bool twoPages)? onPagesChanged,
   bool debugPathEntry = false,
 }) => productionShell(
   locale: locale,
@@ -163,6 +164,7 @@ Widget _reader({
     initialBookId: initialBookId,
     initialSettings: settings,
     progressSource: progressSource,
+    onPagesChanged: onPagesChanged,
     debugPathEntry: debugPathEntry,
   ),
 );
@@ -544,9 +546,14 @@ void main() {
     testWidgets('one page reads a PDF a page at a time', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();
+      final saved = <bool>[];
       await _open(
         tester,
-        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/atlas.pdf',
+          onPagesChanged: saved.add,
+        ),
       );
       await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
       await tester.pump();
@@ -557,6 +564,33 @@ void main() {
       await tester.pump(const Duration(milliseconds: 32));
       await tester.pump(const Duration(milliseconds: 32));
       expect(find.text('33% · page 1 of 3'), findsOneWidget);
+      // The choice is handed to the shell to save, once.
+      expect(saved, [false]);
+      await tester.tap(
+        find.byKey(const ValueKey('reader-typography-one-page')),
+      );
+      await tester.pump();
+      expect(saved, [false]);
+    });
+
+    testWidgets('a saved one-page setting opens a PDF on one page', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge();
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/atlas.pdf',
+          settings: _epub.copyWith(twoPages: false),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 32));
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('67% · page 2 of 3'), findsOneWidget);
     });
 
     testWidgets('a disabled edge dispatches nothing', (tester) async {

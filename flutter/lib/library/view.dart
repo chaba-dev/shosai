@@ -35,6 +35,7 @@ typedef ProductReaderBuilder =
       void Function(String path, int? bookId) locatorChanged,
       ReaderNoticeReporter noticeReporter,
       Widget openBooksAction,
+      void Function(bool twoPages) pagesChanged,
     );
 
 class ProductShell extends StatefulWidget {
@@ -300,6 +301,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             onPressed: () => _shell.dispatch(const ShellSwitcherOpened()),
           ),
         ),
+        // The Pages setting is saved with the library's settings, so the next
+        // book opens with it too.
+        (twoPages) {
+          if (mounted) controller.dispatch(LibraryPagesChanged(twoPages));
+        },
       ),
     );
     _reader = (open.id, reader);
