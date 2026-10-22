@@ -834,24 +834,21 @@ class _ReaderProgressTrackState extends State<_ReaderProgressTrack> {
               onHorizontalDragEnd: onJump == null
                   ? null
                   : (details) => jump(details.localPosition),
-              child: Container(
-                key: const ValueKey('reader-progress-track'),
-                height: 20,
-                foregroundDecoration: _focused && onStep != null
-                    ? BoxDecoration(
-                        border: Border.all(color: palette.accent, width: 2),
-                        borderRadius: BorderRadius.circular(
-                          ShosaiTokens.radiusSm,
-                        ),
-                      )
-                    : null,
-                child: CustomPaint(
-                  painter: _ProgressTrackPainter(
-                    value: widget.value.clamp(0.0, 1.0),
-                    marks: widget.marks,
-                    track: palette.surfaceSunken,
-                    fill: palette.accent,
-                    mark: ShosaiTokens.colorLightVermilion,
+              child: _readerFocusRing(
+                focused: _focused && onStep != null,
+                color: palette.accent,
+                radius: ShosaiTokens.radiusXs,
+                child: SizedBox(
+                  key: const ValueKey('reader-progress-track'),
+                  height: 20,
+                  child: CustomPaint(
+                    painter: _ProgressTrackPainter(
+                      value: widget.value.clamp(0.0, 1.0),
+                      marks: widget.marks,
+                      track: palette.surfaceSunken,
+                      fill: palette.accent,
+                      mark: ShosaiTokens.colorLightVermilion,
+                    ),
                   ),
                 ),
               ),

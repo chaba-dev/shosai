@@ -32,6 +32,38 @@ Widget _readerSemanticButton({
   child: ExcludeSemantics(child: child),
 );
 
+/// The design system's keyboard focus ring around [child]: 2 px of `accent`,
+/// offset 2 px outside the control, following its corner [radius].
+Widget _readerFocusRing({
+  required bool focused,
+  required Color color,
+  required double radius,
+  required Widget child,
+}) => Stack(
+  // The control keeps the constraints it would have had on its own.
+  fit: StackFit.passthrough,
+  clipBehavior: Clip.none,
+  children: [
+    child,
+    if (focused)
+      Positioned(
+        left: -4,
+        top: -4,
+        right: -4,
+        bottom: -4,
+        child: IgnorePointer(
+          child: DecoratedBox(
+            key: const ValueKey('reader-focus-ring'),
+            decoration: BoxDecoration(
+              border: Border.all(color: color, width: 2),
+              borderRadius: BorderRadius.circular(radius + 4),
+            ),
+          ),
+        ),
+      ),
+  ],
+);
+
 /// The search bar (RD-11): query input, `n / total`, previous/next and close.
 ///
 /// Search is independent of the three exclusive panels and stays open while a

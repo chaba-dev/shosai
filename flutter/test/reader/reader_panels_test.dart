@@ -941,6 +941,20 @@ void main() {
       await tester.pump();
       await _settle(tester);
       expect(selected('dark'), isTrue);
+      // The focus ring is 2 px of accent, 2 px outside the tile.
+      final ring = find.byKey(const ValueKey('reader-focus-ring'));
+      expect(ring, findsOneWidget);
+      expect(
+        tester.getRect(ring),
+        tester
+            .getRect(find.byKey(const ValueKey('reader-typography-theme-dark')))
+            .inflate(4),
+      );
+      final border =
+          (tester.widget<DecoratedBox>(ring).decoration as BoxDecoration)
+                  .border!
+              as Border;
+      expect(border.top.width, 2);
       focusOf(
         find.byKey(const ValueKey('reader-typography-theme-sepia')),
       ).requestFocus();
@@ -957,12 +971,18 @@ void main() {
       String value() => tester.getSemantics(trackFinder).value;
       final opening = value();
       expect(tester.getSemantics(trackFinder).label, 'Reading progress');
+      // The track spans the status line between the section and the place.
+      expect(tester.getSize(trackFinder).width, greaterThan(200));
       expect(opening, contains('of 3'));
       Focus.of(tester.element(trackFinder)).requestFocus();
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pump();
       await _settle(tester);
+      expect(
+        tester.getRect(find.byKey(const ValueKey('reader-focus-ring'))),
+        tester.getRect(trackFinder).inflate(4),
+      );
       final stepped = value();
       expect(stepped, isNot(opening));
       tester.binding.performSemanticsAction(

@@ -979,19 +979,10 @@ class _ReaderThemeTileState extends State<_ReaderThemeTile> {
           behavior: HitTestBehavior.opaque,
           excludeFromSemantics: true,
           onTap: onPressed,
-          child: Container(
-            foregroundDecoration: _focused && onPressed != null
-                ? BoxDecoration(
-                    border: Border.all(
-                      color: palette.accent,
-                      width: 2,
-                      strokeAlign: BorderSide.strokeAlignOutside,
-                    ),
-                    borderRadius: BorderRadius.circular(
-                      ShosaiTokens.radiusSm + 2,
-                    ),
-                  )
-                : null,
+          child: _readerFocusRing(
+            focused: _focused && onPressed != null,
+            color: palette.accent,
+            radius: ShosaiTokens.radiusSm,
             child: tile,
           ),
         ),
