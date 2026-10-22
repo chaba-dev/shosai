@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
@@ -14,78 +15,59 @@ import 'support/production_shell_harness.dart';
 
 /// Package 2C: the shared design tokens and the themes mapped from them.
 ///
-/// The expectations in this file are transcribed from the pinned Iced reference
-/// (`docs/flutter-ui-reference-spec.md` §3) rather than read back from
-/// `lib/theme_tokens.dart`, so a wrong mapping cannot agree with itself. The
-/// generated token file is separately checked against
-/// `assets/theme/tokens.json` by `scripts/generate-theme-tokens.py --check` and
-/// by the source comparison below.
+/// The expectations in this file are transcribed from the Shōsai design
+/// system (`docs/design-system/tokens.json`, the Bookshelf look, D1 paper)
+/// rather than read back from `lib/theme_tokens.dart`, so a wrong mapping
+/// cannot agree with itself. The generated token file is separately checked
+/// against `assets/theme/tokens.json` by
+/// `scripts/generate-theme-tokens.py --check` and by the source comparison
+/// below.
 void main() {
   setUpAll(loadHarnessFonts);
 
-  // The pinned Iced application palette (specification §3.1, §3.2).
-  const appBackground = Color(0xFFF4F2ED);
-  const appSurface = Color(0xFFFFFEFB);
-  const appSurfaceMuted = Color(0xFFECE9E1);
-  const appText = Color(0xFF282724);
-  const appTextMuted = Color(0xFF726F67);
-  const appBorder = Color(0xFFD9D5CB);
-  const appAccent = Color(0xFF4D5E86);
-  const appAccentHovered = Color(0xFF3F4F76);
-  const appAccentSoft = Color(0xFFE2E6F0);
+  // The design system's light theme (canvas, surface, surface-sunken, ink,
+  // ink-muted, line, line-strong, accent, accent-hover, accent-soft,
+  // on-accent, on-accent-soft, danger, scrim) and its shadow ink.
+  const appBackground = Color(0xFFF6F1E6);
+  const appSurface = Color(0xFFFDFAF3);
+  const appSurfaceMuted = Color(0xFFE6DFD0);
+  const appText = Color(0xFF221D18);
+  const appTextMuted = Color(0xFF675D4F);
+  const appBorder = Color(0xFFD9D0BD);
+  const appBorderStrong = Color(0xFF7D7364);
+  const appAccent = Color(0xFF2B3A5C);
+  const appAccentHovered = Color(0xFF1E2B47);
+  const appAccentSoft = Color(0xFFDDE2EC);
+  const appTextOnAccentSoft = Color(0xFF1E2B47);
   const appDanger = Color(0xFFA54343);
   const appTextOnAccent = Color(0xFFFFFFFF);
-  const appShadowBase = Color(0xFF21201E);
+  const appShadowBase = Color(0xFF221D18);
   final appBackdrop = Color.fromRGBO(0x21, 0x20, 0x1E, 0.42);
 
-  // The retained Flutter dark palette (Iced defines no dark application
-  // palette; the values are the ones this application already rendered with).
-  const appDarkBackground = Color(0xFF0C0A09);
-  const appDarkForeground = Color(0xFFFAFAF9);
-  const appDarkPrimary = Color(0xFFFAFAF9);
-  const appDarkPrimaryForeground = Color(0xFF1C1917);
-  const appDarkSecondary = Color(0xFF292524);
-  const appDarkMutedForeground = Color(0xFFA8A29E);
-  const appDarkDestructive = Color(0xFFEF4444);
-  const appDarkBorder = Color(0xFF292524);
-  const appDarkRing = Color(0xFFD6D3D1);
-  const appDarkSelection = Color(0xFF355172);
+  // The design system's dark theme, as the dark Shad roles read it.
+  const appDarkBackground = Color(0xFF1D1915);
+  const appDarkSurface = Color(0xFF2A241E);
+  const appDarkSurfaceSunken = Color(0xFF171411);
+  const appDarkForeground = Color(0xFFF1EBE0);
+  const appDarkPrimary = Color(0xFFA8B8DF);
+  const appDarkPrimaryForeground = Color(0xFF141A28);
+  const appDarkAccentSoft = Color(0xFF2A3246);
+  const appDarkOnAccentSoft = Color(0xFFCDD8F0);
+  const appDarkMutedForeground = Color(0xFFAEA597);
+  const appDarkDestructive = Color(0xFFE58A80);
+  const appDarkBorder = Color(0xFF3A322B);
+  const appDarkInput = Color(0xFF7F766A);
 
-  // The pinned Iced reader palettes (specification §3.3).
-  const readerLightBackground = Color(0xFFFFFFFF);
-  final readerLightText = const Color.from(
-    alpha: 1,
-    red: 0.1,
-    green: 0.1,
-    blue: 0.1,
-  );
-  final readerDarkBackground = const Color.from(
-    alpha: 1,
-    red: 0.12,
-    green: 0.12,
-    blue: 0.14,
-  );
-  final readerDarkText = const Color.from(
-    alpha: 1,
-    red: 0.85,
-    green: 0.85,
-    blue: 0.85,
-  );
-  final readerSepiaBackground = const Color.from(
-    alpha: 1,
-    red: 0.96,
-    green: 0.92,
-    blue: 0.84,
-  );
-  final readerSepiaText = const Color.from(
-    alpha: 1,
-    red: 0.3,
-    green: 0.2,
-    blue: 0.1,
-  );
+  // The design system's page themes (page-paper, page-night, page-sepia).
+  const readerLightBackground = Color(0xFFFFFDF8);
+  const readerLightText = Color(0xFF1A1A1A);
+  const readerDarkBackground = Color(0xFF1F1F24);
+  const readerDarkText = Color(0xFFD9D9D9);
+  const readerSepiaBackground = Color(0xFFF5EBD6);
+  const readerSepiaText = Color(0xFF4D331A);
 
   group('application palette mapping', () {
-    test('the light Shad scheme is the pinned Iced palette', () {
+    test('the light Shad scheme is the design system light theme', () {
       expect(
         shosaiShadTheme(Brightness.light).colorScheme,
         const ShadColorScheme(
@@ -102,46 +84,46 @@ void main() {
           muted: appSurfaceMuted,
           mutedForeground: appTextMuted,
           accent: appAccentSoft,
-          accentForeground: appAccent,
+          accentForeground: appTextOnAccentSoft,
           destructive: appDanger,
           destructiveForeground: appTextOnAccent,
           border: appBorder,
-          input: appBorder,
+          input: appBorderStrong,
           ring: appAccent,
           selection: appAccentSoft,
         ),
       );
     });
 
-    test('the dark Shad scheme is the retained dark palette', () {
+    test('the dark Shad scheme is the design system dark theme', () {
       expect(
         shosaiShadTheme(Brightness.dark).colorScheme,
         const ShadColorScheme(
           background: appDarkBackground,
           foreground: appDarkForeground,
-          card: appDarkBackground,
+          card: appDarkSurface,
           cardForeground: appDarkForeground,
-          popover: appDarkBackground,
+          popover: appDarkSurface,
           popoverForeground: appDarkForeground,
           primary: appDarkPrimary,
           primaryForeground: appDarkPrimaryForeground,
-          secondary: appDarkSecondary,
+          secondary: appDarkSurface,
           secondaryForeground: appDarkForeground,
-          muted: appDarkSecondary,
+          muted: appDarkSurfaceSunken,
           mutedForeground: appDarkMutedForeground,
-          accent: appDarkSecondary,
-          accentForeground: appDarkForeground,
+          accent: appDarkAccentSoft,
+          accentForeground: appDarkOnAccentSoft,
           destructive: appDarkDestructive,
-          destructiveForeground: appDarkForeground,
+          destructiveForeground: appDarkBackground,
           border: appDarkBorder,
-          input: appDarkBorder,
-          ring: appDarkRing,
-          selection: appDarkSelection,
+          input: appDarkInput,
+          ring: appDarkPrimary,
+          selection: appDarkAccentSoft,
         ),
       );
     });
 
-    test('the accent is the Iced value and not the historical brown', () {
+    test('the accent is the design system slate, not the historical brown', () {
       for (final brightness in Brightness.values) {
         final scheme = shosaiShadTheme(brightness).colorScheme;
         expect(scheme.ring, isNot(const Color(0xFF8A6338)));
@@ -151,20 +133,23 @@ void main() {
       expect(shosaiShadTheme(Brightness.light).colorScheme.ring, appAccent);
       expect(
         shosaiAppColorScheme(Brightness.light).accentForeground,
-        appAccent,
+        appTextOnAccentSoft,
       );
       // The token the accent is mapped from keeps the same value.
       expect(ShosaiTokens.appAccent, appAccent);
       expect(ShosaiTokens.appAccentHovered, appAccentHovered);
     });
 
-    test('the radius is the Iced small radius', () {
+    test('the radius is the design system small radius', () {
       expect(
         shosaiShadTheme(Brightness.light).radius,
         BorderRadius.circular(6),
       );
       expect(ShosaiTokens.radiusSmall, 6.0);
       expect(ShosaiTokens.radiusMedium, 10.0);
+      expect(ShosaiTokens.radiusSm, ShosaiTokens.radiusSmall);
+      expect(ShosaiTokens.radiusMd, ShosaiTokens.radiusMedium);
+      expect(ShosaiTokens.radiusXs, ShosaiTokens.radiusProgress);
     });
 
     test('the library grid and card metrics are the pinned Iced values', () {
@@ -242,9 +227,8 @@ void main() {
     });
 
     test('the chrome keeps the application palette in every reader theme', () {
-      // Owner decision 2026-09-28: the shared reader chrome matches the pinned
-      // Iced references, which recolor only the page; the reader palette is the
-      // document palette.
+      // Owner decision 2026-09-28: the shared reader chrome recolors only the
+      // page; the reader palette is the document palette.
       for (final theme in const [null, 'light', 'dark', 'sepia']) {
         expect(
           shosaiReaderShadTheme(theme).colorScheme,
@@ -269,7 +253,7 @@ void main() {
       );
     });
 
-    test('reader page colors are the pinned Iced document palettes', () {
+    test('reader page colors are the design system page themes', () {
       final expectations = <String?, ({Color background, Color foreground})>{
         null: (background: readerLightBackground, foreground: readerLightText),
         'light': (
@@ -335,16 +319,16 @@ void main() {
       expect(scheme.primary, appAccent);
       expect(scheme.onPrimary, appTextOnAccent);
       expect(scheme.primaryContainer, appAccentSoft);
-      expect(scheme.onPrimaryContainer, appAccent);
+      expect(scheme.onPrimaryContainer, appTextOnAccentSoft);
       expect(scheme.secondary, appAccentSoft);
-      expect(scheme.onSecondary, appAccent);
+      expect(scheme.onSecondary, appTextOnAccentSoft);
       expect(scheme.error, appDanger);
       expect(scheme.onError, appTextOnAccent);
       expect(scheme.surface, appBackground);
       expect(scheme.onSurface, appText);
       expect(scheme.onSurfaceVariant, appTextMuted);
       expect(scheme.outline, appBorder);
-      expect(scheme.outlineVariant, appBorder);
+      expect(scheme.outlineVariant, appBorderStrong);
       expect(scheme.surfaceContainerHighest, appSurfaceMuted);
       expect(scheme.surfaceContainerLow, appSurface);
       expect(scheme.shadow, appShadowBase);
@@ -464,6 +448,74 @@ void main() {
       );
     });
 
+    testWidgets('a rendered input draws its boundary in line-strong', (
+      tester,
+    ) async {
+      // Shad's default input theme borders a field with the decorative `line`
+      // (`border`); the scheme's `input` role is only read when the theme
+      // routes it to the input decoration. Sample the painted edge itself.
+      const view = HarnessView(size: Size(400, 200));
+      view.apply(tester);
+      const boundary = ValueKey('input-boundary');
+      final cases = <String, (ShadThemeData, Color, Color)>{
+        'light': (
+          shosaiShadTheme(Brightness.light),
+          appBorderStrong,
+          appBorder,
+        ),
+        'dark': (shosaiShadTheme(Brightness.dark), appDarkInput, appDarkBorder),
+        'reader chrome': (
+          shosaiReaderShadTheme('dark'),
+          appBorderStrong,
+          appBorder,
+        ),
+      };
+      for (final MapEntry(key: name, value: (theme, expected, line))
+          in cases.entries) {
+        await tester.pumpWidget(
+          productionShell(
+            home: ShadTheme(
+              data: theme,
+              child: Scaffold(
+                backgroundColor: theme.colorScheme.background,
+                body: Center(
+                  child: RepaintBoundary(
+                    key: boundary,
+                    child: const SizedBox(
+                      width: 200,
+                      child: ShadInput(placeholder: Text('Search')),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        final render = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(boundary),
+        );
+        final pixels = await tester.runAsync(() async {
+          final image = await render.toImage();
+          final data = await image.toByteData();
+          final width = image.width;
+          final height = image.height;
+          image.dispose();
+          return (data!, width, height);
+        });
+        final (data, width, height) = pixels!;
+        // The left edge, half way down: a straight run of the 1 px border.
+        final offset = ((height ~/ 2) * width) * 4;
+        final painted = Color.fromARGB(
+          data.getUint8(offset + 3),
+          data.getUint8(offset),
+          data.getUint8(offset + 1),
+          data.getUint8(offset + 2),
+        );
+        expect(painted, expected, reason: '$name input border');
+        expect(painted, isNot(line), reason: '$name input border');
+      }
+    });
+
     testWidgets('the production shell installs the mapped Material theme', (
       tester,
     ) async {
@@ -493,7 +545,20 @@ void main() {
           jsonDecode(File('../assets/theme/tokens.json').readAsStringSync())
               as Map<String, dynamic>;
 
-      Color hex(String value) {
+      // A `{path}` value names another token; follow it to the literal.
+      String resolve(String value) {
+        final reference = RegExp(r'^\{([A-Za-z0-9_.]+)\}$').firstMatch(value);
+        if (reference == null) return value;
+        Object? node = document;
+        for (final key in reference.group(1)!.split('.')) {
+          node = (node as Map<String, dynamic>)[key];
+        }
+        expect(node, isA<String>(), reason: value);
+        return resolve(node! as String);
+      }
+
+      Color hex(String source) {
+        final value = resolve(source);
         expect(value.startsWith('#'), isTrue, reason: value);
         return Color(int.parse(value.substring(1), radix: 16) | 0xFF000000);
       }
@@ -511,7 +576,8 @@ void main() {
         );
       }
 
-      Color rgba(String value) {
+      Color rgba(String source) {
+        final value = resolve(source);
         final match = RegExp(
           r'^rgba\(#([0-9A-Fa-f]{6}), ([^)]+)\)$',
         ).firstMatch(value);
@@ -524,6 +590,7 @@ void main() {
         );
       }
 
+      final color = document['color'] as Map<String, dynamic>;
       final app = document['app'] as Map<String, dynamic>;
       final reader = document['reader'] as Map<String, dynamic>;
       final radius = document['radius'] as Map<String, dynamic>;
@@ -541,12 +608,38 @@ void main() {
       final light = reader['light'] as Map<String, dynamic>;
       final dark = reader['dark'] as Map<String, dynamic>;
       final sepia = reader['sepia'] as Map<String, dynamic>;
-      expect(ShosaiTokens.readerLightText, rgb(light['text'] as String));
+      expect(ShosaiTokens.readerLightText, hex(light['text'] as String));
       expect(
         ShosaiTokens.readerDarkBackground,
-        rgb(dark['background'] as String),
+        hex(dark['background'] as String),
       );
-      expect(ShosaiTokens.readerSepiaText, rgb(sepia['text'] as String));
+      expect(ShosaiTokens.readerSepiaText, hex(sepia['text'] as String));
+      expect(
+        ShosaiTokens.readerCodeBlockFallbackBackground,
+        rgb(
+          (reader['codeBlock'] as Map<String, dynamic>)['fallbackBackground']
+              as String,
+        ),
+      );
+      final colorLight = color['light'] as Map<String, dynamic>;
+      final colorDark = color['dark'] as Map<String, dynamic>;
+      expect(
+        ShosaiTokens.colorLightChrome,
+        hex(colorLight['chrome'] as String),
+      );
+      expect(
+        ShosaiTokens.colorDarkInkMuted,
+        hex(colorDark['inkMuted'] as String),
+      );
+      expect(
+        ShosaiTokens.colorLightControlRaised,
+        hex(colorLight['controlRaised'] as String),
+      );
+      expect(
+        ShosaiTokens.colorDarkBrandMark,
+        hex(colorDark['brandMark'] as String),
+      );
+      expect(ShosaiTokens.colorHlYellow, rgba(color['hlYellow'] as String));
       expect(ShosaiTokens.readerSepiaLink, hex(sepia['link'] as String));
       expect(ShosaiTokens.radiusSmall, radius['small']);
       expect(ShosaiTokens.radiusMedium, radius['medium']);

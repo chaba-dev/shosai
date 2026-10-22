@@ -183,10 +183,10 @@ class LibraryHeader extends StatelessWidget {
   /// The add-books action, or the cancel action while the import is in flight.
   ///
   /// The action keeps the reference's primary button geometry
-  /// (`app.button.primary`) and its opaque hovered fill instead of the Shad
-  /// primary variant's translucent one. That fill is a pinned light-theme
-  /// value, so the dark theme keeps its own variant behavior: overriding only
-  /// the background there would leave the theme's dark label on a dark fill.
+  /// (`app.button.primary`) and its opaque hovered fill, the design system's
+  /// accent-hover in each theme, instead of the Shad primary variant's
+  /// translucent one, which darkens the light dark-theme accent under its dark
+  /// label.
   Widget _addBooksAction(BuildContext context) {
     const padding = EdgeInsets.symmetric(
       vertical: ShosaiTokens.layoutButtonPrimaryPaddingVertical,
@@ -196,7 +196,7 @@ class LibraryHeader extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final height = shosaiShadButtonHeight(context, padding: padding);
     final hover = theme.brightness == Brightness.dark
-        ? null
+        ? ShosaiTokens.appDarkPrimaryHovered
         : ShosaiTokens.appAccentHovered;
     if (model.importing) {
       return ShadButton(
