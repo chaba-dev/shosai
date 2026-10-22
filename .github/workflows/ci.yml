@@ -15,7 +15,6 @@ on:
       - "flake.nix"
       - "flake.lock"
       - ".github/workflows/ci.yml"
-      - ".github/actions/**"
       - ".github/workflows/release-pr.yml"
   pull_request:
     branches: [main]
@@ -31,7 +30,6 @@ on:
       - "flake.nix"
       - "flake.lock"
       - ".github/workflows/ci.yml"
-      - ".github/actions/**"
       - ".github/workflows/release-pr.yml"
 
 jobs:
@@ -40,9 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
-        with:
-          save: "true"
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make check-fmt
 
   flutter-analyze:
@@ -50,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make lint
 
   rfd-validation:
@@ -65,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make check-l10n-codegen
       - run: nix develop .#ci --command make check-theme-tokens
 
@@ -78,7 +74,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make test-app
 
   script-test:
@@ -86,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make test-scripts
 
   flutter-linux-host:
@@ -94,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make linux-debug
       - name: Verify the Linux bundle carries the declared fonts
         run: nix develop .#ci --command make check-linux-bundle
@@ -104,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
+      - uses: DeterminateSystems/nix-installer-action@main
       # Unsets the PDFium overrides: the bundle's PDFium and SQLite must load.
       - run: nix develop .#ci --command make test-packaged-linux
 
@@ -113,7 +109,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make test-packaged-macos
 
   flutter-macos-host:
@@ -121,9 +117,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/nix-ci
-        with:
-          save: "true"
+      - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make macos-smoke
       - name: Verify the macOS bundle carries the declared fonts
         run: |
