@@ -1991,6 +1991,7 @@ final class ReaderController implements Listenable {
             chapterCount: document.logicalUnitCount.toInt(),
             windowSize: ui.Size(layout.width, height),
             spread: _ensureFacingPage(pageSession, pageKey, scalar),
+            rightToLeft: _epubSource?.book.pageProgression == EpubDirection.rtl,
           );
     final oldImage = _model.pageImage;
     final changedLocation =
