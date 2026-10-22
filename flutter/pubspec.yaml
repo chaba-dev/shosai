@@ -98,3 +98,6 @@ dependency_overrides:
   # the SDK lets pdfrx move to 2.4.8. See third_party/pdfrx_engine/README.md.
   pdfrx_engine:
     path: third_party/pdfrx_engine
+  # pdfium_dart 0.2.5, vendored; see third_party/pdfium_dart/README.md.
+  pdfium_dart:
+    path: third_party/pdfium_dart
