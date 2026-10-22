@@ -39,6 +39,7 @@ class _Recorder {
   final moves = <(int, int)>[];
   final covers = <int>[];
   var adds = 0;
+  var switcherCloses = 0;
 
   /// Whether the library admits a cover request, as its four slots do.
   bool Function() admitCover = () => true;
@@ -54,6 +55,7 @@ class _Recorder {
       covers.add(id);
       return true;
     },
+    closeSwitcher: () => switcherCloses += 1,
   );
 }
 
@@ -404,6 +406,75 @@ void main() {
     expect(find.byType(ShellBottomNav), findsNothing);
     expect(find.byType(ShellRail), findsNothing);
     expect(tester.getSize(find.byKey(const Key('content'))).width, 390);
+  });
+
+  testWidgets('the phone tab switcher lists the open books over the reader', (
+    tester,
+  ) async {
+    final recorder = _Recorder();
+    final reading = _model(reading: true);
+    await _pumpFrame(
+      tester,
+      size: const Size(390, 844),
+      model: update(reading, const ShellSwitcherOpened()),
+      recorder: recorder,
+    );
+    // The reader stays mounted under the switcher.
+    expect(find.byKey(const Key('content')), findsOneWidget);
+    expect(find.byType(ShellTabSwitcher), findsOneWidget);
+    expect(find.text('3 open books'), findsOneWidget);
+    final titles = [
+      for (final book in [_origin, _shannon, _neko])
+        tester.getTopLeft(find.text(book.title)),
+    ];
+    expect(titles[0].dy, titles[1].dy, reason: 'two cards across');
+    expect(titles[2].dy, greaterThan(titles[0].dy));
+
+    await tester.tap(find.text(_shannon.title));
+    await tester.tap(find.byTooltip('Close ${_neko.title}'));
+    await tester.tap(find.text('Library'));
+    await tester.tap(find.text('Done'));
+    expect(recorder.opened, [2]);
+    expect(recorder.closed, [3]);
+    expect(recorder.places, [ShellPlace.library]);
+    expect(recorder.switcherCloses, 1);
+
+    // The system back gesture closes it too.
+    await tester.binding.handlePopRoute();
+    expect(recorder.switcherCloses, 2);
+    expectOnlyKnownDefects(
+      await findRenderDefects(tester),
+      const <KnownRenderDefect>[],
+    );
+
+    await _pumpFrame(
+      tester,
+      size: const Size(390, 844),
+      model: reading,
+      recorder: recorder,
+    );
+    expect(find.byType(ShellTabSwitcher), findsNothing);
+  });
+
+  testWidgets('the open-book count is a labelled touch target', (tester) async {
+    var presses = 0;
+    await tester.pumpWidget(
+      productionShell(
+        home: Scaffold(
+          body: Center(
+            child: ShellOpenBooksButton(count: 3, onPressed: () => presses++),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('3'), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(ShellOpenBooksButton)),
+      const Size.square(44),
+    );
+    await tester.tap(find.byTooltip('3 open books'));
+    expect(presses, 1);
   });
 
   testWidgets('phone Reading now cards open and close books', (tester) async {

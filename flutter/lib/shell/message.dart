@@ -54,6 +54,16 @@ final class ShellLibraryBooksChanged extends ShellMessage {
   final List<FlutterLibraryBook> books;
 }
 
+/// Opens the phone's tab switcher over the reader.
+final class ShellSwitcherOpened extends ShellMessage {
+  const ShellSwitcherOpened();
+}
+
+/// Closes the tab switcher and returns to the current book.
+final class ShellSwitcherClosed extends ShellMessage {
+  const ShellSwitcherClosed();
+}
+
 /// Restores the open books of an earlier run, without entering the reader.
 final class ShellRestored extends ShellMessage {
   const ShellRestored(this.restored);

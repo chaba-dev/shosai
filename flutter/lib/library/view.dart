@@ -310,6 +310,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         ? null
         : () => controller.dispatch(const LibraryImportRequested()),
     loadCover: controller.requestCover,
+    closeSwitcher: () => _shell.dispatch(const ShellSwitcherClosed()),
   );
 
   Future<LibraryImportSelection?> _pickImport() async {

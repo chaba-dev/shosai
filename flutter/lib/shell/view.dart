@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -71,6 +72,7 @@ final class ShellActions {
     required this.moveBook,
     required this.addBooks,
     required this.loadCover,
+    this.closeSwitcher,
   });
 
   final ValueChanged<ShellPlace> selectPlace;
@@ -83,13 +85,16 @@ final class ShellActions {
 
   /// Asks for a book's cover; false when the request was not admitted.
   final bool Function(int bookId) loadCover;
+
+  /// Closes the phone's tab switcher, back to the current book.
+  final VoidCallback? closeSwitcher;
 }
 
 /// The shell around [child]: the sidebar on the library side, the rail while
 /// reading, and the bottom bar on a phone's library side.
 ///
 /// On a phone the reader keeps its own bars, so a reading frame is [child]
-/// alone.
+/// alone, with the tab switcher over it while it is open.
 class ShellFrame extends StatelessWidget {
   const ShellFrame({
     super.key,
@@ -110,7 +115,17 @@ class ShellFrame extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
     if (layout == ShellLayout.phone) {
-      if (model.reading) return child;
+      if (model.reading) {
+        // The reader stays mounted under the switcher, so it keeps its place.
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            child,
+            if (model.switching)
+              ShellTabSwitcher(model: model, covers: covers, actions: actions),
+          ],
+        );
+      }
       return ColoredBox(
         color: palette.canvas,
         child: Column(

@@ -53,6 +53,7 @@ final class ShellModel {
     this.openBooks = const [],
     this.currentBookId,
     this.reading = false,
+    this.switching = false,
   });
 
   /// The library-side place in view, and the one the reader returns to.
@@ -67,6 +68,10 @@ final class ShellModel {
   /// Whether the reader is presented over the library-side place.
   final bool reading;
 
+  /// Whether the phone's tab switcher is open over the reader; only while
+  /// [reading].
+  final bool switching;
+
   OpenBook? get currentBook {
     final index = currentBookId == null ? -1 : indexOf(currentBookId!);
     return index < 0 ? null : openBooks[index];
@@ -80,6 +85,7 @@ final class ShellModel {
     int? currentBookId,
     bool clearCurrentBook = false,
     bool? reading,
+    bool? switching,
   }) => ShellModel(
     place: place ?? this.place,
     openBooks: openBooks == null
@@ -89,5 +95,7 @@ final class ShellModel {
         ? null
         : currentBookId ?? this.currentBookId,
     reading: reading ?? this.reading,
+    // The switcher lives over the reader, so leaving the reader closes it.
+    switching: (reading ?? this.reading) && (switching ?? this.switching),
   );
 }

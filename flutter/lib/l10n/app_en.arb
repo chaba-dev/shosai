@@ -739,5 +739,18 @@
   "cardOpenTag": "Open",
   "@cardOpenTag": {
     "description": "The shelf card's meta line: the book is open (in Reading now)."
+  },
+  "shellOpenBooks": "{count, plural, =1{1 open book} other{{count} open books}}",
+  "@shellOpenBooks": {
+    "description": "The phone reader's open-book count button (its tooltip and accessible name) and the tab switcher's title.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shellSwitcherDone": "Done",
+  "@shellSwitcherDone": {
+    "description": "The tab switcher's action that returns to the current book."
   }
 }
