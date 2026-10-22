@@ -141,15 +141,15 @@ void main() {
     return null;
   }
 
-  Future<void> settle(WidgetTester tester) async {
-    for (var round = 0; round < 6; round += 1) {
-      await pumpHarnessFrames(tester, frames: 4);
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 120)),
-      );
-    }
-    await pumpHarnessFrames(tester, frames: 4);
-  }
+  /// Pumps frames until the window steps and selection geometry a change
+  /// scheduled have run.
+  ///
+  /// Only frames: once [openReader] has waited for the book's parse isolate,
+  /// the reader's continuous work runs on frame callbacks and microtasks in
+  /// the test zone. A real-time wait here would cost wall time on every
+  /// scroll and key press without letting anything else complete.
+  Future<void> settle(WidgetTester tester) =>
+      pumpHarnessFrames(tester, frames: 28);
 
   /// The position of the chapter's scroll view.
   ScrollPosition chapterScroll(WidgetTester tester) {
