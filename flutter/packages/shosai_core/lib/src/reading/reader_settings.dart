@@ -18,6 +18,7 @@ final class ReaderSettings {
     this.epubFontSize = 16,
     this.epubLineSpacing = 1.6,
     this.pdfZoom = pdfZoomFitPage,
+    this.twoPages = true,
   });
 
   static const pdfZoomFitPage = 0.0;
@@ -36,6 +37,10 @@ final class ReaderSettings {
   final double epubLineSpacing;
   final double pdfZoom;
 
+  /// Show two pages side by side where there is room for them, rather than
+  /// always one.
+  final bool twoPages;
+
   /// Whether every value is within its supported range.
   bool get isValid =>
       _within(epubFontSize, minEpubFontSize, maxEpubFontSize) &&
@@ -51,17 +56,24 @@ final class ReaderSettings {
       other.theme == theme &&
       other.epubFontSize == epubFontSize &&
       other.epubLineSpacing == epubLineSpacing &&
-      other.pdfZoom == pdfZoom;
+      other.pdfZoom == pdfZoom &&
+      other.twoPages == twoPages;
 
   @override
-  int get hashCode =>
-      Object.hash(continuous, theme, epubFontSize, epubLineSpacing, pdfZoom);
+  int get hashCode => Object.hash(
+    continuous,
+    theme,
+    epubFontSize,
+    epubLineSpacing,
+    pdfZoom,
+    twoPages,
+  );
 
   @override
   String toString() =>
       'ReaderSettings(continuous: $continuous, theme: ${theme.name}, '
       'epubFontSize: $epubFontSize, epubLineSpacing: $epubLineSpacing, '
-      'pdfZoom: $pdfZoom)';
+      'pdfZoom: $pdfZoom, twoPages: $twoPages)';
 }
 
 bool _within(double value, double min, double max) =>
@@ -72,6 +84,7 @@ const _themeKey = 'reader.theme';
 const _epubFontSizeKey = 'reader.epub_font_size';
 const _epubLineSpacingKey = 'reader.epub_line_spacing';
 const _pdfZoomKey = 'reader.pdf_zoom';
+const _pagesKey = 'reader.pages';
 
 /// Loads and saves [ReaderSettings].
 final class ReaderSettingsStore {
@@ -116,6 +129,7 @@ final class ReaderSettingsStore {
         defaults.pdfZoom,
         (v) => ReaderSettings(pdfZoom: v).isValid,
       ),
+      twoPages: stored[_pagesKey] != 'one',
     );
     return loaded;
   }
@@ -133,6 +147,7 @@ final class ReaderSettingsStore {
       _epubFontSizeKey: '${settings.epubFontSize}',
       _epubLineSpacingKey: '${settings.epubLineSpacing}',
       _pdfZoomKey: '${settings.pdfZoom}',
+      _pagesKey: settings.twoPages ? 'two' : 'one',
     });
   }
 }

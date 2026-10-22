@@ -236,11 +236,13 @@ void main() {
         epubFontSize: 20,
         epubLineSpacing: 1.8,
         pdfZoom: ReaderSettings.pdfZoomFitWidth,
+        twoPages: false,
       );
       await settings.save(saved);
 
       expect(await settings.load(), saved);
       expect(await Preferences(t.store).get('reader.mode'), 'continuous');
+      expect(await Preferences(t.store).get('reader.pages'), 'one');
     });
 
     test('accepts the range ends and rejects values outside them', () async {
@@ -280,11 +282,36 @@ void main() {
         'reader.epub_font_size': 'large',
         'reader.epub_line_spacing': '9',
         'reader.pdf_zoom': '3.5',
+        'reader.pages': 'three',
       });
 
       expect(
         await ReaderSettingsStore(t.store).load(),
         const ReaderSettings(pdfZoom: 3.5),
+      );
+    });
+  });
+
+  group('library settings', () {
+    test('the sort defaults to recent until saved, then round-trips', () async {
+      final settings = LibrarySettingsStore(t.store);
+      expect(await settings.loadSort(), LibrarySort.recent);
+
+      await settings.saveSort(LibrarySort.author);
+
+      expect(
+        await LibrarySettingsStore(t.store).loadSort(),
+        LibrarySort.author,
+      );
+      expect(await Preferences(t.store).get('library.sort'), 'author');
+    });
+
+    test('an unknown stored sort falls back to recent', () async {
+      await Preferences(t.store).set('library.sort', 'colour');
+
+      expect(
+        await LibrarySettingsStore(t.store).loadSort(),
+        LibrarySort.recent,
       );
     });
   });
