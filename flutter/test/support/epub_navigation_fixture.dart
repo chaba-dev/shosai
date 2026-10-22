@@ -226,6 +226,7 @@ Uint8List buildTestEpub({
   required String nav,
   String? ncx,
   Map<String, String> chapterNamespaces = const {},
+  String? pageProgression,
 }) {
   final files = <String, String>{
     'mimetype': 'application/epub+zip',
@@ -266,7 +267,8 @@ Uint8List buildTestEpub({
       '<dc:identifier id="id">reader-navigation</dc:identifier>'
       '<dc:title>Reader Navigation</dc:title><dc:language>en</dc:language>'
       '</metadata><manifest>${manifest.join()}</manifest>'
-      '<spine>${spine.join()}</spine></package>';
+      '<spine${pageProgression == null ? '' : ' page-progression-direction="$pageProgression"'}>'
+      '${spine.join()}</spine></package>';
   files['OPS/Nav/toc.xhtml'] =
       '<?xml version="1.0"?>'
       '<html xmlns="http://www.w3.org/1999/xhtml" '
@@ -300,7 +302,7 @@ Uint8List harnessEpub(int chapters) => buildTestEpub(
 /// A chapter of [paragraphs] numbered paragraphs (about 250K scalars at the
 /// default), alternating short and long so a node's estimated extent is not
 /// its measured one, with a link at the start to an anchor three quarters in.
-Uint8List longChapterEpub({int paragraphs = 2400}) {
+Uint8List longChapterEpub({int paragraphs = 2400, String? pageProgression}) {
   final deep = paragraphs * 3 ~/ 4;
   final body = StringBuffer(
     '<h1 id="long-start">Long chapter</h1>'
@@ -331,5 +333,6 @@ Uint8List longChapterEpub({int paragraphs = 2400}) {
         '<li><a href="../Text/chapter-1.xhtml#long-deep">Long deep</a></li>'
         '<li><a href="../Text/chapter-2.xhtml">Short chapter</a></li>'
         '</ol>',
+    pageProgression: pageProgression,
   );
 }

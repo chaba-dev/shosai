@@ -554,11 +554,16 @@ class EpubBook {
     required this.chapters,
     required this.embeddedFonts,
     required this.warnings,
+    this.pageProgression = EpubDirection.ltr,
   });
 
   final String title;
   final String? author;
   final String? language;
+
+  /// The order pages turn in: the spine's `page-progression-direction`, left
+  /// to right when the book declares none (or `default`).
+  final EpubDirection pageProgression;
 
   /// Canonical resource paths in reading order.
   final List<String> spine;

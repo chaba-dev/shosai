@@ -519,6 +519,7 @@ class ReaderEpubPage {
     this.spread = false,
     this.facing,
     this.facingBox,
+    this.rightToLeft = false,
   });
 
   /// Spine ordinal of the chapter this page belongs to.
@@ -586,6 +587,10 @@ class ReaderEpubPage {
   /// Where [facing] sits in the spread.
   final EpubPageBox? facingBox;
 
+  /// Whether the book's pages turn right to left: a spread's first page sits
+  /// in its right slot, and the next page is to the left.
+  final bool rightToLeft;
+
   /// Canonical scalar the page starts at; the durable position of a page turn.
   int get readingOffset => canonicalStart;
 }
@@ -634,8 +639,12 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
 
 /// The page boxes of a two-page spread of [spreadSize]: both span the spread,
 /// so one surface addresses both pages, and each places its content in its own
-/// slot, [kEpubSpreadGutter] apart.
-({EpubPageBox first, EpubPageBox second}) epubSpreadBoxesFor(Size spreadSize) {
+/// slot, [kEpubSpreadGutter] apart. A right-to-left spread reads its right slot
+/// first.
+({EpubPageBox first, EpubPageBox second}) epubSpreadBoxesFor(
+  Size spreadSize, {
+  bool rightToLeft = false,
+}) {
   final page = epubPageBoxFor(
     Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
   );
@@ -645,7 +654,11 @@ EpubPageBox epubPageBoxFor(Size windowSize) => EpubPageBox(
     contentWidth: page.contentWidth,
     contentHeight: page.contentHeight,
   );
-  return (first: at(0), second: at(page.size.width + kEpubSpreadGutter));
+  final left = at(0);
+  final right = at(page.size.width + kEpubSpreadGutter);
+  return rightToLeft
+      ? (first: right, second: left)
+      : (first: left, second: right);
 }
 
 /// Paginates [flow] for a page window of [windowSize].
@@ -669,8 +682,9 @@ PaginatedChapter paginateWindow(ChapterFlow flow, Size windowSize) {
 ///
 /// With [spread] the window is a two-page spread of [windowSize]: each page is
 /// laid out at [epubSpreadPageWidth], the page holding [scalar] takes the first
-/// slot and the page after it the second. The spread's surface covers both
-/// pages, so a selection can run from one page onto the next.
+/// slot and the page after it the second; with [rightToLeft] the first slot is
+/// the right one. The spread's surface covers both pages, so a selection can
+/// run from one page onto the next.
 ReaderEpubPage pageWindowFor({
   required ChapterLayoutSession session,
   required int scalar,
@@ -678,6 +692,7 @@ ReaderEpubPage pageWindowFor({
   required int chapterCount,
   required Size windowSize,
   bool spread = false,
+  bool rightToLeft = false,
 }) {
   final flow = session.snapshot();
   final pageSize = spread
@@ -688,7 +703,9 @@ ReaderEpubPage pageWindowFor({
       .pageOfCanonical(scalar)
       .clamp(0, paginated.pages.length - 1);
   final page = paginated.pages[index];
-  final boxes = spread ? epubSpreadBoxesFor(windowSize) : null;
+  final boxes = spread
+      ? epubSpreadBoxesFor(windowSize, rightToLeft: rightToLeft)
+      : null;
   final box = boxes?.first ?? epubPageBoxFor(windowSize);
   final facing = spread && index + 1 < paginated.pages.length
       ? paginated.pages[index + 1]
@@ -726,6 +743,7 @@ ReaderEpubPage pageWindowFor({
     spread: spread,
     facing: facing,
     facingBox: facingBox,
+    rightToLeft: rightToLeft,
   );
 }
 

@@ -257,6 +257,54 @@ void main() {
     expect(last.canonicalEnd, last.page.canonicalEnd);
   });
 
+  test('a right-to-left spread reads its right slot first', () {
+    final book = openEpubBytes(
+      longChapterEpub(paragraphs: 40, pageProgression: 'rtl'),
+    );
+    expect(book.pageProgression, EpubDirection.rtl);
+    final chapter = book.chapters.first;
+    const spreadSize = Size(1360, 800);
+    final pageBox = epubPageBoxFor(
+      Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
+    );
+    final session = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(width: pageBox.contentWidth, height: pageBox.contentHeight),
+      images: const {},
+    );
+    addTearDown(session.dispose);
+    session.layoutWindowAt(0);
+    while (!session.complete) {
+      if (session.layoutForward(maxNodes: 64, maxMicros: 20000) == 0) break;
+    }
+
+    final page = pageWindowFor(
+      session: session,
+      scalar: 0,
+      unit: chapter.spine,
+      chapterCount: book.chapters.length,
+      windowSize: spreadSize,
+      spread: true,
+      rightToLeft: true,
+    );
+    final facing = page.facing!;
+    expect(page.rightToLeft, isTrue);
+    expect(
+      page.box.origin.dx,
+      pageBox.size.width + kEpubSpreadGutter + kEpubPageMargin,
+      reason: 'the first page sits in the right slot',
+    );
+    expect(page.facingBox!.origin.dx, kEpubPageMargin);
+    for (final endpoint in page.surface.endpoints) {
+      final onFirstPage = endpoint.rangeStart.toInt() < facing.canonicalStart;
+      if (onFirstPage) {
+        expect(endpoint.rect.left, greaterThanOrEqualTo(page.box.origin.dx));
+      } else {
+        expect(endpoint.rect.right, lessThanOrEqualTo(pageBox.size.width));
+      }
+    }
+  });
+
   test('the windowed session reaches the whole chapter in bounded batches', () {
     final chapter = conformance.chapters[1];
     final session = ChapterLayoutSession(

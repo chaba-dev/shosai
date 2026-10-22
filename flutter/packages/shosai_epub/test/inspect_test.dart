@@ -59,6 +59,18 @@ void main() {
     expect(tooLarge.cover, isNull);
   });
 
+  test('reads the spine page progression, left to right by default', () {
+    EpubDirection progression(String attributes) =>
+        openEpubBytes(_epub(spineAttributes: attributes)).pageProgression;
+    expect(progression(''), EpubDirection.ltr);
+    expect(
+      progression(' page-progression-direction="default"'),
+      EpubDirection.ltr,
+    );
+    expect(progression(' page-progression-direction="ltr"'), EpubDirection.ltr);
+    expect(progression(' page-progression-direction="rtl"'), EpubDirection.rtl);
+  });
+
   test('applies archive admission before reading metadata', () {
     expect(
       () => inspectEpubBytes(Uint8List.fromList([1, 2, 3])),
@@ -79,6 +91,7 @@ final _png = Uint8List.fromList([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
 Uint8List _epub({
   String metadata = '',
   String manifest = '',
+  String spineAttributes = '',
   Map<String, Uint8List> files = const {},
 }) {
   final archive = Archive();
@@ -92,7 +105,7 @@ Uint8List _epub({
   );
   add(
     'OEBPS/content.opf',
-    '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata>$metadata</metadata><manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>$manifest</manifest><spine><itemref idref="ch1"/></spine></package>'
+    '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata>$metadata</metadata><manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>$manifest</manifest><spine$spineAttributes><itemref idref="ch1"/></spine></package>'
         .codeUnits,
   );
   add(

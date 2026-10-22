@@ -137,7 +137,10 @@ class _ReaderStage extends StatelessWidget {
     final total = document?.logicalUnitCount.toInt() ?? 0;
     final edgeWidth = phone ? _readerPhoneEdgeWidth : _readerEdgeWidth;
     final edgeColor = phone && paper ? colors.foreground : palette.inkMuted;
-    Widget edge(int delta) => SizedBox(
+    // A right-to-left book turns leftward: its next page is behind the left
+    // margin. Each chevron still points away from the page.
+    final rightToLeft = model.epubPage?.rightToLeft ?? false;
+    Widget edge(int delta, {required bool left}) => SizedBox(
       width: edgeWidth,
       child: Visibility(
         visible: document != null,
@@ -148,7 +151,7 @@ class _ReaderStage extends StatelessWidget {
           semanticsKey: ValueKey(
             delta < 0 ? 'reader-edge-previous' : 'reader-edge-next',
           ),
-          icon: delta < 0 ? LucideIcons.chevronLeft : LucideIcons.chevronRight,
+          icon: left ? LucideIcons.chevronLeft : LucideIcons.chevronRight,
           semanticsLabel: delta < 0
               ? l10n.readerPreviousPage
               : l10n.readerNextPage,
@@ -203,6 +206,7 @@ class _ReaderStage extends StatelessWidget {
                         child: _ReaderSpreadGutter(
                           shade: palette.shadowBase,
                           dark: palette.dark,
+                          rightToLeft: rightToLeft,
                         ),
                       ),
                   ],
@@ -217,9 +221,9 @@ class _ReaderStage extends StatelessWidget {
     final row = Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showEdges) edge(-1),
+        if (showEdges) edge(rightToLeft ? 1 : -1, left: true),
         Expanded(child: pageArea),
-        if (showEdges) edge(1),
+        if (showEdges) edge(rightToLeft ? -1 : 1, left: false),
       ],
     );
     if (phone) {
@@ -308,12 +312,18 @@ class _ReaderEdgeButton extends StatelessWidget {
 }
 
 /// The fold between the two pages of a spread: the second page darkens toward
-/// its inner edge, as `sh-spread`'s inset shadow does.
+/// its inner edge, as `sh-spread`'s inset shadow does. A right-to-left
+/// spread's second page is the left one.
 class _ReaderSpreadGutter extends StatelessWidget {
-  const _ReaderSpreadGutter({required this.shade, required this.dark});
+  const _ReaderSpreadGutter({
+    required this.shade,
+    required this.dark,
+    required this.rightToLeft,
+  });
 
   final Color shade;
   final bool dark;
+  final bool rightToLeft;
 
   @override
   Widget build(BuildContext context) => IgnorePointer(
@@ -324,6 +334,8 @@ class _ReaderSpreadGutter extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
+            begin: rightToLeft ? Alignment.centerRight : Alignment.centerLeft,
+            end: rightToLeft ? Alignment.centerLeft : Alignment.centerRight,
             colors: [
               shade.withValues(alpha: 0),
               shade.withValues(alpha: 0),
