@@ -1,7 +1,8 @@
 /// Two PDF pages shown side by side as one page.
 ///
-/// A spread pairs pages from the start of the document, (1, 2), (3, 4) and so
-/// on, and an odd last page is shown alone. The reader keeps one surface and one
+/// A spread pairs pages the way a printed book opens: the cover is shown
+/// alone, then (2, 3), (4, 5) and so on, so left pages are even and right
+/// pages odd. A last page without a partner is shown alone too. The reader keeps one surface and one
 /// raster for what it shows, so a spread is built as a single page: the second
 /// page's raster sits to the right of the first's, and its selection geometry
 /// and text follow the first page's, its offsets moved past the first page's
@@ -16,8 +17,24 @@ import 'package:shosai_flutter/core/bridge.dart';
 
 import 'engine.dart';
 
-/// The first page of the spread [page] belongs to.
-int pdfSpreadStart(int page) => page - page % 2;
+/// The first page of the spread [page] belongs to: the cover is a spread of
+/// its own, and every later spread starts on an odd unit.
+int pdfSpreadStart(int page) => page <= 0 ? 0 : page - (page - 1) % 2;
+
+/// The page shown beside the spread starting at [start] in a document of
+/// [pageCount] pages, or null when [start] is shown alone.
+int? pdfSpreadFacing(int start, int pageCount) =>
+    start > 0 && start == pdfSpreadStart(start) && start + 1 < pageCount
+    ? start + 1
+    : null;
+
+/// The first page of the spread [delta] (±1) spreads away from the one
+/// holding [page]; past either end of the document when there is none.
+int pdfSpreadStep(int page, int delta) {
+  final start = pdfSpreadStart(page);
+  if (delta > 0) return start == 0 ? 1 : start + 2;
+  return start <= 1 ? start - 1 : start - 2;
+}
 
 /// Where the second page of a spread lives in the spread's surface.
 final class ReaderPdfSpread {

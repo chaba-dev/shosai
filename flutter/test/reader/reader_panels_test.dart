@@ -1168,7 +1168,8 @@ void main() {
       await _openTypography(tester);
     }
 
-    // A place on page 2 with no offset (a bookmark made with the page shown
+    // The cover is shown alone, so pages 2 and 3 make the first spread. A
+    // place on page 3 with no offset (a bookmark made with the page shown
     // alone), at its start and in its text.
     for (final offset in [null, 0, 10]) {
       final place = offset == null ? 'no offset' : 'offset $offset';
@@ -1179,7 +1180,7 @@ void main() {
         _setView(tester, const Size(1280, 800));
         final bridge = _PanelBridge(
           unitCount: 3,
-          bookmarks: [_bookmark(id: 7, unit: BigInt.one, offset: saved)],
+          bookmarks: [_bookmark(id: 7, unit: BigInt.two, offset: saved)],
         );
         await _open(
           tester,
@@ -1189,7 +1190,7 @@ void main() {
             initialBookId: 1,
           ),
         );
-        expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+        expect(find.text('33% · page 1 of 3'), findsOneWidget);
         await _openNotes(tester);
         await tester.tap(
           find.byKey(const ValueKey('reader-saved-place-open-7')),
@@ -1205,24 +1206,24 @@ void main() {
           tester.getSemantics(bookmark).label,
           contains('Remove bookmark'),
         );
-        expect(bridge.savedReadingStates.last.unit, BigInt.one);
+        expect(bridge.savedReadingStates.last.unit, BigInt.two);
         expect(bridge.savedReadingStates.last.offset, saved);
 
-        // One page shows the second page, where the place is.
+        // One page shows the spread's second page, where the place is.
         await choosePages(tester, 'one-page');
-        expect(find.text('67% · page 2 of 3'), findsOneWidget);
+        expect(find.text('100% · page 3 of 3'), findsOneWidget);
         expect(
           tester.getSemantics(bookmark).label,
           contains('Remove bookmark'),
         );
-        expect(bridge.savedReadingStates.last.unit, BigInt.one);
+        expect(bridge.savedReadingStates.last.unit, BigInt.two);
         expect(bridge.savedReadingStates.last.offset, saved);
 
         // Two pages again: still the same place, and its bookmark is the one
         // removed.
         await choosePages(tester, 'two-pages');
-        expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
-        expect(bridge.savedReadingStates.last.unit, BigInt.one);
+        expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
+        expect(bridge.savedReadingStates.last.unit, BigInt.two);
         expect(bridge.savedReadingStates.last.offset, saved);
         await tester.tap(bookmark);
         await tester.pump();
@@ -1237,10 +1238,10 @@ void main() {
         final bridge =
             _PanelBridge(
                 unitCount: 3,
-                bookmarks: [_bookmark(id: 7, unit: BigInt.one, offset: saved)],
+                bookmarks: [_bookmark(id: 7, unit: BigInt.two, offset: saved)],
               )
               ..readingState = FlutterReadingState(
-                unit: BigInt.one,
+                unit: BigInt.two,
                 offset: saved,
                 zoom: 1,
               );
@@ -1252,18 +1253,18 @@ void main() {
             initialBookId: 1,
           ),
         );
-        expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+        expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
         final bookmark = find.byKey(const ValueKey('reader-header-bookmark'));
         expect(
           tester.getSemantics(bookmark).label,
           contains('Remove bookmark'),
         );
 
-        // One page, two and one again: page 2 throughout.
+        // One page, two and one again: page 3 throughout.
         for (final (key, progress) in [
-          ('one-page', '67% · page 2 of 3'),
-          ('two-pages', '67% · pages 1–2 of 3'),
-          ('one-page', '67% · page 2 of 3'),
+          ('one-page', '100% · page 3 of 3'),
+          ('two-pages', '100% · pages 2–3 of 3'),
+          ('one-page', '100% · page 3 of 3'),
         ]) {
           await choosePages(tester, key);
           expect(find.text(progress), findsOneWidget, reason: key);
@@ -1272,15 +1273,15 @@ void main() {
             contains('Remove bookmark'),
             reason: key,
           );
-          expect(bridge.savedReadingStates.last.unit, BigInt.one);
+          expect(bridge.savedReadingStates.last.unit, BigInt.two);
           expect(bridge.savedReadingStates.last.offset, saved);
         }
       });
     }
 
     // A place in one page's text, then the spread's other page by number.
-    for (final from in [0, 1]) {
-      final to = 1 - from;
+    for (final from in [1, 2]) {
+      final to = 3 - from;
       testWidgets('page ${to + 1} asked for by number from page ${from + 1} '
           'of a spread takes no offset with it', (tester) async {
         _setView(tester, const Size(1280, 800));
@@ -1352,19 +1353,22 @@ void main() {
             const ReaderPickedDocument('/books/slow-rivers.epub'),
       ),
     );
-    expect(find.text('67% · pages 1–2 of 3'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await tester.pump();
+    await _settle(tester);
+    expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
     await _pressOpenBook(tester);
     await _settle(tester, frames: 8);
     expect(find.text('slow-rivers.epub'), findsOneWidget);
 
-    // Chapter 2 is unit 1, the PDF spread's second page.
+    // Chapter 3 is unit 2, the PDF spread's second page.
     await _openContents(tester);
     final input = find.byKey(const ValueKey('reader-page-input'));
-    await tester.enterText(input, '2');
+    await tester.enterText(input, '3');
     await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pump();
     await _settle(tester, frames: 8);
-    expect(find.textContaining('chapter 2 of 3'), findsOneWidget);
+    expect(find.textContaining('chapter 3 of 3'), findsOneWidget);
   });
 
   group('panel modality', () {
@@ -1448,7 +1452,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('reader-saved-place-open-7')));
       await tester.pump();
       await _settle(tester);
-      expect(find.text('100% · page 3 of 3'), findsOneWidget);
+      expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
       expect(find.byKey(const ValueKey('reader-panel-notes')), findsOneWidget);
       expect(focusInStage(tester), isFalse);
       expect(FocusManager.instance.primaryFocus, isNotNull);

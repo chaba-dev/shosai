@@ -2852,15 +2852,17 @@ void main() {
         selectionFailure: true,
       );
       final controller = await openSpread(bridge);
-      expect(controller.model.selectionError, isNotNull);
-      expect(bridge.renderUnits, containsAll([0, 1]));
-      expect(controller.model.pdfSpread?.facingUnit, 1);
-      expect(controller.model.progress.lastOrdinal, 2);
-
-      controller.dispatch(const ReaderUnitRequested(2));
+      // The cover is shown alone; pages 2 and 3 make the first spread.
+      controller.dispatch(const ReaderUnitRequested(1));
       await drain();
-      expect(controller.model.unit, 2);
-      expect(bridge.renderUnits.skip(2), containsAll([2, 3]));
+      expect(controller.model.selectionError, isNotNull);
+      expect(bridge.renderUnits, containsAll([1, 2]));
+      expect(controller.model.pdfSpread?.facingUnit, 2);
+      expect(controller.model.progress.lastOrdinal, 3);
+
+      controller.dispatch(const ReaderUnitRequested(3));
+      await drain();
+      expect(controller.model.unit, 3);
       expect(controller.model.progress.percentage, 100);
       controller.dispose();
       await bridge.disposed.future;
@@ -2877,13 +2879,13 @@ void main() {
           immediateLists: true,
           selectionFailure: failing == 'opening',
           initialReadingState: FlutterReadingState(
-            unit: BigInt.zero,
+            unit: BigInt.one,
             offset: BigInt.from(10),
             zoom: 1,
           ),
         );
         final controller = await openSpread(bridge);
-        expect(controller.model.pdfSpread?.facingUnit, 1);
+        expect(controller.model.pdfSpread?.facingUnit, 2);
         bridge.selectionFailure = true;
         controller.dispatch(
           const ReaderViewportChanged(
@@ -2895,8 +2897,8 @@ void main() {
         await drain();
         expect(controller.model.selectionError, isNotNull);
         expect(controller.model.pdfSpread?.textShift, 0);
-        expect(controller.model.readingLocation.unit, 0);
-        expect(bridge.savedReadingStates.last.unit.toInt(), 0);
+        expect(controller.model.readingLocation.unit, 1);
+        expect(bridge.savedReadingStates.last.unit.toInt(), 1);
         controller.dispose();
         await bridge.disposed.future;
       });
@@ -2909,10 +2911,10 @@ void main() {
         immediateLists: true,
       );
       final controller = await openSpread(bridge);
-      controller.dispatch(const ReaderUnitRequested(1));
+      controller.dispatch(const ReaderUnitRequested(2));
       await drain();
-      expect(controller.model.unit, 0);
-      expect(controller.model.readingLocation.unit, 1);
+      expect(controller.model.unit, 1);
+      expect(controller.model.readingLocation.unit, 2);
       void report(double height) => controller.dispatch(
         ReaderViewportChanged(
           const ReaderLayout(width: 2000, spread: true),
@@ -2943,24 +2945,24 @@ void main() {
       expect(controller.model.relayoutError, isNotNull);
       held.complete(_buffer(BigInt.from(40)));
       await drain();
-      expect(controller.model.readingLocation.unit, 1);
+      expect(controller.model.readingLocation.unit, 2);
       controller.dispose();
       await bridge.disposed.future;
     });
 
-    test('the last spread of an even-page PDF is saved as finished', () async {
+    test('the last spread of an odd-page PDF is saved as finished', () async {
       final bridge = _ControlledBridge(
         bookId: 7,
-        logicalUnitCount: 4,
+        logicalUnitCount: 5,
         immediateLists: true,
       );
       final controller = await openSpread(bridge);
-      controller.dispatch(const ReaderUnitRequested(2));
+      controller.dispatch(const ReaderUnitRequested(3));
       await drain();
       expect(controller.model.progress.percentage, 100);
       final saved = bridge.savedReadingStates.last;
-      expect(saved.unit.toInt(), 2);
-      expect(saved.lastUnit?.toInt(), 3);
+      expect(saved.unit.toInt(), 3);
+      expect(saved.lastUnit?.toInt(), 4);
       controller.dispose();
       await bridge.disposed.future;
     });

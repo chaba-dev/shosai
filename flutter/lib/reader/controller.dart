@@ -1605,10 +1605,8 @@ final class ReaderController implements Listenable {
 
   /// The page shown beside [unit] when [layout] reads in spreads: the next
   /// page, for the first page of a pair that has one.
-  int? _pdfFacingUnit(PdfEngineDocument pdf, int unit, ReaderLayout layout) {
-    if (!layout.spread || unit != pdfSpreadStart(unit)) return null;
-    return unit + 1 < pdf.pageCount ? unit + 1 : null;
-  }
+  int? _pdfFacingUnit(PdfEngineDocument pdf, int unit, ReaderLayout layout) =>
+      layout.spread ? pdfSpreadFacing(unit, pdf.pageCount) : null;
 
   /// The spread for [facing] when its pages' text could not be read: both
   /// pages are still shown and turned together, but no offset lies on either.

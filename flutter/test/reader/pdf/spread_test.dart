@@ -59,10 +59,31 @@ PdfRenderedPage _raster(int width, int height, int value) => PdfRenderedPage(
 );
 
 void main() {
-  test('spreads pair pages from the start of the document', () {
+  test('the cover is shown alone, then pages pair like a printed book', () {
     expect(
-      [for (var page = 0; page < 5; page += 1) pdfSpreadStart(page)],
-      [0, 0, 2, 2, 4],
+      [for (var page = 0; page < 6; page += 1) pdfSpreadStart(page)],
+      [0, 1, 1, 3, 3, 5],
+    );
+    expect(
+      [for (var start = 0; start < 6; start += 1) pdfSpreadFacing(start, 6)],
+      [null, 2, null, 4, null, null],
+      reason: 'the cover and the last page of an even count stand alone',
+    );
+    expect(pdfSpreadFacing(3, 5), 4, reason: 'an odd count ends on a pair');
+  });
+
+  test('a spread step turns to the neighbouring spread\'s first page', () {
+    expect(
+      [
+        for (final page in [0, 1, 2, 3]) pdfSpreadStep(page, 1),
+      ],
+      [1, 3, 3, 5],
+    );
+    expect(
+      [
+        for (final page in [0, 1, 2, 3, 4]) pdfSpreadStep(page, -1),
+      ],
+      [-1, 0, 0, 1, 1],
     );
   });
 

@@ -215,6 +215,16 @@ Future<void> _open(WidgetTester tester, Widget widget) async {
   await tester.pump(const Duration(milliseconds: 32));
 }
 
+/// Turns past the PDF's cover, which a spread shows alone, to the spread of
+/// its second and third pages.
+Future<void> _turnToSpread(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+  await tester.pump();
+  for (var round = 0; round < 4; round += 1) {
+    await tester.pump(const Duration(milliseconds: 32));
+  }
+}
+
 void _setView(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -335,7 +345,8 @@ void main() {
         _setView(tester, const Size(1280, 800));
         final bridge = _SelectionBridge(unitCount: 3);
         await _open(tester, _reader(bridge: bridge));
-        expect(find.textContaining('pages 1–2 of 3'), findsOneWidget);
+        await _turnToSpread(tester);
+        expect(find.textContaining('pages 2–3 of 3'), findsOneWidget);
 
         // The second page's text follows the first page's and a line break.
         final shift = selectionFixtureText.runes.length + 1;
@@ -349,7 +360,7 @@ void main() {
         await settleReaderSelection(tester);
 
         final created = bridge.created.single;
-        expect(created.unit.toInt(), 1);
+        expect(created.unit.toInt(), 2);
         expect(created.textRange!.start.toInt(), 4);
         expect(created.textRange!.end.toInt(), 12);
       },
@@ -361,6 +372,7 @@ void main() {
       _setView(tester, const Size(1280, 800));
       final bridge = _SelectionBridge(unitCount: 3);
       await _open(tester, _reader(bridge: bridge));
+      await _turnToSpread(tester);
 
       final shift = selectionFixtureText.runes.length + 1;
       await dragReaderSelectionBetween(
@@ -373,7 +385,7 @@ void main() {
       await settleReaderSelection(tester);
 
       final created = bridge.created.single;
-      expect(created.unit.toInt(), 0);
+      expect(created.unit.toInt(), 1);
       expect(created.textRange!.start.toInt(), 40);
       expect(
         created.textRange!.end.toInt(),
