@@ -708,6 +708,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 constraints.maxWidth <
                 ShosaiTokens.layoutLibraryCompactBreakpoint,
             model: model,
+            openCount: _shell.model.openBooks.length,
             // The header's add-books action is the import's cancel action;
             // every other cancellable operation keeps the separate cancel
             // action (the retained Flutter capability Iced has no
@@ -773,6 +774,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         Expanded(
           child: LibraryCollection(
             model: model,
+            openBookIds: {for (final open in _shell.model.openBooks) open.id},
+            sortBooks: (sort) => controller.dispatch(LibrarySortChanged(sort)),
             openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
             openNotes: () =>
                 _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),

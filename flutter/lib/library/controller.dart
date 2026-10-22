@@ -74,6 +74,7 @@ class LibraryController implements Listenable {
   int _cleanupRevision = 0;
   String? _displayedQuery;
   FlutterBookFormat? _displayedFormat;
+  FlutterLibrarySort? _displayedSort;
   int? _stalledAppendOffset;
   bool _closing = false;
   bool _bridgeDisposed = false;
@@ -123,7 +124,8 @@ class LibraryController implements Listenable {
             _model.loadError == null &&
             _stalledAppendOffset != _model.books.length &&
             _displayedQuery == _model.query &&
-            _displayedFormat == _model.format) {
+            _displayedFormat == _model.format &&
+            _displayedSort == _model.sort) {
           _load(append: true);
         }
       case LibraryMoreRetryRequested():
@@ -134,7 +136,8 @@ class LibraryController implements Listenable {
             _model.loadError != null &&
             !_model.loading &&
             _displayedQuery == _model.query &&
-            _displayedFormat == _model.format) {
+            _displayedFormat == _model.format &&
+            _displayedSort == _model.sort) {
           _load(append: true);
         }
       case LibraryRetryRequested():
@@ -161,6 +164,11 @@ class LibraryController implements Listenable {
         );
       case LibraryFormatChanged():
         _emit(_model.copyWith(format: message.format, hasMore: false));
+        _loadRevision += 1;
+        _load();
+      case LibrarySortChanged():
+        if (message.sort == _model.sort) return;
+        _emit(_model.copyWith(sort: message.sort, hasMore: false));
         _loadRevision += 1;
         _load();
       case LibraryImportRequested():
@@ -197,6 +205,7 @@ class LibraryController implements Listenable {
           if (!message.append) {
             _displayedQuery = _model.query;
             _displayedFormat = _model.format;
+            _displayedSort = _model.sort;
             // A replacement load is a new collection: whatever offset stalled
             // before it is not this collection's.
             _stalledAppendOffset = null;
@@ -219,6 +228,11 @@ class LibraryController implements Listenable {
                     : message.page.books.map(_withoutCover).toList(),
               ),
               settings: message.settings ?? _model.settings,
+              bookCount: message.page.bookCount,
+              continueReading: switch (message.page.continueReading) {
+                final book? => _withoutCover(book),
+                null => null,
+              },
               loaded: true,
               loading: false,
               loadingMore: false,
@@ -411,6 +425,7 @@ class LibraryController implements Listenable {
     final revision = ++_loadRevision;
     final query = _model.query;
     final format = _model.format;
+    final sort = _model.sort;
     final offset = append ? _model.books.length : 0;
     late final BigInt cancellation;
     try {
@@ -444,6 +459,7 @@ class LibraryController implements Listenable {
         final page = await _records.libraryPage(
           query: query,
           format: format,
+          sort: sort,
           limit: libraryPageSize,
           offset: offset,
           cancellationId: cancellation,

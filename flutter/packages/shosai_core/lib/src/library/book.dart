@@ -129,12 +129,37 @@ final class Book {
   String toString() => 'Book($id, $title, ${format.name}, ${storageKind.name})';
 }
 
-/// One bounded page of library books, most recently read first.
+/// The order a library page lists books in.
+enum LibrarySort {
+  /// Most recently read first, then most recently added.
+  recent,
+
+  /// By title, ignoring case.
+  title,
+
+  /// By author, ignoring case, then by title; books without an author last.
+  author,
+}
+
+/// One bounded page of library books, in a [LibrarySort] order.
 final class LibraryPage {
-  const LibraryPage(this.books, {required this.hasMore});
+  const LibraryPage(
+    this.books, {
+    required this.hasMore,
+    required this.bookCount,
+    this.continueReading,
+  });
 
   final List<Book> books;
   final bool hasMore;
+
+  /// How many books the whole library holds, whatever the page's query,
+  /// format and order.
+  final int bookCount;
+
+  /// The book last opened for reading and not yet finished, or null; it
+  /// ignores the page's query, format and order.
+  final Book? continueReading;
 }
 
 /// The outcome of importing one selected file.

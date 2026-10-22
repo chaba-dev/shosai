@@ -10,10 +10,10 @@ import '../support/production_shell_harness.dart';
 
 /// Package 3C: the continue-reading section (`LB-16`).
 ///
-/// The selection rule is transcribed from the pinned Iced
-/// `continue_reading_book` (`crates/shosai-app/src/app.rs:7856-7866`) and the
-/// composition from `render_continue_card` (`app.rs:8048-8093`), not read back
-/// from the widget, so a wrong mapping cannot agree with itself. Opening is
+/// The store picks the book (the core's library tests); the composition is
+/// transcribed from the pinned Iced `render_continue_card`
+/// (`app.rs:8048-8093`), not read back from the widget, so a wrong mapping
+/// cannot agree with itself. Opening is
 /// asserted through the reader boundary: the durable saved position is
 /// Rust-owned, so the library's contract is that the reader is asked for the
 /// position of the book the card showed.
@@ -133,77 +133,51 @@ void main() {
   );
 
   group('selection', () {
-    test(
-      'picks the first unfinished previously-read book of the first page',
-      () {
-        final model = LibraryModel(
-          books: [
-            _book(id: 1, title: 'Never opened', progress: 0.9),
-            _book(
-              id: 2,
-              title: 'Finished',
-              progress: 1,
-              lastRead: '2026-09-01',
-            ),
-            _resumable(3, 'Resumable'),
-            _resumable(4, 'Later resumable', progress: 0.07),
-          ],
-          loaded: true,
-        );
-
-        expect(model.continueBook?.bookId, 3);
-      },
-    );
-
-    test('skips a finished book and a book that was never opened', () {
-      final finishedFirst = LibraryModel(
+    // The store picks the book (shosai_core's library tests); the model
+    // shows the one the last page reported.
+    test('shows the book the store reports, whatever the shelf order', () {
+      final model = LibraryModel(
         books: [
-          _book(id: 1, title: 'Finished', progress: 1, lastRead: '2026-09-01'),
-          _book(id: 2, title: 'Never opened', progress: 0.5),
+          _book(id: 1, title: 'A never opened book'),
+          _resumable(2, 'Resumable'),
         ],
+        sort: FlutterLibrarySort.title,
+        continueReading: _resumable(3, 'Not on this page'),
         loaded: true,
       );
-      expect(finishedFirst.continueBook, isNull);
 
-      // Progress just under completion still resumes; exactly complete does not.
-      final nearlyDone = LibraryModel(
-        books: [_resumable(1, 'Nearly done', progress: 0.999)],
-        loaded: true,
-      );
-      expect(nearlyDone.continueBook?.bookId, 1);
-    });
-
-    test('a book beyond the first page never introduces the section', () {
-      // 60 books: the eligible book sits past `libraryPageSize`.
-      final books = List.generate(
-        libraryPageSize + 10,
-        (index) => index == libraryPageSize + 5
-            ? _resumable(index + 1, 'Late resumable')
-            : _book(id: index + 1, title: 'Book ${index + 1}'),
-      );
-      expect(LibraryModel(books: books, loaded: true).continueBook, isNull);
-
-      final withinPage = [
-        ...books.sublist(0, libraryPageSize - 1),
-        _resumable(libraryPageSize, 'Last of the page'),
-        ...books.sublist(libraryPageSize),
-      ];
+      expect(model.continueBook?.bookId, 3);
       expect(
-        LibraryModel(books: withinPage, loaded: true).continueBook?.bookId,
-        libraryPageSize,
+        model.copyWith(continueReading: null).continueBook,
+        isNull,
+        reason: 'no book to continue means no hero, never a guess',
       );
     });
 
     test('a search or a format filter hides the section', () {
       final books = [_resumable(1, 'Resumable')];
-      expect(LibraryModel(books: books, loaded: true).continueBook, isNotNull);
+      final continueReading = books.single;
       expect(
-        LibraryModel(books: books, loaded: true, query: 'quiet').continueBook,
+        LibraryModel(
+          books: books,
+          continueReading: continueReading,
+          loaded: true,
+        ).continueBook,
+        isNotNull,
+      );
+      expect(
+        LibraryModel(
+          books: books,
+          continueReading: continueReading,
+          loaded: true,
+          query: 'quiet',
+        ).continueBook,
         isNull,
       );
       expect(
         LibraryModel(
           books: books,
+          continueReading: continueReading,
           loaded: true,
           format: FlutterBookFormat.pdf,
         ).continueBook,

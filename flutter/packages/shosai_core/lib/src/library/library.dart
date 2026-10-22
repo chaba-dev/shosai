@@ -135,13 +135,14 @@ final class Library {
   /// The stored cover thumbnail (PNG) of book [id], or null.
   Future<Uint8List?> cover(int id) => _records.cover(id);
 
-  /// A page of books, most recently read first, then most recently added.
+  /// A page of books in [sort] order.
   ///
   /// [query] matches title or author as a case-insensitive substring;
   /// [limit] is capped at [maxLibraryPageSize].
   Future<LibraryPage> page({
     String? query,
     BookFormat? format,
+    LibrarySort sort = LibrarySort.recent,
     int limit = 100,
     int offset = 0,
   }) async {
@@ -156,7 +157,7 @@ final class Library {
       );
     }
     final pageSize = limit > maxLibraryPageSize ? maxLibraryPageSize : limit;
-    return _records.page(query, format, pageSize, offset);
+    return _records.page(query, format, sort, pageSize, offset);
   }
 
   /// Import each of [paths], continuing past failures.

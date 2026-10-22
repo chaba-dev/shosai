@@ -141,5 +141,12 @@
   "shellBookmarksEmptyHeading": "ブックマークはまだありません",
   "shellBookmarksEmptyBody": "リーダーのツールバーからページをブックマークすると、ここに表示されます。",
   "shellSearchEmptyHeading": "本とノートを検索",
-  "shellSearchEmptyBody": "ライブラリ全体の本文とノートの検索は準備中です。今はライブラリでタイトルや著者から本を探せます。"
+  "shellSearchEmptyBody": "ライブラリ全体の本文とノートの検索は準備中です。今はライブラリでタイトルや著者から本を探せます。",
+  "libraryBookCount": "{count}冊",
+  "libraryOpenCount": "{count}冊を読書中",
+  "librarySortLabel": "並べ替え",
+  "librarySortRecent": "最近",
+  "librarySortTitle": "タイトル",
+  "librarySortAuthor": "著者",
+  "cardOpenTag": "読書中"
 }

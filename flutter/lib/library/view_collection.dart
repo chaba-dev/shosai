@@ -33,13 +33,21 @@ final class LibraryShelf {
     required this.columnGap,
     required this.rowGap,
     required this.layout,
+    required this.openTag,
   });
 
   /// The shelf for [available] px of content width at [layout]: three
   /// columns on a phone, otherwise as many columns of at least
   /// [libraryShelfMinColumn] as fit (seven across at 1440 px, six on a
   /// tablet).
-  factory LibraryShelf.of(ShellLayout layout, double available) {
+  ///
+  /// [openTag] says a book on the shelf is open in Reading now, so every card
+  /// keeps a line for the *Open* tag and the rows stay level.
+  factory LibraryShelf.of(
+    ShellLayout layout,
+    double available, {
+    bool openTag = false,
+  }) {
     final columnGap = switch (layout) {
       ShellLayout.phone => 14.0,
       ShellLayout.tablet => 22.0,
@@ -55,6 +63,7 @@ final class LibraryShelf {
       columnGap: columnGap,
       rowGap: layout == ShellLayout.phone ? 20 : columnGap,
       layout: layout,
+      openTag: openTag,
     );
   }
 
@@ -63,6 +72,9 @@ final class LibraryShelf {
   final double columnGap;
   final double rowGap;
   final ShellLayout layout;
+
+  /// Whether the cards keep a line for the *Open* tag.
+  final bool openTag;
 
   bool get phone => layout == ShellLayout.phone;
 
@@ -109,7 +121,7 @@ double libraryCardTileExtent(BuildContext context, LibraryShelf shelf) =>
     shelf.columnWidth * 3 / 2 +
     _cardSpacing * 3 +
     _cardTitleBox(context, shelf) +
-    _cardMetadataBox(context) +
+    _cardMetadataBox(context, shelf) +
     _cardProgressHeight;
 
 /// The title box: two lines of the card's editorial title, the second
@@ -132,8 +144,17 @@ bool _cardMetadataWraps(BuildContext context) =>
 /// removal-pending chip, whichever is taller. Above it the line wraps: the
 /// badge on a run of its own, then the status or the chip, each allowed a
 /// second line so a scaled `Not started` in a phone's column is wrapped rather
-/// than cut.
-double _cardMetadataBox(BuildContext context) {
+/// than cut. A shelf with an open book adds a run for the *Open* tag, which
+/// wraps onto it where it does not fit after the status.
+double _cardMetadataBox(BuildContext context, LibraryShelf shelf) {
+  final tag = shelf.openTag
+      ? _cardMetadataRunSpacing + _lineHeight(context, _cardOpenTagStyle)
+      : 0.0;
+  return _cardMetadataRuns(context) + tag;
+}
+
+/// The badge and status runs of the meta line.
+double _cardMetadataRuns(BuildContext context) {
   final status = _lineHeight(context, _cardMetaStyle(context));
   final badge =
       _lineHeight(context, shellInterfaceStyle(10, 12)) +
@@ -150,6 +171,13 @@ double _cardMetadataBox(BuildContext context) {
       _cardMetadataRunSpacing +
       math.max(status * lines, status * lines + chipChrome);
 }
+
+/// The *Open* tag: `ui-label` weight in `accent`.
+final TextStyle _cardOpenTagStyle = shellInterfaceStyle(
+  11,
+  14,
+  weight: FontWeight.w600,
+);
 
 /// How many lines a wrapped meta line gives the status or the chip.
 const int _cardMetadataWrappedLines = 2;
@@ -249,6 +277,8 @@ class LibraryCollection extends StatelessWidget {
   const LibraryCollection({
     super.key,
     required this.model,
+    this.openBookIds = const {},
+    this.sortBooks,
     required this.openBook,
     required this.openNotes,
     required this.removeBook,
@@ -261,6 +291,12 @@ class LibraryCollection extends StatelessWidget {
   });
 
   final LibraryModel model;
+
+  /// The books open in Reading now; their cards carry the *Open* tag.
+  final Set<int> openBookIds;
+
+  /// The section head's sort control; null leaves it out.
+  final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
 
   /// The hero's Notes action: the Notes place.
@@ -290,6 +326,7 @@ class LibraryCollection extends StatelessWidget {
   Widget build(BuildContext context) => switch (model.collectionState) {
     LibraryCollectionState.loading => LibrarySkeletonGrid(
       model: model,
+      sortBooks: sortBooks,
       retry: retry,
     ),
     LibraryCollectionState.empty ||
@@ -301,6 +338,8 @@ class LibraryCollection extends StatelessWidget {
     ),
     LibraryCollectionState.ready => _LibraryGrid(
       model: model,
+      openBookIds: openBookIds,
+      sortBooks: sortBooks,
       openBook: openBook,
       openNotes: openNotes,
       removeBook: removeBook,
@@ -314,14 +353,28 @@ class LibraryCollection extends StatelessWidget {
 
 /// The section head above the shelf (`sh-section`): *All books*, or *Search
 /// results* while a search is active, in `ed-section` with a `line` rule
-/// running to the right edge.
+/// running to the sort control at the right edge.
 ///
 /// A filter alone keeps *All books*, because only a query changes what the
-/// shelf is a list of.
+/// shelf is a list of. Where the head and the sort control do not share the
+/// width, as on a phone, the sort control takes the line below, at the right.
+///
+/// The design system places the sort control at the right of the title row;
+/// that row still carries the library search and Add books here, so the sort
+/// sits with the shelf it orders and scrolls with it.
 class _CollectionSectionTitle extends StatelessWidget {
-  const _CollectionSectionTitle({required this.model});
+  const _CollectionSectionTitle({
+    required this.model,
+    required this.layout,
+    required this.sortBooks,
+  });
 
   final LibraryModel model;
+  final ShellLayout layout;
+  final ValueChanged<FlutterLibrarySort>? sortBooks;
+
+  /// The narrowest the rule between the head and the sort control gets.
+  static const double _minRule = 24;
 
   @override
   Widget build(BuildContext context) {
@@ -330,29 +383,86 @@ class _CollectionSectionTitle extends StatelessWidget {
     final label = model.query.isEmpty
         ? l10n.filterAllBooks
         : l10n.librarySearchResults;
-    return Semantics(
-      header: true,
-      child: LayoutBuilder(
-        // The head takes the width it needs and the rule the rest; a scaled
-        // head that needs the whole line wraps and leaves the rule a stub.
-        builder: (context, constraints) => Row(
+    final style = shellEditorialStyle(22, 26).copyWith(color: palette.ink);
+    final sortBooks = this.sortBooks;
+    final segments = <ShellSegment<FlutterLibrarySort>>[
+      (value: FlutterLibrarySort.recent, label: l10n.librarySortRecent),
+      (value: FlutterLibrarySort.title, label: l10n.librarySortTitle),
+      (value: FlutterLibrarySort.author, label: l10n.librarySortAuthor),
+    ];
+    return LayoutBuilder(
+      // The head takes the width it needs and the rule the rest; a scaled
+      // head that needs the whole line wraps and leaves the rule a stub.
+      builder: (context, constraints) {
+        Widget head({double reserved = 0}) => Semantics(
+          header: true,
+          child: Row(
+            spacing: 12,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: math.max(
+                    0,
+                    constraints.maxWidth - reserved - 12 - _minRule,
+                  ),
+                ),
+                child: Text(label, style: style),
+              ),
+              Expanded(child: Container(height: 1, color: palette.line)),
+            ],
+          ),
+        );
+        if (sortBooks == null) return head();
+        final sort = ShellSegmentedControl<FlutterLibrarySort>(
+          label: l10n.librarySortLabel,
+          touch: layout.touch,
+          segments: segments,
+          selected: model.sort,
+          onSelected: sortBooks,
+        );
+        final sortWidth = ShellSegmentedControl.widthOf(
+          context,
+          segments.map((segment) => segment.label),
+        );
+        final fits =
+            _textWidth(context, label, style) +
+                12 +
+                _minRule +
+                12 +
+                sortWidth <=
+            constraints.maxWidth;
+        if (fits) {
+          return Row(
+            spacing: 12,
+            children: [
+              Expanded(child: head(reserved: sortWidth + 12)),
+              sort,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 12,
           children: [
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: math.max(0, constraints.maxWidth - 12 - 24),
-              ),
-              child: Text(
-                label,
-                style: shellEditorialStyle(22, 26).copyWith(color: palette.ink),
-              ),
-            ),
-            Expanded(child: Container(height: 1, color: palette.line)),
+            head(),
+            Align(alignment: AlignmentDirectional.centerEnd, child: sort),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
+}
+
+/// The width one line of [text] paints in [style] at the ambient text scale.
+double _textWidth(BuildContext context, String text, TextStyle style) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textScaler: MediaQuery.textScalerOf(context),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
 }
 
 /// The thin shelf edge under the bottom row (`sh-shelf__edge`): `line`
@@ -452,6 +562,8 @@ class _CollectionAlert extends StatelessWidget {
 class _LibraryGrid extends StatefulWidget {
   const _LibraryGrid({
     required this.model,
+    required this.openBookIds,
+    required this.sortBooks,
     required this.openBook,
     required this.openNotes,
     required this.removeBook,
@@ -462,6 +574,8 @@ class _LibraryGrid extends StatefulWidget {
   });
 
   final LibraryModel model;
+  final Set<int> openBookIds;
+  final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
   final VoidCallback openNotes;
   final ValueChanged<FlutterLibraryBook> removeBook;
@@ -540,6 +654,9 @@ class _LibraryGridState extends State<_LibraryGrid> {
         final shelf = LibraryShelf.of(
           layout,
           constraints.maxWidth - padding.horizontal,
+          openTag: widget.model.books.any(
+            (book) => widget.openBookIds.contains(book.bookId),
+          ),
         );
         return CustomScrollView(
           controller: _scroll,
@@ -578,7 +695,11 @@ class _LibraryGridState extends State<_LibraryGrid> {
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.only(bottom: spacing),
-                      child: _CollectionSectionTitle(model: widget.model),
+                      child: _CollectionSectionTitle(
+                        model: widget.model,
+                        layout: layout,
+                        sortBooks: widget.sortBooks,
+                      ),
                     ),
                   ),
                   SliverGrid.builder(
@@ -591,6 +712,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         cover: widget.model.covers[book.bookId],
                         demandRevision: widget.model.coverRevision,
                         shelf: shelf,
+                        open: widget.openBookIds.contains(book.bookId),
                         removing: widget.model.removingBookId == book.bookId,
                         loadCover: widget.loadCover,
                         openBook: widget.openBook,
@@ -661,10 +783,14 @@ class LibrarySkeletonGrid extends StatelessWidget {
   const LibrarySkeletonGrid({
     super.key,
     required this.model,
+    this.sortBooks,
     required this.retry,
   });
 
   final LibraryModel model;
+
+  /// The section head's sort control; null leaves it out.
+  final ValueChanged<FlutterLibrarySort>? sortBooks;
 
   /// The failure alert's recovery action.
   final VoidCallback retry;
@@ -702,7 +828,11 @@ class LibrarySkeletonGrid extends StatelessWidget {
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.only(bottom: spacing),
-                      child: _CollectionSectionTitle(model: model),
+                      child: _CollectionSectionTitle(
+                        model: model,
+                        layout: layout,
+                        sortBooks: sortBooks,
+                      ),
                     ),
                   ),
                   SliverGrid.builder(
@@ -1129,6 +1259,7 @@ class LibraryBookCard extends StatelessWidget {
     required this.cover,
     required this.demandRevision,
     required this.shelf,
+    this.open = false,
     required this.removing,
     required this.loadCover,
     required this.openBook,
@@ -1139,6 +1270,10 @@ class LibraryBookCard extends StatelessWidget {
   final Uint8List? cover;
   final int demandRevision;
   final LibraryShelf shelf;
+
+  /// Whether the book is open in Reading now: the meta line ends on the
+  /// *Open* tag, and opening the card switches to it.
+  final bool open;
 
   /// Whether this card's removal is in flight: the action is hidden, opening
   /// is disabled and the meta line says so.
@@ -1182,6 +1317,19 @@ class LibraryBookCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: shosaiInterfaceStyleForText(metaStyle, status),
           );
+    // The tag follows the status, or takes the next run where it does not
+    // fit, so neither cuts the other.
+    final tag = open && !removing
+        ? Text(
+            l10n.cardOpenTag,
+            maxLines: 1,
+            softWrap: false,
+            style: shosaiInterfaceStyleForText(
+              _cardOpenTagStyle,
+              l10n.cardOpenTag,
+            ).copyWith(color: palette.accent),
+          )
+        : null;
     final badge = ShellFormatBadge(format: book.format);
     final radius = BorderRadius.circular(ShosaiTokens.radiusSm);
     return Stack(
@@ -1252,7 +1400,7 @@ class LibraryBookCard extends StatelessWidget {
                   ),
                 ),
                 SizedBox(
-                  height: _cardMetadataBox(context),
+                  height: _cardMetadataBox(context, shelf),
                   child: Align(
                     alignment: AlignmentDirectional.topStart,
                     child: wraps
@@ -1260,13 +1408,30 @@ class LibraryBookCard extends StatelessWidget {
                             spacing: 6,
                             runSpacing: _cardMetadataRunSpacing,
                             crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [badge, statusLabel],
+                            children: [badge, statusLabel, ?tag],
                           )
-                        : Row(
+                        : tag == null
+                        ? Row(
                             spacing: 6,
                             children: [
                               badge,
                               Flexible(child: statusLabel),
+                            ],
+                          )
+                        : Wrap(
+                            spacing: 6,
+                            runSpacing: _cardMetadataRunSpacing,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                spacing: 6,
+                                children: [
+                                  badge,
+                                  Flexible(child: statusLabel),
+                                ],
+                              ),
+                              tag,
                             ],
                           ),
                   ),

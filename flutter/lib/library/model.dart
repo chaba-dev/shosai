@@ -21,12 +21,8 @@ Future<bool> _ignoreProviderCleanupRetry() async => false;
 
 /// The number of books one library page holds.
 ///
-/// The controller requests this many books per page, and the continue-reading
-/// rule below only considers the first page, so a book that only arrives on a
-/// later page cannot introduce the section. The pinned Iced reference pages by
-/// its own `LIBRARY_PAGE_SIZE` of 40 (`crates/shosai-app/src/app.rs:425`);
-/// Flutter keeps its retained page size and applies the same first-page rule
-/// with this value.
+/// The controller requests this many books per page; the next page is asked
+/// for as the shelf scrolls toward its end.
 const int libraryPageSize = 50;
 
 /// Which composition the collection column shows.
@@ -77,6 +73,9 @@ final class LibraryModel {
     this.coverRevision = 0,
     this.query = '',
     this.format,
+    this.sort = FlutterLibrarySort.recent,
+    this.bookCount,
+    this.continueReading,
     this.settings,
     this.busy = false,
     this.importing = false,
@@ -98,6 +97,18 @@ final class LibraryModel {
   final int coverRevision;
   final String query;
   final FlutterBookFormat? format;
+
+  /// The shelf's order.
+  final FlutterLibrarySort sort;
+
+  /// How many books the whole library holds, as the last page reported it;
+  /// null until a page has said.
+  final int? bookCount;
+
+  /// The book last opened for reading and not yet finished, as the last page
+  /// reported it, whatever the shelf's query, format and order.
+  final FlutterLibraryBook? continueReading;
+
   final FlutterReaderSettings? settings;
   final bool busy;
 
@@ -154,24 +165,16 @@ final class LibraryModel {
     return LibraryCollectionState.noMatches;
   }
 
-  /// The book the reference's continue-reading section shows, or null.
+  /// The book the Continue reading hero shows, or null.
   ///
-  /// The pinned Iced `continue_reading_book`
-  /// (`crates/shosai-app/src/app.rs:7856-7866`) returns null while a search or
-  /// a format filter is active, and otherwise takes the first book of the
-  /// first page whose reading history is set (`lastRead`) and whose progress is
-  /// still below 1.0. A finished book and a book that was never opened are both
-  /// skipped, and a book that only arrives on a later page cannot introduce the
-  /// section. The selection is a pure function of immutable model state; the
-  /// card dispatches the book it was built with, so a later reload cannot
+  /// The store picks the book last opened for reading whose progress is still
+  /// below 1.0, so a finished book and a book never opened are both skipped,
+  /// and the shelf's order cannot change it. The hero hides while a search or
+  /// a format filter is active, because the shelf is then a list of results.
+  /// The card dispatches the book it was built with, so a later reload cannot
   /// change which book opens.
-  FlutterLibraryBook? get continueBook {
-    if (query.isNotEmpty || format != null) return null;
-    for (final book in books.take(libraryPageSize)) {
-      if (book.lastRead != null && book.progress < 1.0) return book;
-    }
-    return null;
-  }
+  FlutterLibraryBook? get continueBook =>
+      query.isNotEmpty || format != null ? null : continueReading;
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
@@ -179,6 +182,9 @@ final class LibraryModel {
     int? coverRevision,
     String? query,
     Object? format = _same,
+    FlutterLibrarySort? sort,
+    Object? bookCount = _same,
+    Object? continueReading = _same,
     Object? settings = _same,
     bool? busy,
     bool? importing,
@@ -201,6 +207,11 @@ final class LibraryModel {
     format: identical(format, _same)
         ? this.format
         : format as FlutterBookFormat?,
+    sort: sort ?? this.sort,
+    bookCount: identical(bookCount, _same) ? this.bookCount : bookCount as int?,
+    continueReading: identical(continueReading, _same)
+        ? this.continueReading
+        : continueReading as FlutterLibraryBook?,
     settings: identical(settings, _same)
         ? this.settings
         : settings as FlutterReaderSettings?,

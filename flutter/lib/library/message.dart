@@ -49,6 +49,12 @@ final class LibraryFormatChanged extends LibraryMessage {
   final FlutterBookFormat? format;
 }
 
+/// The shelf's order changed; page one reloads in the new order.
+final class LibrarySortChanged extends LibraryMessage {
+  const LibrarySortChanged(this.sort);
+  final FlutterLibrarySort sort;
+}
+
 final class LibraryImportRequested extends LibraryMessage {
   const LibraryImportRequested();
 }
