@@ -8,13 +8,15 @@ lint-rust:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 ## Run Flutter static analysis
-## The package's `pub get` must run before the app-root `flutter analyze`: that
-## command walks into flutter/packages and needs the nested package's own
+## The packages' `pub get` must run before the app-root `flutter analyze`: that
+## command walks into flutter/packages and needs each nested package's own
 ## package config to resolve its `package:test` imports on a fresh checkout.
 lint-flutter:
 	cd flutter/packages/shosai_epub && dart pub get
+	cd flutter/packages/shosai_core && dart pub get
 	cd flutter && flutter analyze
 	cd flutter/packages/shosai_epub && dart analyze
+	cd flutter/packages/shosai_core && dart analyze
 
 ## Format all Rust and Dart source files
 fmt: fmt-rust fmt-flutter
@@ -25,7 +27,7 @@ fmt-rust:
 
 ## Format Dart source files
 fmt-flutter:
-	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test
+	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Check Rust formatting without changing files
 check-fmt-rust:
@@ -33,7 +35,7 @@ check-fmt-rust:
 
 ## Check Dart formatting without changing files
 check-fmt-flutter:
-	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test
+	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
 
 ## Regenerate the Flutter design-token module from assets/theme/tokens.json
 theme-tokens:
@@ -79,6 +81,7 @@ test-flutter:
 	cargo build --package shosai-flutter-bridge
 	cd flutter && flutter test
 	cd flutter/packages/shosai_epub && dart pub get && dart test
+	cd flutter/packages/shosai_core && dart pub get && dart test
 
 ## Run tests for repository scripts
 test-scripts:
