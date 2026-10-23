@@ -326,6 +326,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerNoteCancel => 'Cancel';
 
   @override
+  String readerBackToPage(int page) {
+    return 'Back to page $page';
+  }
+
+  @override
+  String readerBackTo(String place) {
+    return 'Back to $place';
+  }
+
+  @override
+  String get readerBackDismiss => 'Stay here';
+
+  @override
   String readerNotesCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

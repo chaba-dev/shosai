@@ -544,6 +544,18 @@ class _ReaderScreenState extends State<ReaderScreen>
                       _openBook,
                   const SingleActivator(LogicalKeyboardKey.keyO, meta: true):
                       _openBook,
+                  // Back after a jump: Alt+← on Linux and Windows, ⌘[ on
+                  // macOS.
+                  const SingleActivator(
+                    LogicalKeyboardKey.arrowLeft,
+                    alt: true,
+                  ): () =>
+                      _controller.dispatch(const ReaderReturnRequested()),
+                  const SingleActivator(
+                    LogicalKeyboardKey.bracketLeft,
+                    meta: true,
+                  ): () =>
+                      _controller.dispatch(const ReaderReturnRequested()),
                 },
                 child: // The chrome rows are bounded by the height the reader is
                     // actually laid out with, not by the ambient `MediaQuery`: a
@@ -748,6 +760,18 @@ class _ReaderScreenState extends State<ReaderScreen>
               ),
             ),
           ),
+          if (model.returnPoints.isNotEmpty && model.document != null)
+            Positioned(
+              left: ShosaiTokens.space4,
+              right: ShosaiTokens.space4,
+              bottom: ShosaiTokens.space6,
+              child: Center(
+                child: _ReaderBackPill(
+                  model: model,
+                  dispatch: _controller.dispatch,
+                ),
+              ),
+            ),
           ..._readerPanelOverlay(
             model: model,
             layout: layout,

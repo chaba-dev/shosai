@@ -51,6 +51,16 @@ final class ReaderPlace {
   int get hashCode => Object.hash(unit, offset, length, annotationId, note);
 }
 
+/// Returns to where the last jump left from (the BackPill, Alt+← or ⌘[).
+final class ReaderReturnRequested extends ReaderMessage {
+  const ReaderReturnRequested();
+}
+
+/// Closes the BackPill, forgetting every return point.
+final class ReaderReturnDismissed extends ReaderMessage {
+  const ReaderReturnDismissed();
+}
+
 /// Goes to [place] in the open document, as a note or search hit chosen
 /// outside the reader asks; ignored while the reader is busy.
 final class ReaderPlaceRequested extends ReaderMessage {
@@ -708,6 +718,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     this.restorationError,
     this.offset,
     this.toolError,
+    this.returnPoint,
   });
 
   final int generation;
@@ -723,6 +734,9 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final String? restorationError;
   final int? offset;
   final String? toolError;
+
+  /// Where the book was left, when it opened at another place.
+  final ReaderReturnPoint? returnPoint;
 }
 
 final class _ReaderImageDecoded extends ReaderMessage {

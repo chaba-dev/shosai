@@ -725,6 +725,102 @@ void main() {
       await drainHarness(tester);
     });
 
+    testWidgets('a jump shows Back, which returns where it left from', (
+      tester,
+    ) async {
+      final harness = bridge();
+      await openReader(tester, harness);
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      await openContents(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-contents-entry-2')));
+      await settleNative(tester);
+      if (find
+          .byKey(const ValueKey('reader-panel-contents'))
+          .evaluate()
+          .isNotEmpty) {
+        await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+      }
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+      expect(find.text('Back to Chapter one'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('reader-back')));
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+      await openContents(tester);
+      expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('reader-contents-entry-0')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+        reason: 'Back returned to the first chapter',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets('a book opened at a place goes back to where it was left', (
+      tester,
+    ) async {
+      final harness = bridge(
+        readingState: FlutterReadingState(
+          unit: BigInt.from(2),
+          offset: BigInt.from(20),
+          zoom: 1,
+        ),
+      );
+      await openReader(
+        tester,
+        harness,
+        place: const ReaderPlace(1, offset: 21),
+      );
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      // Closing it stays.
+      await tester.tap(find.byKey(const ValueKey('reader-back-dismiss')));
+      await settleNative(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets('three page turns away or Stay here close Back', (
+      tester,
+    ) async {
+      final requests = ReaderPlaceRequests();
+      final harness = bridge();
+      await openReader(tester, harness, placeRequests: requests);
+      await settleEpubPage(tester);
+      requests.go(const ReaderPlace(1, offset: 0));
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      // The book has three one-page chapters: forward to the last, then back.
+      for (final edge in ['next', 'previous', 'previous']) {
+        expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+        await tester.tap(find.byKey(ValueKey('reader-edge-$edge')));
+        await settleEpubPage(tester);
+      }
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      // Stay here closes Back too.
+      requests.go(const ReaderPlace(2, offset: 0));
+      await settleEpubPage(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-back-dismiss')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
     testWidgets('a later row of the same chapter is the current one', (
       tester,
     ) async {
@@ -973,6 +1069,11 @@ void main() {
 
       expect(harness.savedReadingStates.last.unit.toInt(), 2);
       expect(harness.savedReadingStates.last.offset?.toInt(), 0);
+      expect(
+        find.text('Back to Chapter one'),
+        findsOneWidget,
+        reason: 'a followed link is a jump Back returns from',
+      );
 
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);
