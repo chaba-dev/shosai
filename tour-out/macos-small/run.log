@@ -1,0 +1,138 @@
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.1.0 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  file_selector_android 0.5.2+6 (0.5.2+11 available)
+  file_selector_ios 0.5.3+6 (0.5.3+7 available)
+  file_selector_macos 0.9.5+1 (0.9.5+2 available)
+  flutter_shaders 0.1.3 (0.1.5 available)
+  hooks 2.0.2 (2.2.0 available)
+  intl 0.20.2 (0.20.3 available)
+  jni 1.0.3 (1.1.0 available)
+  jni_flutter 1.0.3 (1.0.4+1 available)
+  lucide_icons_flutter 3.1.19 (4.0.1 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.17.0 (1.19.0 available)
+  native_toolchain_c 0.19.2 (0.19.5 available)
+  objective_c 9.5.0 (9.6.2 available)
+  package_config 2.2.0 (3.0.0 available)
+! pdfium_dart 0.2.5 from path third_party/pdfium_dart (overridden)
+  pdfium_flutter 0.2.3 (0.4.0 available)
+  pdfrx 2.4.7 (2.9.0 available)
+! pdfrx_engine 0.4.5 from path third_party/pdfrx_engine (overridden)
+  petitparser 7.0.2 (7.1.0 available)
+  platform 3.1.6 (3.2.0 available)
+  record_use 0.6.0 (1.1.1 available)
+  shadcn_ui 0.56.3 (0.57.2 available)
+  sqlite3 3.5.2 (3.7.1 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  synchronized 3.4.0+1 (3.5.0 available)
+  test_api 0.7.10 (0.7.15 available)
+  theme_extensions_builder_annotation 7.4.0 (7.5.0 available)
+  two_dimensional_scrollables 0.5.4 (0.5.5 available)
+  unorm_dart 0.3.2 (0.3.3 available)
+  url_launcher_android 6.3.30 (6.3.33 available)
+  vector_graphics 1.2.3 (1.2.4 available)
+  vector_graphics_compiler 1.3.0 (1.3.2 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 15.3.0 (15.4.0 available)
+  xml 7.0.1 (7.1.0 available)
+Got dependencies!
+37 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /private/tmp/shosai-tour/flutter/integration_test/release_tour_test.dart
+Building macOS application...                                   
+✓ Built build/macos/Build/Products/Debug/shosai_flutter.app
+Failed to foreground app; open returned 1
+00:00 +0: release tour
+TOUR platform: macos
+TOUR window: 1024.0x768.0 @2.0
+TOUR books: [attention.pdf, gibbon.epub, neko.epub, origin.epub, shannon.pdf]
+TOUR imported: 5
+TOUR shot: 01-library
+TOUR shot: 02-origin-open
+TOUR origin-status-open: [5% · chapter 1 of 19]
+TOUR focus-after-open: FocusNode#35aff(reader surface [PRIMARY FOCUS])(context: Focus-[<'reader-selection-focus'>], PRIMARY FOCUS)
+TOUR origin-status-after-arrow-right: [On the Origin of Species, 11% · chapter 2 of 19]
+TOUR origin-status-after-page-down-unfocused: [On the Origin of Species, 11% · chapter 2 of 19]
+TOUR focus-after-click: FocusNode#35aff(reader surface [PRIMARY FOCUS])(context: Focus-[<'reader-selection-focus'>], PRIMARY FOCUS)
+TOUR origin-status-after-arrow-right-clicked: [Contents, 11% · chapter 2 of 19]
+TOUR origin-status-after-space: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR origin-status-after-page-down-0: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR origin-status-after-page-down-1: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR origin-status-after-page-down-2: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR origin-status-after-page-down-3: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR shot: 03-origin-turned
+TOUR origin-status-turned: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR origin-ok: true
+TOUR shot: 04-origin-contents
+TOUR shot: 05-origin-contents-jump
+TOUR origin-status-chapter-iv: [CHAPTER IV. NATURAL SELECTION., 37% · chapter 7 of 19]
+TOUR origin-back-pill: true
+TOUR origin-status-after-back: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR shot: 06-origin-back
+TOUR origin-contents-ok: true
+TOUR shot: 07-origin-selection
+TOUR shot: 08-origin-highlighted
+TOUR origin-highlight-ok: true
+TOUR shot: 09-origin-notes-opened
+TOUR shot: 10-origin-page-note-editor
+TOUR shot: 11-origin-notes-panel
+TOUR origin-notes-ok: true
+TOUR shot: 12-origin-display-panel
+TOUR shot: 13-origin-night-larger
+TOUR origin-status-larger: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR origin-display-ok: true
+TOUR shot: 14-pdf-open
+TOUR pdf-status-open: [7% · page 1 of 15]
+TOUR shot: 15-pdf-turned
+TOUR pdf-status-turned: [Model Architecture, 20% · pages 2–3 of 15]
+TOUR pdf-ok: true
+TOUR shot: 16-pdf-display-panel
+TOUR shot: 17-pdf-night-zoomed
+TOUR pdf-display-ok: true
+TOUR shot: 18-pdf-selection
+TOUR shot: 19-pdf-highlighted
+TOUR pdf-highlight-ok: true
+TOUR pdf-links-on-page: 30
+TOUR pdf-page-rect: Rect.fromLTRB(100.0, 108.8, 980.0, 678.2) spread true
+TOUR pdf-link-target: page 10 url null at Offset(338.6, 183.1)
+TOUR shot: 20-pdf-link-tapped
+TOUR pdf-status-after-link: [Model Architecture, 20% · pages 2–3 of 15]
+TOUR pdf-link-back-pill: false
+TOUR pdf-link-ok: true
+TOUR shot: 21-gibbon-chapter
+TOUR gibbon-link-tap: at Offset(884.0, 253.0) after 880 taps
+TOUR gibbon-link-found: true
+TOUR shot: 22-gibbon-footnote-tapped
+TOUR gibbon-status-after-link: [Introduction., 12% · chapter 7 of 59]
+TOUR gibbon-back-pill: [Back to Introduction.]
+TOUR gibbon-status-after-back: [Introduction., 12% · chapter 7 of 59]
+TOUR gibbon-ok: true
+TOUR shot: 23-neko-open
+TOUR shot: 24-neko-turned
+TOUR neko-status: [一, 33% · chapter 1 of 3]
+TOUR neko-ok: true
+TOUR shot: 25-search-text-this-book
+TOUR shot: 26-search-text
+TOUR shot: 27-search-note
+TOUR shot: 28-search-note-opened
+TOUR search-note-status: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR search-back-pill: true
+TOUR search-ok: true
+TOUR shot: 29-notes-place
+TOUR shot: 30-bookmarks-place
+TOUR shot: 31-library-after
+TOUR notes-place-ok: true
+TOUR origin-status-reopened: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR shot: 32-origin-reopened
+TOUR open-books-ok: true
+TOUR shot: 33-relaunch
+TOUR relaunch-reading: true
+TOUR origin-status-relaunch: [DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES., 11% · chapter 2 of 19]
+TOUR shot: 34-origin-relaunch
+TOUR relaunch-ok: true
+03:17 +1: (tearDownAll)
+03:17 +1: All tests passed!

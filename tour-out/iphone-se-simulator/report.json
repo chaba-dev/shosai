@@ -1,0 +1,426 @@
+{
+  "steps": [
+    {
+      "key": "downloaded",
+      "value": "origin.epub 610265 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "gibbon.epub 846075 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "attention.pdf 2215244 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "shannon.pdf 366296 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "neko.epub 344973 B"
+    },
+    {
+      "key": "platform",
+      "value": "ios"
+    },
+    {
+      "key": "window",
+      "value": "375.0x667.0 @2.0"
+    },
+    {
+      "key": "books",
+      "value": [
+        "attention.pdf",
+        "gibbon.epub",
+        "neko.epub",
+        "origin.epub",
+        "shannon.pdf"
+      ]
+    },
+    {
+      "key": "imported",
+      "value": 5
+    },
+    {
+      "key": "shot",
+      "value": "01-library"
+    },
+    {
+      "key": "locale",
+      "value": "en system en_US"
+    },
+    {
+      "key": "shot",
+      "value": "02-origin-open"
+    },
+    {
+      "key": "origin-status-open",
+      "value": [
+        "Aa",
+        "5% · chapter 1"
+      ]
+    },
+    {
+      "key": "focus-after-open",
+      "value": "FocusNode#aea7a(reader surface [PRIMARY FOCUS])(context: Focus-[<'reader-selection-focus'>], PRIMARY FOCUS)"
+    },
+    {
+      "key": "origin-status-after-page-down-0",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-1",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-2",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-3",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "03-origin-turned"
+    },
+    {
+      "key": "origin-status-turned",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "04-origin-contents"
+    },
+    {
+      "key": "shot",
+      "value": "05-origin-contents-jump"
+    },
+    {
+      "key": "origin-status-chapter-iv",
+      "value": [
+        "Aa",
+        "37% · chapter 7"
+      ]
+    },
+    {
+      "key": "origin-back-pill",
+      "value": true
+    },
+    {
+      "key": "origin-status-after-back",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "06-origin-back"
+    },
+    {
+      "key": "origin-contents-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "07-origin-selection"
+    },
+    {
+      "key": "origin-highlight-FAILED",
+      "value": "Bad state: no \"Yellow\" on screen\n#0      _tapText (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:486:34)\n#1      main.<anonymous closure>.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:156:13)\n<asynchronous suspension>\n#2      _try (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:422:5)\n<asynchronous suspension>\n#3      main.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:153:5)"
+    },
+    {
+      "key": "shot",
+      "value": "08-origin-notes-opened"
+    },
+    {
+      "key": "shot",
+      "value": "09-origin-page-note-editor"
+    },
+    {
+      "key": "origin-note-typed",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "10-origin-notes-panel"
+    },
+    {
+      "key": "origin-note-listed",
+      "value": true
+    },
+    {
+      "key": "origin-notes-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "11-origin-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "12-origin-night-larger"
+    },
+    {
+      "key": "origin-status-larger",
+      "value": [
+        "Aa",
+        "11% · chapter 2",
+        "1"
+      ]
+    },
+    {
+      "key": "origin-display-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "13-pdf-open"
+    },
+    {
+      "key": "pdf-status-open",
+      "value": [
+        "Aa",
+        "7% · page 1"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "14-pdf-turned"
+    },
+    {
+      "key": "pdf-status-turned",
+      "value": [
+        "Aa",
+        "13% · page 2"
+      ]
+    },
+    {
+      "key": "pdf-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "15-pdf-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "16-pdf-night-zoomed"
+    },
+    {
+      "key": "pdf-display-ok",
+      "value": true
+    },
+    {
+      "key": "pdf-selection-first-drag",
+      "value": "no selection actions"
+    },
+    {
+      "key": "shot",
+      "value": "17-pdf-selection"
+    },
+    {
+      "key": "pdf-highlight-FAILED",
+      "value": "Bad state: no \"Green\" on screen\n#0      _tapText (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:486:34)\n#1      main.<anonymous closure>.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:233:13)\n<asynchronous suspension>\n#2      _try (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:422:5)\n<asynchronous suspension>\n#3      main.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:224:5)"
+    },
+    {
+      "key": "pdf-links-on-page",
+      "value": 30
+    },
+    {
+      "key": "pdf-page-rect",
+      "value": "Rect.fromLTRB(24.0, 76.0, 351.0, 610.0) spread false"
+    },
+    {
+      "key": "pdf-link-target",
+      "value": "page 10 url null at Offset(201.4, 131.2)"
+    },
+    {
+      "key": "shot",
+      "value": "18-pdf-link-tapped"
+    },
+    {
+      "key": "pdf-status-after-link",
+      "value": [
+        "Aa",
+        "13% · page 2"
+      ]
+    },
+    {
+      "key": "pdf-link-back-pill",
+      "value": false
+    },
+    {
+      "key": "pdf-link-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "19-gibbon-chapter"
+    },
+    {
+      "key": "gibbon-link-tap",
+      "value": "at Offset(244.0, 332.0) after 520 taps"
+    },
+    {
+      "key": "gibbon-link-found",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "20-gibbon-footnote-tapped"
+    },
+    {
+      "key": "gibbon-status-after-link",
+      "value": [
+        "Aa",
+        "5% · chapter 3"
+      ]
+    },
+    {
+      "key": "gibbon-back-pill",
+      "value": [
+        "Back to Edward Gibbon, Esq. With notes by the Rev. H. H. Milman"
+      ]
+    },
+    {
+      "key": "gibbon-status-after-back",
+      "value": [
+        "Aa",
+        "3% · chapter 2"
+      ]
+    },
+    {
+      "key": "gibbon-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "21-neko-open"
+    },
+    {
+      "key": "shot",
+      "value": "22-neko-turned"
+    },
+    {
+      "key": "neko-status",
+      "value": [
+        "Aa",
+        "33% · chapter 1"
+      ]
+    },
+    {
+      "key": "neko-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "23-search-text-this-book"
+    },
+    {
+      "key": "shot",
+      "value": "24-search-text"
+    },
+    {
+      "key": "shot",
+      "value": "25-search-note"
+    },
+    {
+      "key": "shot",
+      "value": "26-search-note-opened"
+    },
+    {
+      "key": "search-note-status",
+      "value": [
+        "Aa",
+        "11% · chapter 2",
+        "1"
+      ]
+    },
+    {
+      "key": "search-back-pill",
+      "value": true
+    },
+    {
+      "key": "search-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "27-notes-place"
+    },
+    {
+      "key": "shot",
+      "value": "28-bookmarks-place"
+    },
+    {
+      "key": "shot",
+      "value": "29-library-after"
+    },
+    {
+      "key": "notes-place-ok",
+      "value": true
+    },
+    {
+      "key": "origin-status-reopened",
+      "value": [
+        "Aa",
+        "11% · chapter 2",
+        "1"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "30-origin-reopened"
+    },
+    {
+      "key": "open-books-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "31-relaunch"
+    },
+    {
+      "key": "relaunch-reading",
+      "value": true
+    },
+    {
+      "key": "origin-status-relaunch",
+      "value": [
+        "Aa",
+        "11% · chapter 2",
+        "1"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "32-origin-relaunch"
+    },
+    {
+      "key": "relaunch-ok",
+      "value": true
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+                          Failed to install embedded profile for dev.shosai.shosai-flutter : 0xe8008012 (This provisioning profile cannot be installed on this device.) (MIInstallerErrorDomain error 13 (0x0D))
+                      NSLocalizedRecoverySuggestion = Failed to install embedded profile for dev.shosai.shosai-flutter : 0xe8008012 (This provisioning profile cannot be installed on this device.)
+                 "message" : "Provisioning profile \"iOS Team Provisioning Profile: dev.shosai.shosai-flutter\" doesn't include the currently selected device \"Darwin’s iPad\" (identifier 00008103-001430EE0E68801E).",
+           /tmp/shosai-tour-ios/flutter/ios/Runner.xcodeproj: error: No Accounts: Add a new account in Accounts settings. (in target 'Runner' from project 'Runner')

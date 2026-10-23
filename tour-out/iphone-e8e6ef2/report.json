@@ -1,0 +1,419 @@
+{
+  "steps": [
+    {
+      "key": "downloaded",
+      "value": "origin.epub 610265 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "gibbon.epub 846075 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "attention.pdf 2215244 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "shannon.pdf 366296 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "neko.epub 344973 B"
+    },
+    {
+      "key": "platform",
+      "value": "ios"
+    },
+    {
+      "key": "window",
+      "value": "430.0x932.0 @3.0"
+    },
+    {
+      "key": "books",
+      "value": [
+        "attention.pdf",
+        "gibbon.epub",
+        "neko.epub",
+        "origin.epub",
+        "shannon.pdf"
+      ]
+    },
+    {
+      "key": "imported",
+      "value": 5
+    },
+    {
+      "key": "shot",
+      "value": "01-library"
+    },
+    {
+      "key": "locale",
+      "value": "en system ja_JP"
+    },
+    {
+      "key": "shot",
+      "value": "02-origin-open"
+    },
+    {
+      "key": "origin-status-open",
+      "value": [
+        "Aa",
+        "5% · chapter 1"
+      ]
+    },
+    {
+      "key": "focus-after-open",
+      "value": "Instance of 'FocusNode'"
+    },
+    {
+      "key": "origin-status-after-page-down-0",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-1",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-2",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-3",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "03-origin-turned"
+    },
+    {
+      "key": "origin-status-turned",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "origin-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "04-origin-contents"
+    },
+    {
+      "key": "shot",
+      "value": "05-origin-contents-jump"
+    },
+    {
+      "key": "origin-status-chapter-iv",
+      "value": [
+        "Aa",
+        "37% · chapter 7"
+      ]
+    },
+    {
+      "key": "origin-back-pill",
+      "value": true
+    },
+    {
+      "key": "origin-status-after-back",
+      "value": [
+        "Aa",
+        "11% · chapter 2"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "06-origin-back"
+    },
+    {
+      "key": "origin-contents-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "07-origin-selection"
+    },
+    {
+      "key": "shot",
+      "value": "08-origin-highlighted"
+    },
+    {
+      "key": "origin-highlight-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "09-origin-notes-opened"
+    },
+    {
+      "key": "shot",
+      "value": "10-origin-page-note-editor"
+    },
+    {
+      "key": "origin-note-typed",
+      "value": false
+    },
+    {
+      "key": "shot",
+      "value": "11-origin-notes-panel"
+    },
+    {
+      "key": "origin-note-listed",
+      "value": false
+    },
+    {
+      "key": "origin-notes-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "12-origin-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "13-origin-night-larger"
+    },
+    {
+      "key": "origin-status-larger",
+      "value": [
+        "Aa",
+        "11% · chapter 2",
+        "1"
+      ]
+    },
+    {
+      "key": "origin-display-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "14-pdf-open"
+    },
+    {
+      "key": "pdf-status-open",
+      "value": [
+        "Aa",
+        "7% · page 1"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "15-pdf-turned"
+    },
+    {
+      "key": "pdf-status-turned",
+      "value": [
+        "Aa",
+        "13% · page 2"
+      ]
+    },
+    {
+      "key": "pdf-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "16-pdf-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "17-pdf-night-zoomed"
+    },
+    {
+      "key": "pdf-display-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "18-pdf-selection"
+    },
+    {
+      "key": "shot",
+      "value": "19-pdf-highlighted"
+    },
+    {
+      "key": "pdf-highlight-ok",
+      "value": true
+    },
+    {
+      "key": "pdf-links-on-page",
+      "value": 30
+    },
+    {
+      "key": "pdf-page-rect",
+      "value": "Instance of 'Rect' spread false"
+    },
+    {
+      "key": "pdf-link-target",
+      "value": "page 10 url null at Instance of 'Offset'"
+    },
+    {
+      "key": "shot",
+      "value": "20-pdf-link-tapped"
+    },
+    {
+      "key": "pdf-status-after-link",
+      "value": [
+        "Aa",
+        "13% · page 2",
+        "1"
+      ]
+    },
+    {
+      "key": "pdf-link-back-pill",
+      "value": false
+    },
+    {
+      "key": "pdf-link-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "21-gibbon-chapter"
+    },
+    {
+      "key": "gibbon-link-tap",
+      "value": "none after 1872 taps"
+    },
+    {
+      "key": "gibbon-link-tap",
+      "value": "at Instance of 'Offset' after 1280 taps"
+    },
+    {
+      "key": "gibbon-link-found",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "22-gibbon-footnote-tapped"
+    },
+    {
+      "key": "gibbon-status-after-link",
+      "value": [
+        "Aa",
+        "12% · chapter 7"
+      ]
+    },
+    {
+      "key": "gibbon-back-pill",
+      "value": [
+        "Back to Introduction."
+      ]
+    },
+    {
+      "key": "gibbon-status-after-back",
+      "value": [
+        "Aa",
+        "12% · chapter 7"
+      ]
+    },
+    {
+      "key": "gibbon-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "23-neko-open"
+    },
+    {
+      "key": "shot",
+      "value": "24-neko-turned"
+    },
+    {
+      "key": "neko-status",
+      "value": [
+        "Aa",
+        "33% · chapter 1"
+      ]
+    },
+    {
+      "key": "neko-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "25-search-text-this-book"
+    },
+    {
+      "key": "shot",
+      "value": "26-search-text"
+    },
+    {
+      "key": "shot",
+      "value": "27-search-note"
+    },
+    {
+      "key": "search-FAILED",
+      "value": "Bad state: no \"Tour page note\" on screen\n#0      _tapText (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:486)\n#1      main.<anonymous closure>.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:325)\n<asynchronous suspension>\n#2      _try (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:422)\n<asynchronous suspension>\n#3      main.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:299)"
+    },
+    {
+      "key": "shot",
+      "value": "28-notes-place"
+    },
+    {
+      "key": "shot",
+      "value": "29-bookmarks-place"
+    },
+    {
+      "key": "shot",
+      "value": "30-library-after"
+    },
+    {
+      "key": "notes-place-ok",
+      "value": true
+    },
+    {
+      "key": "origin-status-reopened",
+      "value": [
+        "Aa",
+        "11% · chapter 2",
+        "1"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "31-origin-reopened"
+    },
+    {
+      "key": "open-books-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "32-relaunch"
+    },
+    {
+      "key": "relaunch-reading",
+      "value": true
+    },
+    {
+      "key": "origin-status-relaunch",
+      "value": [
+        "Aa",
+        "11% · chapter 2",
+        "1"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "33-origin-relaunch"
+    },
+    {
+      "key": "relaunch-ok",
+      "value": true
+    }
+  ]
+}

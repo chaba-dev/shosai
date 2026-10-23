@@ -1,0 +1,159 @@
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.1.0 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  file_selector_android 0.5.2+6 (0.5.2+11 available)
+  file_selector_ios 0.5.3+6 (0.5.3+7 available)
+  file_selector_macos 0.9.5+1 (0.9.5+2 available)
+  flutter_shaders 0.1.3 (0.1.5 available)
+  hooks 2.0.2 (2.2.0 available)
+  intl 0.20.2 (0.20.3 available)
+  jni 1.0.3 (1.1.0 available)
+  jni_flutter 1.0.3 (1.0.4+1 available)
+  lucide_icons_flutter 3.1.19 (4.0.1 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.17.0 (1.19.0 available)
+  native_toolchain_c 0.19.2 (0.19.5 available)
+  objective_c 9.5.0 (9.6.2 available)
+  package_config 2.2.0 (3.0.0 available)
+! pdfium_dart 0.2.5 from path third_party/pdfium_dart (overridden)
+  pdfium_flutter 0.2.3 (0.4.0 available)
+  pdfrx 2.4.7 (2.9.0 available)
+! pdfrx_engine 0.4.5 from path third_party/pdfrx_engine (overridden)
+  petitparser 7.0.2 (7.1.0 available)
+  platform 3.1.6 (3.2.0 available)
+  record_use 0.6.0 (1.1.1 available)
+  shadcn_ui 0.56.3 (0.57.2 available)
+  sqlite3 3.5.2 (3.7.1 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  synchronized 3.4.0+1 (3.5.0 available)
+  test_api 0.7.10 (0.7.15 available)
+  theme_extensions_builder_annotation 7.4.0 (7.5.0 available)
+  two_dimensional_scrollables 0.5.4 (0.5.5 available)
+  unorm_dart 0.3.2 (0.3.3 available)
+  url_launcher_android 6.3.30 (6.3.33 available)
+  vector_graphics 1.2.3 (1.2.4 available)
+  vector_graphics_compiler 1.3.0 (1.3.2 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 15.3.0 (15.4.0 available)
+  xml 7.0.1 (7.1.0 available)
+Got dependencies!
+37 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Running Xcode build...                                          
+Xcode build done.                                           26.8s
+VMServiceFlutterDriver: Connecting to Flutter application at http://127.0.0.1:60173/eVNWUWLoigE=/
+VMServiceFlutterDriver: Isolate found with number: 6978259480601279
+VMServiceFlutterDriver: Isolate 6978259480601279 is runnable.
+VMServiceFlutterDriver: Isolate is paused at start.
+VMServiceFlutterDriver: Attempting to resume isolate
+flutter: 00:00 +0: release tour
+VMServiceFlutterDriver: Connected to Flutter application.
+flutter: TOUR downloaded: origin.epub 610265 B
+flutter: TOUR downloaded: gibbon.epub 846075 B
+flutter: TOUR downloaded: attention.pdf 2215244 B
+flutter: TOUR downloaded: shannon.pdf 366296 B
+flutter: TOUR downloaded: neko.epub 344973 B
+flutter: TOUR platform: ios
+flutter: TOUR window: 375.0x667.0 @2.0
+flutter: TOUR books: [attention.pdf, gibbon.epub, neko.epub, origin.epub, shannon.pdf]
+flutter: TOUR imported: 5
+flutter: TOUR shot: 01-library
+flutter: TOUR locale: en system en_US
+VMServiceFlutterDriver: request_data message is taking a long time to complete...
+flutter: TOUR shot: 02-origin-open
+flutter: TOUR origin-status-open: [Aa, 5% · chapter 1]
+flutter: TOUR focus-after-open: FocusNode#aea7a(reader surface [PRIMARY FOCUS])(context: Focus-[<'reader-selection-focus'>], PRIMARY FOCUS)
+flutter: TOUR origin-status-after-page-down-0: [Aa, 11% · chapter 2]
+flutter: TOUR origin-status-after-page-down-1: [Aa, 11% · chapter 2]
+flutter: TOUR origin-status-after-page-down-2: [Aa, 11% · chapter 2]
+flutter: TOUR origin-status-after-page-down-3: [Aa, 11% · chapter 2]
+flutter: TOUR shot: 03-origin-turned
+flutter: TOUR origin-status-turned: [Aa, 11% · chapter 2]
+flutter: TOUR origin-ok: true
+flutter: TOUR shot: 04-origin-contents
+flutter: TOUR shot: 05-origin-contents-jump
+flutter: TOUR origin-status-chapter-iv: [Aa, 37% · chapter 7]
+flutter: TOUR origin-back-pill: true
+flutter: TOUR origin-status-after-back: [Aa, 11% · chapter 2]
+flutter: TOUR shot: 06-origin-back
+flutter: TOUR origin-contents-ok: true
+flutter: TOUR shot: 07-origin-selection
+flutter: TOUR origin-highlight-FAILED: Bad state: no "Yellow" on screen
+#0      _tapText (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:486:34)
+#1      main.<anonymous closure>.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:156:13)
+<asynchronous suspension>
+#2      _try (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:422:5)
+<asynchronous suspension>
+#3      main.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:153:5)
+flutter: TOUR shot: 08-origin-notes-opened
+flutter: TOUR shot: 09-origin-page-note-editor
+flutter: TOUR origin-note-typed: true
+flutter: TOUR shot: 10-origin-notes-panel
+flutter: TOUR origin-note-listed: true
+flutter: TOUR origin-notes-ok: true
+flutter: TOUR shot: 11-origin-display-panel
+flutter: TOUR shot: 12-origin-night-larger
+flutter: TOUR origin-status-larger: [Aa, 11% · chapter 2, 1]
+flutter: TOUR origin-display-ok: true
+flutter: TOUR shot: 13-pdf-open
+flutter: TOUR pdf-status-open: [Aa, 7% · page 1]
+flutter: TOUR shot: 14-pdf-turned
+flutter: TOUR pdf-status-turned: [Aa, 13% · page 2]
+flutter: TOUR pdf-ok: true
+flutter: TOUR shot: 15-pdf-display-panel
+flutter: TOUR shot: 16-pdf-night-zoomed
+flutter: TOUR pdf-display-ok: true
+flutter: TOUR pdf-selection-first-drag: no selection actions
+flutter: TOUR shot: 17-pdf-selection
+flutter: TOUR pdf-highlight-FAILED: Bad state: no "Green" on screen
+#0      _tapText (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:486:34)
+#1      main.<anonymous closure>.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:233:13)
+<asynchronous suspension>
+#2      _try (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:422:5)
+<asynchronous suspension>
+#3      main.<anonymous closure> (file:///private/tmp/shosai-tour-ios/flutter/integration_test/release_tour_test.dart:224:5)
+flutter: TOUR pdf-links-on-page: 30
+flutter: TOUR pdf-page-rect: Rect.fromLTRB(24.0, 76.0, 351.0, 610.0) spread false
+flutter: TOUR pdf-link-target: page 10 url null at Offset(201.4, 131.2)
+flutter: TOUR shot: 18-pdf-link-tapped
+flutter: TOUR pdf-status-after-link: [Aa, 13% · page 2]
+flutter: TOUR pdf-link-back-pill: false
+flutter: TOUR pdf-link-ok: true
+flutter: TOUR shot: 19-gibbon-chapter
+flutter: TOUR gibbon-link-tap: at Offset(244.0, 332.0) after 520 taps
+flutter: TOUR gibbon-link-found: true
+flutter: TOUR shot: 20-gibbon-footnote-tapped
+flutter: TOUR gibbon-status-after-link: [Aa, 5% · chapter 3]
+flutter: TOUR gibbon-back-pill: [Back to Edward Gibbon, Esq. With notes by the Rev. H. H. Milman]
+flutter: TOUR gibbon-status-after-back: [Aa, 3% · chapter 2]
+flutter: TOUR gibbon-ok: true
+flutter: TOUR shot: 21-neko-open
+flutter: TOUR shot: 22-neko-turned
+flutter: TOUR neko-status: [Aa, 33% · chapter 1]
+flutter: TOUR neko-ok: true
+flutter: TOUR shot: 23-search-text-this-book
+flutter: TOUR shot: 24-search-text
+flutter: TOUR shot: 25-search-note
+flutter: TOUR shot: 26-search-note-opened
+flutter: TOUR search-note-status: [Aa, 11% · chapter 2, 1]
+flutter: TOUR search-back-pill: true
+flutter: TOUR search-ok: true
+flutter: TOUR shot: 27-notes-place
+flutter: TOUR shot: 28-bookmarks-place
+flutter: TOUR shot: 29-library-after
+flutter: TOUR notes-place-ok: true
+flutter: TOUR origin-status-reopened: [Aa, 11% · chapter 2, 1]
+flutter: TOUR shot: 30-origin-reopened
+flutter: TOUR open-books-ok: true
+flutter: TOUR shot: 31-relaunch
+flutter: TOUR relaunch-reading: true
+flutter: TOUR origin-status-relaunch: [Aa, 11% · chapter 2, 1]
+flutter: TOUR shot: 32-origin-relaunch
+flutter: TOUR relaunch-ok: true
+flutter: 02:49 +1: (tearDownAll)
+flutter: 02:49 +2: All tests passed!
+All tests passed.
+Leaving the application running.

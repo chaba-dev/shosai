@@ -1,0 +1,424 @@
+{
+  "steps": [
+    {
+      "key": "platform",
+      "value": "macos"
+    },
+    {
+      "key": "window",
+      "value": "1024.0x768.0 @2.0"
+    },
+    {
+      "key": "books",
+      "value": [
+        "attention.pdf",
+        "gibbon.epub",
+        "neko.epub",
+        "origin.epub",
+        "shannon.pdf"
+      ]
+    },
+    {
+      "key": "imported",
+      "value": 5
+    },
+    {
+      "key": "shot",
+      "value": "01-library"
+    },
+    {
+      "key": "shot",
+      "value": "02-origin-open"
+    },
+    {
+      "key": "origin-status-open",
+      "value": [
+        "5% · chapter 1 of 19"
+      ]
+    },
+    {
+      "key": "focus-after-open",
+      "value": "FocusNode#35aff(reader surface [PRIMARY FOCUS])(context: Focus-[<'reader-selection-focus'>], PRIMARY FOCUS)"
+    },
+    {
+      "key": "origin-status-after-arrow-right",
+      "value": [
+        "On the Origin of Species",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-unfocused",
+      "value": [
+        "On the Origin of Species",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "focus-after-click",
+      "value": "FocusNode#35aff(reader surface [PRIMARY FOCUS])(context: Focus-[<'reader-selection-focus'>], PRIMARY FOCUS)"
+    },
+    {
+      "key": "origin-status-after-arrow-right-clicked",
+      "value": [
+        "Contents",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-space",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-0",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-1",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-2",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-3",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "03-origin-turned"
+    },
+    {
+      "key": "origin-status-turned",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "04-origin-contents"
+    },
+    {
+      "key": "shot",
+      "value": "05-origin-contents-jump"
+    },
+    {
+      "key": "origin-status-chapter-iv",
+      "value": [
+        "CHAPTER IV. NATURAL SELECTION.",
+        "37% · chapter 7 of 19"
+      ]
+    },
+    {
+      "key": "origin-back-pill",
+      "value": true
+    },
+    {
+      "key": "origin-status-after-back",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "06-origin-back"
+    },
+    {
+      "key": "origin-contents-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "07-origin-selection"
+    },
+    {
+      "key": "shot",
+      "value": "08-origin-highlighted"
+    },
+    {
+      "key": "origin-highlight-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "09-origin-notes-opened"
+    },
+    {
+      "key": "shot",
+      "value": "10-origin-page-note-editor"
+    },
+    {
+      "key": "shot",
+      "value": "11-origin-notes-panel"
+    },
+    {
+      "key": "origin-notes-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "12-origin-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "13-origin-night-larger"
+    },
+    {
+      "key": "origin-status-larger",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-display-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "14-pdf-open"
+    },
+    {
+      "key": "pdf-status-open",
+      "value": [
+        "7% · page 1 of 15"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "15-pdf-turned"
+    },
+    {
+      "key": "pdf-status-turned",
+      "value": [
+        "Model Architecture",
+        "20% · pages 2–3 of 15"
+      ]
+    },
+    {
+      "key": "pdf-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "16-pdf-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "17-pdf-night-zoomed"
+    },
+    {
+      "key": "pdf-display-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "18-pdf-selection"
+    },
+    {
+      "key": "shot",
+      "value": "19-pdf-highlighted"
+    },
+    {
+      "key": "pdf-highlight-ok",
+      "value": true
+    },
+    {
+      "key": "pdf-links-on-page",
+      "value": 30
+    },
+    {
+      "key": "pdf-page-rect",
+      "value": "Rect.fromLTRB(100.0, 108.8, 980.0, 678.2) spread true"
+    },
+    {
+      "key": "pdf-link-target",
+      "value": "page 10 url null at Offset(338.6, 183.1)"
+    },
+    {
+      "key": "shot",
+      "value": "20-pdf-link-tapped"
+    },
+    {
+      "key": "pdf-status-after-link",
+      "value": [
+        "Model Architecture",
+        "20% · pages 2–3 of 15"
+      ]
+    },
+    {
+      "key": "pdf-link-back-pill",
+      "value": false
+    },
+    {
+      "key": "pdf-link-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "21-gibbon-chapter"
+    },
+    {
+      "key": "gibbon-link-tap",
+      "value": "at Offset(884.0, 253.0) after 880 taps"
+    },
+    {
+      "key": "gibbon-link-found",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "22-gibbon-footnote-tapped"
+    },
+    {
+      "key": "gibbon-status-after-link",
+      "value": [
+        "Introduction.",
+        "12% · chapter 7 of 59"
+      ]
+    },
+    {
+      "key": "gibbon-back-pill",
+      "value": [
+        "Back to Introduction."
+      ]
+    },
+    {
+      "key": "gibbon-status-after-back",
+      "value": [
+        "Introduction.",
+        "12% · chapter 7 of 59"
+      ]
+    },
+    {
+      "key": "gibbon-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "23-neko-open"
+    },
+    {
+      "key": "shot",
+      "value": "24-neko-turned"
+    },
+    {
+      "key": "neko-status",
+      "value": [
+        "一",
+        "33% · chapter 1 of 3"
+      ]
+    },
+    {
+      "key": "neko-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "25-search-text-this-book"
+    },
+    {
+      "key": "shot",
+      "value": "26-search-text"
+    },
+    {
+      "key": "shot",
+      "value": "27-search-note"
+    },
+    {
+      "key": "shot",
+      "value": "28-search-note-opened"
+    },
+    {
+      "key": "search-note-status",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "search-back-pill",
+      "value": true
+    },
+    {
+      "key": "search-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "29-notes-place"
+    },
+    {
+      "key": "shot",
+      "value": "30-bookmarks-place"
+    },
+    {
+      "key": "shot",
+      "value": "31-library-after"
+    },
+    {
+      "key": "notes-place-ok",
+      "value": true
+    },
+    {
+      "key": "origin-status-reopened",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "32-origin-reopened"
+    },
+    {
+      "key": "open-books-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "33-relaunch"
+    },
+    {
+      "key": "relaunch-reading",
+      "value": true
+    },
+    {
+      "key": "origin-status-relaunch",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "34-origin-relaunch"
+    },
+    {
+      "key": "relaunch-ok",
+      "value": true
+    }
+  ]
+}

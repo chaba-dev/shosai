@@ -1,0 +1,3 @@
+  "CFBundleDisplayName" => "Shōsai Dev"
+  "CFBundleIdentifier" => "dev.shosai.shosai-flutter"
+  "CFBundleName" => "Shōsai Dev"

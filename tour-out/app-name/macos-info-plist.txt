@@ -1,0 +1,6 @@
+== Debug
+  "CFBundleDisplayName" => "Shōsai Dev"
+  "CFBundleName" => "Shōsai Dev"
+== Release
+  "CFBundleDisplayName" => "Shōsai"
+  "CFBundleName" => "Shōsai"

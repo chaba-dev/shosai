@@ -1,0 +1,89 @@
+TOUR downloaded: origin.epub 610265 B
+TOUR downloaded: gibbon.epub 846075 B
+TOUR downloaded: attention.pdf 2215244 B
+TOUR downloaded: shannon.pdf 366296 B
+TOUR downloaded: neko.epub 344973 B
+TOUR platform: ios
+TOUR window: 430.0x932.0 @3.0
+TOUR books: [attention.pdf, gibbon.epub, neko.epub, origin.epub, shannon.pdf]
+TOUR imported: 5
+TOUR shot: 01-library
+TOUR locale: en system ja_JP
+TOUR shot: 02-origin-open
+TOUR origin-status-open: [Aa, 5% · chapter 1]
+TOUR focus-after-open: Instance of 'FocusNode'
+TOUR origin-status-after-page-down-0: [Aa, 11% · chapter 2]
+TOUR origin-status-after-page-down-1: [Aa, 11% · chapter 2]
+TOUR origin-status-after-page-down-2: [Aa, 11% · chapter 2]
+TOUR origin-status-after-page-down-3: [Aa, 11% · chapter 2]
+TOUR shot: 03-origin-turned
+TOUR origin-status-turned: [Aa, 11% · chapter 2]
+TOUR origin-ok: true
+TOUR shot: 04-origin-contents
+TOUR shot: 05-origin-contents-jump
+TOUR origin-status-chapter-iv: [Aa, 37% · chapter 7]
+TOUR origin-back-pill: true
+TOUR origin-status-after-back: [Aa, 11% · chapter 2]
+TOUR shot: 06-origin-back
+TOUR origin-contents-ok: true
+TOUR shot: 07-origin-selection
+TOUR shot: 08-origin-highlighted
+TOUR origin-highlight-ok: true
+TOUR shot: 09-origin-notes-opened
+TOUR shot: 10-origin-page-note-editor
+TOUR origin-note-fields: 1 in all, 1 in the dialog
+TOUR origin-note-typed: false
+TOUR shot: 11-origin-notes-panel
+TOUR origin-note-listed: false
+TOUR origin-notes-ok: true
+TOUR shot: 12-origin-display-panel
+TOUR shot: 13-origin-night-larger
+TOUR origin-status-larger: [Aa, 11% · chapter 2, 1]
+TOUR origin-display-ok: true
+TOUR shot: 14-pdf-open
+TOUR pdf-status-open: [Aa, 7% · page 1]
+TOUR shot: 15-pdf-turned
+TOUR pdf-status-turned: [Aa, 13% · page 2]
+TOUR pdf-ok: true
+TOUR shot: 16-pdf-display-panel
+TOUR shot: 17-pdf-night-zoomed
+TOUR pdf-display-ok: true
+TOUR shot: 18-pdf-selection
+TOUR shot: 19-pdf-highlighted
+TOUR pdf-highlight-ok: true
+TOUR pdf-links-on-page: 30
+TOUR pdf-page-rect: Instance of 'Rect' spread false
+TOUR pdf-link-target: page 10 url null at Instance of 'Offset'
+TOUR shot: 20-pdf-link-tapped
+TOUR pdf-status-after-link: [Aa, 13% · page 2, 1]
+TOUR pdf-link-back-pill: false
+TOUR pdf-link-ok: true
+TOUR shot: 21-gibbon-chapter
+TOUR gibbon-link-tap: none after 1872 taps
+TOUR gibbon-link-tap: at Instance of 'Offset' after 1280 taps
+TOUR gibbon-link-found: true
+TOUR shot: 22-gibbon-footnote-tapped
+TOUR gibbon-status-after-link: [Aa, 12% · chapter 7]
+TOUR gibbon-back-pill: [Back to Introduction.]
+TOUR gibbon-status-after-back: [Aa, 12% · chapter 7]
+TOUR gibbon-ok: true
+TOUR shot: 23-neko-open
+TOUR shot: 24-neko-turned
+TOUR neko-status: [Aa, 33% · chapter 1]
+TOUR neko-ok: true
+TOUR shot: 25-search-text-this-book
+TOUR shot: 26-search-text
+TOUR shot: 27-search-note
+TOUR search-FAILED: Bad state: no "Tour page note" on screen
+TOUR shot: 28-notes-place
+TOUR shot: 29-bookmarks-place
+TOUR shot: 30-library-after
+TOUR notes-place-ok: true
+TOUR origin-status-reopened: [Aa, 11% · chapter 2, 1]
+TOUR shot: 31-origin-reopened
+TOUR open-books-ok: true
+TOUR shot: 32-relaunch
+TOUR relaunch-reading: true
+TOUR origin-status-relaunch: [Aa, 11% · chapter 2, 1]
+TOUR shot: 33-origin-relaunch
+TOUR relaunch-ok: true

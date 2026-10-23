@@ -1,0 +1,75 @@
+TOUR downloaded: origin.epub 610265 B
+TOUR downloaded: gibbon.epub 846075 B
+TOUR downloaded: attention.pdf 2215244 B
+TOUR downloaded: shannon.pdf 366296 B
+TOUR downloaded: neko.epub 344973 B
+TOUR platform: ios
+TOUR window: 430.0x932.0 @3.0
+TOUR books: [attention.pdf, gibbon.epub, neko.epub, origin.epub, shannon.pdf]
+TOUR imported: 5
+TOUR shot: 01-library
+TOUR shot: 02-origin-open
+TOUR origin-status-open: [Aa, 5% · 第1章]
+TOUR focus-after-open: Instance of 'FocusNode'
+TOUR origin-status-after-page-down-0: [Aa, 11% · 第2章]
+TOUR origin-status-after-page-down-1: [Aa, 11% · 第2章]
+TOUR origin-status-after-page-down-2: [Aa, 11% · 第2章]
+TOUR origin-status-after-page-down-3: [Aa, 11% · 第2章]
+TOUR shot: 03-origin-turned
+TOUR origin-status-turned: [Aa, 11% · 第2章]
+TOUR origin-ok: true
+TOUR shot: 04-origin-contents
+TOUR shot: 05-origin-contents-jump
+TOUR origin-status-chapter-iv: [Aa, 37% · 第7章]
+TOUR origin-back-pill: true
+TOUR origin-status-after-back: [Aa, 11% · 第2章]
+TOUR shot: 06-origin-back
+TOUR origin-contents-ok: true
+TOUR shot: 07-origin-selection
+TOUR origin-highlight-FAILED: Bad state: no "Yellow" on screen
+TOUR shot: 08-origin-notes-opened
+TOUR shot: 09-origin-page-note-editor
+TOUR origin-notes-FAILED: Bad state: no "Save" on screen
+TOUR shot: 10-origin-display-panel
+TOUR origin-display-FAILED: Bad state: no "Night" on screen
+TOUR shot: 11-pdf-open
+TOUR pdf-status-open: [Aa, 7% · 1ページ]
+TOUR shot: 12-pdf-turned
+TOUR pdf-status-turned: [Aa, 13% · 2ページ]
+TOUR pdf-ok: true
+TOUR shot: 13-pdf-display-panel
+TOUR pdf-display-FAILED: Bad state: no "Night" on screen
+TOUR pdf-selection-first-drag: no selection actions
+TOUR shot: 14-pdf-selection
+TOUR pdf-highlight-FAILED: Bad state: no "Green" on screen
+TOUR pdf-links-on-page: 30
+TOUR pdf-page-rect: Instance of 'Rect' spread false
+TOUR pdf-link-target: page 10 url null at Instance of 'Offset'
+TOUR shot: 15-pdf-link-tapped
+TOUR pdf-status-after-link: [Aa, 13% · 2ページ]
+TOUR pdf-link-back-pill: false
+TOUR pdf-link-ok: true
+TOUR shot: 16-gibbon-chapter
+TOUR gibbon-link-tap: none after 1872 taps
+TOUR gibbon-link-tap: at Instance of 'Offset' after 1280 taps
+TOUR gibbon-link-found: true
+TOUR shot: 17-gibbon-footnote-tapped
+TOUR gibbon-status-after-link: [Aa, 12% · 第7章]
+TOUR gibbon-back-pill: [Introduction.に戻る]
+TOUR gibbon-status-after-back: [Aa, 12% · 第7章]
+TOUR gibbon-ok: true
+TOUR shot: 18-neko-open
+TOUR shot: 19-neko-turned
+TOUR neko-status: [Aa, 33% · 第1章]
+TOUR neko-ok: true
+TOUR shot: 20-search-text-this-book
+TOUR search-FAILED: Bad state: no "All books" on screen
+TOUR notes-place-FAILED: Bad state: no place Notes
+TOUR origin-status-reopened: [Aa, 11% · 第2章]
+TOUR shot: 21-origin-reopened
+TOUR open-books-ok: true
+TOUR shot: 22-relaunch
+TOUR relaunch-reading: true
+TOUR origin-status-relaunch: [Aa, 11% · 第2章]
+TOUR shot: 23-origin-relaunch
+TOUR relaunch-ok: true

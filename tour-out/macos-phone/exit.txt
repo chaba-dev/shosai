@@ -1,0 +1,1 @@
+partial: stopped by me after the notes step (only used for screenshots of the phone-width note dialog)

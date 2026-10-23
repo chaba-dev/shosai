@@ -1,0 +1,21 @@
+{
+  "steps": [
+    {
+      "key": "downloaded",
+      "value": "origin.epub 610265 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "gibbon.epub 846075 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "attention.pdf 2215244 B"
+    },
+    {
+      "key": "downloaded",
+      "value": "shannon.pdf 366296 B"
+    }
+  ],
+  "shots": {}
+}
