@@ -33,6 +33,11 @@ const maxLibraryTextBytes = 8 * 1024 * 1024;
 /// Longest text version name, in UTF-8 bytes.
 const maxTextVersionBytes = 256;
 
+/// UTF-16 code units of note text one matching batch holds, about: notes
+/// are read and matched a few books at a time, so a search that finds its
+/// [maxLibraryNoteHits] early leaves later books' notes unread.
+const _noteBatchUnits = 1024 * 1024;
+
 /// Matches kept in one note's quote or body.
 const _maxMatchesPerNoteField = 16;
 
@@ -155,34 +160,77 @@ final class LibrarySearch {
     firstMatches(const [], query, maxMatches: 1);
     if (query.isEmpty) return const [];
     cancellation.throwIfCancelled();
-    final books = await _records.notes(bookId);
-    cancellation.throwIfCancelled();
-    final notes = [
-      for (final (_, entries) in books)
-        for (final note in entries) (note.quote, note.body),
-    ];
-    final found = await _inIsolate(_matchNotes, notes, query);
+    final documents = await _records.noteDocuments(bookId);
     cancellation.throwIfCancelled();
     final results = <BookNoteHits>[];
-    var index = 0;
-    var next = 0;
-    for (final (book, entries) in books) {
-      final hits = <NoteHit>[];
-      for (final note in entries) {
-        if (next < found.length && found[next].$1 == index) {
-          hits.add(NoteHit(note, found[next].$2));
-          next++;
+    var hitCount = 0;
+    var read = 0;
+    final batch = <(Book, List<NoteEntry>)>[];
+    var batchNotes = 0;
+    var batchUnits = 0;
+    Future<void> flush() async {
+      if (batch.isEmpty) return;
+      final work = List.of(batch);
+      batch.clear();
+      batchNotes = 0;
+      batchUnits = 0;
+      final notes = [
+        for (final (_, entries) in work)
+          for (final note in entries) (note.quote, note.body),
+      ];
+      final found = await _inIsolate(_matchNotes, (
+        notes: notes,
+        limit: maxLibraryNoteHits - hitCount,
+      ), query);
+      cancellation.throwIfCancelled();
+      hitCount += found.length;
+      var index = 0;
+      var next = 0;
+      for (final (book, entries) in work) {
+        final hits = <NoteHit>[];
+        for (final note in entries) {
+          if (next < found.length && found[next].$1 == index) {
+            hits.add(NoteHit(note, found[next].$2));
+            next++;
+          }
+          index++;
         }
-        index++;
+        if (hits.isNotEmpty) results.add(BookNoteHits(book, hits));
       }
-      if (hits.isNotEmpty) results.add(BookNoteHits(book, hits));
     }
+
+    for (final (book, document) in documents) {
+      cancellation.throwIfCancelled();
+      final entries = await _records.entries(document);
+      cancellation.throwIfCancelled();
+      if (entries.isEmpty) continue;
+      read += entries.length;
+      if (read > maxLibraryNotesSearched) {
+        throw const CoreException.limitExceeded(
+          'The library has more than $maxLibraryNotesSearched notes to search.',
+        );
+      }
+      batch.add((book, entries));
+      batchNotes += entries.length;
+      for (final note in entries) {
+        batchUnits += (note.quote?.length ?? 0) + (note.body?.length ?? 0);
+      }
+      // Match once the batch is large, or holds enough notes to fill the
+      // results; stop reading once they are full.
+      if (batchUnits >= _noteBatchUnits ||
+          batchNotes >= maxLibraryNoteHits - hitCount) {
+        await flush();
+        if (hitCount >= maxLibraryNoteHits) break;
+      }
+    }
+    await flush();
+    cancellation.throwIfCancelled();
     return results;
   }
 
   /// The text matches of [query] in every library book, or in book [bookId],
   /// one book at a time, most recently read first; books without matches
-  /// are left out.
+  /// are left out, unless only part of their text could be searched.
   ///
   /// A book whose text is not saved yet is opened through [read], and its
   /// text saved. A book that cannot be read yields a [BookTextHits.failed]
@@ -213,7 +261,8 @@ final class LibrarySearch {
         continue;
       }
       cancellation.throwIfCancelled();
-      if (hits.matches.isNotEmpty) yield hits;
+      // A book searched only in part may hold matches past what was read.
+      if (hits.matches.isNotEmpty || hits.partial) yield hits;
     }
   }
 
@@ -348,14 +397,14 @@ Future<_ReadText> _readText(
   );
 }
 
-/// The notes of [notes] (quote, body) that hold [query], by index, until
-/// [maxLibraryNoteHits] are found.
+/// The notes of [input] (quote, body) that hold [query], by index, until
+/// its limit are found.
 List<(int, List<NoteMatch>)> _matchNotes(
-  List<(String?, String?)> notes,
+  ({List<(String?, String?)> notes, int limit}) input,
   String query,
 ) {
   final found = <(int, List<NoteMatch>)>[];
-  for (final (index, (quote, body)) in notes.indexed) {
+  for (final (index, (quote, body)) in input.notes.indexed) {
     final matches = <NoteMatch>[];
     for (final (field, text) in [
       (NoteField.quote, quote),
@@ -373,7 +422,7 @@ List<(int, List<NoteMatch>)> _matchNotes(
     }
     if (matches.isEmpty) continue;
     found.add((index, matches));
-    if (found.length >= maxLibraryNoteHits) break;
+    if (found.length >= input.limit) break;
   }
   return found;
 }
@@ -392,10 +441,14 @@ final class LibrarySearchRecords {
   Future<List<Book>> books(int? bookId) =>
       _store.read((db) => _books(db, bookId));
 
-  /// The books with live notes, or book [bookId] if it has any, with their
-  /// notes in reading order.
-  Future<List<(Book, List<NoteEntry>)>> notes(int? bookId) =>
-      _store.read((db) => _notes(db, bookId));
+  /// The books with annotation documents, or book [bookId] if it has one,
+  /// most recently read first, with their documents' ids.
+  Future<List<(Book, String)>> noteDocuments(int? bookId) =>
+      _store.read((db) => _noteDocuments(db, bookId));
+
+  /// Document [documentId]'s live notes, in reading order.
+  Future<List<NoteEntry>> entries(String documentId) =>
+      _store.read((db) => noteEntries(db, documentId));
 
   /// Forget the saved texts of contents no longer in the library.
   Future<void> forgetRemoved() => _store.transaction(_forgetRemoved);
@@ -428,8 +481,8 @@ List<Book> _books(Database db, int? bookId) => db
     .map(bookFromRow)
     .toList();
 
-List<(Book, List<NoteEntry>)> _notes(Database db, int? bookId) {
-  final rows = db.select(
+List<(Book, String)> _noteDocuments(Database db, int? bookId) => [
+  for (final row in db.select(
     '''SELECT $bookColumns,
          (SELECT v.document_id FROM annotation_document_versions v
           WHERE v.content_hash = books.content_hash) AS document
@@ -437,45 +490,30 @@ List<(Book, List<NoteEntry>)> _notes(Database db, int? bookId) {
        WHERE document IS NOT NULL AND (?1 IS NULL OR id = ?1)
        ORDER BY $_recent''',
     [bookId],
-  );
-  final results = <(Book, List<NoteEntry>)>[];
-  var count = 0;
-  for (final row in rows) {
-    final entries = noteEntries(db, row['document'] as String);
-    if (entries.isEmpty) continue;
-    count += entries.length;
-    if (count > maxLibraryNotesSearched) {
-      throw const CoreException.limitExceeded(
-        'The library has more than $maxLibraryNotesSearched notes to search.',
-      );
-    }
-    results.add((bookFromRow(row), entries));
-  }
-  return results;
-}
+  ))
+    (bookFromRow(row), row['document'] as String),
+];
 
 void _forgetRemoved(Database db) => db.execute('''DELETE FROM book_texts
      WHERE content_hash NOT IN (SELECT content_hash FROM books)''');
 
 SavedText? _savedText(Database db, String contentHash, String version) {
-  final book = db
-      .select(
-        '''SELECT truncated FROM book_texts
-           WHERE content_hash = ? AND text_version = ?''',
-        [contentHash, version],
-      )
-      .firstOrNull;
-  if (book == null) return null;
+  // One statement, so the version and the units come from one snapshot.
+  final rows = db.select(
+    '''SELECT t.truncated, u.unit, u.text FROM book_texts t
+       LEFT JOIN book_text_units u ON u.content_hash = t.content_hash
+       WHERE t.content_hash = ? AND t.text_version = ?
+       ORDER BY u.unit''',
+    [contentHash, version],
+  );
+  if (rows.isEmpty) return null;
   return (
     units: [
-      for (final row in db.select(
-        '''SELECT unit, text FROM book_text_units
-           WHERE content_hash = ? ORDER BY unit''',
-        [contentHash],
-      ))
-        (row.columnAt(0) as int, row.columnAt(1) as Uint8List),
+      for (final row in rows)
+        if (row.columnAt(1) case final int unit)
+          (unit, row.columnAt(2) as Uint8List),
     ],
-    truncated: book.columnAt(0) == 1,
+    truncated: rows.first.columnAt(0) == 1,
   );
 }
 

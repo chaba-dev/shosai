@@ -138,6 +138,50 @@ void main() {
       expect(await search.notes('nowhere'), isEmpty);
     });
 
+    test('stops reading notes once the results are full', () async {
+      /// Copy book [id]'s one note until it has [count].
+      Future<void> fill(int id, int count) => t.execute(
+        '''WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n
+             WHERE i < ?2)
+           INSERT INTO annotations (id, version_id, format, kind,
+             anchor_version, body)
+           SELECT printf('%08d-0000-4000-8000-%012d', ?1, i), a.version_id,
+             a.format, a.kind, a.anchor_version, a.body
+           FROM annotations a, n
+           JOIN annotation_document_versions v ON v.id = a.version_id
+           JOIN books b ON b.content_hash = v.content_hash
+           WHERE b.id = ?1''',
+        [id, count - 1],
+      );
+
+      final recent = await book(
+        'epub',
+        [],
+        lastRead: '2026-02-01T00:00:00.000Z',
+      );
+      await annotations.createNote(recent, const BookAnchor(), 'match');
+      await fill(recent, maxLibraryNoteHits);
+      // Older books hold more notes than one search reads.
+      for (var index = 0; index < 65; index++) {
+        final older = await book('epub', []);
+        await annotations.createNote(older, const BookAnchor(), 'other');
+        await fill(older, maxAnnotationsPerDocument);
+      }
+
+      final found = await search.notes('match');
+
+      expect(found.single.book.id, recent);
+      expect(found.single.hits, hasLength(maxLibraryNoteHits));
+    });
+
+    test('observes cancellation while the notes are read', () async {
+      final cancellation = CancellationToken();
+      final pending = search.notes('needle', cancellation: cancellation);
+      cancellation.cancel();
+
+      await expectLater(pending, throwsCoreError(CoreErrorKind.cancelled));
+    });
+
     test('a query over its limit is refused', () async {
       await expectLater(
         search.notes('x' * 5000),
@@ -240,6 +284,29 @@ void main() {
       expect(partial.single.partial, isTrue);
       final saved = await searchText('needle', bookId: large);
       expect(saved.single.partial, isTrue);
+    });
+
+    test('a book searched in part is reported without matches', () async {
+      final large = await book('pdf', [
+        'x' * (maxLibraryTextBytes - 100),
+        'needle ${'y' * 200}',
+      ]);
+
+      for (final pass in ['read', 'saved']) {
+        final [hits] = await searchText('needle', bookId: large);
+        expect(hits.matches, isEmpty, reason: pass);
+        expect(hits.partial, isTrue, reason: pass);
+      }
+      expect(opened, [large]);
+
+      // A first unit past the limit leaves nothing saved but the book.
+      final first = await book('pdf', ['needle ${'x' * maxLibraryTextBytes}']);
+      for (final pass in ['read', 'saved']) {
+        final [hits] = await searchText('needle', bookId: first);
+        expect(hits.matches, isEmpty, reason: pass);
+        expect(hits.partial, isTrue, reason: pass);
+      }
+      expect(opened, [large, first]);
     });
 
     test('a removed book forgets its saved text', () async {
