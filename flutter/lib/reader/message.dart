@@ -727,7 +727,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     this.offset,
     this.toolError,
     this.returnPoint,
-    this.matchLength,
+    this.match,
   });
 
   final int generation;
@@ -747,8 +747,9 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   /// Where the book was left, when it opened at another place.
   final ReaderReturnPoint? returnPoint;
 
-  /// The length of the search match at [offset], which the first page marks.
-  final int? matchLength;
+  /// The search match the book opened at: its page, which on a PDF spread
+  /// may be the second, and where in that page's text it runs.
+  final ({int unit, int offset, int length})? match;
 }
 
 final class _ReaderImageDecoded extends ReaderMessage {

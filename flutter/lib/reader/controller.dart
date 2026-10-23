@@ -550,6 +550,18 @@ final class ReaderController implements Listenable {
           ReaderReturnRequested():
         _placeRevision += 1;
         _pendingPlace = null;
+        // The match a book opened at is left behind as well, even before
+        // its page is laid out.
+        _openMatch = null;
+      // So is it when the reader selects text of their own, or cancels a
+      // selection, before it is marked.
+      case ReaderSelectionStarted() ||
+          ReaderSelectionExtended() ||
+          ReaderSelectionPointerStarted() ||
+          ReaderSelectionKeyboardExtended() ||
+          ReaderSelectionAllRequested() ||
+          ReaderSelectionCancelled():
+        _openMatch = null;
       default:
     }
     switch (message) {
@@ -618,6 +630,8 @@ final class ReaderController implements Listenable {
       case ReaderPlaceRequested(:final place):
         // Taken once the document is open and idle (see dispatch).
         if (!_closing) {
+          // A newer place outranks the match the book opened at.
+          _openMatch = null;
           _pendingPlace = (
             generation: _model.generation,
             revision: ++_placeRevision,
@@ -948,6 +962,9 @@ final class ReaderController implements Listenable {
         );
       case ReaderSelectionPointerPressedOutside():
         if (_model.selectionPointer == null) {
+          // A press outside cancels like Escape: the match the book opened
+          // at is not marked after it.
+          _openMatch = null;
           _selectionCancelled();
         }
       case ReaderSelectionPointerMoved():
@@ -1514,9 +1531,14 @@ final class ReaderController implements Listenable {
           returnPoint: place != null && restored != null
               ? (unit: restored.unit.toInt(), offset: restored.offset?.toInt())
               : null,
-          matchLength: unit == restoredUnit && restoredOffset != null
-              ? place?.length
-              : null,
+          match: switch (place) {
+            ReaderPlace(:final offset?, :final length?) => (
+              unit: restoredUnit,
+              offset: offset,
+              length: length,
+            ),
+            _ => null,
+          },
         ),
       );
       opened = null;
@@ -1654,11 +1676,7 @@ final class ReaderController implements Listenable {
     );
     _requestedLayout = requestedLayout;
     _readingStatePersistenceBlocked = message.restorationFailed;
-    final matchLength = message.matchLength;
-    final matchOffset = message.offset;
-    _openMatch = matchLength == null || matchOffset == null
-        ? null
-        : (unit: message.unit, offset: matchOffset, length: matchLength);
+    _openMatch = message.match;
     _emit(
       _model.copyWith(
         document: message.document,
@@ -2531,6 +2549,9 @@ final class ReaderController implements Listenable {
         _suspended) {
       return;
     }
+    // Going somewhere leaves the match the book opened at behind, whoever
+    // asked.
+    _openMatch = null;
     _startRelayout(
       document,
       _model.layout,
@@ -5515,10 +5536,11 @@ final class ReaderController implements Listenable {
       _startRelayout(document, _model.layout, height: height);
       return;
     }
-    _markOpenMatch();
     // Likewise a PDF box or pixel ratio change that arrived while the reader
-    // was busy renders the page at its latest fitted size.
+    // was busy renders the page at its latest fitted size; the match the
+    // book opened at is marked once that render is in, which would clear it.
     _refitPdfPage();
+    if (!_model.relayoutBusy) _markOpenMatch();
   }
 
   /// Selects the search match the book opened at, once the reader has settled
