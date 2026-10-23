@@ -1,4 +1,5 @@
-/// Point bookmarks with optional titles and notes.
+/// Point bookmarks with optional titles. A note about a place is a page
+/// note, an annotation (RFD 6).
 library;
 
 import 'dart:convert';
@@ -9,7 +10,6 @@ import '../store/store.dart';
 
 const maxBookmarksPerBook = 1024;
 const maxBookmarkTitleBytes = 4 * 1024;
-const maxBookmarkNoteBytes = 64 * 1024;
 const maxBookmarkExportBytes = 4 * 1024 * 1024;
 
 /// A bookmark at a unit (PDF page or EPUB spine item) and an optional offset
@@ -20,7 +20,6 @@ final class Bookmark {
     required this.unit,
     required this.offset,
     required this.title,
-    required this.note,
     required this.color,
     required this.createdAt,
   });
@@ -29,7 +28,6 @@ final class Bookmark {
   final int unit;
   final int? offset;
   final String? title;
-  final String? note;
   final String color;
 
   /// ISO 8601 UTC timestamp.
@@ -42,13 +40,11 @@ final class Bookmark {
       other.unit == unit &&
       other.offset == offset &&
       other.title == title &&
-      other.note == note &&
       other.color == color &&
       other.createdAt == createdAt;
 
   @override
-  int get hashCode =>
-      Object.hash(id, unit, offset, title, note, color, createdAt);
+  int get hashCode => Object.hash(id, unit, offset, title, color, createdAt);
 
   @override
   String toString() => 'Bookmark($id, $unit, $offset)';
@@ -65,15 +61,13 @@ final class Bookmarks {
   Future<List<Bookmark>> list(int bookId) =>
       _store.read((db) => _list(db, bookContentHash(db, bookId)));
 
-  /// Remove the plain bookmark (one without a note) at [unit] and [offset],
-  /// or add one there with [title] and [note]. Returns the added bookmark,
-  /// or null when one was removed.
+  /// Remove the bookmark at [unit] and [offset], or add one there with
+  /// [title]. Returns the added bookmark, or null when one was removed.
   Future<Bookmark?> toggle(
     int bookId,
     int unit, {
     int? offset,
     String? title,
-    String? note,
   }) async {
     if (unit < 0 || (offset ?? 0) < 0) {
       throw const CoreException.invalidRequest(
@@ -81,22 +75,7 @@ final class Bookmarks {
       );
     }
     _checkBytes(title, maxBookmarkTitleBytes, 'title');
-    _checkBytes(note, maxBookmarkNoteBytes, 'note');
-    return _store.transaction(
-      (db) => _toggle(db, bookId, unit, offset, title, note),
-    );
-  }
-
-  /// Replace bookmark [id]'s note; null clears it.
-  Future<void> updateNote(int id, String? note) async {
-    _checkBytes(note, maxBookmarkNoteBytes, 'note');
-    final updated = await _store.transaction((db) {
-      db.execute('UPDATE bookmarks SET note = ? WHERE id = ?', [note, id]);
-      return db.updatedRows;
-    });
-    if (updated == 0) {
-      throw const CoreException.notFound('The bookmark does not exist.');
-    }
+    return _store.transaction((db) => _toggle(db, bookId, unit, offset, title));
   }
 
   /// Delete bookmark [id]; deleting a missing bookmark does nothing.
@@ -122,12 +101,11 @@ Bookmark _bookmark(Row row) => Bookmark(
   unit: row.columnAt(1) as int,
   offset: row.columnAt(2) as int?,
   title: row.columnAt(3) as String?,
-  note: row.columnAt(4) as String?,
-  color: row.columnAt(5) as String,
-  createdAt: row.columnAt(6) as String,
+  color: row.columnAt(4) as String,
+  createdAt: row.columnAt(5) as String,
 );
 
-const _columns = 'id, unit, location_offset, title, note, color, created_at';
+const _columns = 'id, unit, location_offset, title, color, created_at';
 
 List<Bookmark> _list(Database db, String hash) {
   final rows = db.select(
@@ -150,14 +128,12 @@ Bookmark? _toggle(
   int unit,
   int? offset,
   String? title,
-  String? note,
 ) {
   final hash = bookContentHash(db, bookId);
   final existing = db
       .select(
         '''SELECT id FROM bookmarks
        WHERE content_hash = ? AND unit = ? AND location_offset IS ?
-         AND note IS NULL
        LIMIT 1''',
         [hash, unit, offset],
       )
@@ -182,10 +158,10 @@ Bookmark? _toggle(
   return _bookmark(
     db
         .select(
-          '''INSERT INTO bookmarks (content_hash, unit, location_offset, title, note)
-         VALUES (?, ?, ?, ?, ?)
+          '''INSERT INTO bookmarks (content_hash, unit, location_offset, title)
+         VALUES (?, ?, ?, ?)
          RETURNING $_columns''',
-          [hash, unit, offset, title, note],
+          [hash, unit, offset, title],
         )
         .single,
   );
@@ -204,7 +180,6 @@ String _exportMarkdown(Database db, int bookId) {
     final entry = StringBuffer(
       '## Page ${bookmark.unit + 1}: ${bookmark.title ?? 'Untitled'}\n\n',
     );
-    if (bookmark.note case final note?) entry.write('$note\n\n');
     entry.write('*Added: ${bookmark.createdAt}*\n\n---\n\n');
     final text = entry.toString();
     bytes += utf8.encode(text).length;

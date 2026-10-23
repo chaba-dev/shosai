@@ -318,4 +318,49 @@ CREATE TABLE book_text_units (
     PRIMARY KEY (content_hash, unit)
 ) STRICT;
 '''),
+  Migration(8, 'bookmark notes become page notes', '''
+-- Bookmarks are places without notes (RFD 6, Notes and search): each
+-- bookmark note becomes a page note where the bookmark is, and the bookmark
+-- stays. A content without an annotation document gets one, described by
+-- its library book; a note whose content is in neither is dropped with the
+-- column. An EPUB bookmark never recorded its chapter's path, so its note
+-- follows the spine index alone.
+CREATE TEMP TABLE noted_contents AS
+  SELECT DISTINCT b.content_hash, k.format, k.title
+  FROM bookmarks b JOIN books k ON k.content_hash = b.content_hash
+  WHERE b.note IS NOT NULL AND length(b.note) > 0
+    AND NOT EXISTS (SELECT 1 FROM annotation_document_versions v
+                    WHERE v.content_hash = b.content_hash);
+ALTER TABLE noted_contents ADD COLUMN document_id TEXT;
+ALTER TABLE noted_contents ADD COLUMN version_id TEXT;
+UPDATE noted_contents SET document_id = $_uuid, version_id = $_uuid;
+
+INSERT INTO annotation_documents (id, format)
+  SELECT document_id, format FROM noted_contents;
+INSERT INTO annotation_document_versions
+    (id, document_id, format, content_hash, title)
+  SELECT version_id, document_id, format, content_hash, title
+  FROM noted_contents;
+DROP TABLE noted_contents;
+
+INSERT INTO annotations (id, version_id, format, kind, anchor_version, body,
+    epub_spine_index, epub_scalar_start, pdf_page, created_at, modified_at)
+  SELECT $_uuid, v.id, v.format, 'page', 1, b.note,
+    CASE v.format WHEN 'epub' THEN b.unit END,
+    CASE v.format WHEN 'epub' THEN coalesce(b.location_offset, 0) END,
+    CASE v.format WHEN 'pdf' THEN b.unit END,
+    b.created_at, b.created_at
+  FROM bookmarks b
+  JOIN annotation_document_versions v ON v.content_hash = b.content_hash
+  WHERE b.note IS NOT NULL AND length(b.note) > 0
+  ORDER BY b.id;
+
+ALTER TABLE bookmarks DROP COLUMN note;
+'''),
 ];
+
+/// A random version 4 UUID, evaluated once per row.
+const _uuid = '''lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4'
+    || substr(hex(randomblob(2)), 2) || '-'
+    || substr('89ab', 1 + (abs(random()) % 4), 1)
+    || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))''';
