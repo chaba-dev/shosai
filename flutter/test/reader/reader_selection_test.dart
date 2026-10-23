@@ -919,6 +919,32 @@ void main() {
       expect(bridge.updated.single.color, FlutterHighlightColor.yellow);
     });
 
+    testWidgets('a draft change made before a rebuild is kept', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge()
+        ..annotations = [_annotation(id: 'one', body: 'old note')];
+      await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
+      await _cardAction(tester, 'one', 'Edit note');
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('reader-note-edit-field'));
+      await tester.enterText(field, 'A');
+      await tester.pump();
+
+      // Two changes before the card is built again: away and back.
+      final draft = tester.widget<ShadInput>(field).controller!;
+      draft.text = 'B';
+      draft.value = const TextEditingValue(
+        text: 'A',
+        selection: TextSelection.collapsed(offset: 1),
+        composing: TextRange(start: 0, end: 1),
+      );
+      await tester.pump();
+
+      expect(draft.text, 'A');
+      expect(draft.value.composing, const TextRange(start: 0, end: 1));
+    });
+
     testWidgets('a secondary click opens the card menu', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _SelectionBridge()..annotations = [_annotation(id: 'one')];

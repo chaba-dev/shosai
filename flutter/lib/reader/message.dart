@@ -94,6 +94,25 @@ final class ReaderNoteSaved extends ReaderMessage {
   final String body;
 }
 
+/// Starts editing note card [card]'s note in place, from [text]. Another
+/// card's edit is dropped.
+final class ReaderNoteEditStarted extends ReaderMessage {
+  const ReaderNoteEditStarted(this.card, this.text);
+  final String card;
+  final String text;
+}
+
+/// The note being edited in place now reads [text].
+final class ReaderNoteDraftChanged extends ReaderMessage {
+  const ReaderNoteDraftChanged(this.text);
+  final String text;
+}
+
+/// Drops the note being edited in place.
+final class ReaderNoteEditCancelled extends ReaderMessage {
+  const ReaderNoteEditCancelled();
+}
+
 /// Deletes a page note or book note.
 final class ReaderNoteDeleted extends ReaderMessage {
   const ReaderNoteDeleted(this.id);

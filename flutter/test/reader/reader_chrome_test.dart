@@ -11,7 +11,12 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/controller.dart'
-    show PageDecoder, ReaderDocumentPickerAdapter, ReaderPickedDocument;
+    show
+        PageDecoder,
+        ReaderDocumentPickerAdapter,
+        ReaderNoteDeleted,
+        ReaderNoteEditStarted,
+        ReaderPickedDocument;
 import 'package:shosai_flutter/reader/epub/content.dart' show ReaderEpubPage;
 import 'package:shosai_flutter/reader/epub/pages.dart' show TextPageSlice;
 import 'package:shosai_flutter/reader/view.dart'
@@ -28,6 +33,26 @@ import '../support/production_shell_harness.dart';
 /// and progress ordinals are fixture-injected presentation data because the
 /// bridge has no session, tab or pagination API (contract §2.2). Real tab
 /// lifecycle is 5F and real page ranges are 5G.
+/// Annotation updates wait for [gate].
+class _GatedUpdateBridge extends _ChromeBridge {
+  _GatedUpdateBridge(this.gate) : super(books: harnessLibraryBooks());
+
+  final Future<void> gate;
+  final List<String> updatedIds = [];
+
+  @override
+  Future<bool> updateAnnotation({
+    required FlutterDocumentHandle document,
+    required String id,
+    required FlutterHighlightColor color,
+    String? body,
+  }) async {
+    updatedIds.add(id);
+    await gate;
+    return true;
+  }
+}
+
 class _ChromeBridge extends HarnessBridge {
   _ChromeBridge({
     super.books,
@@ -1369,6 +1394,84 @@ void main() {
       });
     }
     expect(sizes, {24});
+  });
+
+  test('a highlight save the reader turns down keeps the draft', () async {
+    FlutterAnnotation highlight(String id) => FlutterAnnotation(
+      id: id,
+      unit: BigInt.zero,
+      resolution: FlutterAnnotationResolution.exact,
+      textRange: FlutterAnnotationTextRange(
+        start: BigInt.one,
+        end: BigInt.from(3),
+      ),
+      color: FlutterHighlightColor.yellow,
+    );
+    final gate = Completer<void>();
+    final bridge = _GatedUpdateBridge(gate.future)
+      ..annotations = [highlight('one'), highlight('two')];
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required int width, required int height}) async =>
+          _testImage(),
+    );
+    addTearDown(controller.dispose);
+    controller.dispatch(const ReaderOpenRequested('/books/x.pdf', bookId: 3));
+    await pumpEventQueue();
+    controller.dispatch(
+      const ReaderNoteEditStarted('reader-annotation-one', 'Draft'),
+    );
+
+    // Another highlight's write holds the reader; this save is turned down.
+    controller.dispatch(
+      const ReaderAnnotationUpdated('two', FlutterHighlightColor.green, null),
+    );
+    controller.dispatch(const ReaderAnnotationNoteSaved('one', 'Draft'));
+    await pumpEventQueue();
+    expect(bridge.updatedIds, ['two']);
+    expect(controller.model.noteEdit?.text, 'Draft');
+
+    gate.complete();
+    await pumpEventQueue();
+    controller.dispatch(const ReaderAnnotationNoteSaved('one', 'Draft'));
+    await pumpEventQueue();
+    expect(bridge.updatedIds, ['two', 'one']);
+    expect(controller.model.noteEdit, isNull);
+  });
+
+  test('an in-place edit ends when its note is gone', () async {
+    FlutterNote note(String id) => FlutterNote(
+      id: id,
+      kind: FlutterNoteKind.book,
+      resolution: FlutterAnnotationResolution.exact,
+      body: id,
+      modifiedAt: '2026-09-20T00:00:00Z',
+    );
+    final bridge = _ChromeBridge(books: harnessLibraryBooks())
+      ..placeNotes.addAll([note('a'), note('b'), note('c')]);
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required int width, required int height}) async =>
+          _testImage(),
+    );
+    addTearDown(controller.dispose);
+    controller.dispatch(const ReaderOpenRequested('/books/x.pdf', bookId: 3));
+    await pumpEventQueue();
+    controller.dispatch(
+      const ReaderNoteEditStarted('reader-place-note-a', 'Draft'),
+    );
+
+    // Another note's delete leaves the edit alone.
+    controller.dispatch(const ReaderNoteDeleted('b'));
+    await pumpEventQueue();
+    expect(controller.model.noteEdit?.text, 'Draft');
+
+    // A listing without the note ends it.
+    bridge.placeNotes.removeWhere((item) => item.id == 'a');
+    controller.dispatch(const ReaderNoteDeleted('c'));
+    await pumpEventQueue();
+    expect(controller.model.notes.map((item) => item.id), isNot(contains('a')));
+    expect(controller.model.noteEdit, isNull);
   });
 
   test('a stale editor completion cannot clear a newer editor slot', () async {

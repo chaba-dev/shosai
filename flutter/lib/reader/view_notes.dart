@@ -191,7 +191,7 @@ class _ReaderNotesPanel extends StatelessWidget {
       for (final note in model.notes)
         if (note.unit == null) _placeNoteCard(l10n, note, enabled, pdf: pdf),
     ];
-    String? group;
+    Object? group;
     for (final i in order) {
       final item = placed[i];
       final section = _noteSection(
@@ -201,19 +201,27 @@ class _ReaderNotesPanel extends StatelessWidget {
         item.position,
         pdf: pdf,
       );
-      if (section != null && section != group) {
+      // Sections are told apart by their entry, not their title: two
+      // chapters may both have a "Summary".
+      if (section != null && section.id != group) {
         cards.add(
           _ReaderPanelGroup(
             key: ValueKey('reader-notes-group-${cards.length}'),
-            text: section,
+            text: section.title,
           ),
         );
       }
-      group = section;
-      cards.add(item.card(section));
+      group = section?.id;
+      cards.add(item.card(section?.title));
     }
     return cards;
   }
+
+  /// Card [card]'s draft, when its note is being edited.
+  String? _editOf(String card) => switch (model.noteEdit) {
+    final edit? when edit.card == card => edit.text,
+    _ => null,
+  };
 
   Widget _placeNoteCard(
     AppLocalizations l10n,
@@ -232,6 +240,8 @@ class _ReaderNotesPanel extends StatelessWidget {
     return _ReaderNoteCard(
       key: ValueKey('reader-place-note-${note.id}'),
       id: 'reader-place-note-${note.id}',
+      edit: _editOf('reader-place-note-${note.id}'),
+      dispatch: dispatch,
       leading: Icon(
         unit == null ? LucideIcons.book : LucideIcons.file,
         size: 14,
@@ -272,6 +282,8 @@ class _ReaderNotesPanel extends StatelessWidget {
     return _ReaderNoteCard(
       key: ValueKey('reader-annotation-${annotation.id}'),
       id: 'reader-annotation-${annotation.id}',
+      edit: _editOf('reader-annotation-${annotation.id}'),
+      dispatch: dispatch,
       leading: _ReaderNoteDot(color: annotation.color),
       meta:
           '$place'
@@ -297,10 +309,11 @@ class _ReaderNotesPanel extends StatelessWidget {
   }
 }
 
-/// The title of the section a note at [unit] and [position] sits in: the
-/// last contents entry at or before it. Without one, an EPUB chapter is named
-/// by its number and a PDF page has no section.
-String? _noteSection(
+/// The section a note at [unit] and [position] sits in: the last contents
+/// entry at or before it, identified by its index. Without one, an EPUB
+/// chapter is named by its number and identified by its unit, and a PDF page
+/// has no section.
+({Object id, String title})? _noteSection(
   AppLocalizations l10n,
   List<ReaderContentsEntry> entries,
   int unit,
@@ -308,7 +321,8 @@ String? _noteSection(
   required bool pdf,
 }) {
   ReaderContentsEntry? section;
-  for (final entry in entries) {
+  var index = -1;
+  for (final (i, entry) in entries.indexed) {
     final offset = entry.offset ?? 0;
     final before =
         entry.unit < unit || (entry.unit == unit && offset <= position);
@@ -318,13 +332,19 @@ String? _noteSection(
         entry.unit > best.unit ||
         (entry.unit == best.unit && offset >= (best.offset ?? 0))) {
       section = entry;
+      index = i;
     }
   }
   if (section != null) {
     final title = section.title.trim();
-    return title.isEmpty ? l10n.readerChapterNumber(section.unit + 1) : title;
+    return (
+      id: index,
+      title: title.isEmpty ? l10n.readerChapterNumber(section.unit + 1) : title,
+    );
   }
-  return pdf ? null : l10n.readerChapterNumber(unit + 1);
+  return pdf
+      ? null
+      : (id: 'unit $unit', title: l10n.readerChapterNumber(unit + 1));
 }
 
 /// A highlight's colour on its note card (`sh-dot`).
@@ -385,6 +405,8 @@ class _ReaderNoteCard extends StatefulWidget {
   const _ReaderNoteCard({
     super.key,
     required this.id,
+    required this.edit,
+    required this.dispatch,
     required this.leading,
     required this.meta,
     this.quote,
@@ -398,8 +420,13 @@ class _ReaderNoteCard extends StatefulWidget {
     required this.onDelete,
   });
 
-  /// The prefix of the card's control keys.
+  /// The prefix of the card's control keys, and its identity in the
+  /// model's in-place edit.
   final String id;
+
+  /// The draft, while the card's note is being edited in place.
+  final String? edit;
+  final void Function(ReaderMessage) dispatch;
   final Widget leading;
   final String meta;
   final String? quote;
@@ -422,14 +449,44 @@ class _ReaderNoteCard extends StatefulWidget {
 
 class _ReaderNoteCardState extends State<_ReaderNoteCard> {
   final ShadContextMenuController _menu = ShadContextMenuController();
+
+  /// The editor's text, made from the model's draft when the edit starts and
+  /// reporting each change back to it.
   TextEditingController? _draft;
   bool _hovered = false;
 
   @override
+  void initState() {
+    super.initState();
+    _syncDraft();
+  }
+
+  @override
   void didUpdateWidget(_ReaderNoteCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // An edit the chrome can no longer save is dropped with the draft.
-    if (!widget.enabled && _draft != null && oldWidget.enabled) _cancel();
+    _syncDraft();
+  }
+
+  void _syncDraft() {
+    final edit = widget.edit;
+    final draft = _draft;
+    if (edit == null) {
+      if (draft == null) return;
+      _draft = null;
+      draft.dispose();
+    } else if (draft == null) {
+      _draft = TextEditingController(text: edit)..addListener(_draftChanged);
+    } else if (draft.text != edit) {
+      draft.text = edit;
+    }
+  }
+
+  // Every change is reported: the controller compares it with the model's
+  // draft, which may be newer than the one this card was built with.
+  void _draftChanged() {
+    if (_draft case final draft?) {
+      widget.dispatch(ReaderNoteDraftChanged(draft.text));
+    }
   }
 
   @override
@@ -444,23 +501,28 @@ class _ReaderNoteCardState extends State<_ReaderNoteCard> {
   }
 
   void _edit() {
-    if (!widget.enabled || _draft != null) return;
-    setState(() => _draft = TextEditingController(text: widget.body));
+    if (!widget.enabled || widget.edit != null) return;
+    widget.dispatch(ReaderNoteEditStarted(widget.id, widget.body ?? ''));
   }
 
   void _cancel() {
-    final draft = _draft;
-    if (draft == null) return;
-    setState(() => _draft = null);
-    draft.dispose();
+    if (widget.edit != null) {
+      widget.dispatch(const ReaderNoteEditCancelled());
+    }
+  }
+
+  bool get _canSave {
+    final edit = widget.edit;
+    return widget.enabled &&
+        edit != null &&
+        (edit.trim().isNotEmpty || widget.clearable);
   }
 
   void _save() {
-    final draft = _draft;
-    if (draft == null) return;
-    final body = draft.text;
+    // The field's text: its last change may not be rebuilt into [edit] yet.
+    final body = _draft?.text;
+    if (!widget.enabled || body == null) return;
     if (body.trim().isEmpty && !widget.clearable) return;
-    _cancel();
     widget.onSave(body);
   }
 
@@ -542,7 +604,7 @@ class _ReaderNoteCardState extends State<_ReaderNoteCard> {
                   ),
                 ),
               if (draft != null)
-                ..._editor(l10n, draft)
+                _editor(l10n, draft)
               else if (hasBody)
                 Text(
                   widget.body!,
@@ -602,40 +664,43 @@ class _ReaderNoteCardState extends State<_ReaderNoteCard> {
     );
   }
 
-  List<Widget> _editor(AppLocalizations l10n, TextEditingController draft) => [
-    CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.escape): _cancel},
-      child: ShadInput(
-        key: const ValueKey('reader-note-edit-field'),
-        controller: draft,
-        autofocus: true,
-        minLines: 3,
-        maxLines: 6,
-      ),
-    ),
-    Wrap(
-      alignment: WrapAlignment.end,
-      spacing: ShosaiTokens.space2,
-      runSpacing: ShosaiTokens.space2,
-      children: [
-        ShadButton.outline(
-          key: const ValueKey('reader-note-edit-cancel'),
-          height: shosaiShadButtonHeight(context),
-          onPressed: _cancel,
-          child: Text(l10n.readerNoteCancel),
+  /// The editor: Escape cancels wherever its focus is, on the field or on
+  /// either button.
+  Widget _editor(AppLocalizations l10n, TextEditingController draft) =>
+      CallbackShortcuts(
+        bindings: {const SingleActivator(LogicalKeyboardKey.escape): _cancel},
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 6,
+          children: [
+            ShadInput(
+              key: const ValueKey('reader-note-edit-field'),
+              controller: draft,
+              autofocus: true,
+              minLines: 3,
+              maxLines: 6,
+            ),
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: ShosaiTokens.space2,
+              runSpacing: ShosaiTokens.space2,
+              children: [
+                ShadButton.outline(
+                  key: const ValueKey('reader-note-edit-cancel'),
+                  height: shosaiShadButtonHeight(context),
+                  onPressed: _cancel,
+                  child: Text(l10n.readerNoteCancel),
+                ),
+                // A busy reader keeps the draft and saves it once it can.
+                ShadButton(
+                  key: const ValueKey('reader-note-edit-save'),
+                  height: shosaiShadButtonHeight(context),
+                  onPressed: _canSave ? _save : null,
+                  child: Text(l10n.readerNoteSave),
+                ),
+              ],
+            ),
+          ],
         ),
-        ListenableBuilder(
-          listenable: draft,
-          builder: (context, _) => ShadButton(
-            key: const ValueKey('reader-note-edit-save'),
-            height: shosaiShadButtonHeight(context),
-            onPressed: draft.text.trim().isEmpty && !widget.clearable
-                ? null
-                : _save,
-            child: Text(l10n.readerNoteSave),
-          ),
-        ),
-      ],
-    ),
-  ];
+      );
 }

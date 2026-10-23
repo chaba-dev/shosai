@@ -461,6 +461,18 @@ final class ReaderController implements Listenable {
         _placeNoteRequested(FlutterNoteKind.book);
       case ReaderNoteSaved():
         _placeNoteSaved(message.id, message.body);
+      case ReaderNoteEditStarted():
+        _emit(
+          _model.copyWith(noteEdit: ReaderNoteEdit(message.card, message.text)),
+        );
+      case ReaderNoteDraftChanged():
+        if (_model.noteEdit case final edit? when edit.text != message.text) {
+          _emit(
+            _model.copyWith(noteEdit: ReaderNoteEdit(edit.card, message.text)),
+          );
+        }
+      case ReaderNoteEditCancelled():
+        if (_model.noteEdit != null) _emit(_model.copyWith(noteEdit: null));
       case ReaderNoteDeleted():
         _placeNoteDeleted(message.id);
       case ReaderNoteNavigated():
@@ -660,7 +672,15 @@ final class ReaderController implements Listenable {
       case _ReaderNotesCompleted():
         if (_isCurrent(message.generation) &&
             message.revision == _notesRevision) {
-          _emit(_model.copyWith(notes: message.items, notesBusy: false));
+          _emit(
+            _model.copyWith(
+              notes: message.items,
+              notesBusy: false,
+              noteEdit: _editWithin('reader-place-note-', [
+                for (final note in message.items) note.id,
+              ]),
+            ),
+          );
         }
       case _ReaderNotesFailed():
         if (_isCurrent(message.generation) &&
@@ -1090,6 +1110,7 @@ final class ReaderController implements Listenable {
         openPath: path,
         openBookId: message.bookId,
         document: null,
+        noteEdit: null,
         unit: 0,
         readingOffset: null,
         pageImage: null,
@@ -2862,6 +2883,7 @@ final class ReaderController implements Listenable {
       generation: _model.generation,
       revision: revision,
       document: document!,
+      editCard: 'reader-place-note-$id',
       mutation: (_, _) =>
           _records.updateNote(document: document, id: id, body: trimmed),
     );
@@ -2894,6 +2916,7 @@ final class ReaderController implements Listenable {
     required int generation,
     required int revision,
     required FlutterDocumentSummary document,
+    String? editCard,
     Future<Object?> Function(BigInt cancellation, ReaderText text)? mutation,
   }) {
     final bookId = document.bookId!;
@@ -2912,7 +2935,15 @@ final class ReaderController implements Listenable {
       _beginBookWrite(bookId);
     }
     _activeBridgeOperations += 1;
-    _emit(_model.copyWith(notesBusy: true));
+    _emit(
+      _model.copyWith(
+        notesBusy: true,
+        // The saved draft is the note's now.
+        noteEdit: editCard != null && _model.noteEdit?.card == editCard
+            ? null
+            : _model.noteEdit,
+      ),
+    );
     unawaited(() async {
       String? writeError;
       var mutationCommitted = mutation == null;
@@ -4736,6 +4767,15 @@ final class ReaderController implements Listenable {
     }());
   }
 
+  /// The in-place edit, unless it is of a card with [prefix] whose note is
+  /// not among [ids] any more.
+  ReaderNoteEdit? _editWithin(String prefix, Iterable<String> ids) {
+    final edit = _model.noteEdit;
+    if (edit == null || !edit.card.startsWith(prefix)) return edit;
+    final id = edit.card.substring(prefix.length);
+    return ids.contains(id) ? edit : null;
+  }
+
   void _setAnnotations(
     List<FlutterAnnotation> annotations, {
     bool? annotationsReady,
@@ -4744,6 +4784,13 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         annotations: List.unmodifiable(annotations),
         annotationsReady: annotationsReady,
+        // A list that is not ready (association empties it before reloading)
+        // says nothing about which highlights are gone.
+        noteEdit: annotationsReady ?? _model.annotationsReady
+            ? _editWithin('reader-annotation-', [
+                for (final annotation in annotations) annotation.id,
+              ])
+            : _model.noteEdit,
         savedSelections: _savedSelections(
           annotations,
           _model.unit,
@@ -4792,6 +4839,12 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         annotationOperations: {operationId},
         annotationError: null,
+        // A saved in-place draft is the highlight's note now.
+        noteEdit:
+            fromNote &&
+                _model.noteEdit?.card == 'reader-annotation-${message.id}'
+            ? null
+            : _model.noteEdit,
       ),
     );
     try {
