@@ -517,9 +517,10 @@ void paintPageSlices(
   EpubPageBox box,
 ) {
   canvas.save();
-  // The first line's ruby may stand in the margin before the flow: the page's
-  // top margin, or its right margin on a vertical page. The margins are even,
-  // so the top one measures both.
+  // The first line's ruby may stand in the margin before the flow (the page's
+  // top margin, or its right margin on a vertical page), and the last line's
+  // marks under it in the margin after it. The margins are even, so the top
+  // one measures them all.
   final content = Rect.fromLTWH(
     0,
     0,
@@ -530,7 +531,7 @@ void paintPageSlices(
   canvas.clipRect(
     box.vertical
         ? Rect.fromLTRB(
-            content.left,
+            content.left - margin,
             content.top,
             content.right + margin,
             content.bottom,
@@ -539,7 +540,7 @@ void paintPageSlices(
             content.left,
             content.top - margin,
             content.right,
-            content.bottom,
+            content.bottom + margin,
           ),
   );
   box.transformToFlow(canvas);
@@ -563,7 +564,7 @@ void _paintSlice(Canvas canvas, PageSlice slice, ReaderEpubPalette palette) {
       ruby: false,
     );
     canvas.restore();
-    // Ruby stands above its line's top, outside the slice.
+    // Ruby and emphasis marks stand beside their line, outside the slice.
     canvas.save();
     canvas.translate(0, offsetY);
     text.paintRuby(canvas, lineStart: slice.lineStart, lineEnd: slice.lineEnd);
@@ -627,7 +628,13 @@ void _paintTableRow(
         Rect.fromLTWH(cell.left + 6.0, cellY, cell.width - 12.0, text.height),
       );
       canvas.translate(cell.left + 6.0, cellY);
-      text.paint(canvas);
+      text.paint(canvas, ruby: false);
+      canvas.restore();
+      // Ruby and emphasis use the cell padding beside the line, just as they
+      // use a page's margin; clipping them to the painter drops that ink.
+      canvas.save();
+      canvas.translate(cell.left + 6.0, cellY);
+      text.paintRuby(canvas);
       canvas.restore();
       cellY += text.height;
     }

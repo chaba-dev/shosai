@@ -422,6 +422,94 @@ class RubyRun {
   final BuiltBlockText annotation;
 }
 
+/// Emphasis marks (傍点): the code units of each character of a span that
+/// takes one, and the mark [FlowTextBlock.paint] sets over each of them (to
+/// its right in a vertical line), or under them (to its left).
+///
+/// A mark is a shape drawn half the characters' size, upright on the page
+/// and centred on its own half-em square, so it sits the same in every face;
+/// a mark the book gives as a string is laid out as text instead.
+class EmphasisRun {
+  const EmphasisRun({
+    required this.characters,
+    required this.baseSize,
+    required this.color,
+    required this.shape,
+    this.filled = true,
+    this.string,
+    this.under = false,
+    this.vertical = false,
+  });
+
+  /// Painter code units of each marked character: punctuation and spaces
+  /// take none.
+  final List<({int start, int end})> characters;
+
+  /// The characters' font size: their em square, which the mark stands on.
+  final double baseSize;
+
+  /// The characters' ink.
+  final Color color;
+
+  /// The shape drawn, unless the mark is a [string].
+  final EpubEmphasisShape shape;
+  final bool filled;
+
+  /// A mark the book gave as text, as [buildBlockText] built it.
+  final BuiltBlockText? string;
+
+  /// Whether the marks stand under the line (to the left of a vertical one)
+  /// instead of over it.
+  final bool under;
+
+  /// Whether the line is vertical: its canvas is turned a quarter turn, and
+  /// a shape is turned back to stand upright on the page.
+  final bool vertical;
+}
+
+/// Punctuation that still takes an emphasis mark, including every punctuation
+/// code point whose NFKD form is one of CSS Text Decoration 3's exceptions.
+const Set<int> _emphasizedPunctuation = {
+  0x0023,
+  0x0025,
+  0x0026,
+  0x0040,
+  0x00A7,
+  0x00B6,
+  0x0609,
+  0x060A,
+  0x066A,
+  0x2030,
+  0x2031,
+  0x204A,
+  0x204B,
+  0x2053,
+  0x303D,
+  0xFE5F,
+  0xFE60,
+  0xFE6A,
+  0xFE6B,
+  0xFF03,
+  0xFF05,
+  0xFF06,
+  0xFF20,
+};
+
+/// Whether a typographic character unit takes no emphasis mark, following CSS
+/// Text Decoration 3: separators (except a space combined with a mark), most
+/// punctuation, controls, format characters and unassigned characters.
+bool _takesNoEmphasis(String cluster) {
+  final first = String.fromCharCode(cluster.runes.first);
+  if (_emphasizedPunctuation.contains(cluster.runes.first)) return false;
+  if (RegExp(r'^[\p{Cc}\p{Cf}\p{Cn}]$', unicode: true).hasMatch(first)) {
+    return true;
+  }
+  if (RegExp(r'^\p{P}$', unicode: true).hasMatch(first)) return true;
+  if (!RegExp(r'^\p{Z}$', unicode: true).hasMatch(first)) return false;
+  final rest = cluster.substring(first.length);
+  return !RegExp(r'\p{M}', unicode: true).hasMatch(rest);
+}
+
 /// The ruby annotation's size, relative to its base.
 const double rubyScale = 0.5;
 
@@ -471,13 +559,14 @@ bool isUprightInVertical(int rune) {
 }
 
 /// What [buildBlockText] builds: the span tree the painter lays out, its
-/// canonical map, the runs [FlowTextBlock.paint] draws itself and the ruby it
-/// sets over the text.
+/// canonical map, the runs [FlowTextBlock.paint] draws itself, and the ruby
+/// and emphasis marks it sets beside the text.
 typedef BuiltBlockText = ({
   InlineSpan span,
   BlockTextMap map,
   List<RedrawnRun> redrawn,
   List<RubyRun> rubies,
+  List<EmphasisRun> emphasis,
 });
 
 /// Build the Flutter span tree for a list of engine spans.
@@ -487,7 +576,7 @@ typedef BuiltBlockText = ({
 /// upright characters are laid out transparent and returned as [RedrawnRun]s
 /// for [FlowTextBlock.paint] to draw upright. A span with ruby returns a
 /// [RubyRun], and its base is spaced out (and redrawn) when the annotation is
-/// longer.
+/// longer; a span with emphasis returns an [EmphasisRun].
 BuiltBlockText buildBlockText(
   List<EpubTextSpan> spans,
   ReaderEpubTypography typography,
@@ -501,6 +590,9 @@ BuiltBlockText buildBlockText(
   final children = <TextSpan>[];
   final redrawn = <RedrawnRun>[];
   final rubies = <RubyRun>[];
+  final emphasis = <EmphasisRun>[];
+  // Each emphasis mark, laid out once for the spans that share it.
+  final marks = <(String, TextStyle), BuiltBlockText>{};
   // The children of each tate-chū-yoko grapheme: its span, the index of its
   // run's first grapheme here, and the advance it must take.
   final graphemes = <({int child, int span, int run, double em})>[];
@@ -526,6 +618,49 @@ BuiltBlockText buildBlockText(
     );
     final combined = span.combine;
     final combinesAll = vertical && combined != null && combined.all;
+    if (span.emphasis case final marked?) {
+      final characters = <({int start, int end})>[];
+      var unit = start + codeUnitOffset;
+      for (final cluster in span.text.characters) {
+        if (!_takesNoEmphasis(cluster)) {
+          characters.add((start: unit, end: unit + cluster.length));
+        }
+        unit += cluster.length;
+      }
+      final string = marked.string;
+      if (characters.isNotEmpty) {
+        emphasis.add(
+          EmphasisRun(
+            characters: characters,
+            baseSize: style.fontSize ?? baseFontSize,
+            color: style.color ?? typography.palette.foreground,
+            shape: marked.shapeIn(vertical: vertical),
+            filled: marked.filled,
+            string: string == null
+                ? null
+                : marks[(string, style)] ??= buildBlockText(
+                    [
+                      EpubTextSpan(
+                        text: string,
+                        bold: span.bold,
+                        italic: span.italic,
+                        fontFamily: span.fontFamily,
+                        monospace: span.monospace,
+                        fontSizeMultiplier: span.fontSizeMultiplier * rubyScale,
+                        orientation: EpubTextOrientation.upright,
+                      ),
+                    ],
+                    typography.copyWith(lineHeight: 1),
+                    baseFontSize,
+                    selectableOverride: false,
+                    vertical: vertical,
+                  ),
+            under: vertical ? marked.left : marked.under,
+            vertical: vertical,
+          ),
+        );
+      }
+    }
 
     // A base shorter than its ruby is spaced out to the ruby's length, and
     // its graphemes are redrawn centred in their widened boxes.
@@ -764,6 +899,7 @@ BuiltBlockText buildBlockText(
     ),
     redrawn: redrawn,
     rubies: rubies,
+    emphasis: emphasis,
   );
 }
 

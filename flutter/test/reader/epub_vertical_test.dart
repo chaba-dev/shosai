@@ -107,7 +107,13 @@ void main() {
   });
 
   test('a grapheme cluster keeps one orientation', () {
-    final (:map, redrawn: upright, span: _, rubies: _) = buildBlockText(
+    final (
+      :map,
+      redrawn: upright,
+      span: _,
+      rubies: _,
+      emphasis: _,
+    ) = buildBlockText(
       [EpubTextSpan(text: '葛\u{E0100}城 e\u0301 👩\u200D💻')],
       typography,
       18,
@@ -299,12 +305,8 @@ void main() {
   /// The laid-out width of each upright run of [spans], and whether it is
   /// tate-chū-yoko.
   List<(String, double, bool)> uprightWidths(List<EpubTextSpan> spans) {
-    final (:map, redrawn: upright, :span, rubies: _) = buildBlockText(
-      spans,
-      typography,
-      18,
-      vertical: true,
-    );
+    final (:map, redrawn: upright, :span, rubies: _, emphasis: _) =
+        buildBlockText(spans, typography, 18, vertical: true);
     final painter = TextPainter(text: span, textDirection: TextDirection.ltr)
       ..layout();
     addTearDown(painter.dispose);
