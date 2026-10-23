@@ -144,6 +144,8 @@ class EpubTextSpan {
     this.math,
     this.canonical,
     this.combine,
+    this.ruby,
+    this.rubyContinued = false,
   });
 
   String text;
@@ -168,6 +170,19 @@ class EpubTextSpan {
   /// Tate-chū-yoko for this span's text, or null. A span that combines all
   /// its text is one unit and never merges with a neighbour.
   EpubTextCombine? combine;
+
+  /// The ruby annotation (furigana) set beside this span's text, from the
+  /// `<rt>` of a `<ruby>` element. It is not part of the canonical stream:
+  /// search, copy and offsets see the base text only. A span with ruby never
+  /// merges with its predecessor.
+  ///
+  /// A base can take several spans (an anchor, a link or other markup inside
+  /// it): the first carries the annotation and the others are
+  /// [rubyContinued].
+  String? ruby;
+
+  /// Whether this span continues the ruby base of the span before it.
+  bool rubyContinued;
 
   /// Element ids/legacy anchor names that resolve to this span's start.
   List<String> anchorIds = const [];
@@ -195,6 +210,8 @@ class EpubTextSpan {
     math: math,
     canonical: canonical,
     combine: combine,
+    ruby: ruby,
+    rubyContinued: rubyContinued,
   );
 }
 

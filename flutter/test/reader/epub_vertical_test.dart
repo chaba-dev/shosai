@@ -107,7 +107,7 @@ void main() {
   });
 
   test('a grapheme cluster keeps one orientation', () {
-    final (:map, :upright, span: _) = buildBlockText(
+    final (:map, redrawn: upright, span: _, rubies: _) = buildBlockText(
       [EpubTextSpan(text: '葛\u{E0100}城 e\u0301 👩\u200D💻')],
       typography,
       18,
@@ -263,7 +263,7 @@ void main() {
       (block) => block.map.text.contains('Hello'),
     );
     final runs = [
-      for (final run in mixed.upright)
+      for (final run in mixed.redrawn)
         mixed.map.text.substring(
           run.start - mixed.map.codeUnitOffset,
           run.end - mixed.map.codeUnitOffset,
@@ -271,10 +271,10 @@ void main() {
     ];
     expect(runs, ['「', '」と書生は言った。明治', '38', '年、', '年のことである。']);
     expect(
-      [for (final run in mixed.upright) run.combined],
+      [for (final run in mixed.redrawn) run.combined],
       [false, false, true, false, false],
     );
-    for (final run in mixed.upright) {
+    for (final run in mixed.redrawn) {
       expect(run.style.color, typography.palette.foreground);
     }
 
@@ -299,7 +299,7 @@ void main() {
   /// The laid-out width of each upright run of [spans], and whether it is
   /// tate-chū-yoko.
   List<(String, double, bool)> uprightWidths(List<EpubTextSpan> spans) {
-    final (:map, :upright, :span) = buildBlockText(
+    final (:map, redrawn: upright, :span, rubies: _) = buildBlockText(
       spans,
       typography,
       18,
@@ -385,7 +385,7 @@ void main() {
     expect(laidOut.substring(laidOut.length - 1), '日');
     expect(
       [
-        for (final run in built.upright)
+        for (final run in built.redrawn)
           if (run.combined) built.map.text.substring(run.start, run.end),
       ],
       ['5'],
@@ -409,7 +409,7 @@ void main() {
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: 27);
     addTearDown(painter.dispose);
-    final run = built.upright.singleWhere((run) => run.combined);
+    final run = built.redrawn.singleWhere((run) => run.combined);
     final tops = {
       for (var unit = run.start; unit < run.end; unit++)
         for (final box in painter.getBoxesForSelection(
@@ -531,7 +531,7 @@ void main() {
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: 27);
     addTearDown(painter.dispose);
-    final run = built.upright.singleWhere((run) => run.combined);
+    final run = built.redrawn.singleWhere((run) => run.combined);
     final boxes = painter.getBoxesForSelection(
       TextSelection(baseOffset: run.start, extentOffset: run.end),
     );
@@ -574,7 +574,7 @@ void main() {
     expect(built.span.toPlainText(), built.map.text);
     expect(
       [
-        for (final run in built.upright)
+        for (final run in built.redrawn)
           (built.map.text.substring(run.start, run.end), run.combined),
       ],
       [('甲', false), ('38', true)],
@@ -584,7 +584,7 @@ void main() {
       textDirection: TextDirection.ltr,
     )..layout();
     addTearDown(painter.dispose);
-    final run = built.upright.last;
+    final run = built.redrawn.last;
     expect(
       painter
           .getBoxesForSelection(
@@ -658,7 +658,7 @@ void main() {
     session.layoutWindowAt(0);
     final blocks = [for (final block in session.blocks) block.text!];
     for (final block in blocks) {
-      for (final run in block.upright.where((run) => run.combined)) {
+      for (final run in block.redrawn.where((run) => run.combined)) {
         expect(
           block.painter.getLineBoundary(TextPosition(offset: run.start)),
           block.painter.getLineBoundary(TextPosition(offset: run.end - 1)),
@@ -666,13 +666,13 @@ void main() {
       }
     }
     String combined(FlowTextBlock block) => [
-      for (final run in block.upright)
+      for (final run in block.redrawn)
         if (run.combined) block.map.text.substring(run.start, run.end),
     ].join();
     // 一二 falls back to upright characters; 38 stays combined.
     expect(blocks.map(combined), ['', '38']);
     expect(
-      blocks.first.upright.map((run) => run.combined),
+      blocks.first.redrawn.map((run) => run.combined),
       everyElement(false),
     );
   });
@@ -745,7 +745,7 @@ void main() {
       typography,
       18,
     );
-    expect(built.upright, isEmpty);
+    expect(built.redrawn, isEmpty);
   });
 
   test('images in a vertical flow are measured turned', () async {

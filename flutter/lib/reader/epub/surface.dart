@@ -515,8 +515,30 @@ void paintPageSlices(
   EpubPageBox box,
 ) {
   canvas.save();
+  // The first line's ruby may stand in the margin before the flow: the page's
+  // top margin, or its right margin on a vertical page. The margins are even,
+  // so the top one measures both.
+  final content = Rect.fromLTWH(
+    0,
+    0,
+    box.contentWidth,
+    box.contentHeight,
+  ).shift(box.origin);
+  final margin = box.origin.dy;
   canvas.clipRect(
-    Rect.fromLTWH(0, 0, box.contentWidth, box.contentHeight).shift(box.origin),
+    box.vertical
+        ? Rect.fromLTRB(
+            content.left,
+            content.top,
+            content.right + margin,
+            content.bottom,
+          )
+        : Rect.fromLTRB(
+            content.left,
+            content.top - margin,
+            content.right,
+            content.bottom,
+          ),
   );
   box.transformToFlow(canvas);
   for (final slice in page.slices) {
@@ -532,7 +554,17 @@ void _paintSlice(Canvas canvas, PageSlice slice, ReaderEpubPalette palette) {
     canvas.save();
     canvas.clipRect(Rect.fromLTWH(0, slice.top, text.width, slice.height));
     canvas.translate(0, offsetY);
-    text.paint(canvas, lineStart: slice.lineStart, lineEnd: slice.lineEnd);
+    text.paint(
+      canvas,
+      lineStart: slice.lineStart,
+      lineEnd: slice.lineEnd,
+      ruby: false,
+    );
+    canvas.restore();
+    // Ruby stands above its line's top, outside the slice.
+    canvas.save();
+    canvas.translate(0, offsetY);
+    text.paintRuby(canvas, lineStart: slice.lineStart, lineEnd: slice.lineEnd);
     canvas.restore();
     return;
   }

@@ -64,7 +64,8 @@ class FlowTextBlock {
     required this.selectable,
     required this.textAlign,
     required this.textDirection,
-    this.upright = const [],
+    this.redrawn = const [],
+    this.rubies = const [],
   });
 
   final TextPainter painter;
@@ -77,16 +78,23 @@ class FlowTextBlock {
   final TextAlign textAlign;
   final ui.TextDirection textDirection;
 
-  /// The characters of a vertical block that [paint] draws upright; empty for
-  /// a horizontal block.
-  final List<UprightRun> upright;
+  /// The characters [paint] draws itself over their transparent boxes: a
+  /// vertical block's upright characters and tate-chū-yoko, and ruby bases
+  /// spaced out under a longer annotation.
+  final List<RedrawnRun> redrawn;
 
-  /// The upright glyphs of each line, measured when the line is first painted.
-  final Map<int, List<_UprightGlyph>> _uprightLines = {};
+  /// The ruby annotations [paint] sets over their bases.
+  final List<RubyRun> rubies;
 
-  /// One painter per upright grapheme (or tate-chū-yoko run), style and use
+  /// The redrawn glyphs of each line, measured when the line is first painted.
+  final Map<int, List<_RedrawnGlyph>> _redrawnLines = {};
+
+  /// One painter per redrawn grapheme (or tate-chū-yoko run), style and use
   /// of vertical forms, shared by the block's lines.
-  final Map<(String, TextStyle, bool), TextPainter> _uprightPainters = {};
+  final Map<(String, TextStyle, bool), TextPainter> _glyphPainters = {};
+
+  /// Each ruby annotation, laid out and placed when it is first painted.
+  final Map<int, ({Offset origin, FlowTextBlock text})?> _placedRubies = {};
 
   double get width => painter.width;
   double get height => painter.height;
@@ -122,34 +130,116 @@ class FlowTextBlock {
   ///
   /// A vertical block's canvas is turned a quarter turn clockwise, so each
   /// upright character of the lines [lineStart] to [lineEnd] is drawn turned
-  /// back over its own transparent box, in its font's vertical forms.
-  void paint(Canvas canvas, {int lineStart = 0, int? lineEnd}) {
+  /// back over its own transparent box, in its font's vertical forms. The
+  /// lines' ruby is painted too unless [ruby] is false; a caller that clips
+  /// the block to its lines paints it with [paintRuby] outside that clip,
+  /// since an annotation stands above its line's top.
+  void paint(
+    Canvas canvas, {
+    int lineStart = 0,
+    int? lineEnd,
+    bool ruby = true,
+  }) {
     painter.paint(canvas, Offset.zero);
-    if (upright.isEmpty) return;
     final end = math.min(lineEnd ?? lines.length, lines.length);
-    for (var line = lineStart; line < end; line++) {
-      for (final glyph in _uprightLines[line] ??= _measureUpright(line)) {
-        final glyphPainter = glyph.painter;
-        canvas.save();
-        canvas.translate(glyph.center.dx, glyph.center.dy);
-        canvas.rotate(-math.pi / 2);
-        if (glyph.squeeze != 1) canvas.scale(glyph.squeeze, 1);
-        glyphPainter.paint(
-          canvas,
-          Offset(-glyphPainter.width / 2, -glyphPainter.height / 2),
-        );
-        canvas.restore();
+    if (redrawn.isNotEmpty) {
+      for (var line = lineStart; line < end; line++) {
+        for (final glyph in _redrawnLines[line] ??= _measureRedrawn(line)) {
+          final glyphPainter = glyph.painter;
+          canvas.save();
+          canvas.translate(glyph.center.dx, glyph.center.dy);
+          if (glyph.upright) canvas.rotate(-math.pi / 2);
+          if (glyph.squeeze != 1) canvas.scale(glyph.squeeze, 1);
+          glyphPainter.paint(
+            canvas,
+            Offset(-glyphPainter.width / 2, -glyphPainter.height / 2),
+          );
+          canvas.restore();
+        }
       }
+    }
+    if (ruby) paintRuby(canvas, lineStart: lineStart, lineEnd: end);
+  }
+
+  /// Paints the ruby of the lines [lineStart] to [lineEnd], each annotation
+  /// centred over its base's box, above the line (to its right on a vertical
+  /// page). A base broken across lines takes its ruby on its first line.
+  void paintRuby(Canvas canvas, {int lineStart = 0, int? lineEnd}) {
+    if (rubies.isEmpty) return;
+    final end = math.min(lineEnd ?? lines.length, lines.length);
+    if (lineStart >= end) return;
+    final from = lines[lineStart].codeUnitStart;
+    final to = lines[end - 1].codeUnitEnd;
+    for (var index = 0; index < rubies.length; index++) {
+      final ruby = rubies[index];
+      if (ruby.start < from) continue;
+      if (ruby.start >= to) break;
+      final placed = _placedRubies.containsKey(index)
+          ? _placedRubies[index]
+          : _placedRubies[index] = _placeRuby(ruby);
+      if (placed == null) continue;
+      canvas.save();
+      canvas.translate(placed.origin.dx, placed.origin.dy);
+      placed.text.paint(canvas);
+      canvas.restore();
     }
   }
 
-  List<_UprightGlyph> _measureUpright(int line) {
+  ({Offset origin, FlowTextBlock text})? _placeRuby(RubyRun ruby) {
+    final boxes = painter.getBoxesForSelection(
+      TextSelection(baseOffset: ruby.start, extentOffset: ruby.end),
+    );
+    if (boxes.isEmpty) return null;
+    final first = boxes.first.toRect();
+    var base = first;
+    for (final box in boxes.skip(1)) {
+      final rect = box.toRect();
+      if ((rect.top - first.top).abs() > first.height / 2) continue;
+      base = base.expandToInclude(rect);
+    }
+    final annotation = ruby.annotation;
+    final annotationPainter = TextPainter(
+      text: annotation.span,
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    final text = FlowTextBlock(
+      painter: annotationPainter,
+      map: annotation.map,
+      lines: [
+        FlowLine(
+          codeUnitStart: 0,
+          codeUnitEnd: annotation.map.codeUnitLength,
+          canonicalStart: 0,
+          canonicalEnd: 0,
+          top: 0,
+          height: annotationPainter.height,
+        ),
+      ],
+      links: const [],
+      selectable: false,
+      textAlign: TextAlign.left,
+      textDirection: ui.TextDirection.ltr,
+      redrawn: annotation.redrawn,
+    );
+    // The annotation stands on the base's em square, centred on its box:
+    // the laid-out box is the font's ascent and descent, which can reach well
+    // past the em, and an upright character is drawn centred on it.
+    return (
+      origin: Offset(
+        base.center.dx - annotationPainter.width / 2,
+        base.center.dy - ruby.baseSize / 2 - annotationPainter.height,
+      ),
+      text: text,
+    );
+  }
+
+  List<_RedrawnGlyph> _measureRedrawn(int line) {
     final from = lines[line].codeUnitStart;
     final to = lines[line].codeUnitEnd;
-    final glyphs = <_UprightGlyph>[];
+    final glyphs = <_RedrawnGlyph>[];
     final text = map.text;
     final markerOffset = map.codeUnitOffset;
-    for (final run in upright) {
+    for (final run in redrawn) {
       if (run.end <= from) continue;
       if (run.start >= to) break;
       var unit = math.max(run.start, from);
@@ -169,10 +259,20 @@ class FlowTextBlock {
       for (final grapheme in runText.characters) {
         final start = unit;
         unit += grapheme.length;
-        final glyph = _uprightGlyph(start, unit, grapheme, run.style);
+        final glyph = _redrawnGlyph(
+          start,
+          unit,
+          grapheme,
+          run.style,
+          verticalForms: run.upright,
+        );
         if (glyph == null) continue;
         glyphs.add(
-          _UprightGlyph(center: glyph.box.center, painter: glyph.painter),
+          _RedrawnGlyph(
+            center: glyph.box.center,
+            painter: glyph.painter,
+            upright: run.upright,
+          ),
         );
       }
     }
@@ -181,8 +281,8 @@ class FlowTextBlock {
 
   /// A tate-chū-yoko run drawn as horizontal text across its column,
   /// squeezed to the one em its laid-out text takes along the line.
-  _UprightGlyph? _combinedGlyph(UprightRun run) {
-    final glyph = _uprightGlyph(
+  _RedrawnGlyph? _combinedGlyph(RedrawnRun run) {
+    final glyph = _redrawnGlyph(
       run.start,
       run.end,
       map.text.substring(
@@ -195,7 +295,7 @@ class FlowTextBlock {
     if (glyph == null) return null;
     final advance = glyph.box.width;
     final width = glyph.painter.width;
-    return _UprightGlyph(
+    return _RedrawnGlyph(
       center: glyph.box.center,
       painter: glyph.painter,
       squeeze: width > advance && width > 0 ? advance / width : 1,
@@ -215,7 +315,7 @@ class FlowTextBlock {
     int to,
   ) {
     final cells = <({int start, int end, int index, int count, Rect rect})>[];
-    for (final run in upright) {
+    for (final run in redrawn) {
       if (!run.combined || run.start < from) continue;
       if (run.start >= to) break;
       final glyph = _combinedGlyph(run);
@@ -268,14 +368,15 @@ class FlowTextBlock {
   }
 
   /// The laid-out box of the code units [start] to [end], and a painter that
-  /// draws [text] upright in [style], in the font's vertical forms unless
-  /// [verticalForms] is false (tate-chū-yoko sets its text as horizontal).
-  ({Rect box, TextPainter painter})? _uprightGlyph(
+  /// draws [text] in [style], in the font's vertical forms when
+  /// [verticalForms] is true (an upright character; tate-chū-yoko sets its
+  /// text as horizontal).
+  ({Rect box, TextPainter painter})? _redrawnGlyph(
     int start,
     int end,
     String text,
     TextStyle style, {
-    bool verticalForms = true,
+    required bool verticalForms,
   }) {
     final boxes = painter.getBoxesForSelection(
       TextSelection(baseOffset: start, extentOffset: end),
@@ -285,7 +386,7 @@ class FlowTextBlock {
     for (final box in boxes.skip(1)) {
       rect = rect.expandToInclude(box.toRect());
     }
-    final glyphPainter = _uprightPainters[(text, style, verticalForms)] ??=
+    final glyphPainter = _glyphPainters[(text, style, verticalForms)] ??=
         TextPainter(
           text: TextSpan(
             text: text,
@@ -304,25 +405,33 @@ class FlowTextBlock {
   /// Releases the measured paragraph behind this block.
   void dispose() {
     painter.dispose();
-    for (final glyphPainter in _uprightPainters.values) {
+    for (final glyphPainter in _glyphPainters.values) {
       glyphPainter.dispose();
     }
-    _uprightPainters.clear();
-    _uprightLines.clear();
+    _glyphPainters.clear();
+    _redrawnLines.clear();
+    for (final placed in _placedRubies.values) {
+      placed?.text.dispose();
+    }
+    _placedRubies.clear();
   }
 }
 
-/// One upright character of a vertical line: where its box's centre is, in
-/// block coordinates, and the painter that draws it.
-class _UprightGlyph {
-  const _UprightGlyph({
+/// One redrawn character (or tate-chū-yoko run) of a line: where its box's
+/// centre is, in block coordinates, and the painter that draws it.
+class _RedrawnGlyph {
+  const _RedrawnGlyph({
     required this.center,
     required this.painter,
+    this.upright = true,
     this.squeeze = 1,
   });
 
   final Offset center;
   final TextPainter painter;
+
+  /// Whether the glyph is turned back to stand upright in a vertical line.
+  final bool upright;
 
   /// How much a tate-chū-yoko run is narrowed to fit its em square.
   final double squeeze;
@@ -1793,7 +1902,7 @@ class _FlowContext {
     // (between two kanji, before a full stop that may not start a line):
     // the spans of a run broken across lines are laid out again without it.
     final broken = [
-      for (final run in built.upright)
+      for (final run in built.redrawn)
         if (run.combined &&
             painter.getLineBoundary(TextPosition(offset: run.start)) !=
                 painter.getLineBoundary(TextPosition(offset: run.end - 1)))
@@ -1857,7 +1966,8 @@ class _FlowContext {
       selectable: spans.any((span) => span.selectable),
       textAlign: textAlign,
       textDirection: flutterTextDirection(direction),
-      upright: built.upright,
+      redrawn: built.redrawn,
+      rubies: built.rubies,
     );
   }
 
