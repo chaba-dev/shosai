@@ -372,6 +372,13 @@ void _checkNoteAnchor(NoteAnchor anchor) {
 /// One page note on another content, waiting for its unit's text.
 typedef _PendingPlace = ({int index, int offset});
 
+/// One unit's text with the anchors and page notes to resolve in it.
+typedef _BatchUnit = ({
+  String text,
+  List<_Pending> anchors,
+  List<_PendingPlace> places,
+});
+
 /// One text anchor waiting for its unit's text.
 typedef _Pending = ({
   int index,
@@ -457,7 +464,7 @@ Future<List<ResolvedAnnotation>> _resolve(
   var budget = maxAnchorResolutionWork;
   // The listing's normalization allowance, left from checking its records.
   var normalization = book.normalization;
-  final batch = <({String text, List<_Pending> anchors})>[];
+  final batch = <_BatchUnit>[];
   var batchUnits = 0;
   Future<void> flush() async {
     if (batch.isEmpty) return;
@@ -490,18 +497,15 @@ Future<List<ResolvedAnnotation>> _resolve(
     cancellation.throwIfCancelled();
     if (text == null) continue;
     final epubPath = text.resourcePath;
-    final places = placesByUnit[unit] ?? const <_PendingPlace>[];
-    final length = places.isEmpty ? 0 : text.text.runes.length;
-    for (final place in places) {
-      final annotation = annotations[place.index];
-      final path = (annotation.anchor as EpubPlaceAnchor).resourcePath;
-      if (epubPath != null && path != null && path != epubPath) continue;
-      resolved[place.index] = ResolvedAnnotation(
-        annotation: annotation,
-        resolution: AnnotationResolution.recovered,
-        start: place.offset < length ? place.offset : length,
-      );
-    }
+    final places = [
+      for (final place in placesByUnit[unit] ?? const <_PendingPlace>[])
+        // A page note has no quote to tell its chapter by: a known path
+        // must still be the spine item's. Only a note saved without one
+        // falls back to the spine index.
+        if ((annotations[place.index].anchor as EpubPlaceAnchor).resourcePath
+            case final path when path == null || path == epubPath)
+          place,
+    ];
     final matching = [
       for (final pending in anchors)
         if (annotations[pending.index].anchor case EpubAnchor(
@@ -513,8 +517,8 @@ Future<List<ResolvedAnnotation>> _resolve(
         else
           pending,
     ].nonNulls.toList();
-    if (matching.isEmpty) continue;
-    batch.add((text: text.text, anchors: matching));
+    if (matching.isEmpty && places.isEmpty) continue;
+    batch.add((text: text.text, anchors: matching, places: places));
     batchUnits += text.text.length;
     if (batchUnits >= _resolutionBatchUnits) await flush();
   }
@@ -527,7 +531,7 @@ Future<List<ResolvedAnnotation>> _resolve(
 /// captures only [work], [budget] and [normalization], not the caller's
 /// context.
 Future<(List<(int, ResolvedAnchor)>, int, int)> _runBatch(
-  List<({String text, List<_Pending> anchors})> work,
+  List<_BatchUnit> work,
   int budget,
   int normalization,
 ) => Isolate.run(() => _resolveBatch(work, budget, normalization));
@@ -535,13 +539,28 @@ Future<(List<(int, ResolvedAnchor)>, int, int)> _runBatch(
 /// Resolve every anchor of [work] within [budget] work units and
 /// [normalization] normalization units. Runs in its own isolate.
 (List<(int, ResolvedAnchor)>, int, int) _resolveBatch(
-  List<({String text, List<_Pending> anchors})> work,
+  List<_BatchUnit> work,
   int budget,
   int normalization,
 ) {
   final shared = ResolutionBudget(budget, null, normalization);
   final results = <(int, ResolvedAnchor)>[];
   for (final unit in work) {
+    if (unit.places.isNotEmpty) {
+      // Counting the unit's scalars to clamp its page notes is work too.
+      shared.spend(unit.text.length);
+      final length = unit.text.runes.length;
+      for (final place in unit.places) {
+        results.add((
+          place.index,
+          ResolvedAnchor(
+            AnnotationResolution.recovered,
+            place.offset < length ? place.offset : length,
+          ),
+        ));
+      }
+    }
+    if (unit.anchors.isEmpty) continue;
     final text = AnchorText(unit.text, budget: shared);
     for (final anchor in unit.anchors) {
       // Offsets are only evidence on the content they were captured from.

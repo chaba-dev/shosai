@@ -1159,6 +1159,63 @@ void main() {
       },
     );
 
+    test(
+      'a page note with a known chapter is not kept in an unknown one',
+      () async {
+        final original = await book('epub');
+        final edition = await book('epub');
+        final known = await annotations.createNote(
+          original,
+          const EpubPlaceAnchor(
+            spineIndex: 0,
+            resourcePath: _chapter,
+            offset: 10,
+          ),
+          'known',
+        );
+        await annotations.associate(await versionOf(edition), edition);
+
+        final [listed] = await annotations.list(
+          edition,
+          FakeText([const UnitText('An unrelated chapter')]),
+        );
+
+        expect(listed.id, known.id);
+        expect(listed.resolution, AnnotationResolution.orphaned);
+      },
+    );
+
+    test('page notes on another content share the resolution budget', () async {
+      final original = await book('epub');
+      final edition = await book('epub');
+      // 17 chapters of 4 Mi scalars each exceed the 64 Mi budget.
+      const units = 17;
+      for (var spine = 0; spine < units; spine++) {
+        await annotations.createNote(
+          original,
+          EpubPlaceAnchor(
+            spineIndex: spine,
+            resourcePath: 'c$spine.xhtml',
+            offset: 0,
+          ),
+          'note $spine',
+        );
+      }
+      await annotations.associate(await versionOf(edition), edition);
+      final chapter = 'a' * (maxAnchorResolutionWork ~/ 16);
+
+      await expectLater(
+        annotations.list(
+          edition,
+          FakeText([
+            for (var spine = 0; spine < units; spine++)
+              UnitText(chapter, resourcePath: 'c$spine.xhtml'),
+          ]),
+        ),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+    });
+
     test('a summary counts notes and quotes the latest note', () async {
       final bookId = await book('epub');
       await annotations.create(bookId, _select(_text, 'lead'));
