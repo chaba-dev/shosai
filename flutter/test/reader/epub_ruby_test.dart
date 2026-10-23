@@ -350,4 +350,87 @@ void main() {
       expect(checked, greaterThan(0));
     });
   });
+
+  group('a second level', () {
+    test('stands under its base, and can span several bases', () {
+      final built = buildBlockText(
+        [
+          EpubTextSpan(text: '東', ruby: 'とう', rubyUnder: 'Tōkyō'),
+          EpubTextSpan(text: '京', ruby: 'きょう')..rubyUnderContinued = true,
+          EpubTextSpan(text: '都'),
+        ],
+        typography,
+        20,
+      );
+      expect(
+        [
+          for (final ruby in built.rubies)
+            (
+              built.map.text.substring(ruby.start, ruby.end),
+              ruby.annotation.map.text,
+              ruby.under,
+            ),
+        ],
+        [('東', 'とう', false), ('東京', 'Tōkyō', true), ('京', 'きょう', false)],
+      );
+    });
+
+    test('a base shorter than either level is spaced out to the longer', () {
+      final built = buildBlockText(
+        [EpubTextSpan(text: '猫', ruby: 'ねこ', rubyUnder: 'abcdefgh')],
+        typography,
+        20,
+      );
+      final under = built.rubies.singleWhere((ruby) => ruby.under);
+      expect(
+        boxOf(built, 0, 1).width,
+        closeTo(widthOf(under.annotation.span), 0.01),
+      );
+    });
+
+    for (final vertical in [false, true]) {
+      final mode = vertical ? 'vertical' : 'horizontal';
+      test('$mode: is painted under the base\'s em square', () {
+        final chapter = EpubChapter(
+          spine: 0,
+          resource: 'OPS/Text/ruby.xhtml',
+          title: '',
+          blocks: [
+            EpubParagraph([
+              EpubTextSpan(text: '吾'),
+              EpubTextSpan(text: '猫', ruby: 'ねこ', rubyUnder: 'cat'),
+            ], const EpubNodeStyle()),
+          ],
+          canonicalText: '吾猫',
+          anchors: const {},
+          scalarCount: 2,
+        );
+        final flow = layoutChapterFlow(
+          chapter: chapter,
+          spec: ChapterLayoutSpec(
+            width: 400,
+            height: 400,
+            typography: typography.copyWith(lineHeight: 1.2),
+            vertical: vertical,
+          ),
+          images: const {},
+        );
+        addTearDown(() => disposeFlowBlocks(flow.blocks));
+        final text = flow.blocks.single.text!;
+        // Over and under one line: the gap holds two half ems.
+        expect(text.lines.single.height, closeTo(20 * 2.25, 0.5));
+        final base = text.painter
+            .getBoxesForSelection(
+              const TextSelection(baseOffset: 1, extentOffset: 2),
+            )
+            .single
+            .toRect();
+        final placed = text.debugRubyOrigins();
+        expect(placed, hasLength(2));
+        final (overOrigin, underOrigin) = (placed[0]!, placed[1]!);
+        expect(overOrigin.dy, closeTo(base.center.dy - 10 - 10, 0.5));
+        expect(underOrigin.dy, closeTo(base.center.dy + 10, 0.5));
+      });
+    }
+  });
 }

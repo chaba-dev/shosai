@@ -390,7 +390,9 @@ void main() {
         ).lineHeight,
         stacked,
       );
-      // Marks on the other side share the gap with no annotation.
+      // Marks on the other side stand in the gap the next line's ruby
+      // stands in, so the gap holds both too; marks under a line in a
+      // chapter without ruby need only one half em.
       for (final (vertical, emphasis) in [
         (false, const EpubTextEmphasis(under: true)),
         (true, const EpubTextEmphasis(left: true)),
@@ -403,24 +405,39 @@ void main() {
             tight,
             vertical: vertical,
           ).lineHeight,
+          stacked,
+        );
+        expect(
+          chapterTypography(
+            chapterOf([EpubTextSpan(text: '猫', emphasis: emphasis)]),
+            tight,
+            vertical: vertical,
+          ).lineHeight,
           annotatedLineHeight,
         );
       }
-      // The side is the line's: `under` is a horizontal line's.
-      expect(
-        chapterTypography(
-          chapterOf([
-            EpubTextSpan(
-              text: '猫',
-              ruby: 'ねこ',
-              emphasis: const EpubTextEmphasis(under: true),
-            ),
-          ]),
-          tight,
-          vertical: true,
-        ).lineHeight,
-        stacked,
-      );
+      // Ruby on one character and marks on another over their line share
+      // one half em; marks under it take another. The side is the line's:
+      // `under` is a horizontal line's, `left` a vertical one's.
+      for (final (vertical, emphasis, least) in [
+        (false, sesame, annotatedLineHeight),
+        (false, const EpubTextEmphasis(under: true), stacked),
+        (true, const EpubTextEmphasis(under: true), annotatedLineHeight),
+        (true, const EpubTextEmphasis(left: true), stacked),
+      ]) {
+        expect(
+          chapterTypography(
+            chapterOf([
+              EpubTextSpan(text: '猫', ruby: 'ねこ'),
+              EpubTextSpan(text: '犬', emphasis: emphasis),
+            ]),
+            tight,
+            vertical: vertical,
+          ).lineHeight,
+          least,
+          reason: '$vertical $emphasis',
+        );
+      }
     });
   });
 }

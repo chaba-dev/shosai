@@ -84,7 +84,7 @@ class FlowTextBlock {
   /// spaced out under a longer annotation.
   final List<RedrawnRun> redrawn;
 
-  /// The ruby annotations [paint] sets over their bases.
+  /// The ruby annotations [paint] sets beside their bases.
   final List<RubyRun> rubies;
 
   /// The emphasis marks [paint] sets beside their characters.
@@ -175,7 +175,8 @@ class FlowTextBlock {
 
   /// Paints the ruby of the lines [lineStart] to [lineEnd], each annotation
   /// centred over its base's box, above the line (to its right on a vertical
-  /// page). A base broken across lines takes its ruby on its first line.
+  /// page), or below it (to its left) for a second level. A base broken
+  /// across lines takes its ruby on its first line.
   ///
   /// The emphasis marks of those lines are painted with it, beside each
   /// character, outside a ruby annotation on the same side.
@@ -221,6 +222,16 @@ class FlowTextBlock {
     }
   }
 
+  /// Test-only: where each ruby annotation's top-left corner stands, as
+  /// [paintRuby] places it, or null for one with no base box.
+  List<Offset?> debugRubyOrigins() => [
+    for (var index = 0; index < rubies.length; index++)
+      (_placedRubies.containsKey(index)
+              ? _placedRubies[index]
+              : _placedRubies[index] = _placeRuby(rubies[index]))
+          ?.origin,
+  ];
+
   /// Test-only: where the marks of the emphasis run [index] stand, the
   /// centres [paintRuby] draws them on.
   List<Offset> debugEmphasisCentres(int index) => [
@@ -245,17 +256,15 @@ class FlowTextBlock {
       if (box.width < 0.01) continue;
       // A mark on the side of a ruby annotation stands outside it.
       var clear = 0.0;
-      if (!run.under) {
-        for (var index = 0; index < rubies.length; index++) {
-          final ruby = rubies[index];
-          if (ruby.start > character.start) break;
-          if (character.start >= ruby.end) continue;
-          final annotation = _placedRubies.containsKey(index)
-              ? _placedRubies[index]
-              : _placedRubies[index] = _placeRuby(ruby);
-          clear = annotation?.text.height ?? 0;
-          break;
-        }
+      for (var index = 0; index < rubies.length; index++) {
+        final ruby = rubies[index];
+        if (ruby.start > character.start) break;
+        if (character.start >= ruby.end || ruby.under != run.under) continue;
+        final annotation = _placedRubies.containsKey(index)
+            ? _placedRubies[index]
+            : _placedRubies[index] = _placeRuby(ruby);
+        clear = annotation?.text.height ?? 0;
+        break;
       }
       at.add((
         start: character.start,
@@ -372,13 +381,16 @@ class FlowTextBlock {
       base = base.expandToInclude(rect);
     }
     final text = _annotationBlock(ruby.annotation);
-    // The annotation stands on the base's em square, centred on its box:
+    // The annotation stands on the base's em square (or hangs from it),
+    // centred on its box:
     // the laid-out box is the font's ascent and descent, which can reach well
     // past the em, and an upright character is drawn centred on it.
     return (
       origin: Offset(
         base.center.dx - text.width / 2,
-        base.center.dy - ruby.baseSize / 2 - text.height,
+        ruby.under
+            ? base.center.dy + ruby.baseSize / 2
+            : base.center.dy - ruby.baseSize / 2 - text.height,
       ),
       text: text,
     );
@@ -899,8 +911,10 @@ const double annotatedLineHeight = 1 + rubyScale + 0.25;
 
 /// [typography] for [chapter]: a chapter with ruby or emphasis marks has the
 /// line height that makes room for them ([annotatedLineHeight]) when the
-/// reader's is less. A ruby base with marks on its annotation's side stacks
-/// them outside it, and the gap holds both.
+/// reader's is less. The gap between two lines holds what stands over the
+/// one and under the other: a ruby base with marks on its annotation's side
+/// stacks them outside it, and a second ruby level (`<rtc>`) stands under
+/// its base, so the gap may hold two or more half ems.
 ///
 /// Every line of the chapter takes it, not only the ones with ruby, so the
 /// lines keep an even pitch on the page, as a printed book with ruby sets
@@ -910,25 +924,24 @@ ReaderEpubTypography chapterTypography(
   ReaderEpubTypography typography, {
   bool vertical = false,
 }) {
-  const stacked = 1 + 2 * rubyScale + 0.25;
-  if (typography.lineHeight >= stacked) return typography;
-  // The annotations beside one character, in half ems: 0, 1 or 2.
-  int depth(EpubTextSpan span) {
-    final emphasis = span.emphasis;
-    final ruby = span.ruby != null || span.rubyContinued;
-    if (ruby &&
-        emphasis != null &&
-        !(vertical ? emphasis.left : emphasis.under)) {
-      return 2;
-    }
-    return ruby || emphasis != null ? 1 : 0;
-  }
-
-  var deepest = 0;
+  // The annotations over and under one character, in half ems.
+  var over = 0;
+  var under = 0;
   void spans(List<EpubTextSpan> spans) {
     for (final span in spans) {
-      if (deepest == 2) return;
-      deepest = math.max(deepest, depth(span));
+      final emphasis = span.emphasis;
+      final marksUnder =
+          emphasis != null && (vertical ? emphasis.left : emphasis.under);
+      over = math.max(
+        over,
+        (span.ruby != null || span.rubyContinued ? 1 : 0) +
+            (emphasis != null && !marksUnder ? 1 : 0),
+      );
+      under = math.max(
+        under,
+        (span.rubyUnder != null || span.rubyUnderContinued ? 1 : 0) +
+            (marksUnder ? 1 : 0),
+      );
     }
   }
 
@@ -956,15 +969,10 @@ ReaderEpubTypography chapterTypography(
     }
   }
 
-  for (final block in chapter.blocks) {
-    if (deepest == 2) break;
-    visit(block);
-  }
-  final least = switch (deepest) {
-    0 => typography.lineHeight,
-    1 => annotatedLineHeight,
-    _ => stacked,
-  };
+  chapter.blocks.forEach(visit);
+  final halves = over + under;
+  if (halves == 0) return typography;
+  final least = annotatedLineHeight + (halves - 1) * rubyScale;
   return typography.lineHeight >= least
       ? typography
       : typography.copyWith(lineHeight: least);
