@@ -82,6 +82,18 @@ All notable changes to this project will be documented in this file.
 - *(shell)* Open the tab switcher from the reader toolbar (#178)
 - Save the Pages setting and the shelf's sort (#188)
 - *(reader)* Read right-to-left PDFs, and draw both spread pages' area highlights (#191)
+- *(core)* Store page notes and book notes as annotations (#185)
+- *(core)* Search book text and notes across the library (#187)
+- *(reader)* Write page notes and book notes in the Notes panel (#192)
+- *(reader)* Show highlights and notes as note cards grouped by section (#193)
+- *(shell)* List notes across books in the Notes place (#194)
+- *(shell)* Search books and notes from every screen (#195)
+- *(reader)* Go back after a jump with the Back pill (#196)
+- *(reader)* Mark the search match a book opens at (#197)
+- *(reader)* Switch the Notes panel between This book and All books (#198)
+- *(reader)* Tate-chū-yoko in vertical text (#186)
+- *(reader)* Ruby (furigana) in vertical and horizontal text (#189)
+- *(reader)* Text-orientation in vertical text (#202)
 
 ### 🐛 Bug Fixes
 
