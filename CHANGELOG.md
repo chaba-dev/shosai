@@ -126,6 +126,8 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Anchor table rows at their own canonical position (#146)
 - *(flutter)* Package the declared fonts inside the host bundle (#147)
 - Packaged-host fixes from the Linux and macOS release checks (#165)
+- *(reader)* Step the progress track a whole spread in a PDF read in spreads (#205)
+- *(library)* Show the reader a settings change it could not save (#206)
 
 ### 🚜 Refactor
 
@@ -177,6 +179,7 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Add opt-in real-book corpus harness and measurement evidence (#145)
 - *(core)* List /proc/self/fd without following links (#166)
 - *(reader)* Settle continuous EPUB tests with frames only (#183)
+- *(reader)* Bound continuous EPUB tests by work, not wall-clock time (#204)
 
 ### ⚙️ Miscellaneous Tasks
 
