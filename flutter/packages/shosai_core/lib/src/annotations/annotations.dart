@@ -18,7 +18,8 @@ const _resolutionBatchUnits = 4 * 1024 * 1024;
 
 /// A book's annotations: highlights with optional notes, anchored by layered
 /// evidence (offsets in the content they were made on, the normalized quote
-/// and its context) so they survive relayout and changed bytes.
+/// and its context) so they survive relayout and changed bytes, and page
+/// notes and book notes, anchored at a place or at nothing.
 ///
 /// Annotations belong to a document that can span several contents (an
 /// earlier edition, a re-exported file). They follow a book's content
@@ -60,6 +61,47 @@ final class Annotations {
     provenance: provenance,
   );
 
+  /// Write [body] as a page note at [anchor], or as a book note when
+  /// [anchor] is a [BookAnchor], in book [bookId].
+  Future<ResolvedAnnotation> createNote(
+    int bookId,
+    NoteAnchor anchor,
+    String body, {
+    AnnotationProvenance? provenance,
+  }) => _createNote(LibraryBookOwner(bookId), anchor, body, provenance);
+
+  /// Write a note in [content], a document opened outside the library, as
+  /// [createNote] does in a book.
+  Future<ResolvedAnnotation> createNoteInContent(
+    AnnotatedContent content,
+    NoteAnchor anchor,
+    String body, {
+    AnnotationProvenance? provenance,
+  }) => _createNote(ContentOwner(content), anchor, body, provenance);
+
+  Future<ResolvedAnnotation> _createNote(
+    AnnotationOwner owner,
+    NoteAnchor anchor,
+    String body,
+    AnnotationProvenance? provenance,
+  ) async {
+    checkNoteBody(body);
+    checkProvenance(provenance);
+    _checkNoteAnchor(anchor);
+    return _resolvedAsCreated(
+      await _records.create(
+        owner,
+        NewAnnotation(
+          anchor: anchor,
+          quote: null,
+          color: null,
+          body: body,
+          provenance: provenance,
+        ),
+      ),
+    );
+  }
+
   Future<ResolvedAnnotation> _create(
     AnnotationOwner owner,
     AnnotationSelection selection, {
@@ -70,31 +112,45 @@ final class Annotations {
     checkAnnotationBody(body);
     checkProvenance(provenance);
     final (anchor, quote) = _anchorOf(selection);
-    final stored = await _records.create(
-      owner,
-      NewAnnotation(
-        anchor: anchor,
-        quote: quote,
-        color: color,
-        body: body,
-        provenance: provenance,
+    return _resolvedAsCreated(
+      await _records.create(
+        owner,
+        NewAnnotation(
+          anchor: anchor,
+          quote: quote,
+          color: color,
+          body: body,
+          provenance: provenance,
+        ),
       ),
     );
-    return switch (stored.anchor) {
-      EpubAnchor(:final start, :final end) ||
-      PdfAnchor(:final int start, :final int end) => ResolvedAnnotation(
-        annotation: stored,
-        resolution: AnnotationResolution.exact,
-        start: start,
-        end: end,
-      ),
-      PdfAnchor(:final rectangles) => ResolvedAnnotation(
-        annotation: stored,
-        resolution: AnnotationResolution.exact,
-        rectangles: rectangles,
-      ),
-    };
   }
+
+  /// [stored] resolved against the content it was just made on.
+  ResolvedAnnotation _resolvedAsCreated(StoredAnnotation stored) =>
+      switch (stored.anchor) {
+        EpubAnchor(:final start, :final end) ||
+        PdfAnchor(:final int start, :final int end) => ResolvedAnnotation(
+          annotation: stored,
+          resolution: AnnotationResolution.exact,
+          start: start,
+          end: end,
+        ),
+        PdfAnchor(:final rectangles) => ResolvedAnnotation(
+          annotation: stored,
+          resolution: AnnotationResolution.exact,
+          rectangles: rectangles,
+        ),
+        EpubPlaceAnchor(:final offset) => ResolvedAnnotation(
+          annotation: stored,
+          resolution: AnnotationResolution.exact,
+          start: offset,
+        ),
+        PdfPageAnchor() || BookAnchor() => ResolvedAnnotation(
+          annotation: stored,
+          resolution: AnnotationResolution.exact,
+        ),
+      };
 
   /// Book [bookId]'s live annotations, oldest first, resolved against
   /// [text], the book as it is open now.
@@ -133,13 +189,33 @@ final class Annotations {
     return _resolve(book, text, cancellation);
   }
 
+  /// A page of the library's books that have annotations, most recently
+  /// read first, each with its annotations in reading order. Read from the
+  /// store alone: nothing is resolved, so no book need be open.
+  Future<LibraryNotesPage> libraryNotes({
+    int offset = 0,
+    int limit = 20,
+    CancellationToken? cancellation,
+  }) async {
+    if (offset < 0 || limit < 1 || limit > maxLibraryNotesBooksPerPage) {
+      throw const CoreException.invalidRequest(
+        'A library notes page lists 1 to $maxLibraryNotesBooksPerPage books '
+        'from a non-negative offset.',
+      );
+    }
+    cancellation.throwIfCancelled();
+    final page = await _records.libraryNotes(offset, limit);
+    cancellation.throwIfCancelled();
+    return page;
+  }
+
   /// How many annotations book [bookId] has and the words of the latest one,
   /// read from the store alone: nothing is resolved, so the book need not be
   /// open. A book that is not in the library has none.
   Future<NotesSummary> summary(int bookId) => _records.summary(bookId);
 
-  /// Change annotation [id]'s color and body. Returns false when book
-  /// [bookId] has no such live annotation.
+  /// Change highlight [id]'s color and body. Returns false when book
+  /// [bookId] has no such live highlight.
   Future<bool> update(
     int bookId,
     String id, {
@@ -150,8 +226,8 @@ final class Annotations {
     return _records.update(LibraryBookOwner(bookId), id, color, body);
   }
 
-  /// Change annotation [id]'s color and body. Returns false when [content]
-  /// has no such live annotation.
+  /// Change highlight [id]'s color and body. Returns false when [content]
+  /// has no such live highlight.
   Future<bool> updateInContent(
     AnnotatedContent content,
     String id, {
@@ -160,6 +236,24 @@ final class Annotations {
   }) async {
     checkAnnotationBody(body);
     return _records.update(ContentOwner(content), id, color, body);
+  }
+
+  /// Rewrite page or book note [id]. Returns false when book [bookId] has no
+  /// such live note.
+  Future<bool> updateNote(int bookId, String id, String body) async {
+    checkNoteBody(body);
+    return _records.updateNote(LibraryBookOwner(bookId), id, body);
+  }
+
+  /// Rewrite page or book note [id] of [content], as [updateNote] does a
+  /// book's.
+  Future<bool> updateNoteInContent(
+    AnnotatedContent content,
+    String id,
+    String body,
+  ) async {
+    checkNoteBody(body);
+    return _records.updateNote(ContentOwner(content), id, body);
   }
 
   /// Delete annotation [id], leaving a tombstone for synchronization.
@@ -195,6 +289,29 @@ final class Annotations {
   /// book [bookId]'s document.
   Future<AssociationOutcome> associate(String sourceVersionId, int bookId) =>
       _records.associate(sourceVersionId, bookId);
+}
+
+void _checkNoteAnchor(NoteAnchor anchor) {
+  switch (anchor) {
+    case EpubPlaceAnchor(:final spineIndex, :final resourcePath, :final offset):
+      if (spineIndex < 0 ||
+          offset < 0 ||
+          resourcePath == null ||
+          resourcePath.isEmpty ||
+          utf8.encode(resourcePath).length > maxEpubResourcePathBytes) {
+        throw const CoreException.invalidRequest(
+          'An EPUB page note needs a spine index, a place and a resource path '
+          'of at most $maxEpubResourcePathBytes bytes.',
+        );
+      }
+    case PdfPageAnchor(:final page):
+      if (page < 0) {
+        throw const CoreException.invalidRequest(
+          'A PDF page note needs a page.',
+        );
+      }
+    case BookAnchor():
+  }
 }
 
 (AnnotationAnchor, QuoteSelector?) _anchorOf(AnnotationSelection selection) {
@@ -252,6 +369,16 @@ final class Annotations {
   }
 }
 
+/// One page note on another content, waiting for its unit's text.
+typedef _PendingPlace = ({int index, int offset});
+
+/// One unit's text with the anchors and page notes to resolve in it.
+typedef _BatchUnit = ({
+  String text,
+  List<_Pending> anchors,
+  List<_PendingPlace> places,
+});
+
 /// One text anchor waiting for its unit's text.
 typedef _Pending = ({
   int index,
@@ -275,11 +402,41 @@ Future<List<ResolvedAnnotation>> _resolve(
     ),
   );
   final byUnit = <int, List<_Pending>>{};
+  final placesByUnit = <int, List<_PendingPlace>>{};
   for (var index = 0; index < annotations.length; index++) {
     final annotation = annotations[index];
     final sameContent = annotation.contentHash == book.contentHash;
     final quote = annotation.quote;
     switch (annotation.anchor) {
+      case BookAnchor():
+        resolved[index] = ResolvedAnnotation(
+          annotation: annotation,
+          resolution: AnnotationResolution.exact,
+        );
+      case PdfPageAnchor(:final page):
+        // A page is the only evidence a PDF page note has: on another
+        // content it stays on the same page, if there is one.
+        if (page < source.unitCount) {
+          resolved[index] = ResolvedAnnotation(
+            annotation: annotation,
+            resolution: sameContent
+                ? AnnotationResolution.exact
+                : AnnotationResolution.recovered,
+          );
+        }
+      case EpubPlaceAnchor(:final spineIndex, :final offset):
+        if (spineIndex >= source.unitCount) continue;
+        if (sameContent) {
+          resolved[index] = ResolvedAnnotation(
+            annotation: annotation,
+            resolution: AnnotationResolution.exact,
+            start: offset,
+          );
+        } else {
+          // Another content keeps the note in the same chapter, at most at
+          // its end, when the spine item still holds it.
+          (placesByUnit[spineIndex] ??= []).add((index: index, offset: offset));
+        }
       case PdfAnchor(:final page, :final rectangles, start: null):
         // Geometry is only meaningful on the content it was drawn on.
         if (sameContent && page < source.unitCount) {
@@ -307,7 +464,7 @@ Future<List<ResolvedAnnotation>> _resolve(
   var budget = maxAnchorResolutionWork;
   // The listing's normalization allowance, left from checking its records.
   var normalization = book.normalization;
-  final batch = <({String text, List<_Pending> anchors})>[];
+  final batch = <_BatchUnit>[];
   var batchUnits = 0;
   Future<void> flush() async {
     if (batch.isEmpty) return;
@@ -333,12 +490,22 @@ Future<List<ResolvedAnnotation>> _resolve(
     }
   }
 
-  for (final MapEntry(key: unit, value: anchors) in byUnit.entries) {
+  for (final unit in {...byUnit.keys, ...placesByUnit.keys}) {
+    final anchors = byUnit[unit] ?? const <_Pending>[];
     cancellation.throwIfCancelled();
     final text = await source.unitText(unit, cancellation: cancellation);
     cancellation.throwIfCancelled();
     if (text == null) continue;
     final epubPath = text.resourcePath;
+    final places = [
+      for (final place in placesByUnit[unit] ?? const <_PendingPlace>[])
+        // A page note has no quote to tell its chapter by: a known path
+        // must still be the spine item's. Only a note saved without one
+        // falls back to the spine index.
+        if ((annotations[place.index].anchor as EpubPlaceAnchor).resourcePath
+            case final path when path == null || path == epubPath)
+          place,
+    ];
     final matching = [
       for (final pending in anchors)
         if (annotations[pending.index].anchor case EpubAnchor(
@@ -350,8 +517,8 @@ Future<List<ResolvedAnnotation>> _resolve(
         else
           pending,
     ].nonNulls.toList();
-    if (matching.isEmpty) continue;
-    batch.add((text: text.text, anchors: matching));
+    if (matching.isEmpty && places.isEmpty) continue;
+    batch.add((text: text.text, anchors: matching, places: places));
     batchUnits += text.text.length;
     if (batchUnits >= _resolutionBatchUnits) await flush();
   }
@@ -364,7 +531,7 @@ Future<List<ResolvedAnnotation>> _resolve(
 /// captures only [work], [budget] and [normalization], not the caller's
 /// context.
 Future<(List<(int, ResolvedAnchor)>, int, int)> _runBatch(
-  List<({String text, List<_Pending> anchors})> work,
+  List<_BatchUnit> work,
   int budget,
   int normalization,
 ) => Isolate.run(() => _resolveBatch(work, budget, normalization));
@@ -372,13 +539,28 @@ Future<(List<(int, ResolvedAnchor)>, int, int)> _runBatch(
 /// Resolve every anchor of [work] within [budget] work units and
 /// [normalization] normalization units. Runs in its own isolate.
 (List<(int, ResolvedAnchor)>, int, int) _resolveBatch(
-  List<({String text, List<_Pending> anchors})> work,
+  List<_BatchUnit> work,
   int budget,
   int normalization,
 ) {
   final shared = ResolutionBudget(budget, null, normalization);
   final results = <(int, ResolvedAnchor)>[];
   for (final unit in work) {
+    if (unit.places.isNotEmpty) {
+      // Counting the unit's scalars to clamp its page notes is work too.
+      shared.spend(unit.text.length);
+      final length = unit.text.runes.length;
+      for (final place in unit.places) {
+        results.add((
+          place.index,
+          ResolvedAnchor(
+            AnnotationResolution.recovered,
+            place.offset < length ? place.offset : length,
+          ),
+        ));
+      }
+    }
+    if (unit.anchors.isEmpty) continue;
     final text = AnchorText(unit.text, budget: shared);
     for (final anchor in unit.anchors) {
       // Offsets are only evidence on the content they were captured from.
