@@ -143,7 +143,9 @@ writes, edits, opens and deletes page notes and book notes in its Notes panel.
 * [ ] Notes surface scoped to this book or all books, grouped by place; open a
 note at its anchor. This book is done: the reader's Notes panel groups book
 notes first, then each section's notes in reading order, and edits notes in
-place. All books is still to come.
+place. All books is done in the shell's Notes place, which lists every book's
+notes, most recently read first, and opens a note's book at its place. Still
+to come: the panel's This book / All books switch.
 * [ ] Library-wide search over book text and notes from every screen, scoped
 and filtered as the RFD describes, with a return point for Back.
 * [ ] Keep bookmarks and highlights as independent domain records without
