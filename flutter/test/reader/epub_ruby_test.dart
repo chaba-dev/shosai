@@ -262,4 +262,92 @@ void main() {
       ['漢字'],
     );
   });
+
+  group('line spacing', () {
+    EpubChapter chapterOf(List<EpubContentNode> blocks) => EpubChapter(
+      spine: 0,
+      resource: 'OPS/Text/ruby.xhtml',
+      title: '',
+      blocks: blocks,
+      canonicalText: '',
+      anchors: const {},
+      scalarCount: 0,
+    );
+
+    test('a chapter with ruby makes room for it between its lines', () {
+      final tight = typography.copyWith(lineHeight: 1.2);
+      final plain = chapterOf([
+        EpubParagraph([EpubTextSpan(text: '吾輩は猫である')], const EpubNodeStyle()),
+      ]);
+      final annotated = chapterOf([
+        EpubParagraph([EpubTextSpan(text: '吾輩は')], const EpubNodeStyle()),
+        EpubBlockQuote(
+          children: [
+            EpubParagraph([
+              EpubTextSpan(text: '猫', ruby: 'ねこ'),
+            ], const EpubNodeStyle()),
+          ],
+        ),
+      ]);
+      expect(chapterTypography(plain, tight).lineHeight, 1.2);
+      expect(
+        chapterTypography(annotated, tight).lineHeight,
+        annotatedLineHeight,
+      );
+      // A reader's line height that already has room is kept.
+      final loose = typography.copyWith(lineHeight: 2);
+      expect(chapterTypography(annotated, loose).lineHeight, 2);
+    });
+
+    test('every line of a chapter with ruby takes the room, and its '
+        'annotations clear the line before', () {
+      final chapter = chapterOf([
+        EpubParagraph([
+          for (var index = 0; index < 6; index++) ...[
+            EpubTextSpan(text: '吾輩は'),
+            EpubTextSpan(text: '猫', ruby: 'ねこ'),
+            EpubTextSpan(text: 'である。'),
+          ],
+        ], const EpubNodeStyle()),
+        EpubParagraph([EpubTextSpan(text: '名前はまだ無い。')], const EpubNodeStyle()),
+      ]);
+      final flow = layoutChapterFlow(
+        chapter: chapter,
+        spec: ChapterLayoutSpec(
+          width: 200,
+          height: 600,
+          typography: typography.copyWith(lineHeight: 1.2),
+        ),
+        images: const {},
+      );
+      addTearDown(() => disposeFlowBlocks(flow.blocks));
+      final lines = [for (final block in flow.blocks) ...block.text!.lines];
+      expect(lines.length, greaterThan(2));
+      for (final line in lines) {
+        expect(line.height, closeTo(20 * annotatedLineHeight, 0.5));
+      }
+      final text = flow.blocks.first.text!;
+      var checked = 0;
+      for (final ruby in text.rubies) {
+        final base = text.painter
+            .getBoxesForSelection(
+              TextSelection(baseOffset: ruby.start, extentOffset: ruby.end),
+            )
+            .first
+            .toRect();
+        final line = text.lines.indexWhere(
+          (line) => ruby.start < line.codeUnitEnd,
+        );
+        if (line == 0) continue;
+        // The annotation's top, half an em over the base's em square, stays
+        // below the em square of the line before.
+        final annotationTop = base.center.dy - 10 - 10;
+        final before = text.lines[line - 1];
+        final beforeEmBottom = before.top + before.height / 2 + 10;
+        expect(annotationTop - beforeEmBottom, closeTo(5, 0.5));
+        checked++;
+      }
+      expect(checked, greaterThan(0));
+    });
+  });
 }

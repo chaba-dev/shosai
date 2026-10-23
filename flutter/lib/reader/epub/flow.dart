@@ -736,6 +736,42 @@ class ChapterLayoutSpec {
   int get hashCode => Object.hash(width, height, typography, vertical);
 }
 
+/// The least line height a chapter with ruby is laid out at, in ems: the
+/// gap between two lines' em squares holds an annotation (half an em) and a
+/// quarter of an em between it and the line before, as the line height of
+/// 1.75 Japanese ebooks set does.
+const double annotatedLineHeight = 1 + rubyScale + 0.25;
+
+/// [typography] for [chapter]: a chapter with ruby has the line height that
+/// makes room for it ([annotatedLineHeight]) when the reader's is less.
+///
+/// Every line of the chapter takes it, not only the ones with ruby, so the
+/// lines keep an even pitch on the page, as a printed book with ruby sets
+/// them.
+ReaderEpubTypography chapterTypography(
+  EpubChapter chapter,
+  ReaderEpubTypography typography,
+) {
+  if (typography.lineHeight >= annotatedLineHeight) return typography;
+  bool annotated(List<EpubTextSpan> spans) =>
+      spans.any((span) => span.ruby != null);
+  bool holds(EpubContentNode node) => switch (node) {
+    EpubHeading(:final spans) ||
+    EpubParagraph(:final spans) => annotated(spans),
+    EpubBlockQuote(:final children) ||
+    EpubFigure(:final children) => children.any(holds),
+    EpubUnorderedList(:final items) ||
+    EpubOrderedList(:final items) => items.any(annotated),
+    EpubImage(:final caption) => annotated(caption),
+    // A table cell keeps a ruby's base and drops its annotation.
+    EpubTable(:final caption) => annotated(caption),
+    EpubMathNode() || EpubCodeBlock() || EpubHorizontalRule() => false,
+  };
+  return chapter.blocks.any(holds)
+      ? typography.copyWith(lineHeight: annotatedLineHeight)
+      : typography;
+}
+
 /// Lay out one chapter into a flow.
 ChapterFlow layoutChapterFlow({
   required EpubChapter chapter,
@@ -744,6 +780,7 @@ ChapterFlow layoutChapterFlow({
 }) {
   final context = _FlowContext(
     spec: spec,
+    typography: chapterTypography(chapter, spec.typography),
     images: images,
     maxBlockHeight: math.max(120.0, spec.height - 8),
     canonicalText: chapter.canonicalText,
@@ -867,8 +904,15 @@ class ChapterLayoutSession {
     return result;
   }
 
+  /// The typography the chapter's blocks are laid out with.
+  late final ReaderEpubTypography _typography = chapterTypography(
+    chapter,
+    spec.typography,
+  );
+
   _FlowContext _newContext() => _FlowContext(
     spec: spec,
+    typography: _typography,
     images: images,
     maxBlockHeight: _maxBlockHeight,
     canonicalText: chapter.canonicalText,
@@ -1264,6 +1308,7 @@ EpubTextSpan _syntheticSpan(
 class _FlowContext {
   _FlowContext({
     required this.spec,
+    required this.typography,
     required this.images,
     required this.maxBlockHeight,
     required this.canonicalText,
@@ -1323,7 +1368,9 @@ class _FlowContext {
   double cursor = 0;
   int overflowClippedBlocks = 0;
 
-  ReaderEpubTypography get typography => spec.typography;
+  /// The spec's typography, with room for the chapter's ruby
+  /// ([chapterTypography]).
+  final ReaderEpubTypography typography;
   double get baseFontSize => typography.fontSize;
 
   double _spacingEm(EpubNodeStyle? style, double defaultBefore) {
