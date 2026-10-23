@@ -67,6 +67,7 @@ final class ReaderController implements Listenable {
     ReaderNoticeReporter? noticeReporter,
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
+    LayoutClock? layoutClock,
     this.debugEpubSessionObserver,
     this.debugContinuousStepObserver,
     ReaderTypographyPresentation initialTypography =
@@ -114,6 +115,7 @@ final class ReaderController implements Listenable {
        _reportNotice = noticeReporter ?? ignoreNotice,
        _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
        _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
+       _layoutClock = layoutClock ?? systemLayoutClock,
        _typographyFontSize = initialTypography.epubFontSize,
        _typographyLineSpacing = initialTypography.epubLineSpacing,
        _typographyTheme = initialTypography.theme,
@@ -176,9 +178,15 @@ final class ReaderController implements Listenable {
   /// one is not) needs to reach the session object itself.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
 
-  /// Test and measurement hook: the synchronous microseconds of each
-  /// continuous window step (layout, geometry and page derivation).
-  final void Function(int micros)? debugContinuousStepObserver;
+  /// Test and measurement hook: each continuous window step's synchronous
+  /// microseconds (layout, geometry and page derivation) and the nodes it
+  /// measured.
+  final void Function(({int micros, int measured}) step)?
+  debugContinuousStepObserver;
+
+  /// The clock EPUB layout's time budgets are spent on: the system's, unless
+  /// a test injects one that does not depend on machine speed.
+  final LayoutClock _layoutClock;
 
   ReaderModel _model = ReaderModel();
 
@@ -3763,6 +3771,7 @@ final class ReaderController implements Listenable {
             chapter: chapter,
             spec: spec,
             images: source.images,
+            clock: _layoutClock,
           );
     final active = replacement ?? session!;
     if (replacement != null) debugEpubSessionObserver?.call(replacement);
@@ -4275,6 +4284,7 @@ final class ReaderController implements Listenable {
       return;
     }
     final stopwatch = Stopwatch()..start();
+    final measured = session.measuredNodes;
     final ContinuousWindowStep step;
     final ReaderEpubPage next;
     try {
@@ -4322,7 +4332,10 @@ final class ReaderController implements Listenable {
       ),
     );
     _releaseDetachedEpubBlocks();
-    debugContinuousStepObserver?.call(stopwatch.elapsedMicroseconds);
+    debugContinuousStepObserver?.call((
+      micros: stopwatch.elapsedMicroseconds,
+      measured: session.measuredNodes - measured,
+    ));
     if (step.pending || _continuousCaches[session]!.selectionPending) {
       _scheduleContinuousTick();
     }

@@ -482,9 +482,9 @@ class _ScalarIndex {
 /// calibrates its estimate from the first window.
 ///
 /// With [selectionBudgetMicros], selection geometry is built for the nodes
-/// nearest [priorityTop] (column coordinates) until the budget is spent; the
-/// others paint without it until a later call
-/// ([ContinuousGeometryCache.selectionPending]).
+/// nearest [priorityTop] (column coordinates) until the budget is spent on
+/// [ChapterLayoutSession.clock]; the others paint without it until a later
+/// call ([ContinuousGeometryCache.selectionPending]).
 ReaderEpubPage continuousWindowFor({
   required ChapterLayoutSession session,
   required ContinuousExtents extents,
@@ -548,12 +548,12 @@ ReaderEpubPage continuousWindowFor({
       );
     }
 
-    final watch = Stopwatch()..start();
+    final started = session.clock();
     var built = 0;
     bool spent() =>
         selectionBudgetMicros != null &&
         built > 0 &&
-        watch.elapsedMicroseconds >= selectionBudgetMicros;
+        session.clock() - started >= selectionBudgetMicros;
     void build(int index) {
       final (:node, :geometry) = nodes[index];
       cache._buildSelection(node, geometry, nodeBox);

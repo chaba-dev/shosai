@@ -763,6 +763,19 @@ ChapterFlow layoutChapterFlow({
   );
 }
 
+/// Reads a monotonic clock, in microseconds.
+///
+/// The layout time budgets are spent on this clock. Production reads the
+/// system's ([systemLayoutClock]); a test that must not depend on machine
+/// speed passes one that never advances, so only the node counts bound a
+/// batch.
+typedef LayoutClock = int Function();
+
+final Stopwatch _systemLayoutStopwatch = Stopwatch()..start();
+
+/// Microseconds on the system's monotonic clock.
+int systemLayoutClock() => _systemLayoutStopwatch.elapsedMicroseconds;
+
 /// Incremental, windowed layout of one chapter.
 ///
 /// The session measures a contiguous range of chapter nodes. The first range
@@ -781,11 +794,15 @@ class ChapterLayoutSession {
     required this.chapter,
     required this.spec,
     required this.images,
+    this.clock = systemLayoutClock,
   }) : _maxBlockHeight = math.max(120.0, spec.height - 8);
 
   final EpubChapter chapter;
   final ChapterLayoutSpec spec;
   final Map<String, ui.Image> images;
+
+  /// The clock the batches' time budgets are spent on.
+  final LayoutClock clock;
   final double _maxBlockHeight;
 
   final List<FlowBlock> _blocks = [];
@@ -806,6 +823,10 @@ class ChapterLayoutSession {
 
   /// Work already reported to an owner (measurement bookkeeping only).
   int reportedWorkMicros = 0;
+
+  /// Nodes measured in this session, counting a node again each time it is
+  /// measured again after a release (measurement bookkeeping only).
+  int measuredNodes = 0;
 
   bool get started => _started;
   bool get complete =>
@@ -872,7 +893,7 @@ class ChapterLayoutSession {
   }) {
     assert(!_started, 'the priority window is the first range of a session');
     final context = _newContext();
-    final stopwatch = Stopwatch()..start();
+    final started = clock();
     final target = math.max(
       0,
       math.min(node ?? nodeIndexForScalar(scalar), chapter.blocks.length - 1),
@@ -887,7 +908,7 @@ class ChapterLayoutSession {
         index++;
         if (context.cursor >= targetHeight) break;
         if (maxNodes != null && index - target >= maxNodes) break;
-        if (maxMicros != null && stopwatch.elapsedMicroseconds >= maxMicros) {
+        if (maxMicros != null && clock() - started >= maxMicros) {
           break;
         }
       }
@@ -898,7 +919,8 @@ class ChapterLayoutSession {
       context.releaseUnadoptedPainters(const []);
       rethrow;
     }
-    layoutWorkMicros += stopwatch.elapsedMicroseconds;
+    layoutWorkMicros += clock() - started;
+    measuredNodes += index - target;
     _blocks.addAll(context.blocks);
     context.transferCreatedPainters();
     _overflowClipped += context.overflowClippedBlocks;
@@ -921,14 +943,14 @@ class ChapterLayoutSession {
   int layoutForward({int maxNodes = 24, int maxMicros = 8000}) {
     if (!_started || _nextNode >= chapter.blocks.length) return 0;
     final context = _newContext()..cursor = _cursor;
-    final stopwatch = Stopwatch()..start();
+    final started = clock();
     final bounds = <double>[];
     var next = _nextNode;
     var laid = 0;
     try {
       while (next < chapter.blocks.length &&
           laid < maxNodes &&
-          stopwatch.elapsedMicroseconds < maxMicros) {
+          clock() - started < maxMicros) {
         if (next == debugFailNodeIndex) {
           throw StateError('debug layout failure at $next');
         }
@@ -951,7 +973,8 @@ class ChapterLayoutSession {
     _overflowClipped += context.overflowClippedBlocks;
     _nextNode = next;
     _cursor = context.cursor;
-    layoutWorkMicros += stopwatch.elapsedMicroseconds;
+    layoutWorkMicros += clock() - started;
+    measuredNodes += laid;
     return laid;
   }
 
@@ -1019,7 +1042,7 @@ class ChapterLayoutSession {
   /// [snapshot] normalizes away.
   int layoutBackward({int maxNodes = 24, int maxMicros = 8000}) {
     if (!_started || _firstNode == 0) return 0;
-    final stopwatch = Stopwatch()..start();
+    final started = clock();
     // The batch is staged aside and committed only when it completes: a throw
     // then leaves the range exactly as it was, and every painter the batch
     // created is released here rather than left to finalization. The staged
@@ -1033,9 +1056,7 @@ class ChapterLayoutSession {
     var first = _firstNode;
     var laid = 0;
     try {
-      while (first > 0 &&
-          laid < maxNodes &&
-          stopwatch.elapsedMicroseconds < maxMicros) {
+      while (first > 0 && laid < maxNodes && clock() - started < maxMicros) {
         final index = first - 1;
         final context = _newContext();
         contexts.add(context);
@@ -1067,7 +1088,8 @@ class ChapterLayoutSession {
     _rangeStart = stagedRange;
     _overflowClipped += stagedOverflow;
     _firstNode = first;
-    layoutWorkMicros += stopwatch.elapsedMicroseconds;
+    layoutWorkMicros += clock() - started;
+    measuredNodes += laid;
     return laid;
   }
 
