@@ -39,6 +39,10 @@ final class AnnotationAssociationCancelled extends AnnotationAssociationChoice {
 /// Search is deliberately not a member: it is an independent bar (RD-11).
 enum ReaderPanel { contents, typography, notes }
 
+/// A place a jump left from, which Back returns to: a unit and where in its
+/// text.
+typedef ReaderReturnPoint = ({int unit, int? offset});
+
 /// Which ordinal the reader status text names (RD-05).
 ///
 /// `page` is supplied for paginated EPUB/PDF page ordinals and `chapter`
@@ -434,6 +438,7 @@ final class ReaderModel {
     List<FlutterSearchMatch> searchResults = const [],
     List<FlutterBookmark> bookmarks = const [],
     List<FlutterNote> notes = const [],
+    List<ReaderReturnPoint> returnPoints = const [],
     Set<String> annotationOperations = const {},
     this.selectionError,
     this.relayoutError,
@@ -484,6 +489,7 @@ final class ReaderModel {
        searchResults = List.unmodifiable(searchResults),
        bookmarks = List.unmodifiable(bookmarks),
        notes = List.unmodifiable(notes),
+       returnPoints = List.unmodifiable(returnPoints),
        annotationOperations = Set.unmodifiable(annotationOperations);
 
   final String? openPath;
@@ -562,6 +568,9 @@ final class ReaderModel {
 
   /// The book's notes: its book notes, then its page notes in reading order.
   final List<FlutterNote> notes;
+
+  /// Where each jump left from, the latest last: Back returns to the last.
+  final List<ReaderReturnPoint> returnPoints;
   final Set<String> annotationOperations;
   final String? selectionError;
 
@@ -687,6 +696,7 @@ final class ReaderModel {
     List<FlutterSearchMatch>? searchResults,
     List<FlutterBookmark>? bookmarks,
     List<FlutterNote>? notes,
+    List<ReaderReturnPoint>? returnPoints,
     Set<String>? annotationOperations,
     Object? selectionError = _unchanged,
     Object? relayoutError = _unchanged,
@@ -773,6 +783,7 @@ final class ReaderModel {
       searchResults: searchResults ?? this.searchResults,
       bookmarks: bookmarks ?? this.bookmarks,
       notes: notes ?? this.notes,
+      returnPoints: returnPoints ?? this.returnPoints,
       annotationOperations: annotationOperations == null
           ? this.annotationOperations
           : Set.unmodifiable(annotationOperations),

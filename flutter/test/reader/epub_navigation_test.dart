@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/controller.dart';
@@ -725,6 +726,220 @@ void main() {
       await drainHarness(tester);
     });
 
+    testWidgets('a jump shows Back, which returns where it left from', (
+      tester,
+    ) async {
+      final harness = bridge();
+      await openReader(tester, harness);
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      await openContents(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-contents-entry-2')));
+      await settleNative(tester);
+      if (find
+          .byKey(const ValueKey('reader-panel-contents'))
+          .evaluate()
+          .isNotEmpty) {
+        await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
+      }
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+      expect(find.text('Back to Chapter one'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('reader-back')));
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+      await openContents(tester);
+      expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('reader-contents-entry-0')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+        reason: 'Back returned to the first chapter',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets('a long Back label fits a phone at a large text size', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 720);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 3;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final requests = ReaderPlaceRequests();
+      final harness = bridge(
+        readingState: FlutterReadingState(
+          unit: BigInt.from(2),
+          offset: BigInt.from(200),
+          zoom: 1,
+        ),
+      );
+      await openReader(tester, harness, placeRequests: requests);
+      await settleEpubPage(tester);
+      requests.go(const ReaderPlace(0, offset: 0));
+      await settleEpubPage(tester);
+
+      final pill = find.byKey(const ValueKey('reader-back-pill'));
+      expect(pill, findsOneWidget);
+      expect(find.textContaining('Back to'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      expect(tester.getRect(pill).width, lessThanOrEqualTo(360));
+      expect(
+        find.byKey(const ValueKey('reader-back-dismiss')).hitTestable(),
+        findsOneWidget,
+        reason: 'the close button stays on screen',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets('a turn the reader refuses does not count against Back', (
+      tester,
+    ) async {
+      final requests = ReaderPlaceRequests();
+      final harness = bridge();
+      await openReader(tester, harness, placeRequests: requests);
+      await settleEpubPage(tester);
+      // The last chapter's one page: there is nothing after it.
+      requests.go(const ReaderPlace(2, offset: 0));
+      await settleEpubPage(tester);
+      for (var turn = 0; turn < 3; turn += 1) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await settleEpubPage(tester);
+      }
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets(
+      'Alt+← goes back, but moves by word in a text field',
+      (tester) async {
+        final harness = bridge();
+        await openReader(tester, harness);
+        await settleEpubPage(tester);
+        Future<void> jump() async {
+          await openContents(tester);
+          await tester.tap(inContents('Chapter three deep'));
+          await settleEpubPage(tester);
+          if (find
+              .byKey(const ValueKey('reader-panel-contents'))
+              .evaluate()
+              .isNotEmpty) {
+            await tester.tap(
+              find.byKey(const ValueKey('reader-header-contents')),
+            );
+            await settleEpubPage(tester);
+          }
+        }
+
+        final mac = defaultTargetPlatform == TargetPlatform.macOS;
+        Future<void> press({required bool back}) async {
+          final (key, modifier) = back == mac
+              ? (LogicalKeyboardKey.bracketLeft, LogicalKeyboardKey.metaLeft)
+              : (LogicalKeyboardKey.arrowLeft, LogicalKeyboardKey.altLeft);
+          await tester.sendKeyDownEvent(modifier);
+          await tester.sendKeyEvent(key);
+          await tester.sendKeyUpEvent(modifier);
+          await settleEpubPage(tester);
+        }
+
+        final pill = find.byKey(const ValueKey('reader-back-pill'));
+        await jump();
+        expect(pill, findsOneWidget);
+        // The other platform's shortcut does nothing here.
+        await press(back: false);
+        expect(pill, findsOneWidget);
+
+        // In the search field the key moves the caret instead.
+        await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+        await settleNative(tester);
+        final field = find.byType(EditableText);
+        expect(field, findsOneWidget);
+        await tester.enterText(field, 'two words');
+        await press(back: true);
+        expect(pill, findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+        await settleNative(tester);
+        await press(back: true);
+        expect(pill, findsNothing);
+
+        await tester.pumpWidget(const SizedBox());
+        await drainHarness(tester);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.macOS,
+      }),
+    );
+
+    testWidgets('a book opened at a place goes back to where it was left', (
+      tester,
+    ) async {
+      final harness = bridge(
+        readingState: FlutterReadingState(
+          unit: BigInt.from(2),
+          offset: BigInt.from(20),
+          zoom: 1,
+        ),
+      );
+      await openReader(
+        tester,
+        harness,
+        place: const ReaderPlace(1, offset: 21),
+      );
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      // Closing it stays.
+      await tester.tap(find.byKey(const ValueKey('reader-back-dismiss')));
+      await settleNative(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets('three page turns away or Stay here close Back', (
+      tester,
+    ) async {
+      final requests = ReaderPlaceRequests();
+      final harness = bridge();
+      await openReader(tester, harness, placeRequests: requests);
+      await settleEpubPage(tester);
+      requests.go(const ReaderPlace(1, offset: 0));
+      await settleEpubPage(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      // The book has three one-page chapters: forward to the last, then back.
+      for (final edge in ['next', 'previous', 'previous']) {
+        expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+        await tester.tap(find.byKey(ValueKey('reader-edge-$edge')));
+        await settleEpubPage(tester);
+      }
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      // Stay here closes Back too.
+      requests.go(const ReaderPlace(2, offset: 0));
+      await settleEpubPage(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-back-dismiss')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
     testWidgets('a later row of the same chapter is the current one', (
       tester,
     ) async {
@@ -973,6 +1188,11 @@ void main() {
 
       expect(harness.savedReadingStates.last.unit.toInt(), 2);
       expect(harness.savedReadingStates.last.offset?.toInt(), 0);
+      expect(
+        find.text('Back to Chapter one'),
+        findsOneWidget,
+        reason: 'a followed link is a jump Back returns from',
+      );
 
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);

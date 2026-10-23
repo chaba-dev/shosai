@@ -451,9 +451,9 @@ ReaderMessage pageStepMessage(ReaderModel model, int delta) {
   if (model.epubPage != null) return ReaderPageStepRequested(delta);
   // A PDF read in spreads turns both pages of the spread.
   if (model.layout.spread && model.document?.format == FlutterBookFormat.pdf) {
-    return ReaderUnitRequested(pdfSpreadStep(model.unit, delta));
+    return ReaderUnitRequested(pdfSpreadStep(model.unit, delta), turn: true);
   }
-  return ReaderUnitRequested(model.unit + delta);
+  return ReaderUnitRequested(model.unit + delta, turn: true);
 }
 
 /// Whether a page step in [delta]'s direction can move the reader.

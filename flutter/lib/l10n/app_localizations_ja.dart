@@ -321,6 +321,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerNoteCancel => 'キャンセル';
 
   @override
+  String readerBackToPage(int page) {
+    return '$pageページに戻る';
+  }
+
+  @override
+  String readerBackTo(String place) {
+    return '$placeに戻る';
+  }
+
+  @override
+  String get readerBackDismiss => 'ここにとどまる';
+
+  @override
   String readerNotesCount(int count) {
     return 'メモ $count件';
   }

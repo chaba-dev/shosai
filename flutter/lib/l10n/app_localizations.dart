@@ -630,6 +630,24 @@ abstract class AppLocalizations {
   /// **'Cancel'**
   String get readerNoteCancel;
 
+  /// The BackPill after a jump: returns to the PDF page the jump left from.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to page {page}'**
+  String readerBackToPage(int page);
+
+  /// The BackPill after a jump: returns to the EPUB section the jump left from, by its contents title.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to {place}'**
+  String readerBackTo(String place);
+
+  /// Closes the BackPill without going back.
+  ///
+  /// In en, this message translates to:
+  /// **'Stay here'**
+  String get readerBackDismiss;
+
   /// Notes panel: how many highlights, page notes and book notes are listed.
   ///
   /// In en, this message translates to:

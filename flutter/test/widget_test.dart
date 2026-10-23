@@ -6891,6 +6891,67 @@ void main() {
     await bridge.disposed.future;
   });
 
+  testWidgets('three PDF page turns away from a jump close Back', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      bookId: 7,
+      logicalUnitCount: 8,
+      immediateLists: true,
+    );
+    final requests = ReaderPlaceRequests();
+    Future<void> disposeReader() async {
+      if (bridge.disposed.isCompleted) return;
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+    }
+
+    addTearDown(disposeReader);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/book.pdf',
+          initialBookId: 7,
+          placeRequests: requests,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final back = find.byKey(const ValueKey('reader-back-pill'));
+
+    requests.go(const ReaderPlace(5));
+    await tester.pumpAndSettle();
+    expect(find.text('Back to page 1'), findsOneWidget);
+    for (var turn = 0; turn < 3; turn += 1) {
+      expect(back, findsOneWidget, reason: 'after $turn turns');
+      await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+      await tester.pumpAndSettle();
+    }
+    expect(back, findsNothing);
+
+    // A jump from where the last one left starts the three turns over.
+    requests.go(const ReaderPlace(0));
+    await tester.pumpAndSettle();
+    expect(find.text('Back to page 3'), findsOneWidget);
+    for (var turn = 0; turn < 2; turn += 1) {
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pumpAndSettle();
+    }
+    requests.go(const ReaderPlace(5));
+    await tester.pumpAndSettle();
+    for (var turn = 0; turn < 3; turn += 1) {
+      expect(back, findsOneWidget, reason: 'after $turn turns');
+      await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+      await tester.pumpAndSettle();
+    }
+    expect(back, findsNothing);
+
+    await disposeReader();
+  });
+
   testWidgets('persistence errors fit a compact reader at large text scale', (
     tester,
   ) async {

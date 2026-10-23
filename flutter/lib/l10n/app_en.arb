@@ -489,6 +489,28 @@
   "@readerBookNoteTitle": {
     "description": "A note about the whole book: the note dialog title and the Notes panel's new-note action."
   },
+  "readerBackToPage": "Back to page {page}",
+  "@readerBackToPage": {
+    "description": "The BackPill after a jump: returns to the PDF page the jump left from.",
+    "placeholders": {
+      "page": {
+        "type": "int"
+      }
+    }
+  },
+  "readerBackTo": "Back to {place}",
+  "@readerBackTo": {
+    "description": "The BackPill after a jump: returns to the EPUB section the jump left from, by its contents title.",
+    "placeholders": {
+      "place": {
+        "type": "String"
+      }
+    }
+  },
+  "readerBackDismiss": "Stay here",
+  "@readerBackDismiss": {
+    "description": "Closes the BackPill without going back."
+  },
   "readerNotesCount": "{count, plural, =1{1 note} other{{count} notes}}",
   "@readerNotesCount": {
     "description": "Notes panel: how many highlights, page notes and book notes are listed.",

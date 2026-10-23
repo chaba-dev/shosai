@@ -34,6 +34,9 @@ part 'effects.dart';
 part 'message.dart';
 part 'model.dart';
 
+/// Most jumps Back remembers; the oldest is forgotten first.
+const _maxReturnPoints = 32;
+
 final class ReaderController implements Listenable {
   ReaderController({
     required FlutterBridge bridge,
@@ -276,6 +279,9 @@ final class ReaderController implements Listenable {
   String _searchQuery = '';
   String? _searchError;
   int _searchCurrentIndex = 0;
+
+  /// Page turns since the last jump: three close the BackPill.
+  int _turnsSinceJump = 0;
   int _contentsRevision = 0;
 
   /// The scale the displayed PDF page's raster was rendered at. Set only when
@@ -433,11 +439,13 @@ final class ReaderController implements Listenable {
       _resolvePlace(id, note: place.note ?? false, revision: pending.revision);
       return;
     }
-    _unitRequested(
-      place.unit,
-      offset: place.offset,
-      length: place.length,
-      replaceReadingOffset: true,
+    _jump(
+      () => _unitRequested(
+        place.unit,
+        offset: place.offset,
+        length: place.length,
+        replaceReadingOffset: true,
+      ),
     );
   }
 
@@ -517,7 +525,8 @@ final class ReaderController implements Listenable {
           ReaderNoteSaved() ||
           ReaderNoteDeleted() ||
           ReaderNoteNavigated() ||
-          ReaderPlaceRequested() => true,
+          ReaderPlaceRequested() ||
+          ReaderReturnRequested() => true,
           _ => false,
         }) {
       return;
@@ -533,7 +542,8 @@ final class ReaderController implements Listenable {
           ReaderLocationNavigated() ||
           ReaderLinkActivated() ||
           ReaderPageInputSubmitted() ||
-          ReaderSearchResultStepRequested():
+          ReaderSearchResultStepRequested() ||
+          ReaderReturnRequested():
         _placeRevision += 1;
         _pendingPlace = null;
       default:
@@ -549,6 +559,8 @@ final class ReaderController implements Listenable {
           height: message.height,
           devicePixelRatio: message.devicePixelRatio,
         );
+      case ReaderUnitRequested(turn: true):
+        _pageTurned(() => _unitRequested(message.unit));
       case ReaderUnitRequested():
         _unitRequested(
           message.unit,
@@ -556,7 +568,7 @@ final class ReaderController implements Listenable {
           length: message.length,
         );
       case ReaderPageStepRequested():
-        _pageStepRequested(message.delta);
+        _pageTurned(() => _pageStepRequested(message.delta));
       case ReaderSearchRequested():
         _searchRequested(message.query);
       case ReaderBookmarkToggled():
@@ -564,10 +576,12 @@ final class ReaderController implements Listenable {
       case ReaderBookmarkDeleted():
         _bookmarkDeleted(message.id);
       case ReaderBookmarkNavigated():
-        _unitRequested(
-          message.unit,
-          offset: message.offset,
-          replaceReadingOffset: true,
+        _jump(
+          () => _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          ),
         );
       case ReaderPageNoteRequested():
         _placeNoteRequested(FlutterNoteKind.page);
@@ -590,10 +604,12 @@ final class ReaderController implements Listenable {
       case ReaderNoteDeleted():
         _placeNoteDeleted(message.id);
       case ReaderNoteNavigated():
-        _unitRequested(
-          message.unit,
-          offset: message.offset,
-          replaceReadingOffset: true,
+        _jump(
+          () => _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          ),
         );
       case ReaderPlaceRequested(:final place):
         // Taken once the document is open and idle (see dispatch).
@@ -632,6 +648,13 @@ final class ReaderController implements Listenable {
         _activeBridgeOperations -= 1;
         _recoverIfIdle();
         _disposeBridgeIfIdle();
+      case ReaderReturnRequested():
+        _returnRequested();
+      case ReaderReturnDismissed():
+        _turnsSinceJump = 0;
+        if (_model.returnPoints.isNotEmpty) {
+          _emit(_model.copyWith(returnPoints: const []));
+        }
       case ReaderPanelToggled():
         _panelToggled(message.panel);
       case ReaderSearchToggled():
@@ -646,10 +669,12 @@ final class ReaderController implements Listenable {
         _linkActivated(message.href);
       case ReaderLocationNavigated():
         _closeContentsAfterChoice();
-        _unitRequested(
-          message.unit,
-          offset: message.offset,
-          replaceReadingOffset: true,
+        _jump(
+          () => _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          ),
         );
       case ReaderPageInputChanged():
         _pageInputChanged(message.draft);
@@ -1008,7 +1033,7 @@ final class ReaderController implements Listenable {
       case ReaderAnnotationDeleted():
         unawaited(_deleteAnnotation(message.id));
       case ReaderAnnotationNavigated():
-        _navigateAnnotation(message.id);
+        _jump(() => _navigateAnnotation(message.id));
       case ReaderAnnotationReloadRequested():
         _annotationReloadRequested();
       case ReaderAnnotationAssociationRequested():
@@ -1282,6 +1307,7 @@ final class ReaderController implements Listenable {
         searchResults: const [],
         bookmarks: const [],
         notes: const [],
+        returnPoints: const [],
         annotationOperations: const {},
         selectionError: null,
         selectionActionError: null,
@@ -1479,6 +1505,11 @@ final class ReaderController implements Listenable {
           restorationError: restorationError,
           offset: unit == restoredUnit ? restoredOffset : null,
           toolError: toolError,
+          // A book opened at a note or search hit returns to where it was
+          // left.
+          returnPoint: place != null && restored != null
+              ? (unit: restored.unit.toInt(), offset: restored.offset?.toInt())
+              : null,
         ),
       );
       opened = null;
@@ -1629,6 +1660,7 @@ final class ReaderController implements Listenable {
         focus: message.offset,
         toolError: message.toolError,
         persistenceError: message.restorationError,
+        returnPoints: [?message.returnPoint],
       ),
     );
     _notesRequested();
@@ -2413,6 +2445,58 @@ final class ReaderController implements Listenable {
     }
   }
 
+  /// Runs [navigate] and, when it started a move, records where the reader
+  /// was so Back returns there; jumps stack, the latest last.
+  void _jump(void Function() navigate) {
+    final from = _model.readingLocation;
+    final before = _activeRelayoutIntent;
+    navigate();
+    if (identical(_activeRelayoutIntent, before) || _model.document == null) {
+      return;
+    }
+    // Every jump restarts the turns that close Back, even one from where
+    // the last jump left.
+    _turnsSinceJump = 0;
+    final points = _model.returnPoints;
+    if (points.isNotEmpty && points.last == from) return;
+    _emit(
+      _model.copyWith(
+        returnPoints: [
+          ...points.skip(points.length >= _maxReturnPoints ? 1 : 0),
+          from,
+        ],
+      ),
+    );
+  }
+
+  /// Turns a page with [turn]; three turns the reader took away from a jump
+  /// close the BackPill, and a turn it refused does not count.
+  void _pageTurned(void Function() turn) {
+    final intent = _activeRelayoutIntent;
+    final page = _model.epubPage;
+    turn();
+    if (identical(_activeRelayoutIntent, intent) &&
+        identical(_model.epubPage, page)) {
+      return;
+    }
+    if (_model.returnPoints.isNotEmpty && ++_turnsSinceJump >= 3) {
+      _turnsSinceJump = 0;
+      _emit(_model.copyWith(returnPoints: const []));
+    }
+  }
+
+  /// Goes back to the last jump's origin and forgets it.
+  void _returnRequested() {
+    final points = _model.returnPoints;
+    if (points.isEmpty) return;
+    final to = points.last;
+    final before = _activeRelayoutIntent;
+    _unitRequested(to.unit, offset: to.offset, replaceReadingOffset: true);
+    if (identical(_activeRelayoutIntent, before)) return;
+    _turnsSinceJump = 0;
+    _emit(_model.copyWith(returnPoints: points.sublist(0, points.length - 1)));
+  }
+
   void _unitRequested(
     int unit, {
     int? offset,
@@ -2711,10 +2795,13 @@ final class ReaderController implements Listenable {
       href: href,
     );
     if (target == null) return;
-    _unitRequested(
-      target.point.spine,
-      offset: target.hasFragment ? target.point.scalar : 0,
-      replaceReadingOffset: true,
+    // A footnote or cross-reference is a jump; Back returns from it.
+    _jump(
+      () => _unitRequested(
+        target.point.spine,
+        offset: target.hasFragment ? target.point.scalar : 0,
+        replaceReadingOffset: true,
+      ),
     );
   }
 
