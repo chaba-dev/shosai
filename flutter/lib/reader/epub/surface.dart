@@ -388,7 +388,8 @@ List<FlutterSelectionCaret> _lineCarets(
     if (cell != null) {
       final canonicalStart = cursor.at(cell.start);
       final canonicalEnd = cursor.at(cell.end);
-      final rect = cell.rect;
+      // The cell is in block coordinates; [lineTop] places the line.
+      final rect = cell.rect.shift(Offset(0, -line.top));
       // The first grapheme reaches the line's edge on the page's left, and
       // the last its edge on the right, so the line's full width hits.
       final top = cell.index == cell.count - 1 ? 0.0 : rect.top;
