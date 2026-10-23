@@ -320,6 +320,12 @@ class LibraryController implements Listenable {
               hasMore: message.page.hasMore,
             ),
           );
+          // An order chosen before the saved settings arrived is saved now
+          // that there are settings to save it with.
+          if (message.settings case final loaded?
+              when loaded.librarySort != message.sort) {
+            _saveSettings();
+          }
         }
       case _LibraryFailed():
         _releaseCancellation(message.cancellation);

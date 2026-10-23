@@ -324,6 +324,8 @@ void main() {
 
     expect(controller.model.sort, FlutterLibrarySort.title);
     expect(controller.model.settings?.librarySort, FlutterLibrarySort.title);
+    // It is saved too, so the next start lists the shelf in it.
+    expect(bridge.storedSettings.librarySort, FlutterLibrarySort.title);
 
     controller.dispose();
     await _settle();
