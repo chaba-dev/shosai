@@ -1506,37 +1506,55 @@ class _NormalizeContext {
     }
   }
 
-  /// The content of [text], a child of a `<ruby>`: without the whitespace at
-  /// an edge it shares with the ruby or with one of its annotation or base
-  /// elements, so a ruby written over several lines adds no spaces to its
-  /// text. Whitespace-only text between its parts is no content at all.
-  static String _rubyText(XmlText text) {
+  /// The content of [text], a child of a `<ruby>`: without the collapsible
+  /// whitespace at an edge it shares with the ruby or with one of its
+  /// annotation or base elements, so a ruby written over several lines adds
+  /// no spaces to its text. Whitespace between two parts of one base stays,
+  /// and so does preserved (`white-space: pre`) and non-ASCII whitespace.
+  String _rubyText(XmlText text) {
+    final value = text.value;
+    if (styleOf(text.parent! as XmlElement).preserveWhitespace) return value;
     bool isEdge(XmlNode? node) =>
         node == null ||
         node is XmlElement &&
             const {'rt', 'rtc', 'rb', 'rp'}.contains(node.name.local);
-    XmlNode? sibling(XmlNode node, int step) {
-      final siblings = node.parent!.children;
+    XmlNode? sibling(int step) {
+      final siblings = text.parent!.children;
       for (
-        var index = siblings.indexOf(node) + step;
+        var index = siblings.indexOf(text) + step;
         index >= 0 && index < siblings.length;
         index += step
       ) {
         final candidate = siblings[index];
         if (candidate is XmlElement) return candidate;
-        if (candidate is XmlText && candidate.value.trim().isNotEmpty) {
+        if (candidate is XmlText && !_isCollapsible(candidate.value)) {
           return candidate;
         }
       }
       return null;
     }
 
-    var value = text.value;
-    if (value.trim().isEmpty) return '';
-    if (isEdge(sibling(text, -1))) value = value.trimLeft();
-    if (isEdge(sibling(text, 1))) value = value.trimRight();
-    return value;
+    final before = isEdge(sibling(-1));
+    final after = isEdge(sibling(1));
+    if (_isCollapsible(value)) return before || after ? '' : value;
+    var start = 0;
+    var end = value.length;
+    if (before) {
+      while (start < end && _isCollapsible(value[start])) {
+        start++;
+      }
+    }
+    if (after) {
+      while (end > start && _isCollapsible(value[end - 1])) {
+        end--;
+      }
+    }
+    return value.substring(start, end);
   }
+
+  /// Whether [text] is only collapsible (ASCII) whitespace.
+  static bool _isCollapsible(String text) =>
+      RegExp(r'^[ \t\n\r\f]*$').hasMatch(text);
 
   /// Sets [annotation] on the base made of [spans] [start] to [end]: on its
   /// first span with text, and marks the rest up to its last span with text

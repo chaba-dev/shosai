@@ -2418,6 +2418,25 @@ void main() {
       );
     });
 
+    test('ruby keeps the whitespace that is its text\'s', () {
+      for (final (inline, text) in [
+        ('<ruby><b>New</b> <i>York</i><rt>NY</rt></ruby>', 'New York'),
+        ('A<ruby style="white-space: pre"> 猫 <rt>ねこ</rt></ruby>B', 'A 猫 B'),
+        ('A<ruby>\u00a0猫\u00a0<rt>ねこ</rt></ruby>B', 'A\u00a0猫\u00a0B'),
+      ]) {
+        const after = '<span id="after">!</span>';
+        // A table row ends with its own separator.
+        for (final (body, end) in [
+          ('<p>$inline$after</p>', '\n'),
+          ('<table><tr><td>$inline$after</td></tr></table>', '\n\n'),
+        ]) {
+          final parsed = parsedOf(body);
+          expect(parsed.text, '$text!$end', reason: body);
+          expect(parsed.anchors['after'], text.runes.length, reason: body);
+        }
+      }
+    });
+
     test('the annotation stays out of the canonical text', () {
       final chapter = chapterOf('<p><ruby>漢字<rt>かんじ</rt></ruby>を読む。</p>');
       expect(chapter.canonicalText, '漢字を読む。\n');
