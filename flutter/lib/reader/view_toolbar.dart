@@ -654,10 +654,18 @@ String? _unitStepValue(BuildContext context, ReaderModel model, int delta) {
   final unit = _unitStep(model, delta);
   if (total <= 0 || unit < 0 || unit >= total) return null;
   final l10n = AppLocalizations.of(context);
-  final percent = ((unit + 1) / total * 100).round();
-  return model.document?.format == FlutterBookFormat.epub
-      ? l10n.readerChapterOfStatus(percent, unit + 1, total)
-      : l10n.readerPageOfStatus(percent, unit + 1, total);
+  if (model.document?.format == FlutterBookFormat.epub) {
+    final percent = ((unit + 1) / total * 100).round();
+    return l10n.readerChapterOfStatus(percent, unit + 1, total);
+  }
+  // A spread's place names both of its pages and counts the second as read,
+  // as the status does once the step has shown it.
+  final facing = model.layout.spread ? pdfSpreadFacing(unit, total) : null;
+  final last = (facing ?? unit) + 1;
+  final percent = (last / total * 100).round();
+  return facing == null
+      ? l10n.readerPageOfStatus(percent, unit + 1, total)
+      : l10n.readerPageRangeOfStatus(percent, unit + 1, last, total);
 }
 
 /// The place in the reader's terms: `4% · pages 18–19 of 502`, or the short

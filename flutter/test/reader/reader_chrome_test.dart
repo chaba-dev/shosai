@@ -860,11 +860,33 @@ void main() {
         final backward = rightToLeft
             ? LogicalKeyboardKey.arrowRight
             : LogicalKeyboardKey.arrowLeft;
+        // The track's semantics: what it shows, and what a step forward and
+        // back would show.
+        SemanticsProperties semantics() => tester
+            .widget<Semantics>(
+              find
+                  .ancestor(
+                    of: track,
+                    matching: find.byWidgetPredicate(
+                      (widget) =>
+                          widget is Semantics &&
+                          widget.properties.value != null,
+                    ),
+                  )
+                  .first,
+            )
+            .properties;
         Future<void> step(LogicalKeyboardKey key) async {
+          // A step announces beforehand the place it then shows.
+          final predicted = key == forward
+              ? semantics().increasedValue
+              : semantics().decreasedValue;
+          final shown = semantics().value;
           await tester.sendKeyEvent(key);
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 32));
           await tester.pump(const Duration(milliseconds: 32));
+          expect(semantics().value, predicted ?? shown);
         }
 
         expect(find.textContaining('page 1 of 5'), findsOneWidget);
