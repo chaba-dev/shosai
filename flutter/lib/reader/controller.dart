@@ -245,6 +245,10 @@ final class ReaderController implements Listenable {
   /// first report then lays the chapter out.
   bool _epubHeightPending = false;
 
+  /// The search match a book opened at, marked once the reader settles on
+  /// its page (RFD 6: the current match is marked on the page).
+  ({int unit, int offset, int length})? _openMatch;
+
   /// Embedded `@font-face` families already registered in this process.
   ///
   /// Flutter has no font-unload API, so a family is registered once per
@@ -1510,6 +1514,9 @@ final class ReaderController implements Listenable {
           returnPoint: place != null && restored != null
               ? (unit: restored.unit.toInt(), offset: restored.offset?.toInt())
               : null,
+          matchLength: unit == restoredUnit && restoredOffset != null
+              ? place?.length
+              : null,
         ),
       );
       opened = null;
@@ -1647,6 +1654,11 @@ final class ReaderController implements Listenable {
     );
     _requestedLayout = requestedLayout;
     _readingStatePersistenceBlocked = message.restorationFailed;
+    final matchLength = message.matchLength;
+    final matchOffset = message.offset;
+    _openMatch = matchLength == null || matchOffset == null
+        ? null
+        : (unit: message.unit, offset: matchOffset, length: matchLength);
     _emit(
       _model.copyWith(
         document: message.document,
@@ -5503,9 +5515,38 @@ final class ReaderController implements Listenable {
       _startRelayout(document, _model.layout, height: height);
       return;
     }
+    _markOpenMatch();
     // Likewise a PDF box or pixel ratio change that arrived while the reader
     // was busy renders the page at its latest fitted size.
     _refitPdfPage();
+  }
+
+  /// Selects the search match the book opened at, once the reader has settled
+  /// on its page and is still reading there.
+  void _markOpenMatch() {
+    final match = _openMatch;
+    if (match == null || _model.selectionSurface == null) return;
+    _openMatch = null;
+    final location = _model.readingLocation;
+    if (location.unit != match.unit) return;
+    // The second page of a PDF spread addresses its text after the first's.
+    final shift = (_model.readingOffset ?? 0) - (location.offset ?? 0);
+    final anchor = match.offset + shift;
+    _cancelSelectionCreates();
+    _selectionRevision += 1;
+    _emit(
+      _model.copyWith(
+        anchor: anchor,
+        focus: anchor + match.length,
+        selectionPhase: ReaderSelectionPhase.selected,
+        selectionPointer: null,
+        selectionVisualLine: null,
+        selectionPreferredX: null,
+        selectionActionError: null,
+        keyboardActionInvocation: false,
+      ),
+    );
+    _focusAdapter(ReaderFocusTarget.surface);
   }
 
   void _navigateAnnotation(String id) {

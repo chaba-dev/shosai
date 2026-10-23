@@ -910,6 +910,27 @@ void main() {
       await drainHarness(tester);
     });
 
+    testWidgets('a book opened at a search match marks it on the page', (
+      tester,
+    ) async {
+      final harness = bridge();
+      await openReader(
+        tester,
+        harness,
+        place: const ReaderPlace(1, offset: 0, length: 6),
+      );
+      await settleEpubPage(tester);
+
+      final status = tester
+          .getSemantics(find.byKey(const ValueKey('reader-selection-status')))
+          .getSemanticsData()
+          .label;
+      expect(status, 'Selected text: Second');
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
     testWidgets('three page turns away or Stay here close Back', (
       tester,
     ) async {

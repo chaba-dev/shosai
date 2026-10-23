@@ -6,6 +6,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_flutter/reader/controller.dart' show ReaderPlace;
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -168,6 +169,7 @@ Widget _reader({
   required HarnessBridge bridge,
   String initialPath = '/books/slow-rivers.pdf',
   FlutterReaderSettings settings = _pdfFitPage,
+  ReaderPlace? place,
 }) => productionShell(
   locale: const Locale('en'),
   home: ReaderScreen(
@@ -176,6 +178,7 @@ Widget _reader({
     decoder: (pixels, {required width, required height}) => _testImage(),
     initialPath: initialPath,
     initialSettings: settings,
+    initialPlace: place,
   ),
 );
 
@@ -289,6 +292,25 @@ void main() {
             .label,
         'Selection actions',
       );
+    });
+
+    testWidgets('a PDF opened at a search match selects it', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(
+        tester,
+        _reader(
+          bridge: _SelectionBridge(),
+          place: const ReaderPlace(0, offset: 4, length: 8),
+        ),
+      );
+      await settleReaderSelection(tester);
+
+      final status = tester
+          .getSemantics(find.byKey(const ValueKey('reader-selection-status')))
+          .getSemanticsData()
+          .label;
+      expect(status, startsWith('Selected text:'));
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
     });
 
     testWidgets('Copy is enabled only for a copy-eligible surface', (
