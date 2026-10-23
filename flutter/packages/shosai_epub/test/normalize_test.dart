@@ -2683,14 +2683,17 @@ void main() {
       );
     });
 
-    test('nested ruby keeps every annotation out of the text', () {
+    test('nested ruby puts its outer annotation on the other level', () {
       final parsed = parsedOf(
         '<p><ruby><ruby>猫<rt>ねこ</rt></ruby><rt>cat</rt></ruby></p>',
       );
       expect(parsed.text, '猫\n');
       expect(
-        [for (final span in parsed.spans) (span.text, span.ruby)],
-        [('猫', 'ねこ')],
+        [
+          for (final span in parsed.spans)
+            (span.text, span.ruby, span.rubyUnder),
+        ],
+        [('猫', 'ねこ', 'cat')],
       );
       expect(
         parsedOf(

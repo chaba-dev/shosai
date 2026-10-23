@@ -1746,9 +1746,9 @@ class _NormalizeContext {
   /// a third is not drawn.
   ///
   /// Whitespace-only text between the parts of a ruby is not content. An
-  /// annotation of a base that holds ruby of its own at that level is
-  /// dropped (only the inner one is drawn), and a base without an annotation
-  /// is plain text.
+  /// outer annotation of a nested ruby takes the other level when its normal
+  /// one is occupied; when both are occupied it is dropped. A base without an
+  /// annotation is plain text.
   void _collectRuby(
     XmlElement ruby,
     double baseFontSize,
@@ -1914,8 +1914,8 @@ class _NormalizeContext {
 
   /// Sets [annotation] on the base made of [spans] [start] to [end]: on its
   /// first span with text, and marks the rest up to its last span with text
-  /// as continuing it; [under] sets the second level. A base that already
-  /// holds ruby at that level keeps only its own.
+  /// as continuing it; [under] prefers the second level. A nested ruby's outer
+  /// annotation takes the other level when the preferred one is occupied.
   void _setRuby(
     List<EpubTextSpan> spans,
     int start,
@@ -1925,24 +1925,25 @@ class _NormalizeContext {
   }) {
     if (annotation.isEmpty || end <= start) return;
     final base = spans.sublist(start, end);
-    if (base.any(
-      (span) => under
+    bool occupied(bool below) => base.any(
+      (span) => below
           ? span.rubyUnder != null || span.rubyUnderContinued
           : span.ruby != null || span.rubyContinued,
-    )) {
-      return;
-    }
+    );
+    var placeUnder = under;
+    if (occupied(placeUnder)) placeUnder = !placeUnder;
+    if (occupied(placeUnder)) return;
     bool hasText(EpubTextSpan span) => span.text.trim().isNotEmpty;
     final first = base.indexWhere(hasText);
     if (first < 0) return;
     final last = base.lastIndexWhere(hasText);
-    if (under) {
+    if (placeUnder) {
       base[first].rubyUnder = annotation;
     } else {
       base[first].ruby = annotation;
     }
     for (var index = first + 1; index <= last; index++) {
-      if (under) {
+      if (placeUnder) {
         base[index].rubyUnderContinued = true;
       } else {
         base[index].rubyContinued = true;
