@@ -117,12 +117,12 @@ String _fingerprintLabel(Uint8List fingerprint) {
 }
 
 class _NoteDialog extends StatefulWidget {
-  const _NoteDialog({required this.initialValue, required this.bookmark});
+  const _NoteDialog({required this.initialValue, required this.kind});
   final String? initialValue;
 
-  /// True for the saved-place note action (RD-08); false for the retained
-  /// highlight-note action.
-  final bool bookmark;
+  /// The page note or book note being written, or null for a highlight's
+  /// note.
+  final FlutterNoteKind? kind;
   @override
   State<_NoteDialog> createState() => _NoteDialogState();
 }
@@ -141,11 +141,11 @@ class _NoteDialogState extends State<_NoteDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return ShadDialog(
-      title: Text(
-        widget.bookmark
-            ? l10n.readerBookmarkNoteTitle
-            : l10n.readerHighlightNoteTitle,
-      ),
+      title: Text(switch (widget.kind) {
+        FlutterNoteKind.page => l10n.readerPageNoteTitle,
+        FlutterNoteKind.book => l10n.readerBookNoteTitle,
+        null => l10n.readerHighlightNoteTitle,
+      }),
       actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
           ? Axis.vertical
           : Axis.horizontal,

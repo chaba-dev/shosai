@@ -229,12 +229,10 @@ class _ReaderLinkButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
-    this.fontSize = ShosaiTokens.typeSize12,
   });
 
   final String label;
   final VoidCallback? onPressed;
-  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -248,7 +246,7 @@ class _ReaderLinkButton extends StatelessWidget {
       horizontal: ShosaiTokens.layoutReaderPanelPlaceRowSpacing,
     );
     final style = shosaiInterfaceStyleForText(
-      TextStyle(fontSize: fontSize, color: foreground),
+      TextStyle(fontSize: ShosaiTokens.typeSize12, color: foreground),
       label,
     );
     // The pinned reference link is its padding plus the label's line box (20-24
@@ -256,8 +254,9 @@ class _ReaderLinkButton extends StatelessWidget {
     // height would make the entry taller than the reference, so the link is
     // sized to its content; it keeps the panel width as its target and grows
     // with the text scale, so a scaled interface never clips the label.
-    final labelBox = (MediaQuery.textScalerOf(context).scale(fontSize) * 1.25)
-        .ceilToDouble();
+    final labelBox =
+        (MediaQuery.textScalerOf(context).scale(ShosaiTokens.typeSize12) * 1.25)
+            .ceilToDouble();
     return _readerSemanticButton(
       enabled: enabled,
       label: label,

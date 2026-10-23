@@ -396,15 +396,6 @@ ShadButton _button(WidgetTester tester, String key) =>
       ),
     );
 
-FlutterBookmark _bookmark({int id = 1, String? note}) => FlutterBookmark(
-  id: id,
-  bookId: 1,
-  unit: BigInt.zero,
-  note: note,
-  color: 'yellow',
-  createdAt: '2026-09-20T00:00:00Z',
-);
-
 void main() {
   setUpAll(loadHarnessFonts);
 
@@ -1018,17 +1009,16 @@ void main() {
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
-      final bridge = _ChromeBridge(books: harnessLibraryBooks())
-        ..bookmarks = [_bookmark(id: 1)];
+      final bridge = _ChromeBridge(books: harnessLibraryBooks());
       await _open(tester, _reader(bridge: bridge, initialBookId: 1));
       expect(_button(tester, 'reader-header-typography').enabled, isTrue);
 
-      // The saved-place note control opens the controller-owned modal through
+      // The page note action opens the controller-owned modal through
       // a rendered control (contract §3.1 `modalEffect`).
       await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
-      await tester.tap(find.byKey(const ValueKey('reader-saved-place-note-1')));
+      await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
       await tester.pumpAndSettle();
       expect(find.byType(ShadDialog), findsOneWidget);
       expect(
@@ -1079,38 +1069,38 @@ void main() {
       expect(tester.getRect(_documentArea).right, lessThan(panel.left));
     });
 
-    testWidgets('a long saved note stays inside the notes panel', (
+    testWidgets('a long page note stays inside the notes panel', (
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge(books: harnessLibraryBooks())
-        ..bookmarks = [
-          FlutterBookmark(
-            id: 1,
-            bookId: 1,
+        ..placeNotes.add(
+          FlutterNote(
+            id: 'note-1',
+            kind: FlutterNoteKind.page,
             unit: BigInt.zero,
-            note:
+            resolution: FlutterAnnotationResolution.exact,
+            body:
                 'A deliberately long saved note that cannot fit the bounded '
                 'panel row without ellipsizing, repeated for good measure',
-            color: 'yellow',
-            createdAt: '2026-09-20T00:00:00Z',
+            modifiedAt: '2026-09-20T00:00:00Z',
           ),
-        ];
+        );
       await _open(tester, _reader(bridge: bridge, initialBookId: 1));
 
       await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
 
-      // No overflow: the saved-place card keeps the note inside the panel
-      // (the note paragraph ellipsizes).
+      // No overflow: the note card keeps the note inside the panel (the note
+      // paragraph ellipsizes).
       expect(tester.takeException(), isNull);
       expect(
         find.textContaining('A deliberately long saved note'),
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('reader-saved-place-1')),
+        find.byKey(const ValueKey('reader-place-note-note-1')),
         findsOneWidget,
       );
       final panel = tester.getRect(
@@ -1133,10 +1123,60 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('reader-saved-place-1')),
+        find.byKey(const ValueKey('reader-place-note-note-1')),
         findsOneWidget,
       );
       tester.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    testWidgets('an orphaned page note does not open its old place', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge(books: harnessLibraryBooks());
+      for (final (id, resolution) in [
+        ('found', FlutterAnnotationResolution.recovered),
+        ('lost', FlutterAnnotationResolution.orphaned),
+      ]) {
+        bridge.placeNotes.add(
+          FlutterNote(
+            id: id,
+            kind: FlutterNoteKind.page,
+            unit: BigInt.zero,
+            resolution: resolution,
+            body: id,
+            modifiedAt: '2026-09-20T00:00:00Z',
+          ),
+        );
+      }
+      await _open(tester, _reader(bridge: bridge, initialBookId: 1));
+
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+
+      bool opens(String id) => tester
+          .widget<ShadButton>(
+            find.descendant(
+              of: find.byKey(ValueKey('reader-place-note-open-$id')),
+              matching: find.byType(ShadButton),
+            ),
+          )
+          .enabled;
+      expect(opens('found'), isTrue);
+      expect(opens('lost'), isFalse);
+      // It can still be edited.
+      expect(
+        tester
+            .widget<ShadButton>(
+              find.descendant(
+                of: find.byKey(const ValueKey('reader-place-note-edit-lost')),
+                matching: find.byType(ShadButton),
+              ),
+            )
+            .enabled,
+        isTrue,
+      );
     });
 
     testWidgets('a resize keeps focus in the open panel', (tester) async {
@@ -1356,7 +1396,7 @@ void main() {
         ),
       ];
     final annotationEditors = <Completer<String?>>[];
-    final bookmarkEditors = <Completer<String?>>[];
+    final placeEditors = <Completer<String?>>[];
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required int width, required int height}) async =>
@@ -1366,9 +1406,9 @@ void main() {
         annotationEditors.add(completer);
         return completer.future;
       },
-      bookmarkNoteEditor: (_) {
+      placeNoteEditor: (_, _) {
         final completer = Completer<String?>();
-        bookmarkEditors.add(completer);
+        placeEditors.add(completer);
         return completer.future;
       },
       noteEditorCanceller: () {},
@@ -1388,8 +1428,8 @@ void main() {
     controller.dispatch(const ReaderAnnotationNoteRequested('one'));
     expect(annotationEditors, hasLength(2));
 
-    // Suspension clears the owner and advances both counters, so the next
-    // bookmark editor's revision (`_bookmarkRevision`) collides with the
+    // Suspension clears the owner and advances both counters; the next page
+    // note editor counts with `_notesRevision`, which can collide with the
     // pending annotation editor's revision (`_noteRevision`).
     controller.dispatch(const ReaderSuspended());
     await pumpEventQueue();
@@ -1397,17 +1437,17 @@ void main() {
     controller.dispatch(const ReaderResumed());
     await pumpEventQueue();
 
-    controller.dispatch(const ReaderBookmarkNoteRequested());
-    expect(bookmarkEditors, hasLength(1));
-    expect(controller.model.modalEffect, ReaderModalEffect.bookmarkNote);
+    controller.dispatch(const ReaderPageNoteRequested());
+    expect(placeEditors, hasLength(1));
+    expect(controller.model.modalEffect, ReaderModalEffect.placeNote);
 
-    // The stale annotation editor finishing must not clear the newer bookmark
+    // The stale annotation editor finishing must not clear the newer note
     // slot: ownership is the token, not the colliding revision.
     annotationEditors.last.complete('stale');
     await pumpEventQueue();
     expect(
       controller.model.modalEffect,
-      ReaderModalEffect.bookmarkNote,
+      ReaderModalEffect.placeNote,
       reason: 'the replacement dialog still owns the modal slot',
     );
 
@@ -1415,7 +1455,7 @@ void main() {
     controller.dispatch(const ReaderSuspended());
     await pumpEventQueue();
     expect(controller.model.modalEffect, isNull);
-    for (final pending in bookmarkEditors.where((e) => !e.isCompleted)) {
+    for (final pending in placeEditors.where((e) => !e.isCompleted)) {
       pending.complete(null);
     }
   });
@@ -1429,7 +1469,7 @@ void main() {
         bridge: bridge,
         decoder: (pixels, {required int width, required int height}) async =>
             _testImage(),
-        bookmarkNoteEditor: (_) {
+        placeNoteEditor: (_, _) {
           final completer = Completer<String?>();
           editors.add(completer);
           return completer.future;
@@ -1444,9 +1484,9 @@ void main() {
       expect(controller.model.document, isNotNull);
 
       // Acquisition publishes the owned slot before the adapter starts.
-      controller.dispatch(const ReaderBookmarkNoteRequested());
+      controller.dispatch(const ReaderPageNoteRequested());
       expect(editors, hasLength(1));
-      expect(controller.model.modalEffect, ReaderModalEffect.bookmarkNote);
+      expect(controller.model.modalEffect, ReaderModalEffect.placeNote);
 
       // A relayout while the dialog is open must not clear or replace it.
       controller.dispatch(
@@ -1454,7 +1494,7 @@ void main() {
           ReaderLayout(scale: 1, width: 800, lineSpacing: 1.5),
         ),
       );
-      expect(controller.model.modalEffect, ReaderModalEffect.bookmarkNote);
+      expect(controller.model.modalEffect, ReaderModalEffect.placeNote);
 
       // Suspending cancels the dialog and clears the slot (owner-checked).
       controller.dispatch(const ReaderSuspended());

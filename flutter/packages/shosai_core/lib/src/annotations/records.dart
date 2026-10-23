@@ -193,6 +193,62 @@ _Version _ensureVersion(Database db, _Book book) {
   return (id: versionId, documentId: documentId, format: book.format);
 }
 
+/// Turn the bookmark notes migration 8 kept for content [hash], which no
+/// book held then, into page notes, now that a book with it says their
+/// format. Called as the book is added to the library.
+void adoptPendingBookmarkNotes(
+  Database db, {
+  required String hash,
+  required String format,
+  required String title,
+}) {
+  final notes = db.select(
+    '''SELECT unit, location_offset, note, created_at
+       FROM pending_bookmark_notes WHERE content_hash = ? ORDER BY id''',
+    [hash],
+  );
+  if (notes.isEmpty) return;
+  final version = _ensureVersion(db, (
+    hash: hash,
+    format: format,
+    title: title,
+  ));
+  if (version.format != format) {
+    // Only a content opened outside the library names its own format; the
+    // notes' places mean nothing in another.
+    throw CoreException.invalidRequest(
+      'The content was annotated as ${version.format.toUpperCase()}, not '
+      '${format.toUpperCase()}.',
+    );
+  }
+  final epub = format == 'epub';
+  for (final note in notes) {
+    final unit = note.columnAt(0) as int;
+    db.execute(
+      '''INSERT INTO annotations (id, version_id, format, kind, anchor_version,
+           body, epub_spine_index, epub_scalar_start, pdf_page,
+           created_at, modified_at)
+         VALUES (?, ?, ?, 'page', 1, ?, ?, ?, ?, ?, ?)''',
+      [
+        newUuid(),
+        version.id,
+        version.format,
+        note.columnAt(2),
+        epub ? unit : null,
+        epub ? (note.columnAt(1) as int? ?? 0) : null,
+        epub ? null : unit,
+        note.columnAt(3),
+        note.columnAt(3),
+      ],
+    );
+  }
+  // Over the limits a reader loads, the import fails and the notes wait.
+  _checkSnapshot(db, version.documentId);
+  db.execute('DELETE FROM pending_bookmark_notes WHERE content_hash = ?', [
+    hash,
+  ]);
+}
+
 /// Throw unless the document's live annotations are within the snapshot
 /// limits a reader loads at once.
 void _checkSnapshot(Database db, String documentId) {

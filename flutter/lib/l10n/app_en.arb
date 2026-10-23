@@ -482,7 +482,8 @@
   "@readerAddNote": {
     "description": "Iced reference key: add-note."
   },
-  "readerBookmarkNoteTitle": "Bookmark note",
+  "readerPageNoteTitle": "Page note",
+  "readerBookNoteTitle": "Book note",
   "readerHighlightNoteTitle": "Highlight note",
   "readerNoteSave": "Save",
   "readerNoteCancel": "Cancel",
@@ -495,8 +496,28 @@
   "@readerHighlightNoteTitle": {
     "description": "The controller-injected note dialog title for a highlight (retained selection behavior)."
   },
-  "@readerBookmarkNoteTitle": {
-    "description": "The controller-injected note dialog title for a saved place."
+  "@readerPageNoteTitle": {
+    "description": "A note on a page or place in the book, with no text range: the note dialog title and the Notes panel's new-note action."
+  },
+  "@readerBookNoteTitle": {
+    "description": "A note about the whole book: the note dialog title and the Notes panel's new-note action."
+  },
+  "readerPlaceNotesHeading": "Notes · {count}",
+  "@readerPlaceNotesHeading": {
+    "description": "Notes panel: the page notes and book notes section heading.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "readerNoPlaceNotes": "Write a note on this page or about the whole book.",
+  "@readerNoPlaceNotes": {
+    "description": "Notes panel: the empty page notes and book notes section."
+  },
+  "readerDeleteNote": "Delete note",
+  "@readerDeleteNote": {
+    "description": "Notes panel: deletes a page note or book note."
   },
   "readerExportMarkdown": "Export as Markdown",
   "@readerExportMarkdown": {

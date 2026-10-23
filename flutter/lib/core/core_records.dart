@@ -478,21 +478,15 @@ final class CoreRecords implements ShosaiRecords {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) => _guard(() async {
     final bookmark = await _core.bookmarks.toggle(
       bookId,
       unit.toInt(),
       offset: offset?.toInt(),
       title: title,
-      note: note,
     );
     return bookmark == null ? null : _bookmark(bookmark, bookId);
   });
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) =>
-      _guard(() => _core.bookmarks.updateNote(id, note));
 
   @override
   Future<void> deleteBookmark({required int id}) =>
@@ -517,19 +511,16 @@ final class CoreRecords implements ShosaiRecords {
         ? await _core.annotations.listInContent(
             _content(document),
             text,
+            kinds: const {AnnotationKind.highlight},
             cancellation: cancellation,
           )
         : await _core.annotations.list(
             bookId,
             text,
+            kinds: const {AnnotationKind.highlight},
             cancellation: cancellation,
           );
-    // The reader's surfaces draw highlights; notes have no range to draw.
-    return [
-      for (final item in resolved)
-        if (item.annotation.kind == AnnotationKind.highlight)
-          _annotation(item, scale),
-    ];
+    return [for (final item in resolved) _annotation(item, scale)];
   });
 
   @override
@@ -619,6 +610,102 @@ final class CoreRecords implements ShosaiRecords {
     () => switch (document.bookId) {
       null => _core.annotations.deleteInContent(_content(document), id),
       final bookId => _core.annotations.delete(bookId, id),
+    },
+  );
+
+  @override
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    const kinds = {AnnotationKind.pageNote, AnnotationKind.bookNote};
+    final cancellation = _token(cancellationId);
+    final resolved = switch (document.bookId) {
+      null => await _core.annotations.listInContent(
+        _content(document),
+        text,
+        kinds: kinds,
+        cancellation: cancellation,
+      ),
+      final bookId => await _core.annotations.list(
+        bookId,
+        text,
+        kinds: kinds,
+        cancellation: cancellation,
+      ),
+    };
+    // Book notes first, then page notes in reading order; notes at one
+    // place stay in the order they were written.
+    final notes = [for (final item in resolved) _note(item)];
+    int place(BigInt? value) => value?.toInt() ?? -1;
+    final order = [for (var i = 0; i < notes.length; i++) i]
+      ..sort((i, j) {
+        final (a, b) = (notes[i], notes[j]);
+        return switch (place(a.unit).compareTo(place(b.unit))) {
+          0 => switch (place(a.offset).compareTo(place(b.offset))) {
+            0 => i.compareTo(j),
+            final byOffset => byOffset,
+          },
+          final byUnit => byUnit,
+        };
+      });
+    return [for (final i in order) notes[i]];
+  });
+
+  @override
+  Future<FlutterNote> createNote({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final cancellation = _token(cancellationId);
+    final NoteAnchor anchor;
+    if (unit == null) {
+      anchor = const BookAnchor();
+    } else if (document.format == FlutterBookFormat.pdf) {
+      anchor = PdfPageAnchor(unit.toInt());
+    } else {
+      // A page note keeps its chapter's path, so a reordered spine does not
+      // move it to another chapter.
+      final chapter = await text.unitText(
+        unit.toInt(),
+        cancellation: cancellation,
+      );
+      anchor = EpubPlaceAnchor(
+        spineIndex: unit.toInt(),
+        resourcePath: chapter?.resourcePath,
+        offset: offset?.toInt() ?? 0,
+      );
+    }
+    cancellation.throwIfCancelled();
+    final created = switch (document.bookId) {
+      null => await _core.annotations.createNoteInContent(
+        _content(document),
+        anchor,
+        body,
+      ),
+      final bookId => await _core.annotations.createNote(bookId, anchor, body),
+    };
+    return _note(created);
+  });
+
+  @override
+  Future<bool> updateNote({
+    required FlutterDocumentSummary document,
+    required String id,
+    required String body,
+  }) => _guard(
+    () => switch (document.bookId) {
+      null => _core.annotations.updateNoteInContent(
+        _content(document),
+        id,
+        body,
+      ),
+      final bookId => _core.annotations.updateNote(bookId, id, body),
     },
   );
 
@@ -908,22 +995,12 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) => records.toggleBookmark(
     bookId: bookId,
     unit: unit,
     offset: offset,
     title: title,
-    note: note,
   );
-
-  @override
-  Future<void> updateBookmark({required int id, String? title, String? note}) =>
-      records.updateBookmarkNote(id: id, note: note);
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) =>
-      records.updateBookmarkNote(id: id, note: note);
 
   @override
   Future<void> deleteBookmark({required int id}) =>
@@ -1042,6 +1119,49 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
     required String id,
   }) async =>
       records.deleteAnnotation(document: _document(document).summary, id: id);
+
+  @override
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) {
+    final opened = _document(document);
+    return records.listNotes(
+      document: opened.summary,
+      text: _text(opened),
+      cancellationId: cancellationId,
+    );
+  }
+
+  @override
+  Future<FlutterNote> createNote({
+    required FlutterDocumentHandle document,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) {
+    final opened = _document(document);
+    return records.createNote(
+      document: opened.summary,
+      text: _text(opened),
+      unit: unit,
+      offset: offset,
+      body: body,
+      cancellationId: cancellationId,
+    );
+  }
+
+  @override
+  Future<bool> updateNote({
+    required FlutterDocumentHandle document,
+    required String id,
+    required String body,
+  }) async => records.updateNote(
+    document: _document(document).summary,
+    id: id,
+    body: body,
+  );
 
   @override
   Future<FlutterAnnotationAssociationSourcePage>
@@ -1182,12 +1302,7 @@ FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
   return FlutterAnnotation(
     id: stored.id,
     unit: BigInt.from(stored.anchor.unit!),
-    resolution: switch (resolved.resolution) {
-      AnnotationResolution.exact => FlutterAnnotationResolution.exact,
-      AnnotationResolution.recovered => FlutterAnnotationResolution.recovered,
-      AnnotationResolution.ambiguous => FlutterAnnotationResolution.ambiguous,
-      AnnotationResolution.orphaned => FlutterAnnotationResolution.orphaned,
-    },
+    resolution: _resolution(resolved.resolution),
     textRange: start == null || end == null
         ? null
         : FlutterAnnotationTextRange(
@@ -1210,6 +1325,30 @@ FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
     body: stored.body,
   );
 }
+
+FlutterNote _note(ResolvedAnnotation resolved) {
+  final stored = resolved.annotation;
+  final unit = stored.anchor.unit;
+  return FlutterNote(
+    id: stored.id,
+    kind: stored.kind == AnnotationKind.bookNote
+        ? FlutterNoteKind.book
+        : FlutterNoteKind.page,
+    unit: unit == null ? null : BigInt.from(unit),
+    offset: resolved.start == null ? null : BigInt.from(resolved.start!),
+    resolution: _resolution(resolved.resolution),
+    body: stored.body ?? '',
+    modifiedAt: stored.modifiedAt,
+  );
+}
+
+FlutterAnnotationResolution _resolution(AnnotationResolution resolution) =>
+    switch (resolution) {
+      AnnotationResolution.exact => FlutterAnnotationResolution.exact,
+      AnnotationResolution.recovered => FlutterAnnotationResolution.recovered,
+      AnnotationResolution.ambiguous => FlutterAnnotationResolution.ambiguous,
+      AnnotationResolution.orphaned => FlutterAnnotationResolution.orphaned,
+    };
 
 HighlightColor _highlightColor(FlutterHighlightColor color) =>
     HighlightColor.values.byName(color.name);
@@ -1245,7 +1384,6 @@ FlutterBookmark _bookmark(Bookmark bookmark, int bookId) => FlutterBookmark(
   unit: BigInt.from(bookmark.unit),
   offset: bookmark.offset == null ? null : BigInt.from(bookmark.offset!),
   title: bookmark.title,
-  note: bookmark.note,
   color: bookmark.color,
   createdAt: bookmark.createdAt,
 );

@@ -1209,7 +1209,8 @@ class _ReaderSegmented extends StatelessWidget {
   }
 }
 
-/// The Notes panel: the book's bookmarks and highlights (RD-08, RD-12).
+/// The Notes panel: the book's bookmarks, page and book notes, and
+/// highlights (RD-08, RD-12).
 class _ReaderNotesPanel extends StatelessWidget {
   const _ReaderNotesPanel({required this.model, required this.dispatch});
 
@@ -1271,6 +1272,11 @@ class _ReaderNotesPanel extends StatelessWidget {
                 ),
                 ..._bookmarks(context, l10n),
                 _ReaderPanelGroup(
+                  key: const ValueKey('reader-notes-place-count'),
+                  text: l10n.readerPlaceNotesHeading(model.notes.length),
+                ),
+                ..._placeNotes(l10n),
+                _ReaderPanelGroup(
                   key: const ValueKey('reader-notes-highlights-count'),
                   text: l10n.readerHighlightsHeading(model.annotations.length),
                 ),
@@ -1295,6 +1301,44 @@ class _ReaderNotesPanel extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// The book's page notes and book notes, and the actions that write them.
+  List<Widget> _placeNotes(AppLocalizations l10n) {
+    final enabled =
+        _readerChromeEnabled(model) &&
+        model.document?.bookId != null &&
+        !model.notesBusy &&
+        model.modalEffect == null;
+    return [
+      if (model.notes.isEmpty)
+        _ReaderPanelNote(text: l10n.readerNoPlaceNotes)
+      else
+        for (final note in model.notes)
+          _ReaderPlaceNoteRow(note: note, enabled: enabled, dispatch: dispatch),
+      Wrap(
+        spacing: ShosaiTokens.space2,
+        runSpacing: ShosaiTokens.space2,
+        children: [
+          _ReaderAlertAction(
+            key: const ValueKey('reader-notes-add-page'),
+            label: l10n.readerPageNoteTitle,
+            contentSized: true,
+            onPressed: enabled
+                ? () => dispatch(const ReaderPageNoteRequested())
+                : null,
+          ),
+          _ReaderAlertAction(
+            key: const ValueKey('reader-notes-add-book'),
+            label: l10n.readerBookNoteTitle,
+            contentSized: true,
+            onPressed: enabled
+                ? () => dispatch(const ReaderBookNoteRequested())
+                : null,
+          ),
+        ],
+      ),
+    ];
   }
 
   /// The saved places and the Markdown export action (RD-08).
@@ -1362,8 +1406,7 @@ class _ReaderNotesPanel extends StatelessWidget {
   }
 }
 
-/// One saved place (RD-08): a note card with the title, page, note, and the
-/// note and delete actions.
+/// One saved place (RD-08): a card with the title, page, and delete action.
 class _ReaderSavedPlaceRow extends StatelessWidget {
   const _ReaderSavedPlaceRow({
     required this.bookmark,
@@ -1384,8 +1427,6 @@ class _ReaderSavedPlaceRow extends StatelessWidget {
     final title = authored == null || authored.isEmpty
         ? l10n.readerPageShort(page)
         : authored;
-    final note = bookmark.note;
-    final hasNote = note != null && note.isNotEmpty;
     return Container(
       key: ValueKey('reader-saved-place-${bookmark.id}'),
       padding: const EdgeInsets.all(ShosaiTokens.space2),
@@ -1441,25 +1482,109 @@ class _ReaderSavedPlaceRow extends StatelessWidget {
               ),
             ],
           ),
-          if (hasNote)
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: ShosaiTokens.space1,
+        ],
+      ),
+    );
+  }
+}
+
+/// One page note or book note: where it is written, its body, and the edit
+/// and delete actions. A page note's place opens it.
+class _ReaderPlaceNoteRow extends StatelessWidget {
+  const _ReaderPlaceNoteRow({
+    required this.note,
+    required this.enabled,
+    required this.dispatch,
+  });
+
+  final FlutterNote note;
+  final bool enabled;
+  final void Function(ReaderMessage) dispatch;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final palette = ShellPalette.of(context);
+    final unit = note.unit?.toInt();
+    // An orphaned note's stored place is not in this edition.
+    final found = switch (note.resolution) {
+      FlutterAnnotationResolution.exact ||
+      FlutterAnnotationResolution.recovered => true,
+      FlutterAnnotationResolution.ambiguous ||
+      FlutterAnnotationResolution.orphaned => false,
+    };
+    final place = unit == null
+        ? l10n.readerBookNoteTitle
+        : l10n.readerPageShort(unit + 1);
+    return Container(
+      key: ValueKey('reader-place-note-${note.id}'),
+      padding: const EdgeInsets.all(ShosaiTokens.space2),
+      decoration: BoxDecoration(
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(ShosaiTokens.radiusMd),
+        boxShadow: palette.raised,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: ShosaiTokens.space1),
+                child: Icon(
+                  unit == null ? LucideIcons.bookText : LucideIcons.stickyNote,
+                  size: 14,
+                  color: palette.inkMuted,
+                ),
               ),
-              child: Text(
-                note,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: shellInterfaceStyle(13, 18).copyWith(color: palette.ink),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _ReaderLinkButton(
+                    key: ValueKey('reader-place-note-open-${note.id}'),
+                    label: place,
+                    onPressed: enabled && found && unit != null
+                        ? () => dispatch(
+                            ReaderNoteNavigated(
+                              unit,
+                              offset: note.offset?.toInt(),
+                            ),
+                          )
+                        : null,
+                  ),
+                ),
+              ),
+              _ReaderToolButton(
+                key: ValueKey('reader-place-note-edit-${note.id}'),
+                icon: LucideIcons.pencil,
+                label: l10n.readerEditNote,
+                onPressed: enabled
+                    ? () => dispatch(ReaderNoteEditRequested(note))
+                    : null,
+              ),
+              _ReaderToolButton(
+                key: ValueKey('reader-place-note-delete-${note.id}'),
+                icon: LucideIcons.x,
+                label: l10n.readerDeleteNote,
+                onPressed: enabled
+                    ? () => dispatch(ReaderNoteDeleted(note.id))
+                    : null,
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: ShosaiTokens.space1,
+            ),
+            child: Text(
+              note.body,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: shosaiInterfaceStyleForText(
+                shellInterfaceStyle(13, 18).copyWith(color: palette.ink),
+                note.body,
               ),
             ),
-          _ReaderLinkButton(
-            key: ValueKey('reader-saved-place-note-${bookmark.id}'),
-            label: hasNote ? l10n.readerEditNote : l10n.readerAddNote,
-            fontSize: ShosaiTokens.typeSize11,
-            onPressed: enabled
-                ? () => dispatch(ReaderBookmarkNoteRequested(bookmark))
-                : null,
           ),
         ],
       ),

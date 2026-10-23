@@ -164,28 +164,39 @@ final class Annotations {
   /// Checking the stored selectors and resolving them share one
   /// [maxQuoteNormalizationWork] allowance; a listing that needs more throws
   /// [CoreErrorKind.limitExceeded].
+  ///
+  /// With [kinds], only annotations of those kinds are resolved and listed.
   Future<List<ResolvedAnnotation>> list(
     int bookId,
     UnitTextSource text, {
+    Set<AnnotationKind>? kinds,
     CancellationToken? cancellation,
-  }) => _list(LibraryBookOwner(bookId), text, cancellation);
+  }) => _list(LibraryBookOwner(bookId), text, kinds, cancellation);
 
   /// [content]'s live annotations, as [list] resolves a book's.
   Future<List<ResolvedAnnotation>> listInContent(
     AnnotatedContent content,
     UnitTextSource text, {
+    Set<AnnotationKind>? kinds,
     CancellationToken? cancellation,
-  }) => _list(ContentOwner(content), text, cancellation);
+  }) => _list(ContentOwner(content), text, kinds, cancellation);
 
   Future<List<ResolvedAnnotation>> _list(
     AnnotationOwner owner,
     UnitTextSource text,
+    Set<AnnotationKind>? kinds,
     CancellationToken? cancellation,
   ) async {
     // Reading checks every stored selector, so a cancelled listing skips it.
     cancellation.throwIfCancelled();
-    final book = await _records.list(owner);
+    var book = await _records.list(owner);
     cancellation.throwIfCancelled();
+    if (kinds != null) {
+      book = BookAnnotations(book.contentHash, [
+        for (final annotation in book.annotations)
+          if (kinds.contains(annotation.kind)) annotation,
+      ], book.normalization);
+    }
     return _resolve(book, text, cancellation);
   }
 

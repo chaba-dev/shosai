@@ -228,7 +228,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         ),
         baseScale: View.of(context).devicePixelRatio,
         noteEditor: _editNote,
-        bookmarkNoteEditor: _editBookmarkNote,
+        placeNoteEditor: _editPlaceNote,
         noteEditorCanceller: _cancelNoteEditor,
         annotationAssociationPicker: _pickAnnotationAssociation,
         annotationAssociationPickerCanceller:
@@ -305,14 +305,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Future<String?> _editNote(String? initialValue) =>
-      _showNoteEditor(initialValue, bookmark: false);
+      _showNoteEditor(initialValue, kind: null);
 
-  Future<String?> _editBookmarkNote(String? initialValue) =>
-      _showNoteEditor(initialValue, bookmark: true);
+  Future<String?> _editPlaceNote(FlutterNoteKind kind, String? initialValue) =>
+      _showNoteEditor(initialValue, kind: kind);
 
   Future<String?> _showNoteEditor(
     String? initialValue, {
-    required bool bookmark,
+    required FlutterNoteKind? kind,
   }) async {
     final navigator = Navigator.of(context, rootNavigator: true);
     final readerTheme = _readerTheme(
@@ -329,7 +329,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           data: readerTheme,
           child: ShadTheme(
             data: shosaiReaderShadTheme(_controller.model.typography.theme),
-            child: _NoteDialog(initialValue: initialValue, bookmark: bookmark),
+            child: _NoteDialog(initialValue: initialValue, kind: kind),
           ),
         ),
       ),
