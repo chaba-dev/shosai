@@ -54,6 +54,9 @@ Future<FlutterReaderSettings?> _settingsDialog(
                 ),
                 _SettingSwitch(
                   title: 'Continuous reading',
+                  // A vertical chapter's columns would scroll sideways, so it
+                  // reads in pages whatever this says.
+                  subtitle: 'Vertical books always turn pages.',
                   value: value.continuous,
                   onChanged: (continuous) => setState(
                     () => value = value.copyWith(continuous: continuous),

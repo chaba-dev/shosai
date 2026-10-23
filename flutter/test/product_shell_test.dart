@@ -648,6 +648,7 @@ void main() {
     await _openReaderSettings(tester);
     expect(find.text('Reader theme'), findsOneWidget);
     expect(find.text('Continuous reading'), findsOneWidget);
+    expect(find.text('Vertical books always turn pages.'), findsOneWidget);
     expect(find.text('EPUB text size'), findsOneWidget);
     expect(find.text('EPUB line spacing'), findsOneWidget);
     expect(find.text('PDF zoom'), findsOneWidget);
