@@ -6039,6 +6039,50 @@ void main() {
     await bridge.disposed.future;
   });
 
+  testWidgets('a book opened under a focused ancestor takes the keyboard, '
+      'and the arrow keys and Space turn its pages', (tester) async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      logicalUnitCount: 3,
+      immediateLists: true,
+    );
+    // The shell focuses a key-catching ancestor before the reader's document
+    // exists, which the surface's own autofocus cannot take over.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Focus(
+          autofocus: true,
+          child: ReaderScreen(
+            debugPathEntry: true,
+            bridge: bridge,
+            initialPath: '/tmp/book.pdf',
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('33% · page 1 of 3'), findsOneWidget);
+
+    Future<void> press(LogicalKeyboardKey key, String status) async {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+      expect(find.text(status), findsOneWidget, reason: '$key');
+    }
+
+    await press(LogicalKeyboardKey.arrowRight, '67% · page 2 of 3');
+    await press(LogicalKeyboardKey.space, '100% · page 3 of 3');
+    await press(LogicalKeyboardKey.arrowLeft, '67% · page 2 of 3');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await press(LogicalKeyboardKey.space, '33% · page 1 of 3');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await press(LogicalKeyboardKey.pageDown, '67% · page 2 of 3');
+
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
   testWidgets('page replacement invalidates a pending touch selection', (
     tester,
   ) async {

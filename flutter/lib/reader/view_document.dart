@@ -101,12 +101,7 @@ class _DocumentViewState extends State<_DocumentView> {
     }
     if (surface == null) {
       return CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.pageUp): () =>
-              dispatch(pageStepMessage(model, -1)),
-          const SingleActivator(LogicalKeyboardKey.pageDown): () =>
-              dispatch(pageStepMessage(model, 1)),
-        },
+        bindings: readerPageKeys(model, dispatch),
         child: Focus(
           focusNode: readerFocus,
           autofocus: true,
@@ -440,6 +435,29 @@ class _DocumentViewState extends State<_DocumentView> {
       viewport,
     ).toDestinationRect(selection);
   }
+}
+
+/// The keys that turn pages wherever the reader's document has focus
+/// (`docs/design-system.md`, Accessibility: arrow keys and Space for pages).
+///
+/// Left and Right follow the page on screen, so in a right-to-left book Left
+/// turns forward, as its next-page margin does. Shift-arrows stay with
+/// keyboard selection.
+Map<ShortcutActivator, VoidCallback> readerPageKeys(
+  ReaderModel model,
+  void Function(ReaderMessage) dispatch,
+) {
+  final forward = model.rightToLeft ? -1 : 1;
+  void step(int delta) => dispatch(pageStepMessage(model, delta));
+  return {
+    const SingleActivator(LogicalKeyboardKey.pageUp): () => step(-1),
+    const SingleActivator(LogicalKeyboardKey.pageDown): () => step(1),
+    const SingleActivator(LogicalKeyboardKey.space): () => step(1),
+    const SingleActivator(LogicalKeyboardKey.space, shift: true): () =>
+        step(-1),
+    const SingleActivator(LogicalKeyboardKey.arrowRight): () => step(forward),
+    const SingleActivator(LogicalKeyboardKey.arrowLeft): () => step(-forward),
+  };
 }
 
 /// The page-step message for [delta] (±1).
