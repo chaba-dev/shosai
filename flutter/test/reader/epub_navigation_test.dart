@@ -149,6 +149,7 @@ void main() {
     List<String>? openedLinks,
     ReaderPickedDocument? picked,
     ReaderPlace? place,
+    ReaderPlaceRequests? placeRequests,
   }) async {
     await renderHarnessState(
       tester,
@@ -158,6 +159,7 @@ void main() {
           initialPath: '/books/navigation.epub',
           initialBookId: 1,
           initialPlace: place,
+          placeRequests: placeRequests,
           epubImageDecoder: (bytes) async => null,
           externalLinkOpener: (url) async => openedLinks?.add(url),
           documentPicker: picked == null ? null : () async => picked,
@@ -505,6 +507,30 @@ void main() {
       );
       await openContents(tester);
       expect(current(0), isTrue, reason: 'the saved position');
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets('an open reader goes to a place the shell asks for', (
+      tester,
+    ) async {
+      final requests = ReaderPlaceRequests();
+      final harness = bridge();
+      await openReader(tester, harness, placeRequests: requests);
+      await settleEpubPage(tester);
+
+      requests.go(const ReaderPlace(1, offset: 21));
+      await settleEpubPage(tester);
+      await openContents(tester);
+      expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('reader-contents-entry-1')))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+      );
 
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);

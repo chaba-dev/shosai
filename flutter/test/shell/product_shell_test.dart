@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/reader/controller.dart'
-    show ReaderNoticeReporter, ReaderPlace;
+    show ReaderNoticeReporter, ReaderPlace, ReaderPlaceRequests;
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -30,12 +30,12 @@ Widget _reader(
   ReaderNoticeReporter _,
   Widget openBooksAction,
   void Function(bool twoPages) _,
-  ReaderPlace? place,
+  ReaderPlaceRequests places,
 ) => Scaffold(
   body: Column(
     children: [
       Text('Reading ${book.title} at $path:$bookId'),
-      if (place != null) Text('Opened at ${place.unit}:${place.offset}'),
+      _PlaceLog(places),
       openBooksAction,
       Builder(
         builder: (context) => TextButton(
@@ -54,6 +54,47 @@ Widget _reader(
     ],
   ),
 );
+
+/// The places a reader stand-in was asked to go to: the one it opened at,
+/// then each later request.
+class _PlaceLog extends StatefulWidget {
+  const _PlaceLog(this.places);
+
+  final ReaderPlaceRequests places;
+
+  @override
+  State<_PlaceLog> createState() => _PlaceLogState();
+}
+
+class _PlaceLogState extends State<_PlaceLog> {
+  final List<ReaderPlace> _places = [];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.places.take() case final place?) _places.add(place);
+    widget.places.addListener(_requested);
+  }
+
+  @override
+  void dispose() {
+    widget.places.removeListener(_requested);
+    super.dispose();
+  }
+
+  void _requested() {
+    if (widget.places.take() case final place?) {
+      setState(() => _places.add(place));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      for (final place in _places) Text('At ${place.unit}:${place.offset}'),
+    ],
+  );
+}
 
 /// A reader stand-in that counts how often it is mounted and disposed.
 class _MountCounter extends StatefulWidget {
@@ -196,7 +237,7 @@ void main() {
             notices,
             openBooks,
             pagesChanged,
-            place,
+            places,
           ) => _MountCounter(
             child: _reader(
               bridge,
@@ -208,7 +249,7 @@ void main() {
               notices,
               openBooks,
               pagesChanged,
-              place,
+              places,
             ),
           ),
     );
@@ -322,7 +363,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('shell-note-quiet-page-open')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Reading $_quiet'), findsOneWidget);
-    expect(find.text('Opened at 2:30'), findsOneWidget);
+    expect(find.text('At 2:30'), findsOneWidget);
 
     // Back on the Notes place the list is read again; a book note opens
     // the book where it was left.
@@ -332,7 +373,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('shell-note-quiet-book-open')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Reading $_quiet'), findsOneWidget);
-    expect(find.textContaining('Opened at'), findsNothing);
+    expect(find.textContaining('At '), findsNothing);
   });
 
   testWidgets('the Notes place pages through the library’s books', (
@@ -488,7 +529,7 @@ void main() {
       find.text('Reading $_quiet at /books/quiet-cartographer.epub:1'),
       findsOneWidget,
     );
-    expect(find.text('Opened at 2:30'), findsOneWidget);
+    expect(find.text('At 2:30'), findsOneWidget);
   });
 
   testWidgets('a failed notes list says why and retries', (tester) async {

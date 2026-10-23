@@ -4,7 +4,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
-    show FlutterError, FlutterErrorDetails, Listenable, VoidCallback;
+    show
+        ChangeNotifier,
+        FlutterError,
+        FlutterErrorDetails,
+        Listenable,
+        VoidCallback;
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
     show shosaiJapaneseInterfaceFontFamily;
@@ -419,7 +424,8 @@ final class ReaderController implements Listenable {
           ReaderBookNoteRequested() ||
           ReaderNoteSaved() ||
           ReaderNoteDeleted() ||
-          ReaderNoteNavigated() => true,
+          ReaderNoteNavigated() ||
+          ReaderPlaceRequested() => true,
           _ => false,
         }) {
       return;
@@ -479,6 +485,13 @@ final class ReaderController implements Listenable {
         _unitRequested(
           message.unit,
           offset: message.offset,
+          replaceReadingOffset: true,
+        );
+      case ReaderPlaceRequested(:final place):
+        _unitRequested(
+          place.unit,
+          offset: place.offset,
+          length: place.length,
           replaceReadingOffset: true,
         );
       case ReaderPanelToggled():

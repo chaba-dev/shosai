@@ -252,3 +252,23 @@ typedef ReaderSelectionAnnouncer = Future<void> Function(String description);
 const _unchanged = Object();
 final _frozenSurfaces = Expando<bool>();
 final _frozenAnnotations = Expando<bool>();
+
+/// Places the shell asks a reader to go to, such as a search hit's or a
+/// note's, from outside it. The latest request wins: a reader still opening
+/// opens there, and an open one goes there.
+final class ReaderPlaceRequests extends ChangeNotifier {
+  ReaderPlace? _pending;
+
+  /// Asks the reader to go to [place].
+  void go(ReaderPlace place) {
+    _pending = place;
+    notifyListeners();
+  }
+
+  /// The request not yet taken, which the reader takes once.
+  ReaderPlace? take() {
+    final place = _pending;
+    _pending = null;
+    return place;
+  }
+}

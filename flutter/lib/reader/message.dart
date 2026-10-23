@@ -15,16 +15,23 @@ final class ReaderOpenRequested extends ReaderMessage {
 }
 
 /// A place in a book: an EPUB spine index or PDF page, and where in its text,
-/// in Unicode scalars, when known.
+/// in Unicode scalars, when known; a search match also has its [length].
 ///
 /// A highlight's or note's place names it by [annotationId]: [unit] and
 /// [offset] are where it was made, and the reader resolves it in the book as
 /// it opens, as it lists the book's notes.
 final class ReaderPlace {
-  const ReaderPlace(this.unit, {this.offset, this.annotationId, this.note});
+  const ReaderPlace(
+    this.unit, {
+    this.offset,
+    this.length,
+    this.annotationId,
+    this.note,
+  });
 
   final int unit;
   final int? offset;
+  final int? length;
   final String? annotationId;
 
   /// Whether [annotationId] is a page note's or book note's, not a
@@ -36,11 +43,20 @@ final class ReaderPlace {
       other is ReaderPlace &&
       other.unit == unit &&
       other.offset == offset &&
+      other.length == length &&
       other.annotationId == annotationId &&
       other.note == note;
 
   @override
-  int get hashCode => Object.hash(unit, offset, annotationId, note);
+  int get hashCode => Object.hash(unit, offset, length, annotationId, note);
+}
+
+/// Goes to [place] in the open document, as a note or search hit chosen
+/// outside the reader asks; ignored while the reader is busy.
+final class ReaderPlaceRequested extends ReaderMessage {
+  const ReaderPlaceRequested(this.place);
+
+  final ReaderPlace place;
 }
 
 final class ReaderLayoutChanged extends ReaderMessage {
