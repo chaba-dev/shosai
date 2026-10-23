@@ -520,6 +520,10 @@
       }
     }
   },
+  "readerNotesScope": "Show notes from",
+  "@readerNotesScope": {
+    "description": "The Notes panel: the group of scope options (This book / All books)."
+  },
   "readerNotesEmpty": "No notes yet. Select text to highlight it, or add a note to this page.",
   "@readerNotesEmpty": {
     "description": "Notes panel: the empty state."

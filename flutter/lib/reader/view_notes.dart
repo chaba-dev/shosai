@@ -7,6 +7,8 @@ const double _notesPanelMinHeight = 260;
 /// The Notes panel (`NotesPanel`): the book's notes and highlights, the book
 /// notes first and then a group per section in reading order, with **Page
 /// note** and **Book note** in the foot. Highlights are made from the page.
+/// A library book can list every book's notes instead (**All books**), books
+/// most recently read first.
 class _ReaderNotesPanel extends StatelessWidget {
   const _ReaderNotesPanel({required this.model, required this.dispatch});
 
@@ -18,7 +20,13 @@ class _ReaderNotesPanel extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final palette = ShellPalette.of(context);
     final enabled = _readerChromeEnabled(model);
-    final count = model.annotations.length + model.notes.length;
+    final allBooks = model.notesScope == ReaderNotesScope.allBooks;
+    final count = allBooks
+        ? model.libraryNotes.books.fold(
+            0,
+            (sum, book) => sum + book.notes.length,
+          )
+        : model.annotations.length + model.notes.length;
     final canWrite = enabled && model.document?.bookId != null;
     // As in the Contents panel, a short window (a scaled interface, a
     // keyboard) scrolls the panel as a whole, so its heading and foot stay
@@ -46,6 +54,7 @@ class _ReaderNotesPanel extends StatelessWidget {
     int count, {
     required bool canWrite,
   }) {
+    final allBooks = model.notesScope == ReaderNotesScope.allBooks;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -78,6 +87,42 @@ class _ReaderNotesPanel extends StatelessWidget {
               ),
           ],
         ),
+        if (model.document?.bookId != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              ShosaiTokens.space4,
+              0,
+              ShosaiTokens.space4,
+              ShosaiTokens.space2,
+            ),
+            child: Semantics(
+              container: true,
+              label: l10n.readerNotesScope,
+              child: _ReaderSegmented(
+                segments: [
+                  for (final (scope, key, label) in [
+                    (
+                      ReaderNotesScope.thisBook,
+                      'reader-notes-this-book',
+                      l10n.shellSearchThisBook,
+                    ),
+                    (
+                      ReaderNotesScope.allBooks,
+                      'reader-notes-all-books',
+                      l10n.shellSearchAllBooks,
+                    ),
+                  ])
+                    (
+                      key: ValueKey(key),
+                      icon: null,
+                      label: label,
+                      selected: model.notesScope == scope,
+                      onPressed: () => dispatch(ReaderNotesScopeChanged(scope)),
+                    ),
+                ],
+              ),
+            ),
+          ),
         if (count > 0)
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -107,7 +152,9 @@ class _ReaderNotesPanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               spacing: ShosaiTokens.space2,
-              children: count == 0
+              children: allBooks
+                  ? _libraryCards(l10n, count)
+                  : count == 0
                   ? [
                       _ReaderPanelNote(
                         key: const ValueKey('reader-notes-empty'),
@@ -154,6 +201,70 @@ class _ReaderNotesPanel extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  /// All books: each book's notes in reading order, books most recently read
+  /// first; choosing one opens it at its place.
+  List<Widget> _libraryCards(AppLocalizations l10n, int count) {
+    final notes = model.libraryNotes;
+    final error = notes.error;
+    final retry = ShadButton.outline(
+      key: const ValueKey('reader-notes-library-retry'),
+      onPressed: () => dispatch(const ReaderLibraryNotesMoreRequested()),
+      child: Text(l10n.libraryRetry),
+    );
+    return switch (notes.status) {
+      ShellNotesStatus.idle || ShellNotesStatus.loading => [
+        _ReaderPanelNote(
+          key: const ValueKey('reader-notes-library-loading'),
+          text: l10n.shellNotesLoading,
+          liveRegion: true,
+        ),
+      ],
+      ShellNotesStatus.failed => [
+        _ReaderPanelNote(
+          key: const ValueKey('reader-notes-library-error'),
+          text: error ?? '',
+          danger: true,
+          liveRegion: true,
+        ),
+        retry,
+      ],
+      ShellNotesStatus.loaded when count == 0 => [
+        _ReaderPanelNote(
+          key: const ValueKey('reader-notes-library-empty'),
+          text: l10n.shellNotesEmptyBody,
+        ),
+      ],
+      ShellNotesStatus.loaded => [
+        for (final book in notes.books)
+          for (final note in book.notes)
+            ShellNoteCard(
+              key: ValueKey('reader-library-note-${note.id}'),
+              book: book.book,
+              note: note,
+              onOpen: () => dispatch(ReaderLibraryNoteOpened(book.book, note)),
+            ),
+        if (error != null) ...[
+          _ReaderPanelNote(
+            key: const ValueKey('reader-notes-library-more-error'),
+            text: error,
+            danger: true,
+            liveRegion: true,
+          ),
+          retry,
+        ] else if (notes.hasMore)
+          ShadButton.outline(
+            key: const ValueKey('reader-notes-library-more'),
+            onPressed: notes.appending
+                ? null
+                : () => dispatch(const ReaderLibraryNotesMoreRequested()),
+            child: Text(
+              notes.appending ? l10n.libraryLoadingMore : l10n.shellNotesMore,
+            ),
+          ),
+      ],
+    };
   }
 
   /// The book notes, then each section's page notes and highlights in

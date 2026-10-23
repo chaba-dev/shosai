@@ -350,6 +350,9 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get readerNotesScope => 'Show notes from';
+
+  @override
   String get readerNotesEmpty =>
       'No notes yet. Select text to highlight it, or add a note to this page.';
 

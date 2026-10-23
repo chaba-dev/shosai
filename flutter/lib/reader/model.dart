@@ -43,6 +43,9 @@ enum ReaderPanel { contents, typography, notes }
 /// text.
 typedef ReaderReturnPoint = ({int unit, int? offset});
 
+/// Which notes the Notes panel lists: this book's, or every book's.
+enum ReaderNotesScope { thisBook, allBooks }
+
 /// Which ordinal the reader status text names (RD-05).
 ///
 /// `page` is supplied for paginated EPUB/PDF page ordinals and `chapter`
@@ -439,6 +442,8 @@ final class ReaderModel {
     List<FlutterBookmark> bookmarks = const [],
     List<FlutterNote> notes = const [],
     List<ReaderReturnPoint> returnPoints = const [],
+    this.notesScope = ReaderNotesScope.thisBook,
+    this.libraryNotes = const ShellNotesModel(),
     Set<String> annotationOperations = const {},
     this.selectionError,
     this.relayoutError,
@@ -571,6 +576,12 @@ final class ReaderModel {
 
   /// Where each jump left from, the latest last: Back returns to the last.
   final List<ReaderReturnPoint> returnPoints;
+
+  /// Which notes the Notes panel lists.
+  final ReaderNotesScope notesScope;
+
+  /// Every book's notes, listed while the Notes panel shows All books.
+  final ShellNotesModel libraryNotes;
   final Set<String> annotationOperations;
   final String? selectionError;
 
@@ -697,6 +708,8 @@ final class ReaderModel {
     List<FlutterBookmark>? bookmarks,
     List<FlutterNote>? notes,
     List<ReaderReturnPoint>? returnPoints,
+    ReaderNotesScope? notesScope,
+    ShellNotesModel? libraryNotes,
     Set<String>? annotationOperations,
     Object? selectionError = _unchanged,
     Object? relayoutError = _unchanged,
@@ -784,6 +797,8 @@ final class ReaderModel {
       bookmarks: bookmarks ?? this.bookmarks,
       notes: notes ?? this.notes,
       returnPoints: returnPoints ?? this.returnPoints,
+      notesScope: notesScope ?? this.notesScope,
+      libraryNotes: libraryNotes ?? this.libraryNotes,
       annotationOperations: annotationOperations == null
           ? this.annotationOperations
           : Set.unmodifiable(annotationOperations),

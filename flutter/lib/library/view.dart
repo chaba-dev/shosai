@@ -457,8 +457,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return reader;
     }
     _shownBooks.add(open.id);
+    // A note in the reader's All books opens its own book here.
     final requests = ReaderPlaceRequests(
       openSearch: () => unawaited(_openSearch()),
+      openBook: (book, place) {
+        if (mounted) _openBookAt(book, place);
+      },
     );
     if (_openAt case (final id, final place) when id == open.id) {
       requests.go(place);

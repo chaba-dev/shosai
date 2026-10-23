@@ -654,6 +654,12 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 note} other{{count} notes}}'**
   String readerNotesCount(int count);
 
+  /// The Notes panel: the group of scope options (This book / All books).
+  ///
+  /// In en, this message translates to:
+  /// **'Show notes from'**
+  String get readerNotesScope;
+
   /// Notes panel: the empty state.
   ///
   /// In en, this message translates to:
