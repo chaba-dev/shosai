@@ -8,13 +8,14 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/pdf/spread.dart';
 import 'package:shosai_flutter/reader/view.dart';
 
-/// An area highlight on [unit] covering 10–30 × 10–30 of its page.
-FlutterAnnotation _area(int unit) => FlutterAnnotation(
+/// An area highlight on [unit] covering [left] to [left] + 20 × 10–30 of
+/// its page.
+FlutterAnnotation _area(int unit, double left) => FlutterAnnotation(
   id: 'area-$unit',
   unit: BigInt.from(unit),
   resolution: FlutterAnnotationResolution.exact,
-  rectangles: const [
-    FlutterSelectionRect(left: 10, top: 10, right: 30, bottom: 30),
+  rectangles: [
+    FlutterSelectionRect(left: left, top: 10, right: left + 20, bottom: 30),
   ],
   color: FlutterHighlightColor.yellow,
 );
@@ -81,25 +82,36 @@ void main() {
       anchor: null,
       focus: null,
       savedSelections: const [],
-      annotations: [_area(4), _area(5)],
+      annotations: [_area(4, 10), _area(5, 50)],
       currentUnit: 4,
       spread: spread,
       paintContent: false,
     );
 
+    // Painted where each page's highlight is (page 4's at 10–30 of its page,
+    // page 5's at 50–70) and nowhere a swapped page would put it.
+    Future<List<bool>> paintedAt(PagePainter painter) async => [
+      for (final x in [20, 60, 120, 160]) await _alphaAt(painter, x, 20) > 0,
+    ];
+
     // Left to right: page 4 on the left, page 5 from x = 100.
-    final leftToRight = painter(
-      const ReaderPdfSpread(facingUnit: 5, textShift: 0, facingLeft: 100),
+    expect(
+      await paintedAt(
+        painter(
+          const ReaderPdfSpread(facingUnit: 5, textShift: 0, facingLeft: 100),
+        ),
+      ),
+      [true, false, false, true],
     );
-    expect(await _alphaAt(leftToRight, 20, 20), greaterThan(0));
-    expect(await _alphaAt(leftToRight, 120, 20), greaterThan(0));
-    expect(await _alphaAt(leftToRight, 60, 20), 0);
 
     // Right to left: page 5 on the left, page 4 from x = 100.
-    final rightToLeft = painter(
-      const ReaderPdfSpread(facingUnit: 5, textShift: 0, firstLeft: 100),
+    expect(
+      await paintedAt(
+        painter(
+          const ReaderPdfSpread(facingUnit: 5, textShift: 0, firstLeft: 100),
+        ),
+      ),
+      [false, true, true, false],
     );
-    expect(await _alphaAt(rightToLeft, 20, 20), greaterThan(0));
-    expect(await _alphaAt(rightToLeft, 120, 20), greaterThan(0));
   });
 }
