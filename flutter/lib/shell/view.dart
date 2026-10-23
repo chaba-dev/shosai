@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -107,6 +108,7 @@ class ShellFrame extends StatelessWidget {
     required this.layout,
     required this.model,
     required this.covers,
+    this.pages = const {},
     required this.actions,
     required this.child,
   });
@@ -114,6 +116,10 @@ class ShellFrame extends StatelessWidget {
   final ShellLayout layout;
   final ShellModel model;
   final Map<int, Uint8List> covers;
+
+  /// Miniatures of the open books' pages as they were last read, by book id,
+  /// for the tab switcher.
+  final Map<int, ui.Image> pages;
   final ShellActions actions;
   final Widget child;
 
@@ -132,7 +138,12 @@ class ShellFrame extends StatelessWidget {
               child: ExcludeSemantics(excluding: model.switching, child: child),
             ),
             if (model.switching)
-              ShellTabSwitcher(model: model, covers: covers, actions: actions),
+              ShellTabSwitcher(
+                model: model,
+                covers: covers,
+                pages: pages,
+                actions: actions,
+              ),
           ],
         );
       }

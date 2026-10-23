@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -37,7 +38,7 @@ typedef ProductReaderBuilder =
       void Function(String path, int? bookId) locatorChanged,
       ReaderNoticeReporter noticeReporter,
       Widget openBooksAction,
-      void Function(bool twoPages) pagesChanged,
+      ReaderDisplaySink displayChanged,
       ReaderPlaceRequests placeRequests,
     );
 
@@ -78,6 +79,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   late final ShellController _shell = ShellController(
     presentReader: _presentReader,
     dismissReader: _dismissReader,
+    capturePageMiniature: _capturePageMiniature,
   )..addListener(_shellChanged);
   ModalRoute<void>? _readerRoute;
 
@@ -151,6 +153,33 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   void _notesChanged() => setState(() {});
+
+  /// Captures the current reader's page for the shell controller, which owns
+  /// its admission, invalidation and disposal.
+  Future<ui.Image?> _capturePageMiniature(int id) async {
+    final source = switch (_reader) {
+      (final reader, _, final requests) when reader == id => requests,
+      _ => null,
+    };
+    var capture = source?.pageMiniature;
+    if (capture == null) return null;
+    if (capture() case final image?) return image;
+
+    for (var attempt = 0; attempt < 16; attempt += 1) {
+      WidgetsBinding.instance.scheduleFrame();
+      await WidgetsBinding.instance.endOfFrame;
+      final current = switch (_reader) {
+        (final reader, _, final requests) when reader == id => requests,
+        _ => null,
+      };
+      if (!identical(current, source)) return null;
+      capture = source?.pageMiniature;
+      if (capture == null) return null;
+      final image = capture();
+      if (image != null) return image;
+    }
+    return null;
+  }
 
   /// Opens [book] at [note]'s place; a book note opens where it was left.
   void _openNote(FlutterBookNotes book, FlutterNoteEntry note) {
@@ -293,7 +322,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         if (place != null) requests.go(place);
         return;
       }
-      _openAt = place == null ? null : (book.bookId, place);
+      _openAt = place == null
+          ? null
+          : (book.bookId, _wayBackTo(shell.currentBook, book, place));
       // The library's open effect is still waiting on the reader, so the
       // shell opens or focuses the book itself.
       _shell.dispatch(ShellBookOpened(book));
@@ -303,6 +334,51 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     controller.dispatch(LibraryBookOpened(book));
     // A library that is busy refuses the open; the place goes with it.
     if (!_shell.model.reading) _openAt = null;
+  }
+
+  /// [place] in [to], opened from [from], the book being read, with the way
+  /// Back leads from it: to [from] where it is read, then through the return
+  /// points [from] had, or, when [place] is itself a Back, the ones it
+  /// carries. Each point names the book it is in, except [to]'s own.
+  ReaderPlace _wayBackTo(
+    OpenBook? from,
+    FlutterLibraryBook to,
+    ReaderPlace place,
+  ) {
+    // A tab can temporarily show a document opened by path. Its reader's
+    // return points belong to that document, not to the library book that
+    // owns the tab, so do not mislabel them as places in the book.
+    final fromOwnBook =
+        from != null &&
+        from.path == from.book.pathKey &&
+        from.bookId == from.book.bookId;
+    final points =
+        place.returnPoints ??
+        switch (_reader) {
+          (final id, _, final requests) when fromOwnBook && id == from.id =>
+            requests.wayBack?.call(),
+          _ => null,
+        };
+    if (points == null || from == null) return place;
+    return ReaderPlace(
+      place.unit,
+      offset: place.offset,
+      length: place.length,
+      annotationId: place.annotationId,
+      note: place.note,
+      returnPoints: [
+        for (final point in points)
+          (
+            unit: point.unit,
+            offset: point.offset,
+            book: switch (point.book) {
+              null => from.book,
+              final book when book.bookId == to.bookId => null,
+              final book => book,
+            },
+          ),
+      ],
+    );
   }
 
   void _scheduleRestoredOpen() {
@@ -447,6 +523,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         // The leaving route keeps its rail while it animates away.
         model: _shell.model.copyWith(reading: true),
         covers: controller.model.covers,
+        pages: _shell.pages,
         actions: _shellActions,
         child: current == null
             ? const SizedBox.expand()
@@ -462,8 +539,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   /// The failed settings write, reported over the reader: the library's own
-  /// alert is under the reader's route, and a Pages change made in the reader
-  /// is lost on the next launch unless it is saved. It stays until a retry
+  /// alert is under the reader's route, and a Display change made in the
+  /// reader is lost on the next launch unless it is saved. It stays until a retry
   /// saves the settings or it is dismissed.
   Widget? _settingsFailure() {
     final model = controller.model;
@@ -497,7 +574,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     final requests = ReaderPlaceRequests(
       openSearch: () => unawaited(_openSearch()),
       openBook: (book, place) {
-        if (mounted) _openBookAt(book, place);
+        // The reader can report twice before Flutter replaces it, or report
+        // after it has become stale. Only the reader still current may move
+        // the shell; otherwise a later callback can overwrite the way Back.
+        if (mounted &&
+            _shell.model.currentBookId == open.id &&
+            _reader?.$1 == open.id) {
+          _openBookAt(book, place);
+        }
       },
     );
     if (_openAt case (final id, final place) when id == open.id) {
@@ -533,10 +617,19 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             onPressed: () => _shell.dispatch(const ShellSwitcherOpened()),
           ),
         ),
-        // The Pages setting is saved with the library's settings, so the next
-        // book opens with it too.
-        (twoPages) {
-          if (mounted) controller.dispatch(LibraryPagesChanged(twoPages));
+        // The Display settings are saved with the library's settings, so the
+        // next book opens with them too.
+        (change) {
+          if (mounted) {
+            controller.dispatch(
+              LibraryDisplayChanged(
+                theme: change.theme,
+                fontSize: change.fontSize,
+                lineSpacing: change.lineSpacing,
+                twoPages: change.twoPages,
+              ),
+            );
+          }
         },
         requests,
       ),

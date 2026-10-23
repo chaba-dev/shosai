@@ -155,7 +155,8 @@ hit opens its book there with the match selected on the page. A jump from
 search, a note, a bookmark, a link or the contents shows a Back pill that
 returns to where the jump left from (Alt+← or ⌘[ too); jumps stack, and three
 page turns or Stay here close it. A book opened at a hit goes back to where it
-was last read.
+was last read, or, opened from another book being read, to that book where it
+was read, with that book's own return points.
 * [ ] Keep bookmarks and highlights as independent domain records without
 compatibility adapters for the unreleased Iced UI or development schema.
 * [ ] Reopen unchanged documents and verify exact anchors survive restart,

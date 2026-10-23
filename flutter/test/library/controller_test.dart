@@ -359,7 +359,7 @@ void main() {
     controller.dispatch(const LibrarySettingsRequested());
     await _settle();
     controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
-    controller.dispatch(const LibraryPagesChanged(false));
+    controller.dispatch(const LibraryDisplayChanged(twoPages: false));
     await _settle();
     bridge.saveGate!.complete();
     await _settle();
@@ -389,15 +389,52 @@ void main() {
     );
     await _settle();
 
-    controller.dispatch(const LibraryPagesChanged(false));
+    controller.dispatch(const LibraryDisplayChanged(twoPages: false));
     await _settle();
     expect(controller.model.settings?.twoPages, isFalse);
     expect(bridge.savedSettings.single.twoPages, isFalse);
 
     // The setting already in place is not saved again.
-    controller.dispatch(const LibraryPagesChanged(false));
+    controller.dispatch(const LibraryDisplayChanged(twoPages: false));
     await _settle();
     expect(bridge.savedSettings, hasLength(1));
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('the reader\'s theme, text size and line spacing are saved', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+    final before = controller.model.settings!;
+
+    controller.dispatch(const LibraryDisplayChanged(theme: 'sepia'));
+    controller.dispatch(
+      const LibraryDisplayChanged(fontSize: 22, lineSpacing: 1.8),
+    );
+    await _settle();
+    final saved = bridge.storedSettings;
+    expect(
+      (
+        theme: saved.theme,
+        fontSize: saved.epubFontSize,
+        lineSpacing: saved.epubLineSpacing,
+      ),
+      (theme: 'sepia', fontSize: 22.0, lineSpacing: 1.8),
+    );
+    // Everything else stays as it was.
+    expect(
+      saved,
+      before.copyWith(theme: 'sepia', epubFontSize: 22, epubLineSpacing: 1.8),
+    );
+    expect(controller.model.settings, saved);
 
     controller.dispose();
     await _settle();
@@ -426,7 +463,7 @@ void main() {
     await _settle();
 
     bridge.saveError = Exception('disk full');
-    controller.dispatch(const LibraryPagesChanged(false));
+    controller.dispatch(const LibraryDisplayChanged(twoPages: false));
     await _settle();
     expect(controller.model.failure, LibraryFailure.settings);
 
@@ -441,7 +478,7 @@ void main() {
 
     // A dismissed failure is gone; the setting stays as chosen.
     bridge.saveError = Exception('disk full');
-    controller.dispatch(const LibraryPagesChanged(true));
+    controller.dispatch(const LibraryDisplayChanged(twoPages: true));
     await _settle();
     expect(controller.model.failure, LibraryFailure.settings);
     controller.dispatch(const LibrarySettingsFailureDismissed());

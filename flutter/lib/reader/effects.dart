@@ -74,11 +74,21 @@ typedef ReaderDocumentPickerAdapter = Future<ReaderPickedDocument?> Function();
 /// location instead is a shell-level adapter swap, not a schema change.
 typedef ReaderExportSink = Future<void> Function(String markdown);
 
-/// Saves the Pages setting the reader chose: two pages side by side, or one.
+/// Display settings the reader changed: its theme, text size, line spacing
+/// or Pages setting (two pages side by side, or one); the others are null.
+typedef ReaderDisplayChange = ({
+  String? theme,
+  double? fontSize,
+  double? lineSpacing,
+  bool? twoPages,
+});
+
+/// Saves the Display settings the reader changes.
 ///
-/// The shell injects the library's settings writer, so later books open with
-/// the same setting; a reader built without one keeps it for its session.
-typedef ReaderPagesSink = void Function(bool twoPages);
+/// The shell injects the library's settings writer, so later books and the
+/// next launch open with the same settings; a reader built without one keeps
+/// them for its session.
+typedef ReaderDisplaySink = void Function(ReaderDisplayChange change);
 
 /// Reports reader notices through the application notice center.
 ///
@@ -272,6 +282,15 @@ final class ReaderPlaceRequests extends ChangeNotifier {
 
   /// Opens another book at a place, such as one a note in All books sits in.
   final ReaderBookOpener? openBook;
+
+  /// The way Back leads from the reader showing the book
+  /// ([ReaderController.wayBack]), which a book opened in its stead at a
+  /// place starts with; the reader answers it while it shows.
+  List<ReaderReturnPoint>? Function()? wayBack;
+
+  /// A bounded miniature of the page the reader last fully painted for the
+  /// phone's tab switcher; null before a page is ready or while paint is due.
+  ui.Image? Function()? pageMiniature;
 
   ReaderPlace? _pending;
 

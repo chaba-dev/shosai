@@ -9,7 +9,8 @@ import 'package:flutter/foundation.dart'
         FlutterError,
         FlutterErrorDetails,
         Listenable,
-        VoidCallback;
+        VoidCallback,
+        listEquals;
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
     show shosaiJapaneseInterfaceFontFamily;
@@ -63,7 +64,7 @@ final class ReaderController implements Listenable {
     ReaderBookOpener? bookOpener,
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
-    ReaderPagesSink? pagesSink,
+    ReaderDisplaySink? displaySink,
     ReaderNoticeReporter? noticeReporter,
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
@@ -111,7 +112,7 @@ final class ReaderController implements Listenable {
        _bookOpener = bookOpener,
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
-       _pagesSink = pagesSink ?? ((_) {}),
+       _displaySink = displaySink ?? ((_) {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
        _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
        _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
@@ -166,7 +167,7 @@ final class ReaderController implements Listenable {
   final ReaderBookOpener? _bookOpener;
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
-  final ReaderPagesSink _pagesSink;
+  final ReaderDisplaySink _displaySink;
   final ReaderNoticeReporter _reportNotice;
   final EpubImageDecoder _epubImageDecoder;
   final EpubFontRegistrar _epubFontRegistrar;
@@ -1514,6 +1515,8 @@ final class ReaderController implements Listenable {
   }) async {
     FlutterDocumentSummary? opened;
     PdfEngineDocument? ownedPdf;
+    // Resolving a note's place below keeps the way Back leads from it.
+    final returnPoints = place?.returnPoints;
     try {
       if (bookId != null) await drainBookWrites(bookId);
       opened = bookId == null
@@ -1622,10 +1625,17 @@ final class ReaderController implements Listenable {
           offset: unit == restoredUnit ? restoredOffset : null,
           toolError: toolError,
           // A book opened at a note or search hit returns to where it was
-          // left.
-          returnPoint: place != null && restored != null
-              ? (unit: restored.unit.toInt(), offset: restored.offset?.toInt())
-              : null,
+          // left, or, opened from another book, to that book.
+          returnPoints:
+              returnPoints ??
+              [
+                if (place != null && restored != null)
+                  (
+                    unit: restored.unit.toInt(),
+                    offset: restored.offset?.toInt(),
+                    book: null,
+                  ),
+              ],
           match: switch (place) {
             ReaderPlace(:final offset?, :final length?) => (
               unit: restoredUnit,
@@ -1785,7 +1795,7 @@ final class ReaderController implements Listenable {
         focus: message.offset,
         toolError: message.toolError,
         persistenceError: message.restorationError,
-        returnPoints: [?message.returnPoint],
+        returnPoints: message.returnPoints,
       ),
     );
     _notesRequested();
@@ -2573,7 +2583,12 @@ final class ReaderController implements Listenable {
   /// Runs [navigate] and, when it started a move, records where the reader
   /// was so Back returns there; jumps stack, the latest last.
   void _jump(void Function() navigate) {
-    final from = _model.readingLocation;
+    final here = _model.readingLocation;
+    final ReaderReturnPoint from = (
+      unit: here.unit,
+      offset: here.offset,
+      book: null,
+    );
     final before = _activeRelayoutIntent;
     navigate();
     if (identical(_activeRelayoutIntent, before) || _model.document == null) {
@@ -2592,6 +2607,21 @@ final class ReaderController implements Listenable {
         ],
       ),
     );
+  }
+
+  /// The return points a book opened from this one starts with: this
+  /// book's and, last, where it is read now; null before a document opened.
+  List<ReaderReturnPoint>? get wayBack {
+    if (_model.document == null) return null;
+    final here = _model.readingLocation;
+    final ReaderReturnPoint point = (
+      unit: here.unit,
+      offset: here.offset,
+      book: null,
+    );
+    final points = _model.returnPoints;
+    if (points.isNotEmpty && points.last == point) return points;
+    return [...points.skip(points.length >= _maxReturnPoints ? 1 : 0), point];
   }
 
   /// Turns a page with [turn]; three turns the reader took away from a jump
@@ -2615,6 +2645,19 @@ final class ReaderController implements Listenable {
     final points = _model.returnPoints;
     if (points.isEmpty) return;
     final to = points.last;
+    // The book this one was opened from opens again where it was read, with
+    // the return points it had then.
+    if (to.book case final book?) {
+      _bookOpener?.call(
+        book,
+        ReaderPlace(
+          to.unit,
+          offset: to.offset,
+          returnPoints: points.sublist(0, points.length - 1),
+        ),
+      );
+      return;
+    }
     final before = _activeRelayoutIntent;
     _unitRequested(to.unit, offset: to.offset, replaceReadingOffset: true);
     if (identical(_activeRelayoutIntent, before)) return;
@@ -3032,12 +3075,19 @@ final class ReaderController implements Listenable {
   ///
   /// Font size, line spacing and zoom are clamped to the pinned ranges; a
   /// layout-affecting change is applied through the guarded relayout path so a
-  /// failed layout reports through the existing error surface. Persisting the
-  /// value, per-book precedence and the typed fit codec are 5A/6B.
+  /// failed layout reports through the existing error surface. Global Display
+  /// changes are handed to the settings sink; per-book precedence and the
+  /// typed fit codec are 5A/6B.
   void _typographyChanged(ReaderTypographyChanged message) {
     if (_closing) return;
     final document = _model.document;
     final before = _model.typography;
+    final (fontBefore, spacingBefore, themeBefore, pagesBefore) = (
+      _typographyFontSize,
+      _typographyLineSpacing,
+      _typographyTheme,
+      _typographyTwoPages,
+    );
     final fontSize = message.fontSize?.clamp(8.0, 48.0);
     final lineSpacing = message.lineSpacing?.clamp(1.0, 2.4);
     final theme = message.theme;
@@ -3049,10 +3099,22 @@ final class ReaderController implements Listenable {
     // The view decides whether two pages fit and reports the spread with the
     // viewport, which lays the page out again; the setting needs no relayout
     // of its own.
-    if (message.twoPages case final twoPages?
-        when twoPages != _typographyTwoPages) {
-      _typographyTwoPages = twoPages;
-      _pagesSink(twoPages);
+    if (message.twoPages case final twoPages?) _typographyTwoPages = twoPages;
+    // The settings the library keeps are saved as they change, so the next
+    // book opens with them too.
+    final ReaderDisplayChange change = (
+      theme: _typographyTheme == themeBefore ? null : _typographyTheme,
+      fontSize: _typographyFontSize == fontBefore ? null : _typographyFontSize,
+      lineSpacing: _typographyLineSpacing == spacingBefore
+          ? null
+          : _typographyLineSpacing,
+      twoPages: _typographyTwoPages == pagesBefore ? null : _typographyTwoPages,
+    );
+    if (change.theme != null ||
+        change.fontSize != null ||
+        change.lineSpacing != null ||
+        change.twoPages != null) {
+      _displaySink(change);
     }
     if (message.rasterFit case final fit?) {
       _rasterFit = fit;

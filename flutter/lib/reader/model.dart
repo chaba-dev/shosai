@@ -40,8 +40,9 @@ final class AnnotationAssociationCancelled extends AnnotationAssociationChoice {
 enum ReaderPanel { contents, typography, notes }
 
 /// A place a jump left from, which Back returns to: a unit and where in its
-/// text.
-typedef ReaderReturnPoint = ({int unit, int? offset});
+/// text, in this book or, when the point names a book, in the book being read
+/// when a note or search hit opened this one.
+typedef ReaderReturnPoint = ({int unit, int? offset, FlutterLibraryBook? book});
 
 /// Which notes the Notes panel lists: this book's, or every book's.
 enum ReaderNotesScope { thisBook, allBooks }
