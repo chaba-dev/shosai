@@ -931,6 +931,7 @@ EpubComputedStyle _applyEmphasisStyle(
   bool? filled;
   EpubEmphasisShape? shape;
   String? color;
+  var none = false;
   for (final token in tokens) {
     if (token.quoted) {
       if (string != null || token.value.isEmpty) return style;
@@ -951,7 +952,9 @@ EpubComputedStyle _applyEmphasisStyle(
       'sesame' => EpubEmphasisShape.sesame,
       _ => null,
     };
-    if (fill != null && filled == null) {
+    if (word == 'none' && !none) {
+      none = true;
+    } else if (fill != null && filled == null) {
       filled = fill;
     } else if (named != null && shape == null) {
       shape = named;
@@ -960,6 +963,10 @@ EpubComputedStyle _applyEmphasisStyle(
     } else {
       return style;
     }
+  }
+  if (none) {
+    if (string != null || filled != null || shape != null) return style;
+    return _copyWith(style, noEmphasis: true);
   }
   if (string != null) {
     if (filled != null || shape != null || string.isEmpty) return style;
@@ -1055,20 +1062,45 @@ bool _isCssColor(String value) {
   if (_cssNamedColors.contains(lower) || lower == 'currentcolor') return true;
   final function = RegExp(r'^([a-z][a-z0-9-]*)\((.+)\)$').firstMatch(lower);
   return function != null &&
-      const {
-        'color',
-        'color-mix',
-        'hsl',
-        'hsla',
-        'hwb',
-        'lab',
-        'lch',
-        'light-dark',
-        'oklab',
-        'oklch',
-        'rgb',
-        'rgba',
-      }.contains(function.group(1));
+      _isCssFunctionalColor(function.group(1)!, function.group(2)!);
+}
+
+bool _isCssFunctionalColor(String name, String body) {
+  if (!const {'rgb', 'rgba', 'hsl', 'hsla'}.contains(name)) return false;
+  final number = RegExp(r'^[-+]?(?:\d+|\d*\.\d+)(?:e[-+]?\d+)?$');
+  final percentage = RegExp(r'^[-+]?(?:\d+|\d*\.\d+)(?:e[-+]?\d+)?%$');
+  final angle = RegExp(
+    r'^[-+]?(?:\d+|\d*\.\d+)(?:e[-+]?\d+)?(?:deg|grad|rad|turn)?$',
+  );
+  bool numberOrPercentage(String value) =>
+      number.hasMatch(value) || percentage.hasMatch(value);
+  bool modernNumber(String value) =>
+      value == 'none' || numberOrPercentage(value);
+  final commaParts = body.split(',').map((part) => part.trim()).toList();
+  if (commaParts.length > 1) {
+    if (commaParts.length != 3 && commaParts.length != 4) return false;
+    final components = commaParts.take(3).toList();
+    final validComponents = name.startsWith('hsl')
+        ? angle.hasMatch(components[0]) &&
+              percentage.hasMatch(components[1]) &&
+              percentage.hasMatch(components[2])
+        : components.every(number.hasMatch) ||
+              components.every(percentage.hasMatch);
+    return validComponents &&
+        (commaParts.length == 3 || numberOrPercentage(commaParts.last));
+  }
+  final slashParts = body.split('/').map((part) => part.trim()).toList();
+  if (slashParts.length > 2 || slashParts.any((part) => part.isEmpty)) {
+    return false;
+  }
+  final components = slashParts.first.split(RegExp(r'\s+'));
+  if (components.length != 3) return false;
+  final validComponents = name.startsWith('hsl')
+      ? (components.first == 'none' || angle.hasMatch(components.first)) &&
+            components.skip(1).every(modernNumber)
+      : components.every(modernNumber);
+  return validComponents &&
+      (slashParts.length == 1 || modernNumber(slashParts.last));
 }
 
 final Set<String> _cssNamedColors =

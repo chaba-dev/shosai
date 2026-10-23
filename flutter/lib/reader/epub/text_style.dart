@@ -467,11 +467,48 @@ class EmphasisRun {
   final bool vertical;
 }
 
-/// Whether a character in [cluster] takes no emphasis mark: a space, a
-/// control or format character, or punctuation (CSS Text Decoration 3,
-/// `text-emphasis-style`).
-bool _takesNoEmphasis(String cluster) =>
-    RegExp(r'^[\p{Z}\p{Cc}\p{Cf}\p{P}]', unicode: true).hasMatch(cluster);
+/// Punctuation that still takes an emphasis mark, including every punctuation
+/// code point whose NFKD form is one of CSS Text Decoration 3's exceptions.
+const Set<int> _emphasizedPunctuation = {
+  0x0023,
+  0x0025,
+  0x0026,
+  0x0040,
+  0x00A7,
+  0x00B6,
+  0x0609,
+  0x060A,
+  0x066A,
+  0x2030,
+  0x2031,
+  0x204A,
+  0x204B,
+  0x2053,
+  0x303D,
+  0xFE5F,
+  0xFE60,
+  0xFE6A,
+  0xFE6B,
+  0xFF03,
+  0xFF05,
+  0xFF06,
+  0xFF20,
+};
+
+/// Whether a typographic character unit takes no emphasis mark, following CSS
+/// Text Decoration 3: separators (except a space combined with a mark), most
+/// punctuation, controls, format characters and unassigned characters.
+bool _takesNoEmphasis(String cluster) {
+  final first = String.fromCharCode(cluster.runes.first);
+  if (_emphasizedPunctuation.contains(cluster.runes.first)) return false;
+  if (RegExp(r'^[\p{Cc}\p{Cf}\p{Cn}]$', unicode: true).hasMatch(first)) {
+    return true;
+  }
+  if (RegExp(r'^\p{P}$', unicode: true).hasMatch(first)) return true;
+  if (!RegExp(r'^\p{Z}$', unicode: true).hasMatch(first)) return false;
+  final rest = cluster.substring(first.length);
+  return !RegExp(r'\p{M}', unicode: true).hasMatch(rest);
+}
 
 /// The ruby annotation's size, relative to its base.
 const double rubyScale = 0.5;
@@ -605,9 +642,12 @@ BuiltBlockText buildBlockText(
                     [
                       EpubTextSpan(
                         text: string,
+                        bold: span.bold,
+                        italic: span.italic,
                         fontFamily: span.fontFamily,
                         monospace: span.monospace,
                         fontSizeMultiplier: span.fontSizeMultiplier * rubyScale,
+                        orientation: EpubTextOrientation.upright,
                       ),
                     ],
                     typography.copyWith(lineHeight: 1),

@@ -2447,6 +2447,13 @@ void main() {
         for (final declaration in [
           'text-emphasis: nonsense',
           'text-emphasis: dot nonsense',
+          'text-emphasis: none dot',
+          'text-emphasis: dot rgb(nonsense)',
+          'text-emphasis: dot color-mix(in srgb, red, blue)',
+          'text-emphasis: dot rgb(10%, 20, 30)',
+          'text-emphasis: dot hsl(10, 20, 30)',
+          'text-emphasis: dot rgb(none, 0, 0)',
+          'text-emphasis: dot rgb(1. 2 3)',
           'text-emphasis-position: under under',
           'text-emphasis-position: over right right',
         ]) {
@@ -2470,10 +2477,25 @@ void main() {
       },
     );
 
+    test('none plus a color resets inherited emphasis', () {
+      final spans = emphasisOf(
+        '<p style="text-emphasis: open sesame">甲<span class="e">乙</span>'
+            '</p>',
+        '.e { text-emphasis: none red }',
+      );
+      expect(spans.last.$2, isNull);
+    });
+
     test(
       'valid shorthand colors are accepted without changing palette ink',
       () {
-        for (final color in ['rebeccapurple', '#1234', 'rgb(10 20 30 / 40%)']) {
+        for (final color in [
+          'rebeccapurple',
+          '#1234',
+          'rgb(10 20 30 / 40%)',
+          'hsl(10 20 30)',
+          'hsl(10 20% 30)',
+        ]) {
           expect(
             marked('text-emphasis: dot $color'),
             const EpubTextEmphasis(shape: EpubEmphasisShape.dot),

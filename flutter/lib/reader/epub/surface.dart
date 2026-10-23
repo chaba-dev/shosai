@@ -628,7 +628,13 @@ void _paintTableRow(
         Rect.fromLTWH(cell.left + 6.0, cellY, cell.width - 12.0, text.height),
       );
       canvas.translate(cell.left + 6.0, cellY);
-      text.paint(canvas);
+      text.paint(canvas, ruby: false);
+      canvas.restore();
+      // Ruby and emphasis use the cell padding beside the line, just as they
+      // use a page's margin; clipping them to the painter drops that ink.
+      canvas.save();
+      canvas.translate(cell.left + 6.0, cellY);
+      text.paintRuby(canvas);
       canvas.restore();
       cellY += text.height;
     }

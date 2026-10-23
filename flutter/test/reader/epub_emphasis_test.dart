@@ -4,6 +4,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
+import 'package:shosai_flutter/reader/epub/pages.dart';
+import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 
 /// Emphasis marks (傍点): a shape half the characters' size, set over each
@@ -84,37 +86,66 @@ void main() {
     return ink;
   }
 
-  test('each character takes a mark, but not punctuation or a space', () {
-    final built = buildBlockText(
-      [
-        EpubTextSpan(text: '甲'),
-        EpubTextSpan(text: '猫、で ある。', emphasis: sesame),
-      ],
-      typography,
-      20,
-    );
-    final run = built.emphasis.single;
-    expect(
-      [
-        for (final c in run.characters)
-          built.map.text.substring(c.start, c.end),
-      ],
-      ['猫', 'で', 'あ', 'る'],
-    );
-    expect(run.baseSize, 20);
-    expect(run.color, typography.palette.foreground);
-    // A horizontal line's default shape is a circle, a vertical one's sesame.
-    expect(run.shape, EpubEmphasisShape.circle);
-    expect(
-      buildBlockText(
-        [EpubTextSpan(text: '猫', emphasis: sesame)],
+  test(
+    'marks follow the CSS punctuation, separator and control exceptions',
+    () {
+      final built = buildBlockText(
+        [
+          EpubTextSpan(text: '甲'),
+          EpubTextSpan(
+            text: '猫、#﹟％＆＠で ある。 \u0301\u0001\u200E\u0378😀',
+            emphasis: sesame,
+          ),
+        ],
+        typography,
+        20,
+      );
+      final run = built.emphasis.single;
+      expect(
+        [
+          for (final c in run.characters)
+            built.map.text.substring(c.start, c.end),
+        ],
+        ['猫', '#', '﹟', '％', '＆', '＠', 'で', 'あ', 'る', ' \u0301', '😀'],
+      );
+      expect(run.baseSize, 20);
+      expect(run.color, typography.palette.foreground);
+      // A horizontal line's default shape is a circle, a vertical one's sesame.
+      expect(run.shape, EpubEmphasisShape.circle);
+      expect(
+        buildBlockText(
+          [EpubTextSpan(text: '猫', emphasis: sesame)],
+          typography,
+          20,
+          vertical: true,
+        ).emphasis.single.shape,
+        EpubEmphasisShape.sesame,
+      );
+    },
+  );
+
+  test(
+    'a string mark keeps the base font style and stays upright vertically',
+    () {
+      final mark = buildBlockText(
+        [
+          EpubTextSpan(
+            text: '猫',
+            bold: true,
+            italic: true,
+            emphasis: const EpubTextEmphasis(string: 'x'),
+          ),
+        ],
         typography,
         20,
         vertical: true,
-      ).emphasis.single.shape,
-      EpubEmphasisShape.sesame,
-    );
-  });
+      ).emphasis.single.string!;
+      final glyph = mark.redrawn.single;
+      expect(glyph.combined, isTrue, reason: 'the Latin mark stands upright');
+      expect(glyph.style.fontWeight, FontWeight.bold);
+      expect(glyph.style.fontStyle, FontStyle.italic);
+    },
+  );
 
   test('the side follows the line: under a horizontal one, left of a '
       'vertical one', () {
@@ -219,6 +250,114 @@ void main() {
     final cat = text.debugEmphasisCentres(0).single;
     final dog = text.debugEmphasisCentres(1).single;
     expect(dog.dy - cat.dy, closeTo(10, 0.5), reason: 'one annotation higher');
+  });
+
+  test('table cells paint emphasis outside the text painter clip', () async {
+    final row = EpubTableRow(
+      cells: [
+        EpubTableCell(
+          children: [
+            EpubParagraph([
+              EpubTextSpan(text: '猫', emphasis: sesame),
+              EpubTextSpan(
+                text: '犬',
+                emphasis: const EpubTextEmphasis(under: true),
+              ),
+              EpubTextSpan(text: '鳥', ruby: 'とり', emphasis: sesame),
+            ], const EpubNodeStyle()),
+          ],
+        ),
+      ],
+    )..canonical = const EpubCanonicalSpan(0, 3);
+    final chapter = EpubChapter(
+      spine: 0,
+      resource: 'OPS/Text/table.xhtml',
+      title: '',
+      blocks: [
+        EpubTable(
+          caption: const [],
+          rowGroups: [
+            EpubTableRowGroup(kind: EpubTableRowGroupKind.body, rows: [row]),
+          ],
+        ),
+      ],
+      canonicalText: '猫犬鳥',
+      anchors: const {},
+      scalarCount: 3,
+    );
+    final flow = layoutChapterFlow(
+      chapter: chapter,
+      spec: const ChapterLayoutSpec(
+        width: 240,
+        height: 160,
+        typography: typography,
+      ),
+      images: const {},
+    );
+    addTearDown(() => disposeFlowBlocks(flow.blocks));
+    final page = paginateFlow(
+      flow: flow,
+      pageHeight: 160,
+      pageWidth: 240,
+    ).pages.single;
+    final text =
+        flow.blocks.single.table!.rows.single.cells.single.blocks.single;
+    final textTop = 20 + 6.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    paintPageSlices(
+      canvas,
+      page,
+      typography.palette,
+      const EpubPageBox(
+        size: Size(280, 200),
+        origin: Offset(20, 20),
+        contentWidth: 240,
+        contentHeight: 160,
+      ),
+    );
+    final image = await recorder.endRecording().toImage(280, 200);
+    final bytes = (await image.toByteData())!;
+    image.dispose();
+    bool centreIsInk(Offset center) =>
+        bytes.getUint8((center.dy.round() * 280 + center.dx.round()) * 4 + 3) >
+        64;
+
+    final over = text.debugEmphasisCentres(0).single + const Offset(26, 26);
+    final under = text.debugEmphasisCentres(1).single + const Offset(26, 26);
+    final stacked = text.debugEmphasisCentres(2).single + const Offset(26, 26);
+    expect(stacked.dy, lessThan(textTop));
+    for (final center in [over, under, stacked]) {
+      expect(
+        centreIsInk(center),
+        isTrue,
+        reason: 'the filled mark centre at $center must survive cell clipping',
+      );
+    }
+  });
+
+  test('marks do not enter canonical text or change selection geometry', () {
+    final plain = layOut([
+      EpubTextSpan(text: '甲😀乙', canonical: const EpubCanonicalSpan(0, 3)),
+    ]);
+    final marked = layOut([
+      EpubTextSpan(
+        text: '甲😀乙',
+        canonical: const EpubCanonicalSpan(0, 3),
+        emphasis: const EpubTextEmphasis(string: 'x'),
+      ),
+    ]);
+    expect(marked.map.text, plain.map.text);
+    expect(marked.map.canonicalStart, plain.map.canonicalStart);
+    expect(marked.map.canonicalEnd, plain.map.canonicalEnd);
+    expect(
+      marked.boxesForCanonical(0, 3),
+      pairwiseCompare(
+        plain.boxesForCanonical(0, 3),
+        (Rect left, Rect right) => left == right,
+        'same rectangle',
+      ),
+    );
   });
 
   group('line spacing', () {
