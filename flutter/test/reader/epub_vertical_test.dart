@@ -1,12 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 
 import '../support/epub_navigation_fixture.dart';
+import '../support/production_shell_harness.dart';
 
 /// Vertical (`vertical-rl`) EPUB pages: the flow is laid out as horizontal
 /// lines on a frame the page turns a quarter turn clockwise, so lines run down
@@ -32,8 +37,9 @@ void main() {
   ({ReaderEpubPage page, EpubChapter chapter}) verticalPage({
     Size windowSize = const Size(600, 800),
     bool spread = false,
+    Uint8List? epub,
   }) {
-    final book = openEpubBytes(verticalJapaneseEpub(paragraphs: 30));
+    final book = openEpubBytes(epub ?? verticalJapaneseEpub(paragraphs: 30));
     final chapter = book.chapters.first;
     final pageSize = spread
         ? Size(epubSpreadPageWidth(windowSize.width), windowSize.height)
@@ -281,7 +287,7 @@ void main() {
       }
       return true;
     });
-    // Tate-chū-yoko is laid out a character at a time.
+    // Tate-chū-yoko is laid out a grapheme at a time.
     for (final run in runs) {
       for (final text in laidOut.containsKey(run) ? [run] : run.split('')) {
         expect(laidOut[text]!.a, 0, reason: text);
@@ -457,6 +463,182 @@ void main() {
     final offsets = [for (final caret in line.carets) caret.offset.toInt()];
     final at = offsets.indexOf(three);
     expect(offsets.sublist(at, at + 3), [three, three + 1, three + 2]);
+  });
+
+  test('tate-chū-yoko on a later line of its block selects in its own '
+      'column', () {
+    const tcy = '<span style="text-combine-upright: all">38</span>';
+    final (:page, :chapter) = verticalPage(
+      epub: buildTestEpub(
+        chapters: {
+          'OPS/Text/chapter-1.xhtml': '<p>${'名前はまだ無い。明治$tcy年。' * 12}</p>',
+        },
+        nav: '<ol><li><a href="../Text/chapter-1.xhtml">一</a></li></ol>',
+        pageProgression: 'rtl',
+        bodyAttributes: ' style="writing-mode: vertical-rl"',
+      ),
+    );
+    final surface = page.surface;
+    final text = chapter.canonicalText;
+    Rect area(FlutterSelectionEndpoint endpoint) => Rect.fromLTRB(
+      endpoint.rect.left,
+      endpoint.rect.top,
+      endpoint.rect.right,
+      endpoint.rect.bottom,
+    );
+    final columns = <double>{};
+    for (
+      var three = text.indexOf('38');
+      three >= 0 && three < page.page.canonicalEnd;
+      three = text.indexOf('38', three + 1)
+    ) {
+      final halves = [
+        for (final endpoint in surface.endpoints)
+          if (endpoint.rangeStart.toInt() == three ||
+              endpoint.rangeStart.toInt() == three + 1)
+            endpoint,
+      ];
+      expect(halves, hasLength(4), reason: '$three');
+      for (final half in halves) {
+        expect(area(half).width, greaterThan(0), reason: '$three');
+        expect(area(half).height, greaterThan(0), reason: '$three');
+      }
+      final cell = halves.map(area).reduce((a, b) => a.expandToInclude(b));
+      // The digits' cell is centred on their column's carets.
+      final caret = surface.visualLines
+          .expand((line) => line.carets)
+          .firstWhere((caret) => caret.offset.toInt() == three + 1);
+      expect(cell.center.dx, closeTo(caret.x, 1), reason: '$three');
+      columns.add(caret.x);
+    }
+    expect(columns.length, greaterThan(2), reason: 'later lines are covered');
+  });
+
+  test('tate-chū-yoko stays one em with a ligature in its font', () async {
+    await loadHarnessFonts();
+    final built = buildBlockText(
+      [
+        EpubTextSpan(text: '甲'),
+        EpubTextSpan(text: 'affi', combine: const EpubTextCombine.all()),
+        EpubTextSpan(text: '乙'),
+      ],
+      typography,
+      18,
+      vertical: true,
+    );
+    final painter = TextPainter(
+      text: built.span,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 27);
+    addTearDown(painter.dispose);
+    final run = built.upright.singleWhere((run) => run.combined);
+    final boxes = painter.getBoxesForSelection(
+      TextSelection(baseOffset: run.start, extentOffset: run.end),
+    );
+    expect({for (final box in boxes) box.top}, hasLength(1));
+    expect(
+      boxes.fold(0.0, (width, box) => width + box.right - box.left),
+      closeTo(18, 0.01),
+    );
+  });
+
+  test('tate-chū-yoko the text engine cannot space turns with the line '
+      'instead', () async {
+    // Flutter leaves an Arabic run's letter spacing out, so lam-alef
+    // cannot be made one em long.
+    final arabic = FontLoader('Noto Sans Arabic')
+      ..addFont(
+        File(
+          '../fixtures/fonts/NotoSansArabic.ttf',
+        ).readAsBytes().then(ByteData.sublistView),
+      );
+    await arabic.load();
+    final built = buildBlockText(
+      [
+        EpubTextSpan(text: '甲'),
+        EpubTextSpan(
+          text: '\u0644\u0627\u0644\u0627',
+          combine: const EpubTextCombine.all(),
+        ),
+        EpubTextSpan(text: '38', combine: const EpubTextCombine.all()),
+      ],
+      typography.copyWith(
+        fontFamilyFallback: [
+          ...typography.fontFamilyFallback,
+          'Noto Sans Arabic',
+        ],
+      ),
+      18,
+      vertical: true,
+    );
+    expect(built.span.toPlainText(), built.map.text);
+    expect(
+      [
+        for (final run in built.upright)
+          (built.map.text.substring(run.start, run.end), run.combined),
+      ],
+      [('甲', false), ('38', true)],
+    );
+    final painter = TextPainter(
+      text: built.span,
+      textDirection: TextDirection.ltr,
+    )..layout();
+    addTearDown(painter.dispose);
+    final run = built.upright.last;
+    expect(
+      painter
+          .getBoxesForSelection(
+            TextSelection(baseOffset: run.start, extentOffset: run.end),
+          )
+          .fold(0.0, (width, box) => width + box.right - box.left),
+      closeTo(18, 0.01),
+    );
+  });
+
+  test('tate-chū-yoko keeps the line breaking rules of its text', () async {
+    await loadHarnessFonts();
+    // A closing full stop may not start a line: with no room for it after
+    // 38, the line breaks before 38 rather than between 38 and 。.
+    final built = buildBlockText(
+      [
+        EpubTextSpan(text: '甲'),
+        EpubTextSpan(text: '38', combine: const EpubTextCombine.all()),
+        EpubTextSpan(text: '。乙'),
+      ],
+      typography,
+      18,
+      vertical: true,
+    );
+    final painter = TextPainter(
+      text: built.span,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 36);
+    addTearDown(painter.dispose);
+    final stop = built.map.text.indexOf('。');
+    final eight = built.map.text.indexOf('8');
+    int line(int unit) =>
+        painter.getLineBoundary(TextPosition(offset: unit)).start;
+    expect(line(stop), line(eight));
+  });
+
+  test('a line of tate-chū-yoko alone keeps the line height', () {
+    double lineHeight(double factor) {
+      final built = buildBlockText(
+        [EpubTextSpan(text: '38', combine: const EpubTextCombine.all())],
+        typography.copyWith(lineHeight: factor),
+        18,
+        vertical: true,
+      );
+      final painter = TextPainter(
+        text: built.span,
+        textDirection: TextDirection.ltr,
+      )..layout();
+      addTearDown(painter.dispose);
+      return painter.height;
+    }
+
+    expect(lineHeight(2), closeTo(36, 1));
+    expect(lineHeight(2), greaterThan(lineHeight(1.6)));
   });
 
   test('horizontal text ignores tate-chū-yoko', () {

@@ -452,7 +452,11 @@ bool isUprightInVertical(int rune) {
   final segments = <TextMapSegment>[];
   final children = <TextSpan>[];
   final upright = <UprightRun>[];
-  for (final span in spans) {
+  // The children of each tate-chū-yoko grapheme: its span, the index of its
+  // run's first grapheme here, and the advance it must take.
+  final graphemes = <({int child, int span, int run, double em})>[];
+  for (var spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+    final span = spans[spanIndex];
     if (span.text.isEmpty) continue;
     final start = buffer.length;
     buffer.write(span.text);
@@ -498,21 +502,35 @@ bool isUprightInVertical(int rune) {
 
     void combine(int from, int to) {
       // The first grapheme advances one em and the others nothing, so the
-      // run takes one character's place and a line cannot break inside it
-      // for want of room. Each grapheme is shaped alone, so a ligature
-      // cannot take the spacing meant for several characters.
-      var first = true;
+      // run takes one character's place and, its followers taking no room, a
+      // line cannot break inside it; the text keeps its own line breaking
+      // rules and line height around it. Each grapheme alternates a value on
+      // an axis no font has, which draws nothing differently but keeps the
+      // paragraph from shaping it with its neighbours (ligatures, kerning).
+      // Its advance, still shaped in context (joining forms), is measured in
+      // the laid-out block below and cancelled by its letter spacing. The run
+      // is drawn with its normal shaping.
+      final first = graphemes.length;
+      var index = 0;
       for (final grapheme in span.text.substring(from, to).characters) {
-        final width = _width(grapheme, style);
+        graphemes.add((
+          child: children.length,
+          span: spanIndex,
+          run: first,
+          em: index == 0 ? style.fontSize! : 0,
+        ));
         children.add(
           TextSpan(
             text: grapheme,
             style: hidden.copyWith(
-              letterSpacing: first ? style.fontSize! - width : -width,
+              fontVariations: [
+                ...?style.fontVariations,
+                ui.FontVariation(_shapingBoundaryAxis, (index % 2).toDouble()),
+              ],
             ),
           ),
         );
-        first = false;
+        index++;
       }
       upright.add(
         UprightRun(
@@ -558,6 +576,44 @@ bool isUprightInVertical(int rune) {
     }
     flush(unit);
   }
+  if (graphemes.isNotEmpty) {
+    final unspaced = _graphemeAdvances(children, graphemes);
+    for (final (index, grapheme) in graphemes.indexed) {
+      final child = children[grapheme.child];
+      children[grapheme.child] = TextSpan(
+        text: child.text,
+        style: child.style!.copyWith(
+          letterSpacing: grapheme.em - unspaced[index],
+        ),
+      );
+    }
+    // A text engine may not space every script (Flutter leaves an Arabic
+    // run's letter spacing out): a span whose run is not one em long is
+    // built again without tate-chū-yoko, and turns with the line as other
+    // horizontal script does.
+    final spaced = _graphemeAdvances(children, graphemes);
+    final runs = <int, double>{};
+    for (final (index, grapheme) in graphemes.indexed) {
+      runs[grapheme.run] = (runs[grapheme.run] ?? 0) + spaced[index];
+    }
+    final failed = {
+      for (final MapEntry(key: run, value: advance) in runs.entries)
+        if ((advance - graphemes[run].em).abs() > 0.01) graphemes[run].span,
+    };
+    if (failed.isNotEmpty) {
+      return buildBlockText(
+        [
+          for (final (index, span) in spans.indexed)
+            failed.contains(index) ? (span.copy()..combine = null) : span,
+        ],
+        typography,
+        baseFontSize,
+        selectableOverride: selectableOverride,
+        codeUnitOffset: codeUnitOffset,
+        vertical: vertical,
+      );
+    }
+  }
   return (
     span: TextSpan(children: children),
     map: BlockTextMap(
@@ -569,15 +625,42 @@ bool isUprightInVertical(int rune) {
   );
 }
 
-/// The laid-out width of [text] set in [style].
-double _width(String text, TextStyle style) {
+/// A variation axis no font defines. A tate-chū-yoko run's transparent
+/// layout alternates its value from grapheme to grapheme so the paragraph
+/// shapes each grapheme alone.
+const String _shapingBoundaryAxis = 'ZTCY';
+
+/// The advance each tate-chū-yoko grapheme of [combined] takes when
+/// [children] are laid out in one line.
+List<double> _graphemeAdvances(
+  List<TextSpan> children,
+  List<({int child, int span, int run, double em})> combined,
+) {
   final measure = TextPainter(
-    text: TextSpan(text: text, style: style),
+    text: TextSpan(children: children),
     textDirection: ui.TextDirection.ltr,
   )..layout();
-  final width = measure.width;
+  final starts = <int>[];
+  var unit = 0;
+  for (final child in children) {
+    starts.add(unit);
+    unit += child.text!.length;
+  }
+  final advances = [
+    for (final grapheme in combined)
+      measure
+          .getBoxesForSelection(
+            TextSelection(
+              baseOffset: starts[grapheme.child],
+              extentOffset:
+                  starts[grapheme.child] +
+                  children[grapheme.child].text!.length,
+            ),
+          )
+          .fold(0.0, (width, box) => width + box.right - box.left),
+  ];
   measure.dispose();
-  return width;
+  return advances;
 }
 
 /// The runs of ASCII digits in [text] that `text-combine-upright: digits`
