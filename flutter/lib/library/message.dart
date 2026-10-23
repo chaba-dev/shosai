@@ -61,6 +61,16 @@ final class LibraryPagesChanged extends LibraryMessage {
   final bool twoPages;
 }
 
+/// Save the settings again after their last write failed.
+final class LibrarySettingsSaveRetried extends LibraryMessage {
+  const LibrarySettingsSaveRetried();
+}
+
+/// The failed settings write's report was dismissed.
+final class LibrarySettingsFailureDismissed extends LibraryMessage {
+  const LibrarySettingsFailureDismissed();
+}
+
 final class LibraryImportRequested extends LibraryMessage {
   const LibraryImportRequested();
 }

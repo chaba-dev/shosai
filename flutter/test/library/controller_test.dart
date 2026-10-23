@@ -97,6 +97,9 @@ class _StubLibraryBridge
   /// applies writes in the order they are made, as SQLite does.
   Completer<void>? saveGate;
 
+  /// When set, every settings write fails with it.
+  Object? saveError;
+
   @override
   Future<FlutterReaderSettings> loadReaderSettings({
     required BigInt cancellationId,
@@ -106,9 +109,10 @@ class _StubLibraryBridge
   Future<void> saveReaderSettings({
     required FlutterReaderSettings value,
   }) async {
+    await saveGate?.future;
+    if (saveError case final error?) throw error;
     savedSettings.add(value);
     storedSettings = value;
-    await saveGate?.future;
   }
 
   @override
@@ -394,6 +398,56 @@ void main() {
     controller.dispatch(const LibraryPagesChanged(false));
     await _settle();
     expect(bridge.savedSettings, hasLength(1));
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('a failed settings write is retried in place, or dismissed', () async {
+    final bridge = _StubLibraryBridge();
+    var dialogs = 0;
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async {
+        dialogs += 1;
+        return null;
+      },
+    );
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    bridge.saveError = Exception('disk full');
+    controller.dispatch(const LibraryPagesChanged(false));
+    await _settle();
+    expect(controller.model.failure, LibraryFailure.settings);
+
+    // A retry saves the settings in place, without the dialog.
+    bridge.saveError = null;
+    controller.dispatch(const LibrarySettingsSaveRetried());
+    await _settle();
+    expect(dialogs, 0);
+    expect(bridge.storedSettings.twoPages, isFalse);
+    expect(controller.model.failure, LibraryFailure.none);
+    expect(controller.model.error, isNull);
+
+    // A dismissed failure is gone; the setting stays as chosen.
+    bridge.saveError = Exception('disk full');
+    controller.dispatch(const LibraryPagesChanged(true));
+    await _settle();
+    expect(controller.model.failure, LibraryFailure.settings);
+    controller.dispatch(const LibrarySettingsFailureDismissed());
+    await _settle();
+    expect(controller.model.failure, LibraryFailure.none);
+    expect(controller.model.settings?.twoPages, isTrue);
 
     controller.dispose();
     await _settle();
