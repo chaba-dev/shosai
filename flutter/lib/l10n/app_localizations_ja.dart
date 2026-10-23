@@ -554,17 +554,71 @@ class AppLocalizationsJa extends AppLocalizations {
   String get shellNotesMore => 'さらに表示';
 
   @override
+  String get shellSearchField => '本とノートを検索';
+
+  @override
+  String get shellSearchScope => '検索範囲';
+
+  @override
+  String get shellSearchThisBook => 'この本';
+
+  @override
+  String get shellSearchAllBooks => 'すべての本';
+
+  @override
+  String get shellSearchFilter => '検索対象';
+
+  @override
+  String get shellSearchEverything => 'すべて';
+
+  @override
+  String get shellSearchText => '本文';
+
+  @override
+  String get shellSearchNotes => 'ノート';
+
+  @override
+  String get shellSearchHint => '入力すると、本の本文とノートを検索します。';
+
+  @override
+  String get shellSearchSearching => '検索しています…';
+
+  @override
+  String get shellSearchClose => '検索を閉じる';
+
+  @override
+  String get shellSearchPartial => '長い本のため、冒頭の部分だけを検索しました。';
+
+  @override
+  String shellSearchNoMatches(String query) {
+    return '「$query」に一致するものはありません';
+  }
+
+  @override
+  String shellSearchNotesGroup(int count) {
+    return 'ノート · $count';
+  }
+
+  @override
+  String shellSearchMatches(int count) {
+    return '$count件';
+  }
+
+  @override
+  String shellSearchMoreMatches(int count) {
+    return '$count件以上';
+  }
+
+  @override
+  String shellSearchBookFailed(String error) {
+    return 'この本は検索できませんでした: $error';
+  }
+
+  @override
   String get shellBookmarksEmptyHeading => 'ブックマークはまだありません';
 
   @override
   String get shellBookmarksEmptyBody => 'リーダーのツールバーからページをブックマークすると、ここに表示されます。';
-
-  @override
-  String get shellSearchEmptyHeading => '本とノートを検索';
-
-  @override
-  String get shellSearchEmptyBody =>
-      'ライブラリ全体の本文とノートの検索は準備中です。今はライブラリでタイトルや著者から本を探せます。';
 
   @override
   String libraryBookCount(int count) {

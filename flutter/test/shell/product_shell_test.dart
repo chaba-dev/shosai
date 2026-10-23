@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart' show ShadInput;
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/reader/controller.dart'
     show ReaderNoticeReporter, ReaderPlace, ReaderPlaceRequests;
@@ -547,6 +549,200 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('No notes yet'), findsOneWidget);
     expect(bridge.libraryNotesCalls, 2);
+  });
+
+  group('search palette', () {
+    Future<void> commandK(WidgetTester tester) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+    }
+
+    final palette = find.byType(ShellSearchPalette);
+
+    HarnessBridge withHits(HarnessBridge bridge) {
+      final [quiet, _, _, atlas, ...] = harnessLibraryBooks();
+      return bridge
+        ..libraryNoteHits = [
+          FlutterBookNoteHits(
+            book: quiet,
+            hits: const [
+              FlutterNoteHit(
+                note: FlutterNoteEntry(
+                  id: 'quiet-page',
+                  kind: FlutterNoteEntryKind.page,
+                  body: 'The lead matters.',
+                  unit: 2,
+                  offset: 30,
+                  modifiedAt: '2026-10-01T00:00:00.000Z',
+                ),
+                matches: [
+                  FlutterNoteMatch(
+                    field: FlutterNoteField.body,
+                    offset: 4,
+                    length: 4,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]
+        ..libraryTextHits = [
+          FlutterBookTextHits(
+            book: atlas,
+            matches: [
+              FlutterSearchMatch(
+                unit: BigInt.from(4),
+                offset: BigInt.from(120),
+                length: BigInt.from(4),
+                context: 'where the lead line runs',
+              ),
+            ],
+          ),
+        ];
+    }
+
+    testWidgets('finds notes and book text and opens a hit there', (
+      tester,
+    ) async {
+      final bridge = withHits(await _pump(tester, const Size(1440, 900)));
+      await commandK(tester);
+      expect(palette, findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('shell-search-scope')),
+        findsNothing,
+        reason: 'from the library every book is searched',
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('shell-search-field')),
+        'lead',
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      expect(bridge.libraryNoteSearches, [('lead', null)]);
+      expect(bridge.libraryTextSearches, [('lead', null)]);
+      expect(find.text('NOTES · 1'), findsOneWidget);
+      expect(find.text('$_quiet · Page note'), findsOneWidget);
+      expect(find.text(_atlas), findsWidgets);
+      expect(find.text('· 1 match'), findsOneWidget);
+      // Notes come first, then each book's text.
+      expect(
+        tester.getRect(find.byKey(const ValueKey('shell-search-notes'))).top,
+        lessThan(
+          tester.getRect(find.byKey(const ValueKey('shell-search-book-4'))).top,
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('shell-search-text-4-0')));
+      await tester.pumpAndSettle();
+      expect(palette, findsNothing);
+      expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+      expect(find.text('At 4:120'), findsOneWidget);
+
+      // While reading, the palette searches this book first, with the last
+      // query; a hit in it moves the open reader.
+      await commandK(tester);
+      expect(find.byKey(const ValueKey('shell-search-scope')), findsOneWidget);
+      expect(bridge.libraryTextSearches.last, ('lead', 4));
+      await tester.tap(find.byKey(const ValueKey('shell-search-text-4-0')));
+      await tester.pumpAndSettle();
+      expect(find.text('At 4:120'), findsNWidgets(2));
+
+      // All books finds the note in another book, which opens at its place.
+      await commandK(tester);
+      await tester.tap(find.text('All books'));
+      await tester.pumpAndSettle();
+      expect(bridge.libraryNoteSearches.last, ('lead', null));
+      await tester.tap(
+        find.byKey(const ValueKey('shell-search-note-quiet-page')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+      expect(find.text('At 2:30'), findsOneWidget);
+    });
+
+    testWidgets('the filter keeps to text or notes', (tester) async {
+      final bridge = withHits(await _pump(tester, const Size(1440, 900)));
+      await commandK(tester);
+      await tester.tap(find.text('Notes').last);
+      await tester.enterText(
+        find.byKey(const ValueKey('shell-search-field')),
+        'lead',
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      expect(bridge.libraryNoteSearches, hasLength(1));
+      expect(bridge.libraryTextSearches, isEmpty);
+      expect(find.text('NOTES · 1'), findsOneWidget);
+      expect(find.byKey(const ValueKey('shell-search-book-4')), findsNothing);
+
+      await tester.tap(find.text('Text').last);
+      await tester.pumpAndSettle();
+      expect(bridge.libraryTextSearches, hasLength(1));
+      expect(find.text('NOTES · 1'), findsNothing);
+      expect(find.byKey(const ValueKey('shell-search-book-4')), findsOneWidget);
+    });
+
+    testWidgets('a query that finds nothing says so', (tester) async {
+      await _pump(tester, const Size(1440, 900));
+      await commandK(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('shell-search-field')),
+        'nowhere',
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      expect(find.text('No matches for “nowhere”'), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(palette, findsNothing);
+    });
+
+    testWidgets('the Search place and / open it, but / types in a field', (
+      tester,
+    ) async {
+      await _pump(tester, const Size(1440, 900));
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(ShellSidebar),
+              matching: find.text('Search'),
+            )
+            .last,
+      );
+      await tester.pumpAndSettle();
+      expect(palette, findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('shell-search-close')));
+      await tester.pumpAndSettle();
+      expect(palette, findsNothing);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.slash);
+      await tester.pumpAndSettle();
+      expect(palette, findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(ShadInput).first);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.slash);
+      await tester.pumpAndSettle();
+      expect(palette, findsNothing);
+    });
+
+    testWidgets('a phone shows it full screen', (tester) async {
+      await _pump(tester, const Size(390, 844));
+      await commandK(tester);
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('shell-search-results')))
+            .width,
+        greaterThan(350),
+      );
+      expect(tester.getRect(palette).height, 844);
+    });
   });
 
   testWidgets('the reader’s own back returns to the library', (tester) async {
