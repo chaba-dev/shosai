@@ -93,6 +93,10 @@ class _StubLibraryBridge
   );
   final savedSettings = <FlutterReaderSettings>[];
 
+  /// Holds each settings write's completion until it completes. The store
+  /// applies writes in the order they are made, as SQLite does.
+  Completer<void>? saveGate;
+
   @override
   Future<FlutterReaderSettings> loadReaderSettings({
     required BigInt cancellationId,
@@ -104,6 +108,7 @@ class _StubLibraryBridge
   }) async {
     savedSettings.add(value);
     storedSettings = value;
+    await saveGate?.future;
   }
 
   @override
@@ -319,6 +324,49 @@ void main() {
 
     expect(controller.model.sort, FlutterLibrarySort.title);
     expect(controller.model.settings?.librarySort, FlutterLibrarySort.title);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('changes made while the settings save are all kept', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (initial) async => initial.copyWith(theme: 'dark'),
+    );
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    // The dialog's write is still running when the order and the Pages
+    // setting change.
+    bridge.saveGate = Completer<void>();
+    controller.dispatch(const LibrarySettingsRequested());
+    await _settle();
+    controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
+    controller.dispatch(const LibraryPagesChanged(false));
+    await _settle();
+    bridge.saveGate!.complete();
+    await _settle();
+
+    const expected = (theme: 'dark', sort: FlutterLibrarySort.title);
+    for (final settings in [
+      bridge.storedSettings,
+      controller.model.settings!,
+    ]) {
+      expect((theme: settings.theme, sort: settings.librarySort), expected);
+      expect(settings.twoPages, isFalse);
+    }
+    expect(controller.model.error, isNull);
 
     controller.dispose();
     await _settle();
