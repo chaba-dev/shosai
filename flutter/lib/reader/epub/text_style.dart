@@ -357,24 +357,30 @@ final class CanonicalCursor {
   static bool _isHighSurrogate(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
 }
 
-/// A run of a vertical block's characters that stand upright in their column.
+/// A run of a block's characters that the painter lays out transparent and
+/// [FlowTextBlock.paint] draws again itself, each grapheme centred on its own
+/// laid-out box.
 ///
 /// A vertical block is laid out as horizontal lines on a frame turned a
 /// quarter turn clockwise, so its text reads top to bottom and its lines stack
 /// right to left; Latin letters and the brackets and dashes that CSS rotates
 /// in vertical text come out sideways, as they should. Kanji, kana and the
 /// other characters that stand upright (UAX #50's `U` and `Tu`) are laid out
-/// in the same line for their advance and line breaking, painted transparent,
-/// and drawn again upright over their own boxes (see
-/// [FlowTextBlock.paint]).
+/// in the same line for their advance and line breaking, and drawn [upright]:
+/// turned back, in the font's vertical forms.
 ///
 /// A [combined] run is tate-chū-yoko: its text is laid out one em long, and
 /// drawn upright and side by side in that em square.
-class UprightRun {
-  const UprightRun({
+///
+/// A ruby base that is shorter than its annotation is laid out with letter
+/// spacing that makes it as long; its graphemes are redrawn centred in their
+/// widened boxes, so the base spreads evenly under the annotation.
+class RedrawnRun {
+  const RedrawnRun({
     required this.start,
     required this.end,
     required this.style,
+    this.upright = true,
     this.combined = false,
   });
 
@@ -385,9 +391,38 @@ class UprightRun {
   /// The run's own style, with its ink: the laid-out text is transparent.
   final TextStyle style;
 
+  /// Whether the run is turned back to stand upright in a vertical line.
+  final bool upright;
+
   /// Whether the run is drawn as one unit, its characters side by side.
   final bool combined;
 }
+
+/// A ruby annotation: the painter code units of its base, and the annotation's
+/// own laid-out text, which [FlowTextBlock.paint] sets over the base (to its
+/// right in a vertical line).
+class RubyRun {
+  const RubyRun({
+    required this.start,
+    required this.end,
+    required this.baseSize,
+    required this.annotation,
+  });
+
+  /// Painter code units of the base.
+  final int start;
+  final int end;
+
+  /// The base's font size: its em square, which the annotation stands on.
+  final double baseSize;
+
+  /// The annotation's text, half the base's size, as [buildBlockText] built
+  /// it; its upright characters are redrawn as a vertical block's are.
+  final BuiltBlockText annotation;
+}
+
+/// The ruby annotation's size, relative to its base.
+const double rubyScale = 0.5;
 
 /// Whether [rune] is drawn upright in vertical text.
 ///
@@ -434,13 +469,25 @@ bool isUprightInVertical(int rune) {
   return false;
 }
 
+/// What [buildBlockText] builds: the span tree the painter lays out, its
+/// canonical map, the runs [FlowTextBlock.paint] draws itself and the ruby it
+/// sets over the text.
+typedef BuiltBlockText = ({
+  InlineSpan span,
+  BlockTextMap map,
+  List<RedrawnRun> redrawn,
+  List<RubyRun> rubies,
+});
+
 /// Build the Flutter span tree for a list of engine spans.
 ///
 /// Each span's canonical mapping is preserved in [segments]; the returned
 /// [TextSpan] is the exact text laid out by the painter. With [vertical] the
-/// upright characters are laid out transparent and returned as [UprightRun]s
-/// for [FlowTextBlock.paint] to draw upright.
-({InlineSpan span, BlockTextMap map, List<UprightRun> upright}) buildBlockText(
+/// upright characters are laid out transparent and returned as [RedrawnRun]s
+/// for [FlowTextBlock.paint] to draw upright. A span with ruby returns a
+/// [RubyRun], and its base is spaced out (and redrawn) when the annotation is
+/// longer.
+BuiltBlockText buildBlockText(
   List<EpubTextSpan> spans,
   ReaderEpubTypography typography,
   double baseFontSize, {
@@ -451,7 +498,8 @@ bool isUprightInVertical(int rune) {
   final buffer = StringBuffer();
   final segments = <TextMapSegment>[];
   final children = <TextSpan>[];
-  final upright = <UprightRun>[];
+  final redrawn = <RedrawnRun>[];
+  final rubies = <RubyRun>[];
   // The children of each tate-chū-yoko grapheme: its span, the index of its
   // run's first grapheme here, and the advance it must take.
   final graphemes = <({int child, int span, int run, double em})>[];
@@ -472,26 +520,84 @@ bool isUprightInVertical(int rune) {
       ),
     );
     final style = spanStyle(span, typography, baseFontSize);
-    if (!vertical) {
-      children.add(TextSpan(text: span.text, style: style));
-      continue;
-    }
     final hidden = style.copyWith(
       color: typography.palette.foreground.withValues(alpha: 0),
     );
+    final combined = span.combine;
+    final combinesAll = vertical && combined != null && combined.all;
+
+    // A base shorter than its ruby is spaced out to the ruby's length, and
+    // its graphemes are redrawn centred in their widened boxes.
+    double? spacing;
+    final ruby = span.ruby;
+    if (ruby != null) {
+      final annotation = buildBlockText(
+        [
+          EpubTextSpan(
+            text: ruby,
+            bold: span.bold,
+            italic: span.italic,
+            monospace: span.monospace,
+            fontFamily: span.fontFamily,
+            fontSizeMultiplier: span.fontSizeMultiplier * rubyScale,
+          ),
+        ],
+        typography.copyWith(lineHeight: 1),
+        baseFontSize,
+        selectableOverride: false,
+        vertical: vertical,
+      );
+      rubies.add(
+        RubyRun(
+          start: start + codeUnitOffset,
+          end: buffer.length + codeUnitOffset,
+          baseSize: style.fontSize ?? baseFontSize,
+          annotation: annotation,
+        ),
+      );
+      final extra = _width(annotation.span) - _width(span.text, style);
+      if (extra > 0 && !combinesAll) {
+        spacing = extra / span.text.characters.length;
+      }
+    }
+    if (!vertical) {
+      if (spacing == null) {
+        children.add(TextSpan(text: span.text, style: style));
+        continue;
+      }
+      children.add(
+        TextSpan(
+          text: span.text,
+          style: hidden.copyWith(letterSpacing: spacing),
+        ),
+      );
+      redrawn.add(
+        RedrawnRun(
+          start: start + codeUnitOffset,
+          end: buffer.length + codeUnitOffset,
+          style: style,
+          upright: false,
+        ),
+      );
+      continue;
+    }
+    final spaced = spacing == null
+        ? hidden
+        : hidden.copyWith(letterSpacing: spacing);
     var runStart = 0;
     bool? runUpright;
     void flush(int end) {
       final isUpright = runUpright;
       if (isUpright == null || end <= runStart) return;
       final text = span.text.substring(runStart, end);
-      if (isUpright) {
-        children.add(TextSpan(text: text, style: hidden));
-        upright.add(
-          UprightRun(
+      if (isUpright || spacing != null) {
+        children.add(TextSpan(text: text, style: spaced));
+        redrawn.add(
+          RedrawnRun(
             start: start + codeUnitOffset + runStart,
             end: start + codeUnitOffset + end,
             style: style,
+            upright: isUpright,
           ),
         );
       } else {
@@ -535,8 +641,8 @@ bool isUprightInVertical(int rune) {
         );
         index++;
       }
-      upright.add(
-        UprightRun(
+      redrawn.add(
+        RedrawnRun(
           start: start + codeUnitOffset + from,
           end: start + codeUnitOffset + to,
           style: style,
@@ -547,15 +653,14 @@ bool isUprightInVertical(int rune) {
       runUpright = null;
     }
 
-    final combined = span.combine;
-    if (combined != null && combined.all) {
+    if (combinesAll) {
       combine(0, span.text.length);
       continue;
     }
     // Orientation applies to whole grapheme clusters (UAX #50, 3.2.1): a
     // variation selector, a combining mark or an emoji joined by ZWJ goes
     // with its base, so the upright repaint shapes what the line shaped.
-    final digits = combined == null
+    final digits = combined == null || spacing != null
         ? const <({int start, int end})>[]
         : _digitRuns(span.text, combined.digits);
     var nextDigits = 0;
@@ -624,7 +729,8 @@ bool isUprightInVertical(int rune) {
       segments,
       codeUnitOffset: codeUnitOffset,
     ),
-    upright: upright,
+    redrawn: redrawn,
+    rubies: rubies,
   );
 }
 
@@ -632,7 +738,7 @@ bool isUprightInVertical(int rune) {
 /// which [buildBlockText] built from them at [codeUnitOffset].
 List<EpubTextSpan> withoutCombining(
   List<EpubTextSpan> spans,
-  Iterable<UprightRun> runs, {
+  Iterable<RedrawnRun> runs, {
   int codeUnitOffset = 0,
 }) {
   final result = <EpubTextSpan>[];
@@ -682,6 +788,17 @@ List<double> _graphemeAdvances(
   ];
   measure.dispose();
   return advances;
+}
+
+/// The laid-out width of [text]: a span tree, or a string set in [style].
+double _width(Object text, [TextStyle? style]) {
+  final measure = TextPainter(
+    text: text is InlineSpan ? text : TextSpan(text: '$text', style: style),
+    textDirection: ui.TextDirection.ltr,
+  )..layout();
+  final width = measure.width;
+  measure.dispose();
+  return width;
 }
 
 /// The runs of ASCII digits in [text] that `text-combine-upright: digits`
