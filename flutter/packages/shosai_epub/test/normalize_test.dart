@@ -2296,6 +2296,88 @@ void main() {
     });
   });
 
+  group('ruby', () {
+    ({List<EpubContentNode> blocks, String canonicalText}) chapterOf(
+      String body,
+    ) {
+      final chapter = normalizeChapter(
+        xhtml: '<html><body>$body</body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: const [],
+        limits: const EpubLimits(),
+      );
+      return (
+        blocks: chapter.nodes,
+        canonicalText: extractCanonicalText(chapter.nodes),
+      );
+    }
+
+    List<(String, String?)> rubyOf(String body) => [
+      for (final span in (chapterOf(body).blocks.single as EpubParagraph).spans)
+        (span.text, span.ruby),
+    ];
+
+    test('a base carries its annotation, and the parentheses are hidden', () {
+      expect(
+        rubyOf('<p>吾輩は<ruby>猫<rp>（</rp><rt>ねこ</rt><rp>）</rp></ruby>である。</p>'),
+        [('吾輩は', null), ('猫', 'ねこ'), ('である。', null)],
+      );
+    });
+
+    test('the annotation stays out of the canonical text', () {
+      final chapter = chapterOf('<p><ruby>漢字<rt>かんじ</rt></ruby>を読む。</p>');
+      expect(chapter.canonicalText, '漢字を読む。\n');
+      final spans = (chapter.blocks.single as EpubParagraph).spans;
+      expect(spans.first.canonical!.start, 0);
+      expect(spans.first.canonical!.end, 2);
+      expect(spans.last.canonical!.start, 2);
+    });
+
+    test('mono ruby pairs each base with its own annotation', () {
+      expect(rubyOf('<p><ruby>東<rt>とう</rt>京<rt>きょう</rt></ruby></p>'), [
+        ('東', 'とう'),
+        ('京', 'きょう'),
+      ]);
+      expect(
+        rubyOf(
+          '<p><ruby><rb>東</rb><rb>京</rb><rt>とう</rt><rt>きょう</rt></ruby>'
+          '</p>',
+        ),
+        [('東', 'とう'), ('京', 'きょう')],
+      );
+    });
+
+    test('whitespace around a base and inside an annotation is trimmed', () {
+      expect(rubyOf('<p><ruby>\n  明日\n  <rt> あ した </rt>\n</ruby>は晴れ</p>'), [
+        ('明日', 'あ した'),
+        ('は晴れ', null),
+      ]);
+    });
+
+    test('a base without an annotation is plain text', () {
+      expect(rubyOf('<p><ruby>無<rt></rt></ruby>、<ruby>印</ruby></p>'), [
+        ('無、印', null),
+      ]);
+    });
+
+    test('a second annotation level is not drawn', () {
+      expect(
+        rubyOf('<p><ruby>旧<rt>きゅう</rt><rtc><rt>old</rt></rtc></ruby></p>'),
+        [('旧', 'きゅう')],
+      );
+    });
+
+    test('a table cell keeps the base and drops the annotation', () {
+      final chapter = chapterOf(
+        '<table><tr><td><ruby>猫<rp>(</rp><rt>ねこ</rt><rp>)</rp></ruby></td>'
+        '</tr></table>',
+      );
+      expect(chapter.canonicalText, contains('猫'));
+      expect(chapter.canonicalText, isNot(contains('ねこ')));
+      expect(chapter.canonicalText, isNot(contains('(')));
+    });
+  });
+
   group('fixtures', () {
     // The package lives under flutter/packages in the repository, but tests
     // must not depend on their own nesting depth: search upward for the

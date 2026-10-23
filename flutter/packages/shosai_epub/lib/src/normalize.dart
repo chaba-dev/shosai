@@ -528,6 +528,9 @@ EpubComputedStyle _applyUaDefaults(EpubComputedStyle style, String tag) {
     case 'th':
     case 'caption':
       display = EpubDisplay.block;
+    // Ruby parentheses are a fallback for readers without ruby.
+    case 'rp':
+      display = EpubDisplay.none;
     // `li` is deliberately absent: the production `ua_display` has no arm for
     // it, so a list item computes as inline. That only differs from the block
     // role inside table cells (the chapter list walker matches `li` by tag,
@@ -1384,6 +1387,10 @@ class _NormalizeContext {
       _walkHitDepthCeiling = true;
       return;
     }
+    if (element.name.local == 'ruby') {
+      _collectRuby(element, baseFontSize, link, spans);
+      return;
+    }
     for (final child in element.children) {
       if (child is XmlText) {
         if (child.value.isEmpty) continue;
@@ -1427,6 +1434,85 @@ class _NormalizeContext {
         depth + 1,
       );
     }
+  }
+
+  /// Collects a `<ruby>` element: each base becomes a span that carries its
+  /// `<rt>` annotation, and the annotation stays out of the text.
+  ///
+  /// A base is the text before an `<rt>`, or the `<rb>` elements before a run
+  /// of `<rt>`s, paired in order. Bases keep their element's style; markup
+  /// inside a base or an annotation contributes its text only. `<rtc>` (a
+  /// second annotation level) is not drawn, and a base without an
+  /// annotation is plain text.
+  void _collectRuby(
+    XmlElement ruby,
+    double baseFontSize,
+    String? link,
+    List<EpubTextSpan> spans,
+  ) {
+    final segments = <(String, XmlElement)>[];
+    final loose = StringBuffer();
+
+    void emit(String text, XmlElement owner, String? annotation) {
+      final base = text.trim();
+      if (base.isEmpty) return;
+      final span = _textSpanFor(owner, base, baseFontSize, link)
+        ..ruby = annotation;
+      _takePendingSpan(span);
+      spans.add(span);
+      _inlineRawOffset += base.runes.length;
+    }
+
+    void flushLoose() {
+      emit(loose.toString(), ruby, null);
+      loose.clear();
+    }
+
+    void flushSegments() {
+      for (final (text, owner) in segments) {
+        emit(text, owner, null);
+      }
+      segments.clear();
+    }
+
+    for (final child in ruby.children) {
+      if (child is XmlText) {
+        if (child.value.trim().isNotEmpty) flushSegments();
+        loose.write(child.value);
+        continue;
+      }
+      if (child is! XmlElement) continue;
+      if (styleOf(child).display == EpubDisplay.none) continue;
+      _noteAnchor(child);
+      switch (child.name.local) {
+        case 'rb':
+          if (loose.toString().trim().isNotEmpty) flushLoose();
+          loose.clear();
+          segments.add((_collectVisibleText(child), child));
+        case 'rt':
+          final annotation = _collectVisibleText(
+            child,
+          ).trim().split(RegExp(r'\s+')).join(' ');
+          if (segments.isNotEmpty) {
+            final (text, owner) = segments.removeAt(0);
+            emit(text, owner, annotation.isEmpty ? null : annotation);
+          } else {
+            emit(
+              loose.toString(),
+              ruby,
+              annotation.isEmpty ? null : annotation,
+            );
+            loose.clear();
+          }
+        case 'rtc':
+          break;
+        default:
+          if (segments.isNotEmpty) flushSegments();
+          loose.write(_collectVisibleText(child));
+      }
+    }
+    flushSegments();
+    flushLoose();
   }
 
   void _collapseWhitespace(List<EpubTextSpan> spans) {
@@ -1621,7 +1707,9 @@ class _NormalizeContext {
           current.preserveWhitespace == next.preserveWhitespace &&
           current.link == next.link &&
           current.combine == next.combine &&
-          !(current.combine?.all ?? false)) {
+          !(current.combine?.all ?? false) &&
+          current.ruby == null &&
+          next.ruby == null) {
         current.text = current.text + next.text;
         spans.removeAt(index + 1);
       } else {
@@ -2286,6 +2374,8 @@ class _NormalizeContext {
       );
       return;
     }
+    // A table cell keeps a ruby's base text and drops its annotation.
+    if (element.name.local == 'rt') return;
     final nestedLink = element.name.local == 'a'
         ? element.getAttribute('href')
         : link;
