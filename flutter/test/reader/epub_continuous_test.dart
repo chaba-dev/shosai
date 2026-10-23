@@ -64,6 +64,11 @@ class _ContinuousBridge extends HarnessBridge {
   }) async => matches;
 }
 
+/// A layout clock that never advances: the reader's layout time budgets are
+/// never spent, so each layout step is bounded by its node counts alone and
+/// the tests below do the same work in the same frames on any machine.
+int _stillClock() => 0;
+
 /// The rules between the paragraphs of the backward-search fixture: sized so
 /// a search back across them reaches its window limit a few nodes after the
 /// paragraph nearest them, where restarting further back would skip it.
@@ -117,7 +122,7 @@ void main() {
     HarnessBridge harness, {
     void Function(NoticeRequest)? noticeReporter,
     void Function(ChapterLayoutSession)? sessionObserver,
-    void Function(int micros)? stepObserver,
+    void Function(({int micros, int measured}) step)? stepObserver,
   }) async {
     await renderHarnessState(
       tester,
@@ -131,6 +136,7 @@ void main() {
           noticeReporter: noticeReporter,
           debugEpubSessionObserver: sessionObserver,
           debugContinuousStepObserver: stepObserver,
+          debugLayoutClock: _stillClock,
         ),
       ),
       ready: () => harnessReaderPageReady(tester),
@@ -157,6 +163,22 @@ void main() {
   /// scroll and key press without letting anything else complete.
   Future<void> settle(WidgetTester tester) =>
       pumpHarnessFrames(tester, frames: 28);
+
+  /// Pumps frames one at a time, at least one and then until [done] (for at
+  /// most as many frames as 30 [settle]s), and shows [painted] the window of
+  /// every frame: a window a later step releases is still seen at its widest.
+  Future<void> pumpUntil(
+    WidgetTester tester,
+    bool Function() done,
+    void Function(ReaderEpubWindow window) painted,
+  ) async {
+    var frame = 0;
+    do {
+      await tester.pump(const Duration(milliseconds: 16));
+      painted(dartPage(tester)!.window!);
+      frame += 1;
+    } while (frame < 30 * 28 && !done());
+  }
 
   /// The position of the chapter's scroll view.
   ScrollPosition chapterScroll(WidgetTester tester) {
@@ -470,7 +492,7 @@ void main() {
   testWidgets('scrolling moves the window in bounded steps and releases what '
       'it leaves', (tester) async {
     final sessions = <ChapterLayoutSession>[];
-    final steps = <int>[];
+    final steps = <({int micros, int measured})>[];
     await openReader(
       tester,
       longBridge(),
@@ -485,9 +507,18 @@ void main() {
 
     var maxLaidOut = 0;
     var maxLive = 0;
+    var maxSurface = 0;
+    var maxSteps = 0;
     for (var drag = 0; drag < 24; drag += 1) {
+      final before = steps.length;
       await scrollBy(tester, 2400);
       expectWindowCoversView(tester);
+      maxSteps = math.max(maxSteps, steps.length - before);
+      final page = dartPage(tester)!;
+      maxSurface = math.max(
+        maxSurface,
+        page.canonicalEnd - page.canonicalStart,
+      );
       maxLaidOut = math.max(maxLaidOut, session.laidOutNodes);
       maxLive = math.max(
         maxLive,
@@ -506,10 +537,23 @@ void main() {
     // The window keeps a few viewports either side, whatever was scrolled.
     expect(maxLaidOut, lessThan(longChapter.blocks.length ~/ 10));
     expect(maxLive, lessThanOrEqualTo(maxLaidOut + 2 * kContinuousBatchNodes));
-    // One step is one bounded batch: far below building the whole chapter
-    // (about a second for this chapter on a desktop host).
+    expect(
+      maxSurface,
+      lessThan(longChapter.scalarCount ~/ 20),
+      reason: 'selection geometry covers the window, not the chapter',
+    );
+    // One step is one bounded batch, and a drag takes only the batches that
+    // fill the window around the view: then the steps stop.
     expect(steps, isNotEmpty);
-    expect(steps.reduce(math.max), lessThan(100000));
+    expect(
+      steps.map((step) => step.measured).reduce(math.max),
+      kContinuousBatchNodes,
+    );
+    expect(
+      maxSteps,
+      lessThanOrEqualTo(maxLaidOut ~/ kContinuousBatchNodes + 1),
+      reason: 'each drag settles in a few steps',
+    );
 
     await closeReader(tester);
   });
@@ -976,7 +1020,7 @@ void main() {
       },
       nav: '<ol></ol>',
     );
-    final steps = <int>[];
+    final steps = <({int micros, int measured})>[];
     await openReader(
       tester,
       bridge(epub: epub, unitCount: 2),
@@ -1196,11 +1240,15 @@ void main() {
     await closeReader(tester);
   });
 
-  Future<void> pressShifted(WidgetTester tester, LogicalKeyboardKey key) async {
+  Future<void> pressShifted(
+    WidgetTester tester,
+    LogicalKeyboardKey key, {
+    bool settled = true,
+  }) async {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(key);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await settle(tester);
+    if (settled) await settle(tester);
   }
 
   /// Drags a selection on the page shown from [from] to [to].
@@ -1353,7 +1401,7 @@ void main() {
     final text = chapter.canonicalText;
     final last = text.lastIndexOf('A paragraph before');
     final after = text.indexOf('A paragraph after');
-    final steps = <int>[];
+    final steps = <({int micros, int measured})>[];
     await openReader(
       tester,
       bridge(
@@ -1378,18 +1426,16 @@ void main() {
 
     var widest = 0;
     Future<void> settleUntil(bool Function() done) async {
-      for (var round = 0; round < 30 && !done(); round += 1) {
-        await settle(tester);
-        final window = dartPage(tester)!.window!;
+      await pumpUntil(tester, done, (window) {
         widest = math.max(widest, window.endNode - window.firstNode);
-      }
+      });
     }
 
     bool inAfter(int? focus) =>
         focus != null &&
         focus >= after &&
         focus <= after + 'A paragraph after the rules.'.length;
-    await pressShifted(tester, LogicalKeyboardKey.arrowDown);
+    await pressShifted(tester, LogicalKeyboardKey.arrowDown, settled: false);
     await settleUntil(() => inAfter(highlightPainter(tester).focus));
     expect(
       inAfter(highlightPainter(tester).focus),
@@ -1408,7 +1454,7 @@ void main() {
         focus != null &&
         focus >= last &&
         focus <= last + 'A paragraph before the rules.'.length;
-    await pressShifted(tester, LogicalKeyboardKey.arrowUp);
+    await pressShifted(tester, LogicalKeyboardKey.arrowUp, settled: false);
     await settleUntil(() => inLast(highlightPainter(tester).focus));
     expect(inLast(highlightPainter(tester).focus), isTrue);
     expect(widest, lessThan(3000));
@@ -1445,7 +1491,7 @@ void main() {
     final text = openEpubBytes(epub).chapters.first.canonicalText;
     final near = text.indexOf('The paragraph nearest the gap.');
     final after = text.indexOf('A paragraph after');
-    final steps = <int>[];
+    final steps = <({int micros, int measured})>[];
     await openReader(
       tester,
       bridge(
@@ -1468,15 +1514,23 @@ void main() {
     }
     await dragSelect(tester, after, after + 'A paragraph'.length);
 
-    await pressShifted(tester, LogicalKeyboardKey.arrowUp);
+    await pressShifted(tester, LogicalKeyboardKey.arrowUp, settled: false);
     bool landed() => (highlightPainter(tester).focus ?? after) < after;
-    for (var round = 0; round < 30 && !landed(); round += 1) {
-      await settle(tester);
-    }
+    var widest = 0;
+    await pumpUntil(tester, landed, (window) {
+      widest = math.max(widest, window.endNode - window.firstNode);
+    });
     expect(
       highlightPainter(tester).focus,
-      inInclusiveRange(near, near + 'The paragraph nearest the gap.'.length),
-      reason: 'the paragraph nearest the gap, not a tall one before it',
+      near + 'A paragraph'.length,
+      reason:
+          'the paragraph nearest the gap, not a tall one before it, in the '
+          "focus's column",
+    );
+    expect(
+      widest,
+      lessThan(3000),
+      reason: 'the search never holds the whole gap',
     );
     expect(highlightPainter(tester).anchor, after);
 
@@ -1603,6 +1657,7 @@ void main() {
         ),
       ),
       images: const {},
+      clock: _stillClock,
     )..layoutWindowAt(0);
     final extents = ContinuousExtents(longChapter);
     final cache = ContinuousGeometryCache(longChapter);
@@ -1651,9 +1706,9 @@ void main() {
     expect(released, isNotEmpty);
     disposeFlowBlocks(released);
 
-    // Back to the start: the probe is laid out again, at the same top. A batch
-    // is bounded by time as well as nodes, so the window can reach the first
-    // node before it covers the probe; step until it covers the viewport.
+    // Back to the start: the probe is laid out again, at the same top. The
+    // window can reach the first node before it covers the probe; step until
+    // it covers the viewport.
     for (var step = 0; step < 400; step += 1) {
       final detached = <FlowBlock>[];
       final result = advanceContinuousWindow(
