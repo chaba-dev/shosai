@@ -140,12 +140,13 @@ recently read first.
 * [x] Bookmark notes become page notes: a migration moves each bookmark's note
 to a page note at the bookmark's place, and bookmarks keep no note. The reader
 writes, edits, opens and deletes page notes and book notes in its Notes panel.
-* [ ] Notes surface scoped to this book or all books, grouped by place; open a
-note at its anchor. This book is done: the reader's Notes panel groups book
-notes first, then each section's notes in reading order, and edits notes in
-place. All books is done in the shell's Notes place, which lists every book's
-notes, most recently read first, and opens a note's book at its place. Still
-to come: the panel's This book / All books switch.
+* [x] Notes surface scoped to this book or all books, grouped by place; open a
+note at its anchor. The reader's Notes panel switches between This book and
+All books. This book groups book notes first, then each section's notes in
+reading order, and edits notes in place. All books, in the panel and in the
+shell's Notes place, lists every book's notes, most recently read first, and
+opens a note's book at its place: a note in the book being read goes there
+with Back, and one in another book opens that book.
 * [x] Library-wide search over book text and notes from every screen, scoped
 and filtered as the RFD describes, with a return point for Back. The search
 palette opens with Ctrl+K or ⌘K, `/` and the Search place over the library or
