@@ -387,6 +387,72 @@ void main() {
     }
   });
 
+  test('text-orientation: upright leaves a preserved line break alone, and '
+      'falls back where it cannot stand a letter in one em', () async {
+    final arabic = FontLoader('Noto Sans Arabic')
+      ..addFont(
+        File(
+          '../fixtures/fonts/NotoSansArabic.ttf',
+        ).readAsBytes().then(ByteData.sublistView),
+      );
+    await arabic.load();
+    final built = buildBlockText(
+      [
+        EpubTextSpan(
+          text: 'A\nB',
+          preserveWhitespace: true,
+          orientation: EpubTextOrientation.upright,
+        ),
+        EpubTextSpan(
+          text: '\u0644\u0627',
+          orientation: EpubTextOrientation.upright,
+        ),
+      ],
+      typography.copyWith(
+        fontFamilyFallback: [
+          ...typography.fontFamilyFallback,
+          'Noto Sans Arabic',
+        ],
+      ),
+      18,
+      vertical: true,
+    );
+    expect(built.span.toPlainText(), built.map.text);
+    expect(
+      [
+        for (final run in built.redrawn)
+          if (run.combined) built.map.text.substring(run.start, run.end),
+      ],
+      ['A', 'B'],
+    );
+  });
+
+  test('an upright Latin letter selects by its top and bottom halves, as '
+      'other characters of its column do', () {
+    final (:page, :chapter) = verticalPage(
+      epub: buildTestEpub(
+        chapters: {
+          'OPS/Text/chapter-1.xhtml':
+              '<p>西暦<span style="text-orientation: upright">AB</span>年</p>',
+        },
+        nav: '<ol><li><a href="../Text/chapter-1.xhtml">一</a></li></ol>',
+        pageProgression: 'rtl',
+        bodyAttributes: ' style="writing-mode: vertical-rl"',
+      ),
+    );
+    final a = chapter.canonicalText.indexOf('A');
+    final halves = [
+      for (final endpoint in page.surface.endpoints)
+        if (endpoint.rangeStart.toInt() == a) endpoint,
+    ]..sort((x, y) => x.rect.top.compareTo(y.rect.top));
+    expect(halves, hasLength(2));
+    expect(halves.first.offset.toInt(), a);
+    expect(halves.last.offset.toInt(), a + 1);
+    expect(halves.first.rect.bottom, lessThanOrEqualTo(halves.last.rect.top));
+    expect(halves.first.rect.left, closeTo(halves.last.rect.left, 0.5));
+    expect(halves.first.rect.right, closeTo(halves.last.rect.right, 0.5));
+  });
+
   test('text-orientation: sideways turns kanji and kana with the line', () {
     final runs = uprightWidths([
       EpubTextSpan(text: '吾輩は'),

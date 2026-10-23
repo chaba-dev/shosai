@@ -385,7 +385,9 @@ List<FlutterSelectionCaret> _lineCarets(
     final clusterEnd = unit + grapheme.length;
     unit = clusterEnd;
     final cell = cells[clusterStart + markerOffset];
-    if (cell != null) {
+    // A one-character run (an upright Latin letter) keeps the vertical
+    // halves, top and bottom, of any other character.
+    if (cell != null && cell.count > 1) {
       final canonicalStart = cursor.at(cell.start);
       final canonicalEnd = cursor.at(cell.end);
       // The cell is in block coordinates; [lineTop] places the line.
