@@ -226,22 +226,33 @@ String resolveNamedEntities(String xhtml, List<String> warnings) {
   final out = StringBuffer();
   var index = 0;
   while (index < xhtml.length) {
-    final remaining = xhtml.substring(index);
-    if (remaining.startsWith('<!--')) {
+    // Plain text runs up to the next markup or reference are copied whole.
+    var next = index;
+    while (next < xhtml.length) {
+      final unit = xhtml.codeUnitAt(next);
+      if (unit == 0x3c || unit == 0x26) break; // '<' or '&'
+      next++;
+    }
+    if (next > index) {
+      out.write(xhtml.substring(index, next));
+      index = next;
+      continue;
+    }
+    if (xhtml.startsWith('<!--', index)) {
       final end = xhtml.indexOf('-->', index);
       final stop = end < 0 ? xhtml.length : end + 3;
       out.write(xhtml.substring(index, stop));
       index = stop;
       continue;
     }
-    if (remaining.startsWith('<![CDATA[')) {
+    if (xhtml.startsWith('<![CDATA[', index)) {
       final end = xhtml.indexOf(']]>', index);
       final stop = end < 0 ? xhtml.length : end + 3;
       out.write(xhtml.substring(index, stop));
       index = stop;
       continue;
     }
-    if (remaining.startsWith('<!DOCTYPE')) {
+    if (xhtml.startsWith('<!DOCTYPE', index)) {
       final end = _doctypeEnd(xhtml, index);
       final stop = end < 0 ? xhtml.length : end;
       // Custom entity declarations are not expanded: an unknown entity then
@@ -250,10 +261,10 @@ String resolveNamedEntities(String xhtml, List<String> warnings) {
       index = stop;
       continue;
     }
-    if (remaining.startsWith('&')) {
+    if (xhtml.startsWith('&', index)) {
       final end = xhtml.indexOf(';', index);
       if (end < 0) {
-        out.write(remaining);
+        out.write(xhtml.substring(index));
         break;
       }
       final name = xhtml.substring(index + 1, end);
