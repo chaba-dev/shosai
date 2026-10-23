@@ -28,6 +28,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Debug and profile builds (Flutter's profile type starts from debug)
+        // are told apart from the released app on the launcher.
+        manifestPlaceholders["appLabel"] = "Shōsai Dev"
     }
 
     buildTypes {
@@ -35,6 +38,7 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            manifestPlaceholders["appLabel"] = "Shōsai"
         }
     }
 }

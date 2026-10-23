@@ -14,10 +14,14 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
-// The window title, matching the Iced frontend's window title (`app::title` in
-// crates/shosai-app). The compositor or window manager shows it in the
-// decoration it provides; the application itself draws no title strip.
-static const char kWindowTitle[] = "Shosai";
+// The window title. The compositor or window manager shows it in the
+// decoration it provides; the application itself draws no title strip. A debug
+// build is told apart from the released app.
+#ifdef NDEBUG
+static const char kWindowTitle[] = "Shōsai";
+#else
+static const char kWindowTitle[] = "Shōsai Dev";
+#endif
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {

@@ -481,6 +481,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				APP_DISPLAY_NAME = "Shōsai Dev";
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.shosai.shosai-flutter";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -663,6 +664,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				APP_DISPLAY_NAME = "Shōsai Dev";
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.shosai.shosai-flutter";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -685,6 +687,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				APP_DISPLAY_NAME = "Shōsai";
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.shosai.shosai-flutter";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
