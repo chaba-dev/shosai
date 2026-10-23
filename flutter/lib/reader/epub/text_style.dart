@@ -370,7 +370,8 @@ final class CanonicalCursor {
 /// turned back, in the font's vertical forms.
 ///
 /// A [combined] run is tate-chū-yoko: its text is laid out one em long, and
-/// drawn upright and side by side in that em square.
+/// drawn upright and side by side in that em square. A Latin letter or digit
+/// that `text-orientation: upright` stands up is a combined run of its own.
 ///
 /// A ruby base that is shorter than its annotation is laid out with letter
 /// spacing that makes it as long; its graphemes are redrawn centred in their
@@ -549,6 +550,7 @@ BuiltBlockText buildBlockText(
             monospace: span.monospace,
             fontFamily: span.fontFamily,
             fontSizeMultiplier: span.fontSizeMultiplier * rubyScale,
+            orientation: span.orientation,
           ),
         ],
         typography.copyWith(lineHeight: 1),
@@ -690,7 +692,23 @@ BuiltBlockText buildBlockText(
         unit += cluster.length;
         continue;
       }
-      final isUpright = isUprightInVertical(cluster.runes.first);
+      final rune = cluster.runes.first;
+      final isUpright = switch (span.orientation) {
+        EpubTextOrientation.mixed => isUprightInVertical(rune),
+        EpubTextOrientation.upright => true,
+        EpubTextOrientation.sideways => false,
+      };
+      if (isUpright &&
+          !isUprightInVertical(rune) &&
+          spacing == null &&
+          !_isSpaceOrControl(cluster)) {
+        // `text-orientation: upright` stands a Latin letter or digit up in an
+        // em of its own, as tate-chū-yoko does a run.
+        flush(unit);
+        combine(unit, unit + cluster.length);
+        unit += cluster.length;
+        continue;
+      }
       if (runUpright != isUpright) {
         flush(unit);
         runUpright = isUpright;
@@ -727,7 +745,7 @@ BuiltBlockText buildBlockText(
       return buildBlockText(
         [
           for (final (index, span) in spans.indexed)
-            failed.contains(index) ? (span.copy()..combine = null) : span,
+            failed.contains(index) ? _uncombined(span) : span,
         ],
         typography,
         baseFontSize,
@@ -761,10 +779,27 @@ List<EpubTextSpan> withoutCombining(
   for (final span in spans) {
     final end = start + span.text.length;
     final holds = runs.any((run) => run.start >= start && run.start < end);
-    result.add(holds ? (span.copy()..combine = null) : span);
+    result.add(holds ? _uncombined(span) : span);
     start = end;
   }
   return result;
+}
+
+/// [span] without what makes [buildBlockText] combine its characters:
+/// tate-chū-yoko, and `text-orientation: upright`, which stands a Latin
+/// letter up as a one-character run and falls back to the line's own
+/// orientation (`mixed`) with it.
+EpubTextSpan _uncombined(EpubTextSpan span) => span.copy()
+  ..combine = null
+  ..orientation = span.orientation == EpubTextOrientation.upright
+      ? EpubTextOrientation.mixed
+      : span.orientation;
+
+/// Whether [cluster] is whitespace or a control character, which has no
+/// glyph to stand upright.
+bool _isSpaceOrControl(String cluster) {
+  final rune = cluster.runes.first;
+  return rune < 0x20 || (rune >= 0x7F && rune < 0xA0) || cluster.trim().isEmpty;
 }
 
 /// A variation axis no font defines. A tate-chū-yoko run's transparent

@@ -4,7 +4,8 @@
 /// lists, `!important`, inline `style`, source order, and the property subset
 /// the normalized model can express (display, font-size/-family/-weight/-style,
 /// text-align, direction, margins, text-indent, width/height/max-width,
-/// white-space, writing-mode and text-combine-upright with their `-epub-`,
+/// white-space, writing-mode, text-orientation and text-combine-upright with
+/// their `-epub-`,
 /// `-webkit-` and `-ms-` aliases). `@font-face` is collected for embedded font
 /// admission.
 ///
@@ -601,6 +602,9 @@ const Set<String> kSupportedCssProperties = {
   '-epub-text-combine-horizontal',
   '-webkit-text-combine',
   '-ms-text-combine-horizontal',
+  'text-orientation',
+  '-epub-text-orientation',
+  '-webkit-text-orientation',
 };
 
 List<CssDeclaration> _parseDeclarations(String body, [List<String>? warnings]) {
@@ -721,6 +725,7 @@ class EpubComputedStyle {
     required this.maxWidth,
     this.writingMode = EpubWritingMode.horizontalTb,
     this.combine,
+    this.orientation = EpubTextOrientation.mixed,
   });
 
   final EpubDisplay display;
@@ -746,6 +751,9 @@ class EpubComputedStyle {
   /// Tate-chū-yoko, or null for `none`. Inherited, as CSS
   /// `text-combine-upright` is.
   final EpubTextCombine? combine;
+
+  /// Inherited, as CSS `text-orientation` is.
+  final EpubTextOrientation orientation;
 
   bool get isBlockLike => display != EpubDisplay.inline;
 }

@@ -710,6 +710,26 @@ EpubComputedStyle _applyDeclaration(
         },
         _ => style,
       };
+    case 'text-orientation' ||
+        '-epub-text-orientation' ||
+        '-webkit-text-orientation':
+      // `sideways-right`, `vertical-right` and `use-glyph-orientation` are
+      // the legacy and prefixed spellings.
+      return switch (lower) {
+        'inherit' ||
+        'unset' => _copyWith(style, orientation: parent.orientation),
+        'initial' => _copyWith(style, orientation: EpubTextOrientation.mixed),
+        'mixed' || 'vertical-right' || 'use-glyph-orientation' => _copyWith(
+          style,
+          orientation: EpubTextOrientation.mixed,
+        ),
+        'upright' => _copyWith(style, orientation: EpubTextOrientation.upright),
+        'sideways' || 'sideways-right' => _copyWith(
+          style,
+          orientation: EpubTextOrientation.sideways,
+        ),
+        _ => style,
+      };
     // The legacy property took `horizontal` for what is now `all`.
     case '-epub-text-combine' || '-webkit-text-combine':
       return switch (lower.split(RegExp(r'\s+')).first) {
@@ -871,6 +891,7 @@ EpubComputedStyle _copyWith(
   EpubWritingMode? writingMode,
   EpubTextCombine? combine,
   bool noCombine = false,
+  EpubTextOrientation? orientation,
 }) => EpubComputedStyle(
   display: display ?? style.display,
   bold: bold ?? style.bold,
@@ -890,6 +911,7 @@ EpubComputedStyle _copyWith(
   maxWidth: maxWidth ?? style.maxWidth,
   writingMode: writingMode ?? style.writingMode,
   combine: noCombine ? null : combine ?? style.combine,
+  orientation: orientation ?? style.orientation,
 );
 
 // ---------------------------------------------------------------------------
@@ -1373,6 +1395,7 @@ class _NormalizeContext {
       preserveWhitespace: style.preserveWhitespace,
       link: link,
       combine: style.combine,
+      orientation: style.orientation,
     );
   }
 
@@ -1774,6 +1797,7 @@ class _NormalizeContext {
           current.preserveWhitespace == next.preserveWhitespace &&
           current.link == next.link &&
           current.combine == next.combine &&
+          current.orientation == next.orientation &&
           !(current.combine?.all ?? false) &&
           // A ruby base starts its own span; its continuations merge into it,
           // and nothing else does.

@@ -18,6 +18,21 @@ enum EpubDirection { ltr, rtl }
 /// bottom and stacks them right to left; anything else is horizontal.
 enum EpubWritingMode { horizontalTb, verticalRl }
 
+/// How a vertical line sets the characters of horizontal scripts, from CSS
+/// `text-orientation` (or its `-epub-` and `-webkit-` spellings). Horizontal
+/// text ignores it.
+enum EpubTextOrientation {
+  /// Latin letters and digits turn with the line; kanji and kana stand
+  /// upright (UAX #50).
+  mixed,
+
+  /// Every character stands upright, one to a row.
+  upright,
+
+  /// Every character turns with the line, kanji and kana too.
+  sideways,
+}
+
 /// Tate-chū-yoko: text a vertical line sets side by side in one upright em
 /// square, from CSS `text-combine-upright` (or its `-epub-`, `-webkit-` and
 /// `-ms-` spellings). Horizontal text ignores it.
@@ -146,6 +161,7 @@ class EpubTextSpan {
     this.combine,
     this.ruby,
     this.rubyContinued = false,
+    this.orientation = EpubTextOrientation.mixed,
   });
 
   String text;
@@ -170,6 +186,9 @@ class EpubTextSpan {
   /// Tate-chū-yoko for this span's text, or null. A span that combines all
   /// its text is one unit and never merges with a neighbour.
   EpubTextCombine? combine;
+
+  /// How a vertical line sets this span's characters.
+  EpubTextOrientation orientation;
 
   /// The ruby annotation (furigana) set beside this span's text, from the
   /// `<rt>` of a `<ruby>` element. It is not part of the canonical stream:
@@ -212,6 +231,7 @@ class EpubTextSpan {
     combine: combine,
     ruby: ruby,
     rubyContinued: rubyContinued,
+    orientation: orientation,
   );
 }
 

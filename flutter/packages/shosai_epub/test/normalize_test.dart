@@ -2296,6 +2296,85 @@ void main() {
     });
   });
 
+  group('text-orientation', () {
+    List<(String, EpubTextOrientation)> orientationOf(
+      String body, [
+      String sheet = '',
+    ]) {
+      final chapter = normalizeChapter(
+        xhtml:
+            '<html><body style="writing-mode: vertical-rl">$body</body>'
+            '</html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: [CssStylesheet.parse(sheet, const EpubLimits())],
+        limits: const EpubLimits(),
+      );
+      return [
+        for (final span in (chapter.nodes.single as EpubParagraph).spans)
+          (span.text, span.orientation),
+      ];
+    }
+
+    test('every spelling and keyword is read', () {
+      for (final (declaration, expected) in [
+        ('text-orientation: upright', EpubTextOrientation.upright),
+        ('-epub-text-orientation: upright', EpubTextOrientation.upright),
+        ('-webkit-text-orientation: upright', EpubTextOrientation.upright),
+        ('text-orientation: sideways', EpubTextOrientation.sideways),
+        (
+          '-epub-text-orientation: sideways-right',
+          EpubTextOrientation.sideways,
+        ),
+        ('-webkit-text-orientation: vertical-right', EpubTextOrientation.mixed),
+        (
+          '-epub-text-orientation: use-glyph-orientation',
+          EpubTextOrientation.mixed,
+        ),
+        ('text-orientation: bogus', EpubTextOrientation.mixed),
+      ]) {
+        final spans = orientationOf(
+          '<p>西暦<span class="o">1905</span>年</p>',
+          '.o { $declaration }',
+        );
+        // A mixed span merges with its mixed neighbours.
+        expect(
+          spans.firstWhere((span) => span.$1.contains('1905')).$2,
+          expected,
+          reason: declaration,
+        );
+      }
+    });
+
+    test('inherit, unset and initial read the parent and the default', () {
+      for (final (value, expected) in [
+        ('inherit', EpubTextOrientation.upright),
+        ('unset', EpubTextOrientation.upright),
+        ('initial', EpubTextOrientation.mixed),
+      ]) {
+        final spans = orientationOf(
+          '<p style="text-orientation: upright">AB<span class="x" '
+              'style="text-orientation: $value">CD</span></p>',
+          '.x { text-orientation: sideways }',
+        );
+        expect(spans.last.$1, endsWith('CD'), reason: value);
+        expect(spans.last.$2, expected, reason: value);
+      }
+    });
+
+    test('the value is inherited, and a different one splits the text', () {
+      expect(
+        orientationOf(
+          '<p style="text-orientation: upright">AB<span '
+          'style="text-orientation: mixed">CD</span></p>',
+        ),
+        [
+          ('AB', EpubTextOrientation.upright),
+          ('CD', EpubTextOrientation.mixed),
+        ],
+      );
+    });
+  });
+
   group('ruby', () {
     ({List<EpubContentNode> blocks, String canonicalText}) chapterOf(
       String body,
