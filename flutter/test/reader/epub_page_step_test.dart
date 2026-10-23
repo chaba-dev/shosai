@@ -245,6 +245,42 @@ void main() {
     await closeReader(tester);
   });
 
+  testWidgets('a page back from a chapter start lands on the previous '
+      "chapter's last page", (tester) async {
+    final harness = bridge();
+    await openReader(tester, harness);
+    await settleEpubPage(tester);
+
+    // Walk to the start of chapter two, remembering chapter one's last page.
+    final starts = await walkForward(tester);
+    expect(dartPage(tester)!.page.unit, book.chapters[1].spine);
+    expect(dartPage(tester)!.page.canonicalStart, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+    final page = dartPage(tester)!.page;
+    expect(page.unit, book.chapters.first.spine);
+    // The page is laid out afresh around the chapter end, so its break may
+    // differ from the walk's; what matters is that it ends the chapter.
+    // (The chapter's last scalar can lie past its last drawn line.)
+    expect(
+      page.canonicalEnd,
+      greaterThanOrEqualTo(book.chapters.first.scalarCount - 1),
+      reason: 'one page back shows the end of the chapter before',
+    );
+    expect(page.canonicalStart, greaterThan(0));
+    expect(starts.length, greaterThan(2));
+
+    // Walking on back stays in that chapter, page by page.
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+    final before = dartPage(tester)!.page;
+    expect(before.unit, book.chapters.first.spine);
+    expect(before.canonicalStart, lessThan(page.canonicalStart));
+
+    await closeReader(tester);
+  });
+
   testWidgets('a position on an empty-row page restores to that page', (
     tester,
   ) async {

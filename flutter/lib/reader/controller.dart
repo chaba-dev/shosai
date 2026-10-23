@@ -2324,8 +2324,18 @@ final class ReaderController implements Listenable {
     if (target == null) {
       if (step.complete) {
         // The window measured the whole chapter and has no further page: this
-        // is a chapter edge.
-        _unitRequested(_model.unit + delta);
+        // is a chapter edge. Forward opens the next chapter at its start; back
+        // opens the previous one at its last page, the page before this one.
+        final previous = _model.unit - 1;
+        final chapters = _epubSource?.book.chapters;
+        if (delta < 0 && chapters != null && previous < chapters.length) {
+          _unitRequested(
+            previous,
+            offset: math.max(0, chapters[previous].scalarCount - 1),
+          );
+        } else {
+          _unitRequested(_model.unit + delta);
+        }
       }
       // Otherwise the window simply does not reach that page yet; the step is
       // dropped rather than turned into a chapter change.
