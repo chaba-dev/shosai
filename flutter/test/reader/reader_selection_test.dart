@@ -170,6 +170,7 @@ Widget _reader({
   String initialPath = '/books/slow-rivers.pdf',
   FlutterReaderSettings settings = _pdfFitPage,
   ReaderPlace? place,
+  int? initialBookId,
 }) => productionShell(
   locale: const Locale('en'),
   home: ReaderScreen(
@@ -179,6 +180,7 @@ Widget _reader({
     initialPath: initialPath,
     initialSettings: settings,
     initialPlace: place,
+    initialBookId: initialBookId,
   ),
 );
 
@@ -292,6 +294,32 @@ void main() {
             .label,
         'Selection actions',
       );
+    });
+
+    testWidgets('a highlight made while All books shows lists it again', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge();
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/slow-rivers.pdf',
+          initialBookId: 1,
+        ),
+      );
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
+      await settleReaderSelection(tester);
+      expect(bridge.libraryNotesCalls, 1);
+
+      await dragFixtureSelection(tester, from: 4, to: 12);
+      await settleReaderSelection(tester);
+      await tester.tap(find.text('Yellow'));
+      await settleReaderSelection(tester);
+      expect(bridge.created, hasLength(1));
+      expect(bridge.libraryNotesCalls, 2);
     });
 
     testWidgets('a PDF opened at a search match selects it', (tester) async {

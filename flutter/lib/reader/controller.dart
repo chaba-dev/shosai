@@ -913,6 +913,12 @@ final class ReaderController implements Listenable {
       case _ReaderLibraryNotesLoaded(:final page, :final append):
         if (_isCurrent(message.generation) &&
             message.revision == _libraryNotesRevision) {
+          // Books read since the list began reorder it: it is listed again
+          // from the first book.
+          if (page.changed) {
+            _libraryNotesRequested(append: false);
+            return;
+          }
           _emit(
             _model.copyWith(
               libraryNotes: ShellNotesModel(
@@ -1377,6 +1383,7 @@ final class ReaderController implements Listenable {
     _searchError = null;
     _searchCurrentIndex = 0;
     _exportRevision += 1;
+    _libraryNotesRevision += 1;
     _retireDocumentPicker();
     _emit(
       _model.copyWith(
@@ -1384,6 +1391,10 @@ final class ReaderController implements Listenable {
         openBookId: message.bookId,
         document: null,
         noteEdit: null,
+        // Every book opens on its own notes; a file outside the library has
+        // no All books to switch to.
+        notesScope: ReaderNotesScope.thisBook,
+        libraryNotes: const ShellNotesModel(),
         unit: 0,
         readingOffset: null,
         pageImage: null,
@@ -3240,7 +3251,10 @@ final class ReaderController implements Listenable {
     _libraryNotesCancellation = cancellation;
     _toolCancellations.add(cancellation);
     _activeBridgeOperations += 1;
-    final offset = append ? _model.libraryNotes.books.length : 0;
+    // More follows the books listed, while they are still the first.
+    final after = append
+        ? [for (final book in _model.libraryNotes.books) book.book.bookId]
+        : null;
     _emit(
       _model.copyWith(
         libraryNotes: _model.libraryNotes.copyWith(
@@ -3254,7 +3268,8 @@ final class ReaderController implements Listenable {
       try {
         final page = await _records.libraryNotes(
           limit: ShellNotesController.pageSize,
-          offset: offset,
+          offset: after?.length ?? 0,
+          after: after,
           cancellationId: cancellation,
         );
         dispatch(
@@ -3275,33 +3290,26 @@ final class ReaderController implements Listenable {
     }());
   }
 
-  /// Opens a note from All books: this book's goes to its place, as from This
-  /// book, and another book's opens that book there.
+  /// Opens a note from All books where it resolves, as the Notes place does:
+  /// this book's goes there as any place asked for, and another book's opens
+  /// that book there. A book note opens its book where it was left.
   void _libraryNoteOpened(FlutterLibraryBook book, FlutterNoteEntry note) {
     final unit = note.unit;
-    final offset = note.offset;
-    if (book.bookId == _model.document?.bookId) {
-      switch (note.kind) {
-        case FlutterNoteEntryKind.highlight:
-          _jump(() => _navigateAnnotation(note.id));
-        case FlutterNoteEntryKind.page when unit != null:
-          _jump(
-            () => _unitRequested(
-              unit,
-              offset: offset,
-              replaceReadingOffset: true,
-            ),
+    // Its unit and offset are where it was made; the reader resolves it by
+    // its id in the edition it opens.
+    final place = unit == null
+        ? null
+        : ReaderPlace(
+            unit,
+            offset: note.offset,
+            annotationId: note.id,
+            note: note.kind != FlutterNoteEntryKind.highlight,
           );
-        // The book is open where it was left already.
-        case FlutterNoteEntryKind.page || FlutterNoteEntryKind.book:
-          break;
-      }
+    if (book.bookId == _model.document?.bookId) {
+      if (place != null) _dispatch(ReaderPlaceRequested(place));
       return;
     }
-    _bookOpener?.call(
-      book,
-      unit == null ? null : ReaderPlace(unit, offset: offset),
-    );
+    _bookOpener?.call(book, place);
   }
 
   /// Opens the note editor for a new page note or book note.
@@ -5299,6 +5307,11 @@ final class ReaderController implements Listenable {
     List<FlutterAnnotation> annotations, {
     bool? annotationsReady,
   }) {
+    // All books lists this book's highlights too, as the store has them.
+    if ((annotationsReady ?? _model.annotationsReady) &&
+        _model.notesScope == ReaderNotesScope.allBooks) {
+      _libraryNotesRequested(append: false);
+    }
     _emit(
       _model.copyWith(
         annotations: List.unmodifiable(annotations),
