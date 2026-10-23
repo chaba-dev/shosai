@@ -226,6 +226,8 @@ class EpubTextSpan {
     this.combine,
     this.ruby,
     this.rubyContinued = false,
+    this.rubyUnder,
+    this.rubyUnderContinued = false,
     this.orientation = EpubTextOrientation.mixed,
     this.emphasis,
   });
@@ -272,6 +274,15 @@ class EpubTextSpan {
   /// Whether this span continues the ruby base of the span before it.
   bool rubyContinued;
 
+  /// A second ruby annotation, set under this span's text (to its left in a
+  /// vertical line), from an `<rtc>`. Its base is grouped as [ruby]'s is,
+  /// with [rubyUnderContinued], and can span several of the first level's
+  /// bases.
+  String? rubyUnder;
+
+  /// Whether this span continues the second-level ruby base before it.
+  bool rubyUnderContinued;
+
   /// Element ids/legacy anchor names that resolve to this span's start.
   List<String> anchorIds = const [];
 
@@ -300,6 +311,8 @@ class EpubTextSpan {
     combine: combine,
     ruby: ruby,
     rubyContinued: rubyContinued,
+    rubyUnder: rubyUnder,
+    rubyUnderContinued: rubyUnderContinued,
     orientation: orientation,
     emphasis: emphasis,
   );

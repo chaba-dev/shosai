@@ -2774,11 +2774,67 @@ void main() {
       ]);
     });
 
-    test('a second annotation level is not drawn', () {
+    List<(String, String?, String?)> levelsOf(String body) => [
+      for (final span in (chapterOf(body).blocks.single as EpubParagraph).spans)
+        (span.text, span.ruby, span.rubyUnder),
+    ];
+
+    test('an rtc is a second level, set under the bases', () {
       expect(
-        rubyOf('<p><ruby>旧<rt>きゅう</rt><rtc><rt>old</rt></rtc></ruby></p>'),
-        [('旧', 'きゅう')],
+        levelsOf('<p><ruby>旧<rt>きゅう</rt><rtc><rt>old</rt></rtc></ruby></p>'),
+        [('旧', 'きゅう', 'old')],
       );
+      // An rtc on its own is the first level.
+      expect(levelsOf('<p><ruby>旧<rtc>きゅう</rtc></ruby></p>'), [
+        ('旧', 'きゅう', null),
+      ]);
+      // A third level is not drawn.
+      expect(
+        levelsOf(
+          '<p><ruby>旧<rt>きゅう</rt><rtc>old</rtc><rtc>alt</rtc></ruby></p>',
+        ),
+        [('旧', 'きゅう', 'old')],
+      );
+    });
+
+    test('an rtc\'s rts pair with the bases, and its own text spans them', () {
+      expect(
+        levelsOf(
+          '<p><ruby><rb>東</rb><rb>京</rb><rt>とう</rt><rt>きょう</rt>'
+          '<rtc><rt>East</rt><rt>capital</rt></rtc></ruby></p>',
+        ),
+        [('東', 'とう', 'East'), ('京', 'きょう', 'capital')],
+      );
+      final parsed = chapterOf(
+        '<p><ruby><rb>東</rb><rb>京</rb><rt>とう</rt><rt>きょう</rt>'
+        '<rtc> Tō<rp>(</rp>kyō </rtc></ruby>都</p>',
+      );
+      expect(
+        [
+          for (final span in (parsed.blocks.single as EpubParagraph).spans)
+            (span.text, span.ruby, span.rubyUnder, span.rubyUnderContinued),
+        ],
+        [
+          ('東', 'とう', 'Tōkyō', false),
+          ('京', 'きょう', null, true),
+          ('都', null, null, false),
+        ],
+      );
+      expect(parsed.canonicalText.trim(), '東京都');
+    });
+
+    test('each segment pairs its own levels', () {
+      expect(
+        levelsOf(
+          '<p><ruby>東<rt>とう</rt><rtc>east</rtc>京<rt>きょう</rt>'
+          '<rtc>capital</rtc></ruby></p>',
+        ),
+        [('東', 'とう', 'east'), ('京', 'きょう', 'capital')],
+      );
+      // An rtc before any rt is the first level, and rts after it the second.
+      expect(levelsOf('<p><ruby>旧<rtc>old</rtc><rt>きゅう</rt></ruby></p>'), [
+        ('旧', 'old', 'きゅう'),
+      ]);
     });
 
     test('a table cell keeps the base and drops the annotation', () {
