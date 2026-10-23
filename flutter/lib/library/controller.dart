@@ -202,6 +202,18 @@ class LibraryController implements Listenable {
           ),
         );
         _saveSettings();
+      case LibrarySettingsSaveRetried():
+        // Unlike the library alert's Retry, which reopens the dialog, this
+        // saves the settings already in place: a Pages change made in the
+        // reader is retried where it was made.
+        if (_model.failure == LibraryFailure.settings &&
+            _model.settings != null) {
+          _saveSettings();
+        }
+      case LibrarySettingsFailureDismissed():
+        if (_model.failure == LibraryFailure.settings) {
+          _emit(_model.copyWith(error: null, failure: LibraryFailure.none));
+        }
       case _LibrarySettingsEdited():
         // The dialog edits the display settings; the order and the Pages
         // setting it opened with may have changed since.

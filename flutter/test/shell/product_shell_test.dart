@@ -178,6 +178,27 @@ Future<void> _open(WidgetTester tester, int bookId) async {
   await tester.pumpAndSettle();
 }
 
+/// A library whose settings writes fail while [failSaves] is set.
+class _FailingSettingsBridge extends HarnessBridge {
+  _FailingSettingsBridge()
+    : super(books: harnessLibraryBooks(), covers: harnessCovers());
+
+  bool failSaves = true;
+
+  @override
+  Future<void> saveReaderSettings({
+    required FlutterReaderSettings value,
+  }) async {
+    if (failSaves) {
+      throw const FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.inaccessible,
+        message: 'disk full',
+      );
+    }
+    await super.saveReaderSettings(value: value);
+  }
+}
+
 void main() {
   setUpAll(loadHarnessFonts);
 
@@ -207,6 +228,61 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a Pages setting the reader cannot save stays reported over it '
+      'until a retry saves it', (tester) async {
+    _MountCounter.mounts = 0;
+    final bridge = _FailingSettingsBridge();
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      productionShell(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder:
+              (
+                bridge,
+                book,
+                settings,
+                path,
+                bookId,
+                locatorChanged,
+                notices,
+                openBooks,
+                pagesChanged,
+              ) => _MountCounter(
+                child: Scaffold(
+                  body: TextButton(
+                    onPressed: () => pagesChanged(false),
+                    child: const Text('One page'),
+                  ),
+                ),
+              ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _open(tester, 1);
+
+    await tester.tap(find.text('One page'));
+    await tester.pumpAndSettle();
+    const failure = 'Reader settings could not be saved.';
+    expect(find.text(failure), findsOneWidget);
+    expect(find.text('disk full'), findsOneWidget);
+    // It is no brief notice: the setting is still unsaved.
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(find.text(failure), findsOneWidget);
+    expect(_MountCounter.mounts, 1, reason: 'the reader is not remounted');
+
+    bridge.failSaves = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text(failure), findsNothing);
+    expect(bridge.savedSettings?.twoPages, isFalse);
+    expect(_MountCounter.mounts, 1);
   });
 
   testWidgets('the rail switches books and each keeps its place', (
