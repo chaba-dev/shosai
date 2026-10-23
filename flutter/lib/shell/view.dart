@@ -6,14 +6,17 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/shell/controller.dart';
+import 'package:shosai_flutter/shell/notes_controller.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/shell/controller.dart';
+export 'package:shosai_flutter/shell/notes_controller.dart';
 
 part 'view_controls.dart';
 part 'view_cover.dart';
 part 'view_navigation.dart';
+part 'view_notes.dart';
 part 'view_palette.dart';
 part 'view_phone.dart';
 part 'view_places.dart';

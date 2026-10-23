@@ -284,7 +284,7 @@ class _ReaderNotesPanel extends StatelessWidget {
       id: 'reader-annotation-${annotation.id}',
       edit: _editOf('reader-annotation-${annotation.id}'),
       dispatch: dispatch,
-      leading: _ReaderNoteDot(color: annotation.color),
+      leading: ShellHighlightDot(color: annotation.color),
       meta:
           '$place'
           '${_annotationResolutionSuffix(l10n, annotation.resolution)}',
@@ -345,29 +345,6 @@ class _ReaderNotesPanel extends StatelessWidget {
   return pdf
       ? null
       : (id: 'unit $unit', title: l10n.readerChapterNumber(unit + 1));
-}
-
-/// A highlight's colour on its note card (`sh-dot`).
-class _ReaderNoteDot extends StatelessWidget {
-  const _ReaderNoteDot({required this.color});
-
-  final FlutterHighlightColor color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 10,
-    height: 10,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      color: switch (color) {
-        FlutterHighlightColor.yellow => ShosaiTokens.colorSwatchYellow,
-        FlutterHighlightColor.green => ShosaiTokens.colorSwatchGreen,
-        FlutterHighlightColor.blue => ShosaiTokens.colorSwatchBlue,
-        FlutterHighlightColor.pink => ShosaiTokens.colorSwatchPink,
-        FlutterHighlightColor.purple => ShosaiTokens.colorSwatchPurple,
-      },
-    ),
-  );
 }
 
 /// One of the Notes panel's foot actions: a secondary button with its icon.

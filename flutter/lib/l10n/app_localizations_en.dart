@@ -559,6 +559,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Select text in a book to highlight it, or add a note to a page. Every note and highlight appears here.';
 
   @override
+  String get shellNotesLoading => 'Loading notes…';
+
+  @override
+  String get shellNotesMore => 'More notes';
+
+  @override
   String get shellBookmarksEmptyHeading => 'No bookmarks yet';
 
   @override

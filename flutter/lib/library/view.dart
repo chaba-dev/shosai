@@ -36,6 +36,7 @@ typedef ProductReaderBuilder =
       ReaderNoticeReporter noticeReporter,
       Widget openBooksAction,
       void Function(bool twoPages) pagesChanged,
+      ReaderPlace? initialPlace,
     );
 
 class ProductShell extends StatefulWidget {
@@ -77,6 +78,16 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     dismissReader: _dismissReader,
   )..addListener(_shellChanged);
   ModalRoute<void>? _readerRoute;
+
+  /// The Notes place's list; it lists again each time the place shows.
+  late final ShellNotesController _notes = ShellNotesController(
+    bridge: widget.bridgeFactory(),
+  )..addListener(_notesChanged);
+  bool _notesShowing = false;
+
+  /// The book a note was opened in and the note's place: the reader built
+  /// next for that book opens there instead of where it was left.
+  (int, ReaderPlace?)? _openAt;
 
   /// The reader for the current open book, built once per book so a locator
   /// report does not rebuild it.
@@ -123,6 +134,26 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void _shellChanged() {
     setState(() {});
     _session.value = _encodeSession(_shell.model);
+    final model = _shell.model;
+    final notesShowing = model.place == ShellPlace.notes && !model.reading;
+    if (notesShowing && !_notesShowing) {
+      _notes.dispatch(const ShellNotesRequested());
+    }
+    _notesShowing = notesShowing;
+  }
+
+  void _notesChanged() => setState(() {});
+
+  /// Opens [book] at [note]'s place; a book note opens where it was left.
+  void _openNote(FlutterBookNotes book, FlutterNoteEntry note) {
+    final unit = note.unit;
+    _openAt = (
+      book.book.bookId,
+      unit == null ? null : ReaderPlace(unit, offset: note.offset),
+    );
+    controller.dispatch(LibraryBookOpened(book.book));
+    // A library that is busy refuses the open; the place goes with it.
+    if (!_shell.model.reading) _openAt = null;
   }
 
   void _scheduleRestoredOpen() {
@@ -197,6 +228,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     controller.dispose();
     _shell.removeListener(_shellChanged);
     _shell.dispose();
+    _notes.removeListener(_notesChanged);
+    _notes.dispose();
     _session.dispose();
     super.dispose();
   }
@@ -239,6 +272,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     } finally {
       if (identical(_readerRoute, route)) _readerRoute = null;
       _reader = null;
+      _openAt = null;
     }
   }
 
@@ -272,6 +306,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return reader;
     }
     _shownBooks.add(open.id);
+    final ReaderPlace? place;
+    if (_openAt case (final id, final at) when id == open.id) {
+      place = at;
+      _openAt = null;
+    } else {
+      place = null;
+    }
     // A global key moves the reader when the layout changes (the rail beside
     // it on a tablet, alone on a phone) instead of remounting it: the reader
     // owns its bridge, and a remount would dispose it.
@@ -306,6 +347,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         (twoPages) {
           if (mounted) controller.dispatch(LibraryPagesChanged(twoPages));
         },
+        place,
       ),
     );
     _reader = (open.id, reader);
@@ -703,6 +745,19 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 ? SafeArea(
                     bottom: layout != ShellLayout.phone,
                     child: _libraryPlace(layout),
+                  )
+                : shell.place == ShellPlace.notes
+                ? ListenableBuilder(
+                    listenable: _notes,
+                    builder: (context, _) => ShellNotesPage(
+                      layout: layout,
+                      model: _notes.model,
+                      onOpen: _openNote,
+                      onRetry: () =>
+                          _notes.dispatch(const ShellNotesRequested()),
+                      onMore: () =>
+                          _notes.dispatch(const ShellNotesMoreRequested()),
+                    ),
                   )
                 : ShellPlacePage(layout: layout, place: shell.place),
           );

@@ -313,10 +313,12 @@ class _ShosaiAppState extends State<ShosaiApp> {
                     noticeReporter,
                     openBooksAction,
                     pagesChanged,
+                    place,
                   ) => ReaderScreen(
                     bridge: bridge,
                     initialPath: path,
                     initialBookId: bookId,
+                    initialPlace: place,
                     initialSettings: settings,
                     onLocatorChanged: locatorChanged,
                     noticeReporter: noticeReporter,

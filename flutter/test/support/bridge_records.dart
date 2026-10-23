@@ -37,12 +37,16 @@ mixin BridgeRecords implements RecordsHost {
   /// The library notes pages asked for.
   int libraryNotesCalls = 0;
 
+  /// When set, listing the library's notes fails with it.
+  FlutterBridgeError? libraryNotesFailure;
+
   Future<FlutterLibraryNotesPage> libraryNotes({
     required int limit,
     required int offset,
     required BigInt cancellationId,
   }) async {
     libraryNotesCalls += 1;
+    if (libraryNotesFailure case final failure?) throw failure;
     final end = (offset + limit).clamp(0, libraryBookNotes.length);
     return FlutterLibraryNotesPage(
       books: libraryBookNotes.sublist(offset.clamp(0, end), end),

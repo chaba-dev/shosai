@@ -813,6 +813,14 @@
   "@shellNotesEmptyBody": {
     "description": "The Bookshelf shell: the Notes place's empty state, saying what to do."
   },
+  "shellNotesLoading": "Loading notes…",
+  "@shellNotesLoading": {
+    "description": "The Bookshelf shell: the Notes place while the library's notes are listed."
+  },
+  "shellNotesMore": "More notes",
+  "@shellNotesMore": {
+    "description": "The Bookshelf shell: lists the next books' notes in the Notes place."
+  },
   "shellBookmarksEmptyHeading": "No bookmarks yet",
   "@shellBookmarksEmptyHeading": {
     "description": "The Bookshelf shell: the Bookmarks place before any bookmark exists."

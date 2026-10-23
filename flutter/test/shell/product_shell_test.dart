@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/reader/controller.dart'
-    show ReaderNoticeReporter;
+    show ReaderNoticeReporter, ReaderPlace;
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -30,10 +30,12 @@ Widget _reader(
   ReaderNoticeReporter _,
   Widget openBooksAction,
   void Function(bool twoPages) _,
+  ReaderPlace? place,
 ) => Scaffold(
   body: Column(
     children: [
       Text('Reading ${book.title} at $path:$bookId'),
+      if (place != null) Text('Opened at ${place.unit}:${place.offset}'),
       openBooksAction,
       Builder(
         builder: (context) => TextButton(
@@ -102,6 +104,12 @@ Future<HarnessBridge> _pump(
   await tester.pumpAndSettle();
   return bridge;
 }
+
+/// The sidebar's Notes place.
+final _sidebarNotes = find.descendant(
+  of: find.byType(ShellSidebar),
+  matching: find.text('Notes'),
+);
 
 Future<void> _open(WidgetTester tester, int bookId) async {
   await tester.ensureVisible(_card(bookId));
@@ -184,6 +192,7 @@ void main() {
             notices,
             openBooks,
             pagesChanged,
+            place,
           ) => _MountCounter(
             child: _reader(
               bridge,
@@ -195,6 +204,7 @@ void main() {
               notices,
               openBooks,
               pagesChanged,
+              place,
             ),
           ),
     );
@@ -247,6 +257,141 @@ void main() {
     await tester.tap(find.byTooltip('Close $_quiet'));
     await tester.pumpAndSettle();
     expect(find.text('READING NOW'), findsNothing);
+  });
+
+  testWidgets('the Notes place lists every book’s notes and opens one there', (
+    tester,
+  ) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    final [quiet, _, _, atlas, ...] = harnessLibraryBooks();
+    bridge.libraryBookNotes = [
+      FlutterBookNotes(
+        book: atlas,
+        notes: const [
+          FlutterNoteEntry(
+            id: 'atlas-highlight',
+            kind: FlutterNoteEntryKind.highlight,
+            color: FlutterHighlightColor.green,
+            quote: 'Every map is a promise.',
+            body: 'Open with this.',
+            unit: 4,
+            offset: 12,
+            modifiedAt: '2026-10-01T00:00:00.000Z',
+          ),
+        ],
+      ),
+      FlutterBookNotes(
+        book: quiet,
+        notes: const [
+          FlutterNoteEntry(
+            id: 'quiet-book',
+            kind: FlutterNoteEntryKind.book,
+            body: 'A reading group pick.',
+            modifiedAt: '2026-10-01T00:00:00.000Z',
+          ),
+          FlutterNoteEntry(
+            id: 'quiet-page',
+            kind: FlutterNoteEntryKind.page,
+            body: 'The lead matters.',
+            unit: 2,
+            offset: 30,
+            modifiedAt: '2026-10-01T00:00:00.000Z',
+          ),
+        ],
+      ),
+    ];
+
+    await tester.tap(_sidebarNotes);
+    await tester.pumpAndSettle();
+    expect(bridge.libraryNotesCalls, 1);
+    expect(find.text('3 notes'), findsOneWidget);
+    expect(find.text('$_atlas · page 5'), findsOneWidget);
+    expect(find.text('Every map is a promise.'), findsOneWidget);
+    expect(find.text('$_quiet · Book note'), findsOneWidget);
+    expect(find.text('$_quiet · Page note'), findsOneWidget);
+    // Books most recently read first, each book's notes in reading order.
+    double top(String id) =>
+        tester.getRect(find.byKey(ValueKey('shell-note-$id'))).top;
+    expect(top('atlas-highlight'), lessThan(top('quiet-book')));
+    expect(top('quiet-book'), lessThan(top('quiet-page')));
+
+    await tester.tap(find.byKey(const ValueKey('shell-note-quiet-page-open')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+    expect(find.text('Opened at 2:30'), findsOneWidget);
+
+    // Back on the Notes place the list is read again; a book note opens
+    // the book where it was left.
+    await tester.tap(find.byTooltip('Notes'));
+    await tester.pumpAndSettle();
+    expect(bridge.libraryNotesCalls, 2);
+    await tester.tap(find.byKey(const ValueKey('shell-note-quiet-book-open')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+    expect(find.textContaining('Opened at'), findsNothing);
+  });
+
+  testWidgets('the Notes place pages through the library’s books', (
+    tester,
+  ) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    final books = harnessLibraryBooks();
+    bridge.libraryBookNotes = [
+      for (var i = 0; i < ShellNotesController.pageSize + 1; i += 1)
+        FlutterBookNotes(
+          book: books[i % books.length],
+          notes: [
+            FlutterNoteEntry(
+              id: 'note-$i',
+              kind: FlutterNoteEntryKind.book,
+              body: 'Note $i',
+              modifiedAt: '2026-10-01T00:00:00.000Z',
+            ),
+          ],
+        ),
+    ];
+    await tester.tap(_sidebarNotes);
+    await tester.pumpAndSettle();
+    expect(find.text('${ShellNotesController.pageSize} notes'), findsOneWidget);
+
+    final more = find.byKey(const ValueKey('shell-notes-more'));
+    await tester.scrollUntilVisible(
+      more,
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('shell-notes')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.ensureVisible(more);
+    await tester.pumpAndSettle();
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(ValueKey('shell-note-note-${ShellNotesController.pageSize}')),
+      findsOneWidget,
+    );
+    expect(more, findsNothing);
+    expect(bridge.libraryNotesCalls, 2);
+  });
+
+  testWidgets('a failed notes list says why and retries', (tester) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    bridge.libraryNotesFailure = const FlutterBridgeError(
+      kind: FlutterBridgeErrorKind.backendUnavailable,
+      message: 'The store is unavailable.',
+    );
+    await tester.tap(_sidebarNotes);
+    await tester.pumpAndSettle();
+    expect(find.text('The store is unavailable.'), findsOneWidget);
+
+    bridge.libraryNotesFailure = null;
+    await tester.tap(find.byKey(const ValueKey('shell-notes-retry')));
+    await tester.pumpAndSettle();
+    expect(find.text('No notes yet'), findsOneWidget);
+    expect(bridge.libraryNotesCalls, 2);
   });
 
   testWidgets('the reader’s own back returns to the library', (tester) async {

@@ -156,6 +156,8 @@
   "shellCloseBook": "{title}を閉じる",
   "shellNotesEmptyHeading": "ノートはまだありません",
   "shellNotesEmptyBody": "本の文章を選んでハイライトするか、ページにノートを追加してください。すべてのノートとハイライトがここに並びます。",
+  "shellNotesLoading": "ノートを読み込んでいます…",
+  "shellNotesMore": "さらに表示",
   "shellBookmarksEmptyHeading": "ブックマークはまだありません",
   "shellBookmarksEmptyBody": "リーダーのツールバーからページをブックマークすると、ここに表示されます。",
   "shellSearchEmptyHeading": "本とノートを検索",

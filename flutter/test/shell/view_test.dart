@@ -935,14 +935,14 @@ void main() {
         home: const Scaffold(
           body: ShellPlacePage(
             layout: ShellLayout.desktop,
-            place: ShellPlace.notes,
+            place: ShellPlace.bookmarks,
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Notes'), findsOneWidget);
-    expect(find.text('No notes yet'), findsOneWidget);
+    expect(find.text('Bookmarks'), findsOneWidget);
+    expect(find.text('No bookmarks yet'), findsOneWidget);
   });
 
   testWidgets('covers are requested once per visible book', (tester) async {
