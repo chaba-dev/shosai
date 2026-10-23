@@ -2174,6 +2174,34 @@ void main() {
     });
   });
 
+  group('named entities', () {
+    test('resolves outside comments, CDATA and the DOCTYPE', () {
+      expect(
+        resolveNamedEntities(
+          '<!DOCTYPE html [<!ENTITY x "&nbsp;">]>'
+          '<p>a&nbsp;b&lt;c&#160;&unknown;</p>'
+          '<!-- &nbsp; --><![CDATA[&nbsp;]]>< &mdash;&amp',
+          [],
+        ),
+        '<!DOCTYPE html [<!ENTITY x "&nbsp;">]>'
+        '<p>a\u00a0b&lt;c&#160;&unknown;</p>'
+        '<!-- &nbsp; --><![CDATA[&nbsp;]]>< \u2014&amp',
+      );
+    });
+
+    test('a long chapter full of references resolves in linear time', () {
+      // Copying the rest of the chapter at every character took minutes on
+      // a chapter this size.
+      final line = '<pre>a &lt; b &amp;&amp; c &gt; d&nbsp;e</pre>\n';
+      final xhtml = line * 25000; // About 1.1 MB.
+      final watch = Stopwatch()..start();
+      final resolved = resolveNamedEntities(xhtml, []);
+      watch.stop();
+      expect(resolved.length, xhtml.length - 5 * 25000);
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+  });
+
   group('fixtures', () {
     // The package lives under flutter/packages in the repository, but tests
     // must not depend on their own nesting depth: search upward for the
