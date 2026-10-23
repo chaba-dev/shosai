@@ -74,3 +74,20 @@ final class ShellRestored extends ShellMessage {
 final class _ShellReaderDismissed extends ShellMessage {
   const _ShellReaderDismissed();
 }
+
+/// The result of the controller-requested page capture for one open book.
+final class _ShellPageMiniatureCaptured extends ShellMessage {
+  const _ShellPageMiniatureCaptured(
+    this.id, {
+    required this.path,
+    required this.bookId,
+    required this.revision,
+    required this.image,
+  });
+
+  final int id;
+  final String path;
+  final int? bookId;
+  final int revision;
+  final ui.Image? image;
+}

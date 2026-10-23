@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -78,6 +79,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   late final ShellController _shell = ShellController(
     presentReader: _presentReader,
     dismissReader: _dismissReader,
+    capturePageMiniature: _capturePageMiniature,
   )..addListener(_shellChanged);
   ModalRoute<void>? _readerRoute;
 
@@ -151,6 +153,33 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   void _notesChanged() => setState(() {});
+
+  /// Captures the current reader's page for the shell controller, which owns
+  /// its admission, invalidation and disposal.
+  Future<ui.Image?> _capturePageMiniature(int id) async {
+    final source = switch (_reader) {
+      (final reader, _, final requests) when reader == id => requests,
+      _ => null,
+    };
+    var capture = source?.pageMiniature;
+    if (capture == null) return null;
+    if (capture() case final image?) return image;
+
+    for (var attempt = 0; attempt < 16; attempt += 1) {
+      WidgetsBinding.instance.scheduleFrame();
+      await WidgetsBinding.instance.endOfFrame;
+      final current = switch (_reader) {
+        (final reader, _, final requests) when reader == id => requests,
+        _ => null,
+      };
+      if (!identical(current, source)) return null;
+      capture = source?.pageMiniature;
+      if (capture == null) return null;
+      final image = capture();
+      if (image != null) return image;
+    }
+    return null;
+  }
 
   /// Opens [book] at [note]'s place; a book note opens where it was left.
   void _openNote(FlutterBookNotes book, FlutterNoteEntry note) {
@@ -494,6 +523,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         // The leaving route keeps its rail while it animates away.
         model: _shell.model.copyWith(reading: true),
         covers: controller.model.covers,
+        pages: _shell.pages,
         actions: _shellActions,
         child: current == null
             ? const SizedBox.expand()

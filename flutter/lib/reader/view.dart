@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, listEquals, setEquals;
 import 'package:flutter/gestures.dart' show GestureBinding, kSecondaryButton;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart'
+    show OffsetLayer, PaintingContext, RenderRepaintBoundary;
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -212,6 +215,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   ShadDialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
   bool _controllerInitialized = false;
+  ReaderModel? _stageModel;
+  _ReaderMiniatureRenderBoundary? _stageBoundary;
+  bool _stageFrameComplete = false;
+  int _stageFrameRevision = 0;
 
   void _focusHeaderAction() {
     final focus = switch (_lastOpenPanel) {
@@ -229,7 +236,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     WidgetsBinding.instance.addObserver(this);
     widget.placeRequests
       ?..addListener(_placeRequested)
-      ..wayBack = _wayBack;
+      ..wayBack = _wayBack
+      ..pageMiniature = _pageMiniature;
   }
 
   @override
@@ -239,14 +247,77 @@ class _ReaderScreenState extends State<ReaderScreen>
       _releasePlaceRequests(oldWidget.placeRequests);
       widget.placeRequests
         ?..addListener(_placeRequested)
-        ..wayBack = _wayBack;
+        ..wayBack = _wayBack
+        ..pageMiniature = _pageMiniature;
     }
   }
 
   void _releasePlaceRequests(ReaderPlaceRequests? requests) {
-    requests?.removeListener(_placeRequested);
-    if (requests?.wayBack == _wayBack) requests!.wayBack = null;
+    if (requests == null) return;
+    requests.removeListener(_placeRequested);
+    if (requests.wayBack == _wayBack) requests.wayBack = null;
+    if (requests.pageMiniature == _pageMiniature) {
+      requests.pageMiniature = null;
+    }
   }
+
+  /// The top of the last fully painted stage, bounded to the pixels the tab
+  /// card can expose. A model or viewport change makes it unavailable until
+  /// the resulting frame has painted.
+  ui.Image? _pageMiniature() {
+    final stage = _stageBoundary;
+    if (stage == null ||
+        !_stageFrameComplete ||
+        !_controllerInitialized ||
+        _controller.model.document == null) {
+      return null;
+    }
+    return stage.capture(
+      devicePixelRatio: View.of(context).devicePixelRatio,
+      sourceAspectRatio:
+          ShellTabSwitcher.miniatureSourceWidth /
+          ShellTabSwitcher.miniatureSourceHeight,
+      maxPixelWidth: ShellTabSwitcher.miniatureMaxPixelWidth,
+    );
+  }
+
+  void _stageChanged() {
+    _stageFrameComplete = false;
+    final revision = ++_stageFrameRevision;
+    WidgetsBinding.instance
+      ..addPostFrameCallback((_) {
+        if (mounted && revision == _stageFrameRevision) {
+          _stageFrameComplete = true;
+        }
+      })
+      ..scheduleFrame();
+  }
+
+  bool _stageAppearanceChanged(ReaderModel before, ReaderModel after) =>
+      !identical(before.document, after.document) ||
+      before.unit != after.unit ||
+      before.readingOffset != after.readingOffset ||
+      before.readingPage != after.readingPage ||
+      !identical(before.pageImage, after.pageImage) ||
+      !identical(before.epubPage, after.epubPage) ||
+      before.pdfSpread != after.pdfSpread ||
+      !identical(before.selectionSurface, after.selectionSurface) ||
+      before.selectionPhase != after.selectionPhase ||
+      before.anchor != after.anchor ||
+      before.focus != after.focus ||
+      !listEquals(before.savedSelections, after.savedSelections) ||
+      !listEquals(before.annotations, after.annotations) ||
+      !setEquals(before.annotationOperations, after.annotationOperations) ||
+      before.annotationsReady != after.annotationsReady ||
+      before.typography != after.typography ||
+      before.layout != after.layout ||
+      before.relayoutBusy != after.relayoutBusy ||
+      before.relayoutPending != after.relayoutPending ||
+      before.contentState != after.contentState ||
+      before.busy != after.busy ||
+      before.error != after.error ||
+      before.relayoutError != after.relayoutError ||
+      before.layoutRefusal != after.layoutRefusal;
 
   List<ReaderReturnPoint>? _wayBack() =>
       _controllerInitialized ? _controller.wayBack : null;
@@ -329,7 +400,9 @@ class _ReaderScreenState extends State<ReaderScreen>
               )
             : null,
       )..addListener(_modelChanged);
+      _stageModel = _controller.model;
     }
+    _stageChanged();
     super.didChangeDependencies();
   }
 
@@ -449,6 +522,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   void _modelChanged() {
     final model = _controller.model;
+    final previousStageModel = _stageModel;
+    _stageModel = model;
     if (model.openPanel != null) _lastOpenPanel = model.openPanel;
     final openPath = model.openPath;
     if (openPath != null) {
@@ -464,7 +539,14 @@ class _ReaderScreenState extends State<ReaderScreen>
       }
     }
     setState(() {});
+    if (previousStageModel == null ||
+        _stageAppearanceChanged(previousStageModel, model)) {
+      _stageChanged();
+    }
   }
+
+  @override
+  void didChangeMetrics() => _stageChanged();
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -796,11 +878,15 @@ class _ReaderScreenState extends State<ReaderScreen>
               excluding: covered,
               child: ExcludeSemantics(
                 excluding: covered,
-                child: _ReaderStage(
-                  model: model,
-                  layout: layout,
-                  dispatch: _controller.dispatch,
-                  content: content,
+                // The phone's tab switcher shows the page from here.
+                child: _ReaderMiniatureBoundary(
+                  onPainted: (stage) => _stageBoundary = stage,
+                  child: _ReaderStage(
+                    model: model,
+                    layout: layout,
+                    dispatch: _controller.dispatch,
+                    content: content,
+                  ),
                 ),
               ),
             ),
@@ -847,6 +933,69 @@ class _ReaderScreenState extends State<ReaderScreen>
         ),
       ],
     );
+  }
+}
+
+/// A repaint boundary that reports the exact render object only after its
+/// stage pixels have been painted. The report mutates no model state; it is
+/// the presentation adapter the shell asks to capture synchronously.
+class _ReaderMiniatureBoundary extends SingleChildRenderObjectWidget {
+  const _ReaderMiniatureBoundary({
+    required this.onPainted,
+    required super.child,
+  });
+
+  final ValueChanged<_ReaderMiniatureRenderBoundary> onPainted;
+
+  @override
+  _ReaderMiniatureRenderBoundary createRenderObject(BuildContext context) =>
+      _ReaderMiniatureRenderBoundary(onPainted);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _ReaderMiniatureRenderBoundary renderObject,
+  ) => renderObject.onPainted = onPainted;
+}
+
+class _ReaderMiniatureRenderBoundary extends RenderRepaintBoundary {
+  _ReaderMiniatureRenderBoundary(this.onPainted);
+
+  ValueChanged<_ReaderMiniatureRenderBoundary> onPainted;
+  bool hasPainted = false;
+
+  ui.Image? capture({
+    required double devicePixelRatio,
+    required double sourceAspectRatio,
+    required int maxPixelWidth,
+  }) {
+    final imageLayer = layer;
+    if (!hasPainted ||
+        !attached ||
+        !hasSize ||
+        size.isEmpty ||
+        imageLayer is! OffsetLayer) {
+      return null;
+    }
+    final sourceHeight = math.min(size.height, size.width / sourceAspectRatio);
+    final pixelRatio = math.min(devicePixelRatio, maxPixelWidth / size.width);
+    return imageLayer.toImageSync(
+      Rect.fromLTWH(0, 0, size.width, sourceHeight),
+      pixelRatio: pixelRatio,
+    );
+  }
+
+  @override
+  void markNeedsPaint() {
+    hasPainted = false;
+    super.markNeedsPaint();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    super.paint(context, offset);
+    hasPainted = true;
+    onPainted(this);
   }
 }
 

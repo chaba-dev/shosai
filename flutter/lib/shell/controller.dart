@@ -1,10 +1,19 @@
 import 'dart:async';
+import 'dart:collection';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show ChangeNotifier;
 import 'package:shosai_flutter/core/bridge.dart';
 
 part 'message.dart';
 part 'model.dart';
+
+/// Captures the current reader's last fully painted page for [bookId].
+///
+/// The adapter may wait for the frame requested by the transition that asks
+/// for the image; the controller validates the typed completion before taking
+/// ownership of it.
+typedef ShellPageMiniatureCapture = FutureOr<ui.Image?> Function(int bookId);
 
 /// The Bookshelf shell's state: the place in view and the open books.
 ///
@@ -25,18 +34,33 @@ class ShellController extends ChangeNotifier {
   ShellController({
     required ShellReaderPresenter presentReader,
     required ShellReaderDismisser dismissReader,
+    ShellPageMiniatureCapture? capturePageMiniature,
     ShellModel initial = const ShellModel(),
   }) : _presentReader = presentReader,
        _dismissReader = dismissReader,
+       _capturePageMiniature = capturePageMiniature,
        _model = initial;
+
+  static const int pageMiniatureBudgetBytes = 16 * 1024 * 1024;
 
   final ShellReaderPresenter _presentReader;
   final ShellReaderDismisser _dismissReader;
+  final ShellPageMiniatureCapture? _capturePageMiniature;
+  final Map<int, ui.Image> _pages = {};
+  late final Map<int, ui.Image> _pageView = UnmodifiableMapView(_pages);
+  final Map<int, int> _pageCaptureRevisions = {};
+  int _pageBytes = 0;
   ShellModel _model;
   Completer<void>? _presentation;
   bool _disposed = false;
 
   ShellModel get model => _model;
+
+  /// Last-read page miniatures admitted for the phone tab switcher.
+  ///
+  /// The controller owns and disposes every image. Books outside the bounded
+  /// budget fall back to their covers.
+  Map<int, ui.Image> get pages => _pageView;
 
   /// Completes when the current reader presentation has gone; already
   /// complete when the reader is not presented.
@@ -44,11 +68,16 @@ class ShellController extends ChangeNotifier {
       _presentation?.future ?? Future<void>.value();
 
   void dispatch(ShellMessage message) {
+    if (message case _ShellPageMiniatureCaptured()) {
+      _pageCaptured(message);
+      return;
+    }
     if (_disposed) return;
     final previous = _model;
     final next = update(previous, message);
     if (identical(next, previous)) return;
     _model = next;
+    _updatePages(previous, next);
     if (!previous.reading && next.reading) {
       _present();
     } else if (previous.reading &&
@@ -57,6 +86,92 @@ class ShellController extends ChangeNotifier {
       _dismissReader();
     }
     notifyListeners();
+  }
+
+  void _updatePages(ShellModel before, ShellModel after) {
+    for (final id in {..._pages.keys, ..._pageCaptureRevisions.keys}) {
+      final beforeIndex = before.indexOf(id);
+      final afterIndex = after.indexOf(id);
+      final beforeBook = beforeIndex < 0 ? null : before.openBooks[beforeIndex];
+      final afterBook = afterIndex < 0 ? null : after.openBooks[afterIndex];
+      final invalid =
+          afterBook == null ||
+          (beforeBook != null &&
+              (beforeBook.path != afterBook.path ||
+                  beforeBook.bookId != afterBook.bookId));
+      if (invalid) _invalidatePage(id);
+    }
+
+    final id = before.currentBookId;
+    if (!before.reading || id == null || after.indexOf(id) < 0) return;
+    final covered = after.switching && !before.switching;
+    final left = !after.reading || after.currentBookId != id;
+    if (!covered && !left) return;
+    final source = before.openBooks[before.indexOf(id)];
+    _capturePage(id, source);
+  }
+
+  void _capturePage(int id, OpenBook source) {
+    final capture = _capturePageMiniature;
+    if (capture == null) return;
+    final revision = (_pageCaptureRevisions[id] ?? 0) + 1;
+    _pageCaptureRevisions[id] = revision;
+    unawaited(() async {
+      ui.Image? image;
+      try {
+        image = await capture(id);
+      } on Object {
+        image = null;
+      }
+      dispatch(
+        _ShellPageMiniatureCaptured(
+          id,
+          path: source.path,
+          bookId: source.bookId,
+          revision: revision,
+          image: image,
+        ),
+      );
+    }());
+  }
+
+  void _pageCaptured(_ShellPageMiniatureCaptured message) {
+    final page = message.image;
+    if (page == null) return;
+    final index = _model.indexOf(message.id);
+    final current = index < 0 ? null : _model.openBooks[index];
+    if (_disposed ||
+        _pageCaptureRevisions[message.id] != message.revision ||
+        current?.path != message.path ||
+        current?.bookId != message.bookId) {
+      page.dispose();
+      return;
+    }
+    final id = message.id;
+    _removePage(id);
+    final bytes = page.width * page.height * 4;
+    if (bytes > pageMiniatureBudgetBytes) {
+      page.dispose();
+      return;
+    }
+    while (_pages.isNotEmpty && _pageBytes + bytes > pageMiniatureBudgetBytes) {
+      _removePage(_pages.keys.first);
+    }
+    _pages[id] = page;
+    _pageBytes += bytes;
+    notifyListeners();
+  }
+
+  void _invalidatePage(int id) {
+    _pageCaptureRevisions[id] = (_pageCaptureRevisions[id] ?? 0) + 1;
+    _removePage(id);
+  }
+
+  void _removePage(int id) {
+    final page = _pages.remove(id);
+    if (page == null) return;
+    _pageBytes -= page.width * page.height * 4;
+    page.dispose();
   }
 
   void _present() {
@@ -80,6 +195,9 @@ class ShellController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    for (final id in {..._pages.keys, ..._pageCaptureRevisions.keys}) {
+      _invalidatePage(id);
+    }
     super.dispose();
   }
 }
@@ -179,5 +297,8 @@ ShellModel update(ShellModel model, ShellMessage message) {
     case _ShellReaderDismissed():
       if (!model.reading) return model;
       return model.copyWith(reading: false);
+    case _ShellPageMiniatureCaptured():
+      // Resource completions are consumed by ShellController.dispatch.
+      return model;
   }
 }
