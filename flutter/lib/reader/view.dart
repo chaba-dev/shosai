@@ -66,6 +66,7 @@ class ReaderScreen extends StatefulWidget {
     this.epubFontRegistrar,
     this.debugEpubSessionObserver,
     this.debugContinuousStepObserver,
+    this.debugLayoutClock,
     this.debugPathEntry = false,
     this.openBooksAction,
   }) : assert(
@@ -124,9 +125,17 @@ class ReaderScreen extends StatefulWidget {
   /// into the controller; production composition leaves it null.
   final void Function(ChapterLayoutSession session)? debugEpubSessionObserver;
 
-  /// Measurement hook: the synchronous microseconds of each continuous window
-  /// step.
-  final void Function(int micros)? debugContinuousStepObserver;
+  /// Test and measurement hook: each continuous window step's synchronous
+  /// microseconds and the nodes it measured.
+  final void Function(({int micros, int measured}) step)?
+  debugContinuousStepObserver;
+
+  /// Test-only clock for EPUB layout's time budgets; production composition
+  /// leaves it null and the budgets are spent on the system clock.
+  ///
+  /// A test passes a clock that never advances so each layout step's work is
+  /// bounded by its node counts alone, whatever the machine's speed.
+  final LayoutClock? debugLayoutClock;
 
   /// Renders the retired path entry for tests and development only.
   ///
@@ -263,6 +272,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         epubFontRegistrar: widget.epubFontRegistrar ?? _registerEpubFont,
         debugEpubSessionObserver: widget.debugEpubSessionObserver,
         debugContinuousStepObserver: widget.debugContinuousStepObserver,
+        layoutClock: widget.debugLayoutClock,
         // A callback runs after the next frame, and asks for that frame: a
         // continuous window step that installs nothing new still runs.
         frameScheduler: (callback) {
