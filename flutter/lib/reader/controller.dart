@@ -1042,6 +1042,7 @@ final class ReaderController implements Listenable {
         pageImage: null,
         epubPage: null,
         pdfSpread: null,
+        pdfRightToLeft: false,
         readingPage: null,
         error: null,
         selectionSurface: null,
@@ -1315,6 +1316,7 @@ final class ReaderController implements Listenable {
     _emit(
       _model.copyWith(
         document: message.document,
+        pdfRightToLeft: message.pdfDocument?.rightToLeft ?? false,
         unit: message.unit,
         readingOffset: message.offset,
         bookmarks: message.bookmarks,
@@ -1610,7 +1612,13 @@ final class ReaderController implements Listenable {
       pdf.render(unit, scale),
       pdf.render(facing, scale),
     ], eagerError: true);
-    return (composePdfSpread(pages[0], pages[1]), scale);
+    // A right-to-left spread shows its first page on the right.
+    return (
+      pdf.rightToLeft
+          ? composePdfSpread(pages[1], pages[0])
+          : composePdfSpread(pages[0], pages[1]),
+      scale,
+    );
   }
 
   /// The page shown beside [unit] when [layout] reads in spreads: the next
@@ -1639,10 +1647,11 @@ final class ReaderController implements Listenable {
       pdf.selectionSurface(unit, scale),
       pdf.selectionSurface(facing, scale),
     ], eagerError: true);
-    final merged = mergePdfSpreadSurfaces(pages[0], pages[1]);
-    return (
-      surface: merged.surface,
-      spread: ReaderPdfSpread(facingUnit: facing, textShift: merged.textShift),
+    return mergePdfSpreadSurfaces(
+      pages[0],
+      pages[1],
+      facingUnit: facing,
+      rightToLeft: pdf.rightToLeft,
     );
   }
 
@@ -5740,6 +5749,7 @@ final class ReaderController implements Listenable {
       // A PDF spread describes the released document's surface; a document
       // opened through the same controller starts without one.
       pdfSpread: null,
+      pdfRightToLeft: false,
       readingPage: null,
       selectionSurface: null,
       selectionPhase: ReaderSelectionPhase.idle,

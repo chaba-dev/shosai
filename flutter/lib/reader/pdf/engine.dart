@@ -53,6 +53,11 @@ abstract interface class PdfEngineDocument {
   /// mapping alone (RFD 4, M3.0).
   bool get allowsCopying;
 
+  /// Whether the document's viewer preferences read it right to left
+  /// (`/Direction /R2L`), as a book in Japanese or Arabic is bound: a spread
+  /// puts its first page on the right, and the next page is to the left.
+  bool get rightToLeft;
+
   /// Page size in points, after the page's rotation.
   PdfPageSize pageSize(int page);
 

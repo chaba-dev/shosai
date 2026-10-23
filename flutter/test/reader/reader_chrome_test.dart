@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'dart:ui' as ui;
 
@@ -9,10 +10,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/reader/controller.dart'
+    show PageDecoder, ReaderDocumentPickerAdapter, ReaderPickedDocument;
 import 'package:shosai_flutter/reader/epub/content.dart' show ReaderEpubPage;
 import 'package:shosai_flutter/reader/epub/pages.dart' show TextPageSlice;
 import 'package:shosai_flutter/reader/view.dart'
-    show ReaderEpubPageContentPainter;
+    show PagePainter, ReaderEpubPageContentPainter;
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/bridge_pdf_engine.dart';
@@ -31,11 +34,16 @@ class _ChromeBridge extends HarnessBridge {
     this.title,
     this.failOpen = false,
     this.hangOpen = false,
+    this.rightToLeft = false,
   });
 
   final String? title;
   final bool failOpen;
   final bool hangOpen;
+  bool rightToLeft;
+
+  @override
+  bool get pdfEngineRightToLeft => rightToLeft;
 
   @override
   Future<FlutterDocumentSummary> openDocument({
@@ -127,6 +135,136 @@ class _ChromeBridge extends HarnessBridge {
   }
 }
 
+/// A right-to-left PDF whose pages tell each other apart: page unit `n` is
+/// [_sidedWidth] wide, its raster's red channel is `n`, and its surface has
+/// one endpoint 10 pixels from its left edge.
+class _SidedPdfBridge extends _ChromeBridge {
+  _SidedPdfBridge() : super(rightToLeft: true);
+
+  final Map<BigInt, Uint8List> _rasters = {};
+  BigInt _nextRaster = BigInt.from(1000);
+
+  @override
+  Future<FlutterRenderedBuffer> renderPage({
+    required FlutterDocumentHandle document,
+    required BigInt page,
+    required double scale,
+    required BigInt cancellationId,
+  }) async {
+    final width = _sidedWidth(page.toInt());
+    final pixels = Uint8List(width * pageHeight * 4);
+    for (var index = 0; index < pixels.length; index += 4) {
+      pixels[index] = page.toInt();
+      pixels[index + 3] = 0xff;
+    }
+    final handle = FlutterBufferHandle(registry: BigInt.one, id: _nextRaster);
+    _nextRaster += BigInt.one;
+    _rasters[handle.id] = pixels;
+    return FlutterRenderedBuffer(
+      handle: handle,
+      width: width,
+      height: pageHeight,
+      byteLen: BigInt.from(pixels.length),
+    );
+  }
+
+  @override
+  Uint8List takeBuffer({required FlutterBufferHandle handle}) =>
+      _rasters[handle.id] ?? super.takeBuffer(handle: handle);
+
+  @override
+  bool releaseBuffer({required FlutterBufferHandle handle}) =>
+      _rasters.remove(handle.id) != null || super.releaseBuffer(handle: handle);
+
+  @override
+  Future<FlutterSelectionSurface> selectionSurface({
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required double scale,
+    required double width,
+    required double fontSize,
+    required double lineSpacing,
+    required BigInt cancellationId,
+  }) async => FlutterSelectionSurface(
+    width: _sidedWidth(unit.toInt()).toDouble(),
+    height: pageHeight.toDouble(),
+    text: 'p',
+    copyEligible: false,
+    endpoints: [
+      FlutterSelectionEndpoint(
+        offset: BigInt.zero,
+        rangeStart: BigInt.zero,
+        rangeEnd: BigInt.one,
+        rect: const FlutterSelectionRect(
+          left: 10,
+          top: 10,
+          right: 20,
+          bottom: 30,
+        ),
+      ),
+    ],
+    graphemeBoundaries: Uint32List.fromList([0, 1]),
+    wordBoundaries: Uint32List.fromList([0, 1]),
+    visualLines: const [],
+  );
+}
+
+/// The width of page [unit] of a [_SidedPdfBridge]: page 2 (unit 1) is wider
+/// than page 3 (unit 2), so a spread's halves differ.
+int _sidedWidth(int unit) => unit == 2 ? 200 : 300;
+
+/// An area highlight on [unit] at 10–30 × 10–30 of its page.
+FlutterAnnotation _areaHighlight(int unit, FlutterHighlightColor color) =>
+    FlutterAnnotation(
+      id: 'area-$unit',
+      unit: BigInt.from(unit),
+      resolution: FlutterAnnotationResolution.exact,
+      rectangles: const [
+        FlutterSelectionRect(left: 10, top: 10, right: 30, bottom: 30),
+      ],
+      color: color,
+    );
+
+/// The reader's painter of the open page or spread.
+PagePainter _pagePainter(WidgetTester tester) => tester
+    .widgetList<CustomPaint>(find.byType(CustomPaint))
+    .map((paint) => paint.painter)
+    .whereType<PagePainter>()
+    .single;
+
+/// The color at each of [points] once [painter] paints [size].
+Future<List<ui.Color>> _paintedColors(
+  WidgetTester tester,
+  PagePainter painter,
+  Size size,
+  List<Offset> points,
+) async {
+  final colors = await tester.runAsync(() async {
+    final recorder = ui.PictureRecorder();
+    painter.paint(ui.Canvas(recorder), size);
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.width.ceil(), size.height.ceil());
+    try {
+      final bytes = (await image.toByteData())!;
+      ui.Color at(Offset point) {
+        final index = (point.dy.toInt() * image.width + point.dx.toInt()) * 4;
+        return ui.Color.fromARGB(
+          bytes.getUint8(index + 3),
+          bytes.getUint8(index),
+          bytes.getUint8(index + 1),
+          bytes.getUint8(index + 2),
+        );
+      }
+
+      return [for (final point in points) at(point)];
+    } finally {
+      image.dispose();
+      picture.dispose();
+    }
+  });
+  return colors!;
+}
+
 const _epub = FlutterReaderSettings(
   continuous: false,
   theme: 'light',
@@ -153,13 +291,17 @@ Widget _reader({
   FlutterReaderSettings? settings = _epub,
   ReaderProgressSource? progressSource,
   void Function(bool twoPages)? onPagesChanged,
+  PageDecoder? decoder,
+  ReaderDocumentPickerAdapter? documentPicker,
   bool debugPathEntry = false,
 }) => productionShell(
   locale: locale,
   home: ReaderScreen(
     key: ValueKey('reader-${_readerKeyCounter++}'),
     bridge: bridge,
-    decoder: (pixels, {required width, required height}) => _testImage(),
+    decoder:
+        decoder ?? (pixels, {required width, required height}) => _testImage(),
+    documentPicker: documentPicker,
     initialPath: initialPath,
     initialBookId: initialBookId,
     initialSettings: settings,
@@ -541,6 +683,156 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       expect(find.text('33% · page 1 of 3'), findsOneWidget);
+    });
+
+    testWidgets('a right-to-left PDF turns leftward, first page on the right', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SidedPdfBridge();
+      final rasters = <({Uint8List pixels, int width})>[];
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/atlas.pdf',
+          decoder: (pixels, {required width, required height}) {
+            rasters.add((pixels: pixels, width: width));
+            return _testImage();
+          },
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('reader-edge-next'))).dx,
+        lessThan(
+          tester
+              .getCenter(find.byKey(const ValueKey('reader-edge-previous')))
+              .dx,
+        ),
+        reason: 'the next page is behind the left margin',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
+
+      // Page 3 (unit 2, 200 wide) is drawn on the left and page 2 (unit 1,
+      // 300 wide) on the right, in the raster and the selection surface alike.
+      final raster = rasters.last;
+      expect(raster.width, 500);
+      int unitAt(int x) => raster.pixels[x * 4];
+      expect([unitAt(5), unitAt(195), unitAt(205), unitAt(495)], [2, 2, 1, 1]);
+      final painter = _pagePainter(tester);
+      final surface = painter.surface;
+      expect(surface.text, 'p\np', reason: 'page 2 still reads first');
+      expect(
+        [
+          for (final endpoint in surface.endpoints)
+            (endpoint.offset.toInt(), endpoint.rect.left),
+        ],
+        [(0, 210.0), (2, 10.0)],
+      );
+      expect(painter.spread!.facingUnit, 2);
+    });
+
+    testWidgets('a right-to-left spread paints each page\'s area highlights '
+        'on that page', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SidedPdfBridge()
+        ..annotations = [
+          _areaHighlight(1, FlutterHighlightColor.yellow),
+          _areaHighlight(2, FlutterHighlightColor.blue),
+        ];
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+      );
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
+
+      final painter = _pagePainter(tester);
+      expect(
+        [for (final annotation in painter.annotations) annotation.unit.toInt()],
+        unorderedEquals([1, 2]),
+        reason: 'both pages\' highlights reach the painter',
+      );
+      final colors = await _paintedColors(
+        tester,
+        painter,
+        const Size(500, 560),
+        const [Offset(20, 20), Offset(220, 20), Offset(120, 20)],
+      );
+      // Page 3's blue highlight is on the left page and page 2's yellow one
+      // on the right page; nothing is painted between them.
+      expect(colors[0].b, greaterThan(colors[0].r));
+      expect(colors[1].r, greaterThan(colors[1].b));
+      expect(colors[2].a, 0);
+    });
+
+    testWidgets('a right-to-left PDF read a page at a time steps leftward', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(
+        tester,
+        _reader(
+          bridge: _ChromeBridge(rightToLeft: true),
+          initialPath: '/books/atlas.pdf',
+          settings: _epub.copyWith(twoPages: false),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 32));
+      final track = find.byKey(const ValueKey('reader-progress-track'));
+      Focus.of(tester.element(track)).requestFocus();
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('67% · page 2 of 3'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('33% · page 1 of 3'), findsOneWidget);
+    });
+
+    testWidgets('a PDF opened after a right-to-left one turns rightward', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge(rightToLeft: true);
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/atlas.pdf',
+          documentPicker: () async =>
+              const ReaderPickedDocument('/books/replacement.pdf'),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 32));
+      double nextLeftOfPrevious() =>
+          tester.getCenter(find.byKey(const ValueKey('reader-edge-next'))).dx -
+          tester
+              .getCenter(find.byKey(const ValueKey('reader-edge-previous')))
+              .dx;
+      expect(nextLeftOfPrevious(), lessThan(0));
+
+      bridge.rightToLeft = false;
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyO);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      for (var frame = 0; frame < 6; frame += 1) {
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+      expect(bridge.pdfEngineOpenedPaths.last, '/books/replacement.pdf');
+      expect(nextLeftOfPrevious(), greaterThan(0));
     });
 
     testWidgets('one page reads a PDF a page at a time', (tester) async {

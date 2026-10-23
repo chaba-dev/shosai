@@ -89,7 +89,16 @@ final class PdfrxPdfEngine implements PdfEngine {
       await document.dispose();
       throw const PdfEngineException('PDF has no pages');
     }
-    return _PdfrxDocument(document);
+    final opened = _PdfrxDocument(document);
+    try {
+      opened._rightToLeft = await pdfrx.PdfrxEntryFunctions.instance.compute(
+        _rightToLeftOnWorker,
+        opened._handle.address,
+      );
+    } catch (_) {
+      // Unreadable viewer preferences leave the document left to right.
+    }
+    return opened;
   }
 }
 
@@ -98,6 +107,7 @@ final class _PdfrxDocument implements PdfEngineDocument {
 
   final pdfrx.PdfDocument _document;
   bool _disposed = false;
+  bool _rightToLeft = false;
 
   @override
   int get pageCount => _document.pages.length;
@@ -107,6 +117,9 @@ final class _PdfrxDocument implements PdfEngineDocument {
 
   @override
   bool get allowsCopying => _document.permissions?.allowsCopying ?? true;
+
+  @override
+  bool get rightToLeft => _rightToLeft;
 
   pdfrx.PdfPage _page(int page) {
     if (_disposed) throw const PdfEngineException('PDF document is closed');
@@ -318,6 +331,27 @@ pdfium_bindings.PDFium get _pdfium => _workerPdfium ??= pdfium_bindings
     return value.isEmpty ? null : value;
   });
   return (text('Title'), text('Author'));
+}
+
+/// Runs on pdfrx's worker isolate: whether the viewer preferences'
+/// `/Direction` is `/R2L`.
+bool _rightToLeftOnWorker(int address) {
+  final pdfium = _pdfium;
+  final document = pdfium_bindings.FPDF_DOCUMENT.fromAddress(address);
+  return using((arena) {
+    final key = 'Direction'.toNativeUtf8(allocator: arena).cast<Char>();
+    // The value's bytes and a terminator; 0 when there is no such name.
+    const capacity = 8;
+    final buffer = arena<Uint8>(capacity);
+    final length = pdfium.FPDF_VIEWERREF_GetName(
+      document,
+      key,
+      buffer.cast(),
+      capacity,
+    );
+    if (length < 1 || length > capacity) return false;
+    return String.fromCharCodes(buffer.asTypedList(length - 1)) == 'R2L';
+  });
 }
 
 /// Runs on pdfrx's worker isolate: samples every character of one page.

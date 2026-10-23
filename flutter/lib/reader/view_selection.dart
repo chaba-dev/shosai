@@ -804,9 +804,15 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                     focus: widget.model.focus,
                     savedSelections: widget.model.savedSelections,
                     annotations: widget.model.annotations
-                        .where((item) => item.unit.toInt() == widget.model.unit)
+                        .where(
+                          (item) =>
+                              item.unit.toInt() == widget.model.unit ||
+                              item.unit.toInt() ==
+                                  widget.model.pdfSpread?.facingUnit,
+                        )
                         .toList(growable: false),
                     currentUnit: widget.model.unit,
+                    spread: widget.model.pdfSpread,
                     paintContent: false,
                   ),
                 ),

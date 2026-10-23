@@ -78,6 +78,9 @@ mixin BridgePdfEngine implements PdfEngine {
   /// Pages the engine document reports.
   int get pdfEnginePageCount => 1;
 
+  /// Whether the engine document reads right to left.
+  bool get pdfEngineRightToLeft => false;
+
   /// The layout width the engine document asks the bridge's selection fake
   /// for; the reader's default layout width.
   double get pdfEngineSurfaceWidth => 680;
@@ -117,6 +120,9 @@ final class BridgePdfDocument implements PdfEngineDocument {
 
   @override
   bool get allowsCopying => true;
+
+  @override
+  bool get rightToLeft => _engine.pdfEngineRightToLeft;
 
   @override
   Future<PdfDocumentInfo> info() async => const PdfDocumentInfo();
