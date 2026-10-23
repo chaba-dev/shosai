@@ -53,6 +53,7 @@ class ReaderScreen extends StatefulWidget {
     this.decoder = _decodeRgba,
     this.initialPath,
     this.initialBookId,
+    this.initialPlace,
     this.initialSettings,
     this.onLocatorChanged,
     this.progressSource,
@@ -78,6 +79,9 @@ class ReaderScreen extends StatefulWidget {
   final PageDecoder decoder;
   final String? initialPath;
   final int? initialBookId;
+
+  /// Where [initialPath] opens instead of its saved reading position.
+  final ReaderPlace? initialPlace;
   final FlutterReaderSettings? initialSettings;
   final void Function(String path, int? bookId)? onLocatorChanged;
 
@@ -299,7 +303,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     } else if (widget.initialPath case final path?) {
       _path.value.text = path;
       _controller.dispatch(
-        ReaderOpenRequested(path, bookId: widget.initialBookId),
+        ReaderOpenRequested(
+          path,
+          bookId: widget.initialBookId,
+          place: widget.initialPlace,
+        ),
       );
     }
   }

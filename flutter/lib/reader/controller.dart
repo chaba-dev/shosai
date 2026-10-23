@@ -1159,7 +1159,14 @@ final class ReaderController implements Listenable {
       ),
     );
     unawaited(
-      _openEffect(path, message.bookId, generation, cancellation, openLayout),
+      _openEffect(
+        path,
+        message.bookId,
+        generation,
+        cancellation,
+        openLayout,
+        place: message.place,
+      ),
     );
   }
 
@@ -1168,8 +1175,9 @@ final class ReaderController implements Listenable {
     int? bookId,
     int generation,
     BigInt cancellation,
-    ReaderLayout layout,
-  ) async {
+    ReaderLayout layout, {
+    ReaderPlace? place,
+  }) async {
     FlutterDocumentSummary? opened;
     PdfEngineDocument? ownedPdf;
     try {
@@ -1210,10 +1218,15 @@ final class ReaderController implements Listenable {
               'Reading position could not be restored: ${_describeError(error)}';
         }
       }
-      final restoredUnit = (restored?.unit.toInt() ?? 0).clamp(
+      // A place to open at, such as a note's, wins over the saved position;
+      // the saved zoom still applies.
+      final restoredUnit = (place?.unit ?? restored?.unit.toInt() ?? 0).clamp(
         0,
         document.logicalUnitCount.toInt() - 1,
       );
+      final restoredOffset = place == null
+          ? restored?.offset?.toInt()
+          : place.offset;
       // A PDF read in spreads opens on the spread that holds its page.
       final unit = pdf != null && layout.spread
           ? pdfSpreadStart(restoredUnit)
@@ -1249,7 +1262,7 @@ final class ReaderController implements Listenable {
           restoredLayout: restored != null,
           restorationFailed: restorationFailed,
           restorationError: restorationError,
-          offset: unit == restoredUnit ? restored?.offset?.toInt() : null,
+          offset: unit == restoredUnit ? restoredOffset : null,
           toolError: toolError,
         ),
       );
@@ -1271,7 +1284,6 @@ final class ReaderController implements Listenable {
         if (!_isCurrent(generation)) return;
         // A position saved on a spread's second page reopens there: its
         // offset moves past the first page's text.
-        final restoredOffset = restored?.offset?.toInt();
         dispatch(
           _ReaderSurfaceLoaded(
             generation: generation,

@@ -55,6 +55,7 @@ export 'package:shosai_flutter/reader/controller.dart'
         ReaderMessage,
         ReaderModel,
         ReaderOpenRequested,
+        ReaderPlace,
         ReaderResumed,
         ReaderSelection,
         ReaderSelectionAllRequested,

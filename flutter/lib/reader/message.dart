@@ -5,10 +5,29 @@ sealed class ReaderMessage {
 }
 
 final class ReaderOpenRequested extends ReaderMessage {
-  const ReaderOpenRequested(this.path, {this.bookId});
+  const ReaderOpenRequested(this.path, {this.bookId, this.place});
 
   final String path;
   final int? bookId;
+
+  /// Where to open instead of the saved reading position: a note's place.
+  final ReaderPlace? place;
+}
+
+/// A place in a book: an EPUB spine index or PDF page, and where in its text,
+/// in Unicode scalars, when known.
+final class ReaderPlace {
+  const ReaderPlace(this.unit, {this.offset});
+
+  final int unit;
+  final int? offset;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderPlace && other.unit == unit && other.offset == offset;
+
+  @override
+  int get hashCode => Object.hash(unit, offset);
 }
 
 final class ReaderLayoutChanged extends ReaderMessage {
