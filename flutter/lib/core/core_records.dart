@@ -13,6 +13,14 @@ import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 
+/// The name of each format's text extraction, as library search saves book
+/// text under it. Change a name when its extraction changes (a new
+/// canonical text stream, a new PDFium release), and books are read again.
+const libraryTextVersions = {
+  BookFormat.epub: 'shosai-epub-canonical-1',
+  BookFormat.pdf: 'pdfium-chromium-7811-1',
+};
+
 /// The application's records: one store, opened once per process and shared
 /// by every bridge the shell creates. Its [CoreOwner] closes it.
 final class ShosaiCore {
@@ -22,7 +30,8 @@ final class ShosaiCore {
       bookmarks = Bookmarks(store),
       settings = ReaderSettingsStore(store),
       librarySettings = LibrarySettingsStore(store),
-      annotations = Annotations(store);
+      annotations = Annotations(store),
+      search = LibrarySearch(store, textVersions: libraryTextVersions);
 
   /// Open the store `library.sqlite3` and the managed directory `books`
   /// under [dataDirectory], reading PDF metadata through [pdfEngine], and
@@ -62,6 +71,7 @@ final class ShosaiCore {
   final ReaderSettingsStore settings;
   final LibrarySettingsStore librarySettings;
   final Annotations annotations;
+  final LibrarySearch search;
 
   /// The private copies open PDFs are read from, shared by every bridge.
   final DocumentSnapshots snapshots;
@@ -793,6 +803,89 @@ final class CoreRecords implements ShosaiRecords {
   });
 
   @override
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final books = await _core.search.notes(
+      query,
+      bookId: bookId,
+      cancellation: _token(cancellationId),
+    );
+    return [
+      for (final book in books)
+        FlutterBookNoteHits(
+          book: _libraryBook(book.book),
+          hits: [
+            for (final hit in book.hits)
+              FlutterNoteHit(
+                note: _noteEntry(hit.note),
+                matches: [
+                  for (final match in hit.matches)
+                    FlutterNoteMatch(
+                      field: FlutterNoteField.values.byName(match.field.name),
+                      offset: match.offset,
+                      length: match.length,
+                    ),
+                ],
+              ),
+          ],
+        ),
+    ];
+  });
+
+  @override
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final cancellation = _token(cancellationId);
+    await for (final hits in _core.search.text(
+      query,
+      bookId: bookId,
+      read: (book, read) => _readBookText(book, read, cancellation),
+      cancellation: cancellation,
+    )) {
+      onBook(
+        FlutterBookTextHits(
+          book: _libraryBook(hits.book),
+          matches: [for (final match in hits.matches) _searchMatch(match)],
+          more: hits.more,
+          partial: hits.partial,
+          error: hits.error?.message,
+        ),
+      );
+    }
+  });
+
+  /// Open library [book] as the reader would, hand its text to [read], then
+  /// release it.
+  Future<void> _readBookText(
+    Book book,
+    Future<void> Function(UnitTextSource text) read,
+    CancellationToken cancellation,
+  ) async {
+    final opened = await _documents.open(
+      book.path,
+      format: book.format,
+      expected: (
+        bookId: book.id,
+        title: book.title,
+        contentHash: book.contentHash,
+      ),
+      cancellation: cancellation,
+    );
+    try {
+      await read(_documentText(opened));
+    } finally {
+      _documents.release(opened.summary.handle);
+    }
+  }
+
+  @override
   Future<List<FlutterSearchMatch>> searchDocument({
     required FlutterDocumentSummary document,
     required ReaderText text,
@@ -804,17 +897,16 @@ final class CoreRecords implements ShosaiRecords {
       query,
       cancellation: _token(cancellationId),
     );
-    return [
-      for (final match in matches)
-        FlutterSearchMatch(
-          unit: BigInt.from(match.unit),
-          offset: BigInt.from(match.offset),
-          length: BigInt.from(match.length),
-          context: match.context,
-        ),
-    ];
+    return [for (final match in matches) _searchMatch(match)];
   });
 }
+
+FlutterSearchMatch _searchMatch(SearchMatch match) => FlutterSearchMatch(
+  unit: BigInt.from(match.unit),
+  offset: BigInt.from(match.offset),
+  length: BigInt.from(match.length),
+  context: match.context,
+);
 
 /// The bridge the application hands its controllers: the documents it opens
 /// through the Dart engines, and [records] over the Dart core.
@@ -1065,14 +1157,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
     }
   }
 
-  ReaderText _text(OpenDocument opened) => switch (opened.epub) {
-    null => _LazyPdfText(opened),
-    final book => EpubReaderText(
-      unitCount: book.chapters.length,
-      text: (unit) async => book.chapters[unit].canonicalText,
-      resourcePath: (unit) async => book.chapters[unit].resource,
-    ),
-  };
+  ReaderText _text(OpenDocument opened) => _documentText(opened);
 
   @override
   Future<List<FlutterAnnotation>> listAnnotations({
@@ -1228,6 +1313,30 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   );
 
   @override
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) => records.searchLibraryNotes(
+    query: query,
+    bookId: bookId,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) => records.searchLibraryText(
+    query: query,
+    bookId: bookId,
+    onBook: onBook,
+    cancellationId: cancellationId,
+  );
+
+  @override
   Future<List<FlutterSearchMatch>> searchDocument({
     required FlutterDocumentHandle document,
     required String query,
@@ -1245,6 +1354,16 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
 
 /// PDF page text from an engine document opened on the document's snapshot
 /// on first use.
+/// [opened]'s text as annotations and search read it.
+ReaderText _documentText(OpenDocument opened) => switch (opened.epub) {
+  null => _LazyPdfText(opened),
+  final book => EpubReaderText(
+    unitCount: book.chapters.length,
+    text: (unit) async => book.chapters[unit].canonicalText,
+    resourcePath: (unit) async => book.chapters[unit].resource,
+  ),
+};
+
 final class _LazyPdfText implements ReaderText {
   const _LazyPdfText(this._opened);
 

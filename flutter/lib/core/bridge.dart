@@ -191,6 +191,25 @@ abstract interface class FlutterBridge {
     required BigInt cancellationId,
   });
 
+  /// The notes of every library book, or of book [bookId], whose quote or
+  /// body holds [query]; books most recently read first.
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  });
+
+  /// The text matches of [query] in every library book, or in book
+  /// [bookId], reported to [onBook] one book at a time, most recently read
+  /// first; books without matches are left out. Completes when every book
+  /// has been searched.
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  });
+
   /// Release everything the bridge holds; [isDisposed] is then true.
   void dispose();
 
@@ -916,6 +935,75 @@ class FlutterReadingState {
           offset == other.offset &&
           zoom == other.zoom &&
           lastUnit == other.lastUnit;
+}
+
+/// Which words of a note matched a library search.
+enum FlutterNoteField { quote, body }
+
+/// One match in a note: [length] Unicode scalars of its [field] from
+/// [offset].
+class FlutterNoteMatch {
+  final FlutterNoteField field;
+  final int offset;
+  final int length;
+
+  const FlutterNoteMatch({
+    required this.field,
+    required this.offset,
+    required this.length,
+  });
+
+  @override
+  int get hashCode => Object.hash(field, offset, length);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNoteMatch &&
+          field == other.field &&
+          offset == other.offset &&
+          length == other.length;
+}
+
+/// A note whose quote or body holds the query, with its matches in field
+/// order, then text order.
+class FlutterNoteHit {
+  final FlutterNoteEntry note;
+  final List<FlutterNoteMatch> matches;
+
+  const FlutterNoteHit({required this.note, required this.matches});
+}
+
+/// One book's notes that hold the query, in reading order.
+class FlutterBookNoteHits {
+  final FlutterLibraryBook book;
+  final List<FlutterNoteHit> hits;
+
+  const FlutterBookNoteHits({required this.book, required this.hits});
+}
+
+/// One book's text matches in reading order, or why it could not be
+/// searched.
+class FlutterBookTextHits {
+  final FlutterLibraryBook book;
+  final List<FlutterSearchMatch> matches;
+
+  /// Whether the book holds matches beyond [matches].
+  final bool more;
+
+  /// Whether only the first part of a very long book was searched.
+  final bool partial;
+
+  /// Why the book could not be read; [matches] is then empty.
+  final String? error;
+
+  const FlutterBookTextHits({
+    required this.book,
+    required this.matches,
+    this.more = false,
+    this.partial = false,
+    this.error,
+  });
 }
 
 class FlutterSearchMatch {

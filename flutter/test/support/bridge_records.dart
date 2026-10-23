@@ -76,6 +76,44 @@ mixin BridgeRecords implements RecordsHost {
     );
   }
 
+  /// What library searches answer, whatever the query: [libraryNoteHits]
+  /// for notes and [libraryTextHits] for book text, each filtered to the
+  /// searched book.
+  List<FlutterBookNoteHits> libraryNoteHits = [];
+  List<FlutterBookTextHits> libraryTextHits = [];
+
+  /// The library searches asked for: the query and book of each.
+  final List<(String, int?)> libraryNoteSearches = [];
+  final List<(String, int?)> libraryTextSearches = [];
+
+  /// When set, library text searches wait for it before their first book.
+  Completer<void>? libraryTextGate;
+
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) async {
+    libraryNoteSearches.add((query, bookId));
+    return [
+      for (final book in libraryNoteHits)
+        if (bookId == null || book.book.bookId == bookId) book,
+    ];
+  }
+
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) async {
+    libraryTextSearches.add((query, bookId));
+    await libraryTextGate?.future;
+    for (final book in libraryTextHits) {
+      if (bookId == null || book.book.bookId == bookId) onBook(book);
+    }
+  }
+
   Future<List<FlutterNote>> listNotes({
     required FlutterDocumentHandle document,
     required BigInt cancellationId,
@@ -155,6 +193,30 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     required int bookId,
     required BigInt cancellationId,
   }) => bridge.libraryCover(bookId: bookId, cancellationId: cancellationId);
+
+  @override
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) => bridge.searchLibraryNotes(
+    query: query,
+    bookId: bookId,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) => bridge.searchLibraryText(
+    query: query,
+    bookId: bookId,
+    onBook: onBook,
+    cancellationId: cancellationId,
+  );
 
   @override
   Future<FlutterLibraryNotesPage> libraryNotes({
