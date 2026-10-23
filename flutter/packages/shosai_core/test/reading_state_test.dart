@@ -318,6 +318,18 @@ void main() {
   });
 
   group('library settings', () {
+    test('the open books are absent until saved, then round-trip', () async {
+      final settings = LibrarySettingsStore(t.store);
+      expect(await settings.loadOpenBooks(), isNull);
+
+      await settings.saveOpenBooks('{"books":[]}');
+
+      expect(
+        await LibrarySettingsStore(t.store).loadOpenBooks(),
+        '{"books":[]}',
+      );
+    });
+
     test('the sort defaults to recent until saved, then round-trips', () async {
       final settings = LibrarySettingsStore(t.store);
       expect(await settings.loadSort(), LibrarySort.recent);

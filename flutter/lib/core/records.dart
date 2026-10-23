@@ -82,6 +82,11 @@ abstract interface class ShosaiRecords {
 
   Future<void> saveReaderSettings({required FlutterReaderSettings value});
 
+  /// The open books the shell last saved, in its own encoding, or null.
+  Future<String?> loadOpenBooks();
+
+  Future<void> saveOpenBooks(String session);
+
   // Reading.
 
   /// Open library book [bookId] after checking that its file still holds

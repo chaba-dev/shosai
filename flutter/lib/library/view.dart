@@ -66,6 +66,15 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// The open books and whether the reader was showing, kept across a
   /// platform restoration.
   final RestorableStringN _session = RestorableStringN(null);
+
+  /// The same session saved with the library, so the open books also come
+  /// back when the application starts again (RFD 4, outcome 4). Saves start
+  /// once the saved one is read and applied, in order, one at a time.
+  late final ShosaiRecords _sessionRecords = recordsOf(_sessionBridge);
+  late final FlutterBridge _sessionBridge = widget.bridgeFactory();
+  bool _savedSessionRead = false;
+  String? _savedSession;
+  Future<void> _sessionWrites = Future.value();
   final Set<Route<Object?>> _dialogRoutes = {};
   NavigatorState? _navigator;
   _RestoredSession? _pendingRestoredSession;
@@ -142,6 +151,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void _shellChanged() {
     setState(() {});
     _session.value = _encodeSession(_shell.model);
+    _saveSession();
     final model = _shell.model;
     final notesShowing = model.place == ShellPlace.notes && !model.reading;
     if (notesShowing && !_notesShowing) {
@@ -305,6 +315,46 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     if (!_shell.model.reading) _openAt = null;
   }
 
+  /// Reads the session saved at the last run. A platform restoration is
+  /// newer, so it wins when there is one.
+  Future<void> _readSavedSession() async {
+    String? saved;
+    try {
+      saved = await _sessionRecords.loadOpenBooks();
+    } catch (_) {
+      // An unreadable session starts with no open books.
+    }
+    if (!mounted) return;
+    _savedSessionRead = true;
+    _savedSession = saved;
+    if (saved != null &&
+        _pendingRestoredSession == null &&
+        _shell.model.openBooks.isEmpty) {
+      _pendingRestoredSession = _decodeSession(saved);
+      _scheduleRestoredOpen();
+    }
+    _saveSession();
+  }
+
+  void _saveSession() {
+    final session = _session.value;
+    // Nothing is written until the saved session has been read and applied,
+    // so the empty shell of a starting application never replaces it.
+    if (!_savedSessionRead ||
+        _pendingRestoredSession != null ||
+        session == null ||
+        session == _savedSession) {
+      return;
+    }
+    _savedSession = session;
+    _sessionWrites = _sessionWrites.then(
+      (_) => _sessionRecords.saveOpenBooks(session).catchError((Object _) {
+        // A session that cannot be saved costs only the next start's open
+        // books; reading goes on.
+      }),
+    );
+  }
+
   void _scheduleRestoredOpen() {
     if (_pendingRestoredSession != null &&
         controller.model.loaded &&
@@ -357,6 +407,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void initState() {
     super.initState();
     controller.dispatch(const LibraryStarted());
+    unawaited(_readSavedSession());
   }
 
   @override
@@ -381,6 +432,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     _notes.dispose();
     _search.dispose();
     _session.dispose();
+    _sessionBridge.dispose();
     super.dispose();
   }
 

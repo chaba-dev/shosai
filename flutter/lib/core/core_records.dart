@@ -426,6 +426,14 @@ final class CoreRecords implements ShosaiRecords {
       });
 
   @override
+  Future<String?> loadOpenBooks() =>
+      _guard(_core.librarySettings.loadOpenBooks);
+
+  @override
+  Future<void> saveOpenBooks(String session) =>
+      _guard(() => _core.librarySettings.saveOpenBooks(session));
+
+  @override
   Future<FlutterDocumentSummary> openLibraryBook({
     required int bookId,
     required BigInt cancellationId,
