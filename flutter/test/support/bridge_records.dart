@@ -274,6 +274,15 @@ final class BridgeForwardingRecords implements ShosaiRecords {
   Future<void> saveReaderSettings({required FlutterReaderSettings value}) =>
       bridge.saveReaderSettings(value: value);
 
+  /// The open books the shell saved, kept in memory.
+  String? openBooks;
+
+  @override
+  Future<String?> loadOpenBooks() async => openBooks;
+
+  @override
+  Future<void> saveOpenBooks(String session) async => openBooks = session;
+
   @override
   Future<FlutterDocumentSummary> openLibraryBook({
     required int bookId,

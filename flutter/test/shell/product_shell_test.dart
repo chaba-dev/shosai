@@ -15,6 +15,7 @@ import 'package:shosai_flutter/reader/controller.dart'
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
+import '../support/bridge_records.dart';
 import '../support/production_shell_harness.dart';
 
 /// The Bookshelf shell composed by the product shell: the library side in the
@@ -1534,6 +1535,41 @@ void main() {
     );
     expect(find.byTooltip(_quiet), findsOneWidget);
     expect(find.byTooltip(_atlas), findsOneWidget);
+  });
+
+  testWidgets('open books come back when the application starts again', (
+    tester,
+  ) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    await _open(tester, 4);
+    await tester.tap(find.text('Turn page'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // A cold start has no platform restoration: only the saved session.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      productionShell(
+        home: ProductShell(bridgeFactory: () => bridge, readerBuilder: _reader),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Reading $_atlas at /books/atlas.pdf#later:4'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip(_quiet), findsOneWidget);
+    expect(find.byTooltip(_atlas), findsOneWidget);
+  });
+
+  testWidgets('a first start opens no books and saves none', (tester) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    expect(find.textContaining('Reading '), findsNothing);
+    expect((bridge.records as BridgeForwardingRecords).openBooks, isNull);
   });
 
   testWidgets('the title counts the open books and their cards say Open', (
