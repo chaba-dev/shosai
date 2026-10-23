@@ -1643,9 +1643,11 @@ class _NormalizeContext {
       for (final target in splits) {
         piece.text = String.fromCharCodes(text.runes.take(target - position));
         rebuilt.add(piece);
+        // The first piece keeps the ruby, so it is drawn once.
         piece = span.copy()
           ..text = String.fromCharCodes(text.runes.skip(target - position))
-          ..anchorIds = const [];
+          ..anchorIds = const []
+          ..ruby = null;
         pieceStart = target;
       }
       piece.text = String.fromCharCodes(text.runes.skip(pieceStart - position));
@@ -1930,7 +1932,8 @@ class _NormalizeContext {
           output.add(
             run.first.copy()
               ..text = '\n'
-              ..math = null,
+              ..math = null
+              ..ruby = null,
           );
         }
         output.addAll(run);

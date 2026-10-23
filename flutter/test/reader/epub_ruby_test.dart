@@ -6,6 +6,8 @@ import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 
+import '../support/epub_navigation_fixture.dart';
+
 /// Ruby: the annotation is laid out half the base's size and set over the
 /// base (to its right in a vertical line); a base shorter than its annotation
 /// is spaced out to the annotation's length.
@@ -184,5 +186,43 @@ void main() {
     expect(above, isNotEmpty);
     expect(above.first, greaterThanOrEqualTo((baseTop - 10).floor() - 1));
     expect(above.first, lessThan(40 + line.top), reason: 'above the line');
+  });
+
+  test('a ruby base laid out again without tate-chū-yoko keeps its ruby', () {
+    // A line may break between 一 and 二 but not before 。, so at two ems a
+    // line the combined base is laid out again without tate-chū-yoko.
+    final book = openEpubBytes(
+      buildTestEpub(
+        chapters: {
+          'OPS/Text/chapter-1.xhtml':
+              '<p>甲<ruby style="text-combine-upright: all">一二'
+              '<rt>いちに</rt></ruby>。乙</p>',
+        },
+        nav: '<ol><li><a href="../Text/chapter-1.xhtml">一</a></li></ol>',
+        pageProgression: 'rtl',
+        bodyAttributes: ' style="writing-mode: vertical-rl"',
+      ),
+    );
+    final session = ChapterLayoutSession(
+      chapter: book.chapters.first,
+      spec: const ChapterLayoutSpec(
+        width: 40,
+        height: 600,
+        typography: typography,
+        vertical: true,
+      ),
+      images: const {},
+    );
+    addTearDown(session.dispose);
+    session.layoutWindowAt(0);
+    final block = session.blocks.single.text!;
+    expect(block.redrawn.where((run) => run.combined), isEmpty);
+    expect(
+      [
+        for (final ruby in block.rubies)
+          block.map.text.substring(ruby.start, ruby.end),
+      ],
+      ['一二'],
+    );
   });
 }

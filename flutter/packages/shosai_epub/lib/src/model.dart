@@ -202,6 +202,7 @@ class EpubTextSpan {
     math: math,
     canonical: canonical,
     combine: combine,
+    ruby: ruby,
   );
 }
 

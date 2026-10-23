@@ -2324,6 +2324,17 @@ void main() {
       );
     });
 
+    test('a caption line that starts with ruby gives its separator none', () {
+      final figure = chapterOf(
+        '<figure><img src="a.png" alt=""/><figcaption><div>犬</div>'
+        '<div><ruby>猫<rt>ねこ</rt></ruby></div></figcaption></figure>',
+      ).blocks.whereType<EpubImage>().single;
+      expect(
+        [for (final span in figure.caption) (span.text, span.ruby)],
+        [('犬', null), ('\n', null), ('猫', 'ねこ')],
+      );
+    });
+
     test('the annotation stays out of the canonical text', () {
       final chapter = chapterOf('<p><ruby>漢字<rt>かんじ</rt></ruby>を読む。</p>');
       expect(chapter.canonicalText, '漢字を読む。\n');
