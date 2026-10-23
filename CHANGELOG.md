@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-22
+## [0.1.0] - 2026-10-23
 
 ### 🚀 Features
 
@@ -80,6 +80,8 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Read right-to-left books right to left (#181)
 - *(reader)* Set vertical Japanese in columns, right to left (#182)
 - *(shell)* Open the tab switcher from the reader toolbar (#178)
+- Save the Pages setting and the shelf's sort (#188)
+- *(reader)* Read right-to-left PDFs, and draw both spread pages' area highlights (#191)
 
 ### 🐛 Bug Fixes
 
@@ -132,6 +134,7 @@ All notable changes to this project will be documented in this file.
 - Render raster pages asynchronously (#10)
 - Optimize library loading and page rendering (#11)
 - *(app)* Improve responsiveness across the app (#71)
+- *(epub)* Resolve named entities in linear time (#190)
 
 ### 🧪 Testing
 
