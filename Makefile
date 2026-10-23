@@ -23,11 +23,11 @@ lint:
 
 ## Format all Dart source files
 fmt:
-	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
+	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
 
 ## Check Dart formatting without changing files
 check-fmt:
-	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_core/lib packages/shosai_core/test
+	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
 
 ## Regenerate the Flutter design-token module from assets/theme/tokens.json
 theme-tokens:
