@@ -1129,6 +1129,56 @@ void main() {
       tester.platformDispatcher.clearTextScaleFactorTestValue();
     });
 
+    testWidgets('an orphaned page note does not open its old place', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge(books: harnessLibraryBooks());
+      for (final (id, resolution) in [
+        ('found', FlutterAnnotationResolution.recovered),
+        ('lost', FlutterAnnotationResolution.orphaned),
+      ]) {
+        bridge.placeNotes.add(
+          FlutterNote(
+            id: id,
+            kind: FlutterNoteKind.page,
+            unit: BigInt.zero,
+            resolution: resolution,
+            body: id,
+            modifiedAt: '2026-09-20T00:00:00Z',
+          ),
+        );
+      }
+      await _open(tester, _reader(bridge: bridge, initialBookId: 1));
+
+      await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+
+      bool opens(String id) => tester
+          .widget<ShadButton>(
+            find.descendant(
+              of: find.byKey(ValueKey('reader-place-note-open-$id')),
+              matching: find.byType(ShadButton),
+            ),
+          )
+          .enabled;
+      expect(opens('found'), isTrue);
+      expect(opens('lost'), isFalse);
+      // It can still be edited.
+      expect(
+        tester
+            .widget<ShadButton>(
+              find.descendant(
+                of: find.byKey(const ValueKey('reader-place-note-edit-lost')),
+                matching: find.byType(ShadButton),
+              ),
+            )
+            .enabled,
+        isTrue,
+      );
+    });
+
     testWidgets('a resize keeps focus in the open panel', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();

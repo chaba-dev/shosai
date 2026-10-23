@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:test/test.dart';
 
@@ -1514,6 +1516,98 @@ void main() {
       );
       expect(listed.resolution, AnnotationResolution.exact);
     });
+
+    /// A library migrated from schema 7 holding [notes] bookmark notes for
+    /// sample.epub, whose book was removed, and that file's path and hash.
+    Future<(Store, Library, String, String)> removedWithNotes(int notes) async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      final fixture = '${directory.path}/sample.epub';
+      File(fixturePath('sample.epub')).copySync(fixture);
+      final hash = sha256.convert(File(fixture).readAsBytesSync()).toString();
+      final before = await Store.open(
+        path,
+        migrations: schemaMigrations.where((m) => m.version <= 7).toList(),
+      );
+      await before.transaction((db) {
+        for (var index = 0; index < notes; index++) {
+          db.execute(
+            '''INSERT INTO bookmarks (content_hash, unit, location_offset, note,
+                 created_at)
+               VALUES (?, 1, ?, 'Kept', '2026-01-02T03:04:05.000Z')''',
+            [hash, 12 + index],
+          );
+        }
+      });
+      await before.close();
+
+      final store = await Store.open(path);
+      addTearDown(store.close);
+      final library = Library(
+        store,
+        managedDirectory: '${directory.path}/books',
+        inspectors: const {BookFormat.epub: EpubInspector()},
+      );
+      return (store, library, canonicalBookPath(fixture), hash);
+    }
+
+    test('of a removed book wait for it to be imported again', () async {
+      final (store, library, path, _) = await removedWithNotes(1);
+      final item = await library.importFile(path, managed: false);
+
+      final [notes] = (await Annotations(store).libraryNotes()).books;
+      expect(notes.book.id, item.book!.id);
+      expect(
+        notes.notes.map((n) => (n.kind, n.unit, n.offset, n.body, n.createdAt)),
+        [(AnnotationKind.pageNote, 1, 12, 'Kept', '2026-01-02T03:04:05.000Z')],
+      );
+      expect(await countRows(store, 'pending_bookmark_notes'), 0);
+    });
+
+    test(
+      'that do not fit or match their content leave the import undone',
+      () async {
+        // Annotated outside the library as a PDF.
+        final (store, library, path, hash) = await removedWithNotes(1);
+        final annotations = Annotations(store);
+        await annotations.createNoteInContent(
+          AnnotatedContent(
+            contentHash: hash,
+            format: BookFormat.pdf,
+            title: 'sample.pdf',
+          ),
+          const PdfPageAnchor(0),
+          'As a PDF',
+        );
+        final mismatched = await library.importFile(path, managed: false);
+        expect(mismatched.error, contains('annotated as PDF'));
+        expect(await countRows(store, 'books'), 0);
+        expect(await countRows(store, 'pending_bookmark_notes'), 1);
+        expect(await countRows(store, 'annotations'), 1);
+
+        // One more note than a reader loads.
+        final (full, fullLibrary, fullPath, fullHash) = await removedWithNotes(
+          maxAnnotationsPerDocument,
+        );
+        await Annotations(full).createNoteInContent(
+          AnnotatedContent(
+            contentHash: fullHash,
+            format: BookFormat.epub,
+            title: 'sample.epub',
+          ),
+          const BookAnchor(),
+          'Opened directly',
+        );
+        final over = await fullLibrary.importFile(fullPath, managed: false);
+        expect(over.error, isNotNull);
+        expect(await countRows(full, 'books'), 0);
+        expect(
+          await countRows(full, 'pending_bookmark_notes'),
+          maxAnnotationsPerDocument,
+        );
+        expect(await countRows(full, 'annotations'), 1);
+      },
+    );
   });
 
   group('limits', () {

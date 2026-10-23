@@ -322,8 +322,9 @@ CREATE TABLE book_text_units (
 -- Bookmarks are places without notes (RFD 6, Notes and search): each
 -- bookmark note becomes a page note where the bookmark is, and the bookmark
 -- stays. A content without an annotation document gets one, described by
--- its library book; a note whose content is in neither is dropped with the
--- column. An EPUB bookmark never recorded its chapter's path, so its note
+-- its library book. A note whose content is in neither waits in
+-- pending_bookmark_notes until a book with that content is imported and says
+-- its format; the bookmark itself was kept too. An EPUB bookmark never recorded its chapter's path, so its note
 -- follows the spine index alone.
 CREATE TEMP TABLE noted_contents AS
   SELECT DISTINCT b.content_hash, k.format, k.title
@@ -353,6 +354,26 @@ INSERT INTO annotations (id, version_id, format, kind, anchor_version, body,
   FROM bookmarks b
   JOIN annotation_document_versions v ON v.content_hash = b.content_hash
   WHERE b.note IS NOT NULL AND length(b.note) > 0
+  ORDER BY b.id;
+
+CREATE TABLE pending_bookmark_notes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_hash    TEXT NOT NULL
+                    CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    unit            INTEGER NOT NULL CHECK (unit >= 0),
+    location_offset INTEGER CHECK (location_offset IS NULL OR location_offset >= 0),
+    note            TEXT NOT NULL CHECK (length(CAST(note AS BLOB)) BETWEEN 1 AND 65536),
+    created_at      TEXT NOT NULL
+) STRICT;
+CREATE INDEX pending_bookmark_notes_content_idx
+    ON pending_bookmark_notes(content_hash, id);
+INSERT INTO pending_bookmark_notes
+    (content_hash, unit, location_offset, note, created_at)
+  SELECT b.content_hash, b.unit, b.location_offset, b.note, b.created_at
+  FROM bookmarks b
+  WHERE b.note IS NOT NULL AND length(b.note) > 0
+    AND NOT EXISTS (SELECT 1 FROM annotation_document_versions v
+                    WHERE v.content_hash = b.content_hash)
   ORDER BY b.id;
 
 ALTER TABLE bookmarks DROP COLUMN note;

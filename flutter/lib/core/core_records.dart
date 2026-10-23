@@ -511,6 +511,7 @@ final class CoreRecords implements ShosaiRecords {
         ? await _core.annotations.listInContent(
             _content(document),
             text,
+            kinds: const {AnnotationKind.highlight},
             cancellation: cancellation,
           )
         : await _core.annotations.list(

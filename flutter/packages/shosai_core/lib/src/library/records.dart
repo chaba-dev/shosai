@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import '../annotations/records.dart';
 import '../errors.dart';
 import '../store/store.dart';
 import 'book.dart';
@@ -425,7 +426,14 @@ Book _insertBook(
       metadata.cover,
     ],
   );
-  return _bookById(db, db.lastInsertRowId)!;
+  final book = _bookById(db, db.lastInsertRowId)!;
+  adoptPendingBookmarkNotes(
+    db,
+    hash: fingerprint.hash,
+    format: format.name,
+    title: book.title,
+  );
+  return book;
 }
 
 Book? _removeBook(Database db, int id) {

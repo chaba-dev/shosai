@@ -512,6 +512,51 @@ void main() {
     );
   });
 
+  test(
+    'a file opened directly lists its highlights without its notes',
+    () async {
+      final book = await import(_epubFixture);
+      final library = await bridge.openLibraryBook(
+        bookId: book.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      final highlight = await bridge.createAnnotation(
+        document: library.handle,
+        unit: BigInt.zero,
+        start: BigInt.zero,
+        end: BigInt.from(4),
+        displayScale: 1,
+        color: FlutterHighlightColor.blue,
+        cancellationId: bridge.createCancellation(),
+      );
+      for (final unit in [BigInt.zero, null]) {
+        await bridge.createNote(
+          document: library.handle,
+          unit: unit,
+          offset: unit == null ? null : BigInt.one,
+          body: 'Note',
+          cancellationId: bridge.createCancellation(),
+        );
+      }
+
+      final direct = await bridge.openDocument(
+        request: FlutterOpenRequest(
+          localId: 'direct',
+          pathKey: '${directory.path}/sample.epub',
+        ),
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(direct.bookId, isNull);
+
+      final listed = await bridge.listAnnotations(
+        document: direct.handle,
+        scale: 1,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(listed.map((a) => a.id), [highlight.id]);
+    },
+  );
+
   test('PDF annotations keep page rectangles in page points', () async {
     final book = await import(_pdfFixture);
     final document = await bridge.openLibraryBook(

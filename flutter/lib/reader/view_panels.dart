@@ -1506,6 +1506,13 @@ class _ReaderPlaceNoteRow extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final palette = ShellPalette.of(context);
     final unit = note.unit?.toInt();
+    // An orphaned note's stored place is not in this edition.
+    final found = switch (note.resolution) {
+      FlutterAnnotationResolution.exact ||
+      FlutterAnnotationResolution.recovered => true,
+      FlutterAnnotationResolution.ambiguous ||
+      FlutterAnnotationResolution.orphaned => false,
+    };
     final place = unit == null
         ? l10n.readerBookNoteTitle
         : l10n.readerPageShort(unit + 1);
@@ -1536,7 +1543,7 @@ class _ReaderPlaceNoteRow extends StatelessWidget {
                   child: _ReaderLinkButton(
                     key: ValueKey('reader-place-note-open-${note.id}'),
                     label: place,
-                    onPressed: enabled && unit != null
+                    onPressed: enabled && found && unit != null
                         ? () => dispatch(
                             ReaderNoteNavigated(
                               unit,
