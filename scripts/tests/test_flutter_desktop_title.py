@@ -8,11 +8,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class FlutterDesktopTitleTest(unittest.TestCase):
     def test_linux_window_title_and_decoration_policy(self):
-        runner = (ROOT / "flutter/linux/runner/my_application.cc").read_text()
+        runner = (ROOT / "flutter/linux/runner/my_application.cc").read_text(
+            encoding="utf-8"
+        )
 
         # The window carries the application title, which is what the
-        # compositor or window manager shows in whatever decoration it provides.
-        self.assertIn('static const char kWindowTitle[] = "Shosai";', runner)
+        # compositor or window manager shows in whatever decoration it provides;
+        # a debug build says it is one.
+        self.assertIn('static const char kWindowTitle[] = "Shōsai";', runner)
+        self.assertIn('static const char kWindowTitle[] = "Shōsai Dev";', runner)
         self.assertIn("gtk_window_set_title(window, kWindowTitle);", runner)
 
         # The application draws no title strip of its own: the library header is
