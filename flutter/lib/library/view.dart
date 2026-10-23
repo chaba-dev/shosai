@@ -215,7 +215,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       book,
       place == null
           ? null
-          : ReaderPlace(place.unit, offset: place.offset, length: place.length),
+          : ReaderPlace(
+              place.unit,
+              offset: place.offset,
+              length: place.length,
+              annotationId: place.annotationId,
+              note: place.note,
+            ),
     );
   }
 
@@ -451,7 +457,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return reader;
     }
     _shownBooks.add(open.id);
-    final requests = ReaderPlaceRequests();
+    final requests = ReaderPlaceRequests(
+      openSearch: () => unawaited(_openSearch()),
+    );
     if (_openAt case (final id, final place) when id == open.id) {
       requests.go(place);
       _openAt = null;

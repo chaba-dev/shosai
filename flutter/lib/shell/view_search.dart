@@ -5,8 +5,15 @@ part of 'view.dart';
 typedef ShellSearchChoice = (FlutterLibraryBook book, ShellSearchPlace? place);
 
 /// Where a search hit sits: a unit, where in its text and the match's
-/// length, in Unicode scalars.
-typedef ShellSearchPlace = ({int unit, int? offset, int? length});
+/// length, in Unicode scalars; for a note hit, the annotation and whether
+/// it is a page note rather than a highlight, so the reader resolves it.
+typedef ShellSearchPlace = ({
+  int unit,
+  int? offset,
+  int? length,
+  String? annotationId,
+  bool? note,
+});
 
 /// The search palette (`docs/design-system.md`, SearchPalette): book text and
 /// notes together, from any screen. A query, the scope (This book / All
@@ -170,21 +177,32 @@ class _ShellSearchPaletteState extends State<ShellSearchPalette> {
         ),
       ),
     );
+    // A dialog route does not avoid the software keyboard: the palette ends
+    // above it, so its last results scroll into view.
+    final keyboard = EdgeInsets.only(
+      bottom: MediaQuery.viewInsetsOf(context).bottom,
+    );
     if (phone) {
       // On phones the palette is the whole screen.
       return ColoredBox(
         color: palette.surface,
-        child: SafeArea(child: palettePanel),
+        child: Padding(
+          padding: keyboard,
+          child: SafeArea(child: palettePanel),
+        ),
       );
     }
-    return SafeArea(
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 72, 16, 32),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: palettePanel,
+    return Padding(
+      padding: keyboard,
+      child: SafeArea(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 72, 16, 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: palettePanel,
+            ),
           ),
         ),
       ),
@@ -497,7 +515,15 @@ class _ShellSearchNoteHit extends StatelessWidget {
       editorial: match.field == FlutterNoteField.quote,
       onPressed: () => onChosen((
         book,
-        unit == null ? null : (unit: unit, offset: note.offset, length: null),
+        unit == null
+            ? null
+            : (
+                unit: unit,
+                offset: note.offset,
+                length: null,
+                annotationId: note.id,
+                note: note.kind != FlutterNoteEntryKind.highlight,
+              ),
       )),
     );
   }
@@ -526,7 +552,14 @@ class _ShellSearchTextHit extends StatelessWidget {
       meta: book.format == FlutterBookFormat.pdf
           ? l10n.readerPageNumber(unit + 1)
           : l10n.readerChapterNumber(unit + 1),
-      snippet: _Snippet.inContext(match.context, query),
+      snippet: switch (match.contextOffset) {
+        final at? => _Snippet.around(
+          match.context,
+          at.toInt(),
+          match.length.toInt(),
+        ),
+        null => _Snippet.inContext(match.context, query),
+      },
       editorial: true,
       onPressed: () => onChosen((
         book,
@@ -534,6 +567,8 @@ class _ShellSearchTextHit extends StatelessWidget {
           unit: unit,
           offset: match.offset.toInt(),
           length: match.length.toInt(),
+          annotationId: null,
+          note: null,
         ),
       )),
     );

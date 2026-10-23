@@ -51,6 +51,7 @@ final class ReaderController implements Listenable {
     SelectionCopier? selectionCopier,
     ReaderSelectionAnnouncer? selectionAnnouncer,
     ReaderNavigationAdapter? navigationAdapter,
+    VoidCallback? librarySearchOpener,
     ReaderProgressSource? progressSource,
     ReaderContentsLoader? contentsLoader,
     ReaderExternalLinkOpener? externalLinkOpener,
@@ -96,6 +97,7 @@ final class ReaderController implements Listenable {
        _selectionCopier = selectionCopier ?? ((_) async {}),
        _selectionAnnouncer = selectionAnnouncer,
        _navigationAdapter = navigationAdapter ?? (() async {}),
+       _librarySearchOpener = librarySearchOpener,
        _progressSource = progressSource,
        _contentsLoader = contentsLoader,
        _externalLinkOpener = externalLinkOpener ?? ((_) async {}),
@@ -143,6 +145,10 @@ final class ReaderController implements Listenable {
   final SelectionCopier _selectionCopier;
   final ReaderSelectionAnnouncer? _selectionAnnouncer;
   final ReaderNavigationAdapter _navigationAdapter;
+
+  /// The shell's search palette, which the Search action opens instead of
+  /// the in-book search when the reader is in the shell.
+  final VoidCallback? _librarySearchOpener;
   final ReaderProgressSource? _progressSource;
   final ReaderContentsLoader? _contentsLoader;
   final ReaderExternalLinkOpener _externalLinkOpener;
@@ -392,6 +398,92 @@ final class ReaderController implements Listenable {
   }
 
   void dispatch(ReaderMessage message) {
+    _dispatch(message);
+    _applyPendingPlace();
+  }
+
+  /// A place the shell asked for that the reader could not go to yet, with
+  /// the document generation and place revision it was asked for.
+  ({int generation, int revision, ReaderPlace place})? _pendingPlace;
+
+  /// Advanced by every place request and every navigation the reader asks
+  /// for itself, so a place still waiting or resolving yields to them.
+  int _placeRevision = 0;
+
+  /// Goes to the pending place once the document is open and idle; a newer
+  /// request replaces it, and another document drops it.
+  void _applyPendingPlace() {
+    final pending = _pendingPlace;
+    if (pending == null || _closing) return;
+    if (!_isCurrent(pending.generation) || pending.revision != _placeRevision) {
+      _pendingPlace = null;
+      return;
+    }
+    if (_model.document == null ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _model.annotationOperations.isNotEmpty ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    _pendingPlace = null;
+    final place = pending.place;
+    if (place.annotationId case final id?) {
+      _resolvePlace(id, note: place.note ?? false, revision: pending.revision);
+      return;
+    }
+    _unitRequested(
+      place.unit,
+      offset: place.offset,
+      length: place.length,
+      replaceReadingOffset: true,
+    );
+  }
+
+  /// Resolves note or highlight [id] in the open document, as opening a book
+  /// at it does, then goes there.
+  void _resolvePlace(String id, {required bool note, required int revision}) {
+    final document = _model.document!;
+    final generation = _model.generation;
+    final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(toolError: _describeError(error)));
+      return;
+    }
+    _toolCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    final pdf = _pdfDocument;
+    final scale = _model.layout.scale;
+    unawaited(() async {
+      try {
+        final place = await _resolvedPlace(
+          document,
+          pdf,
+          id,
+          note: note,
+          scale: scale,
+          cancellation: cancellation,
+        );
+        dispatch(_ReaderPlaceResolved(generation, revision, place));
+      } catch (error) {
+        dispatch(
+          _ReaderPlaceResolved(
+            generation,
+            revision,
+            null,
+            error: _describeError(error),
+          ),
+        );
+      } finally {
+        dispatch(_ReaderPlaceResolveFinished(cancellation));
+      }
+    }());
+  }
+
+  void _dispatch(ReaderMessage message) {
     if (_recovering &&
         switch (message) {
           ReaderSelectionStarted() ||
@@ -429,6 +521,22 @@ final class ReaderController implements Listenable {
           _ => false,
         }) {
       return;
+    }
+    switch (message) {
+      // Going somewhere in the book outranks a place asked for earlier that
+      // is still waiting or resolving; relayouts and scrolling do not.
+      case ReaderPageStepRequested() ||
+          ReaderUnitRequested() ||
+          ReaderBookmarkNavigated() ||
+          ReaderNoteNavigated() ||
+          ReaderAnnotationNavigated() ||
+          ReaderLocationNavigated() ||
+          ReaderLinkActivated() ||
+          ReaderPageInputSubmitted() ||
+          ReaderSearchResultStepRequested():
+        _placeRevision += 1;
+        _pendingPlace = null;
+      default:
     }
     switch (message) {
       case ReaderOpenRequested():
@@ -488,12 +596,42 @@ final class ReaderController implements Listenable {
           replaceReadingOffset: true,
         );
       case ReaderPlaceRequested(:final place):
-        _unitRequested(
-          place.unit,
-          offset: place.offset,
-          length: place.length,
-          replaceReadingOffset: true,
-        );
+        // Taken once the document is open and idle (see dispatch).
+        if (!_closing) {
+          _pendingPlace = (
+            generation: _model.generation,
+            revision: ++_placeRevision,
+            place: place,
+          );
+        }
+      case _ReaderPlaceResolved(
+        :final generation,
+        :final revision,
+        :final place,
+        :final error,
+      ):
+        if (!_isCurrent(generation) || revision != _placeRevision) return;
+        if (place != null) {
+          _pendingPlace = (
+            generation: generation,
+            revision: revision,
+            place: place,
+          );
+        } else {
+          _emit(
+            _model.copyWith(
+              toolError: error == null
+                  ? "This note's place isn't in this edition of the book."
+                  : "This note's place couldn't be found: $error",
+            ),
+          );
+        }
+      case _ReaderPlaceResolveFinished(:final cancellation):
+        _toolCancellations.remove(cancellation);
+        _bridge.releaseCancellation(id: cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
       case ReaderPanelToggled():
         _panelToggled(message.panel);
       case ReaderSearchToggled():
@@ -2344,6 +2482,12 @@ final class ReaderController implements Listenable {
   /// Opens or closes the search bar and cancels an in-flight search on close.
   void _searchToggled() {
     if (_closing) return;
+    if (!_model.searchOpen) {
+      if (_librarySearchOpener case final open?) {
+        open();
+        return;
+      }
+    }
     if (_model.searchOpen) {
       _cancelSearch();
       _searchQuery = '';

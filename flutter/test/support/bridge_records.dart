@@ -114,10 +114,17 @@ mixin BridgeRecords implements RecordsHost {
     }
   }
 
+  /// Gates for the next note listings, one each in order: a listing waits
+  /// for its gate, so a test can finish listings out of order.
+  final List<Completer<void>> noteListGates = [];
+
   Future<List<FlutterNote>> listNotes({
     required FlutterDocumentHandle document,
     required BigInt cancellationId,
-  }) async => List.of(placeNotes);
+  }) async {
+    if (noteListGates.isNotEmpty) await noteListGates.removeAt(0).future;
+    return List.of(placeNotes);
+  }
 
   Future<FlutterNote> createNote({
     required FlutterDocumentHandle document,

@@ -257,6 +257,12 @@ final _frozenAnnotations = Expando<bool>();
 /// note's, from outside it. The latest request wins: a reader still opening
 /// opens there, and an open one goes there.
 final class ReaderPlaceRequests extends ChangeNotifier {
+  ReaderPlaceRequests({this.openSearch});
+
+  /// Opens the shell's search palette, which the reader's Search action
+  /// opens in its in-book search's stead.
+  final VoidCallback? openSearch;
+
   ReaderPlace? _pending;
 
   /// Asks the reader to go to [place].

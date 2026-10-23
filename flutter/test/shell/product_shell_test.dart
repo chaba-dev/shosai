@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart' show ShadInput;
 import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_flutter/reader/view.dart' show ReaderScreen;
 import 'package:shosai_flutter/reader/controller.dart'
     show ReaderNoticeReporter, ReaderPlace, ReaderPlaceRequests;
 import 'package:shosai_flutter/shell/view.dart';
@@ -93,7 +94,11 @@ class _PlaceLogState extends State<_PlaceLog> {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      for (final place in _places) Text('At ${place.unit}:${place.offset}'),
+      for (final place in _places) ...[
+        Text('At ${place.unit}:${place.offset}'),
+        if (place.annotationId case final id?)
+          Text('Resolving $id as ${place.note! ? 'a note' : 'a highlight'}'),
+      ],
     ],
   );
 }
@@ -661,6 +666,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Reading $_quiet'), findsOneWidget);
       expect(find.text('At 2:30'), findsOneWidget);
+      // The reader finds the note where this edition has it.
+      expect(find.text('Resolving quiet-page as a note'), findsOneWidget);
+
+      // A note hit in the book being read moves its reader the same way.
+      await commandK(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('shell-search-note-quiet-page')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Resolving quiet-page as a note'), findsNWidgets(2));
     });
 
     testWidgets('the filter keeps to text or notes', (tester) async {
@@ -730,6 +745,149 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.slash);
       await tester.pumpAndSettle();
       expect(palette, findsNothing);
+    });
+
+    testWidgets('each text hit marks its own match', (tester) async {
+      final bridge = await _pump(tester, const Size(1440, 900));
+      final [_, _, _, atlas, ...] = harnessLibraryBooks();
+      FlutterSearchMatch hit(int at, String context, {int length = 4}) =>
+          FlutterSearchMatch(
+            unit: BigInt.from(4),
+            offset: BigInt.from(100 + at),
+            length: BigInt.from(length),
+            context: context,
+            contextOffset: BigInt.from(at),
+          );
+      bridge.libraryTextHits = [
+        FlutterBookTextHits(
+          book: atlas,
+          matches: [
+            hit(0, 'lead one lead two'),
+            hit(9, 'lead one lead two'),
+            // Full case folding: STRASSE is found as Straße.
+            hit(4, 'Die Straße', length: 6),
+          ],
+        ),
+      ];
+      await commandK(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('shell-search-field')),
+        'STRASSE',
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+
+      List<String?> parts(int index) => [
+        for (final span
+            in (tester
+                        .widget<Text>(
+                          find.descendant(
+                            of: find.byKey(
+                              ValueKey('shell-search-text-4-$index'),
+                            ),
+                            matching: find.byWidgetPredicate(
+                              (widget) =>
+                                  widget is Text && widget.textSpan != null,
+                            ),
+                          ),
+                        )
+                        .textSpan
+                    as TextSpan)
+                .children!)
+          (span as TextSpan).text,
+      ];
+      expect(parts(0), ['', 'lead', ' one lead two']);
+      expect(parts(1), ['lead one ', 'lead', ' two']);
+      expect(parts(2), ['Die ', 'Straße', '']);
+    });
+
+    testWidgets('a phone reader’s Search button opens it', (tester) async {
+      await _pump(
+        tester,
+        const Size(390, 844),
+        readerBuilder:
+            (
+              bridge,
+              book,
+              settings,
+              path,
+              bookId,
+              locatorChanged,
+              noticeReporter,
+              openBooksAction,
+              pagesChanged,
+              placeRequests,
+            ) => ReaderScreen(
+              bridge: bridge,
+              initialPath: path,
+              initialBookId: bookId,
+              placeRequests: placeRequests,
+              onLocatorChanged: locatorChanged,
+              noticeReporter: noticeReporter,
+              openBooksAction: openBooksAction,
+              onPagesChanged: pagesChanged,
+            ),
+      );
+      await _open(tester, 1);
+      for (var frame = 0; frame < 8; frame += 1) {
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+      for (var frame = 0; frame < 8; frame += 1) {
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+      expect(palette, findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('shell-search-scope')),
+        findsOneWidget,
+        reason: 'it searches this book first',
+      );
+    });
+
+    testWidgets('its last results scroll above a phone’s keyboard', (
+      tester,
+    ) async {
+      final bridge = await _pump(tester, const Size(390, 844));
+      final [_, _, _, atlas, ...] = harnessLibraryBooks();
+      bridge.libraryTextHits = [
+        FlutterBookTextHits(
+          book: atlas,
+          matches: [
+            for (var i = 0; i < 30; i += 1)
+              FlutterSearchMatch(
+                unit: BigInt.from(i),
+                offset: BigInt.zero,
+                length: BigInt.from(4),
+                context: 'lead line $i',
+              ),
+          ],
+        ),
+      ];
+      await commandK(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('shell-search-field')),
+        'lead',
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpAndSettle();
+
+      final last = find.byKey(const ValueKey('shell-search-text-4-29'));
+      await tester.scrollUntilVisible(
+        last,
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const ValueKey('shell-search-results')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getRect(last).bottom, lessThanOrEqualTo(844 - 300));
     });
 
     testWidgets('a phone shows it full screen', (tester) async {

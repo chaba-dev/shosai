@@ -358,6 +358,26 @@ final class _ReaderNotesFailed extends ReaderMessage {
   final bool persistence;
 }
 
+/// Where a note or highlight the shell asked for resolves in the open
+/// document: null when it is not there, or [error] when it could not be told.
+final class _ReaderPlaceResolved extends ReaderMessage {
+  const _ReaderPlaceResolved(
+    this.generation,
+    this.revision,
+    this.place, {
+    this.error,
+  });
+  final int generation;
+  final int revision;
+  final ReaderPlace? place;
+  final String? error;
+}
+
+final class _ReaderPlaceResolveFinished extends ReaderMessage {
+  const _ReaderPlaceResolveFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
 final class _ReaderNotesFinished extends ReaderMessage {
   const _ReaderNotesFinished(this.cancellation);
   final BigInt cancellation;

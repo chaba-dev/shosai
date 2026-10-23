@@ -252,6 +252,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           View.of(context).devicePixelRatio,
         ),
         baseScale: View.of(context).devicePixelRatio,
+        librarySearchOpener: widget.placeRequests?.openSearch,
         noteEditor: _editNote,
         placeNoteEditor: _editPlaceNote,
         noteEditorCanceller: _cancelNoteEditor,

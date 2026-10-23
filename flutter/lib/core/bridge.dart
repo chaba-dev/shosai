@@ -1012,16 +1012,25 @@ class FlutterSearchMatch {
   final BigInt length;
   final String context;
 
+  /// Where the match starts in [context], in Unicode scalars, when known:
+  /// the context may hold the query more than once.
+  final BigInt? contextOffset;
+
   const FlutterSearchMatch({
     required this.unit,
     required this.offset,
     required this.length,
     required this.context,
+    this.contextOffset,
   });
 
   @override
   int get hashCode =>
-      unit.hashCode ^ offset.hashCode ^ length.hashCode ^ context.hashCode;
+      unit.hashCode ^
+      offset.hashCode ^
+      length.hashCode ^
+      context.hashCode ^
+      contextOffset.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1031,7 +1040,8 @@ class FlutterSearchMatch {
           unit == other.unit &&
           offset == other.offset &&
           length == other.length &&
-          context == other.context;
+          context == other.context &&
+          contextOffset == other.contextOffset;
 }
 
 class FlutterSelectionCaret {

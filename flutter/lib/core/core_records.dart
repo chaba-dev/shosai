@@ -906,6 +906,7 @@ FlutterSearchMatch _searchMatch(SearchMatch match) => FlutterSearchMatch(
   offset: BigInt.from(match.offset),
   length: BigInt.from(match.length),
   context: match.context,
+  contextOffset: BigInt.from(match.contextOffset),
 );
 
 /// The bridge the application hands its controllers: the documents it opens
