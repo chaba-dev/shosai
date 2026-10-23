@@ -94,6 +94,9 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Tate-chū-yoko in vertical text (#186)
 - *(reader)* Ruby (furigana) in vertical and horizontal text (#189)
 - *(reader)* Text-orientation in vertical text (#202)
+- *(reader)* Make room for ruby between a chapter's lines (#207)
+- *(reader)* Draw emphasis marks (傍点) beside their characters (#211)
+- *(reader)* Set a second ruby level (rtc) under its base (#212)
 
 ### 🐛 Bug Fixes
 
