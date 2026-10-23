@@ -621,13 +621,11 @@ void main() {
     expect(line(stop), line(eight));
   });
 
-  test('tate-chū-yoko whose text breaks a line inside it is laid out '
-      'without it', () async {
-    await loadHarnessFonts();
-    // A line may break between 一 and 二 but not before 。, so with two ems
-    // to a line the run's empty second character would start the next one.
+  /// A vertical chapter whose first paragraph breaks a two-em line inside
+  /// its tate-chū-yoko, and whose second does not.
+  EpubBook brokenCombinedBook() {
     const tcy = '<span style="text-combine-upright: all">';
-    final book = openEpubBytes(
+    return openEpubBytes(
       buildTestEpub(
         chapters: {
           'OPS/Text/chapter-1.xhtml':
@@ -638,6 +636,14 @@ void main() {
         bodyAttributes: ' style="writing-mode: vertical-rl"',
       ),
     );
+  }
+
+  test('tate-chū-yoko whose text breaks a line inside it is laid out '
+      'without it', () async {
+    await loadHarnessFonts();
+    // A line may break between 一 and 二 but not before 。, so with two ems
+    // to a line the run's empty second character would start the next one.
+    final book = brokenCombinedBook();
     final session = ChapterLayoutSession(
       chapter: book.chapters.first,
       spec: const ChapterLayoutSpec(
@@ -668,6 +674,48 @@ void main() {
     expect(
       blocks.first.upright.map((run) => run.combined),
       everyElement(false),
+    );
+  });
+
+  test('a block laid out again without tate-chū-yoko releases the painter '
+      'it set aside, once', () async {
+    await loadHarnessFonts();
+    final book = brokenCombinedBook();
+    ChapterLayoutSession session() => ChapterLayoutSession(
+      chapter: book.chapters.first,
+      spec: const ChapterLayoutSpec(
+        width: 36,
+        height: 600,
+        typography: typography,
+        vertical: true,
+      ),
+      images: const {},
+    );
+
+    final laidOut = session()..debugObservePainters = true;
+    addTearDown(laidOut.dispose);
+    laidOut.layoutWindowAt(0);
+    // The first paragraph's painter is set aside and released; its second
+    // attempt and the next paragraph's are kept.
+    expect(
+      [
+        for (final painter in laidOut.debugCreatedPainters)
+          painter.debugDisposed,
+      ],
+      [true, false, false],
+    );
+
+    // A failure in the second attempt releases what is left, and does not
+    // release the set-aside painter twice.
+    final failed = session()..debugFailTextBlockAt = 2;
+    addTearDown(failed.dispose);
+    expect(() => failed.layoutWindowAt(0), throwsA(isA<StateError>()));
+    expect(
+      [
+        for (final painter in failed.debugCreatedPainters)
+          painter.debugDisposed,
+      ],
+      [true, true],
     );
   });
 

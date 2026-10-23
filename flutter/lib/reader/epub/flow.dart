@@ -1776,11 +1776,13 @@ class _FlowContext {
     }
     children.add(built.span);
     final textAlign = flutterTextAlign(align ?? EpubTextAlign.start);
-    final painter = TextPainter(
-      text: TextSpan(children: children),
-      textAlign: textAlign,
-      textDirection: flutterTextDirection(direction),
-      textWidthBasis: TextWidthBasis.parent,
+    final painter = _registerPainter(
+      TextPainter(
+        text: TextSpan(children: children),
+        textAlign: textAlign,
+        textDirection: flutterTextDirection(direction),
+        textWidthBasis: TextWidthBasis.parent,
+      ),
     );
     final width = math.max(
       20.0,
@@ -1798,6 +1800,7 @@ class _FlowContext {
           run,
     ];
     if (broken.isNotEmpty) {
+      _painters.remove(painter);
       painter.dispose();
       return _textBlock(
         withoutCombining(spans, broken, codeUnitOffset: markerPrefix.length),
@@ -1809,7 +1812,6 @@ class _FlowContext {
         markerIndent: markerIndent,
       );
     }
-    _registerPainter(painter);
     final lines = <FlowLine>[];
     final metrics = painter.computeLineMetrics();
     final bounds = _lineBounds(
