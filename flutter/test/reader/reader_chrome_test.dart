@@ -31,6 +31,7 @@ import '../support/production_shell_harness.dart';
 class _ChromeBridge extends HarnessBridge {
   _ChromeBridge({
     super.books,
+    super.unitCount,
     this.title,
     this.failOpen = false,
     this.hangOpen = false,
@@ -834,6 +835,51 @@ void main() {
       expect(bridge.pdfEngineOpenedPaths.last, '/books/replacement.pdf');
       expect(nextLeftOfPrevious(), greaterThan(0));
     });
+
+    for (final rightToLeft in [false, true]) {
+      testWidgets('the progress track steps a PDF a spread at a time '
+          '(${rightToLeft ? 'right to left' : 'left to right'})', (
+        tester,
+      ) async {
+        _setView(tester, const Size(1280, 800));
+        await _open(
+          tester,
+          _reader(
+            bridge: _ChromeBridge(unitCount: 5, rightToLeft: rightToLeft),
+            initialPath: '/books/atlas.pdf',
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 32));
+        final track = find.byKey(const ValueKey('reader-progress-track'));
+        Focus.of(tester.element(track)).requestFocus();
+        await tester.pump();
+        // The arrow toward the next page: left in a right-to-left book.
+        final forward = rightToLeft
+            ? LogicalKeyboardKey.arrowLeft
+            : LogicalKeyboardKey.arrowRight;
+        final backward = rightToLeft
+            ? LogicalKeyboardKey.arrowRight
+            : LogicalKeyboardKey.arrowLeft;
+        Future<void> step(LogicalKeyboardKey key) async {
+          await tester.sendKeyEvent(key);
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 32));
+          await tester.pump(const Duration(milliseconds: 32));
+        }
+
+        expect(find.textContaining('page 1 of 5'), findsOneWidget);
+        await step(forward);
+        expect(find.textContaining('pages 2–3 of 5'), findsOneWidget);
+        await step(forward);
+        expect(find.textContaining('pages 4–5 of 5'), findsOneWidget);
+        await step(forward);
+        expect(find.textContaining('pages 4–5 of 5'), findsOneWidget);
+        await step(backward);
+        expect(find.textContaining('pages 2–3 of 5'), findsOneWidget);
+        await step(backward);
+        expect(find.textContaining('page 1 of 5'), findsOneWidget);
+      });
+    }
 
     testWidgets('one page reads a PDF a page at a time', (tester) async {
       _setView(tester, const Size(1280, 800));

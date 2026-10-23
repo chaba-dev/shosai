@@ -619,11 +619,8 @@ class _ReaderStatusLine extends StatelessWidget {
                       decreasedValue: _unitStepValue(context, model, -1),
                       onStep: total > 0 && !model.busy
                           ? (delta) {
-                              final unit = (model.unit + delta).clamp(
-                                0,
-                                total - 1,
-                              );
-                              if (unit != model.unit) {
+                              final unit = _unitStep(model, delta);
+                              if (unit >= 0 && unit < total) {
                                 dispatch(ReaderUnitRequested(unit));
                               }
                             }
@@ -644,9 +641,17 @@ class _ReaderStatusLine extends StatelessWidget {
 ///
 /// A step lands at the start of the neighbouring unit, so it names that unit
 /// with the share of the book read once it is.
+/// The unit the progress track's step in [delta]'s direction (±1) goes to:
+/// the next or previous chapter or page, or a whole spread when a PDF is read
+/// in spreads, as the edges turn it. Past either end when there is none.
+int _unitStep(ReaderModel model, int delta) =>
+    model.layout.spread && model.document?.format == FlutterBookFormat.pdf
+    ? pdfSpreadStep(model.unit, delta)
+    : model.unit + delta;
+
 String? _unitStepValue(BuildContext context, ReaderModel model, int delta) {
   final total = model.document?.logicalUnitCount.toInt() ?? 0;
-  final unit = model.unit + delta;
+  final unit = _unitStep(model, delta);
   if (total <= 0 || unit < 0 || unit >= total) return null;
   final l10n = AppLocalizations.of(context);
   final percent = ((unit + 1) / total * 100).round();
