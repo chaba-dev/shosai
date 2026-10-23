@@ -295,9 +295,8 @@ class ShellOpenBooksButton extends StatelessWidget {
 /// current one is outlined in `accent`. **Done** returns to the current book,
 /// and so does the system back gesture.
 ///
-/// Each card shows the book's cover where the design system shows a
-/// miniature of the open page; the page's text is the reader's, and the
-/// switcher does not reach into it.
+/// Each card shows a miniature of the book's open page as the reader last
+/// showed it, or, for a book not shown since launch, its cover.
 ///
 /// It takes keyboard focus while it shows and gives it back to what had it,
 /// such as the count button, when it closes.
@@ -306,13 +305,24 @@ class ShellTabSwitcher extends StatefulWidget {
     super.key,
     required this.model,
     required this.covers,
+    this.pages = const {},
     required this.actions,
   });
 
   static const double gap = 12;
 
+  /// The source crop has the narrowest phone card's proportions. Capture is
+  /// capped at 1.5× its widest rendered width; the controller also admits all
+  /// retained miniatures under one memory budget.
+  static const double miniatureSourceWidth = 280;
+  static const double miniatureSourceHeight = 168;
+  static const int miniatureMaxPixelWidth = 420;
+
   final ShellModel model;
   final Map<int, Uint8List> covers;
+
+  /// Miniatures of the open books' pages, by book id.
+  final Map<int, ui.Image> pages;
   final ShellActions actions;
 
   @override
@@ -335,7 +345,7 @@ class _ShellTabSwitcherState extends State<ShellTabSwitcher> {
 
   @override
   Widget build(BuildContext context) {
-    final ShellTabSwitcher(:model, :covers, :actions) = widget;
+    final ShellTabSwitcher(:model, :covers, :pages, :actions) = widget;
     final palette = ShellPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final title = l10n.shellOpenBooks(model.openBooks.length);
@@ -427,6 +437,7 @@ class _ShellTabSwitcherState extends State<ShellTabSwitcher> {
                               child: _TabCard(
                                 entry: entry,
                                 cover: covers[entry.id],
+                                page: pages[entry.id],
                                 current: entry.id == model.currentBookId,
                                 actions: actions,
                               ),
@@ -454,18 +465,21 @@ class _ShellTabSwitcherState extends State<ShellTabSwitcher> {
   }
 }
 
-/// One open book in the switcher (`sh-tabcard`): its title, its cover, the
-/// format badge and place, and a progress bar; it closes from its corner.
+/// One open book in the switcher (`sh-tabcard`): its title, the top of its
+/// open page (or its cover), the format badge and place, and a progress bar;
+/// it closes from its corner.
 class _TabCard extends StatelessWidget {
   const _TabCard({
     required this.entry,
     required this.cover,
+    required this.page,
     required this.current,
     required this.actions,
   });
 
   final OpenBook entry;
   final Uint8List? cover;
+  final ui.Image? page;
   final bool current;
   final ShellActions actions;
 
@@ -513,16 +527,29 @@ class _TabCard extends StatelessWidget {
                 Container(
                   height: 96,
                   alignment: Alignment.center,
+                  clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     color: palette.surfaceSunken,
                     borderRadius: BorderRadius.circular(ShosaiTokens.radiusXs),
                   ),
-                  child: ShellCoverThumb(
-                    book: book,
-                    cover: cover,
-                    loadCover: actions.loadCover,
-                    width: 52,
-                  ),
+                  child: switch (page) {
+                    // The page across the card, from its top.
+                    final page? => RawImage(
+                      key: ValueKey('shell-tab-page-${entry.id}'),
+                      image: page,
+                      width: double.infinity,
+                      height: double.infinity,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.topCenter,
+                      filterQuality: FilterQuality.medium,
+                    ),
+                    null => ShellCoverThumb(
+                      book: book,
+                      cover: cover,
+                      loadCover: actions.loadCover,
+                      width: 52,
+                    ),
+                  },
                 ),
                 Row(
                   spacing: 6,

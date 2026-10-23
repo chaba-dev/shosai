@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/shell/controller.dart';
@@ -27,6 +28,17 @@ ShellModel _open(List<int> ids, {int? current, bool reading = true}) {
 List<int> _ids(ShellModel model) => [
   for (final entry in model.openBooks) entry.id,
 ];
+
+Future<ui.Image> _image({int width = 8, int height = 8}) async {
+  final recorder = ui.PictureRecorder();
+  ui.Canvas(recorder);
+  final picture = recorder.endRecording();
+  try {
+    return await picture.toImage(width, height);
+  } finally {
+    picture.dispose();
+  }
+}
 
 void main() {
   group('update', () {
@@ -279,6 +291,175 @@ void main() {
 
     test('readerDismissed is complete when nothing is presented', () async {
       await controller.readerDismissed;
+    });
+
+    test(
+      'current and last books release their page miniatures when closed',
+      () async {
+        final first = await _image();
+        final second = await _image();
+        final captures = [first, second];
+        final presentation = Completer<void>();
+        final owned = ShellController(
+          presentReader: () => presentation.future,
+          dismissReader: () {
+            if (!presentation.isCompleted) presentation.complete();
+          },
+          capturePageMiniature: (_) => captures.removeAt(0),
+        );
+        addTearDown(owned.dispose);
+
+        owned.dispatch(ShellBookOpened(_book(1)));
+        owned.dispatch(ShellBookOpened(_book(2)));
+        owned.dispatch(const ShellSwitcherOpened());
+        await pumpEventQueue();
+        expect(owned.pages.keys, [1, 2]);
+
+        owned.dispatch(const ShellBookClosed(2));
+        expect(second.debugDisposed, isTrue);
+        expect(owned.pages.keys, [1]);
+        owned.dispatch(const ShellBookClosed(1));
+        expect(first.debugDisposed, isTrue);
+        expect(owned.pages, isEmpty);
+      },
+    );
+
+    test('a changed document identity invalidates its old miniature', () async {
+      final page = await _image();
+      final presentation = Completer<void>();
+      final owned = ShellController(
+        presentReader: () => presentation.future,
+        dismissReader: () {
+          if (!presentation.isCompleted) presentation.complete();
+        },
+        capturePageMiniature: (_) => page,
+      );
+      addTearDown(owned.dispose);
+
+      owned.dispatch(ShellBookOpened(_book(1)));
+      owned.dispatch(const ShellSwitcherOpened());
+      await pumpEventQueue();
+      expect(owned.pages[1], same(page));
+      owned.dispatch(const ShellSwitcherClosed());
+      owned.dispatch(
+        const ShellLocatorChanged(
+          1,
+          path: '/books/replacement.pdf',
+          bookId: null,
+        ),
+      );
+      expect(page.debugDisposed, isTrue);
+      expect(owned.pages, isEmpty);
+    });
+
+    test('a late miniature for a replaced document is disposed', () async {
+      final capture = Completer<ui.Image?>();
+      final page = await _image();
+      final owned = ShellController(
+        presentReader: () => Completer<void>().future,
+        dismissReader: () {},
+        capturePageMiniature: (_) => capture.future,
+      );
+      addTearDown(owned.dispose);
+
+      owned.dispatch(ShellBookOpened(_book(1)));
+      owned.dispatch(const ShellSwitcherOpened());
+      owned.dispatch(
+        const ShellLocatorChanged(
+          1,
+          path: '/books/replacement.pdf',
+          bookId: null,
+        ),
+      );
+      capture.complete(page);
+      await pumpEventQueue();
+
+      expect(page.debugDisposed, isTrue);
+      expect(owned.pages, isEmpty);
+    });
+
+    test('a late miniature cannot cross a close and reopen', () async {
+      final capture = Completer<ui.Image?>();
+      final page = await _image();
+      final owned = ShellController(
+        presentReader: () => Completer<void>().future,
+        dismissReader: () {},
+        capturePageMiniature: (_) => capture.future,
+      );
+      addTearDown(owned.dispose);
+
+      owned.dispatch(ShellBookOpened(_book(1)));
+      owned.dispatch(const ShellSwitcherOpened());
+      owned.dispatch(const ShellBookClosed(1));
+      owned.dispatch(ShellBookOpened(_book(1)));
+      capture.complete(page);
+      await pumpEventQueue();
+
+      expect(page.debugDisposed, isTrue);
+      expect(owned.pages, isEmpty);
+    });
+
+    test('a late miniature cannot cross a locator change and return', () async {
+      final capture = Completer<ui.Image?>();
+      final page = await _image();
+      final presentation = Completer<void>();
+      final owned = ShellController(
+        presentReader: () => presentation.future,
+        dismissReader: () {
+          if (!presentation.isCompleted) presentation.complete();
+        },
+        capturePageMiniature: (_) => capture.future,
+      );
+      addTearDown(owned.dispose);
+
+      owned.dispatch(ShellBookOpened(_book(1)));
+      owned.dispatch(const ShellSwitcherOpened());
+      owned.dispatch(
+        const ShellLocatorChanged(
+          1,
+          path: '/books/replacement.pdf',
+          bookId: null,
+        ),
+      );
+      owned.dispatch(
+        ShellLocatorChanged(1, path: _book(1).pathKey, bookId: _book(1).bookId),
+      );
+      capture.complete(page);
+      await pumpEventQueue();
+
+      expect(page.debugDisposed, isTrue);
+      expect(owned.pages, isEmpty);
+    });
+
+    test('page miniatures stay within the controller memory budget', () async {
+      final images = [
+        for (var index = 0; index < 5; index += 1)
+          await _image(width: 1000, height: 1000),
+      ];
+      var next = 0;
+      final presentation = Completer<void>();
+      final owned = ShellController(
+        presentReader: () => presentation.future,
+        dismissReader: () {
+          if (!presentation.isCompleted) presentation.complete();
+        },
+        capturePageMiniature: (_) => images[next++],
+      );
+      addTearDown(owned.dispose);
+
+      for (var id = 1; id <= 6; id += 1) {
+        owned.dispatch(ShellBookOpened(_book(id)));
+      }
+      await pumpEventQueue();
+      expect(images.first.debugDisposed, isTrue);
+      expect(owned.pages.length, 4);
+      expect(
+        owned.pages.values.fold<int>(
+          0,
+          (bytes, image) => bytes + image.width * image.height * 4,
+        ),
+        lessThanOrEqualTo(ShellController.pageMiniatureBudgetBytes),
+      );
     });
   });
 }

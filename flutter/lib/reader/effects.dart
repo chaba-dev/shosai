@@ -278,6 +278,10 @@ final class ReaderPlaceRequests extends ChangeNotifier {
   /// place starts with; the reader answers it while it shows.
   List<ReaderReturnPoint>? Function()? wayBack;
 
+  /// A bounded miniature of the page the reader last fully painted for the
+  /// phone's tab switcher; null before a page is ready or while paint is due.
+  ui.Image? Function()? pageMiniature;
+
   ReaderPlace? _pending;
 
   /// Asks the reader to go to [place].

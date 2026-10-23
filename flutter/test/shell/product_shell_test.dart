@@ -241,13 +241,14 @@ Future<HarnessBridge> _pump(
   WidgetTester tester,
   Size size, {
   ProductReaderBuilder readerBuilder = _reader,
+  double devicePixelRatio = 1,
 }) async {
   final bridge = HarnessBridge(
     books: harnessLibraryBooks(),
     covers: harnessCovers(),
   );
-  tester.view.physicalSize = size;
-  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = size * devicePixelRatio;
+  tester.view.devicePixelRatio = devicePixelRatio;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     productionShell(
@@ -1284,6 +1285,165 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ShellTabSwitcher), findsNothing);
     expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+  });
+
+  testWidgets('the tab switcher shows each book’s page as it was left', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const Size(390, 844),
+      readerBuilder: _realReader,
+      devicePixelRatio: 4,
+    );
+    Finder page(int bookId) => find.byKey(ValueKey('shell-tab-page-$bookId'));
+    await _open(tester, 3);
+    await _readerSettles(tester, () => harnessReaderPageReady(tester));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 40)),
+    );
+    await pumpHarnessFrames(tester, frames: 4);
+
+    await tester.tap(find.byTooltip('1 open book'));
+    await tester.pumpAndSettle();
+    expect(page(3), findsOneWidget);
+    final miniature = tester.widget<RawImage>(page(3)).image!;
+    expect(miniature.width, lessThanOrEqualTo(420));
+    expect(miniature.height, lessThanOrEqualTo(252));
+    expect(miniature.height, greaterThan(0));
+
+    // The library card leaves the reader; the next book's switcher still
+    // shows the first one's page, now that its reader has gone.
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ShellTabSwitcher),
+        matching: find.text('Library'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _open(tester, 4);
+    await _readerSettles(tester, () => harnessReaderPageReady(tester));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 40)),
+    );
+    await pumpHarnessFrames(tester, frames: 4);
+    await tester.tap(find.byTooltip('2 open books'));
+    await tester.pumpAndSettle();
+    expect(page(3), findsOneWidget);
+    expect(page(4), findsOneWidget);
+
+    // A closed book's page goes with it.
+    await tester.tap(
+      find.byTooltip(
+        'Close Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(page(3), findsNothing);
+    expect(page(4), findsOneWidget);
+  });
+
+  testWidgets('the tab switcher captures the new page after pending paint', (
+    tester,
+  ) async {
+    late ReaderPlaceRequests requests;
+    await _pump(
+      tester,
+      const Size(390, 844),
+      readerBuilder:
+          (
+            bridge,
+            book,
+            settings,
+            path,
+            bookId,
+            locatorChanged,
+            notices,
+            openBooks,
+            pagesChanged,
+            places,
+          ) {
+            requests = places;
+            return _realReader(
+              bridge,
+              book,
+              settings,
+              path,
+              bookId,
+              locatorChanged,
+              notices,
+              openBooks,
+              pagesChanged,
+              places,
+            );
+          },
+    );
+    final page = find.byKey(const ValueKey('shell-tab-page-3'));
+    await _open(tester, 3);
+    await _readerSettles(tester, () => harnessReaderPageReady(tester));
+    final capture = requests.pageMiniature!;
+    final settled = capture();
+    expect(settled, isNotNull);
+    settled!.dispose();
+
+    // The page-turn transition dirties the isolated stage. Open the switcher
+    // before pumping that frame: capture waits for the resulting frame rather
+    // than retaining the old layer's pixels under the new document state.
+    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    expect(capture(), isNull);
+    await tester.tap(find.byTooltip('1 open book'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellTabSwitcher), findsOneWidget);
+    expect(page, findsOneWidget);
+  });
+
+  testWidgets('a direct cross-book jump keeps the page it left', (
+    tester,
+  ) async {
+    late ReaderPlaceRequests requests;
+    await _pump(
+      tester,
+      const Size(390, 844),
+      readerBuilder:
+          (
+            bridge,
+            book,
+            settings,
+            path,
+            bookId,
+            locatorChanged,
+            notices,
+            openBooks,
+            pagesChanged,
+            places,
+          ) {
+            requests = places;
+            return _realReader(
+              bridge,
+              book,
+              settings,
+              path,
+              bookId,
+              locatorChanged,
+              notices,
+              openBooks,
+              pagesChanged,
+              places,
+            );
+          },
+    );
+    await _open(tester, 3);
+    await _readerSettles(tester, () => harnessReaderPageReady(tester));
+
+    requests.openBook!(
+      harnessLibraryBooks()[3],
+      const ReaderPlace(4, offset: 12),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('2 open books'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('shell-tab-page-3')), findsOneWidget);
   });
 
   testWidgets('open books come back after a restoration', (tester) async {
