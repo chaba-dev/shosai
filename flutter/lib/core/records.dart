@@ -51,6 +51,17 @@ abstract interface class ShosaiRecords {
     required BigInt cancellationId,
   });
 
+  /// A page of the library's books that have notes, most recently read
+  /// first, each with its notes in reading order.
+  /// A page of the library's books with notes; [after] continues a listing
+  /// and makes the page `changed` when those books are no longer the first.
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  });
+
   Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -101,10 +112,7 @@ abstract interface class ShosaiRecords {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   });
-
-  Future<void> updateBookmarkNote({required int id, String? note});
 
   Future<void> deleteBookmark({required int id});
 
@@ -142,9 +150,35 @@ abstract interface class ShosaiRecords {
     String? body,
   });
 
+  /// Delete highlight or note [id].
   Future<bool> deleteAnnotation({
     required FlutterDocumentSummary document,
     required String id,
+  });
+
+  /// [document]'s page notes and book notes, resolved against [text].
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    required BigInt cancellationId,
+  });
+
+  /// Write [body] as a page note at [unit] and [offset] of [text], or as a
+  /// book note when [unit] is null.
+  Future<FlutterNote> createNote({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  });
+
+  /// Rewrite note [id]; false when [document] has no such live note.
+  Future<bool> updateNote({
+    required FlutterDocumentSummary document,
+    required String id,
+    required String body,
   });
 
   Future<FlutterAnnotationAssociationSourcePage>
@@ -166,6 +200,25 @@ abstract interface class ShosaiRecords {
     required FlutterDocumentSummary document,
     required ReaderText text,
     required String query,
+    required BigInt cancellationId,
+  });
+
+  /// The notes of every library book, or of book [bookId], whose quote or
+  /// body holds [query]; books most recently read first.
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  });
+
+  /// The text matches of [query] in every library book, or in book
+  /// [bookId], reported to [onBook] one book at a time, most recently read
+  /// first; books without matches are left out. Completes when every book
+  /// has been searched.
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
     required BigInt cancellationId,
   });
 }

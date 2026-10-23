@@ -5,10 +5,68 @@ sealed class ReaderMessage {
 }
 
 final class ReaderOpenRequested extends ReaderMessage {
-  const ReaderOpenRequested(this.path, {this.bookId});
+  const ReaderOpenRequested(this.path, {this.bookId, this.place});
 
   final String path;
   final int? bookId;
+
+  /// Where to open instead of the saved reading position: a note's place.
+  final ReaderPlace? place;
+}
+
+/// A place in a book: an EPUB spine index or PDF page, and where in its text,
+/// in Unicode scalars, when known; a search match also has its [length].
+///
+/// A highlight's or note's place names it by [annotationId]: [unit] and
+/// [offset] are where it was made, and the reader resolves it in the book as
+/// it opens, as it lists the book's notes.
+final class ReaderPlace {
+  const ReaderPlace(
+    this.unit, {
+    this.offset,
+    this.length,
+    this.annotationId,
+    this.note,
+  });
+
+  final int unit;
+  final int? offset;
+  final int? length;
+  final String? annotationId;
+
+  /// Whether [annotationId] is a page note's or book note's, not a
+  /// highlight's.
+  final bool? note;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderPlace &&
+      other.unit == unit &&
+      other.offset == offset &&
+      other.length == length &&
+      other.annotationId == annotationId &&
+      other.note == note;
+
+  @override
+  int get hashCode => Object.hash(unit, offset, length, annotationId, note);
+}
+
+/// Returns to where the last jump left from (the BackPill, Alt+← or ⌘[).
+final class ReaderReturnRequested extends ReaderMessage {
+  const ReaderReturnRequested();
+}
+
+/// Closes the BackPill, forgetting every return point.
+final class ReaderReturnDismissed extends ReaderMessage {
+  const ReaderReturnDismissed();
+}
+
+/// Goes to [place] in the open document, as a note or search hit chosen
+/// outside the reader asks; ignored while the reader is busy.
+final class ReaderPlaceRequested extends ReaderMessage {
+  const ReaderPlaceRequested(this.place);
+
+  final ReaderPlace place;
 }
 
 final class ReaderLayoutChanged extends ReaderMessage {
@@ -50,11 +108,19 @@ final class ReaderPageStepRequested extends ReaderMessage {
 }
 
 final class ReaderUnitRequested extends ReaderMessage {
-  const ReaderUnitRequested(this.unit, {this.offset, this.length});
+  const ReaderUnitRequested(
+    this.unit, {
+    this.offset,
+    this.length,
+    this.turn = false,
+  });
 
   final int unit;
   final int? offset;
   final int? length;
+
+  /// Whether this is a page turn (a PDF's), not a jump to [unit].
+  final bool turn;
 }
 
 final class ReaderSearchRequested extends ReaderMessage {
@@ -66,11 +132,6 @@ final class ReaderBookmarkToggled extends ReaderMessage {
   const ReaderBookmarkToggled();
 }
 
-final class ReaderBookmarkNoteRequested extends ReaderMessage {
-  const ReaderBookmarkNoteRequested([this.bookmark]);
-  final FlutterBookmark? bookmark;
-}
-
 final class ReaderBookmarkDeleted extends ReaderMessage {
   const ReaderBookmarkDeleted(this.id);
   final int id;
@@ -80,6 +141,75 @@ final class ReaderBookmarkNavigated extends ReaderMessage {
   const ReaderBookmarkNavigated(this.unit, {this.offset});
   final int unit;
   final int? offset;
+}
+
+/// Writes a new page note at the place being read.
+final class ReaderPageNoteRequested extends ReaderMessage {
+  const ReaderPageNoteRequested();
+}
+
+/// Writes the book's note, or edits it when the book has one.
+final class ReaderBookNoteRequested extends ReaderMessage {
+  const ReaderBookNoteRequested();
+}
+
+/// Saves the body a page note or book note was edited to in place.
+final class ReaderNoteSaved extends ReaderMessage {
+  const ReaderNoteSaved(this.id, this.body);
+  final String id;
+  final String body;
+}
+
+/// Starts editing note card [card]'s note in place, from [text]. Another
+/// card's edit is dropped.
+final class ReaderNoteEditStarted extends ReaderMessage {
+  const ReaderNoteEditStarted(this.card, this.text);
+  final String card;
+  final String text;
+}
+
+/// The note being edited in place now reads [text].
+final class ReaderNoteDraftChanged extends ReaderMessage {
+  const ReaderNoteDraftChanged(this.text);
+  final String text;
+}
+
+/// Drops the note being edited in place.
+final class ReaderNoteEditCancelled extends ReaderMessage {
+  const ReaderNoteEditCancelled();
+}
+
+/// Deletes a page note or book note.
+final class ReaderNoteDeleted extends ReaderMessage {
+  const ReaderNoteDeleted(this.id);
+  final String id;
+}
+
+/// Goes to the place a page note is written at.
+final class ReaderNoteNavigated extends ReaderMessage {
+  const ReaderNoteNavigated(this.unit, {this.offset});
+  final int unit;
+  final int? offset;
+}
+
+/// Lists this book's notes or every book's in the Notes panel.
+final class ReaderNotesScopeChanged extends ReaderMessage {
+  const ReaderNotesScopeChanged(this.scope);
+  final ReaderNotesScope scope;
+}
+
+/// Lists the next page of books in the Notes panel's All books, or retries
+/// the list or the page that failed.
+final class ReaderLibraryNotesMoreRequested extends ReaderMessage {
+  const ReaderLibraryNotesMoreRequested();
+}
+
+/// Opens a note from All books at its place: in this book the reader goes
+/// there, and another book is opened there.
+final class ReaderLibraryNoteOpened extends ReaderMessage {
+  const ReaderLibraryNoteOpened(this.book, this.note);
+  final FlutterLibraryBook book;
+  final FlutterNoteEntry note;
 }
 
 /// Toggles one of the three mutually exclusive reader panels (RD-13).
@@ -246,31 +376,99 @@ final class _ReaderBookmarkFinished extends ReaderMessage {
   final BigInt cancellation;
 }
 
-final class _ReaderBookmarkNoteEdited extends ReaderMessage {
-  const _ReaderBookmarkNoteEdited({
-    required this.generation,
-    required this.revision,
-    required this.bookId,
-    required this.unit,
-    required this.offset,
-    required this.bookmarkId,
-    required this.note,
+final class _ReaderNotesCompleted extends ReaderMessage {
+  const _ReaderNotesCompleted(this.generation, this.revision, this.items);
+  final int generation;
+  final int revision;
+  final List<FlutterNote> items;
+}
+
+final class _ReaderNotesFailed extends ReaderMessage {
+  const _ReaderNotesFailed(
+    this.generation,
+    this.revision,
+    this.error, {
+    this.persistence = false,
   });
   final int generation;
   final int revision;
-  final int bookId;
-  final int unit;
-  final int? offset;
-  final int? bookmarkId;
-  final String? note;
+  final String error;
+  final bool persistence;
 }
 
-final class _ReaderBookmarkNoteEditFailed extends ReaderMessage {
-  const _ReaderBookmarkNoteEditFailed(
+/// Where a note or highlight the shell asked for resolves in the open
+/// document: null when it is not there, or [error] when it could not be told.
+final class _ReaderPlaceResolved extends ReaderMessage {
+  const _ReaderPlaceResolved(
     this.generation,
     this.revision,
+    this.place, {
     this.error,
-  );
+  });
+  final int generation;
+  final int revision;
+  final ReaderPlace? place;
+  final String? error;
+}
+
+final class _ReaderPlaceResolveFinished extends ReaderMessage {
+  const _ReaderPlaceResolveFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
+final class _ReaderNotesFinished extends ReaderMessage {
+  const _ReaderNotesFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
+final class _ReaderLibraryNotesLoaded extends ReaderMessage {
+  const _ReaderLibraryNotesLoaded(
+    this.generation,
+    this.revision,
+    this.page, {
+    required this.append,
+  });
+  final int generation;
+  final int revision;
+  final FlutterLibraryNotesPage page;
+  final bool append;
+}
+
+final class _ReaderLibraryNotesFailed extends ReaderMessage {
+  const _ReaderLibraryNotesFailed(
+    this.generation,
+    this.revision,
+    this.error, {
+    required this.append,
+  });
+  final int generation;
+  final int revision;
+  final String error;
+  final bool append;
+}
+
+final class _ReaderLibraryNotesFinished extends ReaderMessage {
+  const _ReaderLibraryNotesFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
+/// The note editor's result for a page note or book note: [body] is null when
+/// the editor was dismissed.
+final class _ReaderPlaceNoteEdited extends ReaderMessage {
+  const _ReaderPlaceNoteEdited({
+    required this.generation,
+    required this.revision,
+    required this.target,
+    required this.body,
+  });
+  final int generation;
+  final int revision;
+  final _PlaceNoteTarget target;
+  final String? body;
+}
+
+final class _ReaderPlaceNoteEditFailed extends ReaderMessage {
+  const _ReaderPlaceNoteEditFailed(this.generation, this.revision, this.error);
   final int generation;
   final int revision;
   final String error;
@@ -461,6 +659,14 @@ final class ReaderAnnotationNoteRequested extends ReaderMessage {
   final String id;
 }
 
+/// Saves the note a highlight's card was edited to in place; an empty body
+/// removes the note.
+final class ReaderAnnotationNoteSaved extends ReaderMessage {
+  const ReaderAnnotationNoteSaved(this.id, this.body);
+  final String id;
+  final String body;
+}
+
 /// Completion from a controller-owned note editor effect.
 final class _ReaderAnnotationNoteCompleted extends ReaderMessage {
   const _ReaderAnnotationNoteCompleted(
@@ -571,6 +777,8 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     this.restorationError,
     this.offset,
     this.toolError,
+    this.returnPoint,
+    this.match,
   });
 
   final int generation;
@@ -586,6 +794,13 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final String? restorationError;
   final int? offset;
   final String? toolError;
+
+  /// Where the book was left, when it opened at another place.
+  final ReaderReturnPoint? returnPoint;
+
+  /// The search match the book opened at: its page, which on a PDF spread
+  /// may be the second, and where in that page's text it runs.
+  final ({int unit, int offset, int length})? match;
 }
 
 final class _ReaderImageDecoded extends ReaderMessage {
@@ -891,8 +1106,8 @@ final class _ReaderNoteEditorFinished extends ReaderMessage {
 
   /// Controller-wide ownership token of the editor that finished, so a stale
   /// completion cannot clear a newer editor's slot even when the per-operation
-  /// revisions collide (bookmark editors count with `_bookmarkRevision`,
-  /// selection/annotation editors with `_noteRevision`).
+  /// revisions collide (page and book note editors count with
+  /// `_notesRevision`, selection/annotation editors with `_noteRevision`).
   final int token;
 }
 

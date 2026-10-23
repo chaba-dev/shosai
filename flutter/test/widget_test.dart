@@ -2950,6 +2950,42 @@ void main() {
       await bridge.disposed.future;
     });
 
+    test('a book opened at a match on a spread\'s second page selects it '
+        'there', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+      );
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      controller.dispatch(
+        const ReaderViewportChanged(
+          ReaderLayout(width: 1000, spread: true),
+          height: 600,
+          devicePixelRatio: 1,
+        ),
+      );
+      controller.dispatch(
+        const ReaderOpenRequested(
+          '/tmp/book.pdf',
+          place: ReaderPlace(2, offset: 2, length: 3),
+        ),
+      );
+      await bridge.waitForOp(1);
+      await drain();
+      final model = controller.model;
+      expect(model.unit, 1, reason: 'the spread of pages 2 and 3');
+      expect(model.readingLocation.unit, 2);
+      expect(model.selectionPhase, ReaderSelectionPhase.selected);
+      final shift = model.pdfSpread!.textShift;
+      expect((model.anchor, model.focus), (2 + shift, 5 + shift));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
     test('the last spread of an odd-page PDF is saved as finished', () async {
       final bridge = _ControlledBridge(
         bookId: 7,
@@ -3015,6 +3051,47 @@ void main() {
         devicePixelRatio: devicePixelRatio,
       ),
     );
+
+    test('a search match a book opens at stays marked through its fitted '
+        'render', () async {
+      final bridge = _ControlledBridge(immediateLists: true);
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      void report(double height) => controller.dispatch(
+        ReaderViewportChanged(
+          const ReaderLayout(width: width),
+          height: height,
+          devicePixelRatio: 1,
+        ),
+      );
+      report(396);
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      controller.dispatch(
+        const ReaderOpenRequested(
+          '/tmp/book.pdf',
+          place: ReaderPlace(0, offset: 2, length: 3),
+        ),
+      );
+      while (bridge.renderScales.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      // The box grows while the page renders: once it is in, the page
+      // renders again to fit.
+      report(594);
+      held.complete(_buffer(BigInt.from(40)));
+      await drain();
+      await drain();
+      expect(bridge.renderScales, hasLength(2));
+      expect(bridge.renderScales.last, closeTo(.75, 1e-9));
+      expect(controller.model.selectionPhase, ReaderSelectionPhase.selected);
+      expect((controller.model.anchor, controller.model.focus), (2, 5));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
 
     test('a new pixel ratio renders the page again at it', () async {
       final (controller, bridge) = await open();
@@ -4269,25 +4346,9 @@ void main() {
     await tester.pumpAndSettle();
     bridge.updateCompleter = Completer<bool>();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Change color'));
+    await _chooseHighlightAction(tester, 'Change color');
     await tester.pump();
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
-          )
-          .onPressed,
-      isNull,
-    );
-    await tester.tap(find.byTooltip('Edit note'));
+    expect(_highlightActionsEnabled(tester), isFalse);
     expect(bridge.updateCalls, 1);
     bridge.updateCompleter!.complete(false);
     await tester.pumpAndSettle();
@@ -4297,30 +4358,7 @@ void main() {
     tester.view.devicePixelRatio = tester.view.devicePixelRatio == 2 ? 3 : 2;
     await tester.pump();
     await tester.pump();
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.trash2),
-          )
-          .onPressed,
-      isNull,
-    );
+    expect(_highlightActionsEnabled(tester), isFalse);
     pendingLayout.complete(_surface(BigInt.from(20), raster: true));
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());
@@ -4405,7 +4443,7 @@ void main() {
     final selectionCalls = bridge.selectionCalls;
     bridge.updateCompleter = Completer<bool>();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Change color'));
+    await _chooseHighlightAction(tester, 'Change color');
     await tester.pump();
 
     final originalScale = tester.view.devicePixelRatio;
@@ -4448,7 +4486,7 @@ void main() {
       final selectionCalls = bridge.selectionCalls;
       bridge.updateCompleter = Completer<bool>();
       await _openNotesPanel(tester);
-      await tester.tap(find.byTooltip('Change color'));
+      await _chooseHighlightAction(tester, 'Change color');
       await tester.pump();
 
       tester.view.devicePixelRatio = displayedScale == 2 ? 3 : 2;
@@ -4513,7 +4551,11 @@ void main() {
   testWidgets('note dialog dismisses through its exit transition safely', (
     tester,
   ) async {
-    final bridge = _ControlledBridge(initialAnnotations: [_annotation('one')]);
+    final bridge = _ControlledBridge(
+      bookId: 7,
+      initialAnnotations: [_annotation('one')],
+      immediateLists: true,
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
@@ -4527,13 +4569,14 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Edit note'));
+    await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
     await tester.pumpAndSettle();
+    expect(find.byType(ShadDialog), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
-    expect(find.text('Highlight note'), findsNothing);
+    expect(find.byType(ShadDialog), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
@@ -4616,7 +4659,7 @@ void main() {
       expect(bridge.selectionLayouts.last.scale, 2);
       _expectViewportBetweenEdges(tester);
       await _openNotesPanel(tester);
-      expect(find.text('Highlight 1 — recovered'), findsOneWidget);
+      expect(find.text('page 1 — recovered'), findsOneWidget);
       // Address the Notes panel's own scrollable: the reader chrome adds
       // scroll regions of its own (the bounded header and the dev-only entry).
       final notesScroll = find.descendant(
@@ -4624,17 +4667,17 @@ void main() {
         matching: find.byType(Scrollable),
       );
       await tester.scrollUntilVisible(
-        find.text('Highlight 1 — ambiguous'),
+        find.text('page 1 — ambiguous'),
         300,
         scrollable: notesScroll,
       );
-      expect(find.text('Highlight 1 — ambiguous'), findsOneWidget);
+      expect(find.text('page 1 — ambiguous'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('Highlight 1 — unavailable'),
+        find.text('page 1 — unavailable'),
         300,
         scrollable: notesScroll,
       );
-      expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
+      expect(find.text('page 1 — unavailable'), findsOneWidget);
 
       tester.view.physicalSize = const Size(1400, 1000);
       await tester.pumpAndSettle();
@@ -4645,7 +4688,7 @@ void main() {
       await tester.pumpWidget(app(brightness: Brightness.dark));
       await tester.pumpAndSettle();
       expect(bridge.selectionCalls, callsBeforeTheme);
-      expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
+      expect(find.text('page 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(app(brightness: Brightness.dark, textScale: 2));
       await tester.pumpAndSettle();
@@ -4661,7 +4704,7 @@ void main() {
       // scale of an already-open document stays the one it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
       _expectViewportBetweenEdges(tester);
-      expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
+      expect(find.text('page 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       await bridge.disposed.future;
@@ -4932,7 +4975,7 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    final highlight = find.widgetWithText(ShadButton, 'Highlight 1');
+    final highlight = _highlightCards();
     // The button's own focus, not the panel's, which holds it.
     bool onHighlight(FocusNode? focus) =>
         focus != null &&
@@ -5370,7 +5413,7 @@ void main() {
         await tester.tap(find.text('Open document'));
         await tester.pumpAndSettle();
         await _openNotesPanel(tester);
-        await tester.tap(find.byTooltip('Change color'));
+        await _chooseHighlightAction(tester, 'Change color');
         await tester.pump();
 
         tester.view.devicePixelRatio = tester.view.devicePixelRatio == 2
@@ -5654,7 +5697,7 @@ void main() {
           expect(bridge.createCalls, 1);
           expect(bridge.createdRanges.single, (BigInt.one, BigInt.from(8)));
           await _openNotesPanel(tester);
-          expect(find.text('Highlight 1'), findsOneWidget);
+          expect(_highlightCards(), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
 
@@ -5662,7 +5705,7 @@ void main() {
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
           await _openNotesPanel(tester);
-          expect(find.text('Highlight 1'), findsOneWidget);
+          expect(_highlightCards(), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
 
@@ -6231,10 +6274,13 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Edit note'));
+    await _chooseHighlightAction(tester, 'Add note');
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(ShadInput).last, 'Updated note');
-    await tester.tap(find.text('Save'));
+    await tester.enterText(
+      find.byKey(const ValueKey('reader-note-edit-field')),
+      'Updated note',
+    );
+    await tester.tap(find.byKey(const ValueKey('reader-note-edit-save')));
     await _waitUntil(() => bridge.updateCalls == 1);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -6254,7 +6300,7 @@ void main() {
 
     expect(bridge.listCalls, 3);
     await _openNotesPanel(tester);
-    expect(find.text('Highlight 1'), findsOneWidget);
+    expect(_highlightCards(), findsOneWidget);
     expect(find.textContaining('annotation list failed'), findsNothing);
     expect(
       find.text(
@@ -6324,6 +6370,7 @@ void main() {
     tester,
   ) async {
     final bridge = _ControlledBridge(
+      bookId: 7,
       initialAnnotations: [_annotation('one')],
       immediateLists: true,
     );
@@ -6340,9 +6387,9 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Edit note'));
+    await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
     await tester.pumpAndSettle();
-    expect(find.text('Save'), findsOneWidget);
+    expect(find.byType(ShadDialog), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
@@ -6565,144 +6612,155 @@ void main() {
     await bridge.disposed.future;
   });
 
-  test('bookmarks support note creation, editing, and deletion', () async {
+  test('page notes and book notes are written, edited and deleted', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-    final edits = Queue<String?>.from(['first note', 'edited note']);
+    final edits = Queue<String?>.from(['first note', 'about the book']);
+    final kinds = <FlutterNoteKind>[];
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      noteEditor: (_) async => edits.removeFirst(),
+      placeNoteEditor: (kind) async {
+        kinds.add(kind);
+        return edits.removeFirst();
+      },
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
-    final bookmark = _bookmark(11, note: 'first note');
-    bridge.bookmarkToggleCompleters.add(
-      Completer<FlutterBookmark?>()..complete(bookmark),
-    );
-    bridge.bookmarkListCompleters.add(
-      Completer<List<FlutterBookmark>>()..complete([bookmark]),
-    );
 
-    controller.dispatch(const ReaderBookmarkNoteRequested());
-    await _waitUntil(() => !controller.model.bookmarkBusy);
-    expect(bridge.toggledBookmarkNotes, ['first note']);
-    expect(bridge.updatedBookmarkNotes, isEmpty);
+    controller.dispatch(const ReaderPageNoteRequested());
+    await _waitUntil(() => controller.model.notes.length == 1);
+    final page = controller.model.notes.single;
+    expect(page.kind, FlutterNoteKind.page);
+    expect(page.unit, BigInt.zero);
+    expect(page.body, 'first note');
 
-    final edited = _bookmark(11, note: 'edited note');
-    bridge.bookmarkListCompleters.add(
-      Completer<List<FlutterBookmark>>()..complete([edited]),
-    );
-    controller.dispatch(ReaderBookmarkNoteRequested(bookmark));
-    await _waitUntil(() => !controller.model.bookmarkBusy);
-    expect(bridge.updatedBookmarkNotes.last, (11, 'edited note'));
+    controller.dispatch(const ReaderBookNoteRequested());
+    await _waitUntil(() => controller.model.notes.length == 2);
+    expect(controller.model.notes.last.kind, FlutterNoteKind.book);
+    expect(controller.model.notes.last.unit, isNull);
 
-    bridge.bookmarkListCompleters.add(
-      Completer<List<FlutterBookmark>>()..complete(const []),
-    );
-    controller.dispatch(const ReaderBookmarkDeleted(11));
-    await _waitUntil(() => !controller.model.bookmarkBusy);
-    expect(bridge.deletedBookmarkIds, [11]);
-    expect(controller.model.bookmarks, isEmpty);
+    // An edit in place is saved trimmed; an empty one is not saved.
+    controller.dispatch(ReaderNoteSaved(page.id, '  edited note '));
+    await _waitUntil(() => controller.model.notes.first.body == 'edited note');
+    controller.dispatch(ReaderNoteSaved(page.id, '  '));
+    expect(controller.model.notesBusy, isFalse);
+    expect(kinds, [FlutterNoteKind.page, FlutterNoteKind.book]);
+
+    controller.dispatch(ReaderNoteDeleted(page.id));
+    await _waitUntil(() => controller.model.notes.length == 1);
+    expect(bridge.deleteCalls, 1);
+    expect(controller.model.notesBusy, isFalse);
+    expect(controller.model.toolError, isNull);
     controller.dispose();
     await bridge.disposed.future;
   });
 
-  test(
-    'toggling a noted bookmark deletes it instead of creating another',
-    () async {
-      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-      final noted = _bookmark(11, note: 'keep');
-      bridge.bookmarkListCompleters.add(
-        Completer<List<FlutterBookmark>>()..complete([noted]),
-      );
-      final controller = _epubController(bridge);
-      controller.dispatch(
-        const ReaderOpenRequested('/tmp/book.epub', bookId: 7),
-      );
-      await bridge.waitForOp(1);
-      await _waitUntil(() => controller.model.bookmarks.isNotEmpty);
-      bridge.bookmarkListCompleters.add(
-        Completer<List<FlutterBookmark>>()..complete(const []),
-      );
+  test('a dismissed or empty note editor writes nothing', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final edits = Queue<String?>.from([null, '   ']);
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      placeNoteEditor: (_) async => edits.removeFirst(),
+    );
+    await _openControlled(controller, bridge, '/tmp/book.epub');
 
-      controller.dispatch(const ReaderBookmarkToggled());
-      await _waitUntil(() => !controller.model.bookmarkBusy);
+    controller.dispatch(const ReaderPageNoteRequested());
+    await _waitUntil(() => !controller.model.notesBusy);
+    controller.dispatch(const ReaderBookNoteRequested());
+    await _waitUntil(() => !controller.model.notesBusy);
 
-      expect(bridge.deletedBookmarkIds, [11]);
-      expect(bridge.toggledBookmarkOffsets, isEmpty);
-      controller.dispose();
-      await bridge.disposed.future;
-    },
-  );
+    expect(edits, isEmpty);
+    expect(bridge.placeNotes, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
 
-  test(
-    'stale bookmark note dialog cannot mutate a replacement document',
-    () async {
-      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-      final editor = Completer<String?>();
-      final controller = ReaderController(
-        bridge: bridge,
-        decoder: (pixels, {required width, required height}) => _testImage(),
-        noteEditor: (_) => editor.future,
-      );
-      await _openControlled(controller, bridge, '/tmp/one.epub');
-      controller.dispatch(const ReaderBookmarkNoteRequested());
-      controller.dispatch(
-        const ReaderOpenRequested('/tmp/two.epub', bookId: 7),
-      );
-      editor.complete('must not leak');
-      await bridge.waitForOp(2);
+  test('toggling a bookmarked place deletes its bookmark', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    bridge.bookmarkListCompleters.add(
+      Completer<List<FlutterBookmark>>()..complete([_bookmark(11)]),
+    );
+    final controller = _epubController(bridge);
+    controller.dispatch(const ReaderOpenRequested('/tmp/book.epub', bookId: 7));
+    await bridge.waitForOp(1);
+    await _waitUntil(() => controller.model.bookmarks.isNotEmpty);
+    bridge.bookmarkListCompleters.add(
+      Completer<List<FlutterBookmark>>()..complete(const []),
+    );
 
-      expect(bridge.updatedBookmarkNotes, isEmpty);
-      expect(bridge.toggledBookmarkOffsets, isEmpty);
-      controller.dispose();
-      await bridge.disposed.future;
-    },
-  );
+    controller.dispatch(const ReaderBookmarkToggled());
+    await _waitUntil(() => !controller.model.bookmarkBusy);
 
-  test('suspending cancels a bookmark note draft without a write', () async {
+    expect(bridge.deletedBookmarkIds, [11]);
+    expect(bridge.toggledBookmarkOffsets, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('a stale note dialog cannot write to a replacement document', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final editor = Completer<String?>();
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      noteEditor: (_) => editor.future,
+    );
+    await _openControlled(controller, bridge, '/tmp/one.epub');
+    controller.dispatch(const ReaderPageNoteRequested());
+    controller.dispatch(const ReaderOpenRequested('/tmp/two.epub', bookId: 7));
+    editor.complete('must not leak');
+    await bridge.waitForOp(2);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(bridge.placeNotes, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('suspending cancels a note draft without a write', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
     final editor = Completer<String?>();
     var cancellations = 0;
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      bookmarkNoteEditor: (_) => editor.future,
+      placeNoteEditor: (_) => editor.future,
       noteEditorCanceller: () => cancellations += 1,
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
 
-    controller.dispatch(const ReaderBookmarkNoteRequested());
+    controller.dispatch(const ReaderPageNoteRequested());
+    expect(controller.model.modalEffect, ReaderModalEffect.placeNote);
     controller.dispatch(const ReaderSuspended());
     editor.complete('must not save');
     await Future<void>.delayed(Duration.zero);
 
     expect(cancellations, 1);
-    expect(bridge.toggledBookmarkNotes, isEmpty);
-    expect(bridge.updatedBookmarkNotes, isEmpty);
-    expect(controller.model.toolError, contains('bookmark note was not saved'));
+    expect(bridge.placeNotes, isEmpty);
+    expect(controller.model.toolError, contains('note was not saved'));
     controller.dispose();
     await bridge.disposed.future;
   });
 
-  test('dispose drains an in-flight bookmark note creation', () async {
+  test('dispose drains an in-flight note write', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-    final create = Completer<FlutterBookmark?>();
-    bridge.bookmarkToggleCompleters.add(create);
+    final gate = Completer<void>();
+    bridge.noteWriteGate = gate;
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      bookmarkNoteEditor: (_) async => 'note',
+      placeNoteEditor: (_) async => 'note',
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
 
-    controller.dispatch(const ReaderBookmarkNoteRequested());
-    await _waitUntil(() => bridge.toggledBookmarkNotes.isNotEmpty);
+    controller.dispatch(const ReaderBookNoteRequested());
+    await _waitUntil(() => bridge.noteWrites == 1);
     controller.dispose();
     expect(bridge.isDisposed, isFalse);
 
-    create.complete(_bookmark(11, note: 'note'));
+    gate.complete();
     await bridge.disposed.future;
-    expect(bridge.toggledBookmarkNotes, ['note']);
+    expect(bridge.placeNotes.single.body, 'note');
   });
 
   test(
@@ -6908,6 +6966,67 @@ void main() {
     expect(controller.model.openPanel, isNull);
     controller.dispose();
     await bridge.disposed.future;
+  });
+
+  testWidgets('three PDF page turns away from a jump close Back', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      bookId: 7,
+      logicalUnitCount: 8,
+      immediateLists: true,
+    );
+    final requests = ReaderPlaceRequests();
+    Future<void> disposeReader() async {
+      if (bridge.disposed.isCompleted) return;
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+    }
+
+    addTearDown(disposeReader);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/book.pdf',
+          initialBookId: 7,
+          placeRequests: requests,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final back = find.byKey(const ValueKey('reader-back-pill'));
+
+    requests.go(const ReaderPlace(5));
+    await tester.pumpAndSettle();
+    expect(find.text('Back to page 1'), findsOneWidget);
+    for (var turn = 0; turn < 3; turn += 1) {
+      expect(back, findsOneWidget, reason: 'after $turn turns');
+      await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+      await tester.pumpAndSettle();
+    }
+    expect(back, findsNothing);
+
+    // A jump from where the last one left starts the three turns over.
+    requests.go(const ReaderPlace(0));
+    await tester.pumpAndSettle();
+    expect(find.text('Back to page 3'), findsOneWidget);
+    for (var turn = 0; turn < 2; turn += 1) {
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pumpAndSettle();
+    }
+    requests.go(const ReaderPlace(5));
+    await tester.pumpAndSettle();
+    for (var turn = 0; turn < 3; turn += 1) {
+      expect(back, findsOneWidget, reason: 'after $turn turns');
+      await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+      await tester.pumpAndSettle();
+    }
+    expect(back, findsNothing);
+
+    await disposeReader();
   });
 
   testWidgets('persistence errors fit a compact reader at large text scale', (
@@ -7418,11 +7537,10 @@ FlutterAnnotation _annotation(String id, {int unit = 0}) => FlutterAnnotation(
   color: FlutterHighlightColor.yellow,
 );
 
-FlutterBookmark _bookmark(int id, {String? note}) => FlutterBookmark(
+FlutterBookmark _bookmark(int id) => FlutterBookmark(
   id: id,
   bookId: 7,
   unit: BigInt.zero,
-  note: note,
   color: 'yellow',
   createdAt: '2026-09-11T00:00:00Z',
 );
@@ -7484,6 +7602,38 @@ Future<void> _openNotesPanel(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
   await tester.pumpAndSettle();
 }
+
+/// Chooses [action] from a highlight card's menu in the Notes panel.
+Future<void> _chooseHighlightAction(
+  WidgetTester tester,
+  String action, {
+  String id = 'one',
+}) async {
+  await tester.tap(find.byKey(ValueKey('reader-annotation-$id-actions')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(action).last);
+}
+
+/// Whether a highlight card's actions can be chosen.
+bool _highlightActionsEnabled(WidgetTester tester, {String id = 'one'}) =>
+    tester
+        .widget<ShadButton>(
+          find.descendant(
+            of: find.byKey(ValueKey('reader-annotation-$id-actions')),
+            matching: find.byType(ShadButton),
+          ),
+        )
+        .onPressed !=
+    null;
+
+/// The Notes panel's highlight cards, by the control that opens each.
+Finder _highlightCards() => find.byWidgetPredicate(
+  (widget) => switch (widget.key) {
+    ValueKey<String>(:final value) =>
+      value.startsWith('reader-annotation-') && value.endsWith('-open'),
+    _ => false,
+  },
+);
 
 Future<void> _waitUntil(bool Function() condition) async {
   while (!condition()) {
@@ -7621,8 +7771,6 @@ final class _ControlledBridge
   final savedReadingStates = <FlutterReadingState>[];
   final savedReadingStateUnitCounts = <BigInt>[];
   final toggledBookmarkOffsets = <BigInt?>[];
-  final toggledBookmarkNotes = <String?>[];
-  final updatedBookmarkNotes = <(int, String?)>[];
   final deletedBookmarkIds = <int>[];
   final searchCompleters = Queue<Completer<List<FlutterSearchMatch>>>();
   final associationCompleters =
@@ -7755,28 +7903,12 @@ final class _ControlledBridge
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) async {
     toggledBookmarkOffsets.add(offset);
-    toggledBookmarkNotes.add(note);
     if (bookmarkToggleCompleters.isNotEmpty) {
       return bookmarkToggleCompleters.removeFirst().future;
     }
     return null;
-  }
-
-  @override
-  Future<void> updateBookmark({
-    required int id,
-    String? title,
-    String? note,
-  }) async {
-    updatedBookmarkNotes.add((id, note));
-  }
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) async {
-    updatedBookmarkNotes.add((id, note));
   }
 
   @override
@@ -8057,7 +8189,10 @@ final class _ControlledBridge
   }) async {
     deleteCalls += 1;
     final changed = await (deleteCompleter?.future ?? Future.value(true));
-    if (changed) storedAnnotations.removeWhere((item) => item.id == id);
+    if (changed) {
+      storedAnnotations.removeWhere((item) => item.id == id);
+      placeNotes.removeWhere((item) => item.id == id);
+    }
     return changed;
   }
 

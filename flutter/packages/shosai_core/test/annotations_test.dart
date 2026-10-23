@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:test/test.dart';
 
 import 'support/library_fixtures.dart';
+import 'support/temp_store.dart';
 
 const _chapter = 'OEBPS/chapter1.xhtml';
 const _text = 'The lead Café text tail of the chapter.';
@@ -571,12 +574,12 @@ void main() {
         _select(text, text.substring(6, text.length - 6)),
       );
       await t.executeMany(
-        '''INSERT INTO annotations (id, version_id, format, anchor_version,
-             original_quote, normalization_profile, normalized_exact,
-             normalized_prefix, normalized_suffix, color,
+        '''INSERT INTO annotations (id, version_id, format, kind,
+             anchor_version, original_quote, normalization_profile,
+             normalized_exact, normalized_prefix, normalized_suffix, color,
              epub_spine_index, epub_resource_path, epub_scalar_start,
              epub_scalar_end)
-           SELECT ?, version_id, format, anchor_version, original_quote,
+           SELECT ?, version_id, format, kind, anchor_version, original_quote,
              normalization_profile, normalized_exact, normalized_prefix,
              normalized_suffix, color, epub_spine_index, epub_resource_path,
              epub_scalar_start, epub_scalar_end
@@ -953,6 +956,686 @@ void main() {
     });
   });
 
+  group('notes', () {
+    test('page and book notes round trip in an EPUB', () async {
+      final bookId = await book('epub');
+      const place = EpubPlaceAnchor(
+        spineIndex: 0,
+        resourcePath: _chapter,
+        offset: 9,
+      );
+
+      final page = await annotations.createNote(bookId, place, 'Read again');
+      final whole = await annotations.createNote(
+        bookId,
+        const BookAnchor(),
+        'Reading group pick',
+      );
+
+      expect(page.annotation.kind, AnnotationKind.pageNote);
+      expect(page.annotation.anchor, place);
+      expect(page.annotation.color, isNull);
+      expect(page.annotation.quote, isNull);
+      expect((page.start, page.end), (9, null));
+      expect(whole.annotation.kind, AnnotationKind.bookNote);
+      expect(whole.unit, isNull);
+
+      final listed = await annotations.list(bookId, _epubText(_text));
+      expect(listed, [page, whole]);
+      final highlights = await annotations.create(
+        bookId,
+        _select(_text, 'lead'),
+      );
+      expect(
+        await annotations.list(
+          bookId,
+          _epubText(_text),
+          kinds: {AnnotationKind.highlight},
+        ),
+        [highlights],
+      );
+      expect(
+        await annotations.list(
+          bookId,
+          _epubText(_text),
+          kinds: {AnnotationKind.pageNote, AnnotationKind.bookNote},
+        ),
+        [page, whole],
+      );
+      await annotations.delete(bookId, highlights.id);
+
+      expect(await annotations.updateNote(bookId, page.id, 'Twice'), isTrue);
+      expect(await annotations.delete(bookId, whole.id), isTrue);
+      final [updated] = await annotations.list(bookId, _epubText(_text));
+      expect(updated.annotation.body, 'Twice');
+      expect(
+        updated.annotation.modifiedAt.compareTo(page.annotation.modifiedAt),
+        greaterThan(0),
+      );
+    });
+
+    test('a PDF page note sits on its page', () async {
+      final bookId = await book('pdf');
+      final created = await annotations.createNote(
+        bookId,
+        const PdfPageAnchor(1),
+        'Fig. 1 is the model',
+      );
+
+      final [listed] = await annotations.list(
+        bookId,
+        FakeText([const UnitText('one'), const UnitText('two')]),
+      );
+      final [gone] = await annotations.list(
+        bookId,
+        FakeText([const UnitText('one')]),
+      );
+
+      expect(created.annotation.anchor, const PdfPageAnchor(1));
+      expect(listed.resolution, AnnotationResolution.exact);
+      expect(listed.unit, 1);
+      expect(gone.resolution, AnnotationResolution.orphaned);
+    });
+
+    test('notes and highlights are updated only as what they are', () async {
+      final bookId = await book('epub');
+      final highlight = await annotations.create(
+        bookId,
+        _select(_text, 'lead'),
+      );
+      final note = await annotations.createNote(
+        bookId,
+        const BookAnchor(),
+        'Whole',
+      );
+
+      expect(await annotations.updateNote(bookId, highlight.id, 'x'), isFalse);
+      expect(
+        await annotations.update(bookId, note.id, color: HighlightColor.blue),
+        isFalse,
+      );
+      expect(
+        (await annotations.list(
+          bookId,
+          _epubText(_text),
+        )).map((a) => (a.annotation.color, a.annotation.body)),
+        [(HighlightColor.yellow, null), (null, 'Whole')],
+      );
+    });
+
+    test('notes need words and a valid place', () async {
+      final bookId = await book('epub');
+      final pdfBook = await book('pdf');
+      for (final (id, anchor, body) in [
+        (bookId, const BookAnchor(), ''),
+        (bookId, const BookAnchor(), ' \n\t'),
+        (
+          bookId,
+          const EpubPlaceAnchor(
+            spineIndex: -1,
+            resourcePath: _chapter,
+            offset: 0,
+          ),
+          'x',
+        ),
+        (
+          bookId,
+          const EpubPlaceAnchor(
+            spineIndex: 0,
+            resourcePath: _chapter,
+            offset: -1,
+          ),
+          'x',
+        ),
+        (
+          bookId,
+          const EpubPlaceAnchor(spineIndex: 0, resourcePath: null, offset: 0),
+          'x',
+        ),
+        (
+          bookId,
+          const EpubPlaceAnchor(spineIndex: 0, resourcePath: '', offset: 0),
+          'x',
+        ),
+        (pdfBook, const PdfPageAnchor(-1), 'x'),
+        // A place of the other format.
+        (
+          pdfBook,
+          const EpubPlaceAnchor(
+            spineIndex: 0,
+            resourcePath: _chapter,
+            offset: 0,
+          ),
+          'x',
+        ),
+        (bookId, const PdfPageAnchor(0), 'x'),
+      ]) {
+        await expectLater(
+          annotations.createNote(id, anchor, body),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+          reason: '$anchor $body',
+        );
+      }
+      final note = await annotations.createNote(
+        bookId,
+        const BookAnchor(),
+        'kept',
+      );
+      await expectLater(
+        annotations.updateNote(bookId, note.id, '  '),
+        throwsCoreError(CoreErrorKind.invalidRequest),
+      );
+      expect(await t.count('annotations'), 1);
+    });
+
+    test(
+      'page notes on another content stay in their chapter or page',
+      () async {
+        final original = await book('epub');
+        final edition = await book('epub');
+        final kept = await annotations.createNote(
+          original,
+          const EpubPlaceAnchor(
+            spineIndex: 0,
+            resourcePath: _chapter,
+            offset: 30,
+          ),
+          'kept',
+        );
+        final moved = await annotations.createNote(
+          original,
+          const EpubPlaceAnchor(
+            spineIndex: 1,
+            resourcePath: 'OEBPS/chapter2.xhtml',
+            offset: 0,
+          ),
+          'moved',
+        );
+        await annotations.associate(await versionOf(edition), edition);
+
+        final text = FakeText([
+          const UnitText('A shorter chapter.', resourcePath: _chapter),
+          const UnitText('Another', resourcePath: 'OEBPS/other.xhtml'),
+        ]);
+        final listed = await annotations.list(edition, text);
+
+        expect(listed.map((a) => a.id), [kept.id, moved.id]);
+        expect(listed[0].resolution, AnnotationResolution.recovered);
+        // At most at the chapter's end.
+        expect(listed[0].start, 18);
+        expect(listed[1].resolution, AnnotationResolution.orphaned);
+        expect(text.requested, [0, 1]);
+
+        final pdfOriginal = await book('pdf');
+        final pdfEdition = await book('pdf');
+        await annotations.createNote(
+          pdfOriginal,
+          const PdfPageAnchor(0),
+          'page',
+        );
+        await annotations.associate(await versionOf(pdfEdition), pdfEdition);
+        final [page] = await annotations.list(
+          pdfEdition,
+          FakeText([const UnitText('changed')]),
+        );
+        expect(page.resolution, AnnotationResolution.recovered);
+      },
+    );
+
+    test(
+      'a page note with a known chapter is not kept in an unknown one',
+      () async {
+        final original = await book('epub');
+        final edition = await book('epub');
+        final known = await annotations.createNote(
+          original,
+          const EpubPlaceAnchor(
+            spineIndex: 0,
+            resourcePath: _chapter,
+            offset: 10,
+          ),
+          'known',
+        );
+        await annotations.associate(await versionOf(edition), edition);
+
+        final [listed] = await annotations.list(
+          edition,
+          FakeText([const UnitText('An unrelated chapter')]),
+        );
+
+        expect(listed.id, known.id);
+        expect(listed.resolution, AnnotationResolution.orphaned);
+      },
+    );
+
+    test('page notes on another content share the resolution budget', () async {
+      final original = await book('epub');
+      final edition = await book('epub');
+      // 17 chapters of 4 Mi scalars each exceed the 64 Mi budget.
+      const units = 17;
+      for (var spine = 0; spine < units; spine++) {
+        await annotations.createNote(
+          original,
+          EpubPlaceAnchor(
+            spineIndex: spine,
+            resourcePath: 'c$spine.xhtml',
+            offset: 0,
+          ),
+          'note $spine',
+        );
+      }
+      await annotations.associate(await versionOf(edition), edition);
+      final chapter = 'a' * (maxAnchorResolutionWork ~/ 16);
+
+      await expectLater(
+        annotations.list(
+          edition,
+          FakeText([
+            for (var spine = 0; spine < units; spine++)
+              UnitText(chapter, resourcePath: 'c$spine.xhtml'),
+          ]),
+        ),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+    });
+
+    test('a summary counts notes and quotes the latest note', () async {
+      final bookId = await book('epub');
+      await annotations.create(bookId, _select(_text, 'lead'));
+      await annotations.createNote(bookId, const BookAnchor(), 'Whole book');
+
+      expect(
+        await annotations.summary(bookId),
+        const NotesSummary(2, 'Whole book'),
+      );
+    });
+  });
+
+  group('library notes', () {
+    Future<void> read(int bookId, String at) =>
+        t.execute('UPDATE books SET last_read = ? WHERE id = ?', [at, bookId]);
+
+    test('lists books with notes, most recently read first', () async {
+      final older = await book('epub', title: 'Older');
+      final newer = await book('pdf', title: 'Newer');
+      final unread = await book('epub', title: 'Unread');
+      final empty = await book('epub', title: 'Empty');
+      await read(older, '2026-01-01T00:00:00.000Z');
+      await read(newer, '2026-02-01T00:00:00.000Z');
+      await read(empty, '2026-03-01T00:00:00.000Z');
+
+      final later = await annotations.create(
+        older,
+        _select(_text, 'tail', spineIndex: 2),
+        color: HighlightColor.green,
+        body: 'Noted',
+      );
+      final place = await annotations.createNote(
+        older,
+        const EpubPlaceAnchor(spineIndex: 0, resourcePath: _chapter, offset: 4),
+        'Start here',
+      );
+      final first = await annotations.create(older, _select(_text, 'Café'));
+      final whole = await annotations.createNote(
+        older,
+        const BookAnchor(),
+        'Whole book',
+      );
+      final page = await annotations.createNote(
+        newer,
+        const PdfPageAnchor(3),
+        'Fig. 1',
+      );
+      await annotations.createNote(unread, const BookAnchor(), 'Soon');
+      final gone = await annotations.createNote(
+        empty,
+        const BookAnchor(),
+        'Gone',
+      );
+      await annotations.delete(empty, gone.id);
+
+      final listed = await annotations.libraryNotes();
+
+      expect(listed.hasMore, isFalse);
+      expect(listed.books.map((b) => (b.book.title, b.book.format)), [
+        ('Newer', BookFormat.pdf),
+        ('Older', BookFormat.epub),
+        ('Unread', BookFormat.epub),
+      ]);
+      expect(
+        listed.books[0].notes.single,
+        (NoteEntry(
+          id: page.id,
+          kind: AnnotationKind.pageNote,
+          color: null,
+          quote: null,
+          body: 'Fig. 1',
+          unit: 3,
+          offset: null,
+          createdAt: page.annotation.createdAt,
+          modifiedAt: page.annotation.modifiedAt,
+        )),
+      );
+      final notes = listed.books[1].notes;
+      // The book note, then each unit's notes by where they start.
+      expect(notes.map((n) => n.id), [whole.id, place.id, first.id, later.id]);
+      expect(notes.map((n) => (n.unit, n.offset)), [
+        (null, null),
+        (0, 4),
+        (0, 9),
+        (2, 19),
+      ]);
+      expect(notes[3].quote, 'tail');
+      expect(notes[3].color, HighlightColor.green);
+      expect(notes[3].body, 'Noted');
+      expect(listed.books[1].book.id, older);
+    });
+
+    test('pages through the books', () async {
+      for (var index = 0; index < 3; index++) {
+        final id = await book('epub', title: 'Book $index');
+        await read(id, '2026-01-0${index + 1}T00:00:00.000Z');
+        await annotations.createNote(id, const BookAnchor(), 'Note $index');
+      }
+
+      final first = await annotations.libraryNotes(limit: 2);
+      final second = await annotations.libraryNotes(offset: 2, limit: 2);
+
+      expect(first.books.map((b) => b.book.title), ['Book 2', 'Book 1']);
+      expect(first.hasMore, isTrue);
+      expect(second.books.map((b) => b.book.title), ['Book 0']);
+      expect(second.hasMore, isFalse);
+      for (final (offset, limit) in [(-1, 1), (0, 0), (0, 101)]) {
+        await expectLater(
+          annotations.libraryNotes(offset: offset, limit: limit),
+          throwsCoreError(CoreErrorKind.invalidRequest),
+        );
+      }
+      final cancelled = CancellationToken()..cancel();
+      await expectLater(
+        annotations.libraryNotes(cancellation: cancelled),
+        throwsCoreError(CoreErrorKind.cancelled),
+      );
+    });
+
+    test(
+      'a page follows the books listed before it only while they lead',
+      () async {
+        final ids = <int>[];
+        for (var index = 0; index < 3; index++) {
+          final id = await book('epub', title: 'Book $index');
+          await read(id, '2026-01-0${index + 1}T00:00:00.000Z');
+          await annotations.createNote(id, const BookAnchor(), 'Note $index');
+          ids.add(id);
+        }
+        final first = await annotations.libraryNotes(limit: 2);
+        final shown = [for (final b in first.books) b.book.id];
+
+        final next = await annotations.libraryNotes(limit: 2, after: shown);
+        expect(next.changed, isFalse);
+        expect(next.books.map((b) => b.book.title), ['Book 0']);
+
+        // Reading Book 0 moves it to the front: the page would repeat Book 1
+        // and never list Book 0.
+        await read(ids[0], '2026-02-01T00:00:00.000Z');
+        final changed = await annotations.libraryNotes(limit: 2, after: shown);
+        expect(changed.changed, isTrue);
+        expect(changed.books, isEmpty);
+      },
+    );
+  });
+
+  group('migration', () {
+    test('highlights written before notes existed stay highlights', () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      final before = await Store.open(
+        path,
+        migrations: schemaMigrations.where((m) => m.version <= 5).toList(),
+      );
+      final hash = 'b' * 64;
+      await before.transaction((db) {
+        db.execute(
+          '''INSERT INTO books (title, format, file_path, storage_kind,
+               original_path, content_hash, file_size)
+             VALUES ('Old', 'epub', '/old.epub', 'referenced', '/old.epub', ?, 0)''',
+          [hash],
+        );
+        db.execute(
+          "INSERT INTO annotation_documents (id, format) VALUES (?, 'epub')",
+          [_unknownVersion],
+        );
+        db.execute(
+          '''INSERT INTO annotation_document_versions
+               (id, document_id, format, content_hash, title)
+             VALUES (?, ?, 'epub', ?, 'Old')''',
+          [_unknownVersion, _unknownVersion, hash],
+        );
+        db.execute(
+          '''INSERT INTO annotations (id, version_id, format, anchor_version,
+               original_quote, normalization_profile, normalized_exact,
+               normalized_prefix, normalized_suffix, color, body,
+               epub_spine_index, epub_resource_path, epub_scalar_start,
+               epub_scalar_end)
+             VALUES ('33333333-3333-4333-8333-333333333333', ?, 'epub', 1,
+               'lead', 'shosai-quote-v1', 'lead', 'The', 'Café text', 'pink',
+               'Kept', 0, ?, 4, 8)''',
+          [_unknownVersion, _chapter],
+        );
+      });
+      await before.close();
+
+      final store = await Store.open(path);
+      addTearDown(store.close);
+      final [bookRow] = await store.read(
+        (db) => [
+          for (final row in db.select('SELECT id FROM books')) row.columnAt(0),
+        ],
+      );
+      final [listed] = await Annotations(
+        store,
+      ).list(bookRow as int, _epubText(_text));
+
+      expect(store.schemaVersion, greaterThanOrEqualTo(6));
+      expect(listed.annotation.kind, AnnotationKind.highlight);
+      expect(listed.annotation.color, HighlightColor.pink);
+      expect(listed.annotation.body, 'Kept');
+      expect(listed.resolution, AnnotationResolution.exact);
+      expect((listed.start, listed.end), (4, 8));
+    });
+  });
+
+  group('bookmark notes', () {
+    test('become page notes where their bookmarks are', () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      final before = await Store.open(
+        path,
+        migrations: schemaMigrations.where((m) => m.version <= 7).toList(),
+      );
+      final epubHash = 'd' * 64;
+      final pdfHash = 'e' * 64;
+      await before.transaction((db) {
+        for (final (hash, format) in [(epubHash, 'epub'), (pdfHash, 'pdf')]) {
+          db.execute(
+            '''INSERT INTO books (title, format, file_path, storage_kind,
+                 original_path, content_hash, file_size)
+               VALUES (?, ?, ?, 'referenced', ?, ?, 0)''',
+            ['Book $format', format, '/b.$format', '/b.$format', hash],
+          );
+        }
+        for (final (hash, unit, offset, note) in [
+          (epubHash, 2, 40, 'Chapter three'),
+          (epubHash, 0, null, 'Opening'),
+          (epubHash, 1, null, null),
+          (epubHash, 4, null, ''),
+          (pdfHash, 5, null, 'Fig. 1'),
+          // A content no longer in the library.
+          ('f' * 64, 0, null, 'Lost'),
+        ]) {
+          db.execute(
+            '''INSERT INTO bookmarks (content_hash, unit, location_offset, note)
+               VALUES (?, ?, ?, ?)''',
+            [hash, unit, offset, note],
+          );
+        }
+      });
+      await before.close();
+
+      final store = await Store.open(path);
+      addTearDown(store.close);
+      final notes = (await Annotations(store).libraryNotes()).books;
+
+      final byFormat = {for (final book in notes) book.book.format: book};
+      expect(
+        byFormat[BookFormat.epub]!.notes.map(
+          (n) => (n.kind, n.unit, n.offset, n.body, n.color),
+        ),
+        [
+          (AnnotationKind.pageNote, 0, 0, 'Opening', null),
+          (AnnotationKind.pageNote, 2, 40, 'Chapter three', null),
+        ],
+      );
+      expect(
+        byFormat[BookFormat.pdf]!.notes.map((n) => (n.unit, n.offset, n.body)),
+        [(5, null, 'Fig. 1')],
+      );
+      expect(
+        byFormat[BookFormat.epub]!.notes.first.id,
+        matches(
+          RegExp(
+            r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-'
+            r'[0-9a-f]{12}$',
+          ),
+        ),
+      );
+      final counts = await store.read(
+        (db) => [
+          for (final table in [
+            'bookmarks',
+            'annotation_documents',
+            'annotation_document_versions',
+          ])
+            db.select('SELECT count(*) FROM $table').single.columnAt(0),
+        ],
+      );
+      expect(counts, [6, 2, 2]);
+      final columns = await store.read(
+        (db) => [
+          for (final row in db.select('PRAGMA table_info(bookmarks)'))
+            row['name'],
+        ],
+      );
+      expect(columns, isNot(contains('note')));
+      // A migrated EPUB note follows its spine index alone.
+      final [_, listed] = await Annotations(store).list(
+        byFormat[BookFormat.epub]!.book.id,
+        FakeText([
+          const UnitText('First', resourcePath: _chapter),
+          const UnitText('Second'),
+          const UnitText('Third'),
+        ]),
+      );
+      expect(
+        listed.annotation.anchor,
+        const EpubPlaceAnchor(spineIndex: 0, resourcePath: null, offset: 0),
+      );
+      expect(listed.resolution, AnnotationResolution.exact);
+    });
+
+    /// A library migrated from schema 7 holding [notes] bookmark notes for
+    /// sample.epub, whose book was removed, and that file's path and hash.
+    Future<(Store, Library, String, String)> removedWithNotes(int notes) async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      final fixture = '${directory.path}/sample.epub';
+      File(fixturePath('sample.epub')).copySync(fixture);
+      final hash = sha256.convert(File(fixture).readAsBytesSync()).toString();
+      final before = await Store.open(
+        path,
+        migrations: schemaMigrations.where((m) => m.version <= 7).toList(),
+      );
+      await before.transaction((db) {
+        for (var index = 0; index < notes; index++) {
+          db.execute(
+            '''INSERT INTO bookmarks (content_hash, unit, location_offset, note,
+                 created_at)
+               VALUES (?, 1, ?, 'Kept', '2026-01-02T03:04:05.000Z')''',
+            [hash, 12 + index],
+          );
+        }
+      });
+      await before.close();
+
+      final store = await Store.open(path);
+      addTearDown(store.close);
+      final library = Library(
+        store,
+        managedDirectory: '${directory.path}/books',
+        inspectors: const {BookFormat.epub: EpubInspector()},
+      );
+      return (store, library, canonicalBookPath(fixture), hash);
+    }
+
+    test('of a removed book wait for it to be imported again', () async {
+      final (store, library, path, _) = await removedWithNotes(1);
+      final item = await library.importFile(path, managed: false);
+
+      final [notes] = (await Annotations(store).libraryNotes()).books;
+      expect(notes.book.id, item.book!.id);
+      expect(
+        notes.notes.map((n) => (n.kind, n.unit, n.offset, n.body, n.createdAt)),
+        [(AnnotationKind.pageNote, 1, 12, 'Kept', '2026-01-02T03:04:05.000Z')],
+      );
+      expect(await countRows(store, 'pending_bookmark_notes'), 0);
+    });
+
+    test(
+      'that do not fit or match their content leave the import undone',
+      () async {
+        // Annotated outside the library as a PDF.
+        final (store, library, path, hash) = await removedWithNotes(1);
+        final annotations = Annotations(store);
+        await annotations.createNoteInContent(
+          AnnotatedContent(
+            contentHash: hash,
+            format: BookFormat.pdf,
+            title: 'sample.pdf',
+          ),
+          const PdfPageAnchor(0),
+          'As a PDF',
+        );
+        final mismatched = await library.importFile(path, managed: false);
+        expect(mismatched.error, contains('annotated as PDF'));
+        expect(await countRows(store, 'books'), 0);
+        expect(await countRows(store, 'pending_bookmark_notes'), 1);
+        expect(await countRows(store, 'annotations'), 1);
+
+        // One more note than a reader loads.
+        final (full, fullLibrary, fullPath, fullHash) = await removedWithNotes(
+          maxAnnotationsPerDocument,
+        );
+        await Annotations(full).createNoteInContent(
+          AnnotatedContent(
+            contentHash: fullHash,
+            format: BookFormat.epub,
+            title: 'sample.epub',
+          ),
+          const BookAnchor(),
+          'Opened directly',
+        );
+        final over = await fullLibrary.importFile(fullPath, managed: false);
+        expect(over.error, isNotNull);
+        expect(await countRows(full, 'books'), 0);
+        expect(
+          await countRows(full, 'pending_bookmark_notes'),
+          maxAnnotationsPerDocument,
+        );
+        expect(await countRows(full, 'annotations'), 1);
+      },
+    );
+  });
+
   group('limits', () {
     test('inputs are checked before anything is written', () async {
       final epub = await book('epub');
@@ -1083,12 +1766,12 @@ void main() {
       final bookId = await book('epub');
       final first = await annotations.create(bookId, _select(_text, 'lead'));
       await t.executeMany(
-        '''INSERT INTO annotations (id, version_id, format, anchor_version,
-             original_quote, normalization_profile, normalized_exact,
-             normalized_prefix, normalized_suffix, color,
+        '''INSERT INTO annotations (id, version_id, format, kind,
+             anchor_version, original_quote, normalization_profile,
+             normalized_exact, normalized_prefix, normalized_suffix, color,
              epub_spine_index, epub_resource_path, epub_scalar_start,
              epub_scalar_end)
-           SELECT ?, version_id, format, anchor_version, original_quote,
+           SELECT ?, version_id, format, kind, anchor_version, original_quote,
              normalization_profile, normalized_exact, normalized_prefix,
              normalized_suffix, color, epub_spine_index, epub_resource_path,
              epub_scalar_start, epub_scalar_end
@@ -1173,18 +1856,22 @@ void main() {
       final kept = [created.id, pdfCreated.id];
       const deleteOthers = 'DELETE FROM annotations WHERE id NOT IN (?, ?)';
       const insert = '''INSERT INTO annotations (id, version_id, format,
-          anchor_version, original_quote, normalization_profile,
-          normalized_exact, normalized_prefix, normalized_suffix, color,
+          kind, anchor_version, original_quote, normalization_profile,
+          normalized_exact, normalized_prefix, normalized_suffix, color, body,
           epub_spine_index, epub_resource_path, epub_scalar_start,
           epub_scalar_end, pdf_page, pdf_rectangles)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''';
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''';
       List<Object?> row({
         String format = 'epub',
+        String kind = 'highlight',
         int anchor = 1,
         String? profile = 'shosai-quote-v1',
         String? exact = 'lead',
         String? prefix = '',
-        String color = 'yellow',
+        String? color = 'yellow',
+        String? body,
+        int? spineIndex = 0,
+        String? path = _chapter,
         int? start = 0,
         int? end = 4,
         int? page,
@@ -1196,6 +1883,7 @@ void main() {
             ? epubVersion
             : pdfVersion)['version_id'],
         format,
+        kind,
         anchor,
         null,
         profile,
@@ -1203,13 +1891,43 @@ void main() {
         prefix,
         prefix,
         color,
-        format == 'epub' ? 0 : null,
-        format == 'epub' ? _chapter : null,
+        body,
+        format == 'epub' ? spineIndex : null,
+        format == 'epub' ? path : null,
         start,
         end,
         page,
         rectangles == null ? null : Uint8List(rectangles),
       ];
+
+      /// A note row: [kind] `page` or `book`, in [format].
+      List<Object?> noteRow({
+        String format = 'epub',
+        String kind = 'page',
+        String? color,
+        String? body = 'A note',
+        String? exact,
+        int? spineIndex = 0,
+        String? path = _chapter,
+        int? start = 3,
+        int? end,
+        int? page,
+        int? rectangles,
+      }) => row(
+        format: format,
+        kind: kind,
+        profile: exact == null ? null : 'shosai-quote-v1',
+        exact: exact,
+        prefix: exact == null ? null : '',
+        color: color,
+        body: body,
+        spineIndex: spineIndex,
+        path: path,
+        start: start,
+        end: end,
+        page: page,
+        rectangles: rectangles,
+      );
 
       List<Object?> pdfRow({String? versionFormat}) => row(
         format: 'pdf',
@@ -1223,11 +1941,44 @@ void main() {
         versionFormat: versionFormat,
       );
 
-      await t.execute(insert, row());
-      await t.execute(deleteOthers, kept);
-      await t.execute(insert, pdfRow());
-      await t.execute(deleteOthers, kept);
+      List<Object?> bookNote({String format = 'epub', int? page}) => noteRow(
+        format: format,
+        kind: 'book',
+        spineIndex: null,
+        path: null,
+        start: null,
+        page: page,
+      );
+
+      for (final valid in [
+        row(),
+        pdfRow(),
+        noteRow(),
+        // A page note made from a bookmark never recorded its chapter path.
+        noteRow(path: null),
+        noteRow(format: 'pdf', start: null, page: 2),
+        bookNote(),
+        bookNote(format: 'pdf'),
+      ]) {
+        await t.execute(insert, valid);
+        await t.execute(deleteOthers, kept);
+      }
       for (final invalid in [
+        row(kind: 'bookmark'),
+        row(color: null),
+        // Notes have a note, no color, no quote and no range.
+        noteRow(body: null),
+        noteRow(body: ''),
+        noteRow(color: 'yellow'),
+        noteRow(exact: 'lead'),
+        noteRow(end: 4),
+        noteRow(start: null),
+        noteRow(spineIndex: null),
+        noteRow(page: 0),
+        noteRow(format: 'pdf', start: null, page: null),
+        noteRow(format: 'pdf', start: null, page: 0, rectangles: 16),
+        bookNote(page: 0),
+        noteRow(kind: 'book'),
         // An annotation has its version's format.
         row(versionFormat: 'pdf'),
         pdfRow(versionFormat: 'epub'),

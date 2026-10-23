@@ -208,6 +208,25 @@ void main() {
     });
   });
 
+  group('context', () {
+    test('says where in it the match starts', () {
+      // A supplementary scalar before both, and the query twice in each
+      // context.
+      final matches = searchTexts(['😀 lead one lead two'], 'lead');
+      expect(
+        [for (final m in matches) m.context],
+        ['😀 lead one lead two', '😀 lead one lead two'],
+      );
+      expect([for (final m in matches) m.contextOffset], [2, 11]);
+
+      // Full case folding: the match is the original's six scalars.
+      final [folded] = searchTexts(['  Die Straße  '], 'STRASSE');
+      expect(folded.context, 'Die Straße');
+      expect(folded.contextOffset, 4);
+      expect(folded.length, 6);
+    });
+  });
+
   group('book search', () {
     test('searches every unit with text in other isolates', () async {
       final source = FakeText([

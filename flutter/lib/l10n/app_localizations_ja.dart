@@ -279,14 +279,6 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String readerHighlightsHeading(int count) {
-    return 'ハイライト · $count';
-  }
-
-  @override
-  String get readerNoHighlights => 'テキストを選ぶとハイライトできます。';
-
-  @override
   String get readerNoBookmarks => 'ブックマークはありません';
 
   @override
@@ -314,7 +306,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerAddNote => 'メモを追加';
 
   @override
-  String get readerBookmarkNoteTitle => 'ブックマークのメモ';
+  String get readerPageNoteTitle => 'ページのメモ';
+
+  @override
+  String get readerBookNoteTitle => '本のメモ';
 
   @override
   String get readerHighlightNoteTitle => 'ハイライトのメモ';
@@ -324,6 +319,47 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get readerNoteCancel => 'キャンセル';
+
+  @override
+  String readerBackToPage(int page) {
+    return '$pageページに戻る';
+  }
+
+  @override
+  String readerBackTo(String place) {
+    return '$placeに戻る';
+  }
+
+  @override
+  String get readerBackDismiss => 'ここにとどまる';
+
+  @override
+  String readerNotesCount(int count) {
+    return 'メモ $count件';
+  }
+
+  @override
+  String get readerNotesScope => '表示するメモ';
+
+  @override
+  String get readerNotesEmpty =>
+      'まだメモはありません。テキストを選んでハイライトするか、このページにメモを追加してください。';
+
+  @override
+  String readerPageNumber(int page) {
+    return '$pageページ';
+  }
+
+  @override
+  String readerPageNoteAt(int page) {
+    return 'ページのメモ · $pageページ';
+  }
+
+  @override
+  String get readerNoteActions => 'メモの操作';
+
+  @override
+  String get readerDeleteNote => 'メモを削除';
 
   @override
   String get readerExportMarkdown => 'Markdownで書き出す';
@@ -477,11 +513,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerHighlightPurple => '紫';
 
   @override
-  String readerHighlightLabel(int number) {
-    return 'ハイライト$number';
-  }
-
-  @override
   String get readerAnnotationRecovered => '復元';
 
   @override
@@ -533,17 +564,77 @@ class AppLocalizationsJa extends AppLocalizations {
       '本の文章を選んでハイライトするか、ページにノートを追加してください。すべてのノートとハイライトがここに並びます。';
 
   @override
+  String get shellNotesLoading => 'ノートを読み込んでいます…';
+
+  @override
+  String get shellNotesMore => 'さらに表示';
+
+  @override
+  String get shellSearchField => '本とノートを検索';
+
+  @override
+  String get shellSearchScope => '検索範囲';
+
+  @override
+  String get shellSearchThisBook => 'この本';
+
+  @override
+  String get shellSearchAllBooks => 'すべての本';
+
+  @override
+  String get shellSearchFilter => '検索対象';
+
+  @override
+  String get shellSearchEverything => 'すべて';
+
+  @override
+  String get shellSearchText => '本文';
+
+  @override
+  String get shellSearchNotes => 'ノート';
+
+  @override
+  String get shellSearchHint => '入力すると、本の本文とノートを検索します。';
+
+  @override
+  String get shellSearchSearching => '検索しています…';
+
+  @override
+  String get shellSearchClose => '検索を閉じる';
+
+  @override
+  String get shellSearchPartial => '長い本のため、冒頭の部分だけを検索しました。';
+
+  @override
+  String shellSearchNoMatches(String query) {
+    return '「$query」に一致するものはありません';
+  }
+
+  @override
+  String shellSearchNotesGroup(int count) {
+    return 'ノート · $count';
+  }
+
+  @override
+  String shellSearchMatches(int count) {
+    return '$count件';
+  }
+
+  @override
+  String shellSearchMoreMatches(int count) {
+    return '$count件以上';
+  }
+
+  @override
+  String shellSearchBookFailed(String error) {
+    return 'この本は検索できませんでした: $error';
+  }
+
+  @override
   String get shellBookmarksEmptyHeading => 'ブックマークはまだありません';
 
   @override
   String get shellBookmarksEmptyBody => 'リーダーのツールバーからページをブックマークすると、ここに表示されます。';
-
-  @override
-  String get shellSearchEmptyHeading => '本とノートを検索';
-
-  @override
-  String get shellSearchEmptyBody =>
-      'ライブラリ全体の本文とノートの検索は準備中です。今はライブラリでタイトルや著者から本を探せます。';
 
   @override
   String libraryBookCount(int count) {

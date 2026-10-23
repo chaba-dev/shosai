@@ -6,6 +6,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_flutter/reader/controller.dart' show ReaderPlace;
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -168,6 +169,8 @@ Widget _reader({
   required HarnessBridge bridge,
   String initialPath = '/books/slow-rivers.pdf',
   FlutterReaderSettings settings = _pdfFitPage,
+  ReaderPlace? place,
+  int? initialBookId,
 }) => productionShell(
   locale: const Locale('en'),
   home: ReaderScreen(
@@ -176,6 +179,8 @@ Widget _reader({
     decoder: (pixels, {required width, required height}) => _testImage(),
     initialPath: initialPath,
     initialSettings: settings,
+    initialPlace: place,
+    initialBookId: initialBookId,
   ),
 );
 
@@ -188,7 +193,13 @@ Future<ui.Image> _testImage() async {
   return recorder.endRecording().toImage(420, 560);
 }
 
-/// Pumps until the fixture document is loaded and its surface is painted.
+/// Chooses [action] from note card [id]'s menu, opened by its actions button.
+Future<void> _cardAction(WidgetTester tester, String id, String action) async {
+  await tester.tap(find.byKey(ValueKey('reader-annotation-$id-actions')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(action).last);
+}
+
 /// Opens the Notes panel, where the saved highlights are listed.
 Future<void> _openNotes(WidgetTester tester) async {
   if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isNotEmpty) {
@@ -283,6 +294,51 @@ void main() {
             .label,
         'Selection actions',
       );
+    });
+
+    testWidgets('a highlight made while All books shows lists it again', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge();
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialPath: '/books/slow-rivers.pdf',
+          initialBookId: 1,
+        ),
+      );
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
+      await settleReaderSelection(tester);
+      expect(bridge.libraryNotesCalls, 1);
+
+      await dragFixtureSelection(tester, from: 4, to: 12);
+      await settleReaderSelection(tester);
+      await tester.tap(find.text('Yellow'));
+      await settleReaderSelection(tester);
+      expect(bridge.created, hasLength(1));
+      expect(bridge.libraryNotesCalls, 2);
+    });
+
+    testWidgets('a PDF opened at a search match selects it', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(
+        tester,
+        _reader(
+          bridge: _SelectionBridge(),
+          place: const ReaderPlace(0, offset: 4, length: 8),
+        ),
+      );
+      await settleReaderSelection(tester);
+
+      final status = tester
+          .getSemantics(find.byKey(const ValueKey('reader-selection-status')))
+          .getSemanticsData()
+          .label;
+      expect(status, startsWith('Selected text:'));
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
     });
 
     testWidgets('Copy is enabled only for a copy-eligible surface', (
@@ -423,7 +479,7 @@ void main() {
         // highlight.
         expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
         await _openNotes(tester);
-        expect(find.text('HIGHLIGHTS · 1'), findsOneWidget);
+        expect(find.text('1 note'), findsOneWidget);
       }
     });
 
@@ -853,19 +909,18 @@ void main() {
         await _open(tester, _reader(bridge: bridge));
         await _openNotes(tester);
 
-        expect(find.text('Highlight 1'), findsOneWidget);
+        expect(find.byKey(const ValueKey('reader-annotation-one')), findsOne);
+        expect(find.text('old note'), findsOneWidget);
 
         // Recolor cycles yellow -> green and keeps the note.
-        await tester.tap(
-          find.byKey(const ValueKey('reader-annotation-color-one')),
-        );
+        await _cardAction(tester, 'one', 'Change color');
         await settleReaderSelection(tester);
         expect(bridge.updated.single.color, FlutterHighlightColor.green);
         expect(bridge.updated.single.body, 'old note');
 
-        // Navigation selects the range and focuses the surface.
+        // Choosing the card selects the range and focuses the surface.
         await tester.tap(
-          find.byKey(const ValueKey('reader-annotation-navigate-one')),
+          find.byKey(const ValueKey('reader-annotation-one-open')),
         );
         await settleReaderSelection(tester);
         expect(
@@ -874,16 +929,17 @@ void main() {
         );
 
         // Delete removes the highlight.
-        await tester.tap(
-          find.byKey(const ValueKey('reader-annotation-delete-one')),
-        );
+        await _cardAction(tester, 'one', 'Delete highlight');
         await settleReaderSelection(tester);
         expect(bridge.deleted, ['one']);
-        expect(find.text('Highlight 1'), findsNothing);
+        expect(
+          find.byKey(const ValueKey('reader-annotation-one')),
+          findsNothing,
+        );
       },
     );
 
-    testWidgets('the note action opens the editor with the existing body', (
+    testWidgets('the note is edited in place with Save and Cancel', (
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
@@ -891,50 +947,70 @@ void main() {
         ..annotations = [_annotation(id: 'one', body: 'old note')];
       await _open(tester, _reader(bridge: bridge));
       await _openNotes(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-note-one')),
-      );
-      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('reader-note-edit-field'));
 
-      expect(find.text('Highlight note'), findsOneWidget);
-      final field = tester.widget<ShadInput>(
-        find.descendant(
-          of: find.byType(ShadDialog),
-          matching: find.byType(ShadInput),
-        ),
-      );
-      expect(field.controller!.text, 'old note');
-
-      await tester.enterText(
-        find.descendant(
-          of: find.byType(ShadDialog),
-          matching: find.byType(ShadInput),
-        ),
-        'revised note',
-      );
-      await tester.tap(find.widgetWithText(ShadButton, 'Save'));
+      await _cardAction(tester, 'one', 'Edit note');
       await tester.pumpAndSettle();
+      expect(find.byType(ShadDialog), findsNothing);
+      expect(tester.widget<ShadInput>(field).controller!.text, 'old note');
+      await tester.enterText(field, 'discarded');
+      await tester.tap(find.byKey(const ValueKey('reader-note-edit-cancel')));
+      await tester.pumpAndSettle();
+      expect(field, findsNothing);
+      expect(find.text('old note'), findsOneWidget);
+      expect(bridge.updated, isEmpty);
+
+      await _cardAction(tester, 'one', 'Edit note');
+      await tester.pumpAndSettle();
+      await tester.enterText(field, 'revised note');
+      await tester.tap(find.byKey(const ValueKey('reader-note-edit-save')));
+      await settleReaderSelection(tester);
       expect(bridge.updated.single.body, 'revised note');
+      expect(bridge.updated.single.color, FlutterHighlightColor.yellow);
     });
 
-    testWidgets('a secondary click opens the salvaged annotation menu', (
-      tester,
-    ) async {
+    testWidgets('a draft change made before a rebuild is kept', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge()
+        ..annotations = [_annotation(id: 'one', body: 'old note')];
+      await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
+      await _cardAction(tester, 'one', 'Edit note');
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('reader-note-edit-field'));
+      await tester.enterText(field, 'A');
+      await tester.pump();
+
+      // Two changes before the card is built again: away and back.
+      final draft = tester.widget<ShadInput>(field).controller!;
+      draft.text = 'B';
+      draft.value = const TextEditingValue(
+        text: 'A',
+        selection: TextSelection.collapsed(offset: 1),
+        composing: TextRange(start: 0, end: 1),
+      );
+      await tester.pump();
+
+      expect(draft.text, 'A');
+      expect(draft.value.composing, const TextRange(start: 0, end: 1));
+    });
+
+    testWidgets('a secondary click opens the card menu', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _SelectionBridge()..annotations = [_annotation(id: 'one')];
       await _open(tester, _reader(bridge: bridge));
       await _openNotes(tester);
 
       await tester.tapAt(
-        tester.getCenter(find.text('Highlight 1')),
+        tester.getCenter(find.byKey(const ValueKey('reader-annotation-one'))),
         buttons: kSecondaryMouseButton,
         kind: ui.PointerDeviceKind.mouse,
       );
       await tester.pumpAndSettle();
 
       for (final label in const [
+        'Add note',
         'Change color',
-        'Edit note',
         'Delete highlight',
       ]) {
         expect(find.text(label), findsOneWidget);
@@ -953,14 +1029,23 @@ void main() {
       await _open(tester, _reader(bridge: bridge));
       await _openNotes(tester);
 
-      // Focus a control in the card through the rendered tree, then use the
-      // keyboard equivalent of a secondary click.
-      Focus.of(tester.element(find.text('Highlight 1'))).requestFocus();
+      // Focus the card through the rendered tree, then use the keyboard
+      // equivalent of a secondary click.
+      Focus.of(
+        tester.element(
+          find
+              .descendant(
+                of: find.byKey(const ValueKey('reader-annotation-one-open')),
+                matching: find.byType(Padding),
+              )
+              .first,
+        ),
+      ).requestFocus();
       await tester.pump();
       expect(
         FocusManager.instance.primaryFocus,
         isNotNull,
-        reason: 'a card control can take focus',
+        reason: 'the card can take focus',
       );
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.f10);
@@ -973,48 +1058,35 @@ void main() {
       expect(bridge.deleted, ['one']);
     });
 
-    testWidgets(
-      'an open menu keeps its annotation when an earlier one is deleted',
-      (tester) async {
-        _setView(tester, const Size(1280, 800));
-        final bridge = _SelectionBridge()
-          ..annotations = [
-            _annotation(id: 'one'),
-            _annotation(id: 'two', color: FlutterHighlightColor.green),
-            _annotation(id: 'three', color: FlutterHighlightColor.blue),
-          ];
-        await _open(tester, _reader(bridge: bridge));
-        await _openNotes(tester);
+    testWidgets('a card keeps its annotation when an earlier one is deleted', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge()
+        ..annotations = [
+          _annotation(id: 'one'),
+          _annotation(id: 'two', color: FlutterHighlightColor.green),
+          _annotation(id: 'three', color: FlutterHighlightColor.blue),
+        ];
+      await _open(tester, _reader(bridge: bridge));
+      await _openNotes(tester);
 
-        // Open the middle card's menu, then delete the first card: the cards are
-        // keyed by annotation id, so the open menu must stay with 'two' rather
-        // than being handed to whichever annotation lands in its list position.
-        await tester.tapAt(
-          tester.getCenter(
-            find.byKey(const ValueKey('reader-annotation-navigate-two')),
-          ),
-          buttons: kSecondaryMouseButton,
-          kind: ui.PointerDeviceKind.mouse,
-        );
-        await tester.pumpAndSettle();
-        expect(find.text('Change color'), findsOneWidget);
+      // The cards are keyed by annotation id, so after the first is deleted
+      // the second card still acts on 'two' rather than on whichever
+      // annotation lands in its list position.
+      await _cardAction(tester, 'one', 'Delete highlight');
+      await settleReaderSelection(tester);
+      expect(bridge.deleted, ['one']);
 
-        await tester.tap(
-          find.byKey(const ValueKey('reader-annotation-delete-one')),
-        );
-        await settleReaderSelection(tester);
-        expect(bridge.deleted, ['one']);
-
-        await tester.tap(find.text('Change color'));
-        await settleReaderSelection(tester);
-        expect(
-          bridge.updated.single.id,
-          'two',
-          reason: 'the menu still acts on the annotation it was opened for',
-        );
-        expect(bridge.updated.single.color, FlutterHighlightColor.blue);
-      },
-    );
+      await _cardAction(tester, 'two', 'Change color');
+      await settleReaderSelection(tester);
+      expect(
+        bridge.updated.single.id,
+        'two',
+        reason: 'the menu acts on the annotation it was opened for',
+      );
+      expect(bridge.updated.single.color, FlutterHighlightColor.blue);
+    });
 
     testWidgets('a failed annotation write reports through the live region', (
       tester,
@@ -1028,9 +1100,7 @@ void main() {
         );
       await _open(tester, _reader(bridge: bridge));
       await _openNotes(tester);
-      await tester.tap(
-        find.byKey(const ValueKey('reader-annotation-delete-one')),
-      );
+      await _cardAction(tester, 'one', 'Delete highlight');
       await settleReaderSelection(tester);
 
       expect(bridge.deleted, isEmpty);

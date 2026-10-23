@@ -372,11 +372,69 @@ List<FlutterSelectionCaret> _lineCarets(
   if (endUnit <= startUnit) return const [];
   final lineText = map.text.substring(startUnit, endUnit);
   final carets = <FlutterSelectionCaret>[];
+  // Tate-chū-yoko sets its graphemes side by side across the line, in one
+  // em along it: each grapheme's halves are its left and right on the page,
+  // and its carets are spread along the em so they keep their order.
+  final cells = {
+    for (final cell in text.combinedCells(line.codeUnitStart, line.codeUnitEnd))
+      cell.start: cell,
+  };
   var unit = startUnit;
   for (final grapheme in lineText.characters) {
     final clusterStart = unit;
     final clusterEnd = unit + grapheme.length;
     unit = clusterEnd;
+    final cell = cells[clusterStart + markerOffset];
+    // A one-character run (an upright Latin letter) keeps the vertical
+    // halves, top and bottom, of any other character.
+    if (cell != null && cell.count > 1) {
+      final canonicalStart = cursor.at(cell.start);
+      final canonicalEnd = cursor.at(cell.end);
+      // The cell is in block coordinates; [lineTop] places the line.
+      final rect = cell.rect.shift(Offset(0, -line.top));
+      // The first grapheme reaches the line's edge on the page's left, and
+      // the last its edge on the right, so the line's full width hits.
+      final top = cell.index == cell.count - 1 ? 0.0 : rect.top;
+      final bottom = cell.index == 0 ? line.height : rect.bottom;
+      final mid = (rect.top + rect.bottom) / 2;
+      FlutterSelectionRect half(double from, double to) {
+        final page = box.rectToPage(
+          Rect.fromLTRB(
+            rect.left + originX,
+            lineTop + from,
+            rect.right + originX,
+            lineTop + to,
+          ),
+        );
+        return FlutterSelectionRect(
+          left: page.left,
+          top: page.top,
+          right: page.right,
+          bottom: page.bottom,
+        );
+      }
+
+      endpoints.add(
+        FlutterSelectionEndpoint(
+          offset: BigInt.from(canonicalStart),
+          rangeStart: BigInt.from(canonicalStart),
+          rangeEnd: BigInt.from(canonicalEnd),
+          rect: half(mid, bottom),
+        ),
+      );
+      endpoints.add(
+        FlutterSelectionEndpoint(
+          offset: BigInt.from(canonicalEnd),
+          rangeStart: BigInt.from(canonicalStart),
+          rangeEnd: BigInt.from(canonicalEnd),
+          rect: half(top, mid),
+        ),
+      );
+      final step = rect.width / cell.count;
+      carets.add(caret(canonicalStart, rect.left + step * cell.index));
+      carets.add(caret(canonicalEnd, rect.left + step * (cell.index + 1)));
+      continue;
+    }
     final boxes = painter.getBoxesForSelection(
       TextSelection(
         baseOffset: clusterStart + markerOffset,
@@ -459,8 +517,30 @@ void paintPageSlices(
   EpubPageBox box,
 ) {
   canvas.save();
+  // The first line's ruby may stand in the margin before the flow: the page's
+  // top margin, or its right margin on a vertical page. The margins are even,
+  // so the top one measures both.
+  final content = Rect.fromLTWH(
+    0,
+    0,
+    box.contentWidth,
+    box.contentHeight,
+  ).shift(box.origin);
+  final margin = box.origin.dy;
   canvas.clipRect(
-    Rect.fromLTWH(0, 0, box.contentWidth, box.contentHeight).shift(box.origin),
+    box.vertical
+        ? Rect.fromLTRB(
+            content.left,
+            content.top,
+            content.right + margin,
+            content.bottom,
+          )
+        : Rect.fromLTRB(
+            content.left,
+            content.top - margin,
+            content.right,
+            content.bottom,
+          ),
   );
   box.transformToFlow(canvas);
   for (final slice in page.slices) {
@@ -476,7 +556,17 @@ void _paintSlice(Canvas canvas, PageSlice slice, ReaderEpubPalette palette) {
     canvas.save();
     canvas.clipRect(Rect.fromLTWH(0, slice.top, text.width, slice.height));
     canvas.translate(0, offsetY);
-    text.paint(canvas, lineStart: slice.lineStart, lineEnd: slice.lineEnd);
+    text.paint(
+      canvas,
+      lineStart: slice.lineStart,
+      lineEnd: slice.lineEnd,
+      ruby: false,
+    );
+    canvas.restore();
+    // Ruby stands above its line's top, outside the slice.
+    canvas.save();
+    canvas.translate(0, offsetY);
+    text.paintRuby(canvas, lineStart: slice.lineStart, lineEnd: slice.lineEnd);
     canvas.restore();
     return;
   }

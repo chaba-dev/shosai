@@ -69,6 +69,7 @@ final class SearchMatch {
     required this.offset,
     required this.length,
     required this.context,
+    this.contextOffset = 0,
   });
 
   /// The EPUB spine index or PDF page.
@@ -84,16 +85,21 @@ final class SearchMatch {
   /// match itself, trimmed, with line breaks as spaces.
   final String context;
 
+  /// Where the match starts in [context], in Unicode scalars: the context
+  /// may hold the query more than once.
+  final int contextOffset;
+
   @override
   bool operator ==(Object other) =>
       other is SearchMatch &&
       other.unit == unit &&
       other.offset == offset &&
       other.length == length &&
-      other.context == context;
+      other.context == context &&
+      other.contextOffset == contextOffset;
 
   @override
-  int get hashCode => Object.hash(unit, offset, length, context);
+  int get hashCode => Object.hash(unit, offset, length, context, contextOffset);
 
   @override
   String toString() => 'SearchMatch($unit, $offset, $length, $context)';
@@ -186,6 +192,25 @@ List<SearchMatch> searchTexts(
       .$1;
 }
 
+/// The first [maxMatches] matches of [query] in [units] (unit numbers and
+/// texts), on the calling isolate, and whether the units hold more. Unlike
+/// [searchTexts] it neither bounds the text nor fails at the match limit:
+/// the caller bounds the text it hands over.
+(List<SearchMatch>, bool) firstMatches(
+  Iterable<(int, String)> units,
+  String query, {
+  required int maxMatches,
+}) {
+  final search = _Search(
+    query,
+    SearchLimits(maxMatches: maxMatches),
+    stopAtLimit: true,
+  );
+  if (search.query.isEmpty) return (const [], false);
+  final (matches, _, more) = search.run(units.toList(), 0, 0);
+  return (matches, more);
+}
+
 /// The UTF-8 length of [text]; a lone surrogate counts as its replacement
 /// character.
 int utf8Length(String text) {
@@ -216,11 +241,18 @@ Future<(List<SearchMatch>, int)> _runBatch(
   List<(int, String)> batch,
   int matches,
   int resultBytes,
-) => Isolate.run(() => search.run(batch, matches, resultBytes));
+) => Isolate.run(() {
+  final (results, bytes, _) = search.run(batch, matches, resultBytes);
+  return (results, bytes);
+});
 
 /// A folded query and its limits.
 final class _Search {
-  factory _Search(String query, SearchLimits limits) {
+  factory _Search(
+    String query,
+    SearchLimits limits, {
+    bool stopAtLimit = false,
+  }) {
     limits._check();
     final bytes = utf8Length(query);
     if (bytes > limits.maxQueryBytes) {
@@ -231,10 +263,10 @@ final class _Search {
     final folded = Int32List.fromList([
       for (final scalar in query.runes) ...fullCaseFold(scalar),
     ]);
-    return _Search._(folded, _failures(folded), limits);
+    return _Search._(folded, _failures(folded), limits, stopAtLimit);
   }
 
-  const _Search._(this.query, this.failures, this.limits);
+  const _Search._(this.query, this.failures, this.limits, this.stopAtLimit);
 
   final Int32List query;
 
@@ -242,21 +274,30 @@ final class _Search {
   final Int32List failures;
   final SearchLimits limits;
 
-  /// The matches in [batch], given [matches] and [resultBytes] so far, and
-  /// the result bytes after them.
-  (List<SearchMatch>, int) run(
+  /// Whether reaching [SearchLimits.maxMatches] ends the search rather than
+  /// failing it.
+  final bool stopAtLimit;
+
+  /// The matches in [batch], given [matches] and [resultBytes] so far, the
+  /// result bytes after them, and whether the search stopped at its match
+  /// limit with more to find.
+  (List<SearchMatch>, int, bool) run(
     List<(int, String)> batch,
     int matches,
     int resultBytes,
   ) {
     final results = <SearchMatch>[];
     for (final (unit, text) in batch) {
-      resultBytes = _searchUnit(unit, text, matches, resultBytes, results);
+      final bytes = _searchUnit(unit, text, matches, resultBytes, results);
+      if (bytes == null) return (results, resultBytes, true);
+      resultBytes = bytes;
     }
-    return (results, resultBytes);
+    return (results, resultBytes, false);
   }
 
-  int _searchUnit(
+  /// The result bytes after [unit]'s matches; null when the search stopped
+  /// at its match limit.
+  int? _searchUnit(
     int unit,
     String text,
     int earlier,
@@ -309,11 +350,16 @@ final class _Search {
       final originalEnd = boundaries[end];
       if (start < keptEnd || originalStart < 0 || originalEnd < 0) continue;
       if (earlier + results.length >= limits.maxMatches) {
+        if (stopAtLimit) return null;
         throw CoreException.limitExceeded(
           'The search found more than ${limits.maxMatches} matches.',
         );
       }
-      final context = _context(original, originalStart, originalEnd);
+      final (context, contextOffset) = _context(
+        original,
+        originalStart,
+        originalEnd,
+      );
       resultBytes += searchMatchBaseBytes + utf8Length(context);
       if (resultBytes > limits.maxResultBytes) {
         throw CoreException.limitExceeded(
@@ -326,6 +372,7 @@ final class _Search {
           offset: originalStart,
           length: originalEnd - originalStart,
           context: context,
+          contextOffset: contextOffset,
         ),
       );
       keptEnd = end;
@@ -334,12 +381,27 @@ final class _Search {
   }
 }
 
-String _context(Int32List original, int start, int end) {
+/// The context around the match at [start]..[end] of [original], and where
+/// the match starts in it, in scalars. Space is trimmed from its ends, but
+/// never from the match.
+(String, int) _context(Int32List original, int start, int end) {
   final from = start < searchContextScalars ? 0 : start - searchContextScalars;
   final to = end + searchContextScalars > original.length
       ? original.length
       : end + searchContextScalars;
-  return String.fromCharCodes(original, from, to).trim().replaceAll('\n', ' ');
+  bool space(int scalar) => String.fromCharCode(scalar).trim().isEmpty;
+  var first = from;
+  while (first < start && space(original[first])) {
+    first++;
+  }
+  var last = to;
+  while (last > end && space(original[last - 1])) {
+    last--;
+  }
+  return (
+    String.fromCharCodes(original, first, last).replaceAll('\n', ' '),
+    start - first,
+  );
 }
 
 Int32List _failures(Int32List pattern) {

@@ -229,12 +229,10 @@ class _ReaderLinkButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
-    this.fontSize = ShosaiTokens.typeSize12,
   });
 
   final String label;
   final VoidCallback? onPressed;
-  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -248,7 +246,7 @@ class _ReaderLinkButton extends StatelessWidget {
       horizontal: ShosaiTokens.layoutReaderPanelPlaceRowSpacing,
     );
     final style = shosaiInterfaceStyleForText(
-      TextStyle(fontSize: fontSize, color: foreground),
+      TextStyle(fontSize: ShosaiTokens.typeSize12, color: foreground),
       label,
     );
     // The pinned reference link is its padding plus the label's line box (20-24
@@ -256,8 +254,9 @@ class _ReaderLinkButton extends StatelessWidget {
     // height would make the entry taller than the reference, so the link is
     // sized to its content; it keeps the panel width as its target and grows
     // with the text scale, so a scaled interface never clips the label.
-    final labelBox = (MediaQuery.textScalerOf(context).scale(fontSize) * 1.25)
-        .ceilToDouble();
+    final labelBox =
+        (MediaQuery.textScalerOf(context).scale(ShosaiTokens.typeSize12) * 1.25)
+            .ceilToDouble();
     return _readerSemanticButton(
       enabled: enabled,
       label: label,
@@ -603,6 +602,116 @@ class _ReaderErrorSurfaces extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The BackPill (`docs/design-system.md`, BackPill): after a jump, an
+/// `inverse` capsule at the bottom centre names where the jump left from in
+/// the reader's terms, **Back to page 61** or **Back to Chapter III**, with a
+/// close button. Each Back steps one jump back.
+class _ReaderBackPill extends StatelessWidget {
+  const _ReaderBackPill({required this.model, required this.dispatch});
+
+  final ReaderModel model;
+  final void Function(ReaderMessage) dispatch;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final palette = ShellPalette.of(context);
+    final to = model.returnPoints.last;
+    final pdf = model.document?.format == FlutterBookFormat.pdf;
+    final label = pdf
+        ? l10n.readerBackToPage(to.unit + 1)
+        : l10n.readerBackTo(
+            _noteSection(
+              l10n,
+              model.contents.status == ReaderContentsStatus.ready
+                  ? model.contents.entries
+                  : const [],
+              to.unit,
+              to.offset ?? 0,
+              pdf: false,
+            )!.title,
+          );
+    final background = palette.dark
+        ? ShosaiTokens.colorDarkInverse
+        : ShosaiTokens.colorLightInverse;
+    final foreground = palette.dark
+        ? ShosaiTokens.colorDarkOnInverse
+        : ShosaiTokens.colorLightOnInverse;
+    final style = shosaiInterfaceStyleForText(
+      shellInterfaceStyle(13, 18, weight: FontWeight.w500),
+      label,
+    ).copyWith(color: foreground);
+    return Material(
+      key: const ValueKey('reader-back-pill'),
+      color: background,
+      shape: const StadiumBorder(),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: palette.menu,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // A long section title ellipsizes; the close button stays.
+            Flexible(
+              child: InkWell(
+                key: const ValueKey('reader-back'),
+                customBorder: const StadiumBorder(),
+                onTap: () => dispatch(const ReaderReturnRequested()),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minHeight: ShosaiTokens.sizeTouchTarget,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsetsDirectional.fromSTEB(14, 0, 8, 0),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      spacing: 6,
+                      children: [
+                        Icon(
+                          LucideIcons.arrowLeft,
+                          size: 16,
+                          color: foreground,
+                        ),
+                        Flexible(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: style,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Tooltip(
+              message: l10n.readerBackDismiss,
+              child: InkWell(
+                key: const ValueKey('reader-back-dismiss'),
+                customBorder: const CircleBorder(),
+                onTap: () => dispatch(const ReaderReturnDismissed()),
+                child: SizedBox.square(
+                  dimension: ShosaiTokens.sizeTouchTarget,
+                  child: Icon(
+                    LucideIcons.x,
+                    size: 16,
+                    color: foreground,
+                    semanticLabel: l10n.readerBackDismiss,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

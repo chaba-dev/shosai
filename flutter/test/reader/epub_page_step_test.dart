@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderPlace, ReaderPlaceRequests;
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -334,7 +336,95 @@ void main() {
 
     await closeReader(tester);
   });
+
+  group('the match a book opened at, before its chapter is measured,', () {
+    /// Opens the book at the chapter's first word without letting time pass,
+    /// so its first page installs while the rest of the chapter waits to be
+    /// measured.
+    Future<void> openAtMatch(
+      WidgetTester tester, {
+      ReaderPlaceRequests? requests,
+    }) async {
+      imageCache.clear();
+      await tester.pumpWidget(
+        productionShell(
+          home: ReaderScreen(
+            bridge: bridge(),
+            initialPath: '/books/page-anchor.epub',
+            initialBookId: 1,
+            initialPlace: ReaderPlace(
+              book.chapters.first.spine,
+              offset: 0,
+              length: 4,
+            ),
+            placeRequests: requests,
+            epubImageDecoder: (bytes) async => null,
+          ),
+        ),
+      );
+      for (var round = 0; round < 16 && dartPage(tester) == null; round += 1) {
+        await tester.pump();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 120)),
+        );
+      }
+      expect(status(tester), isNot(startsWith('Selected text')));
+    }
+
+    testWidgets('is dropped by a page turn', (tester) async {
+      await openAtMatch(tester);
+      final first = dartPage(tester)!.page.canonicalStart;
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pump();
+      await settleEpubPage(tester);
+      expect(dartPage(tester)!.page.canonicalStart, greaterThan(first));
+      expect(status(tester), isNot(startsWith('Selected text')));
+
+      await closeReader(tester);
+    });
+
+    testWidgets('gives way to a newer match in the same chapter', (
+      tester,
+    ) async {
+      final requests = ReaderPlaceRequests();
+      await openAtMatch(tester, requests: requests);
+      requests.go(ReaderPlace(book.chapters.first.spine, offset: 5, length: 3));
+      await tester.pump();
+      await settleEpubPage(tester);
+      expect(status(tester), startsWith('Selected text'));
+      expect(status(tester), isNot('Selected text: Lead'));
+
+      await closeReader(tester);
+    });
+
+    testWidgets('is dropped by a press outside the page', (tester) async {
+      await openAtMatch(tester);
+      await tester.tapAt(const Offset(2, 2));
+      await tester.pump();
+      await settleEpubPage(tester);
+      expect(status(tester), 'No text selected');
+
+      await closeReader(tester);
+    });
+
+    testWidgets('is dropped when the reader cancels the selection', (
+      tester,
+    ) async {
+      await openAtMatch(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await settleEpubPage(tester);
+      expect(status(tester), 'No text selected');
+
+      await closeReader(tester);
+    });
+  });
 }
+
+String? status(WidgetTester tester) => tester
+    .getSemantics(find.byKey(const ValueKey('reader-selection-status')))
+    .getSemanticsData()
+    .label;
 
 /// Whether every row a table slice paints carries no mapped canonical content
 /// (cells present but empty). A caption-only slice paints no rows and never

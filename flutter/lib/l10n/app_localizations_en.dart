@@ -284,14 +284,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String readerHighlightsHeading(int count) {
-    return 'Highlights · $count';
-  }
-
-  @override
-  String get readerNoHighlights => 'Select text to highlight it.';
-
-  @override
   String get readerNoBookmarks => 'No bookmarks yet';
 
   @override
@@ -319,7 +311,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerAddNote => 'Add note';
 
   @override
-  String get readerBookmarkNoteTitle => 'Bookmark note';
+  String get readerPageNoteTitle => 'Page note';
+
+  @override
+  String get readerBookNoteTitle => 'Book note';
 
   @override
   String get readerHighlightNoteTitle => 'Highlight note';
@@ -329,6 +324,53 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readerNoteCancel => 'Cancel';
+
+  @override
+  String readerBackToPage(int page) {
+    return 'Back to page $page';
+  }
+
+  @override
+  String readerBackTo(String place) {
+    return 'Back to $place';
+  }
+
+  @override
+  String get readerBackDismiss => 'Stay here';
+
+  @override
+  String readerNotesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count notes',
+      one: '1 note',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get readerNotesScope => 'Show notes from';
+
+  @override
+  String get readerNotesEmpty =>
+      'No notes yet. Select text to highlight it, or add a note to this page.';
+
+  @override
+  String readerPageNumber(int page) {
+    return 'page $page';
+  }
+
+  @override
+  String readerPageNoteAt(int page) {
+    return 'Page note · page $page';
+  }
+
+  @override
+  String get readerNoteActions => 'Note actions';
+
+  @override
+  String get readerDeleteNote => 'Delete note';
 
   @override
   String get readerExportMarkdown => 'Export as Markdown';
@@ -482,11 +524,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerHighlightPurple => 'Purple';
 
   @override
-  String readerHighlightLabel(int number) {
-    return 'Highlight $number';
-  }
-
-  @override
   String get readerAnnotationRecovered => 'recovered';
 
   @override
@@ -538,18 +575,86 @@ class AppLocalizationsEn extends AppLocalizations {
       'Select text in a book to highlight it, or add a note to a page. Every note and highlight appears here.';
 
   @override
+  String get shellNotesLoading => 'Loading notes…';
+
+  @override
+  String get shellNotesMore => 'More notes';
+
+  @override
+  String get shellSearchField => 'Search books and notes';
+
+  @override
+  String get shellSearchScope => 'Search in';
+
+  @override
+  String get shellSearchThisBook => 'This book';
+
+  @override
+  String get shellSearchAllBooks => 'All books';
+
+  @override
+  String get shellSearchFilter => 'Find';
+
+  @override
+  String get shellSearchEverything => 'Everything';
+
+  @override
+  String get shellSearchText => 'Text';
+
+  @override
+  String get shellSearchNotes => 'Notes';
+
+  @override
+  String get shellSearchHint =>
+      'Type to search the text and notes of your books.';
+
+  @override
+  String get shellSearchSearching => 'Searching…';
+
+  @override
+  String get shellSearchClose => 'Close search';
+
+  @override
+  String get shellSearchPartial =>
+      'Only the beginning of this long book was searched.';
+
+  @override
+  String shellSearchNoMatches(String query) {
+    return 'No matches for “$query”';
+  }
+
+  @override
+  String shellSearchNotesGroup(int count) {
+    return 'Notes · $count';
+  }
+
+  @override
+  String shellSearchMatches(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count matches',
+      one: '1 match',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String shellSearchMoreMatches(int count) {
+    return '$count+ matches';
+  }
+
+  @override
+  String shellSearchBookFailed(String error) {
+    return 'This book could not be searched: $error';
+  }
+
+  @override
   String get shellBookmarksEmptyHeading => 'No bookmarks yet';
 
   @override
   String get shellBookmarksEmptyBody =>
       'Bookmark a page from the reader’s toolbar and it appears here.';
-
-  @override
-  String get shellSearchEmptyHeading => 'Search books and notes';
-
-  @override
-  String get shellSearchEmptyBody =>
-      'Searching book text and notes across the library is coming. To find a book now, search the library by title or author.';
 
   @override
   String libraryBookCount(int count) {

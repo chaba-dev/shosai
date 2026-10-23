@@ -322,10 +322,6 @@ void main() {
             id: 1,
             bookId: 1,
             unit: BigInt.zero,
-            // A short note: the render shows the retained saved-place row, and
-            // the bounded-row truncation behavior is asserted by the rendered
-            // long-note test in `test/reader/reader_chrome_test.dart`.
-            note: 'Opening notes',
             color: 'yellow',
             createdAt: '2026-09-20T00:00:00Z',
           ),

@@ -2223,6 +2223,353 @@ void main() {
     });
   });
 
+  group('text-combine-upright', () {
+    List<EpubTextSpan> spansOf(String body, [String sheet = '']) {
+      final chapter = normalizeChapter(
+        xhtml:
+            '<html><body style="writing-mode: vertical-rl">$body</body>'
+            '</html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: [CssStylesheet.parse(sheet, const EpubLimits())],
+        limits: const EpubLimits(),
+      );
+      return (chapter.nodes.single as EpubParagraph).spans;
+    }
+
+    test('every spelling marks its text for tate-chū-yoko', () {
+      for (final declaration in [
+        'text-combine-upright: all',
+        '-epub-text-combine-horizontal: all',
+        '-ms-text-combine-horizontal: all',
+        '-epub-text-combine: horizontal',
+        '-webkit-text-combine: horizontal',
+      ]) {
+        final spans = spansOf(
+          '<p>明治<span class="tcy">38</span>年</p>',
+          '.tcy { $declaration }',
+        );
+        expect(
+          [for (final span in spans) (span.text, span.combine)],
+          [('明治', null), ('38', const EpubTextCombine.all()), ('年', null)],
+          reason: declaration,
+        );
+      }
+    });
+
+    test(
+      'digits keep their count, and none or a bad value combine nothing',
+      () {
+        EpubTextCombine? combineOf(String value) => spansOf(
+          '<p><span style="text-combine-upright: $value">12</span>月</p>',
+        ).first.combine;
+
+        expect(combineOf('digits'), const EpubTextCombine.digits(2));
+        expect(combineOf('digits 3'), const EpubTextCombine.digits(3));
+        expect(combineOf('digits 7'), isNull);
+        expect(combineOf('none'), isNull);
+        expect(combineOf('sideways'), isNull);
+      },
+    );
+
+    test('the value is inherited, and none turns it off', () {
+      final spans = spansOf(
+        '<p style="text-combine-upright: digits 4">平成<b>31</b>年'
+        '<span style="text-combine-upright: none">2019</span></p>',
+      );
+      expect(
+        [for (final span in spans) (span.text, span.combine)],
+        [
+          ('平成', const EpubTextCombine.digits(4)),
+          ('31', const EpubTextCombine.digits(4)),
+          ('年', const EpubTextCombine.digits(4)),
+          ('2019', null),
+        ],
+      );
+    });
+
+    test('neighbouring combined boxes stay apart', () {
+      final spans = spansOf(
+        '<p><span class="tcy">!!</span><span class="tcy">12</span></p>',
+        '.tcy { text-combine-upright: all }',
+      );
+      expect([for (final span in spans) span.text], ['!!', '12']);
+    });
+  });
+
+  group('text-orientation', () {
+    List<(String, EpubTextOrientation)> orientationOf(
+      String body, [
+      String sheet = '',
+    ]) {
+      final chapter = normalizeChapter(
+        xhtml:
+            '<html><body style="writing-mode: vertical-rl">$body</body>'
+            '</html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: [CssStylesheet.parse(sheet, const EpubLimits())],
+        limits: const EpubLimits(),
+      );
+      return [
+        for (final span in (chapter.nodes.single as EpubParagraph).spans)
+          (span.text, span.orientation),
+      ];
+    }
+
+    test('every spelling and keyword is read', () {
+      for (final (declaration, expected) in [
+        ('text-orientation: upright', EpubTextOrientation.upright),
+        ('-epub-text-orientation: upright', EpubTextOrientation.upright),
+        ('-webkit-text-orientation: upright', EpubTextOrientation.upright),
+        ('text-orientation: sideways', EpubTextOrientation.sideways),
+        (
+          '-epub-text-orientation: sideways-right',
+          EpubTextOrientation.sideways,
+        ),
+        ('-webkit-text-orientation: vertical-right', EpubTextOrientation.mixed),
+        (
+          '-epub-text-orientation: use-glyph-orientation',
+          EpubTextOrientation.mixed,
+        ),
+        ('text-orientation: bogus', EpubTextOrientation.mixed),
+      ]) {
+        final spans = orientationOf(
+          '<p>西暦<span class="o">1905</span>年</p>',
+          '.o { $declaration }',
+        );
+        // A mixed span merges with its mixed neighbours.
+        expect(
+          spans.firstWhere((span) => span.$1.contains('1905')).$2,
+          expected,
+          reason: declaration,
+        );
+      }
+    });
+
+    test('inherit, unset and initial read the parent and the default', () {
+      for (final (value, expected) in [
+        ('inherit', EpubTextOrientation.upright),
+        ('unset', EpubTextOrientation.upright),
+        ('initial', EpubTextOrientation.mixed),
+      ]) {
+        final spans = orientationOf(
+          '<p style="text-orientation: upright">AB<span class="x" '
+              'style="text-orientation: $value">CD</span></p>',
+          '.x { text-orientation: sideways }',
+        );
+        expect(spans.last.$1, endsWith('CD'), reason: value);
+        expect(spans.last.$2, expected, reason: value);
+      }
+    });
+
+    test('the value is inherited, and a different one splits the text', () {
+      expect(
+        orientationOf(
+          '<p style="text-orientation: upright">AB<span '
+          'style="text-orientation: mixed">CD</span></p>',
+        ),
+        [
+          ('AB', EpubTextOrientation.upright),
+          ('CD', EpubTextOrientation.mixed),
+        ],
+      );
+    });
+  });
+
+  group('ruby', () {
+    ({List<EpubContentNode> blocks, String canonicalText}) chapterOf(
+      String body,
+    ) {
+      final chapter = normalizeChapter(
+        xhtml: '<html><body>$body</body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: const [],
+        limits: const EpubLimits(),
+      );
+      return (
+        blocks: chapter.nodes,
+        canonicalText: extractCanonicalText(chapter.nodes),
+      );
+    }
+
+    List<(String, String?)> rubyOf(String body) => [
+      for (final span in (chapterOf(body).blocks.single as EpubParagraph).spans)
+        (span.text, span.ruby),
+    ];
+
+    test('a base carries its annotation, and the parentheses are hidden', () {
+      expect(
+        rubyOf('<p>吾輩は<ruby>猫<rp>（</rp><rt>ねこ</rt><rp>）</rp></ruby>である。</p>'),
+        [('吾輩は', null), ('猫', 'ねこ'), ('である。', null)],
+      );
+    });
+
+    test('a caption line that starts with ruby gives its separator none', () {
+      final figure = chapterOf(
+        '<figure><img src="a.png" alt=""/><figcaption><div>犬</div>'
+        '<div><ruby>猫<rt>ねこ</rt></ruby></div></figcaption></figure>',
+      ).blocks.whereType<EpubImage>().single;
+      expect(
+        [for (final span in figure.caption) (span.text, span.ruby)],
+        [('犬', null), ('\n', null), ('猫', 'ねこ')],
+      );
+    });
+
+    ({String text, Map<String, int> anchors, List<EpubTextSpan> spans})
+    parsedOf(String body) {
+      final chapter = normalizeChapter(
+        xhtml: '<html><body>$body</body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: const [],
+        limits: const EpubLimits(),
+      );
+      final paragraph = chapter.nodes.whereType<EpubParagraph>().firstOrNull;
+      return (
+        text: extractCanonicalText(chapter.nodes),
+        anchors: chapter.anchors,
+        spans: paragraph?.spans ?? const [],
+      );
+    }
+
+    test('anchors inside ruby bases resolve to their own characters', () {
+      final rb = parsedOf(
+        '<p><ruby><rb id="east">東</rb><rb id="capital">京</rb>'
+        '<rt>とう</rt><rt>きょう</rt></ruby></p>',
+      );
+      expect(rb.anchors['east'], 0);
+      expect(rb.anchors['capital'], 1);
+      final inner = parsedOf(
+        '<p><ruby>漢<a id="middle"></a>字<rt>かんじ</rt></ruby></p>',
+      );
+      expect(inner.anchors['middle'], 1);
+      // The base keeps one annotation over both its characters.
+      expect(
+        [
+          for (final span in inner.spans)
+            (span.text, span.ruby, span.rubyContinued),
+        ],
+        [('漢', 'かんじ', false), ('字', null, true)],
+      );
+    });
+
+    test('a link inside a ruby base is kept', () {
+      final parsed = parsedOf(
+        '<p><ruby><a href="#note">猫</a><rt>ねこ</rt></ruby></p>',
+      );
+      expect(
+        [for (final span in parsed.spans) (span.text, span.ruby, span.link)],
+        [('猫', 'ねこ', '#note')],
+      );
+    });
+
+    test('nested ruby keeps every annotation out of the text', () {
+      final parsed = parsedOf(
+        '<p><ruby><ruby>猫<rt>ねこ</rt></ruby><rt>cat</rt></ruby></p>',
+      );
+      expect(parsed.text, '猫\n');
+      expect(
+        [for (final span in parsed.spans) (span.text, span.ruby)],
+        [('猫', 'ねこ')],
+      );
+      expect(
+        parsedOf(
+          '<table><tr><td><ruby>猫<rtc>cat</rtc></ruby></td></tr></table>',
+        ).text,
+        isNot(contains('cat')),
+      );
+    });
+
+    test('a table cell places an anchor after ruby where its text is', () {
+      final chapter = normalizeChapter(
+        xhtml:
+            '<html><body><table><tr><td>A<ruby> 猫<rt>ねこ</rt></ruby>'
+            '<span id="after">B</span></td></tr></table></body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: const [],
+        limits: const EpubLimits(),
+      );
+      final text = extractCanonicalText(chapter.nodes);
+      expect(text, contains('A猫B'));
+      expect(
+        String.fromCharCodes(
+          text.runes.skip(chapter.anchors['after']!).take(1),
+        ),
+        'B',
+      );
+    });
+
+    test('ruby keeps the whitespace that is its text\'s', () {
+      for (final (inline, text) in [
+        ('<ruby><b>New</b> <i>York</i><rt>NY</rt></ruby>', 'New York'),
+        ('A<ruby style="white-space: pre"> 猫 <rt>ねこ</rt></ruby>B', 'A 猫 B'),
+        ('A<ruby>\u00a0猫\u00a0<rt>ねこ</rt></ruby>B', 'A\u00a0猫\u00a0B'),
+      ]) {
+        const after = '<span id="after">!</span>';
+        // A table row ends with its own separator.
+        for (final (body, end) in [
+          ('<p>$inline$after</p>', '\n'),
+          ('<table><tr><td>$inline$after</td></tr></table>', '\n\n'),
+        ]) {
+          final parsed = parsedOf(body);
+          expect(parsed.text, '$text!$end', reason: body);
+          expect(parsed.anchors['after'], text.runes.length, reason: body);
+        }
+      }
+    });
+
+    test('the annotation stays out of the canonical text', () {
+      final chapter = chapterOf('<p><ruby>漢字<rt>かんじ</rt></ruby>を読む。</p>');
+      expect(chapter.canonicalText, '漢字を読む。\n');
+      final spans = (chapter.blocks.single as EpubParagraph).spans;
+      expect(spans.first.canonical!.start, 0);
+      expect(spans.first.canonical!.end, 2);
+      expect(spans.last.canonical!.start, 2);
+    });
+
+    test('mono ruby pairs each base with its own annotation', () {
+      expect(rubyOf('<p><ruby>東<rt>とう</rt>京<rt>きょう</rt></ruby></p>'), [
+        ('東', 'とう'),
+        ('京', 'きょう'),
+      ]);
+      expect(
+        rubyOf(
+          '<p><ruby><rb>東</rb><rb>京</rb><rt>とう</rt><rt>きょう</rt></ruby>'
+          '</p>',
+        ),
+        [('東', 'とう'), ('京', 'きょう')],
+      );
+    });
+
+    test('whitespace around a base and inside an annotation is trimmed', () {
+      expect(rubyOf('<p><ruby>\n  明日\n  <rt> あ した </rt>\n</ruby>は晴れ</p>'), [
+        ('明日', 'あ した'),
+        ('は晴れ', null),
+      ]);
+    });
+
+    test('a base without an annotation is plain text', () {
+      expect(rubyOf('<p><ruby>無<rt></rt></ruby>、<ruby>印</ruby></p>'), [
+        ('無、印', null),
+      ]);
+    });
+
+    test('a second annotation level is not drawn', () {
+      expect(
+        rubyOf('<p><ruby>旧<rt>きゅう</rt><rtc><rt>old</rt></rtc></ruby></p>'),
+        [('旧', 'きゅう')],
+      );
+    });
+
+    test('a table cell keeps the base and drops the annotation', () {
+      final chapter = chapterOf(
+        '<table><tr><td><ruby>猫<rp>(</rp><rt>ねこ</rt><rp>)</rp></ruby></td>'
+        '</tr></table>',
+      );
+      expect(chapter.canonicalText, contains('猫'));
+      expect(chapter.canonicalText, isNot(contains('ねこ')));
+      expect(chapter.canonicalText, isNot(contains('(')));
+    });
+  });
+
   group('fixtures', () {
     // The package lives under flutter/packages in the repository, but tests
     // must not depend on their own nesting depth: search upward for the

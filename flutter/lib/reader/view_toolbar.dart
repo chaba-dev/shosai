@@ -228,7 +228,10 @@ List<Widget> _readerPageActions(
       icon: LucideIcons.messageSquareText,
       text: includeNotesLabel ? l10n.readerNotesAction : null,
       label: l10n.readerNotesAction,
-      count: model.annotations.isEmpty ? null : model.annotations.length,
+      count: switch (model.annotations.length + model.notes.length) {
+        0 => null,
+        final count => count,
+      },
       countColor: palette.surfaceSunken,
       selected: model.openPanel == ReaderPanel.notes,
       touch: layout.touch,

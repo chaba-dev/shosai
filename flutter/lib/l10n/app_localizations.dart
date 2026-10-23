@@ -558,18 +558,6 @@ abstract class AppLocalizations {
   /// **'Bookmarks · {count}'**
   String readerBookmarksHeading(int count);
 
-  /// Notes panel: the highlights section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Highlights · {count}'**
-  String readerHighlightsHeading(int count);
-
-  /// Notes panel: the empty highlights section.
-  ///
-  /// In en, this message translates to:
-  /// **'Select text to highlight it.'**
-  String get readerNoHighlights;
-
   /// Iced reference key: no-bookmarks.
   ///
   /// In en, this message translates to:
@@ -612,11 +600,17 @@ abstract class AppLocalizations {
   /// **'Add note'**
   String get readerAddNote;
 
-  /// The controller-injected note dialog title for a saved place.
+  /// A note on a page or place in the book, with no text range: the note dialog title and the Notes panel's new-note action.
   ///
   /// In en, this message translates to:
-  /// **'Bookmark note'**
-  String get readerBookmarkNoteTitle;
+  /// **'Page note'**
+  String get readerPageNoteTitle;
+
+  /// A note about the whole book: the note dialog title and the Notes panel's new-note action.
+  ///
+  /// In en, this message translates to:
+  /// **'Book note'**
+  String get readerBookNoteTitle;
 
   /// The controller-injected note dialog title for a highlight (retained selection behavior).
   ///
@@ -635,6 +629,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cancel'**
   String get readerNoteCancel;
+
+  /// The BackPill after a jump: returns to the PDF page the jump left from.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to page {page}'**
+  String readerBackToPage(int page);
+
+  /// The BackPill after a jump: returns to the EPUB section the jump left from, by its contents title.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to {place}'**
+  String readerBackTo(String place);
+
+  /// Closes the BackPill without going back.
+  ///
+  /// In en, this message translates to:
+  /// **'Stay here'**
+  String get readerBackDismiss;
+
+  /// Notes panel: how many highlights, page notes and book notes are listed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 note} other{{count} notes}}'**
+  String readerNotesCount(int count);
+
+  /// The Notes panel: the group of scope options (This book / All books).
+  ///
+  /// In en, this message translates to:
+  /// **'Show notes from'**
+  String get readerNotesScope;
+
+  /// Notes panel: the empty state.
+  ///
+  /// In en, this message translates to:
+  /// **'No notes yet. Select text to highlight it, or add a note to this page.'**
+  String get readerNotesEmpty;
+
+  /// A note card's place on a PDF page.
+  ///
+  /// In en, this message translates to:
+  /// **'page {page}'**
+  String readerPageNumber(int page);
+
+  /// A page note card's meta line on a PDF page.
+  ///
+  /// In en, this message translates to:
+  /// **'Page note · page {page}'**
+  String readerPageNoteAt(int page);
+
+  /// Notes panel: opens a note card's actions.
+  ///
+  /// In en, this message translates to:
+  /// **'Note actions'**
+  String get readerNoteActions;
+
+  /// Notes panel: deletes a page note or book note.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete note'**
+  String get readerDeleteNote;
 
   /// Iced reference key: export-markdown. 4C's delivery is the clipboard plus a brief notice (contract 9.2 item 1).
   ///
@@ -918,12 +972,6 @@ abstract class AppLocalizations {
   /// **'Purple'**
   String get readerHighlightPurple;
 
-  /// NEW: no Iced string (RFD 6 authority). One saved highlight's navigation label in the annotation strip (RD-12).
-  ///
-  /// In en, this message translates to:
-  /// **'Highlight {number}'**
-  String readerHighlightLabel(int number);
-
   /// NEW: no Iced string (RFD 6 authority). The resolution suffix of a highlight recovered by quote context (RD-12).
   ///
   /// In en, this message translates to:
@@ -1020,6 +1068,120 @@ abstract class AppLocalizations {
   /// **'Select text in a book to highlight it, or add a note to a page. Every note and highlight appears here.'**
   String get shellNotesEmptyBody;
 
+  /// The Bookshelf shell: the Notes place while the library's notes are listed.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading notes…'**
+  String get shellNotesLoading;
+
+  /// The Bookshelf shell: lists the next books' notes in the Notes place.
+  ///
+  /// In en, this message translates to:
+  /// **'More notes'**
+  String get shellNotesMore;
+
+  /// The search palette's field: its placeholder and accessible name.
+  ///
+  /// In en, this message translates to:
+  /// **'Search books and notes'**
+  String get shellSearchField;
+
+  /// The search palette: the group of scope options.
+  ///
+  /// In en, this message translates to:
+  /// **'Search in'**
+  String get shellSearchScope;
+
+  /// The search palette: search only the book being read.
+  ///
+  /// In en, this message translates to:
+  /// **'This book'**
+  String get shellSearchThisBook;
+
+  /// The search palette: search every library book.
+  ///
+  /// In en, this message translates to:
+  /// **'All books'**
+  String get shellSearchAllBooks;
+
+  /// The search palette: the group of filter options.
+  ///
+  /// In en, this message translates to:
+  /// **'Find'**
+  String get shellSearchFilter;
+
+  /// The search palette: find book text and notes.
+  ///
+  /// In en, this message translates to:
+  /// **'Everything'**
+  String get shellSearchEverything;
+
+  /// The search palette: find book text only.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get shellSearchText;
+
+  /// The search palette: find notes and highlights only.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get shellSearchNotes;
+
+  /// The search palette before a query is typed.
+  ///
+  /// In en, this message translates to:
+  /// **'Type to search the text and notes of your books.'**
+  String get shellSearchHint;
+
+  /// The search palette while books are still being searched.
+  ///
+  /// In en, this message translates to:
+  /// **'Searching…'**
+  String get shellSearchSearching;
+
+  /// The search palette's close button.
+  ///
+  /// In en, this message translates to:
+  /// **'Close search'**
+  String get shellSearchClose;
+
+  /// A search result group: the book was too long to search whole.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the beginning of this long book was searched.'**
+  String get shellSearchPartial;
+
+  /// The search palette when nothing matched.
+  ///
+  /// In en, this message translates to:
+  /// **'No matches for “{query}”'**
+  String shellSearchNoMatches(String query);
+
+  /// The search palette's notes group heading with how many notes matched.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes · {count}'**
+  String shellSearchNotesGroup(int count);
+
+  /// A search result group: how many matches a book has.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 match} other{{count} matches}}'**
+  String shellSearchMatches(int count);
+
+  /// A search result group: a book with more matches than are shown.
+  ///
+  /// In en, this message translates to:
+  /// **'{count}+ matches'**
+  String shellSearchMoreMatches(int count);
+
+  /// A search result group: why the book could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'This book could not be searched: {error}'**
+  String shellSearchBookFailed(String error);
+
   /// The Bookshelf shell: the Bookmarks place before any bookmark exists.
   ///
   /// In en, this message translates to:
@@ -1031,18 +1193,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Bookmark a page from the reader’s toolbar and it appears here.'**
   String get shellBookmarksEmptyBody;
-
-  /// The Bookshelf shell: the Search place's title.
-  ///
-  /// In en, this message translates to:
-  /// **'Search books and notes'**
-  String get shellSearchEmptyHeading;
-
-  /// The Bookshelf shell: the Search place until the search palette (RFD 6) exists.
-  ///
-  /// In en, this message translates to:
-  /// **'Searching book text and notes across the library is coming. To find a book now, search the library by title or author.'**
-  String get shellSearchEmptyBody;
 
   /// The library title row: how many books the library holds.
   ///

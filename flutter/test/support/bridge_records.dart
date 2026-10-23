@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:shosai_flutter/core/records.dart';
@@ -10,11 +11,164 @@ import 'package:shosai_flutter/core/bridge.dart';
 /// Mixed into a bridge fake: `class Fake with BridgePdfEngine, BridgeRecords
 /// implements FlutterBridge`. The controllers use the records of a bridge
 /// that is a [RecordsHost].
+///
+/// The mixin also keeps the bridge's page notes and book notes, so a fake
+/// answers note calls without writing them itself.
 mixin BridgeRecords implements RecordsHost {
   @override
   late final ShosaiRecords records = BridgeForwardingRecords(
     this as FlutterBridge,
   );
+
+  /// The page notes and book notes [createNote] wrote, in creation order.
+  final List<FlutterNote> placeNotes = [];
+  int _nextNote = 0;
+
+  /// When set, note writes wait for it, so a test can hold one in flight.
+  Completer<void>? noteWriteGate;
+
+  /// The note writes started, held or not.
+  int noteWrites = 0;
+
+  /// The library's books with notes, most recently read first, as
+  /// [libraryNotes] lists them.
+  List<FlutterBookNotes> libraryBookNotes = [];
+
+  /// The library notes pages asked for.
+  int libraryNotesCalls = 0;
+
+  /// When set, listing the library's notes fails with it.
+  FlutterBridgeError? libraryNotesFailure;
+
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  }) async {
+    libraryNotesCalls += 1;
+    if (libraryNotesFailure case final failure?) throw failure;
+    // The core's page limit.
+    if (limit > 100) {
+      throw const FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.invalidRequest,
+        message: 'A library notes page lists 1 to 100 books.',
+      );
+    }
+    if (after != null) {
+      final before = [
+        for (final book in libraryBookNotes.take(after.length))
+          book.book.bookId,
+      ];
+      if (before.join(',') != after.join(',')) {
+        return const FlutterLibraryNotesPage(
+          books: [],
+          hasMore: false,
+          changed: true,
+        );
+      }
+      offset = after.length;
+    }
+    final end = (offset + limit).clamp(0, libraryBookNotes.length);
+    return FlutterLibraryNotesPage(
+      books: libraryBookNotes.sublist(offset.clamp(0, end), end),
+      hasMore: end < libraryBookNotes.length,
+    );
+  }
+
+  /// What library searches answer, whatever the query: [libraryNoteHits]
+  /// for notes and [libraryTextHits] for book text, each filtered to the
+  /// searched book.
+  List<FlutterBookNoteHits> libraryNoteHits = [];
+  List<FlutterBookTextHits> libraryTextHits = [];
+
+  /// The library searches asked for: the query and book of each.
+  final List<(String, int?)> libraryNoteSearches = [];
+  final List<(String, int?)> libraryTextSearches = [];
+
+  /// When set, library text searches wait for it before their first book.
+  Completer<void>? libraryTextGate;
+
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) async {
+    libraryNoteSearches.add((query, bookId));
+    return [
+      for (final book in libraryNoteHits)
+        if (bookId == null || book.book.bookId == bookId) book,
+    ];
+  }
+
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) async {
+    libraryTextSearches.add((query, bookId));
+    await libraryTextGate?.future;
+    for (final book in libraryTextHits) {
+      if (bookId == null || book.book.bookId == bookId) onBook(book);
+    }
+  }
+
+  /// Gates for the next note listings, one each in order: a listing waits
+  /// for its gate, so a test can finish listings out of order.
+  final List<Completer<void>> noteListGates = [];
+
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) async {
+    if (noteListGates.isNotEmpty) await noteListGates.removeAt(0).future;
+    return List.of(placeNotes);
+  }
+
+  Future<FlutterNote> createNote({
+    required FlutterDocumentHandle document,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) async {
+    noteWrites += 1;
+    await noteWriteGate?.future;
+    final note = FlutterNote(
+      id: 'note-${++_nextNote}',
+      kind: unit == null ? FlutterNoteKind.book : FlutterNoteKind.page,
+      unit: unit,
+      offset: offset,
+      resolution: FlutterAnnotationResolution.exact,
+      body: body,
+      modifiedAt: '2026-01-01T00:00:00.000Z',
+    );
+    placeNotes.add(note);
+    return note;
+  }
+
+  Future<bool> updateNote({
+    required FlutterDocumentHandle document,
+    required String id,
+    required String body,
+  }) async {
+    noteWrites += 1;
+    await noteWriteGate?.future;
+    final index = placeNotes.indexWhere((note) => note.id == id);
+    if (index < 0) return false;
+    final note = placeNotes[index];
+    placeNotes[index] = FlutterNote(
+      id: note.id,
+      kind: note.kind,
+      unit: note.unit,
+      offset: note.offset,
+      resolution: note.resolution,
+      body: body,
+      modifiedAt: note.modifiedAt,
+    );
+    return true;
+  }
 }
 
 /// [ShosaiRecords] answered by [bridge]'s record methods; annotation and
@@ -46,6 +200,43 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     required int bookId,
     required BigInt cancellationId,
   }) => bridge.libraryCover(bookId: bookId, cancellationId: cancellationId);
+
+  @override
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) => bridge.searchLibraryNotes(
+    query: query,
+    bookId: bookId,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) => bridge.searchLibraryText(
+    query: query,
+    bookId: bookId,
+    onBook: onBook,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  }) => bridge.libraryNotes(
+    limit: limit,
+    offset: offset,
+    after: after,
+    cancellationId: cancellationId,
+  );
 
   @override
   Future<FlutterImportReport> importPaths({
@@ -118,18 +309,12 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) => bridge.toggleBookmark(
     bookId: bookId,
     unit: unit,
     offset: offset,
     title: title,
-    note: note,
   );
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) =>
-      bridge.updateBookmarkNote(id: id, note: note);
 
   @override
   Future<void> deleteBookmark({required int id}) =>
@@ -150,6 +335,39 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     scale: scale,
     cancellationId: cancellationId,
   );
+
+  @override
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    required BigInt cancellationId,
+  }) => bridge.listNotes(
+    document: document.handle,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<FlutterNote> createNote({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) => bridge.createNote(
+    document: document.handle,
+    unit: unit,
+    offset: offset,
+    body: body,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<bool> updateNote({
+    required FlutterDocumentSummary document,
+    required String id,
+    required String body,
+  }) => bridge.updateNote(document: document.handle, id: id, body: body);
 
   @override
   Future<FlutterAnnotation> createAnnotation({

@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import '../errors.dart';
+import '../library/records.dart';
 import '../store/store.dart';
 import 'annotation.dart';
 import 'quote.dart';
@@ -21,7 +22,9 @@ final class NewAnnotation {
 
   final AnnotationAnchor anchor;
   final QuoteSelector? quote;
-  final HighlightColor color;
+
+  /// A highlight's color; null for notes.
+  final HighlightColor? color;
   final String? body;
   final AnnotationProvenance? provenance;
 }
@@ -66,6 +69,15 @@ final class AnnotationRecords {
     HighlightColor color,
     String? body,
   ) => _store.transaction((db) => _update(db, owner, id, color, body));
+
+  Future<bool> updateNote(AnnotationOwner owner, String id, String body) =>
+      _store.transaction((db) => _updateNote(db, owner, id, body));
+
+  Future<LibraryNotesPage> libraryNotes(
+    int offset,
+    int limit,
+    List<int>? after,
+  ) => _store.read((db) => _libraryNotes(db, offset, limit, after));
 
   Future<bool> delete(AnnotationOwner owner, String id) =>
       _store.transaction((db) => _delete(db, owner, id));
@@ -184,6 +196,62 @@ _Version _ensureVersion(Database db, _Book book) {
   return (id: versionId, documentId: documentId, format: book.format);
 }
 
+/// Turn the bookmark notes migration 8 kept for content [hash], which no
+/// book held then, into page notes, now that a book with it says their
+/// format. Called as the book is added to the library.
+void adoptPendingBookmarkNotes(
+  Database db, {
+  required String hash,
+  required String format,
+  required String title,
+}) {
+  final notes = db.select(
+    '''SELECT unit, location_offset, note, created_at
+       FROM pending_bookmark_notes WHERE content_hash = ? ORDER BY id''',
+    [hash],
+  );
+  if (notes.isEmpty) return;
+  final version = _ensureVersion(db, (
+    hash: hash,
+    format: format,
+    title: title,
+  ));
+  if (version.format != format) {
+    // Only a content opened outside the library names its own format; the
+    // notes' places mean nothing in another.
+    throw CoreException.invalidRequest(
+      'The content was annotated as ${version.format.toUpperCase()}, not '
+      '${format.toUpperCase()}.',
+    );
+  }
+  final epub = format == 'epub';
+  for (final note in notes) {
+    final unit = note.columnAt(0) as int;
+    db.execute(
+      '''INSERT INTO annotations (id, version_id, format, kind, anchor_version,
+           body, epub_spine_index, epub_scalar_start, pdf_page,
+           created_at, modified_at)
+         VALUES (?, ?, ?, 'page', 1, ?, ?, ?, ?, ?, ?)''',
+      [
+        newUuid(),
+        version.id,
+        version.format,
+        note.columnAt(2),
+        epub ? unit : null,
+        epub ? (note.columnAt(1) as int? ?? 0) : null,
+        epub ? null : unit,
+        note.columnAt(3),
+        note.columnAt(3),
+      ],
+    );
+  }
+  // Over the limits a reader loads, the import fails and the notes wait.
+  _checkSnapshot(db, version.documentId);
+  db.execute('DELETE FROM pending_bookmark_notes WHERE content_hash = ?', [
+    hash,
+  ]);
+}
+
 /// Throw unless the document's live annotations are within the snapshot
 /// limits a reader loads at once.
 void _checkSnapshot(Database db, String documentId) {
@@ -225,8 +293,9 @@ StoredAnnotation _create(
   final book = _owner(db, owner);
   final anchor = annotation.anchor;
   final format = switch (anchor) {
-    EpubAnchor() => 'epub',
-    PdfAnchor() => 'pdf',
+    EpubAnchor() || EpubPlaceAnchor() => 'epub',
+    PdfAnchor() || PdfPageAnchor() => 'pdf',
+    BookAnchor() => book.format,
   };
   if (format != book.format) {
     throw CoreException.invalidRequest(
@@ -246,33 +315,36 @@ StoredAnnotation _create(
   final quote = annotation.quote;
   final epub = anchor is EpubAnchor ? anchor : null;
   final pdf = anchor is PdfAnchor ? anchor : null;
+  final place = anchor is EpubPlaceAnchor ? anchor : null;
+  final page = anchor is PdfPageAnchor ? anchor : null;
   db.execute(
-    '''INSERT INTO annotations (id, version_id, format, anchor_version,
+    '''INSERT INTO annotations (id, version_id, format, kind, anchor_version,
          original_quote, normalization_profile, normalized_exact,
          normalized_prefix, normalized_suffix, color, body,
          source_system, source_id,
          epub_spine_index, epub_resource_path, epub_scalar_start, epub_scalar_end,
          pdf_page, pdf_char_start, pdf_char_end, pdf_rectangles)
-       VALUES (?, ?, ?, $anchorVersion, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+       VALUES (?, ?, ?, ?, $anchorVersion, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                ?, ?, ?, ?, ?, ?, ?, ?)''',
     [
       id,
       version.id,
       format,
+      _kindNames[anchor.kind],
       quote?.original,
       quote == null ? null : quoteProfileV1,
       quote?.exact,
       quote?.prefix,
       quote?.suffix,
-      annotation.color.name,
+      annotation.color?.name,
       annotation.body,
       annotation.provenance?.system,
       annotation.provenance?.id,
-      epub?.spineIndex,
-      epub?.resourcePath,
-      epub?.start,
+      epub?.spineIndex ?? place?.spineIndex,
+      epub?.resourcePath ?? place?.resourcePath,
+      epub?.start ?? place?.offset,
       epub?.end,
-      pdf?.page,
+      pdf?.page ?? page?.page,
       pdf?.start,
       pdf?.end,
       pdf == null ? null : encodeRectangles(pdf.rectangles),
@@ -290,33 +362,51 @@ const _select = '''SELECT a.id, v.content_hash, a.format,
     a.normalized_suffix, a.color, a.body, a.source_system, a.source_id,
     a.epub_spine_index, a.epub_resource_path, a.epub_scalar_start,
     a.epub_scalar_end, a.pdf_page, a.pdf_char_start, a.pdf_char_end,
-    a.pdf_rectangles, a.created_at, a.modified_at
+    a.pdf_rectangles, a.created_at, a.modified_at, a.kind
   FROM annotations a
   JOIN annotation_document_versions v ON v.id = a.version_id''';
+
+/// Each [AnnotationKind] as the `kind` column stores it.
+const _kindNames = {
+  AnnotationKind.highlight: 'highlight',
+  AnnotationKind.pageNote: 'page',
+  AnnotationKind.bookNote: 'book',
+};
+
+AnnotationKind _kind(String name) =>
+    _kindNames.entries.firstWhere((entry) => entry.value == name).key;
 
 /// The annotation [row] holds, its selector checked within [allowance].
 StoredAnnotation _annotation(Row row, NormalizationAllowance allowance) {
   final exact = row.columnAt(4) as String?;
   final system = row.columnAt(9) as String?;
+  final color = row.columnAt(7) as String?;
   return StoredAnnotation(
     id: row.columnAt(0) as String,
     contentHash: row.columnAt(1) as String,
-    anchor: switch (row.columnAt(2) as String) {
-      'epub' => EpubAnchor(
+    anchor: switch ((_kind(row.columnAt(21) as String), row.columnAt(2))) {
+      (AnnotationKind.highlight, 'epub') => EpubAnchor(
         spineIndex: row.columnAt(11) as int,
         resourcePath: row.columnAt(12) as String,
         start: row.columnAt(13) as int,
         end: row.columnAt(14) as int,
       ),
-      _ => PdfAnchor(
+      (AnnotationKind.highlight, _) => PdfAnchor(
         page: row.columnAt(15) as int,
         start: row.columnAt(16) as int?,
         end: row.columnAt(17) as int?,
         rectangles: decodeRectangles(row.columnAt(18) as Uint8List),
       ),
+      (AnnotationKind.pageNote, 'epub') => EpubPlaceAnchor(
+        spineIndex: row.columnAt(11) as int,
+        resourcePath: row.columnAt(12) as String?,
+        offset: row.columnAt(13) as int,
+      ),
+      (AnnotationKind.pageNote, _) => PdfPageAnchor(row.columnAt(15) as int),
+      (AnnotationKind.bookNote, _) => const BookAnchor(),
     },
     quote: exact == null ? null : _quote(row, exact, allowance),
-    color: HighlightColor.values.byName(row.columnAt(7) as String),
+    color: color == null ? null : HighlightColor.values.byName(color),
     body: row.columnAt(8) as String?,
     provenance: system == null
         ? null
@@ -461,13 +551,99 @@ bool _update(
   if (version == null) return false;
   db.execute(
     '''UPDATE annotations SET color = ?, body = ?, modified_at = $_nextModifiedAt
-       WHERE $_ownedBy''',
+       WHERE $_ownedBy AND kind = 'highlight' ''',
     [color.name, body, id, version.documentId],
   );
   if (db.updatedRows != 1) return false;
   _checkSnapshot(db, version.documentId);
   return true;
 }
+
+bool _updateNote(Database db, AnnotationOwner owner, String id, String body) {
+  final version = _version(db, _owner(db, owner).hash);
+  if (version == null) return false;
+  db.execute(
+    '''UPDATE annotations SET body = ?, modified_at = $_nextModifiedAt
+       WHERE $_ownedBy AND kind <> 'highlight' ''',
+    [body, id, version.documentId],
+  );
+  if (db.updatedRows != 1) return false;
+  _checkSnapshot(db, version.documentId);
+  return true;
+}
+
+LibraryNotesPage _libraryNotes(
+  Database db,
+  int offset,
+  int limit,
+  List<int>? after,
+) {
+  // Library books whose documents hold live annotations, in the library's
+  // recent order: from the first when the books before the page are checked
+  // in the same statement.
+  final from = after == null ? offset : 0;
+  final books = db.select(
+    '''SELECT $bookColumns,
+         (SELECT v.document_id FROM annotation_document_versions v
+          WHERE v.content_hash = books.content_hash) AS document
+       FROM books
+       WHERE EXISTS (
+         SELECT 1 FROM annotation_document_versions dv
+         JOIN annotations a ON a.version_id = dv.id
+         WHERE dv.document_id = document AND a.deleted_at IS NULL)
+       ORDER BY last_read DESC, date_added DESC, id DESC
+       LIMIT ? OFFSET ?''',
+    [offset - from + limit + 1, from],
+  );
+  if (after != null) {
+    final before = [for (final row in books.take(offset)) row['id'] as int];
+    if (before.length != after.length ||
+        before.indexed.any((entry) => after[entry.$1] != entry.$2)) {
+      return const LibraryNotesPage.changed();
+    }
+  }
+  final page = books.skip(offset - from).toList();
+  return LibraryNotesPage([
+    for (final row in page.take(limit))
+      BookNotes(bookFromRow(row), noteEntries(db, row['document'] as String)),
+  ], hasMore: page.length > limit);
+}
+
+/// The live annotations of document [documentId] as the notes surfaces list
+/// them, in reading order: book notes first, then each unit's annotations by
+/// where they start.
+List<NoteEntry> noteEntries(Database db, String documentId) => [
+  for (final row in db.select(
+    '''SELECT a.id, a.kind, a.color,
+         coalesce(a.original_quote, a.normalized_exact), a.body,
+         coalesce(a.epub_spine_index, a.pdf_page),
+         coalesce(a.epub_scalar_start, a.pdf_char_start),
+         a.created_at, a.modified_at
+       FROM annotations a
+       JOIN annotation_document_versions v ON v.id = a.version_id
+       WHERE v.document_id = ? AND a.deleted_at IS NULL
+       ORDER BY a.kind <> 'book',
+         coalesce(a.epub_spine_index, a.pdf_page),
+         coalesce(a.epub_scalar_start, a.pdf_char_start, 0),
+         a.created_at, a.rowid
+       LIMIT ?''',
+    [documentId, maxAnnotationsPerDocument],
+  ))
+    NoteEntry(
+      id: row.columnAt(0) as String,
+      kind: _kind(row.columnAt(1) as String),
+      color: switch (row.columnAt(2) as String?) {
+        final color? => HighlightColor.values.byName(color),
+        null => null,
+      },
+      quote: row.columnAt(3) as String?,
+      body: row.columnAt(4) as String?,
+      unit: row.columnAt(5) as int?,
+      offset: row.columnAt(6) as int?,
+      createdAt: row.columnAt(7) as String,
+      modifiedAt: row.columnAt(8) as String,
+    ),
+];
 
 bool _delete(Database db, AnnotationOwner owner, String id) {
   final version = _version(db, _owner(db, owner).hash);

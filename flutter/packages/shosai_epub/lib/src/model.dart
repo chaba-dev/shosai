@@ -18,6 +18,47 @@ enum EpubDirection { ltr, rtl }
 /// bottom and stacks them right to left; anything else is horizontal.
 enum EpubWritingMode { horizontalTb, verticalRl }
 
+/// How a vertical line sets the characters of horizontal scripts, from CSS
+/// `text-orientation` (or its `-epub-` and `-webkit-` spellings). Horizontal
+/// text ignores it.
+enum EpubTextOrientation {
+  /// Latin letters and digits turn with the line; kanji and kana stand
+  /// upright (UAX #50).
+  mixed,
+
+  /// Every character stands upright, one to a row.
+  upright,
+
+  /// Every character turns with the line, kanji and kana too.
+  sideways,
+}
+
+/// Tate-chū-yoko: text a vertical line sets side by side in one upright em
+/// square, from CSS `text-combine-upright` (or its `-epub-`, `-webkit-` and
+/// `-ms-` spellings). Horizontal text ignores it.
+class EpubTextCombine {
+  /// Combines all of a box's text (`all`, or the legacy `horizontal`).
+  const EpubTextCombine.all() : digits = 0;
+
+  /// Combines each run of at most [digits] ASCII digits (`digits <n>`).
+  const EpubTextCombine.digits(this.digits) : assert(digits >= 2);
+
+  /// The longest digit run that combines, or 0 when all the text does.
+  final int digits;
+
+  bool get all => digits == 0;
+
+  @override
+  bool operator ==(Object other) =>
+      other is EpubTextCombine && other.digits == digits;
+
+  @override
+  int get hashCode => digits.hashCode;
+
+  @override
+  String toString() => all ? 'all' : 'digits $digits';
+}
+
 enum EpubFontStyle { normal, italic }
 
 enum EpubFontWeight { normal, bold }
@@ -117,6 +158,10 @@ class EpubTextSpan {
     this.link,
     this.math,
     this.canonical,
+    this.combine,
+    this.ruby,
+    this.rubyContinued = false,
+    this.orientation = EpubTextOrientation.mixed,
   });
 
   String text;
@@ -137,6 +182,26 @@ class EpubTextSpan {
 
   /// Canonical scalar mapping, assigned by [assignCanonicalOffsets].
   EpubCanonicalSpan? canonical;
+
+  /// Tate-chū-yoko for this span's text, or null. A span that combines all
+  /// its text is one unit and never merges with a neighbour.
+  EpubTextCombine? combine;
+
+  /// How a vertical line sets this span's characters.
+  EpubTextOrientation orientation;
+
+  /// The ruby annotation (furigana) set beside this span's text, from the
+  /// `<rt>` of a `<ruby>` element. It is not part of the canonical stream:
+  /// search, copy and offsets see the base text only. A span with ruby never
+  /// merges with its predecessor.
+  ///
+  /// A base can take several spans (an anchor, a link or other markup inside
+  /// it): the first carries the annotation and the others are
+  /// [rubyContinued].
+  String? ruby;
+
+  /// Whether this span continues the ruby base of the span before it.
+  bool rubyContinued;
 
   /// Element ids/legacy anchor names that resolve to this span's start.
   List<String> anchorIds = const [];
@@ -163,6 +228,10 @@ class EpubTextSpan {
     link: link,
     math: math,
     canonical: canonical,
+    combine: combine,
+    ruby: ruby,
+    rubyContinued: rubyContinued,
+    orientation: orientation,
   );
 }
 

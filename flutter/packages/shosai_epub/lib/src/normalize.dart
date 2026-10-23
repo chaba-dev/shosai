@@ -528,6 +528,9 @@ EpubComputedStyle _applyUaDefaults(EpubComputedStyle style, String tag) {
     case 'th':
     case 'caption':
       display = EpubDisplay.block;
+    // Ruby parentheses are a fallback for readers without ruby.
+    case 'rp':
+      display = EpubDisplay.none;
     // `li` is deliberately absent: the production `ua_display` has no arm for
     // it, so a list item computes as inline. That only differs from the block
     // role inside table cells (the chapter list walker matches `li` by tag,
@@ -687,6 +690,53 @@ EpubComputedStyle _applyDeclaration(
         ),
         _ => style,
       };
+    case 'text-combine-upright' ||
+        '-epub-text-combine-horizontal' ||
+        '-ms-text-combine-horizontal':
+      final words = lower.split(RegExp(r'\s+'));
+      return switch (words) {
+        ['none'] => _copyWith(style, noCombine: true),
+        ['all'] => _copyWith(style, combine: const EpubTextCombine.all()),
+        ['digits'] => _copyWith(
+          style,
+          combine: const EpubTextCombine.digits(2),
+        ),
+        ['digits', final count] => switch (int.tryParse(count)) {
+          final digits? when digits >= 2 && digits <= 4 => _copyWith(
+            style,
+            combine: EpubTextCombine.digits(digits),
+          ),
+          _ => style,
+        },
+        _ => style,
+      };
+    case 'text-orientation' ||
+        '-epub-text-orientation' ||
+        '-webkit-text-orientation':
+      // `sideways-right`, `vertical-right` and `use-glyph-orientation` are
+      // the legacy and prefixed spellings.
+      return switch (lower) {
+        'inherit' ||
+        'unset' => _copyWith(style, orientation: parent.orientation),
+        'initial' => _copyWith(style, orientation: EpubTextOrientation.mixed),
+        'mixed' || 'vertical-right' || 'use-glyph-orientation' => _copyWith(
+          style,
+          orientation: EpubTextOrientation.mixed,
+        ),
+        'upright' => _copyWith(style, orientation: EpubTextOrientation.upright),
+        'sideways' || 'sideways-right' => _copyWith(
+          style,
+          orientation: EpubTextOrientation.sideways,
+        ),
+        _ => style,
+      };
+    // The legacy property took `horizontal` for what is now `all`.
+    case '-epub-text-combine' || '-webkit-text-combine':
+      return switch (lower.split(RegExp(r'\s+')).first) {
+        'none' => _copyWith(style, noCombine: true),
+        'horizontal' => _copyWith(style, combine: const EpubTextCombine.all()),
+        _ => style,
+      };
     case 'direction':
       if (lower == 'rtl') return _copyWith(style, direction: EpubDirection.rtl);
       if (lower == 'ltr') return _copyWith(style, direction: EpubDirection.ltr);
@@ -839,6 +889,9 @@ EpubComputedStyle _copyWith(
   EpubLength? height,
   EpubLength? maxWidth,
   EpubWritingMode? writingMode,
+  EpubTextCombine? combine,
+  bool noCombine = false,
+  EpubTextOrientation? orientation,
 }) => EpubComputedStyle(
   display: display ?? style.display,
   bold: bold ?? style.bold,
@@ -857,6 +910,8 @@ EpubComputedStyle _copyWith(
   height: height ?? style.height,
   maxWidth: maxWidth ?? style.maxWidth,
   writingMode: writingMode ?? style.writingMode,
+  combine: noCombine ? null : combine ?? style.combine,
+  orientation: orientation ?? style.orientation,
 );
 
 // ---------------------------------------------------------------------------
@@ -1339,6 +1394,8 @@ class _NormalizeContext {
       fontSizeMultiplier: style.fontSizePx / baseFontSize,
       preserveWhitespace: style.preserveWhitespace,
       link: link,
+      combine: style.combine,
+      orientation: style.orientation,
     );
   }
 
@@ -1351,6 +1408,10 @@ class _NormalizeContext {
   ) {
     if (depth > _maxDepth) {
       _walkHitDepthCeiling = true;
+      return;
+    }
+    if (element.name.local == 'ruby') {
+      _collectRuby(element, baseFontSize, link, spans, depth);
       return;
     }
     for (final child in element.children) {
@@ -1395,6 +1456,148 @@ class _NormalizeContext {
         spans,
         depth + 1,
       );
+    }
+  }
+
+  /// Collects a `<ruby>` element: its bases are collected as ordinary inline
+  /// content, so their anchors, links and whitespace are what they would be
+  /// outside it, and each `<rt>` annotation is set on the base it pairs with,
+  /// staying out of the text.
+  ///
+  /// A base is the content before an `<rt>`, or the `<rb>` elements before a
+  /// run of `<rt>`s, paired in order. Whitespace-only text between the parts
+  /// of a ruby is not content. `<rtc>` (a second annotation level) is not
+  /// drawn, an annotation of a base that holds ruby of its own is dropped
+  /// (only the inner one is drawn), and a base without an annotation is plain
+  /// text.
+  void _collectRuby(
+    XmlElement ruby,
+    double baseFontSize,
+    String? link,
+    List<EpubTextSpan> spans,
+    int depth,
+  ) {
+    // The span ranges of `<rb>`s waiting for their annotations, and where
+    // the content since the last annotation starts.
+    final bases = <(int, int)>[];
+    var looseStart = spans.length;
+    for (final child in ruby.children) {
+      if (child is XmlText) {
+        final text = _rubyText(child);
+        if (text.isEmpty) continue;
+        bases.clear();
+        final span = _textSpanFor(ruby, text, baseFontSize, link);
+        _takePendingSpan(span);
+        spans.add(span);
+        _inlineRawOffset += text.runes.length;
+        continue;
+      }
+      if (child is! XmlElement) continue;
+      if (styleOf(child).display == EpubDisplay.none) continue;
+      _noteAnchor(child);
+      switch (child.name.local) {
+        case 'rt':
+          final (start, end) = bases.isNotEmpty
+              ? bases.removeAt(0)
+              : (looseStart, spans.length);
+          _setRuby(
+            spans,
+            start,
+            end,
+            _collectVisibleText(child).trim().split(RegExp(r'\s+')).join(' '),
+          );
+          looseStart = spans.length;
+        case 'rtc':
+          break;
+        case 'rb':
+          final start = spans.length;
+          _collectInline(child, baseFontSize, link, spans, depth + 1);
+          bases.add((start, spans.length));
+          looseStart = spans.length;
+        default:
+          bases.clear();
+          _collectInline(
+            child,
+            baseFontSize,
+            child.name.local == 'a'
+                ? (child.getAttribute('href') ?? link)
+                : link,
+            spans,
+            depth + 1,
+          );
+      }
+    }
+  }
+
+  /// The content of [text], a child of a `<ruby>`: without the collapsible
+  /// whitespace at an edge it shares with the ruby or with one of its
+  /// annotation or base elements, so a ruby written over several lines adds
+  /// no spaces to its text. Whitespace between two parts of one base stays,
+  /// and so does preserved (`white-space: pre`) and non-ASCII whitespace.
+  String _rubyText(XmlText text) {
+    final value = text.value;
+    if (styleOf(text.parent! as XmlElement).preserveWhitespace) return value;
+    bool isEdge(XmlNode? node) =>
+        node == null ||
+        node is XmlElement &&
+            const {'rt', 'rtc', 'rb', 'rp'}.contains(node.name.local);
+    XmlNode? sibling(int step) {
+      final siblings = text.parent!.children;
+      for (
+        var index = siblings.indexOf(text) + step;
+        index >= 0 && index < siblings.length;
+        index += step
+      ) {
+        final candidate = siblings[index];
+        if (candidate is XmlElement) return candidate;
+        if (candidate is XmlText && !_isCollapsible(candidate.value)) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+
+    final before = isEdge(sibling(-1));
+    final after = isEdge(sibling(1));
+    if (_isCollapsible(value)) return before || after ? '' : value;
+    var start = 0;
+    var end = value.length;
+    if (before) {
+      while (start < end && _isCollapsible(value[start])) {
+        start++;
+      }
+    }
+    if (after) {
+      while (end > start && _isCollapsible(value[end - 1])) {
+        end--;
+      }
+    }
+    return value.substring(start, end);
+  }
+
+  /// Whether [text] is only collapsible (ASCII) whitespace.
+  static bool _isCollapsible(String text) =>
+      RegExp(r'^[ \t\n\r\f]*$').hasMatch(text);
+
+  /// Sets [annotation] on the base made of [spans] [start] to [end]: on its
+  /// first span with text, and marks the rest up to its last span with text
+  /// as continuing it. A base that already holds ruby keeps only its own.
+  void _setRuby(
+    List<EpubTextSpan> spans,
+    int start,
+    int end,
+    String annotation,
+  ) {
+    if (annotation.isEmpty) return;
+    final base = spans.sublist(start, end);
+    if (base.any((span) => span.ruby != null || span.rubyContinued)) return;
+    bool hasText(EpubTextSpan span) => span.text.trim().isNotEmpty;
+    final first = base.indexWhere(hasText);
+    if (first < 0) return;
+    final last = base.lastIndexWhere(hasText);
+    base[first].ruby = annotation;
+    for (var index = first + 1; index <= last; index++) {
+      base[index].rubyContinued = true;
     }
   }
 
@@ -1526,9 +1729,13 @@ class _NormalizeContext {
       for (final target in splits) {
         piece.text = String.fromCharCodes(text.runes.take(target - position));
         rebuilt.add(piece);
+        // A later piece continues the first one's ruby base, so the
+        // annotation is drawn once over the whole base.
         piece = span.copy()
           ..text = String.fromCharCodes(text.runes.skip(target - position))
-          ..anchorIds = const [];
+          ..anchorIds = const []
+          ..ruby = null
+          ..rubyContinued = span.ruby != null || span.rubyContinued;
         pieceStart = target;
       }
       piece.text = String.fromCharCodes(text.runes.skip(pieceStart - position));
@@ -1588,7 +1795,15 @@ class _NormalizeContext {
           current.monospace == next.monospace &&
           current.fontSizeMultiplier == next.fontSizeMultiplier &&
           current.preserveWhitespace == next.preserveWhitespace &&
-          current.link == next.link) {
+          current.link == next.link &&
+          current.combine == next.combine &&
+          current.orientation == next.orientation &&
+          !(current.combine?.all ?? false) &&
+          // A ruby base starts its own span; its continuations merge into it,
+          // and nothing else does.
+          next.ruby == null &&
+          next.rubyContinued ==
+              (current.ruby != null || current.rubyContinued)) {
         current.text = current.text + next.text;
         spans.removeAt(index + 1);
       } else {
@@ -1809,7 +2024,9 @@ class _NormalizeContext {
           output.add(
             run.first.copy()
               ..text = '\n'
-              ..math = null,
+              ..math = null
+              ..ruby = null
+              ..rubyContinued = false,
           );
         }
         output.addAll(run);
@@ -2253,11 +2470,22 @@ class _NormalizeContext {
       );
       return;
     }
+    // A table cell keeps a ruby's base text and drops its annotations, and
+    // the whitespace between a ruby's parts, as [_collectRuby] does.
+    if (element.name.local == 'rt' || element.name.local == 'rtc') return;
+    final isRuby = element.name.local == 'ruby';
     final nestedLink = element.name.local == 'a'
         ? element.getAttribute('href')
         : link;
     for (final child in element.children) {
       if (child is XmlText) {
+        if (isRuby) {
+          final text = _rubyText(child);
+          if (text.isNotEmpty) {
+            spans.add(_textSpanFor(element, text, baseFontSize, nestedLink));
+          }
+          continue;
+        }
         _collectTableCellText(child, element, baseFontSize, nestedLink, spans);
       } else if (child is XmlElement) {
         if (styleOf(child).display == EpubDisplay.none) continue;

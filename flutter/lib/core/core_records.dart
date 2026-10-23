@@ -13,6 +13,14 @@ import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 
+/// The name of each format's text extraction, as library search saves book
+/// text under it. Change a name when its extraction changes (a new
+/// canonical text stream, a new PDFium release), and books are read again.
+const libraryTextVersions = {
+  BookFormat.epub: 'shosai-epub-canonical-1',
+  BookFormat.pdf: 'pdfium-chromium-7811-1',
+};
+
 /// The application's records: one store, opened once per process and shared
 /// by every bridge the shell creates. Its [CoreOwner] closes it.
 final class ShosaiCore {
@@ -22,7 +30,8 @@ final class ShosaiCore {
       bookmarks = Bookmarks(store),
       settings = ReaderSettingsStore(store),
       librarySettings = LibrarySettingsStore(store),
-      annotations = Annotations(store);
+      annotations = Annotations(store),
+      search = LibrarySearch(store, textVersions: libraryTextVersions);
 
   /// Open the store `library.sqlite3` and the managed directory `books`
   /// under [dataDirectory], reading PDF metadata through [pdfEngine], and
@@ -62,6 +71,7 @@ final class ShosaiCore {
   final ReaderSettingsStore settings;
   final LibrarySettingsStore librarySettings;
   final Annotations annotations;
+  final LibrarySearch search;
 
   /// The private copies open PDFs are read from, shared by every bridge.
   final DocumentSnapshots snapshots;
@@ -307,6 +317,32 @@ final class CoreRecords implements ShosaiRecords {
   });
 
   @override
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final page = await _core.annotations.libraryNotes(
+      offset: offset,
+      limit: limit,
+      after: after,
+      cancellation: _token(cancellationId),
+    );
+    return FlutterLibraryNotesPage(
+      books: [
+        for (final book in page.books)
+          FlutterBookNotes(
+            book: _libraryBook(book.book),
+            notes: [for (final note in book.notes) _noteEntry(note)],
+          ),
+      ],
+      hasMore: page.hasMore,
+      changed: page.changed,
+    );
+  });
+
+  @override
   Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -478,21 +514,15 @@ final class CoreRecords implements ShosaiRecords {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) => _guard(() async {
     final bookmark = await _core.bookmarks.toggle(
       bookId,
       unit.toInt(),
       offset: offset?.toInt(),
       title: title,
-      note: note,
     );
     return bookmark == null ? null : _bookmark(bookmark, bookId);
   });
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) =>
-      _guard(() => _core.bookmarks.updateNote(id, note));
 
   @override
   Future<void> deleteBookmark({required int id}) =>
@@ -517,11 +547,13 @@ final class CoreRecords implements ShosaiRecords {
         ? await _core.annotations.listInContent(
             _content(document),
             text,
+            kinds: const {AnnotationKind.highlight},
             cancellation: cancellation,
           )
         : await _core.annotations.list(
             bookId,
             text,
+            kinds: const {AnnotationKind.highlight},
             cancellation: cancellation,
           );
     return [for (final item in resolved) _annotation(item, scale)];
@@ -618,6 +650,102 @@ final class CoreRecords implements ShosaiRecords {
   );
 
   @override
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    const kinds = {AnnotationKind.pageNote, AnnotationKind.bookNote};
+    final cancellation = _token(cancellationId);
+    final resolved = switch (document.bookId) {
+      null => await _core.annotations.listInContent(
+        _content(document),
+        text,
+        kinds: kinds,
+        cancellation: cancellation,
+      ),
+      final bookId => await _core.annotations.list(
+        bookId,
+        text,
+        kinds: kinds,
+        cancellation: cancellation,
+      ),
+    };
+    // Book notes first, then page notes in reading order; notes at one
+    // place stay in the order they were written.
+    final notes = [for (final item in resolved) _note(item)];
+    int place(BigInt? value) => value?.toInt() ?? -1;
+    final order = [for (var i = 0; i < notes.length; i++) i]
+      ..sort((i, j) {
+        final (a, b) = (notes[i], notes[j]);
+        return switch (place(a.unit).compareTo(place(b.unit))) {
+          0 => switch (place(a.offset).compareTo(place(b.offset))) {
+            0 => i.compareTo(j),
+            final byOffset => byOffset,
+          },
+          final byUnit => byUnit,
+        };
+      });
+    return [for (final i in order) notes[i]];
+  });
+
+  @override
+  Future<FlutterNote> createNote({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final cancellation = _token(cancellationId);
+    final NoteAnchor anchor;
+    if (unit == null) {
+      anchor = const BookAnchor();
+    } else if (document.format == FlutterBookFormat.pdf) {
+      anchor = PdfPageAnchor(unit.toInt());
+    } else {
+      // A page note keeps its chapter's path, so a reordered spine does not
+      // move it to another chapter.
+      final chapter = await text.unitText(
+        unit.toInt(),
+        cancellation: cancellation,
+      );
+      anchor = EpubPlaceAnchor(
+        spineIndex: unit.toInt(),
+        resourcePath: chapter?.resourcePath,
+        offset: offset?.toInt() ?? 0,
+      );
+    }
+    cancellation.throwIfCancelled();
+    final created = switch (document.bookId) {
+      null => await _core.annotations.createNoteInContent(
+        _content(document),
+        anchor,
+        body,
+      ),
+      final bookId => await _core.annotations.createNote(bookId, anchor, body),
+    };
+    return _note(created);
+  });
+
+  @override
+  Future<bool> updateNote({
+    required FlutterDocumentSummary document,
+    required String id,
+    required String body,
+  }) => _guard(
+    () => switch (document.bookId) {
+      null => _core.annotations.updateNoteInContent(
+        _content(document),
+        id,
+        body,
+      ),
+      final bookId => _core.annotations.updateNote(bookId, id, body),
+    },
+  );
+
+  @override
   Future<FlutterAnnotationAssociationSourcePage>
   listAnnotationAssociationSources({
     required FlutterDocumentSummary target,
@@ -675,6 +803,89 @@ final class CoreRecords implements ShosaiRecords {
   });
 
   @override
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final books = await _core.search.notes(
+      query,
+      bookId: bookId,
+      cancellation: _token(cancellationId),
+    );
+    return [
+      for (final book in books)
+        FlutterBookNoteHits(
+          book: _libraryBook(book.book),
+          hits: [
+            for (final hit in book.hits)
+              FlutterNoteHit(
+                note: _noteEntry(hit.note),
+                matches: [
+                  for (final match in hit.matches)
+                    FlutterNoteMatch(
+                      field: FlutterNoteField.values.byName(match.field.name),
+                      offset: match.offset,
+                      length: match.length,
+                    ),
+                ],
+              ),
+          ],
+        ),
+    ];
+  });
+
+  @override
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final cancellation = _token(cancellationId);
+    await for (final hits in _core.search.text(
+      query,
+      bookId: bookId,
+      read: (book, read) => _readBookText(book, read, cancellation),
+      cancellation: cancellation,
+    )) {
+      onBook(
+        FlutterBookTextHits(
+          book: _libraryBook(hits.book),
+          matches: [for (final match in hits.matches) _searchMatch(match)],
+          more: hits.more,
+          partial: hits.partial,
+          error: hits.error?.message,
+        ),
+      );
+    }
+  });
+
+  /// Open library [book] as the reader would, hand its text to [read], then
+  /// release it.
+  Future<void> _readBookText(
+    Book book,
+    Future<void> Function(UnitTextSource text) read,
+    CancellationToken cancellation,
+  ) async {
+    final opened = await _documents.open(
+      book.path,
+      format: book.format,
+      expected: (
+        bookId: book.id,
+        title: book.title,
+        contentHash: book.contentHash,
+      ),
+      cancellation: cancellation,
+    );
+    try {
+      await read(_documentText(opened));
+    } finally {
+      _documents.release(opened.summary.handle);
+    }
+  }
+
+  @override
   Future<List<FlutterSearchMatch>> searchDocument({
     required FlutterDocumentSummary document,
     required ReaderText text,
@@ -686,17 +897,17 @@ final class CoreRecords implements ShosaiRecords {
       query,
       cancellation: _token(cancellationId),
     );
-    return [
-      for (final match in matches)
-        FlutterSearchMatch(
-          unit: BigInt.from(match.unit),
-          offset: BigInt.from(match.offset),
-          length: BigInt.from(match.length),
-          context: match.context,
-        ),
-    ];
+    return [for (final match in matches) _searchMatch(match)];
   });
 }
+
+FlutterSearchMatch _searchMatch(SearchMatch match) => FlutterSearchMatch(
+  unit: BigInt.from(match.unit),
+  offset: BigInt.from(match.offset),
+  length: BigInt.from(match.length),
+  context: match.context,
+  contextOffset: BigInt.from(match.contextOffset),
+);
 
 /// The bridge the application hands its controllers: the documents it opens
 /// through the Dart engines, and [records] over the Dart core.
@@ -838,6 +1049,19 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   }) => records.libraryCover(bookId: bookId, cancellationId: cancellationId);
 
   @override
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  }) => records.libraryNotes(
+    limit: limit,
+    offset: offset,
+    after: after,
+    cancellationId: cancellationId,
+  );
+
+  @override
   Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -903,22 +1127,12 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) => records.toggleBookmark(
     bookId: bookId,
     unit: unit,
     offset: offset,
     title: title,
-    note: note,
   );
-
-  @override
-  Future<void> updateBookmark({required int id, String? title, String? note}) =>
-      records.updateBookmarkNote(id: id, note: note);
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) =>
-      records.updateBookmarkNote(id: id, note: note);
 
   @override
   Future<void> deleteBookmark({required int id}) =>
@@ -944,14 +1158,7 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
     }
   }
 
-  ReaderText _text(OpenDocument opened) => switch (opened.epub) {
-    null => _LazyPdfText(opened),
-    final book => EpubReaderText(
-      unitCount: book.chapters.length,
-      text: (unit) async => book.chapters[unit].canonicalText,
-      resourcePath: (unit) async => book.chapters[unit].resource,
-    ),
-  };
+  ReaderText _text(OpenDocument opened) => _documentText(opened);
 
   @override
   Future<List<FlutterAnnotation>> listAnnotations({
@@ -1039,6 +1246,49 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
       records.deleteAnnotation(document: _document(document).summary, id: id);
 
   @override
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) {
+    final opened = _document(document);
+    return records.listNotes(
+      document: opened.summary,
+      text: _text(opened),
+      cancellationId: cancellationId,
+    );
+  }
+
+  @override
+  Future<FlutterNote> createNote({
+    required FlutterDocumentHandle document,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) {
+    final opened = _document(document);
+    return records.createNote(
+      document: opened.summary,
+      text: _text(opened),
+      unit: unit,
+      offset: offset,
+      body: body,
+      cancellationId: cancellationId,
+    );
+  }
+
+  @override
+  Future<bool> updateNote({
+    required FlutterDocumentHandle document,
+    required String id,
+    required String body,
+  }) async => records.updateNote(
+    document: _document(document).summary,
+    id: id,
+    body: body,
+  );
+
+  @override
   Future<FlutterAnnotationAssociationSourcePage>
   listAnnotationAssociationSources({
     required FlutterDocumentHandle target,
@@ -1064,6 +1314,30 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   );
 
   @override
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  }) => records.searchLibraryNotes(
+    query: query,
+    bookId: bookId,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  }) => records.searchLibraryText(
+    query: query,
+    bookId: bookId,
+    onBook: onBook,
+    cancellationId: cancellationId,
+  );
+
+  @override
   Future<List<FlutterSearchMatch>> searchDocument({
     required FlutterDocumentHandle document,
     required String query,
@@ -1081,6 +1355,16 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
 
 /// PDF page text from an engine document opened on the document's snapshot
 /// on first use.
+/// [opened]'s text as annotations and search read it.
+ReaderText _documentText(OpenDocument opened) => switch (opened.epub) {
+  null => _LazyPdfText(opened),
+  final book => EpubReaderText(
+    unitCount: book.chapters.length,
+    text: (unit) async => book.chapters[unit].canonicalText,
+    resourcePath: (unit) async => book.chapters[unit].resource,
+  ),
+};
+
 final class _LazyPdfText implements ReaderText {
   const _LazyPdfText(this._opened);
 
@@ -1176,13 +1460,8 @@ FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
   final (start, end) = (resolved.start, resolved.end);
   return FlutterAnnotation(
     id: stored.id,
-    unit: BigInt.from(stored.anchor.unit),
-    resolution: switch (resolved.resolution) {
-      AnnotationResolution.exact => FlutterAnnotationResolution.exact,
-      AnnotationResolution.recovered => FlutterAnnotationResolution.recovered,
-      AnnotationResolution.ambiguous => FlutterAnnotationResolution.ambiguous,
-      AnnotationResolution.orphaned => FlutterAnnotationResolution.orphaned,
-    },
+    unit: BigInt.from(stored.anchor.unit!),
+    resolution: _resolution(resolved.resolution),
     textRange: start == null || end == null
         ? null
         : FlutterAnnotationTextRange(
@@ -1201,16 +1480,58 @@ FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
                 bottom: rectangle.bottom * scale,
               ),
           ],
-    color: _flutterColor(stored.color),
+    color: _flutterColor(stored.color!),
     body: stored.body,
   );
 }
+
+FlutterNote _note(ResolvedAnnotation resolved) {
+  final stored = resolved.annotation;
+  final unit = stored.anchor.unit;
+  return FlutterNote(
+    id: stored.id,
+    kind: stored.kind == AnnotationKind.bookNote
+        ? FlutterNoteKind.book
+        : FlutterNoteKind.page,
+    unit: unit == null ? null : BigInt.from(unit),
+    offset: resolved.start == null ? null : BigInt.from(resolved.start!),
+    resolution: _resolution(resolved.resolution),
+    body: stored.body ?? '',
+    modifiedAt: stored.modifiedAt,
+  );
+}
+
+FlutterAnnotationResolution _resolution(AnnotationResolution resolution) =>
+    switch (resolution) {
+      AnnotationResolution.exact => FlutterAnnotationResolution.exact,
+      AnnotationResolution.recovered => FlutterAnnotationResolution.recovered,
+      AnnotationResolution.ambiguous => FlutterAnnotationResolution.ambiguous,
+      AnnotationResolution.orphaned => FlutterAnnotationResolution.orphaned,
+    };
 
 HighlightColor _highlightColor(FlutterHighlightColor color) =>
     HighlightColor.values.byName(color.name);
 
 FlutterHighlightColor _flutterColor(HighlightColor color) =>
     FlutterHighlightColor.values.byName(color.name);
+
+FlutterNoteEntry _noteEntry(NoteEntry note) => FlutterNoteEntry(
+  id: note.id,
+  kind: switch (note.kind) {
+    AnnotationKind.highlight => FlutterNoteEntryKind.highlight,
+    AnnotationKind.pageNote => FlutterNoteEntryKind.page,
+    AnnotationKind.bookNote => FlutterNoteEntryKind.book,
+  },
+  color: switch (note.color) {
+    final color? => _flutterColor(color),
+    null => null,
+  },
+  quote: note.quote,
+  body: note.body,
+  unit: note.unit,
+  offset: note.offset,
+  modifiedAt: note.modifiedAt,
+);
 
 BookFormat _bookFormat(FlutterBookFormat format) => switch (format) {
   FlutterBookFormat.epub => BookFormat.epub,
@@ -1240,7 +1561,6 @@ FlutterBookmark _bookmark(Bookmark bookmark, int bookId) => FlutterBookmark(
   unit: BigInt.from(bookmark.unit),
   offset: bookmark.offset == null ? null : BigInt.from(bookmark.offset!),
   title: bookmark.title,
-  note: bookmark.note,
   color: bookmark.color,
   createdAt: bookmark.createdAt,
 );

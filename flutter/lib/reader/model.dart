@@ -39,6 +39,13 @@ final class AnnotationAssociationCancelled extends AnnotationAssociationChoice {
 /// Search is deliberately not a member: it is an independent bar (RD-11).
 enum ReaderPanel { contents, typography, notes }
 
+/// A place a jump left from, which Back returns to: a unit and where in its
+/// text.
+typedef ReaderReturnPoint = ({int unit, int? offset});
+
+/// Which notes the Notes panel lists: this book's, or every book's.
+enum ReaderNotesScope { thisBook, allBooks }
+
 /// Which ordinal the reader status text names (RD-05).
 ///
 /// `page` is supplied for paginated EPUB/PDF page ordinals and `chapter`
@@ -59,7 +66,7 @@ enum ReaderProgressKind { none, loading, single, range }
 enum ReaderModalEffect {
   selectionNote,
   annotationNote,
-  bookmarkNote,
+  placeNote,
   associationPicker,
   documentPicker,
 }
@@ -396,6 +403,18 @@ final class ReaderLayout {
   int get hashCode => Object.hash(scale, width, fontSize, lineSpacing, spread);
 }
 
+/// A note being edited in place on its Notes panel card.
+final class ReaderNoteEdit {
+  const ReaderNoteEdit(this.card, this.text);
+
+  /// The card's key prefix: `reader-annotation-<id>` or
+  /// `reader-place-note-<id>`.
+  final String card;
+
+  /// The draft.
+  final String text;
+}
+
 final class ReaderModel {
   ReaderModel({
     this.openPath,
@@ -421,6 +440,10 @@ final class ReaderModel {
     List<FlutterAnnotation> annotations = const [],
     List<FlutterSearchMatch> searchResults = const [],
     List<FlutterBookmark> bookmarks = const [],
+    List<FlutterNote> notes = const [],
+    List<ReaderReturnPoint> returnPoints = const [],
+    this.notesScope = ReaderNotesScope.thisBook,
+    this.libraryNotes = const ShellNotesModel(),
     Set<String> annotationOperations = const {},
     this.selectionError,
     this.relayoutError,
@@ -430,6 +453,8 @@ final class ReaderModel {
     this.annotationsReady = false,
     this.searchBusy = false,
     this.bookmarkBusy = false,
+    this.notesBusy = false,
+    this.noteEdit,
     this.toolError,
     this.persistenceError,
     this.openPanel,
@@ -468,6 +493,8 @@ final class ReaderModel {
        annotations = List.unmodifiable(annotations.map(_freezeAnnotation)),
        searchResults = List.unmodifiable(searchResults),
        bookmarks = List.unmodifiable(bookmarks),
+       notes = List.unmodifiable(notes),
+       returnPoints = List.unmodifiable(returnPoints),
        annotationOperations = Set.unmodifiable(annotationOperations);
 
   final String? openPath;
@@ -543,6 +570,18 @@ final class ReaderModel {
   final List<FlutterAnnotation> annotations;
   final List<FlutterSearchMatch> searchResults;
   final List<FlutterBookmark> bookmarks;
+
+  /// The book's notes: its book notes, then its page notes in reading order.
+  final List<FlutterNote> notes;
+
+  /// Where each jump left from, the latest last: Back returns to the last.
+  final List<ReaderReturnPoint> returnPoints;
+
+  /// Which notes the Notes panel lists.
+  final ReaderNotesScope notesScope;
+
+  /// Every book's notes, listed while the Notes panel shows All books.
+  final ShellNotesModel libraryNotes;
   final Set<String> annotationOperations;
   final String? selectionError;
 
@@ -565,6 +604,13 @@ final class ReaderModel {
   final bool annotationsReady;
   final bool searchBusy;
   final bool bookmarkBusy;
+
+  /// Whether a page note or book note is being edited or saved.
+  final bool notesBusy;
+
+  /// The note being edited in place, kept while the reader is busy so a
+  /// relayout or another note's save leaves the draft alone.
+  final ReaderNoteEdit? noteEdit;
   final String? toolError;
 
   /// Reading-position restoration/save feedback, independent of tool chrome.
@@ -660,6 +706,10 @@ final class ReaderModel {
     List<FlutterAnnotation>? annotations,
     List<FlutterSearchMatch>? searchResults,
     List<FlutterBookmark>? bookmarks,
+    List<FlutterNote>? notes,
+    List<ReaderReturnPoint>? returnPoints,
+    ReaderNotesScope? notesScope,
+    ShellNotesModel? libraryNotes,
     Set<String>? annotationOperations,
     Object? selectionError = _unchanged,
     Object? relayoutError = _unchanged,
@@ -669,6 +719,8 @@ final class ReaderModel {
     bool? annotationsReady,
     bool? searchBusy,
     bool? bookmarkBusy,
+    bool? notesBusy,
+    Object? noteEdit = _unchanged,
     Object? toolError = _unchanged,
     Object? persistenceError = _unchanged,
     Object? openPanel = _unchanged,
@@ -743,6 +795,10 @@ final class ReaderModel {
           : List.unmodifiable(annotations),
       searchResults: searchResults ?? this.searchResults,
       bookmarks: bookmarks ?? this.bookmarks,
+      notes: notes ?? this.notes,
+      returnPoints: returnPoints ?? this.returnPoints,
+      notesScope: notesScope ?? this.notesScope,
+      libraryNotes: libraryNotes ?? this.libraryNotes,
       annotationOperations: annotationOperations == null
           ? this.annotationOperations
           : Set.unmodifiable(annotationOperations),
@@ -764,6 +820,10 @@ final class ReaderModel {
       annotationsReady: annotationsReady ?? this.annotationsReady,
       searchBusy: searchBusy ?? this.searchBusy,
       bookmarkBusy: bookmarkBusy ?? this.bookmarkBusy,
+      notesBusy: notesBusy ?? this.notesBusy,
+      noteEdit: identical(noteEdit, _unchanged)
+          ? this.noteEdit
+          : noteEdit as ReaderNoteEdit?,
       toolError: identical(toolError, _unchanged)
           ? this.toolError
           : toolError as String?,
@@ -808,7 +868,16 @@ enum ReaderContentState { loading, ready, failed }
 /// focus nodes when the controller asks, and never moves focus on its own.
 enum ReaderFocusTarget { surface, actions, header, panel }
 
-enum _ReaderNoteTarget { selection, annotation, bookmark }
+enum _ReaderNoteTarget { selection, annotation, place }
+
+/// Where a new page note or book note editor writes: at [unit] and [offset],
+/// or on the whole book when [unit] is null.
+final class _PlaceNoteTarget {
+  const _PlaceNoteTarget({required this.kind, this.unit, this.offset});
+  final FlutterNoteKind kind;
+  final int? unit;
+  final int? offset;
+}
 
 enum ReaderSelectionMovement {
   previousGrapheme,

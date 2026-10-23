@@ -300,12 +300,11 @@ void main() {
     );
     expect(bookmark!.unit, BigInt.two);
     expect(bookmark.bookId, book.bookId);
-    await bridge.updateBookmarkNote(id: bookmark.id, note: 'Remember');
     final [listed] = await bridge.listBookmarks(
       bookId: book.bookId,
       cancellationId: bridge.createCancellation(),
     );
-    expect(listed.note, 'Remember');
+    expect(listed.title, 'Chapter 3');
     expect(
       await bridge.exportBookmarks(bookId: book.bookId),
       contains('Chapter 3'),
@@ -426,6 +425,203 @@ void main() {
     );
     expect(matches.single.unit, BigInt.one);
     expect(matches.single.offset, BigInt.from(19));
+  });
+
+  test('page notes and book notes are listed apart from highlights', () async {
+    final book = await import(_epubFixture);
+    final document = await bridge.openLibraryBook(
+      bookId: book.bookId,
+      cancellationId: bridge.createCancellation(),
+    );
+    const chapter = 'The lead Café text tail.';
+    const path = 'OEBPS/chapter.xhtml';
+    final text = EpubReaderText(
+      unitCount: 3,
+      text: (unit) async => unit == 1 ? chapter : '',
+      resourcePath: (unit) async => unit == 1 ? path : 'other.xhtml',
+    );
+    final records = bridge.records;
+    await records.createAnnotation(
+      document: document,
+      surface: _surface(chapter, resourcePath: path),
+      unit: BigInt.one,
+      start: BigInt.from(9),
+      end: BigInt.from(13),
+      displayScale: 1,
+      color: FlutterHighlightColor.green,
+      cancellationId: bridge.createCancellation(),
+    );
+
+    final page = await records.createNote(
+      document: document,
+      text: text,
+      unit: BigInt.one,
+      offset: BigInt.from(4),
+      body: 'The lead matters.',
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(page.kind, FlutterNoteKind.page);
+    expect(page.unit, BigInt.one);
+    expect(page.offset, BigInt.from(4));
+    final whole = await records.createNote(
+      document: document,
+      text: text,
+      body: 'Reading group pick.',
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(whole.kind, FlutterNoteKind.book);
+    expect(whole.unit, isNull);
+
+    expect(
+      await records.updateNote(
+        document: document,
+        id: page.id,
+        body: 'The lead matters most.',
+      ),
+      isTrue,
+    );
+    final listed = await records.listNotes(
+      document: document,
+      text: text,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(listed.map((note) => (note.kind, note.body)), [
+      (FlutterNoteKind.book, 'Reading group pick.'),
+      (FlutterNoteKind.page, 'The lead matters most.'),
+    ]);
+    expect(listed.last.resolution, FlutterAnnotationResolution.exact);
+    final [highlight] = await records.listAnnotations(
+      document: document,
+      text: text,
+      scale: 1,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(highlight.quote, 'Café');
+
+    expect(
+      await records.deleteAnnotation(document: document, id: whole.id),
+      isTrue,
+    );
+    expect(
+      await records.listNotes(
+        document: document,
+        text: text,
+        cancellationId: bridge.createCancellation(),
+      ),
+      hasLength(1),
+    );
+
+    // The library's notes list the book's highlight and page note in
+    // reading order, from the store alone.
+    final library = await records.libraryNotes(
+      limit: 20,
+      offset: 0,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(library.hasMore, isFalse);
+    final [listedBook] = library.books;
+    expect(listedBook.book.bookId, book.bookId);
+    expect(
+      listedBook.notes.map(
+        (note) => (note.kind, note.unit, note.offset, note.quote, note.body),
+      ),
+      [
+        (FlutterNoteEntryKind.page, 1, 4, null, 'The lead matters most.'),
+        (FlutterNoteEntryKind.highlight, 1, 9, 'Café', null),
+      ],
+    );
+    expect(listedBook.notes.last.color, FlutterHighlightColor.green);
+  });
+
+  test(
+    'a file opened directly lists its highlights without its notes',
+    () async {
+      final book = await import(_epubFixture);
+      final library = await bridge.openLibraryBook(
+        bookId: book.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      final highlight = await bridge.createAnnotation(
+        document: library.handle,
+        unit: BigInt.zero,
+        start: BigInt.zero,
+        end: BigInt.from(4),
+        displayScale: 1,
+        color: FlutterHighlightColor.blue,
+        cancellationId: bridge.createCancellation(),
+      );
+      for (final unit in [BigInt.zero, null]) {
+        await bridge.createNote(
+          document: library.handle,
+          unit: unit,
+          offset: unit == null ? null : BigInt.one,
+          body: 'Note',
+          cancellationId: bridge.createCancellation(),
+        );
+      }
+
+      final direct = await bridge.openDocument(
+        request: FlutterOpenRequest(
+          localId: 'direct',
+          pathKey: '${directory.path}/sample.epub',
+        ),
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(direct.bookId, isNull);
+
+      final listed = await bridge.listAnnotations(
+        document: direct.handle,
+        scale: 1,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(listed.map((a) => a.id), [highlight.id]);
+    },
+  );
+  test('library search finds notes and book text across the library', () async {
+    final epub = await import(_epubFixture);
+    final pdf = await import(_pdfFixture);
+    final document = await bridge.openLibraryBook(
+      bookId: epub.bookId,
+      cancellationId: bridge.createCancellation(),
+    );
+    final records = bridge.records;
+    await records.createNote(
+      document: document,
+      text: EpubReaderText(
+        unitCount: 1,
+        text: (_) async => 'Chapter text.',
+        resourcePath: (_) async => 'OEBPS/chapter.xhtml',
+      ),
+      unit: BigInt.zero,
+      offset: BigInt.zero,
+      body: 'The lead matters.',
+      cancellationId: bridge.createCancellation(),
+    );
+
+    final [notes] = await records.searchLibraryNotes(
+      query: 'LEAD',
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(notes.book.bookId, epub.bookId);
+    final [hit] = notes.hits;
+    expect(hit.note.kind, FlutterNoteEntryKind.page);
+    expect(hit.matches, const [
+      FlutterNoteMatch(field: FlutterNoteField.body, offset: 4, length: 4),
+    ]);
+
+    // The PDF is opened, its text read and saved, then released.
+    final found = <FlutterBookTextHits>[];
+    await records.searchLibraryText(
+      query: 'PAGE 1',
+      bookId: pdf.bookId,
+      onBook: found.add,
+      cancellationId: bridge.createCancellation(),
+    );
+    final [text] = found;
+    expect(text.book.bookId, pdf.bookId);
+    expect(text.error, isNull);
+    expect(text.matches.single.unit, BigInt.one);
+    expect(text.matches.single.offset, BigInt.zero);
   });
 
   test('PDF annotations keep page rectangles in page points', () async {

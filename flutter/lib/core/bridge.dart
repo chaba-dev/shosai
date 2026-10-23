@@ -58,6 +58,17 @@ abstract interface class FlutterBridge {
     required BigInt cancellationId,
   });
 
+  /// A page of the library's books that have notes, most recently read
+  /// first, each with its notes in reading order.
+  /// A page of the library's books with notes; [after] continues a listing
+  /// and makes the page `changed` when those books are no longer the first.
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  });
+
   Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -101,12 +112,7 @@ abstract interface class FlutterBridge {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   });
-
-  Future<void> updateBookmark({required int id, String? title, String? note});
-
-  Future<void> updateBookmarkNote({required int id, String? note});
 
   Future<void> deleteBookmark({required int id});
 
@@ -143,6 +149,28 @@ abstract interface class FlutterBridge {
     required String id,
   });
 
+  /// [document]'s page notes and book notes.
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  });
+
+  /// Write [body] as a page note at [unit] and [offset], or as a book note
+  /// when [unit] is null.
+  Future<FlutterNote> createNote({
+    required FlutterDocumentHandle document,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  });
+
+  Future<bool> updateNote({
+    required FlutterDocumentHandle document,
+    required String id,
+    required String body,
+  });
+
   Future<FlutterAnnotationAssociationSourcePage>
   listAnnotationAssociationSources({
     required FlutterDocumentHandle target,
@@ -160,6 +188,25 @@ abstract interface class FlutterBridge {
   Future<List<FlutterSearchMatch>> searchDocument({
     required FlutterDocumentHandle document,
     required String query,
+    required BigInt cancellationId,
+  });
+
+  /// The notes of every library book, or of book [bookId], whose quote or
+  /// body holds [query]; books most recently read first.
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  });
+
+  /// The text matches of [query] in every library book, or in book
+  /// [bookId], reported to [onBook] one book at a time, most recently read
+  /// first; books without matches are left out. Completes when every book
+  /// has been searched.
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
     required BigInt cancellationId,
   });
 
@@ -214,6 +261,52 @@ class FlutterAnnotation {
           rectangles == other.rectangles &&
           color == other.color &&
           body == other.body;
+}
+
+/// A page note (at a place) or a book note (on the whole book).
+enum FlutterNoteKind { page, book }
+
+/// A page note or book note of the open document, resolved against it.
+class FlutterNote {
+  final String id;
+  final FlutterNoteKind kind;
+
+  /// The EPUB spine index or PDF page of a page note; null for a book note.
+  final BigInt? unit;
+
+  /// An EPUB page note's place in its spine item, in Unicode scalars.
+  final BigInt? offset;
+  final FlutterAnnotationResolution resolution;
+  final String body;
+
+  /// ISO 8601 UTC.
+  final String modifiedAt;
+
+  const FlutterNote({
+    required this.id,
+    required this.kind,
+    this.unit,
+    this.offset,
+    required this.resolution,
+    required this.body,
+    required this.modifiedAt,
+  });
+
+  @override
+  int get hashCode =>
+      Object.hash(id, kind, unit, offset, resolution, body, modifiedAt);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNote &&
+          id == other.id &&
+          kind == other.kind &&
+          unit == other.unit &&
+          offset == other.offset &&
+          resolution == other.resolution &&
+          body == other.body &&
+          modifiedAt == other.modifiedAt;
 }
 
 enum FlutterAnnotationAssociationOutcome { associated, alreadyAssociated }
@@ -314,7 +407,6 @@ class FlutterBookmark {
   final BigInt unit;
   final BigInt? offset;
   final String? title;
-  final String? note;
   final String color;
   final String createdAt;
 
@@ -324,7 +416,6 @@ class FlutterBookmark {
     required this.unit,
     this.offset,
     this.title,
-    this.note,
     required this.color,
     required this.createdAt,
   });
@@ -336,7 +427,6 @@ class FlutterBookmark {
       unit.hashCode ^
       offset.hashCode ^
       title.hashCode ^
-      note.hashCode ^
       color.hashCode ^
       createdAt.hashCode;
 
@@ -350,7 +440,6 @@ class FlutterBookmark {
           unit == other.unit &&
           offset == other.offset &&
           title == other.title &&
-          note == other.note &&
           color == other.color &&
           createdAt == other.createdAt;
 }
@@ -582,6 +671,88 @@ class FlutterNotesSummary {
           latest == other.latest;
 }
 
+/// What a note in the library's notes list is.
+enum FlutterNoteEntryKind { highlight, page, book }
+
+/// One highlight, page note or book note as the library's notes list it:
+/// read from the store alone, so its book need not be open, and placed as
+/// it was made.
+class FlutterNoteEntry {
+  final String id;
+  final FlutterNoteEntryKind kind;
+
+  /// A highlight's colour; null for notes.
+  final FlutterHighlightColor? color;
+
+  /// A highlight's text as it was selected; null for notes and for PDF
+  /// highlights of unmapped text.
+  final String? quote;
+  final String? body;
+
+  /// The EPUB spine index or PDF page it was made on; null for a book note.
+  final int? unit;
+
+  /// Where in [unit] it starts, in Unicode scalars of the unit's text; null
+  /// when unknown.
+  final int? offset;
+
+  /// ISO 8601 UTC.
+  final String modifiedAt;
+
+  const FlutterNoteEntry({
+    required this.id,
+    required this.kind,
+    this.color,
+    this.quote,
+    this.body,
+    this.unit,
+    this.offset,
+    required this.modifiedAt,
+  });
+
+  @override
+  int get hashCode =>
+      Object.hash(id, kind, color, quote, body, unit, offset, modifiedAt);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNoteEntry &&
+          id == other.id &&
+          kind == other.kind &&
+          color == other.color &&
+          quote == other.quote &&
+          body == other.body &&
+          unit == other.unit &&
+          offset == other.offset &&
+          modifiedAt == other.modifiedAt;
+}
+
+/// A library book and its notes in reading order: book notes first, then
+/// each unit's notes by where they start.
+class FlutterBookNotes {
+  final FlutterLibraryBook book;
+  final List<FlutterNoteEntry> notes;
+
+  const FlutterBookNotes({required this.book, required this.notes});
+}
+
+/// A page of the library's books that have notes, most recently read first.
+class FlutterLibraryNotesPage {
+  final List<FlutterBookNotes> books;
+  final bool hasMore;
+
+  /// The books the page was asked to follow are no longer the library's
+  /// first: it lists nothing, and the listing starts again.
+  final bool changed;
+
+  const FlutterLibraryNotesPage({
+    required this.books,
+    required this.hasMore,
+    this.changed = false,
+  });
+}
+
 class FlutterLibraryPage {
   final List<FlutterLibraryBook> books;
   final bool hasMore;
@@ -766,22 +937,100 @@ class FlutterReadingState {
           lastUnit == other.lastUnit;
 }
 
+/// Which words of a note matched a library search.
+enum FlutterNoteField { quote, body }
+
+/// One match in a note: [length] Unicode scalars of its [field] from
+/// [offset].
+class FlutterNoteMatch {
+  final FlutterNoteField field;
+  final int offset;
+  final int length;
+
+  const FlutterNoteMatch({
+    required this.field,
+    required this.offset,
+    required this.length,
+  });
+
+  @override
+  int get hashCode => Object.hash(field, offset, length);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNoteMatch &&
+          field == other.field &&
+          offset == other.offset &&
+          length == other.length;
+}
+
+/// A note whose quote or body holds the query, with its matches in field
+/// order, then text order.
+class FlutterNoteHit {
+  final FlutterNoteEntry note;
+  final List<FlutterNoteMatch> matches;
+
+  const FlutterNoteHit({required this.note, required this.matches});
+}
+
+/// One book's notes that hold the query, in reading order.
+class FlutterBookNoteHits {
+  final FlutterLibraryBook book;
+  final List<FlutterNoteHit> hits;
+
+  const FlutterBookNoteHits({required this.book, required this.hits});
+}
+
+/// One book's text matches in reading order, or why it could not be
+/// searched.
+class FlutterBookTextHits {
+  final FlutterLibraryBook book;
+  final List<FlutterSearchMatch> matches;
+
+  /// Whether the book holds matches beyond [matches].
+  final bool more;
+
+  /// Whether only the first part of a very long book was searched.
+  final bool partial;
+
+  /// Why the book could not be read; [matches] is then empty.
+  final String? error;
+
+  const FlutterBookTextHits({
+    required this.book,
+    required this.matches,
+    this.more = false,
+    this.partial = false,
+    this.error,
+  });
+}
+
 class FlutterSearchMatch {
   final BigInt unit;
   final BigInt offset;
   final BigInt length;
   final String context;
 
+  /// Where the match starts in [context], in Unicode scalars, when known:
+  /// the context may hold the query more than once.
+  final BigInt? contextOffset;
+
   const FlutterSearchMatch({
     required this.unit,
     required this.offset,
     required this.length,
     required this.context,
+    this.contextOffset,
   });
 
   @override
   int get hashCode =>
-      unit.hashCode ^ offset.hashCode ^ length.hashCode ^ context.hashCode;
+      unit.hashCode ^
+      offset.hashCode ^
+      length.hashCode ^
+      context.hashCode ^
+      contextOffset.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -791,7 +1040,8 @@ class FlutterSearchMatch {
           unit == other.unit &&
           offset == other.offset &&
           length == other.length &&
-          context == other.context;
+          context == other.context &&
+          contextOffset == other.contextOffset;
 }
 
 class FlutterSelectionCaret {

@@ -8,6 +8,9 @@ typedef PageDecoder =
     });
 
 typedef NoteEditor = Future<String?> Function(String? initialValue);
+
+/// Writes the body of a new page note or book note; null when dismissed.
+typedef PlaceNoteEditor = Future<String?> Function(FlutterNoteKind kind);
 typedef NoteEditorCanceller = void Function();
 typedef AnnotationAssociationPicker =
     Future<AnnotationAssociationChoice> Function(
@@ -249,3 +252,39 @@ typedef ReaderSelectionAnnouncer = Future<void> Function(String description);
 const _unchanged = Object();
 final _frozenSurfaces = Expando<bool>();
 final _frozenAnnotations = Expando<bool>();
+
+/// Opens [book] at [place] (its saved position when null) in the shell.
+typedef ReaderBookOpener =
+    void Function(FlutterLibraryBook book, ReaderPlace? place);
+
+/// Places the shell asks a reader to go to, such as a search hit's or a
+/// note's, from outside it. The latest request wins: a reader still opening
+/// opens there, and an open one goes there.
+///
+/// The other way, [openBook] is how the reader asks the shell to open another
+/// book, such as one a note in All books sits in.
+final class ReaderPlaceRequests extends ChangeNotifier {
+  ReaderPlaceRequests({this.openSearch, this.openBook});
+
+  /// Opens the shell's search palette, which the reader's Search action
+  /// opens in its in-book search's stead.
+  final VoidCallback? openSearch;
+
+  /// Opens another book at a place, such as one a note in All books sits in.
+  final ReaderBookOpener? openBook;
+
+  ReaderPlace? _pending;
+
+  /// Asks the reader to go to [place].
+  void go(ReaderPlace place) {
+    _pending = place;
+    notifyListeners();
+  }
+
+  /// The request not yet taken, which the reader takes once.
+  ReaderPlace? take() {
+    final place = _pending;
+    _pending = null;
+    return place;
+  }
+}

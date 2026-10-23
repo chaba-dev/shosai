@@ -25,24 +25,12 @@ void main() {
       expect(added!.unit, 3);
       expect(added.offset, isNull);
       expect(added.title, 'Chapter 4');
-      expect(added.note, isNull);
       expect(added.color, 'yellow');
       expect(added.createdAt, endsWith('Z'));
       expect(await bookmarks.list(pdf.id), [added]);
 
       expect(await bookmarks.toggle(pdf.id, 3), isNull);
       expect(await bookmarks.list(pdf.id), isEmpty);
-    });
-
-    test('a bookmark with a note is not toggled off', () async {
-      final bookmarks = Bookmarks(t.store);
-      final noted = await bookmarks.toggle(pdf.id, 0, note: 'Remember this');
-
-      final plain = await bookmarks.toggle(pdf.id, 0);
-
-      expect(noted!.note, 'Remember this');
-      expect(plain, isNotNull);
-      expect(await bookmarks.list(pdf.id), [noted, plain]);
     });
 
     test('EPUB bookmarks share a chapter at distinct offsets', () async {
@@ -65,43 +53,17 @@ void main() {
       expect(await bookmarks.list(pdf.id), hasLength(1));
     });
 
-    test(
-      'notes are updated and cleared; missing bookmarks are reported',
-      () async {
-        final bookmarks = Bookmarks(t.store);
-        final bookmark = (await bookmarks.toggle(pdf.id, 1))!;
-
-        await bookmarks.updateNote(bookmark.id, 'Updated');
-        expect((await bookmarks.list(pdf.id)).single.note, 'Updated');
-        await bookmarks.updateNote(bookmark.id, null);
-        expect((await bookmarks.list(pdf.id)).single.note, isNull);
-
-        await bookmarks.delete(bookmark.id);
-        expect(await bookmarks.list(pdf.id), isEmpty);
-        await bookmarks.delete(bookmark.id);
-        await expectLater(
-          bookmarks.updateNote(bookmark.id, 'Gone'),
-          throwsCoreError(CoreErrorKind.notFound),
-        );
-      },
-    );
-
     test('a deleted bookmark id is never reused', () async {
       final bookmarks = Bookmarks(t.store);
-      final a = (await bookmarks.toggle(pdf.id, 0, note: 'A'))!;
+      final a = (await bookmarks.toggle(pdf.id, 0, title: 'A'))!;
       await bookmarks.delete(a.id);
 
-      final b = (await bookmarks.toggle(epub.id, 0, note: 'B'))!;
+      final b = (await bookmarks.toggle(epub.id, 0, title: 'B'))!;
 
       expect(b.id, isNot(a.id));
-      // Late requests for the deleted bookmark do not reach the new one.
-      await expectLater(
-        bookmarks.updateNote(a.id, 'late'),
-        throwsCoreError(CoreErrorKind.notFound),
-      );
+      // A late delete of the old bookmark does not reach the new one.
       await bookmarks.delete(a.id);
       expect(await bookmarks.list(epub.id), [b]);
-      expect(b.note, 'B');
     });
 
     test(
@@ -119,28 +81,11 @@ void main() {
 
     test('fields are bounded', () async {
       final bookmarks = Bookmarks(t.store);
-      final bookmark = (await bookmarks.toggle(
-        pdf.id,
-        0,
-        title: 't' * maxBookmarkTitleBytes,
-        note: 'n' * maxBookmarkNoteBytes,
-      ))!;
+      await bookmarks.toggle(pdf.id, 0, title: 't' * maxBookmarkTitleBytes);
 
       await expectLater(
         bookmarks.toggle(pdf.id, 1, title: 't' * (maxBookmarkTitleBytes + 1)),
         throwsCoreError(CoreErrorKind.invalidRequest, contains('title')),
-      );
-      await expectLater(
-        bookmarks.toggle(
-          pdf.id,
-          1,
-          note: 'é' * (maxBookmarkNoteBytes ~/ 2 + 1),
-        ),
-        throwsCoreError(CoreErrorKind.invalidRequest, contains('note')),
-      );
-      await expectLater(
-        bookmarks.updateNote(bookmark.id, 'n' * (maxBookmarkNoteBytes + 1)),
-        throwsCoreError(CoreErrorKind.invalidRequest, contains('note')),
       );
       await expectLater(
         bookmarks.toggle(pdf.id, -1),
@@ -215,12 +160,7 @@ void main() {
 
     test('exports Markdown in reading order', () async {
       final bookmarks = Bookmarks(t.store);
-      await bookmarks.toggle(
-        epub.id,
-        4,
-        title: 'Key Concept',
-        note: 'Important.',
-      );
+      await bookmarks.toggle(epub.id, 4, title: 'Key Concept');
       await bookmarks.toggle(epub.id, 0, title: 'Introduction');
 
       final markdown = await bookmarks.exportMarkdown(epub.id);
@@ -228,7 +168,7 @@ void main() {
       expect(markdown, startsWith('# Bookmarks: Sample Book\n\n'));
       expect(
         markdown.indexOf('## Page 1: Introduction'),
-        lessThan(markdown.indexOf('## Page 5: Key Concept\n\nImportant.\n\n')),
+        lessThan(markdown.indexOf('## Page 5: Key Concept\n\n*Added: ')),
       );
       expect(RegExp(r'\*Added: .+Z\*').allMatches(markdown), hasLength(2));
       expect(
@@ -239,11 +179,12 @@ void main() {
 
     test('the export is bounded', () async {
       final bookmarks = Bookmarks(t.store);
-      final note = 'n' * maxBookmarkNoteBytes;
+      final title = 't' * maxBookmarkTitleBytes;
       await t.executeMany(
-        'INSERT INTO bookmarks (content_hash, unit, note) VALUES (?, ?, ?)',
+        'INSERT INTO bookmarks (content_hash, unit, title) VALUES (?, ?, ?)',
         [
-          for (var unit = 0; unit < 65; unit++) [pdf.contentHash, unit, note],
+          for (var unit = 0; unit < 1024; unit++)
+            [pdf.contentHash, unit, title],
         ],
       );
 
@@ -256,43 +197,45 @@ void main() {
     test('an export of exactly 4 MiB succeeds; one byte more fails', () async {
       const limit = 4 * 1024 * 1024;
       const added = '2026-01-02T03:04:05.678Z';
-      // A note of exactly [bytes] UTF-8 bytes, mostly three-byte characters.
-      String noteOf(int bytes) =>
+      // A title of exactly [bytes] UTF-8 bytes, mostly three-byte characters.
+      String titleOf(int bytes) =>
           '日' * (bytes ~/ 3) + const ['', 'a', 'é'][bytes % 3];
-      String entry(int unit, String note) =>
-          '## Page ${unit + 1}: Untitled\n\n$note\n\n'
-          '*Added: $added*\n\n---\n\n';
+      String entry(int unit, String title) =>
+          '## Page ${unit + 1}: $title\n\n*Added: $added*\n\n---\n\n';
       int size(String text) => utf8.encode(text).length;
 
-      // Fill the export to the limit with notes of at most 64 KiB each.
+      // Fill the export to the limit with titles of at most 4 KiB each.
       var expected = '# Bookmarks: Sample PDF\n\n';
-      final notes = <String>[];
+      final titles = <String>[];
       while (size(expected) < limit) {
-        final room = limit - size(expected) - size(entry(notes.length, ''));
+        final room = limit - size(expected) - size(entry(titles.length, ''));
         expect(room, greaterThan(0));
-        final note = noteOf(room < 65536 ? room : 65536);
-        expected += entry(notes.length, note);
-        notes.add(note);
+        final title = titleOf(
+          room < maxBookmarkTitleBytes ? room : maxBookmarkTitleBytes,
+        );
+        expected += entry(titles.length, title);
+        titles.add(title);
       }
       expect(size(expected), limit);
+      expect(titles.length, lessThanOrEqualTo(maxBookmarksPerBook));
       await t.executeMany(
-        '''INSERT INTO bookmarks (content_hash, unit, note, created_at)
+        '''INSERT INTO bookmarks (content_hash, unit, title, created_at)
            VALUES (?, ?, ?, ?)''',
         [
-          for (final (unit, note) in notes.indexed)
-            [pdf.contentHash, unit, note, added],
+          for (final (unit, title) in titles.indexed)
+            [pdf.contentHash, unit, title, added],
         ],
       );
       final bookmarks = Bookmarks(t.store);
 
       expect(await bookmarks.exportMarkdown(pdf.id), expected);
 
-      // One more byte in the last note puts the export over the limit.
-      expect(size(notes.last), lessThan(65536));
+      // One more byte in the last title puts the export over the limit.
+      expect(size(titles.last), lessThan(maxBookmarkTitleBytes));
       await t.execute(
-        "UPDATE bookmarks SET note = note || 'x' WHERE content_hash = ? "
+        "UPDATE bookmarks SET title = title || 'x' WHERE content_hash = ? "
         'AND unit = ?',
-        [pdf.contentHash, notes.length - 1],
+        [pdf.contentHash, titles.length - 1],
       );
       await expectLater(
         bookmarks.exportMarkdown(pdf.id),
@@ -302,17 +245,16 @@ void main() {
 
     test('the schema rejects malformed rows', () async {
       for (final row in <List<Object?>>[
-        ['a' * 63, 0, null, null, null, 'yellow'],
-        [pdf.contentHash, -1, null, null, null, 'yellow'],
-        [pdf.contentHash, 0, -1, null, null, 'yellow'],
-        [pdf.contentHash, 0, null, 't' * 4097, null, 'yellow'],
-        [pdf.contentHash, 0, null, null, 'n' * 65537, 'yellow'],
-        [pdf.contentHash, 0, null, null, null, ''],
+        ['a' * 63, 0, null, null, 'yellow'],
+        [pdf.contentHash, -1, null, null, 'yellow'],
+        [pdf.contentHash, 0, -1, null, 'yellow'],
+        [pdf.contentHash, 0, null, 't' * 4097, 'yellow'],
+        [pdf.contentHash, 0, null, null, ''],
       ]) {
         await expectLater(
           t.execute('''INSERT INTO bookmarks
-                 (content_hash, unit, location_offset, title, note, color)
-               VALUES (?, ?, ?, ?, ?, ?)''', row),
+                 (content_hash, unit, location_offset, title, color)
+               VALUES (?, ?, ?, ?, ?)''', row),
           throwsCoreError(CoreErrorKind.storage),
           reason: '${row.take(3)}',
         );

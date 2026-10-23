@@ -4,7 +4,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
-    show FlutterError, FlutterErrorDetails, Listenable, VoidCallback;
+    show
+        ChangeNotifier,
+        FlutterError,
+        FlutterErrorDetails,
+        Listenable,
+        VoidCallback;
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
     show shosaiJapaneseInterfaceFontFamily;
@@ -12,6 +17,8 @@ import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
+import 'package:shosai_flutter/shell/notes_controller.dart'
+    show ShellNotesController, ShellNotesModel, ShellNotesStatus;
 import 'package:shosai_flutter/notices/reader_notice_text.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/continuous.dart';
@@ -29,6 +36,9 @@ part 'effects.dart';
 part 'message.dart';
 part 'model.dart';
 
+/// Most jumps Back remembers; the oldest is forgotten first.
+const _maxReturnPoints = 32;
+
 final class ReaderController implements Listenable {
   ReaderController({
     required FlutterBridge bridge,
@@ -37,7 +47,7 @@ final class ReaderController implements Listenable {
     double initialScale = 1,
     double initialLineSpacing = 1.5,
     NoteEditor? noteEditor,
-    NoteEditor? bookmarkNoteEditor,
+    PlaceNoteEditor? placeNoteEditor,
     NoteEditorCanceller? noteEditorCanceller,
     AnnotationAssociationPicker? annotationAssociationPicker,
     AnnotationAssociationPickerCanceller? annotationAssociationPickerCanceller,
@@ -46,9 +56,11 @@ final class ReaderController implements Listenable {
     SelectionCopier? selectionCopier,
     ReaderSelectionAnnouncer? selectionAnnouncer,
     ReaderNavigationAdapter? navigationAdapter,
+    VoidCallback? librarySearchOpener,
     ReaderProgressSource? progressSource,
     ReaderContentsLoader? contentsLoader,
     ReaderExternalLinkOpener? externalLinkOpener,
+    ReaderBookOpener? bookOpener,
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
     ReaderPagesSink? pagesSink,
@@ -77,8 +89,9 @@ final class ReaderController implements Listenable {
            pdfEngine ??
            (bridge is PdfEngine ? bridge as PdfEngine : PdfrxPdfEngine()),
        _noteEditor = noteEditor ?? ((_) async => null),
-       _bookmarkNoteEditor =
-           bookmarkNoteEditor ?? noteEditor ?? ((_) async => null),
+       _placeNoteEditor =
+           placeNoteEditor ??
+           (noteEditor == null ? ((_) async => null) : (_) => noteEditor(null)),
        _noteEditorCanceller = noteEditorCanceller ?? (() {}),
        _annotationAssociationPicker =
            annotationAssociationPicker ??
@@ -90,9 +103,11 @@ final class ReaderController implements Listenable {
        _selectionCopier = selectionCopier ?? ((_) async {}),
        _selectionAnnouncer = selectionAnnouncer,
        _navigationAdapter = navigationAdapter ?? (() async {}),
+       _librarySearchOpener = librarySearchOpener,
        _progressSource = progressSource,
        _contentsLoader = contentsLoader,
        _externalLinkOpener = externalLinkOpener ?? ((_) async {}),
+       _bookOpener = bookOpener,
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
        _pagesSink = pagesSink ?? ((_) {}),
@@ -127,7 +142,7 @@ final class ReaderController implements Listenable {
   /// resources.
   PdfEngineDocument? _pdfDocument;
   final NoteEditor _noteEditor;
-  final NoteEditor _bookmarkNoteEditor;
+  final PlaceNoteEditor _placeNoteEditor;
   final NoteEditorCanceller _noteEditorCanceller;
   final AnnotationAssociationPicker _annotationAssociationPicker;
   final AnnotationAssociationPickerCanceller
@@ -137,9 +152,16 @@ final class ReaderController implements Listenable {
   final SelectionCopier _selectionCopier;
   final ReaderSelectionAnnouncer? _selectionAnnouncer;
   final ReaderNavigationAdapter _navigationAdapter;
+
+  /// The shell's search palette, which the Search action opens instead of
+  /// the in-book search when the reader is in the shell.
+  final VoidCallback? _librarySearchOpener;
   final ReaderProgressSource? _progressSource;
   final ReaderContentsLoader? _contentsLoader;
   final ReaderExternalLinkOpener _externalLinkOpener;
+
+  /// Opens another library book in the shell; null outside it.
+  final ReaderBookOpener? _bookOpener;
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
   final ReaderPagesSink _pagesSink;
@@ -230,6 +252,10 @@ final class ReaderController implements Listenable {
   /// first report then lays the chapter out.
   bool _epubHeightPending = false;
 
+  /// The search match a book opened at, marked once the reader settles on
+  /// its page (RFD 6: the current match is marked on the page).
+  ({int unit, int offset, int length})? _openMatch;
+
   /// Embedded `@font-face` families already registered in this process.
   ///
   /// Flutter has no font-unload API, so a family is registered once per
@@ -260,9 +286,15 @@ final class ReaderController implements Listenable {
   int _noteRevision = 0;
   int _searchRevision = 0;
   int _bookmarkRevision = 0;
+  int _notesRevision = 0;
+  int _libraryNotesRevision = 0;
+  BigInt? _libraryNotesCancellation;
   String _searchQuery = '';
   String? _searchError;
   int _searchCurrentIndex = 0;
+
+  /// Page turns since the last jump: three close the BackPill.
+  int _turnsSinceJump = 0;
   int _contentsRevision = 0;
 
   /// The scale the displayed PDF page's raster was rendered at. Set only when
@@ -294,14 +326,16 @@ final class ReaderController implements Listenable {
   final Set<BigInt> _toolCancellations = {};
   final Set<BigInt> _searchCancellations = {};
   BigInt? _bookmarkMutationCancellation;
+  BigInt? _notesMutationCancellation;
   _ReaderNoteTarget? _activeNoteEditor;
   bool _associationPickerActive = false;
 
   /// Controller-wide ownership token of the active note editor.
   ///
-  /// The per-operation revisions are not comparable across editors (bookmark
-  /// editors count with `_bookmarkRevision`, selection/annotation editors with
-  /// `_noteRevision`), so completion ownership needs its own token.
+  /// The per-operation revisions are not comparable across editors (page and
+  /// book note editors count with `_notesRevision`, selection/annotation
+  /// editors with `_noteRevision`), so completion ownership needs its own
+  /// token.
   int _noteEditorToken = 0;
   int? _activeNoteEditorToken;
 
@@ -383,6 +417,94 @@ final class ReaderController implements Listenable {
   }
 
   void dispatch(ReaderMessage message) {
+    _dispatch(message);
+    _applyPendingPlace();
+  }
+
+  /// A place the shell asked for that the reader could not go to yet, with
+  /// the document generation and place revision it was asked for.
+  ({int generation, int revision, ReaderPlace place})? _pendingPlace;
+
+  /// Advanced by every place request and every navigation the reader asks
+  /// for itself, so a place still waiting or resolving yields to them.
+  int _placeRevision = 0;
+
+  /// Goes to the pending place once the document is open and idle; a newer
+  /// request replaces it, and another document drops it.
+  void _applyPendingPlace() {
+    final pending = _pendingPlace;
+    if (pending == null || _closing) return;
+    if (!_isCurrent(pending.generation) || pending.revision != _placeRevision) {
+      _pendingPlace = null;
+      return;
+    }
+    if (_model.document == null ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _model.annotationOperations.isNotEmpty ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    _pendingPlace = null;
+    final place = pending.place;
+    if (place.annotationId case final id?) {
+      _resolvePlace(id, note: place.note ?? false, revision: pending.revision);
+      return;
+    }
+    _jump(
+      () => _unitRequested(
+        place.unit,
+        offset: place.offset,
+        length: place.length,
+        replaceReadingOffset: true,
+      ),
+    );
+  }
+
+  /// Resolves note or highlight [id] in the open document, as opening a book
+  /// at it does, then goes there.
+  void _resolvePlace(String id, {required bool note, required int revision}) {
+    final document = _model.document!;
+    final generation = _model.generation;
+    final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(toolError: _describeError(error)));
+      return;
+    }
+    _toolCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    final pdf = _pdfDocument;
+    final scale = _model.layout.scale;
+    unawaited(() async {
+      try {
+        final place = await _resolvedPlace(
+          document,
+          pdf,
+          id,
+          note: note,
+          scale: scale,
+          cancellation: cancellation,
+        );
+        dispatch(_ReaderPlaceResolved(generation, revision, place));
+      } catch (error) {
+        dispatch(
+          _ReaderPlaceResolved(
+            generation,
+            revision,
+            null,
+            error: _describeError(error),
+          ),
+        );
+      } finally {
+        dispatch(_ReaderPlaceResolveFinished(cancellation));
+      }
+    }());
+  }
+
+  void _dispatch(ReaderMessage message) {
     if (_recovering &&
         switch (message) {
           ReaderSelectionStarted() ||
@@ -402,18 +524,55 @@ final class ReaderController implements Listenable {
           ReaderSelectionCancelled() ||
           ReaderAnnotationUpdated() ||
           ReaderAnnotationNoteRequested() ||
+          ReaderAnnotationNoteSaved() ||
           ReaderAnnotationDeleted() ||
           ReaderAnnotationNavigated() ||
           ReaderAnnotationReloadRequested() ||
           ReaderAnnotationAssociationRequested() ||
           ReaderSearchRequested() ||
           ReaderBookmarkToggled() ||
-          ReaderBookmarkNoteRequested() ||
           ReaderBookmarkDeleted() ||
-          ReaderBookmarkNavigated() => true,
+          ReaderBookmarkNavigated() ||
+          ReaderPageNoteRequested() ||
+          ReaderBookNoteRequested() ||
+          ReaderNoteSaved() ||
+          ReaderNoteDeleted() ||
+          ReaderNoteNavigated() ||
+          ReaderLibraryNoteOpened() ||
+          ReaderPlaceRequested() ||
+          ReaderReturnRequested() => true,
           _ => false,
         }) {
       return;
+    }
+    switch (message) {
+      // Going somewhere in the book outranks a place asked for earlier that
+      // is still waiting or resolving; relayouts and scrolling do not.
+      case ReaderPageStepRequested() ||
+          ReaderUnitRequested() ||
+          ReaderBookmarkNavigated() ||
+          ReaderNoteNavigated() ||
+          ReaderAnnotationNavigated() ||
+          ReaderLocationNavigated() ||
+          ReaderLinkActivated() ||
+          ReaderPageInputSubmitted() ||
+          ReaderSearchResultStepRequested() ||
+          ReaderReturnRequested():
+        _placeRevision += 1;
+        _pendingPlace = null;
+        // The match a book opened at is left behind as well, even before
+        // its page is laid out.
+        _openMatch = null;
+      // So is it when the reader selects text of their own, or cancels a
+      // selection, before it is marked.
+      case ReaderSelectionStarted() ||
+          ReaderSelectionExtended() ||
+          ReaderSelectionPointerStarted() ||
+          ReaderSelectionKeyboardExtended() ||
+          ReaderSelectionAllRequested() ||
+          ReaderSelectionCancelled():
+        _openMatch = null;
+      default:
     }
     switch (message) {
       case ReaderOpenRequested():
@@ -426,6 +585,8 @@ final class ReaderController implements Listenable {
           height: message.height,
           devicePixelRatio: message.devicePixelRatio,
         );
+      case ReaderUnitRequested(turn: true):
+        _pageTurned(() => _unitRequested(message.unit));
       case ReaderUnitRequested():
         _unitRequested(
           message.unit,
@@ -433,21 +594,115 @@ final class ReaderController implements Listenable {
           length: message.length,
         );
       case ReaderPageStepRequested():
-        _pageStepRequested(message.delta);
+        _pageTurned(() => _pageStepRequested(message.delta));
       case ReaderSearchRequested():
         _searchRequested(message.query);
       case ReaderBookmarkToggled():
         _bookmarkToggled();
-      case ReaderBookmarkNoteRequested():
-        _bookmarkNoteRequested(message.bookmark);
       case ReaderBookmarkDeleted():
         _bookmarkDeleted(message.id);
       case ReaderBookmarkNavigated():
-        _unitRequested(
-          message.unit,
-          offset: message.offset,
-          replaceReadingOffset: true,
+        _jump(
+          () => _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          ),
         );
+      case ReaderPageNoteRequested():
+        _placeNoteRequested(FlutterNoteKind.page);
+      case ReaderBookNoteRequested():
+        _placeNoteRequested(FlutterNoteKind.book);
+      case ReaderNoteSaved():
+        _placeNoteSaved(message.id, message.body);
+      case ReaderNoteEditStarted():
+        _emit(
+          _model.copyWith(noteEdit: ReaderNoteEdit(message.card, message.text)),
+        );
+      case ReaderNoteDraftChanged():
+        if (_model.noteEdit case final edit? when edit.text != message.text) {
+          _emit(
+            _model.copyWith(noteEdit: ReaderNoteEdit(edit.card, message.text)),
+          );
+        }
+      case ReaderNoteEditCancelled():
+        if (_model.noteEdit != null) _emit(_model.copyWith(noteEdit: null));
+      case ReaderNoteDeleted():
+        _placeNoteDeleted(message.id);
+      case ReaderNotesScopeChanged(:final scope):
+        if (scope == _model.notesScope || _model.document?.bookId == null) {
+          return;
+        }
+        _emit(_model.copyWith(notesScope: scope));
+        if (scope == ReaderNotesScope.allBooks) {
+          _libraryNotesRequested(append: false);
+        }
+      case ReaderLibraryNotesMoreRequested():
+        final notes = _model.libraryNotes;
+        if (_model.notesScope != ReaderNotesScope.allBooks || notes.loading) {
+          return;
+        }
+        if (notes.status == ShellNotesStatus.failed) {
+          _libraryNotesRequested(append: false);
+        } else if (notes.hasMore) {
+          _libraryNotesRequested(append: true);
+        }
+      case ReaderLibraryNoteOpened(:final book, :final note):
+        _libraryNoteOpened(book, note);
+      case ReaderNoteNavigated():
+        _jump(
+          () => _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          ),
+        );
+      case ReaderPlaceRequested(:final place):
+        // Taken once the document is open and idle (see dispatch).
+        if (!_closing) {
+          // A newer place outranks the match the book opened at.
+          _openMatch = null;
+          _pendingPlace = (
+            generation: _model.generation,
+            revision: ++_placeRevision,
+            place: place,
+          );
+        }
+      case _ReaderPlaceResolved(
+        :final generation,
+        :final revision,
+        :final place,
+        :final error,
+      ):
+        if (!_isCurrent(generation) || revision != _placeRevision) return;
+        if (place != null) {
+          _pendingPlace = (
+            generation: generation,
+            revision: revision,
+            place: place,
+          );
+        } else {
+          _emit(
+            _model.copyWith(
+              toolError: error == null
+                  ? "This note's place isn't in this edition of the book."
+                  : "This note's place couldn't be found: $error",
+            ),
+          );
+        }
+      case _ReaderPlaceResolveFinished(:final cancellation):
+        _toolCancellations.remove(cancellation);
+        _bridge.releaseCancellation(id: cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
+      case ReaderReturnRequested():
+        _returnRequested();
+      case ReaderReturnDismissed():
+        _turnsSinceJump = 0;
+        if (_model.returnPoints.isNotEmpty) {
+          _emit(_model.copyWith(returnPoints: const []));
+        }
       case ReaderPanelToggled():
         _panelToggled(message.panel);
       case ReaderSearchToggled():
@@ -462,10 +717,12 @@ final class ReaderController implements Listenable {
         _linkActivated(message.href);
       case ReaderLocationNavigated():
         _closeContentsAfterChoice();
-        _unitRequested(
-          message.unit,
-          offset: message.offset,
-          replaceReadingOffset: true,
+        _jump(
+          () => _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          ),
         );
       case ReaderPageInputChanged():
         _pageInputChanged(message.draft);
@@ -636,12 +893,100 @@ final class ReaderController implements Listenable {
         _activeBridgeOperations -= 1;
         _recoverIfIdle();
         _disposeBridgeIfIdle();
-      case _ReaderBookmarkNoteEdited():
-        _bookmarkNoteEdited(message);
-      case _ReaderBookmarkNoteEditFailed():
+      case _ReaderNotesCompleted():
         if (_isCurrent(message.generation) &&
-            message.revision == _bookmarkRevision) {
-          _emit(_model.copyWith(bookmarkBusy: false, toolError: message.error));
+            message.revision == _notesRevision) {
+          _emit(
+            _model.copyWith(
+              notes: message.items,
+              notesBusy: false,
+              noteEdit: _editWithin('reader-place-note-', [
+                for (final note in message.items) note.id,
+              ]),
+            ),
+          );
+          // All books lists this book's notes too.
+          if (_model.notesScope == ReaderNotesScope.allBooks) {
+            _libraryNotesRequested(append: false);
+          }
+        }
+      case _ReaderLibraryNotesLoaded(:final page, :final append):
+        if (_isCurrent(message.generation) &&
+            message.revision == _libraryNotesRevision) {
+          // Books read since the list began reorder it: it is listed again
+          // from the first book.
+          if (page.changed) {
+            _libraryNotesRequested(append: false);
+            return;
+          }
+          _emit(
+            _model.copyWith(
+              libraryNotes: ShellNotesModel(
+                status: ShellNotesStatus.loaded,
+                books: List.unmodifiable([
+                  if (append) ..._model.libraryNotes.books,
+                  ...page.books,
+                ]),
+                hasMore: page.hasMore,
+              ),
+            ),
+          );
+        }
+      case _ReaderLibraryNotesFailed(:final error, :final append):
+        if (_isCurrent(message.generation) &&
+            message.revision == _libraryNotesRevision) {
+          // A page that fails after others keeps what was listed.
+          _emit(
+            _model.copyWith(
+              libraryNotes: _model.libraryNotes.copyWith(
+                status: append
+                    ? ShellNotesStatus.loaded
+                    : ShellNotesStatus.failed,
+                books: append ? null : const [],
+                hasMore: append ? null : false,
+                error: () => error,
+              ),
+            ),
+          );
+        }
+      case _ReaderLibraryNotesFinished(:final cancellation):
+        if (_libraryNotesCancellation == cancellation) {
+          _libraryNotesCancellation = null;
+        }
+        _toolCancellations.remove(cancellation);
+        _bridge.releaseCancellation(id: cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
+      case _ReaderNotesFailed():
+        if (_isCurrent(message.generation) &&
+            message.revision == _notesRevision) {
+          final error = message.persistence
+              ? 'Note changes were not saved: ${message.error}'
+              : 'Notes are unavailable: ${message.error}';
+          _emit(
+            _model.copyWith(
+              notesBusy: false,
+              toolError: error,
+              persistenceError: message.persistence ? error : _unchanged,
+            ),
+          );
+        }
+      case _ReaderNotesFinished():
+        if (_notesMutationCancellation == message.cancellation) {
+          _notesMutationCancellation = null;
+        }
+        _toolCancellations.remove(message.cancellation);
+        _bridge.releaseCancellation(id: message.cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
+      case _ReaderPlaceNoteEdited():
+        _placeNoteEdited(message);
+      case _ReaderPlaceNoteEditFailed():
+        if (_isCurrent(message.generation) &&
+            message.revision == _notesRevision) {
+          _emit(_model.copyWith(notesBusy: false, toolError: message.error));
         }
       case _ReaderReadingStateSaveFailed():
         if (_isCurrent(message.generation) &&
@@ -699,6 +1044,9 @@ final class ReaderController implements Listenable {
         );
       case ReaderSelectionPointerPressedOutside():
         if (_model.selectionPointer == null) {
+          // A press outside cancels like Escape: the match the book opened
+          // at is not marked after it.
+          _openMatch = null;
           _selectionCancelled();
         }
       case ReaderSelectionPointerMoved():
@@ -776,6 +1124,8 @@ final class ReaderController implements Listenable {
         unawaited(_updateAnnotation(message));
       case ReaderAnnotationNoteRequested():
         _noteRequested(message.id);
+      case ReaderAnnotationNoteSaved():
+        _annotationNoteSaved(message.id, message.body);
       case _ReaderAnnotationNoteCompleted():
         _noteCompleted(message);
       case _ReaderAnnotationNoteFailed():
@@ -786,7 +1136,7 @@ final class ReaderController implements Listenable {
       case ReaderAnnotationDeleted():
         unawaited(_deleteAnnotation(message.id));
       case ReaderAnnotationNavigated():
-        _navigateAnnotation(message.id);
+        _jump(() => _navigateAnnotation(message.id));
       case ReaderAnnotationReloadRequested():
         _annotationReloadRequested();
       case ReaderAnnotationAssociationRequested():
@@ -968,11 +1318,13 @@ final class ReaderController implements Listenable {
       _emit(_model.copyWith(openPath: path, openBookId: message.bookId));
       return;
     }
-    if (_bookmarkMutationCancellation != null) {
+    if (_bookmarkMutationCancellation != null ||
+        _notesMutationCancellation != null) {
       _emit(
         _model.copyWith(
-          toolError:
-              'Bookmark changes are still saving. Try opening again shortly.',
+          toolError: _bookmarkMutationCancellation != null
+              ? 'Bookmark changes are still saving. Try opening again shortly.'
+              : 'Note changes are still saving. Try opening again shortly.',
         ),
       );
       return;
@@ -1031,12 +1383,18 @@ final class ReaderController implements Listenable {
     _searchError = null;
     _searchCurrentIndex = 0;
     _exportRevision += 1;
+    _libraryNotesRevision += 1;
     _retireDocumentPicker();
     _emit(
       _model.copyWith(
         openPath: path,
         openBookId: message.bookId,
         document: null,
+        noteEdit: null,
+        // Every book opens on its own notes; a file outside the library has
+        // no All books to switch to.
+        notesScope: ReaderNotesScope.thisBook,
+        libraryNotes: const ShellNotesModel(),
         unit: 0,
         readingOffset: null,
         pageImage: null,
@@ -1056,6 +1414,8 @@ final class ReaderController implements Listenable {
         annotations: const [],
         searchResults: const [],
         bookmarks: const [],
+        notes: const [],
+        returnPoints: const [],
         annotationOperations: const {},
         selectionError: null,
         selectionActionError: null,
@@ -1064,6 +1424,7 @@ final class ReaderController implements Listenable {
         annotationsReady: false,
         searchBusy: false,
         bookmarkBusy: false,
+        notesBusy: false,
         toolError: null,
         persistenceError: null,
         openPanel: null,
@@ -1083,7 +1444,55 @@ final class ReaderController implements Listenable {
       ),
     );
     unawaited(
-      _openEffect(path, message.bookId, generation, cancellation, openLayout),
+      _openEffect(
+        path,
+        message.bookId,
+        generation,
+        cancellation,
+        openLayout,
+        place: message.place,
+      ),
+    );
+  }
+
+  /// Where highlight or note [id] resolves in [document], or null when it is
+  /// not there (orphaned, ambiguous or gone).
+  Future<ReaderPlace?> _resolvedPlace(
+    FlutterDocumentSummary document,
+    PdfEngineDocument? pdf,
+    String id, {
+    required bool note,
+    required double scale,
+    required BigInt cancellation,
+  }) async {
+    final text = _readerText(document, cancellation, pdf: pdf);
+    bool found(FlutterAnnotationResolution resolution) =>
+        resolution == FlutterAnnotationResolution.exact ||
+        resolution == FlutterAnnotationResolution.recovered;
+    if (note) {
+      final notes = await _records.listNotes(
+        document: document,
+        text: text,
+        cancellationId: cancellation,
+      );
+      final match = notes.where((item) => item.id == id).firstOrNull;
+      final unit = match?.unit;
+      if (match == null || unit == null || !found(match.resolution)) {
+        return null;
+      }
+      return ReaderPlace(unit.toInt(), offset: match.offset?.toInt());
+    }
+    final annotations = await _records.listAnnotations(
+      document: document,
+      text: text,
+      scale: scale,
+      cancellationId: cancellation,
+    );
+    final match = annotations.where((item) => item.id == id).firstOrNull;
+    if (match == null || !found(match.resolution)) return null;
+    return ReaderPlace(
+      match.unit.toInt(),
+      offset: match.textRange?.start.toInt(),
     );
   }
 
@@ -1092,8 +1501,9 @@ final class ReaderController implements Listenable {
     int? bookId,
     int generation,
     BigInt cancellation,
-    ReaderLayout layout,
-  ) async {
+    ReaderLayout layout, {
+    ReaderPlace? place,
+  }) async {
     FlutterDocumentSummary? opened;
     PdfEngineDocument? ownedPdf;
     try {
@@ -1134,10 +1544,38 @@ final class ReaderController implements Listenable {
               'Reading position could not be restored: ${_describeError(error)}';
         }
       }
-      final restoredUnit = (restored?.unit.toInt() ?? 0).clamp(
+      // A highlight's or note's place is where it resolves in this book: an
+      // edition its annotations were associated with may have moved it, and
+      // one that lost it opens where it was left.
+      if (place?.annotationId case final id?) {
+        try {
+          place = await _resolvedPlace(
+            document,
+            pdf,
+            id,
+            note: place!.note ?? false,
+            scale: restored?.zoom ?? layout.scale,
+            cancellation: cancellation,
+          );
+          if (place == null) {
+            toolError = "This note's place isn't in this edition of the book.";
+          }
+        } catch (error) {
+          place = null;
+          toolError =
+              "This note's place couldn't be found: "
+              '${_describeError(error)}';
+        }
+      }
+      // A place to open at, such as a note's, wins over the saved position;
+      // the saved zoom still applies.
+      final restoredUnit = (place?.unit ?? restored?.unit.toInt() ?? 0).clamp(
         0,
         document.logicalUnitCount.toInt() - 1,
       );
+      final restoredOffset = place == null
+          ? restored?.offset?.toInt()
+          : place.offset;
       // A PDF read in spreads opens on the spread that holds its page.
       final unit = pdf != null && layout.spread
           ? pdfSpreadStart(restoredUnit)
@@ -1159,7 +1597,7 @@ final class ReaderController implements Listenable {
             cancellationId: cancellation,
           );
         } catch (error) {
-          toolError = 'Bookmarks are unavailable: ${_describeError(error)}';
+          toolError ??= 'Bookmarks are unavailable: ${_describeError(error)}';
         }
       }
       dispatch(
@@ -1173,8 +1611,21 @@ final class ReaderController implements Listenable {
           restoredLayout: restored != null,
           restorationFailed: restorationFailed,
           restorationError: restorationError,
-          offset: unit == restoredUnit ? restored?.offset?.toInt() : null,
+          offset: unit == restoredUnit ? restoredOffset : null,
           toolError: toolError,
+          // A book opened at a note or search hit returns to where it was
+          // left.
+          returnPoint: place != null && restored != null
+              ? (unit: restored.unit.toInt(), offset: restored.offset?.toInt())
+              : null,
+          match: switch (place) {
+            ReaderPlace(:final offset?, :final length?) => (
+              unit: restoredUnit,
+              offset: offset,
+              length: length,
+            ),
+            _ => null,
+          },
         ),
       );
       opened = null;
@@ -1195,7 +1646,6 @@ final class ReaderController implements Listenable {
         if (!_isCurrent(generation)) return;
         // A position saved on a spread's second page reopens there: its
         // offset moves past the first page's text.
-        final restoredOffset = restored?.offset?.toInt();
         dispatch(
           _ReaderSurfaceLoaded(
             generation: generation,
@@ -1313,6 +1763,7 @@ final class ReaderController implements Listenable {
     );
     _requestedLayout = requestedLayout;
     _readingStatePersistenceBlocked = message.restorationFailed;
+    _openMatch = message.match;
     _emit(
       _model.copyWith(
         document: message.document,
@@ -1326,8 +1777,10 @@ final class ReaderController implements Listenable {
         focus: message.offset,
         toolError: message.toolError,
         persistenceError: message.restorationError,
+        returnPoints: [?message.returnPoint],
       ),
     );
+    _notesRequested();
     if (message.pdfDocument == null) {
       // Every EPUB chapter is laid out by the Dart engine, which paginates for
       // the reported content-box height: an open that ran before the first
@@ -2109,6 +2562,58 @@ final class ReaderController implements Listenable {
     }
   }
 
+  /// Runs [navigate] and, when it started a move, records where the reader
+  /// was so Back returns there; jumps stack, the latest last.
+  void _jump(void Function() navigate) {
+    final from = _model.readingLocation;
+    final before = _activeRelayoutIntent;
+    navigate();
+    if (identical(_activeRelayoutIntent, before) || _model.document == null) {
+      return;
+    }
+    // Every jump restarts the turns that close Back, even one from where
+    // the last jump left.
+    _turnsSinceJump = 0;
+    final points = _model.returnPoints;
+    if (points.isNotEmpty && points.last == from) return;
+    _emit(
+      _model.copyWith(
+        returnPoints: [
+          ...points.skip(points.length >= _maxReturnPoints ? 1 : 0),
+          from,
+        ],
+      ),
+    );
+  }
+
+  /// Turns a page with [turn]; three turns the reader took away from a jump
+  /// close the BackPill, and a turn it refused does not count.
+  void _pageTurned(void Function() turn) {
+    final intent = _activeRelayoutIntent;
+    final page = _model.epubPage;
+    turn();
+    if (identical(_activeRelayoutIntent, intent) &&
+        identical(_model.epubPage, page)) {
+      return;
+    }
+    if (_model.returnPoints.isNotEmpty && ++_turnsSinceJump >= 3) {
+      _turnsSinceJump = 0;
+      _emit(_model.copyWith(returnPoints: const []));
+    }
+  }
+
+  /// Goes back to the last jump's origin and forgets it.
+  void _returnRequested() {
+    final points = _model.returnPoints;
+    if (points.isEmpty) return;
+    final to = points.last;
+    final before = _activeRelayoutIntent;
+    _unitRequested(to.unit, offset: to.offset, replaceReadingOffset: true);
+    if (identical(_activeRelayoutIntent, before)) return;
+    _turnsSinceJump = 0;
+    _emit(_model.copyWith(returnPoints: points.sublist(0, points.length - 1)));
+  }
+
   void _unitRequested(
     int unit, {
     int? offset,
@@ -2131,6 +2636,9 @@ final class ReaderController implements Listenable {
         _suspended) {
       return;
     }
+    // Going somewhere leaves the match the book opened at behind, whoever
+    // asked.
+    _openMatch = null;
     _startRelayout(
       document,
       _model.layout,
@@ -2178,6 +2686,12 @@ final class ReaderController implements Listenable {
   /// Opens or closes the search bar and cancels an in-flight search on close.
   void _searchToggled() {
     if (_closing) return;
+    if (!_model.searchOpen) {
+      if (_librarySearchOpener case final open?) {
+        open();
+        return;
+      }
+    }
     if (_model.searchOpen) {
       _cancelSearch();
       _searchQuery = '';
@@ -2401,10 +2915,13 @@ final class ReaderController implements Listenable {
       href: href,
     );
     if (target == null) return;
-    _unitRequested(
-      target.point.spine,
-      offset: target.hasFragment ? target.point.scalar : 0,
-      replaceReadingOffset: true,
+    // A footnote or cross-reference is a jump; Back returns from it.
+    _jump(
+      () => _unitRequested(
+        target.point.spine,
+        offset: target.hasFragment ? target.point.scalar : 0,
+        replaceReadingOffset: true,
+      ),
     );
   }
 
@@ -2696,36 +3213,148 @@ final class ReaderController implements Listenable {
     );
   }
 
-  void _bookmarkNoteRequested(FlutterBookmark? bookmark) {
-    if (_model.bookmarkBusy || _closing || _suspended || _recovering) return;
+  /// Loads the book's page notes and book notes into the model.
+  void _notesRequested() {
+    final document = _model.document;
+    if (document?.bookId == null || _closing || _suspended) return;
+    final revision = ++_notesRevision;
+    _startNotesEffect(
+      generation: _model.generation,
+      revision: revision,
+      document: document!,
+    );
+  }
+
+  /// Lists every book's notes for All books: the first page again, or the
+  /// page after those listed.
+  void _libraryNotesRequested({required bool append}) {
+    if (_closing || _suspended) return;
     final generation = _model.generation;
-    final revision = ++_bookmarkRevision;
-    final bookId = _model.document?.bookId;
+    final revision = ++_libraryNotesRevision;
+    if (_libraryNotesCancellation case final previous?) {
+      _bridge.cancel(id: previous);
+    }
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      dispatch(
+        _ReaderLibraryNotesFailed(
+          generation,
+          revision,
+          _describeError(error),
+          append: append,
+        ),
+      );
+      return;
+    }
+    _libraryNotesCancellation = cancellation;
+    _toolCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    // More follows the books listed, while they are still the first.
+    final after = append
+        ? [for (final book in _model.libraryNotes.books) book.book.bookId]
+        : null;
+    _emit(
+      _model.copyWith(
+        libraryNotes: _model.libraryNotes.copyWith(
+          status: append ? null : ShellNotesStatus.loading,
+          appending: append,
+          error: () => null,
+        ),
+      ),
+    );
+    unawaited(() async {
+      try {
+        final page = await _records.libraryNotes(
+          limit: ShellNotesController.pageSize,
+          offset: after?.length ?? 0,
+          after: after,
+          cancellationId: cancellation,
+        );
+        dispatch(
+          _ReaderLibraryNotesLoaded(generation, revision, page, append: append),
+        );
+      } catch (error) {
+        dispatch(
+          _ReaderLibraryNotesFailed(
+            generation,
+            revision,
+            _describeError(error),
+            append: append,
+          ),
+        );
+      } finally {
+        dispatch(_ReaderLibraryNotesFinished(cancellation));
+      }
+    }());
+  }
+
+  /// Opens a note from All books where it resolves, as the Notes place does:
+  /// this book's goes there as any place asked for, and another book's opens
+  /// that book there. A book note opens its book where it was left.
+  void _libraryNoteOpened(FlutterLibraryBook book, FlutterNoteEntry note) {
+    final unit = note.unit;
+    // Its unit and offset are where it was made; the reader resolves it by
+    // its id in the edition it opens.
+    final place = unit == null
+        ? null
+        : ReaderPlace(
+            unit,
+            offset: note.offset,
+            annotationId: note.id,
+            note: note.kind != FlutterNoteEntryKind.highlight,
+          );
+    if (book.bookId == _model.document?.bookId) {
+      if (place != null) _dispatch(ReaderPlaceRequested(place));
+      return;
+    }
+    _bookOpener?.call(book, place);
+  }
+
+  /// Opens the note editor for a new page note or book note.
+  void _placeNoteRequested(FlutterNoteKind kind) {
+    final document = _model.document;
+    if (document?.bookId == null ||
+        _model.notesBusy ||
+        _activeNoteEditor != null ||
+        _closing ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    // A page note marks the page being read, in its own offsets, like a
+    // bookmark.
     final (:unit, :offset) = _model.readingLocation;
-    if (bookId == null) return;
+    final target = kind == FlutterNoteKind.page
+        ? _PlaceNoteTarget(
+            kind: kind,
+            unit: unit,
+            offset: document!.format == FlutterBookFormat.pdf ? null : offset,
+          )
+        : _PlaceNoteTarget(kind: kind);
+    final generation = _model.generation;
+    final revision = ++_notesRevision;
     final token = ++_noteEditorToken;
-    _activeNoteEditor = _ReaderNoteTarget.bookmark;
+    _activeNoteEditor = _ReaderNoteTarget.place;
     _activeNoteEditorToken = token;
     // The owned modal slot is published with the same emission that starts the
     // dialog (contract §3.1 `modalEffect`).
-    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
+    _emit(_model.copyWith(notesBusy: true, toolError: null));
     unawaited(() async {
       try {
-        final note = await _bookmarkNoteEditor(bookmark?.note);
+        final body = await _placeNoteEditor(target.kind);
         dispatch(
-          _ReaderBookmarkNoteEdited(
+          _ReaderPlaceNoteEdited(
             generation: generation,
             revision: revision,
-            bookId: bookId,
-            unit: unit,
-            offset: offset,
-            bookmarkId: bookmark?.id,
-            note: note,
+            target: target,
+            body: body,
           ),
         );
       } catch (error) {
         dispatch(
-          _ReaderBookmarkNoteEditFailed(
+          _ReaderPlaceNoteEditFailed(
             generation,
             revision,
             _describeError(error),
@@ -2737,33 +3366,151 @@ final class ReaderController implements Listenable {
     }());
   }
 
-  void _bookmarkNoteEdited(_ReaderBookmarkNoteEdited message) {
-    if (!_isCurrent(message.generation) ||
-        message.revision != _bookmarkRevision) {
+  void _placeNoteEdited(_ReaderPlaceNoteEdited message) {
+    if (!_isCurrent(message.generation) || message.revision != _notesRevision) {
       return;
     }
-    if (message.note == null) {
-      _emit(_model.copyWith(bookmarkBusy: false));
+    final document = _model.document;
+    final body = message.body?.trim();
+    if (document == null || body == null || body.isEmpty) {
+      _emit(_model.copyWith(notesBusy: false));
       return;
     }
-    _startBookmarkMutation(
+    final target = message.target;
+    _startNotesEffect(
       generation: message.generation,
       revision: message.revision,
-      bookId: message.bookId,
-      mutation: () => message.bookmarkId == null
-          ? _records.toggleBookmark(
-              bookId: message.bookId,
-              unit: BigInt.from(message.unit),
-              offset: message.offset == null
-                  ? null
-                  : BigInt.from(message.offset!),
-              note: message.note,
-            )
-          : _records.updateBookmarkNote(
-              id: message.bookmarkId!,
-              note: message.note,
-            ),
+      document: document,
+      mutation: (cancellation, text) => _records.createNote(
+        document: document,
+        text: text,
+        unit: target.unit == null ? null : BigInt.from(target.unit!),
+        offset: target.offset == null ? null : BigInt.from(target.offset!),
+        body: body,
+        cancellationId: cancellation,
+      ),
     );
+  }
+
+  /// Writes the body a note was edited to in place; an empty body is not
+  /// saved.
+  void _placeNoteSaved(String id, String body) {
+    final document = _model.document;
+    final trimmed = body.trim();
+    if (document?.bookId == null ||
+        trimmed.isEmpty ||
+        _model.notesBusy ||
+        _closing ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    final revision = ++_notesRevision;
+    _startNotesEffect(
+      generation: _model.generation,
+      revision: revision,
+      document: document!,
+      editCard: 'reader-place-note-$id',
+      mutation: (_, _) =>
+          _records.updateNote(document: document, id: id, body: trimmed),
+    );
+  }
+
+  void _placeNoteDeleted(String id) {
+    final document = _model.document;
+    if (document?.bookId == null ||
+        _model.notesBusy ||
+        _closing ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    final revision = ++_notesRevision;
+    _startNotesEffect(
+      generation: _model.generation,
+      revision: revision,
+      document: document!,
+      mutation: (_, _) => _records.deleteAnnotation(document: document, id: id),
+    );
+  }
+
+  /// Runs [mutation], if any, then lists the book's notes again.
+  ///
+  /// Notes belong to library books. A mutation is a book write: its failure
+  /// is a persistence error, while a list that fails after it committed is
+  /// only a tool error.
+  void _startNotesEffect({
+    required int generation,
+    required int revision,
+    required FlutterDocumentSummary document,
+    String? editCard,
+    Future<Object?> Function(BigInt cancellation, ReaderText text)? mutation,
+  }) {
+    final bookId = document.bookId!;
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(
+        _model.copyWith(notesBusy: false, toolError: _describeError(error)),
+      );
+      return;
+    }
+    _toolCancellations.add(cancellation);
+    if (mutation != null) {
+      _notesMutationCancellation = cancellation;
+      _beginBookWrite(bookId);
+    }
+    _activeBridgeOperations += 1;
+    _emit(
+      _model.copyWith(
+        notesBusy: true,
+        // The saved draft is the note's now.
+        noteEdit: editCard != null && _model.noteEdit?.card == editCard
+            ? null
+            : _model.noteEdit,
+      ),
+    );
+    unawaited(() async {
+      String? writeError;
+      var mutationCommitted = mutation == null;
+      try {
+        // The text is taken before the first await, while the effect's
+        // generation is still the model's.
+        final text = _readerText(document, cancellation);
+        if (mutation != null) {
+          await mutation(cancellation, text);
+          mutationCommitted = true;
+        }
+        final items = await _records.listNotes(
+          document: document,
+          text: text,
+          cancellationId: cancellation,
+        );
+        dispatch(_ReaderNotesCompleted(generation, revision, items));
+      } catch (error) {
+        if (!mutationCommitted) writeError = _describeError(error);
+        dispatch(
+          _ReaderNotesFailed(
+            generation,
+            revision,
+            _describeError(error),
+            persistence: !mutationCommitted,
+          ),
+        );
+      } finally {
+        if (mutation != null) {
+          _finishBookWrite(
+            bookId,
+            failureKind: 'notes',
+            error: writeError == null
+                ? null
+                : 'Note changes were not saved: $writeError',
+          );
+        }
+        dispatch(_ReaderNotesFinished(cancellation));
+      }
+    }());
   }
 
   void _bookmarkDeleted(int id) {
@@ -4547,14 +5294,35 @@ final class ReaderController implements Listenable {
     }());
   }
 
+  /// The in-place edit, unless it is of a card with [prefix] whose note is
+  /// not among [ids] any more.
+  ReaderNoteEdit? _editWithin(String prefix, Iterable<String> ids) {
+    final edit = _model.noteEdit;
+    if (edit == null || !edit.card.startsWith(prefix)) return edit;
+    final id = edit.card.substring(prefix.length);
+    return ids.contains(id) ? edit : null;
+  }
+
   void _setAnnotations(
     List<FlutterAnnotation> annotations, {
     bool? annotationsReady,
   }) {
+    // All books lists this book's highlights too, as the store has them.
+    if ((annotationsReady ?? _model.annotationsReady) &&
+        _model.notesScope == ReaderNotesScope.allBooks) {
+      _libraryNotesRequested(append: false);
+    }
     _emit(
       _model.copyWith(
         annotations: List.unmodifiable(annotations),
         annotationsReady: annotationsReady,
+        // A list that is not ready (association empties it before reloading)
+        // says nothing about which highlights are gone.
+        noteEdit: annotationsReady ?? _model.annotationsReady
+            ? _editWithin('reader-annotation-', [
+                for (final annotation in annotations) annotation.id,
+              ])
+            : _model.noteEdit,
         savedSelections: _savedSelections(
           annotations,
           _model.unit,
@@ -4603,6 +5371,12 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         annotationOperations: {operationId},
         annotationError: null,
+        // A saved in-place draft is the highlight's note now.
+        noteEdit:
+            fromNote &&
+                _model.noteEdit?.card == 'reader-annotation-${message.id}'
+            ? null
+            : _model.noteEdit,
       ),
     );
     try {
@@ -4784,6 +5558,26 @@ final class ReaderController implements Listenable {
     }());
   }
 
+  /// Writes a highlight's note as edited in place, as the note editor's
+  /// result is written.
+  void _annotationNoteSaved(String id, String body) {
+    final annotation = _model.annotations
+        .where((item) => item.id == id)
+        .firstOrNull;
+    if (annotation == null) return;
+    final trimmed = body.trim();
+    unawaited(
+      _updateAnnotation(
+        ReaderAnnotationUpdated(
+          id,
+          annotation.color,
+          trimmed.isEmpty ? null : trimmed,
+        ),
+        fromNote: true,
+      ),
+    );
+  }
+
   void _noteCompleted(_ReaderAnnotationNoteCompleted message) {
     if (!_isCurrent(message.generation) || message.revision != _noteRevision) {
       return;
@@ -4922,8 +5716,38 @@ final class ReaderController implements Listenable {
       return;
     }
     // Likewise a PDF box or pixel ratio change that arrived while the reader
-    // was busy renders the page at its latest fitted size.
+    // was busy renders the page at its latest fitted size; the match the
+    // book opened at is marked once that render is in, which would clear it.
     _refitPdfPage();
+    if (!_model.relayoutBusy) _markOpenMatch();
+  }
+
+  /// Selects the search match the book opened at, once the reader has settled
+  /// on its page and is still reading there.
+  void _markOpenMatch() {
+    final match = _openMatch;
+    if (match == null || _model.selectionSurface == null) return;
+    _openMatch = null;
+    final location = _model.readingLocation;
+    if (location.unit != match.unit) return;
+    // The second page of a PDF spread addresses its text after the first's.
+    final shift = (_model.readingOffset ?? 0) - (location.offset ?? 0);
+    final anchor = match.offset + shift;
+    _cancelSelectionCreates();
+    _selectionRevision += 1;
+    _emit(
+      _model.copyWith(
+        anchor: anchor,
+        focus: anchor + match.length,
+        selectionPhase: ReaderSelectionPhase.selected,
+        selectionPointer: null,
+        selectionVisualLine: null,
+        selectionPreferredX: null,
+        selectionActionError: null,
+        keyboardActionInvocation: false,
+      ),
+    );
+    _focusAdapter(ReaderFocusTarget.surface);
   }
 
   void _navigateAnnotation(String id) {
@@ -5417,8 +6241,8 @@ final class ReaderController implements Listenable {
     _suspended = true;
     _retireDocumentPicker();
     if (_model.document == null && !_model.busy) return;
-    final bookmarkNotice = _activeNoteEditor == _ReaderNoteTarget.bookmark
-        ? 'The bookmark note was not saved because the app was suspended. Try again.'
+    final placeNoteNotice = _activeNoteEditor == _ReaderNoteTarget.place
+        ? 'The note was not saved because the app was suspended. Try again.'
         : _model.toolError;
     switch (_activeNoteEditor) {
       case _ReaderNoteTarget.selection:
@@ -5427,7 +6251,7 @@ final class ReaderController implements Listenable {
       case _ReaderNoteTarget.annotation:
         _recoveryAnnotationNotice =
             'The note was not saved because the app was suspended. Try again.';
-      case _ReaderNoteTarget.bookmark:
+      case _ReaderNoteTarget.place:
       case null:
         break;
     }
@@ -5456,6 +6280,7 @@ final class ReaderController implements Listenable {
     _noteRevision += 1;
     _searchRevision += 1;
     _bookmarkRevision += 1;
+    _notesRevision += 1;
     _emit(
       _model.copyWith(
         busy: true,
@@ -5463,7 +6288,8 @@ final class ReaderController implements Listenable {
         relayoutPending: false,
         searchBusy: false,
         bookmarkBusy: false,
-        toolError: bookmarkNotice,
+        notesBusy: false,
+        toolError: placeNoteNotice,
         annotationOperations: const {},
         selectionPhase: ReaderSelectionPhase.idle,
         anchor: null,
@@ -5649,7 +6475,7 @@ final class ReaderController implements Listenable {
     return switch (_activeNoteEditor) {
       _ReaderNoteTarget.selection => ReaderModalEffect.selectionNote,
       _ReaderNoteTarget.annotation => ReaderModalEffect.annotationNote,
-      _ReaderNoteTarget.bookmark => ReaderModalEffect.bookmarkNote,
+      _ReaderNoteTarget.place => ReaderModalEffect.placeNote,
       null => null,
     };
   }
@@ -5812,6 +6638,7 @@ final class ReaderController implements Listenable {
     _cancelEpubSourceLoad();
     _searchRevision += 1;
     _bookmarkRevision += 1;
+    _notesRevision += 1;
     _retireDocumentPicker();
     _model = _model.copyWith(busy: false, generation: _model.generation + 1);
     _disposeBridgeIfIdle();

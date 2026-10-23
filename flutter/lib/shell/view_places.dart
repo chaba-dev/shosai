@@ -8,11 +8,11 @@ TextStyle shellScreenTitleStyle(ShellLayout layout) => switch (layout) {
   ShellLayout.phone => shellEditorialStyle(30, 34),
 }.copyWith(letterSpacing: -.6);
 
-/// A library-side place other than the Library: its title and what to do.
+/// Bookmarks: its title and what to do.
 ///
-/// Notes, Bookmarks and Search list across all books once RFD 6's notes
-/// surface and search palette exist; until then each place says what will
-/// appear there and how to make it.
+/// Bookmarks list across all books once a bookmarks list exists; until then
+/// the place says what will appear there and how to make it. Notes has its
+/// own page, [ShellNotesPage], and Search opens the [ShellSearchPalette].
 class ShellPlacePage extends StatelessWidget {
   const ShellPlacePage({super.key, required this.layout, required this.place});
 
@@ -24,19 +24,11 @@ class ShellPlacePage extends StatelessWidget {
     final palette = ShellPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final (heading, body) = switch (place) {
-      ShellPlace.notes => (
-        l10n.shellNotesEmptyHeading,
-        l10n.shellNotesEmptyBody,
-      ),
       ShellPlace.bookmarks => (
         l10n.shellBookmarksEmptyHeading,
         l10n.shellBookmarksEmptyBody,
       ),
-      ShellPlace.search => (
-        l10n.shellSearchEmptyHeading,
-        l10n.shellSearchEmptyBody,
-      ),
-      ShellPlace.library => ('', ''),
+      ShellPlace.library || ShellPlace.notes || ShellPlace.search => ('', ''),
     };
     final gutter = layout == ShellLayout.phone ? 16.0 : 48.0;
     return ColoredBox(
