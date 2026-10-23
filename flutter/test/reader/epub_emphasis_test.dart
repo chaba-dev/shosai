@@ -252,6 +252,25 @@ void main() {
     expect(dog.dy - cat.dy, closeTo(10, 0.5), reason: 'one annotation higher');
   });
 
+  test('a mark on the second ruby level stands outside its annotation', () {
+    for (final (vertical, emphasis) in [
+      (false, const EpubTextEmphasis(under: true)),
+      (true, const EpubTextEmphasis(left: true)),
+    ]) {
+      final text = layOut([
+        EpubTextSpan(text: '猫', rubyUnder: 'cat', emphasis: emphasis),
+        EpubTextSpan(text: '犬', emphasis: emphasis),
+      ], vertical: vertical);
+      final cat = text.debugEmphasisCentres(0).single;
+      final dog = text.debugEmphasisCentres(1).single;
+      expect(
+        cat.dy - dog.dy,
+        closeTo(10, 0.5),
+        reason: '$vertical: one annotation farther outside',
+      );
+    }
+  });
+
   test('table cells paint emphasis outside the text painter clip', () async {
     final row = EpubTableRow(
       cells: [
@@ -302,7 +321,6 @@ void main() {
     ).pages.single;
     final text =
         flow.blocks.single.table!.rows.single.cells.single.blocks.single;
-    final textTop = 20 + 6.0;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     paintPageSlices(
@@ -326,7 +344,14 @@ void main() {
     final over = text.debugEmphasisCentres(0).single + const Offset(26, 26);
     final under = text.debugEmphasisCentres(1).single + const Offset(26, 26);
     final stacked = text.debugEmphasisCentres(2).single + const Offset(26, 26);
-    expect(stacked.dy, lessThan(textTop));
+    final stackedBase = text.painter
+        .getBoxesForSelection(
+          const TextSelection(baseOffset: 2, extentOffset: 3),
+        )
+        .single
+        .toRect()
+        .shift(const Offset(26, 26));
+    expect(stacked.dy, lessThan(stackedBase.center.dy - 10));
     for (final center in [over, under, stacked]) {
       expect(
         centreIsInk(center),

@@ -271,7 +271,7 @@ class FlowTextBlock {
         center: Offset(
           box.center.dx,
           run.under
-              ? box.center.dy + run.baseSize / 2 + half
+              ? box.center.dy + run.baseSize / 2 + clear + half
               : box.center.dy - run.baseSize / 2 - clear - half,
         ),
       ));
