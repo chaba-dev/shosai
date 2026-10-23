@@ -2418,6 +2418,11 @@ void main() {
         ),
         ('text-emphasis-style: "＊"', const EpubTextEmphasis(string: '＊')),
         ("text-emphasis-style: '※※'", const EpubTextEmphasis(string: '※')),
+        (r'text-emphasis-style: "\25B2"', const EpubTextEmphasis(string: '▲')),
+        (
+          r'''text-emphasis-style: '\'' ''',
+          const EpubTextEmphasis(string: "'"),
+        ),
         (
           'text-emphasis: filled circle #333',
           const EpubTextEmphasis(shape: EpubEmphasisShape.circle),
@@ -2435,6 +2440,48 @@ void main() {
         expect(marked(declaration), expected, reason: declaration);
       }
     });
+
+    test(
+      'invalid shorthand and position declarations leave inherited values',
+      () {
+        for (final declaration in [
+          'text-emphasis: nonsense',
+          'text-emphasis: dot nonsense',
+          'text-emphasis-position: under under',
+          'text-emphasis-position: over right right',
+        ]) {
+          final spans = emphasisOf(
+            '<p style="text-emphasis: open sesame; '
+                'text-emphasis-position: under left">甲<span class="e">乙</span>'
+                '</p>',
+            '.e { $declaration }',
+          );
+          expect(
+            spans.last.$2,
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              filled: false,
+              under: true,
+              left: true,
+            ),
+            reason: declaration,
+          );
+        }
+      },
+    );
+
+    test(
+      'valid shorthand colors are accepted without changing palette ink',
+      () {
+        for (final color in ['rebeccapurple', '#1234', 'rgb(10 20 30 / 40%)']) {
+          expect(
+            marked('text-emphasis: dot $color'),
+            const EpubTextEmphasis(shape: EpubEmphasisShape.dot),
+            reason: color,
+          );
+        }
+      },
+    );
 
     test('the position is read with the style', () {
       for (final (position, under, left) in [

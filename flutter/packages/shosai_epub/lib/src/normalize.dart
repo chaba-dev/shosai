@@ -741,7 +741,7 @@ EpubComputedStyle _applyDeclaration(
     case 'text-emphasis-position' ||
         '-epub-text-emphasis-position' ||
         '-webkit-text-emphasis-position':
-      final words = lower.split(RegExp(r'\s+')).toSet();
+      final words = lower.split(RegExp(r'\s+'));
       if (words.length == 1 && const {'inherit', 'unset'}.contains(lower)) {
         return _copyWith(
           style,
@@ -754,9 +754,11 @@ EpubComputedStyle _applyDeclaration(
       }
       // `over` or `under`, and `right` (the default) or `left`.
       final valid =
+          words.length <= 2 &&
+          words.toSet().length == words.length &&
           words.every(const {'over', 'under', 'right', 'left'}.contains) &&
-          !words.containsAll(const {'over', 'under'}) &&
-          !words.containsAll(const {'right', 'left'}) &&
+          !(words.contains('over') && words.contains('under')) &&
+          !(words.contains('right') && words.contains('left')) &&
           (words.contains('over') || words.contains('under'));
       if (!valid) return style;
       return _copyWith(
@@ -905,7 +907,8 @@ EpubLength? _resolveCssLength(String value) {
 }
 
 /// [style] with the emphasis mark of a `text-emphasis-style` [value], or of
-/// a `text-emphasis` [shorthand], whose other words (a colour) are skipped.
+/// a `text-emphasis` [shorthand], whose optional colour is validated but
+/// ignored because the reader's palette owns ink.
 /// A value that is not one leaves [style] as it is.
 EpubComputedStyle _applyEmphasisStyle(
   EpubComputedStyle style,
@@ -922,19 +925,19 @@ EpubComputedStyle _applyEmphasisStyle(
   if (lower == 'initial' || lower == 'none') {
     return _copyWith(style, noEmphasis: true);
   }
-  // A string is the mark itself, its first character.
-  final quoted = RegExp(r"""(["'])(.*?)\1""").firstMatch(value);
-  final string = quoted?.group(2);
-  final words =
-      (quoted == null
-              ? value
-              : value.replaceRange(quoted.start, quoted.end, ' '))
-          .toLowerCase()
-          .split(RegExp(r'\s+'))
-          .where((word) => word.isNotEmpty);
+  final tokens = _emphasisTokens(value);
+  if (tokens == null) return style;
+  String? string;
   bool? filled;
   EpubEmphasisShape? shape;
-  for (final word in words) {
+  String? color;
+  for (final token in tokens) {
+    if (token.quoted) {
+      if (string != null || token.value.isEmpty) return style;
+      string = token.value;
+      continue;
+    }
+    final word = token.value.toLowerCase();
     final fill = switch (word) {
       'filled' => true,
       'open' => false,
@@ -952,7 +955,9 @@ EpubComputedStyle _applyEmphasisStyle(
       filled = fill;
     } else if (named != null && shape == null) {
       shape = named;
-    } else if (!shorthand || fill != null || named != null) {
+    } else if (shorthand && color == null && _isCssColor(token.value)) {
+      color = token.value;
+    } else {
       return style;
     }
   }
@@ -971,6 +976,127 @@ EpubComputedStyle _applyEmphasisStyle(
     emphasis: EpubTextEmphasis(shape: shape, filled: filled ?? true),
   );
 }
+
+typedef _EmphasisToken = ({String value, bool quoted});
+
+/// Tokenizes an emphasis value into decoded CSS strings and top-level
+/// component values. Whitespace inside a color function stays in that token.
+List<_EmphasisToken>? _emphasisTokens(String value) {
+  final tokens = <_EmphasisToken>[];
+  var index = 0;
+  while (index < value.length) {
+    while (index < value.length && value[index].trim().isEmpty) {
+      index++;
+    }
+    if (index >= value.length) break;
+    final quote = value.codeUnitAt(index);
+    if (quote == 0x22 || quote == 0x27) {
+      final buffer = StringBuffer();
+      var closed = false;
+      index++;
+      while (index < value.length) {
+        final unit = value.codeUnitAt(index);
+        if (unit == 0x5C && index + 1 < value.length) {
+          buffer
+            ..writeCharCode(unit)
+            ..writeCharCode(value.codeUnitAt(index + 1));
+          index += 2;
+          continue;
+        }
+        index++;
+        if (unit == quote) {
+          closed = true;
+          break;
+        }
+        if (unit == 0x0A || unit == 0x0D || unit == 0x0C) return null;
+        buffer.writeCharCode(unit);
+      }
+      if (!closed || index < value.length && value[index].trim().isNotEmpty) {
+        return null;
+      }
+      tokens.add((value: decodeCssEscapes(buffer.toString()), quoted: true));
+      continue;
+    }
+
+    final start = index;
+    var depth = 0;
+    while (index < value.length) {
+      final unit = value.codeUnitAt(index);
+      if (unit == 0x5C && index + 1 < value.length) {
+        index += 2;
+        continue;
+      }
+      if (unit == 0x28) {
+        depth++;
+      } else if (unit == 0x29) {
+        depth--;
+        if (depth < 0) return null;
+      } else if (depth == 0 && value[index].trim().isEmpty) {
+        break;
+      }
+      index++;
+    }
+    if (depth != 0) return null;
+    tokens.add((
+      value: decodeCssEscapes(value.substring(start, index)),
+      quoted: false,
+    ));
+  }
+  return tokens;
+}
+
+bool _isCssColor(String value) {
+  final lower = value.toLowerCase();
+  if (RegExp(
+    r'^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$',
+  ).hasMatch(lower)) {
+    return true;
+  }
+  if (_cssNamedColors.contains(lower) || lower == 'currentcolor') return true;
+  final function = RegExp(r'^([a-z][a-z0-9-]*)\((.+)\)$').firstMatch(lower);
+  return function != null &&
+      const {
+        'color',
+        'color-mix',
+        'hsl',
+        'hsla',
+        'hwb',
+        'lab',
+        'lch',
+        'light-dark',
+        'oklab',
+        'oklch',
+        'rgb',
+        'rgba',
+      }.contains(function.group(1));
+}
+
+final Set<String> _cssNamedColors =
+    '''
+aliceblue antiquewhite aqua aquamarine azure beige bisque black
+blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate
+coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod
+darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange
+darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray
+darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey
+dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold
+goldenrod gray grey green greenyellow honeydew hotpink indianred indigo ivory
+khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral
+lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink
+lightsalmon lightseagreen lightskyblue lightslategray lightslategrey
+lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine
+mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue
+mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream
+mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered
+orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip
+peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown
+royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue
+slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato
+transparent turquoise violet wheat white whitesmoke yellow yellowgreen
+'''
+        .split(RegExp(r'\s+'))
+        .where((name) => name.isNotEmpty)
+        .toSet();
 
 EpubComputedStyle _copyWith(
   EpubComputedStyle style, {
