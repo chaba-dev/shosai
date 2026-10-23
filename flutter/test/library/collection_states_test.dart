@@ -130,7 +130,7 @@ void main() {
         locale: locale,
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
           androidImport: androidImport,
         ),
       ),
@@ -165,7 +165,7 @@ void main() {
       productionShell(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
     );

@@ -51,6 +51,7 @@ final class ReaderController implements Listenable {
     ReaderExternalLinkOpener? externalLinkOpener,
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
+    ReaderPagesSink? pagesSink,
     ReaderNoticeReporter? noticeReporter,
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
@@ -94,6 +95,7 @@ final class ReaderController implements Listenable {
        _externalLinkOpener = externalLinkOpener ?? ((_) async {}),
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
+       _pagesSink = pagesSink ?? ((_) {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
        _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
        _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
@@ -140,6 +142,7 @@ final class ReaderController implements Listenable {
   final ReaderExternalLinkOpener _externalLinkOpener;
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
+  final ReaderPagesSink _pagesSink;
   final ReaderNoticeReporter _reportNotice;
   final EpubImageDecoder _epubImageDecoder;
   final EpubFontRegistrar _epubFontRegistrar;
@@ -2512,7 +2515,11 @@ final class ReaderController implements Listenable {
     // The view decides whether two pages fit and reports the spread with the
     // viewport, which lays the page out again; the setting needs no relayout
     // of its own.
-    if (message.twoPages case final twoPages?) _typographyTwoPages = twoPages;
+    if (message.twoPages case final twoPages?
+        when twoPages != _typographyTwoPages) {
+      _typographyTwoPages = twoPages;
+      _pagesSink(twoPages);
+    }
     if (message.rasterFit case final fit?) {
       _rasterFit = fit;
       if (fit != ReaderRasterFit.manual) _rasterZoom = _baseScale;

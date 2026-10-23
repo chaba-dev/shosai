@@ -21,6 +21,7 @@ final class ShosaiCore {
       readingState = ReadingState(store),
       bookmarks = Bookmarks(store),
       settings = ReaderSettingsStore(store),
+      librarySettings = LibrarySettingsStore(store),
       annotations = Annotations(store);
 
   /// Open the store `library.sqlite3` and the managed directory `books`
@@ -59,6 +60,7 @@ final class ShosaiCore {
   final ReadingState readingState;
   final Bookmarks bookmarks;
   final ReaderSettingsStore settings;
+  final LibrarySettingsStore librarySettings;
   final Annotations annotations;
 
   /// The private copies open PDFs are read from, shared by every bridge.
@@ -349,12 +351,15 @@ final class CoreRecords implements ShosaiRecords {
   }) => _guard(() async {
     _token(cancellationId).throwIfCancelled();
     final settings = await _core.settings.load();
+    final sort = await _core.librarySettings.loadSort();
     return FlutterReaderSettings(
       continuous: settings.continuous,
       theme: settings.theme.name,
       epubFontSize: settings.epubFontSize,
       epubLineSpacing: settings.epubLineSpacing,
       pdfZoom: settings.pdfZoom,
+      twoPages: settings.twoPages,
+      librarySort: FlutterLibrarySort.values.byName(sort.name),
     );
   });
 
@@ -376,7 +381,11 @@ final class CoreRecords implements ShosaiRecords {
             epubFontSize: value.epubFontSize,
             epubLineSpacing: value.epubLineSpacing,
             pdfZoom: value.pdfZoom,
+            twoPages: value.twoPages,
           ),
+        );
+        await _core.librarySettings.saveSort(
+          LibrarySort.values.byName(value.librarySort.name),
         );
       });
 

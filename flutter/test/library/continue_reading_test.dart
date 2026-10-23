@@ -212,7 +212,7 @@ void main() {
             locale: const Locale('en'),
             home: ProductShell(
               bridgeFactory: () => bridge,
-              readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+              readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
             ),
           ),
           ready: () => harnessImagesReady(tester),
@@ -286,7 +286,7 @@ void main() {
             locale: const Locale('en'),
             home: ProductShell(
               bridgeFactory: () => bridge,
-              readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+              readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
             ),
           ),
           ready: () => harnessImagesReady(tester),
@@ -345,7 +345,7 @@ void main() {
             locale: const Locale('en'),
             home: ProductShell(
               bridgeFactory: () => bridge,
-              readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+              readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
             ),
           ),
           ready: () => harnessImagesReady(tester),
@@ -393,7 +393,7 @@ void main() {
             locale: locale,
             home: ProductShell(
               bridgeFactory: () => bridge,
-              readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+              readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
             ),
           ),
           ready: () => harnessImagesReady(tester),
@@ -447,7 +447,7 @@ void main() {
           locale: const Locale('en'),
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () => harnessImagesReady(tester),
@@ -472,7 +472,7 @@ void main() {
           locale: const Locale('en'),
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () => harnessImagesReady(tester),
@@ -506,7 +506,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, book, _, _, _, _, _, _) {
+            readerBuilder: (_, book, _, _, _, _, _, _, _) {
               opened.add(book);
               return const SizedBox();
             },

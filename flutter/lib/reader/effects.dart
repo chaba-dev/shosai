@@ -71,6 +71,12 @@ typedef ReaderDocumentPickerAdapter = Future<ReaderPickedDocument?> Function();
 /// location instead is a shell-level adapter swap, not a schema change.
 typedef ReaderExportSink = Future<void> Function(String markdown);
 
+/// Saves the Pages setting the reader chose: two pages side by side, or one.
+///
+/// The shell injects the library's settings writer, so later books open with
+/// the same setting; a reader built without one keeps it for its session.
+typedef ReaderPagesSink = void Function(bool twoPages);
+
 /// Reports reader notices through the application notice center.
 ///
 /// The reader route is outside the shell's `NoticeHost`, so the composition
