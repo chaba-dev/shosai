@@ -284,14 +284,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String readerHighlightsHeading(int count) {
-    return 'Highlights · $count';
-  }
-
-  @override
-  String get readerNoHighlights => 'Select text to highlight it.';
-
-  @override
   String get readerNoBookmarks => 'No bookmarks yet';
 
   @override
@@ -334,13 +326,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerNoteCancel => 'Cancel';
 
   @override
-  String readerPlaceNotesHeading(int count) {
-    return 'Notes · $count';
+  String readerNotesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count notes',
+      one: '1 note',
+    );
+    return '$_temp0';
   }
 
   @override
-  String get readerNoPlaceNotes =>
-      'Write a note on this page or about the whole book.';
+  String get readerNotesEmpty =>
+      'No notes yet. Select text to highlight it, or add a note to this page.';
+
+  @override
+  String readerPageNumber(int page) {
+    return 'page $page';
+  }
+
+  @override
+  String readerPageNoteAt(int page) {
+    return 'Page note · page $page';
+  }
+
+  @override
+  String get readerNoteActions => 'Note actions';
 
   @override
   String get readerDeleteNote => 'Delete note';
@@ -495,11 +506,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readerHighlightPurple => 'Purple';
-
-  @override
-  String readerHighlightLabel(int number) {
-    return 'Highlight $number';
-  }
 
   @override
   String get readerAnnotationRecovered => 'recovered';

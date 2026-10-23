@@ -372,15 +372,12 @@ void main() {
       ),
       metadata: const <String, Object?>{
         'state': 'annotation-menu-open',
-        'source':
-            'secondary click on the annotation card (salvaged #114 action set)',
+        'source': 'secondary click on the highlight\'s note card',
       },
       after: (tester) async {
         await _openNotes(tester);
         await tester.tapAt(
-          tester.getCenter(
-            find.byKey(const ValueKey('reader-annotation-navigate-one')),
-          ),
+          tester.getCenter(find.byKey(const ValueKey('reader-annotation-one'))),
           buttons: kSecondaryMouseButton,
           kind: ui.PointerDeviceKind.mouse,
         );
@@ -407,9 +404,7 @@ void main() {
       after: (tester) async {
         await _openNotes(tester);
         await tester.tapAt(
-          tester.getCenter(
-            find.byKey(const ValueKey('reader-annotation-navigate-one')),
-          ),
+          tester.getCenter(find.byKey(const ValueKey('reader-annotation-one'))),
           buttons: kSecondaryMouseButton,
           kind: ui.PointerDeviceKind.mouse,
         );

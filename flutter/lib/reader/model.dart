@@ -396,6 +396,18 @@ final class ReaderLayout {
   int get hashCode => Object.hash(scale, width, fontSize, lineSpacing, spread);
 }
 
+/// A note being edited in place on its Notes panel card.
+final class ReaderNoteEdit {
+  const ReaderNoteEdit(this.card, this.text);
+
+  /// The card's key prefix: `reader-annotation-<id>` or
+  /// `reader-place-note-<id>`.
+  final String card;
+
+  /// The draft.
+  final String text;
+}
+
 final class ReaderModel {
   ReaderModel({
     this.openPath,
@@ -432,6 +444,7 @@ final class ReaderModel {
     this.searchBusy = false,
     this.bookmarkBusy = false,
     this.notesBusy = false,
+    this.noteEdit,
     this.toolError,
     this.persistenceError,
     this.openPanel,
@@ -574,6 +587,10 @@ final class ReaderModel {
 
   /// Whether a page note or book note is being edited or saved.
   final bool notesBusy;
+
+  /// The note being edited in place, kept while the reader is busy so a
+  /// relayout or another note's save leaves the draft alone.
+  final ReaderNoteEdit? noteEdit;
   final String? toolError;
 
   /// Reading-position restoration/save feedback, independent of tool chrome.
@@ -680,6 +697,7 @@ final class ReaderModel {
     bool? searchBusy,
     bool? bookmarkBusy,
     bool? notesBusy,
+    Object? noteEdit = _unchanged,
     Object? toolError = _unchanged,
     Object? persistenceError = _unchanged,
     Object? openPanel = _unchanged,
@@ -777,6 +795,9 @@ final class ReaderModel {
       searchBusy: searchBusy ?? this.searchBusy,
       bookmarkBusy: bookmarkBusy ?? this.bookmarkBusy,
       notesBusy: notesBusy ?? this.notesBusy,
+      noteEdit: identical(noteEdit, _unchanged)
+          ? this.noteEdit
+          : noteEdit as ReaderNoteEdit?,
       toolError: identical(toolError, _unchanged)
           ? this.toolError
           : toolError as String?,
@@ -823,21 +844,13 @@ enum ReaderFocusTarget { surface, actions, header, panel }
 
 enum _ReaderNoteTarget { selection, annotation, place }
 
-/// What a page note or book note editor writes: a new note at a place, or the
-/// body of note [id] when it is set.
+/// Where a new page note or book note editor writes: at [unit] and [offset],
+/// or on the whole book when [unit] is null.
 final class _PlaceNoteTarget {
-  const _PlaceNoteTarget({
-    required this.bookId,
-    required this.kind,
-    this.unit,
-    this.offset,
-    this.id,
-  });
-  final int bookId;
+  const _PlaceNoteTarget({required this.kind, this.unit, this.offset});
   final FlutterNoteKind kind;
   final int? unit;
   final int? offset;
-  final String? id;
 }
 
 enum ReaderSelectionMovement {

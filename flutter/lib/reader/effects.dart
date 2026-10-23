@@ -9,9 +9,8 @@ typedef PageDecoder =
 
 typedef NoteEditor = Future<String?> Function(String? initialValue);
 
-/// Edits the body of a page note or book note; null when dismissed.
-typedef PlaceNoteEditor =
-    Future<String?> Function(FlutterNoteKind kind, String? initialValue);
+/// Writes the body of a new page note or book note; null when dismissed.
+typedef PlaceNoteEditor = Future<String?> Function(FlutterNoteKind kind);
 typedef NoteEditorCanceller = void Function();
 typedef AnnotationAssociationPicker =
     Future<AnnotationAssociationChoice> Function(

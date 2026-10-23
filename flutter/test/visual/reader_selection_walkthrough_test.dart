@@ -4,7 +4,6 @@ import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -204,20 +203,19 @@ void main() {
     expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
     await settleReaderSelection(tester);
-    expect(find.text('Highlight 1'), findsOneWidget);
+    final card = find.byKey(const ValueKey('reader-annotation-walkthrough'));
+    expect(card, findsOneWidget);
     await _frame(
       tester,
       'walkthrough-04-committed',
       step: '4. committed highlight',
       assertion:
           'the green action committed the range and the Notes panel lists '
-          'Highlight 1',
+          'its card',
     );
 
     await tester.tapAt(
-      tester.getCenter(
-        find.byKey(const ValueKey('reader-annotation-navigate-walkthrough')),
-      ),
+      tester.getCenter(card),
       buttons: kSecondaryMouseButton,
       kind: ui.PointerDeviceKind.mouse,
     );
@@ -227,28 +225,24 @@ void main() {
       tester,
       'walkthrough-05-annotation-menu',
       step: '5. annotation menu (secondary click)',
-      assertion: 'the salvaged #114 action menu opened over the card',
+      assertion: 'the card menu opened over the card',
     );
 
-    await tester.tap(find.text('Edit note'));
+    await tester.tap(find.text('Add note'));
     await tester.pumpAndSettle();
-    expect(find.text('Highlight note'), findsOneWidget);
+    final field = find.byKey(const ValueKey('reader-note-edit-field'));
+    expect(field, findsOneWidget);
     await _frame(
       tester,
       'walkthrough-06-note-editor',
       step: '6. note editor',
-      assertion: 'the controller-owned note dialog opened for the highlight',
+      assertion: 'the note opened for editing in the card',
     );
 
-    await tester.tap(
-      find.descendant(
-        of: find.byType(ShadDialog),
-        matching: find.widgetWithText(ShadButton, 'Cancel'),
-      ),
-    );
+    await tester.tap(find.byKey(const ValueKey('reader-note-edit-cancel')));
     await tester.pumpAndSettle();
-    expect(find.byType(ShadDialog), findsNothing);
-    expect(find.text('Highlight 1'), findsOneWidget);
+    expect(field, findsNothing);
+    expect(card, findsOneWidget);
     await _frame(
       tester,
       'walkthrough-07-note-cancelled',
@@ -257,11 +251,13 @@ void main() {
     );
 
     await tester.tap(
-      find.byKey(const ValueKey('reader-annotation-delete-walkthrough')),
+      find.byKey(const ValueKey('reader-annotation-walkthrough-actions')),
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete highlight').last);
     await settleReaderSelection(tester);
     expect(bridge.deleted, ['walkthrough']);
-    expect(find.text('Highlight 1'), findsNothing);
+    expect(card, findsNothing);
     await _frame(
       tester,
       'walkthrough-08-deleted',

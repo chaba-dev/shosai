@@ -4269,25 +4269,9 @@ void main() {
     await tester.pumpAndSettle();
     bridge.updateCompleter = Completer<bool>();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Change color'));
+    await _chooseHighlightAction(tester, 'Change color');
     await tester.pump();
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
-          )
-          .onPressed,
-      isNull,
-    );
-    await tester.tap(find.byTooltip('Edit note'));
+    expect(_highlightActionsEnabled(tester), isFalse);
     expect(bridge.updateCalls, 1);
     bridge.updateCompleter!.complete(false);
     await tester.pumpAndSettle();
@@ -4297,30 +4281,7 @@ void main() {
     tester.view.devicePixelRatio = tester.view.devicePixelRatio == 2 ? 3 : 2;
     await tester.pump();
     await tester.pump();
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<ShadIconButton>(
-            find.widgetWithIcon(ShadIconButton, LucideIcons.trash2),
-          )
-          .onPressed,
-      isNull,
-    );
+    expect(_highlightActionsEnabled(tester), isFalse);
     pendingLayout.complete(_surface(BigInt.from(20), raster: true));
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());
@@ -4405,7 +4366,7 @@ void main() {
     final selectionCalls = bridge.selectionCalls;
     bridge.updateCompleter = Completer<bool>();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Change color'));
+    await _chooseHighlightAction(tester, 'Change color');
     await tester.pump();
 
     final originalScale = tester.view.devicePixelRatio;
@@ -4448,7 +4409,7 @@ void main() {
       final selectionCalls = bridge.selectionCalls;
       bridge.updateCompleter = Completer<bool>();
       await _openNotesPanel(tester);
-      await tester.tap(find.byTooltip('Change color'));
+      await _chooseHighlightAction(tester, 'Change color');
       await tester.pump();
 
       tester.view.devicePixelRatio = displayedScale == 2 ? 3 : 2;
@@ -4513,7 +4474,11 @@ void main() {
   testWidgets('note dialog dismisses through its exit transition safely', (
     tester,
   ) async {
-    final bridge = _ControlledBridge(initialAnnotations: [_annotation('one')]);
+    final bridge = _ControlledBridge(
+      bookId: 7,
+      initialAnnotations: [_annotation('one')],
+      immediateLists: true,
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
@@ -4527,13 +4492,14 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Edit note'));
+    await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
     await tester.pumpAndSettle();
+    expect(find.byType(ShadDialog), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
-    expect(find.text('Highlight note'), findsNothing);
+    expect(find.byType(ShadDialog), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
@@ -4616,7 +4582,7 @@ void main() {
       expect(bridge.selectionLayouts.last.scale, 2);
       _expectViewportBetweenEdges(tester);
       await _openNotesPanel(tester);
-      expect(find.text('Highlight 1 — recovered'), findsOneWidget);
+      expect(find.text('page 1 — recovered'), findsOneWidget);
       // Address the Notes panel's own scrollable: the reader chrome adds
       // scroll regions of its own (the bounded header and the dev-only entry).
       final notesScroll = find.descendant(
@@ -4624,17 +4590,17 @@ void main() {
         matching: find.byType(Scrollable),
       );
       await tester.scrollUntilVisible(
-        find.text('Highlight 1 — ambiguous'),
+        find.text('page 1 — ambiguous'),
         300,
         scrollable: notesScroll,
       );
-      expect(find.text('Highlight 1 — ambiguous'), findsOneWidget);
+      expect(find.text('page 1 — ambiguous'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('Highlight 1 — unavailable'),
+        find.text('page 1 — unavailable'),
         300,
         scrollable: notesScroll,
       );
-      expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
+      expect(find.text('page 1 — unavailable'), findsOneWidget);
 
       tester.view.physicalSize = const Size(1400, 1000);
       await tester.pumpAndSettle();
@@ -4645,7 +4611,7 @@ void main() {
       await tester.pumpWidget(app(brightness: Brightness.dark));
       await tester.pumpAndSettle();
       expect(bridge.selectionCalls, callsBeforeTheme);
-      expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
+      expect(find.text('page 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(app(brightness: Brightness.dark, textScale: 2));
       await tester.pumpAndSettle();
@@ -4661,7 +4627,7 @@ void main() {
       // scale of an already-open document stays the one it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
       _expectViewportBetweenEdges(tester);
-      expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
+      expect(find.text('page 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       await bridge.disposed.future;
@@ -4932,7 +4898,7 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    final highlight = find.widgetWithText(ShadButton, 'Highlight 1');
+    final highlight = _highlightCards();
     // The button's own focus, not the panel's, which holds it.
     bool onHighlight(FocusNode? focus) =>
         focus != null &&
@@ -5370,7 +5336,7 @@ void main() {
         await tester.tap(find.text('Open document'));
         await tester.pumpAndSettle();
         await _openNotesPanel(tester);
-        await tester.tap(find.byTooltip('Change color'));
+        await _chooseHighlightAction(tester, 'Change color');
         await tester.pump();
 
         tester.view.devicePixelRatio = tester.view.devicePixelRatio == 2
@@ -5654,7 +5620,7 @@ void main() {
           expect(bridge.createCalls, 1);
           expect(bridge.createdRanges.single, (BigInt.one, BigInt.from(8)));
           await _openNotesPanel(tester);
-          expect(find.text('Highlight 1'), findsOneWidget);
+          expect(_highlightCards(), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
 
@@ -5662,7 +5628,7 @@ void main() {
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
           await _openNotesPanel(tester);
-          expect(find.text('Highlight 1'), findsOneWidget);
+          expect(_highlightCards(), findsOneWidget);
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
 
@@ -6231,10 +6197,13 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Edit note'));
+    await _chooseHighlightAction(tester, 'Add note');
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(ShadInput).last, 'Updated note');
-    await tester.tap(find.text('Save'));
+    await tester.enterText(
+      find.byKey(const ValueKey('reader-note-edit-field')),
+      'Updated note',
+    );
+    await tester.tap(find.byKey(const ValueKey('reader-note-edit-save')));
     await _waitUntil(() => bridge.updateCalls == 1);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -6254,7 +6223,7 @@ void main() {
 
     expect(bridge.listCalls, 3);
     await _openNotesPanel(tester);
-    expect(find.text('Highlight 1'), findsOneWidget);
+    expect(_highlightCards(), findsOneWidget);
     expect(find.textContaining('annotation list failed'), findsNothing);
     expect(
       find.text(
@@ -6324,6 +6293,7 @@ void main() {
     tester,
   ) async {
     final bridge = _ControlledBridge(
+      bookId: 7,
       initialAnnotations: [_annotation('one')],
       immediateLists: true,
     );
@@ -6340,9 +6310,9 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await _openNotesPanel(tester);
-    await tester.tap(find.byTooltip('Edit note'));
+    await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
     await tester.pumpAndSettle();
-    expect(find.text('Save'), findsOneWidget);
+    expect(find.byType(ShadDialog), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
@@ -6567,16 +6537,12 @@ void main() {
 
   test('page notes and book notes are written, edited and deleted', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-    final edits = Queue<String?>.from([
-      'first note',
-      'about the book',
-      'edited note',
-    ]);
+    final edits = Queue<String?>.from(['first note', 'about the book']);
     final kinds = <FlutterNoteKind>[];
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      placeNoteEditor: (kind, _) async {
+      placeNoteEditor: (kind) async {
         kinds.add(kind);
         return edits.removeFirst();
       },
@@ -6595,13 +6561,12 @@ void main() {
     expect(controller.model.notes.last.kind, FlutterNoteKind.book);
     expect(controller.model.notes.last.unit, isNull);
 
-    controller.dispatch(ReaderNoteEditRequested(page));
+    // An edit in place is saved trimmed; an empty one is not saved.
+    controller.dispatch(ReaderNoteSaved(page.id, '  edited note '));
     await _waitUntil(() => controller.model.notes.first.body == 'edited note');
-    expect(kinds, [
-      FlutterNoteKind.page,
-      FlutterNoteKind.book,
-      FlutterNoteKind.page,
-    ]);
+    controller.dispatch(ReaderNoteSaved(page.id, '  '));
+    expect(controller.model.notesBusy, isFalse);
+    expect(kinds, [FlutterNoteKind.page, FlutterNoteKind.book]);
 
     controller.dispatch(ReaderNoteDeleted(page.id));
     await _waitUntil(() => controller.model.notes.length == 1);
@@ -6618,7 +6583,7 @@ void main() {
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      placeNoteEditor: (_, _) async => edits.removeFirst(),
+      placeNoteEditor: (_) async => edits.removeFirst(),
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
 
@@ -6682,7 +6647,7 @@ void main() {
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      placeNoteEditor: (_, _) => editor.future,
+      placeNoteEditor: (_) => editor.future,
       noteEditorCanceller: () => cancellations += 1,
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
@@ -6707,7 +6672,7 @@ void main() {
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      placeNoteEditor: (_, _) async => 'note',
+      placeNoteEditor: (_) async => 'note',
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
 
@@ -7499,6 +7464,38 @@ Future<void> _openNotesPanel(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
   await tester.pumpAndSettle();
 }
+
+/// Chooses [action] from a highlight card's menu in the Notes panel.
+Future<void> _chooseHighlightAction(
+  WidgetTester tester,
+  String action, {
+  String id = 'one',
+}) async {
+  await tester.tap(find.byKey(ValueKey('reader-annotation-$id-actions')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(action).last);
+}
+
+/// Whether a highlight card's actions can be chosen.
+bool _highlightActionsEnabled(WidgetTester tester, {String id = 'one'}) =>
+    tester
+        .widget<ShadButton>(
+          find.descendant(
+            of: find.byKey(ValueKey('reader-annotation-$id-actions')),
+            matching: find.byType(ShadButton),
+          ),
+        )
+        .onPressed !=
+    null;
+
+/// The Notes panel's highlight cards, by the control that opens each.
+Finder _highlightCards() => find.byWidgetPredicate(
+  (widget) => switch (widget.key) {
+    ValueKey<String>(:final value) =>
+      value.startsWith('reader-annotation-') && value.endsWith('-open'),
+    _ => false,
+  },
+);
 
 Future<void> _waitUntil(bool Function() condition) async {
   while (!condition()) {

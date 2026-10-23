@@ -79,9 +79,7 @@ final class ReaderController implements Listenable {
        _noteEditor = noteEditor ?? ((_) async => null),
        _placeNoteEditor =
            placeNoteEditor ??
-           (noteEditor == null
-               ? ((_, _) async => null)
-               : (_, body) => noteEditor(body)),
+           (noteEditor == null ? ((_) async => null) : (_) => noteEditor(null)),
        _noteEditorCanceller = noteEditorCanceller ?? (() {}),
        _annotationAssociationPicker =
            annotationAssociationPicker ??
@@ -408,6 +406,7 @@ final class ReaderController implements Listenable {
           ReaderSelectionCancelled() ||
           ReaderAnnotationUpdated() ||
           ReaderAnnotationNoteRequested() ||
+          ReaderAnnotationNoteSaved() ||
           ReaderAnnotationDeleted() ||
           ReaderAnnotationNavigated() ||
           ReaderAnnotationReloadRequested() ||
@@ -418,7 +417,7 @@ final class ReaderController implements Listenable {
           ReaderBookmarkNavigated() ||
           ReaderPageNoteRequested() ||
           ReaderBookNoteRequested() ||
-          ReaderNoteEditRequested() ||
+          ReaderNoteSaved() ||
           ReaderNoteDeleted() ||
           ReaderNoteNavigated() => true,
           _ => false,
@@ -460,8 +459,20 @@ final class ReaderController implements Listenable {
         _placeNoteRequested(FlutterNoteKind.page);
       case ReaderBookNoteRequested():
         _placeNoteRequested(FlutterNoteKind.book);
-      case ReaderNoteEditRequested():
-        _placeNoteRequested(message.note.kind, note: message.note);
+      case ReaderNoteSaved():
+        _placeNoteSaved(message.id, message.body);
+      case ReaderNoteEditStarted():
+        _emit(
+          _model.copyWith(noteEdit: ReaderNoteEdit(message.card, message.text)),
+        );
+      case ReaderNoteDraftChanged():
+        if (_model.noteEdit case final edit? when edit.text != message.text) {
+          _emit(
+            _model.copyWith(noteEdit: ReaderNoteEdit(edit.card, message.text)),
+          );
+        }
+      case ReaderNoteEditCancelled():
+        if (_model.noteEdit != null) _emit(_model.copyWith(noteEdit: null));
       case ReaderNoteDeleted():
         _placeNoteDeleted(message.id);
       case ReaderNoteNavigated():
@@ -661,7 +672,15 @@ final class ReaderController implements Listenable {
       case _ReaderNotesCompleted():
         if (_isCurrent(message.generation) &&
             message.revision == _notesRevision) {
-          _emit(_model.copyWith(notes: message.items, notesBusy: false));
+          _emit(
+            _model.copyWith(
+              notes: message.items,
+              notesBusy: false,
+              noteEdit: _editWithin('reader-place-note-', [
+                for (final note in message.items) note.id,
+              ]),
+            ),
+          );
         }
       case _ReaderNotesFailed():
         if (_isCurrent(message.generation) &&
@@ -826,6 +845,8 @@ final class ReaderController implements Listenable {
         unawaited(_updateAnnotation(message));
       case ReaderAnnotationNoteRequested():
         _noteRequested(message.id);
+      case ReaderAnnotationNoteSaved():
+        _annotationNoteSaved(message.id, message.body);
       case _ReaderAnnotationNoteCompleted():
         _noteCompleted(message);
       case _ReaderAnnotationNoteFailed():
@@ -1089,6 +1110,7 @@ final class ReaderController implements Listenable {
         openPath: path,
         openBookId: message.bookId,
         document: null,
+        noteEdit: null,
         unit: 0,
         readingOffset: null,
         pageImage: null,
@@ -2763,12 +2785,10 @@ final class ReaderController implements Listenable {
     );
   }
 
-  /// Opens the note editor for a new page note, a new book note, or an
-  /// existing note's body.
-  void _placeNoteRequested(FlutterNoteKind kind, {FlutterNote? note}) {
+  /// Opens the note editor for a new page note or book note.
+  void _placeNoteRequested(FlutterNoteKind kind) {
     final document = _model.document;
-    final bookId = document?.bookId;
-    if (bookId == null ||
+    if (document?.bookId == null ||
         _model.notesBusy ||
         _activeNoteEditor != null ||
         _closing ||
@@ -2779,16 +2799,13 @@ final class ReaderController implements Listenable {
     // A page note marks the page being read, in its own offsets, like a
     // bookmark.
     final (:unit, :offset) = _model.readingLocation;
-    final target = note != null
-        ? _PlaceNoteTarget(bookId: bookId, kind: note.kind, id: note.id)
-        : kind == FlutterNoteKind.page
+    final target = kind == FlutterNoteKind.page
         ? _PlaceNoteTarget(
-            bookId: bookId,
             kind: kind,
             unit: unit,
             offset: document!.format == FlutterBookFormat.pdf ? null : offset,
           )
-        : _PlaceNoteTarget(bookId: bookId, kind: kind);
+        : _PlaceNoteTarget(kind: kind);
     final generation = _model.generation;
     final revision = ++_notesRevision;
     final token = ++_noteEditorToken;
@@ -2799,7 +2816,7 @@ final class ReaderController implements Listenable {
     _emit(_model.copyWith(notesBusy: true, toolError: null));
     unawaited(() async {
       try {
-        final body = await _placeNoteEditor(target.kind, note?.body);
+        final body = await _placeNoteEditor(target.kind);
         dispatch(
           _ReaderPlaceNoteEdited(
             generation: generation,
@@ -2837,18 +2854,38 @@ final class ReaderController implements Listenable {
       generation: message.generation,
       revision: message.revision,
       document: document,
-      mutation: (cancellation, text) => target.id == null
-          ? _records.createNote(
-              document: document,
-              text: text,
-              unit: target.unit == null ? null : BigInt.from(target.unit!),
-              offset: target.offset == null
-                  ? null
-                  : BigInt.from(target.offset!),
-              body: body,
-              cancellationId: cancellation,
-            )
-          : _records.updateNote(document: document, id: target.id!, body: body),
+      mutation: (cancellation, text) => _records.createNote(
+        document: document,
+        text: text,
+        unit: target.unit == null ? null : BigInt.from(target.unit!),
+        offset: target.offset == null ? null : BigInt.from(target.offset!),
+        body: body,
+        cancellationId: cancellation,
+      ),
+    );
+  }
+
+  /// Writes the body a note was edited to in place; an empty body is not
+  /// saved.
+  void _placeNoteSaved(String id, String body) {
+    final document = _model.document;
+    final trimmed = body.trim();
+    if (document?.bookId == null ||
+        trimmed.isEmpty ||
+        _model.notesBusy ||
+        _closing ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    final revision = ++_notesRevision;
+    _startNotesEffect(
+      generation: _model.generation,
+      revision: revision,
+      document: document!,
+      editCard: 'reader-place-note-$id',
+      mutation: (_, _) =>
+          _records.updateNote(document: document, id: id, body: trimmed),
     );
   }
 
@@ -2872,12 +2909,14 @@ final class ReaderController implements Listenable {
 
   /// Runs [mutation], if any, then lists the book's notes again.
   ///
-  /// A mutation is a book write: its failure is a persistence error, while a
-  /// list that fails after it committed is only a tool error.
+  /// Notes belong to library books. A mutation is a book write: its failure
+  /// is a persistence error, while a list that fails after it committed is
+  /// only a tool error.
   void _startNotesEffect({
     required int generation,
     required int revision,
     required FlutterDocumentSummary document,
+    String? editCard,
     Future<Object?> Function(BigInt cancellation, ReaderText text)? mutation,
   }) {
     final bookId = document.bookId!;
@@ -2896,7 +2935,15 @@ final class ReaderController implements Listenable {
       _beginBookWrite(bookId);
     }
     _activeBridgeOperations += 1;
-    _emit(_model.copyWith(notesBusy: true));
+    _emit(
+      _model.copyWith(
+        notesBusy: true,
+        // The saved draft is the note's now.
+        noteEdit: editCard != null && _model.noteEdit?.card == editCard
+            ? null
+            : _model.noteEdit,
+      ),
+    );
     unawaited(() async {
       String? writeError;
       var mutationCommitted = mutation == null;
@@ -4720,6 +4767,15 @@ final class ReaderController implements Listenable {
     }());
   }
 
+  /// The in-place edit, unless it is of a card with [prefix] whose note is
+  /// not among [ids] any more.
+  ReaderNoteEdit? _editWithin(String prefix, Iterable<String> ids) {
+    final edit = _model.noteEdit;
+    if (edit == null || !edit.card.startsWith(prefix)) return edit;
+    final id = edit.card.substring(prefix.length);
+    return ids.contains(id) ? edit : null;
+  }
+
   void _setAnnotations(
     List<FlutterAnnotation> annotations, {
     bool? annotationsReady,
@@ -4728,6 +4784,13 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         annotations: List.unmodifiable(annotations),
         annotationsReady: annotationsReady,
+        // A list that is not ready (association empties it before reloading)
+        // says nothing about which highlights are gone.
+        noteEdit: annotationsReady ?? _model.annotationsReady
+            ? _editWithin('reader-annotation-', [
+                for (final annotation in annotations) annotation.id,
+              ])
+            : _model.noteEdit,
         savedSelections: _savedSelections(
           annotations,
           _model.unit,
@@ -4776,6 +4839,12 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         annotationOperations: {operationId},
         annotationError: null,
+        // A saved in-place draft is the highlight's note now.
+        noteEdit:
+            fromNote &&
+                _model.noteEdit?.card == 'reader-annotation-${message.id}'
+            ? null
+            : _model.noteEdit,
       ),
     );
     try {
@@ -4955,6 +5024,26 @@ final class ReaderController implements Listenable {
         dispatch(_ReaderNoteEditorFinished(token));
       }
     }());
+  }
+
+  /// Writes a highlight's note as edited in place, as the note editor's
+  /// result is written.
+  void _annotationNoteSaved(String id, String body) {
+    final annotation = _model.annotations
+        .where((item) => item.id == id)
+        .firstOrNull;
+    if (annotation == null) return;
+    final trimmed = body.trim();
+    unawaited(
+      _updateAnnotation(
+        ReaderAnnotationUpdated(
+          id,
+          annotation.color,
+          trimmed.isEmpty ? null : trimmed,
+        ),
+        fromNote: true,
+      ),
+    );
   }
 
   void _noteCompleted(_ReaderAnnotationNoteCompleted message) {

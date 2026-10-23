@@ -87,10 +87,30 @@ final class ReaderBookNoteRequested extends ReaderMessage {
   const ReaderBookNoteRequested();
 }
 
-/// Edits a page note or book note.
-final class ReaderNoteEditRequested extends ReaderMessage {
-  const ReaderNoteEditRequested(this.note);
-  final FlutterNote note;
+/// Saves the body a page note or book note was edited to in place.
+final class ReaderNoteSaved extends ReaderMessage {
+  const ReaderNoteSaved(this.id, this.body);
+  final String id;
+  final String body;
+}
+
+/// Starts editing note card [card]'s note in place, from [text]. Another
+/// card's edit is dropped.
+final class ReaderNoteEditStarted extends ReaderMessage {
+  const ReaderNoteEditStarted(this.card, this.text);
+  final String card;
+  final String text;
+}
+
+/// The note being edited in place now reads [text].
+final class ReaderNoteDraftChanged extends ReaderMessage {
+  const ReaderNoteDraftChanged(this.text);
+  final String text;
+}
+
+/// Drops the note being edited in place.
+final class ReaderNoteEditCancelled extends ReaderMessage {
+  const ReaderNoteEditCancelled();
 }
 
 /// Deletes a page note or book note.
@@ -500,6 +520,14 @@ final class _ReaderAnnotationUpdateCompleted extends ReaderMessage {
 final class ReaderAnnotationNoteRequested extends ReaderMessage {
   const ReaderAnnotationNoteRequested(this.id);
   final String id;
+}
+
+/// Saves the note a highlight's card was edited to in place; an empty body
+/// removes the note.
+final class ReaderAnnotationNoteSaved extends ReaderMessage {
+  const ReaderAnnotationNoteSaved(this.id, this.body);
+  final String id;
+  final String body;
 }
 
 /// Completion from a controller-owned note editor effect.

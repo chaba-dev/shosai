@@ -17,7 +17,6 @@ import 'package:shosai_flutter/reader/epub/continuous.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/pdf/spread.dart';
-import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
@@ -27,6 +26,7 @@ part 'painting.dart';
 part 'view_chrome.dart';
 part 'view_dialogs.dart';
 part 'view_document.dart';
+part 'view_notes.dart';
 part 'view_panels.dart';
 part 'view_selection.dart';
 part 'view_stage.dart';
@@ -307,8 +307,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<String?> _editNote(String? initialValue) =>
       _showNoteEditor(initialValue, kind: null);
 
-  Future<String?> _editPlaceNote(FlutterNoteKind kind, String? initialValue) =>
-      _showNoteEditor(initialValue, kind: kind);
+  Future<String?> _editPlaceNote(FlutterNoteKind kind) =>
+      _showNoteEditor(null, kind: kind);
 
   Future<String?> _showNoteEditor(
     String? initialValue, {
