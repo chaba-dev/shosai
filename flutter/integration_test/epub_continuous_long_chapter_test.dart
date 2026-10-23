@@ -63,7 +63,7 @@ void main() {
 
     final timings = <FrameTiming>[];
     SchedulerBinding.instance.addTimingsCallback(timings.addAll);
-    final steps = <int>[];
+    final steps = <({int micros, int measured})>[];
     final sessions = <ChapterLayoutSession>[];
 
     vms.VmService? vm;
@@ -225,7 +225,9 @@ void main() {
       },
       'framesOver16_7ms': total.where((value) => value > 16667).length,
       'windowSteps': steps.length - stepStart,
-      'windowStepMs_p50_p95_p99_max': percentiles(steps.sublist(stepStart)),
+      'windowStepMs_p50_p95_p99_max': percentiles([
+        for (final step in steps.sublist(stepStart)) step.micros,
+      ]),
       'sessions': sessions.length,
       'checkpoints': checkpoints,
     };

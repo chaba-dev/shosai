@@ -622,11 +622,8 @@ class _ReaderStatusLine extends StatelessWidget {
                       decreasedValue: _unitStepValue(context, model, -1),
                       onStep: total > 0 && !model.busy
                           ? (delta) {
-                              final unit = (model.unit + delta).clamp(
-                                0,
-                                total - 1,
-                              );
-                              if (unit != model.unit) {
+                              final unit = _unitStep(model, delta);
+                              if (unit >= 0 && unit < total) {
                                 dispatch(ReaderUnitRequested(unit));
                               }
                             }
@@ -647,15 +644,31 @@ class _ReaderStatusLine extends StatelessWidget {
 ///
 /// A step lands at the start of the neighbouring unit, so it names that unit
 /// with the share of the book read once it is.
+/// The unit the progress track's step in [delta]'s direction (±1) goes to:
+/// the next or previous chapter or page, or a whole spread when a PDF is read
+/// in spreads, as the edges turn it. Past either end when there is none.
+int _unitStep(ReaderModel model, int delta) =>
+    model.layout.spread && model.document?.format == FlutterBookFormat.pdf
+    ? pdfSpreadStep(model.unit, delta)
+    : model.unit + delta;
+
 String? _unitStepValue(BuildContext context, ReaderModel model, int delta) {
   final total = model.document?.logicalUnitCount.toInt() ?? 0;
-  final unit = model.unit + delta;
+  final unit = _unitStep(model, delta);
   if (total <= 0 || unit < 0 || unit >= total) return null;
   final l10n = AppLocalizations.of(context);
-  final percent = ((unit + 1) / total * 100).round();
-  return model.document?.format == FlutterBookFormat.epub
-      ? l10n.readerChapterOfStatus(percent, unit + 1, total)
-      : l10n.readerPageOfStatus(percent, unit + 1, total);
+  if (model.document?.format == FlutterBookFormat.epub) {
+    final percent = ((unit + 1) / total * 100).round();
+    return l10n.readerChapterOfStatus(percent, unit + 1, total);
+  }
+  // A spread's place names both of its pages and counts the second as read,
+  // as the status does once the step has shown it.
+  final facing = model.layout.spread ? pdfSpreadFacing(unit, total) : null;
+  final last = (facing ?? unit) + 1;
+  final percent = (last / total * 100).round();
+  return facing == null
+      ? l10n.readerPageOfStatus(percent, unit + 1, total)
+      : l10n.readerPageRangeOfStatus(percent, unit + 1, last, total);
 }
 
 /// The place in the reader's terms: `4% · pages 18–19 of 502`, or the short

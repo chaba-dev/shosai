@@ -13,6 +13,7 @@ import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
+import 'package:shosai_flutter/notices/library_notice_text.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
@@ -447,8 +448,43 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         model: _shell.model.copyWith(reading: true),
         covers: controller.model.covers,
         actions: _shellActions,
-        child: current == null ? const SizedBox.expand() : _readerFor(current),
+        child: current == null
+            ? const SizedBox.expand()
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ?_settingsFailure(),
+                  Expanded(child: _readerFor(current)),
+                ],
+              ),
       ),
+    );
+  }
+
+  /// The failed settings write, reported over the reader: the library's own
+  /// alert is under the reader's route, and a Pages change made in the reader
+  /// is lost on the next launch unless it is saved. It stays until a retry
+  /// saves the settings or it is dismissed.
+  Widget? _settingsFailure() {
+    final model = controller.model;
+    final error = model.error;
+    if (model.failure != LibraryFailure.settings || error == null) return null;
+    return PersistentNoticeSurface(
+      key: const ValueKey('reader-settings-failure'),
+      notice: Notice(
+        id: 0,
+        kind: NoticeKind.failure,
+        lifetime: NoticeLifetime.persistent,
+        text: const LibrarySettingsSaveFailedNotice(),
+        details: RawNoticeText(error),
+        actions: const [
+          NoticeAction(id: 'retry', label: NoticeRetryText(), primary: true),
+        ],
+        dedupeKey: NoticePolicy.librarySettingsKey,
+      ),
+      onDismiss: () =>
+          controller.dispatch(const LibrarySettingsFailureDismissed()),
+      onAction: (_) => controller.dispatch(const LibrarySettingsSaveRetried()),
     );
   }
 
