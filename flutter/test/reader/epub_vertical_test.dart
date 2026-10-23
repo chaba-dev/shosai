@@ -281,8 +281,11 @@ void main() {
       }
       return true;
     });
+    // Tate-chū-yoko is laid out a character at a time.
     for (final run in runs) {
-      expect(laidOut[run]!.a, 0, reason: run);
+      for (final text in laidOut.containsKey(run) ? [run] : run.split('')) {
+        expect(laidOut[text]!.a, 0, reason: text);
+      }
     }
     expect(laidOut['Hello, world'], typography.palette.foreground);
   });
@@ -381,6 +384,79 @@ void main() {
       ],
       ['5'],
     );
+  });
+
+  test('a line never breaks inside tate-chū-yoko, even with half an em '
+      'left', () {
+    final built = buildBlockText(
+      [
+        EpubTextSpan(text: '甲'),
+        EpubTextSpan(text: '一二', combine: const EpubTextCombine.all()),
+        EpubTextSpan(text: '乙'),
+      ],
+      typography,
+      18,
+      vertical: true,
+    );
+    final painter = TextPainter(
+      text: built.span,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 27);
+    addTearDown(painter.dispose);
+    final run = built.upright.singleWhere((run) => run.combined);
+    final tops = {
+      for (var unit = run.start; unit < run.end; unit++)
+        for (final box in painter.getBoxesForSelection(
+          TextSelection(baseOffset: unit, extentOffset: unit + 1),
+        ))
+          box.top,
+    };
+    expect(tops, hasLength(1));
+    final width = painter
+        .getBoxesForSelection(
+          TextSelection(baseOffset: run.start, extentOffset: run.end),
+        )
+        .fold(0.0, (width, box) => width + box.right - box.left);
+    expect(width, closeTo(18, 0.01));
+  });
+
+  test('tate-chū-yoko selects its characters where they are drawn, side by '
+      'side across the column', () {
+    final (:page, :chapter) = verticalPage();
+    final text = chapter.canonicalText;
+    final three = text.indexOf('明治38') + 2;
+    final surface = page.surface;
+    Rect charAt(int offset) => [
+      for (final endpoint in surface.endpoints)
+        if (endpoint.rangeStart.toInt() == offset)
+          Rect.fromLTRB(
+            endpoint.rect.left,
+            endpoint.rect.top,
+            endpoint.rect.right,
+            endpoint.rect.bottom,
+          ),
+    ].reduce((a, b) => a.expandToInclude(b));
+    final first = charAt(three);
+    final second = charAt(three + 1);
+    // 3 is drawn left of 8, in the same em of the column.
+    expect(second.left, closeTo(first.right, 0.5));
+    expect(second.top, closeTo(first.top, 0.5));
+    expect(second.bottom, closeTo(first.bottom, 0.5));
+    // Each character's left half starts it and its right half ends it.
+    final halves = surface.endpoints
+        .where((endpoint) => endpoint.rangeStart.toInt() == three + 1)
+        .toList();
+    final left = halves.reduce((a, b) => a.rect.left < b.rect.left ? a : b);
+    final right = halves.reduce((a, b) => a.rect.left < b.rect.left ? b : a);
+    expect(left.offset.toInt(), three + 1);
+    expect(right.offset.toInt(), three + 2);
+    // Carets keep reading order along the column.
+    final line = surface.visualLines.firstWhere(
+      (line) => line.carets.any((caret) => caret.offset.toInt() == three + 1),
+    );
+    final offsets = [for (final caret in line.carets) caret.offset.toInt()];
+    final at = offsets.indexOf(three);
+    expect(offsets.sublist(at, at + 3), [three, three + 1, three + 2]);
   });
 
   test('horizontal text ignores tate-chū-yoko', () {

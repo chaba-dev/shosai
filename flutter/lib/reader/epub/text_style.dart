@@ -497,13 +497,23 @@ bool isUprightInVertical(int rune) {
     }
 
     void combine(int from, int to) {
-      final text = span.text.substring(from, to);
-      children.add(
-        TextSpan(
-          text: text,
-          style: hidden.copyWith(letterSpacing: _combinedSpacing(text, style)),
-        ),
-      );
+      // The first grapheme advances one em and the others nothing, so the
+      // run takes one character's place and a line cannot break inside it
+      // for want of room. Each grapheme is shaped alone, so a ligature
+      // cannot take the spacing meant for several characters.
+      var first = true;
+      for (final grapheme in span.text.substring(from, to).characters) {
+        final width = _width(grapheme, style);
+        children.add(
+          TextSpan(
+            text: grapheme,
+            style: hidden.copyWith(
+              letterSpacing: first ? style.fontSize! - width : -width,
+            ),
+          ),
+        );
+        first = false;
+      }
       upright.add(
         UprightRun(
           start: start + codeUnitOffset + from,
@@ -559,17 +569,15 @@ bool isUprightInVertical(int rune) {
   );
 }
 
-/// The letter spacing that makes [text], set in [style], one em long, so a
-/// tate-chū-yoko run advances its column by one character.
-double _combinedSpacing(String text, TextStyle style) {
+/// The laid-out width of [text] set in [style].
+double _width(String text, TextStyle style) {
   final measure = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: ui.TextDirection.ltr,
   )..layout();
   final width = measure.width;
   measure.dispose();
-  final em = style.fontSize ?? 14;
-  return (em - width) / text.characters.length;
+  return width;
 }
 
 /// The runs of ASCII digits in [text] that `text-combine-upright: digits`

@@ -159,25 +159,11 @@ class FlowTextBlock {
         runEnd - markerOffset,
       );
       if (run.combined) {
-        final glyph = _uprightGlyph(
-          unit,
-          runEnd,
-          runText,
-          run.style,
-          verticalForms: false,
-        );
-        if (glyph == null) continue;
-        // Tate-chū-yoko: the run's text sits across the column, squeezed to
-        // the one em its laid-out letters were spaced to fill.
-        final advance = glyph.box.width;
-        final width = glyph.painter.width;
-        glyphs.add(
-          _UprightGlyph(
-            center: glyph.box.center,
-            painter: glyph.painter,
-            squeeze: width > advance && width > 0 ? advance / width : 1,
-          ),
-        );
+        // Tate-chū-yoko is one unit that a line never breaks: it is drawn
+        // whole on the line it starts on.
+        if (run.start < from) continue;
+        final glyph = _combinedGlyph(run);
+        if (glyph != null) glyphs.add(glyph);
         continue;
       }
       for (final grapheme in runText.characters) {
@@ -191,6 +177,94 @@ class FlowTextBlock {
       }
     }
     return glyphs;
+  }
+
+  /// A tate-chū-yoko run drawn as horizontal text across its column,
+  /// squeezed to the one em its laid-out text takes along the line.
+  _UprightGlyph? _combinedGlyph(UprightRun run) {
+    final glyph = _uprightGlyph(
+      run.start,
+      run.end,
+      map.text.substring(
+        run.start - map.codeUnitOffset,
+        run.end - map.codeUnitOffset,
+      ),
+      run.style,
+      verticalForms: false,
+    );
+    if (glyph == null) return null;
+    final advance = glyph.box.width;
+    final width = glyph.painter.width;
+    return _UprightGlyph(
+      center: glyph.box.center,
+      painter: glyph.painter,
+      squeeze: width > advance && width > 0 ? advance / width : 1,
+    );
+  }
+
+  /// Where each grapheme of the tate-chū-yoko runs that start in the code
+  /// units [from] to [to] is drawn, in block coordinates.
+  ///
+  /// A run takes one em along its line, and its graphemes sit side by side
+  /// across the line: on the page, the first is leftmost. Each cell spans the
+  /// run's em along the line and its grapheme's share of the drawn text
+  /// across it, so selection, highlights and hit testing see the characters
+  /// where they are painted. [index] and [count] place a cell in its run.
+  List<({int start, int end, int index, int count, Rect rect})> combinedCells(
+    int from,
+    int to,
+  ) {
+    final cells = <({int start, int end, int index, int count, Rect rect})>[];
+    for (final run in upright) {
+      if (!run.combined || run.start < from) continue;
+      if (run.start >= to) break;
+      final glyph = _combinedGlyph(run);
+      if (glyph == null) continue;
+      final runText = map.text.substring(
+        run.start - map.codeUnitOffset,
+        run.end - map.codeUnitOffset,
+      );
+      final boxes = painter.getBoxesForSelection(
+        TextSelection(baseOffset: run.start, extentOffset: run.end),
+      );
+      var along = boxes.first.toRect();
+      for (final box in boxes.skip(1)) {
+        along = along.expandToInclude(box.toRect());
+      }
+      final half = glyph.painter.width / 2;
+      final count = runText.characters.length;
+      var index = 0;
+      var unit = 0;
+      for (final grapheme in runText.characters) {
+        final start = unit;
+        unit += grapheme.length;
+        final drawn = glyph.painter.getBoxesForSelection(
+          TextSelection(baseOffset: start, extentOffset: unit),
+        );
+        if (drawn.isEmpty) continue;
+        var left = drawn.first.left;
+        var right = drawn.first.right;
+        for (final box in drawn.skip(1)) {
+          left = math.min(left, box.left);
+          right = math.max(right, box.right);
+        }
+        // The glyph is turned back a quarter turn, so its text runs towards
+        // the block's top.
+        cells.add((
+          start: run.start + start,
+          end: run.start + unit,
+          index: index++,
+          count: count,
+          rect: Rect.fromLTRB(
+            along.left,
+            glyph.center.dy - glyph.squeeze * (right - half),
+            along.right,
+            glyph.center.dy - glyph.squeeze * (left - half),
+          ),
+        ));
+      }
+    }
+    return cells;
   }
 
   /// The laid-out box of the code units [start] to [end], and a painter that

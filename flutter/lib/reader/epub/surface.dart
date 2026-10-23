@@ -372,11 +372,66 @@ List<FlutterSelectionCaret> _lineCarets(
   if (endUnit <= startUnit) return const [];
   final lineText = map.text.substring(startUnit, endUnit);
   final carets = <FlutterSelectionCaret>[];
+  // Tate-chū-yoko sets its graphemes side by side across the line, in one
+  // em along it: each grapheme's halves are its left and right on the page,
+  // and its carets are spread along the em so they keep their order.
+  final cells = {
+    for (final cell in text.combinedCells(line.codeUnitStart, line.codeUnitEnd))
+      cell.start: cell,
+  };
   var unit = startUnit;
   for (final grapheme in lineText.characters) {
     final clusterStart = unit;
     final clusterEnd = unit + grapheme.length;
     unit = clusterEnd;
+    final cell = cells[clusterStart + markerOffset];
+    if (cell != null) {
+      final canonicalStart = cursor.at(cell.start);
+      final canonicalEnd = cursor.at(cell.end);
+      final rect = cell.rect;
+      // The first grapheme reaches the line's edge on the page's left, and
+      // the last its edge on the right, so the line's full width hits.
+      final top = cell.index == cell.count - 1 ? 0.0 : rect.top;
+      final bottom = cell.index == 0 ? line.height : rect.bottom;
+      final mid = (rect.top + rect.bottom) / 2;
+      FlutterSelectionRect half(double from, double to) {
+        final page = box.rectToPage(
+          Rect.fromLTRB(
+            rect.left + originX,
+            lineTop + from,
+            rect.right + originX,
+            lineTop + to,
+          ),
+        );
+        return FlutterSelectionRect(
+          left: page.left,
+          top: page.top,
+          right: page.right,
+          bottom: page.bottom,
+        );
+      }
+
+      endpoints.add(
+        FlutterSelectionEndpoint(
+          offset: BigInt.from(canonicalStart),
+          rangeStart: BigInt.from(canonicalStart),
+          rangeEnd: BigInt.from(canonicalEnd),
+          rect: half(mid, bottom),
+        ),
+      );
+      endpoints.add(
+        FlutterSelectionEndpoint(
+          offset: BigInt.from(canonicalEnd),
+          rangeStart: BigInt.from(canonicalStart),
+          rangeEnd: BigInt.from(canonicalEnd),
+          rect: half(top, mid),
+        ),
+      );
+      final step = rect.width / cell.count;
+      carets.add(caret(canonicalStart, rect.left + step * cell.index));
+      carets.add(caret(canonicalEnd, rect.left + step * (cell.index + 1)));
+      continue;
+    }
     final boxes = painter.getBoxesForSelection(
       TextSelection(
         baseOffset: clusterStart + markerOffset,
