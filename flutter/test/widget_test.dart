@@ -2950,6 +2950,42 @@ void main() {
       await bridge.disposed.future;
     });
 
+    test('a book opened at a match on a spread\'s second page selects it '
+        'there', () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 4,
+        immediateLists: true,
+      );
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      controller.dispatch(
+        const ReaderViewportChanged(
+          ReaderLayout(width: 1000, spread: true),
+          height: 600,
+          devicePixelRatio: 1,
+        ),
+      );
+      controller.dispatch(
+        const ReaderOpenRequested(
+          '/tmp/book.pdf',
+          place: ReaderPlace(2, offset: 2, length: 3),
+        ),
+      );
+      await bridge.waitForOp(1);
+      await drain();
+      final model = controller.model;
+      expect(model.unit, 1, reason: 'the spread of pages 2 and 3');
+      expect(model.readingLocation.unit, 2);
+      expect(model.selectionPhase, ReaderSelectionPhase.selected);
+      final shift = model.pdfSpread!.textShift;
+      expect((model.anchor, model.focus), (2 + shift, 5 + shift));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
+
     test('the last spread of an odd-page PDF is saved as finished', () async {
       final bridge = _ControlledBridge(
         bookId: 7,
@@ -3015,6 +3051,47 @@ void main() {
         devicePixelRatio: devicePixelRatio,
       ),
     );
+
+    test('a search match a book opens at stays marked through its fitted '
+        'render', () async {
+      final bridge = _ControlledBridge(immediateLists: true);
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        baseScale: 1,
+      );
+      void report(double height) => controller.dispatch(
+        ReaderViewportChanged(
+          const ReaderLayout(width: width),
+          height: height,
+          devicePixelRatio: 1,
+        ),
+      );
+      report(396);
+      final held = Completer<FlutterRenderedBuffer>();
+      bridge.renderCompleters.add(held);
+      controller.dispatch(
+        const ReaderOpenRequested(
+          '/tmp/book.pdf',
+          place: ReaderPlace(0, offset: 2, length: 3),
+        ),
+      );
+      while (bridge.renderScales.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      // The box grows while the page renders: once it is in, the page
+      // renders again to fit.
+      report(594);
+      held.complete(_buffer(BigInt.from(40)));
+      await drain();
+      await drain();
+      expect(bridge.renderScales, hasLength(2));
+      expect(bridge.renderScales.last, closeTo(.75, 1e-9));
+      expect(controller.model.selectionPhase, ReaderSelectionPhase.selected);
+      expect((controller.model.anchor, controller.model.focus), (2, 5));
+      controller.dispose();
+      await bridge.disposed.future;
+    });
 
     test('a new pixel ratio renders the page again at it', () async {
       final (controller, bridge) = await open();

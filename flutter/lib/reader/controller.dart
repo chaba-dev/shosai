@@ -245,6 +245,10 @@ final class ReaderController implements Listenable {
   /// first report then lays the chapter out.
   bool _epubHeightPending = false;
 
+  /// The search match a book opened at, marked once the reader settles on
+  /// its page (RFD 6: the current match is marked on the page).
+  ({int unit, int offset, int length})? _openMatch;
+
   /// Embedded `@font-face` families already registered in this process.
   ///
   /// Flutter has no font-unload API, so a family is registered once per
@@ -546,6 +550,18 @@ final class ReaderController implements Listenable {
           ReaderReturnRequested():
         _placeRevision += 1;
         _pendingPlace = null;
+        // The match a book opened at is left behind as well, even before
+        // its page is laid out.
+        _openMatch = null;
+      // So is it when the reader selects text of their own, or cancels a
+      // selection, before it is marked.
+      case ReaderSelectionStarted() ||
+          ReaderSelectionExtended() ||
+          ReaderSelectionPointerStarted() ||
+          ReaderSelectionKeyboardExtended() ||
+          ReaderSelectionAllRequested() ||
+          ReaderSelectionCancelled():
+        _openMatch = null;
       default:
     }
     switch (message) {
@@ -614,6 +630,8 @@ final class ReaderController implements Listenable {
       case ReaderPlaceRequested(:final place):
         // Taken once the document is open and idle (see dispatch).
         if (!_closing) {
+          // A newer place outranks the match the book opened at.
+          _openMatch = null;
           _pendingPlace = (
             generation: _model.generation,
             revision: ++_placeRevision,
@@ -944,6 +962,9 @@ final class ReaderController implements Listenable {
         );
       case ReaderSelectionPointerPressedOutside():
         if (_model.selectionPointer == null) {
+          // A press outside cancels like Escape: the match the book opened
+          // at is not marked after it.
+          _openMatch = null;
           _selectionCancelled();
         }
       case ReaderSelectionPointerMoved():
@@ -1510,6 +1531,14 @@ final class ReaderController implements Listenable {
           returnPoint: place != null && restored != null
               ? (unit: restored.unit.toInt(), offset: restored.offset?.toInt())
               : null,
+          match: switch (place) {
+            ReaderPlace(:final offset?, :final length?) => (
+              unit: restoredUnit,
+              offset: offset,
+              length: length,
+            ),
+            _ => null,
+          },
         ),
       );
       opened = null;
@@ -1647,6 +1676,7 @@ final class ReaderController implements Listenable {
     );
     _requestedLayout = requestedLayout;
     _readingStatePersistenceBlocked = message.restorationFailed;
+    _openMatch = message.match;
     _emit(
       _model.copyWith(
         document: message.document,
@@ -2519,6 +2549,9 @@ final class ReaderController implements Listenable {
         _suspended) {
       return;
     }
+    // Going somewhere leaves the match the book opened at behind, whoever
+    // asked.
+    _openMatch = null;
     _startRelayout(
       document,
       _model.layout,
@@ -5504,8 +5537,38 @@ final class ReaderController implements Listenable {
       return;
     }
     // Likewise a PDF box or pixel ratio change that arrived while the reader
-    // was busy renders the page at its latest fitted size.
+    // was busy renders the page at its latest fitted size; the match the
+    // book opened at is marked once that render is in, which would clear it.
     _refitPdfPage();
+    if (!_model.relayoutBusy) _markOpenMatch();
+  }
+
+  /// Selects the search match the book opened at, once the reader has settled
+  /// on its page and is still reading there.
+  void _markOpenMatch() {
+    final match = _openMatch;
+    if (match == null || _model.selectionSurface == null) return;
+    _openMatch = null;
+    final location = _model.readingLocation;
+    if (location.unit != match.unit) return;
+    // The second page of a PDF spread addresses its text after the first's.
+    final shift = (_model.readingOffset ?? 0) - (location.offset ?? 0);
+    final anchor = match.offset + shift;
+    _cancelSelectionCreates();
+    _selectionRevision += 1;
+    _emit(
+      _model.copyWith(
+        anchor: anchor,
+        focus: anchor + match.length,
+        selectionPhase: ReaderSelectionPhase.selected,
+        selectionPointer: null,
+        selectionVisualLine: null,
+        selectionPreferredX: null,
+        selectionActionError: null,
+        keyboardActionInvocation: false,
+      ),
+    );
+    _focusAdapter(ReaderFocusTarget.surface);
   }
 
   void _navigateAnnotation(String id) {
