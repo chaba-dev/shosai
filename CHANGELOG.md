@@ -97,6 +97,9 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Make room for ruby between a chapter's lines (#207)
 - *(reader)* Draw emphasis marks (傍点) beside their characters (#211)
 - *(reader)* Set a second ruby level (rtc) under its base (#212)
+- *(reader)* Back returns to the book a note or search hit was opened from (#208)
+- *(shell)* Show each open book's page on the tab switcher cards (#209)
+- *(reader)* Save the theme, text size and line spacing the Display panel sets (#210)
 
 ### 🐛 Bug Fixes
 
