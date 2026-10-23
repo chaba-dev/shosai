@@ -356,6 +356,33 @@ void main() {
     );
   });
 
+  test('text-combine-upright: digits keeps a keycap or a marked digit whole, '
+      'so the laid-out text stays the mapped text', () {
+    final built = buildBlockText(
+      [
+        EpubTextSpan(
+          text: '第1\uFE0F\u20E3話12\u0301月、5',
+          combine: const EpubTextCombine.digits(2),
+        ),
+        EpubTextSpan(text: '7\u0301', combine: const EpubTextCombine.digits(2)),
+        EpubTextSpan(text: '日'),
+      ],
+      typography,
+      18,
+      vertical: true,
+    );
+    final laidOut = built.span.toPlainText();
+    expect(laidOut.length, built.map.text.length);
+    expect(laidOut.substring(laidOut.length - 1), '日');
+    expect(
+      [
+        for (final run in built.upright)
+          if (run.combined) built.map.text.substring(run.start, run.end),
+      ],
+      ['5'],
+    );
+  });
+
   test('horizontal text ignores tate-chū-yoko', () {
     final built = buildBlockText(
       [EpubTextSpan(text: '38', combine: const EpubTextCombine.all())],

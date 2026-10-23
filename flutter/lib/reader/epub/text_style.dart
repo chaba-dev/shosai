@@ -574,21 +574,40 @@ double _combinedSpacing(String text, TextStyle style) {
 
 /// The runs of ASCII digits in [text] that `text-combine-upright: digits`
 /// combines: those no longer than [longest].
+///
+/// Runs are found on grapheme boundaries, so a run never ends inside a
+/// cluster. A digit that carries a mark or a keycap still counts towards its
+/// run's length, but its run does not combine.
 List<({int start, int end})> _digitRuns(String text, int longest) {
   bool isDigit(int unit) => unit >= 0x30 && unit <= 0x39;
   final runs = <({int start, int end})>[];
-  var index = 0;
-  while (index < text.length) {
-    if (!isDigit(text.codeUnitAt(index))) {
-      index++;
-      continue;
+  var unit = 0;
+  int? start;
+  var count = 0;
+  var plain = true;
+  void close() {
+    final runStart = start;
+    if (runStart != null && plain && count <= longest) {
+      runs.add((start: runStart, end: unit));
     }
-    final start = index;
-    while (index < text.length && isDigit(text.codeUnitAt(index))) {
-      index++;
-    }
-    if (index - start <= longest) runs.add((start: start, end: index));
+    start = null;
   }
+
+  for (final cluster in text.characters) {
+    if (isDigit(cluster.codeUnitAt(0))) {
+      if (start == null) {
+        start = unit;
+        count = 0;
+        plain = true;
+      }
+      count++;
+      plain = plain && cluster.length == 1;
+    } else {
+      close();
+    }
+    unit += cluster.length;
+  }
+  close();
   return runs;
 }
 
