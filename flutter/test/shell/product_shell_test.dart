@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,7 +7,11 @@ import 'package:shadcn_ui/shadcn_ui.dart' show ShadInput;
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/reader/view.dart' show ReaderScreen;
 import 'package:shosai_flutter/reader/controller.dart'
-    show ReaderNoticeReporter, ReaderPlace, ReaderPlaceRequests;
+    show
+        ReaderDisplaySink,
+        ReaderNoticeReporter,
+        ReaderPlace,
+        ReaderPlaceRequests;
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -32,7 +38,7 @@ Widget _reader(
   void Function(String path, int? bookId) locatorChanged,
   ReaderNoticeReporter _,
   Widget openBooksAction,
-  void Function(bool twoPages) _,
+  ReaderDisplaySink _,
   ReaderPlaceRequests places,
 ) => Scaffold(
   body: Column(
@@ -101,7 +107,7 @@ Widget _readerWithWayBack(
   void Function(String path, int? bookId) locatorChanged,
   ReaderNoticeReporter notices,
   Widget openBooksAction,
-  void Function(bool twoPages) pagesChanged,
+  ReaderDisplaySink displayChanged,
   ReaderPlaceRequests places,
 ) {
   places.wayBack = () => const [
@@ -117,7 +123,7 @@ Widget _readerWithWayBack(
     locatorChanged,
     notices,
     openBooksAction,
-    pagesChanged,
+    displayChanged,
     places,
   );
 }
@@ -145,17 +151,18 @@ Widget _realReader(
   void Function(String path, int? bookId) locatorChanged,
   ReaderNoticeReporter noticeReporter,
   Widget openBooksAction,
-  void Function(bool twoPages) pagesChanged,
+  ReaderDisplaySink displayChanged,
   ReaderPlaceRequests placeRequests,
 ) => ReaderScreen(
   bridge: bridge,
   initialPath: path,
   initialBookId: bookId,
+  initialSettings: settings,
   placeRequests: placeRequests,
   onLocatorChanged: locatorChanged,
   noticeReporter: noticeReporter,
   openBooksAction: openBooksAction,
-  onPagesChanged: pagesChanged,
+  onDisplayChanged: displayChanged,
 );
 
 /// The places a reader stand-in was asked to go to: the one it opened at,
@@ -242,24 +249,24 @@ Future<HarnessBridge> _pump(
   Size size, {
   ProductReaderBuilder readerBuilder = _reader,
   double devicePixelRatio = 1,
+  HarnessBridge? bridge,
 }) async {
-  final bridge = HarnessBridge(
-    books: harnessLibraryBooks(),
-    covers: harnessCovers(),
-  );
+  final activeBridge =
+      bridge ??
+      HarnessBridge(books: harnessLibraryBooks(), covers: harnessCovers());
   tester.view.physicalSize = size * devicePixelRatio;
   tester.view.devicePixelRatio = devicePixelRatio;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     productionShell(
       home: ProductShell(
-        bridgeFactory: () => bridge,
+        bridgeFactory: () => activeBridge,
         readerBuilder: readerBuilder,
       ),
     ),
   );
   await tester.pumpAndSettle();
-  return bridge;
+  return activeBridge;
 }
 
 /// The sidebar's Notes place.
@@ -294,6 +301,16 @@ class _FailingSettingsBridge extends HarnessBridge {
     }
     await super.saveReaderSettings(value: value);
   }
+}
+
+class _PersistingSettingsBridge extends HarnessBridge {
+  _PersistingSettingsBridge()
+    : super(books: harnessLibraryBooks(), covers: harnessCovers());
+
+  @override
+  Future<FlutterReaderSettings> loadReaderSettings({
+    required BigInt cancellationId,
+  }) async => savedSettings ?? settings;
 }
 
 void main() {
@@ -348,12 +365,17 @@ void main() {
                 locatorChanged,
                 notices,
                 openBooks,
-                pagesChanged,
+                displayChanged,
                 places,
               ) => _MountCounter(
                 child: Scaffold(
                   body: TextButton(
-                    onPressed: () => pagesChanged(false),
+                    onPressed: () => displayChanged((
+                      theme: null,
+                      fontSize: null,
+                      lineSpacing: null,
+                      twoPages: false,
+                    )),
                     child: const Text('One page'),
                   ),
                 ),
@@ -425,7 +447,7 @@ void main() {
             locatorChanged,
             notices,
             openBooks,
-            pagesChanged,
+            displayChanged,
             places,
           ) => _MountCounter(
             child: _reader(
@@ -437,7 +459,7 @@ void main() {
               locatorChanged,
               notices,
               openBooks,
-              pagesChanged,
+              displayChanged,
               places,
             ),
           ),
@@ -1080,7 +1102,7 @@ void main() {
               locatorChanged,
               noticeReporter,
               openBooksAction,
-              pagesChanged,
+              displayChanged,
               placeRequests,
             ) => ReaderScreen(
               bridge: bridge,
@@ -1090,7 +1112,7 @@ void main() {
               onLocatorChanged: locatorChanged,
               noticeReporter: noticeReporter,
               openBooksAction: openBooksAction,
-              onPagesChanged: pagesChanged,
+              onDisplayChanged: displayChanged,
             ),
       );
       await _open(tester, 1);
@@ -1360,7 +1382,7 @@ void main() {
             locatorChanged,
             notices,
             openBooks,
-            pagesChanged,
+            displayChanged,
             places,
           ) {
             requests = places;
@@ -1373,7 +1395,7 @@ void main() {
               locatorChanged,
               notices,
               openBooks,
-              pagesChanged,
+              displayChanged,
               places,
             );
           },
@@ -1414,7 +1436,7 @@ void main() {
             locatorChanged,
             notices,
             openBooks,
-            pagesChanged,
+            displayChanged,
             places,
           ) {
             requests = places;
@@ -1427,7 +1449,7 @@ void main() {
               locatorChanged,
               notices,
               openBooks,
-              pagesChanged,
+              displayChanged,
               places,
             );
           },
@@ -1444,6 +1466,54 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('shell-tab-page-3')), findsOneWidget);
+  });
+
+  testWidgets('a theme chosen in the reader is saved for every book', (
+    tester,
+  ) async {
+    final persisted = _PersistingSettingsBridge();
+    final bridge = await _pump(
+      tester,
+      const Size(1440, 900),
+      readerBuilder: _realReader,
+      bridge: persisted,
+    );
+    await _open(tester, 3);
+    await _readerSettles(tester, () => harnessReaderPageReady(tester));
+    await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sepia'));
+    await _readerSettles(tester, () => bridge.savedSettings != null);
+    expect(bridge.savedSettings!.theme, 'sepia');
+    expect(
+      bridge.savedSettings!.copyWith(theme: bridge.settings.theme),
+      bridge.settings,
+      reason: 'the other settings stay as they were',
+    );
+
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    await _open(tester, 1);
+    await _readerSettles(tester, () => harnessReaderPageReady(tester));
+    await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ReaderScreen>(find.byType(ReaderScreen))
+          .initialSettings
+          ?.theme,
+      'sepia',
+    );
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const ValueKey('reader-typography-theme-sepia')),
+          )
+          .getSemanticsData()
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
   });
 
   testWidgets('open books come back after a restoration', (tester) async {

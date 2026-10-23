@@ -13,6 +13,8 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/controller.dart'
     show
         PageDecoder,
+        ReaderDisplayChange,
+        ReaderDisplaySink,
         ReaderDocumentPickerAdapter,
         ReaderNoteDeleted,
         ReaderNoteEditStarted,
@@ -316,7 +318,7 @@ Widget _reader({
   int? initialBookId,
   FlutterReaderSettings? settings = _epub,
   ReaderProgressSource? progressSource,
-  void Function(bool twoPages)? onPagesChanged,
+  ReaderDisplaySink? onDisplayChanged,
   PageDecoder? decoder,
   ReaderDocumentPickerAdapter? documentPicker,
   bool debugPathEntry = false,
@@ -332,7 +334,7 @@ Widget _reader({
     initialBookId: initialBookId,
     initialSettings: settings,
     progressSource: progressSource,
-    onPagesChanged: onPagesChanged,
+    onDisplayChanged: onDisplayChanged,
     debugPathEntry: debugPathEntry,
   ),
 );
@@ -922,13 +924,13 @@ void main() {
     testWidgets('one page reads a PDF a page at a time', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _ChromeBridge();
-      final saved = <bool>[];
+      final saved = <bool?>[];
       await _open(
         tester,
         _reader(
           bridge: bridge,
           initialPath: '/books/atlas.pdf',
-          onPagesChanged: saved.add,
+          onDisplayChanged: (change) => saved.add(change.twoPages),
         ),
       );
       await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
@@ -947,6 +949,45 @@ void main() {
       );
       await tester.pump();
       expect(saved, [false]);
+    });
+
+    testWidgets('the theme, text size and line spacing are handed over', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge();
+      final saved = <ReaderDisplayChange>[];
+      await _open(tester, _reader(bridge: bridge, onDisplayChanged: saved.add));
+      await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+      await tester.pump();
+      await tester.tap(find.text('Sepia'));
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('reader-typography-font-increase')),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('reader-typography-line-spacing-increase')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+
+      expect(saved, hasLength(3));
+      expect(saved[0], (
+        theme: 'sepia',
+        fontSize: null,
+        lineSpacing: null,
+        twoPages: null,
+      ));
+      expect(saved[1].fontSize, greaterThan(18));
+      expect((saved[1].theme, saved[1].lineSpacing), (null, null));
+      expect(saved[2].lineSpacing, greaterThan(1.6));
+      expect((saved[2].theme, saved[2].fontSize), (null, null));
+
+      // The theme already chosen is not handed over again.
+      await tester.tap(find.text('Sepia'));
+      await tester.pump();
+      expect(saved, hasLength(3));
     });
 
     testWidgets('a saved one-page setting opens a PDF on one page', (

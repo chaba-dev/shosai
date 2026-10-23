@@ -65,7 +65,7 @@ class ReaderScreen extends StatefulWidget {
     this.externalLinkOpener,
     this.documentPicker,
     this.exportSink,
-    this.onPagesChanged,
+    this.onDisplayChanged,
     this.noticeReporter,
     this.epubImageDecoder,
     this.epubFontRegistrar,
@@ -113,8 +113,8 @@ class ReaderScreen extends StatefulWidget {
   /// Delivers the Markdown export text (RD-08); defaults to the clipboard.
   final ReaderExportSink? exportSink;
 
-  /// Saves the Pages setting when the reader changes it.
-  final ReaderPagesSink? onPagesChanged;
+  /// Saves the Display settings when the reader changes them.
+  final ReaderDisplaySink? onDisplayChanged;
 
   /// The application notice center's reporter, injected by the composition
   /// root; a reader built without one reports no notices.
@@ -372,7 +372,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         bookOpener: widget.placeRequests?.openBook,
         documentPickerAdapter: widget.documentPicker,
         exportSink: widget.exportSink ?? _copyExportToClipboard,
-        pagesSink: widget.onPagesChanged,
+        displaySink: widget.onDisplayChanged,
         noticeReporter: widget.noticeReporter,
         // The Dart EPUB renderer's platform adapters: decoding an admitted
         // image resource, registering an embedded `@font-face` family and

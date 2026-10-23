@@ -55,10 +55,20 @@ final class LibrarySortChanged extends LibraryMessage {
   final FlutterLibrarySort sort;
 }
 
-/// The reader's Pages setting changed: two pages side by side, or one.
-final class LibraryPagesChanged extends LibraryMessage {
-  const LibraryPagesChanged(this.twoPages);
-  final bool twoPages;
+/// The reader's Display panel changed settings the library saves: the
+/// theme, the EPUB text size and line spacing, or the Pages setting (two pages
+/// side by side, or one). Null fields are unchanged.
+final class LibraryDisplayChanged extends LibraryMessage {
+  const LibraryDisplayChanged({
+    this.theme,
+    this.fontSize,
+    this.lineSpacing,
+    this.twoPages,
+  });
+  final String? theme;
+  final double? fontSize;
+  final double? lineSpacing;
+  final bool? twoPages;
 }
 
 /// Save the settings again after their last write failed.
