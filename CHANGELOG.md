@@ -135,6 +135,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Step the progress track a whole spread in a PDF read in spreads (#205)
 - *(library)* Show the reader a settings change it could not save (#206)
 - *(app)* Show the app as Shōsai, and Shōsai Dev for test builds (#219)
+- *(reader)* A page back across a chapter edge lands on the previous chapter's last page (#220)
 
 ### 🚜 Refactor
 
