@@ -124,11 +124,11 @@ void main() {
       blocks: [
         EpubParagraph([
           EpubTextSpan(text: 'AB'),
-          EpubTextSpan(text: 'C', ruby: 'xyzw'),
+          EpubTextSpan(text: '猫', ruby: 'ねこねこ'),
           EpubTextSpan(text: 'D'),
         ], const EpubNodeStyle()),
       ],
-      canonicalText: 'ABCD',
+      canonicalText: 'AB猫D',
       anchors: const {},
       scalarCount: 4,
     );
@@ -223,6 +223,43 @@ void main() {
           block.map.text.substring(ruby.start, ruby.end),
       ],
       ['一二'],
+    );
+  });
+
+  test('a base of joined or ligated letters keeps its shaping under a longer '
+      'annotation', () {
+    for (final vertical in [false, true]) {
+      final built = buildBlockText(
+        [
+          EpubTextSpan(text: '\u0644\u0627', ruby: 'abcdefgh'),
+          EpubTextSpan(text: 'ffi', ruby: 'abcdefgh'),
+        ],
+        typography,
+        20,
+        vertical: vertical,
+      );
+      expect(built.redrawn.where((run) => !run.upright), isEmpty);
+      expect(built.rubies, hasLength(2));
+    }
+  });
+
+  test('ruby stands over every span of a base with markup inside it', () {
+    final built = buildBlockText(
+      [
+        EpubTextSpan(text: '甲'),
+        EpubTextSpan(text: '漢', ruby: 'かんじ'),
+        EpubTextSpan(text: '字', link: '#note')..rubyContinued = true,
+        EpubTextSpan(text: '乙'),
+      ],
+      typography,
+      20,
+    );
+    expect(
+      [
+        for (final ruby in built.rubies)
+          built.map.text.substring(ruby.start, ruby.end),
+      ],
+      ['漢字'],
     );
   });
 }

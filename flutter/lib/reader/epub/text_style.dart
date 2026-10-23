@@ -531,6 +531,15 @@ BuiltBlockText buildBlockText(
     double? spacing;
     final ruby = span.ruby;
     if (ruby != null) {
+      // A base can continue over the next spans (markup inside it); its
+      // annotation stands over all of them.
+      var baseEnd = buffer.length;
+      var next = spanIndex + 1;
+      while (next < spans.length && spans[next].rubyContinued) {
+        baseEnd += spans[next].text.length;
+        next++;
+      }
+      final continued = next > spanIndex + 1;
       final annotation = buildBlockText(
         [
           EpubTextSpan(
@@ -550,13 +559,19 @@ BuiltBlockText buildBlockText(
       rubies.add(
         RubyRun(
           start: start + codeUnitOffset,
-          end: buffer.length + codeUnitOffset,
+          end: baseEnd + codeUnitOffset,
           baseSize: style.fontSize ?? baseFontSize,
           annotation: annotation,
         ),
       );
+      // Only a base of one span whose characters stand alone (kanji, kana)
+      // is spaced out and redrawn a character at a time; any other keeps its
+      // shaping (joining, ligatures) and its annotation overhangs it.
       final extra = _width(annotation.span) - _width(span.text, style);
-      if (extra > 0 && !combinesAll) {
+      if (extra > 0 &&
+          !combinesAll &&
+          !continued &&
+          span.text.runes.every(isUprightInVertical)) {
         spacing = extra / span.text.characters.length;
       }
     }
