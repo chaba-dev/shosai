@@ -1214,6 +1214,7 @@ final class ReaderController implements Listenable {
             offset: message.offset,
             length: message.length,
             replaceReadingOffset: message.replaceReadingOffset,
+            epubEdge: message.epubEdge,
             annotationError: message.annotationError,
             session: message.session,
             sessionKey: message.sessionKey,
@@ -1966,7 +1967,8 @@ final class ReaderController implements Listenable {
         (intent.unit != _model.readingLocation.unit ||
             intent.offset != null ||
             intent.length != null ||
-            intent.replaceReadingOffset);
+            intent.replaceReadingOffset ||
+            intent.epubEdge == EpubPositionEdge.end);
     if (document != null &&
         _model.relayoutBusy &&
         !isNavigation &&
@@ -1982,6 +1984,7 @@ final class ReaderController implements Listenable {
         offset: intent.offset,
         length: intent.length,
         replaceReadingOffset: intent.replaceReadingOffset,
+        epubEdge: intent.epubEdge,
         height: height,
       );
       return;
@@ -2186,6 +2189,7 @@ final class ReaderController implements Listenable {
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
+    EpubPositionEdge epubEdge = EpubPositionEdge.startOrInterior,
     double? height,
     bool keepRelayoutError = false,
   }) {
@@ -2229,6 +2233,7 @@ final class ReaderController implements Listenable {
       offset: offset,
       length: length,
       replaceReadingOffset: replaceReadingOffset,
+      epubEdge: epubEdge,
     );
     for (final active in _relayoutCancellations) {
       _bridge.cancel(id: active);
@@ -2246,7 +2251,8 @@ final class ReaderController implements Listenable {
         targetUnit != _model.unit ||
         offset != null ||
         length != null ||
-        replaceReadingOffset;
+        replaceReadingOffset ||
+        epubEdge == EpubPositionEdge.end;
     _emit(
       _model.copyWith(
         relayoutBusy: true,
@@ -2271,6 +2277,7 @@ final class ReaderController implements Listenable {
         offset: offset,
         length: length,
         replaceReadingOffset: replaceReadingOffset,
+        epubEdge: epubEdge,
         height: height,
       ),
     );
@@ -2328,11 +2335,11 @@ final class ReaderController implements Listenable {
         // opens the previous one at its last page, the page before this one.
         final previous = _model.unit - 1;
         final chapters = _epubSource?.book.chapters;
-        if (delta < 0 && chapters != null && previous < chapters.length) {
-          _unitRequested(
-            previous,
-            offset: math.max(0, chapters[previous].scalarCount - 1),
-          );
+        if (delta < 0 &&
+            chapters != null &&
+            previous >= 0 &&
+            previous < chapters.length) {
+          _unitRequested(previous, epubEdge: EpubPositionEdge.end);
         } else {
           _unitRequested(_model.unit + delta);
         }
@@ -2463,6 +2470,7 @@ final class ReaderController implements Listenable {
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
+    EpubPositionEdge epubEdge = EpubPositionEdge.startOrInterior,
     String? annotationError,
     String? selectionError,
     ChapterLayoutSession? session,
@@ -2483,6 +2491,7 @@ final class ReaderController implements Listenable {
             chapterCount: document.logicalUnitCount.toInt(),
             windowSize: ui.Size(layout.width, height),
             spread: _ensureFacingPage(pageSession, pageKey, scalar),
+            edge: epubEdge,
             // A vertical chapter's columns run right to left, and so do its
             // pages, whatever the spine declares.
             rightToLeft:
@@ -2492,14 +2501,21 @@ final class ReaderController implements Listenable {
           );
     final oldImage = _model.pageImage;
     final changedLocation =
-        unit != _model.unit || offset != null || replaceReadingOffset;
+        unit != _model.unit ||
+        offset != null ||
+        replaceReadingOffset ||
+        epubEdge == EpubPositionEdge.end;
     if (changedLocation) {
       _readingStatePersistenceBlocked = false;
       // The view reveals the new location before it reports what it shows:
       // the region reported for the previous location is not this one's.
       _continuousViewport = null;
     }
-    final readingOffset = changedLocation ? offset : _model.readingOffset;
+    final readingOffset = epubEdge == EpubPositionEdge.end
+        ? page.canonicalStart
+        : changedLocation
+        ? offset
+        : _model.readingOffset;
     // The ownership transfer is the commit, and it happens after the next model
     // is derived but before it is published: a failure in the injected progress
     // source, or while releasing the previous page, must not leave a published
@@ -2637,6 +2653,7 @@ final class ReaderController implements Listenable {
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
+    EpubPositionEdge epubEdge = EpubPositionEdge.startOrInterior,
   }) {
     final document = _model.document;
     if (document == null ||
@@ -2664,6 +2681,7 @@ final class ReaderController implements Listenable {
       offset: offset,
       length: length,
       replaceReadingOffset: replaceReadingOffset,
+      epubEdge: epubEdge,
     );
   }
 
@@ -3704,6 +3722,7 @@ final class ReaderController implements Listenable {
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
+    EpubPositionEdge epubEdge = EpubPositionEdge.startOrInterior,
   }) async {
     final pageHeight =
         _epubPageHeight(height) ??
@@ -3760,11 +3779,15 @@ final class ReaderController implements Listenable {
     // meant to discard. A relayout without replacement keeps the reader's
     // position when it stays in the chapter.
     final target =
-        (offset ??
-                (replaceReadingOffset
-                    ? null
-                    : (unit == _model.unit ? _model.readingOffset : null)) ??
-                0)
+        (epubEdge == EpubPositionEdge.end
+                ? chapter.scalarCount
+                : offset ??
+                      (replaceReadingOffset
+                          ? null
+                          : (unit == _model.unit
+                                ? _model.readingOffset
+                                : null)) ??
+                      0)
             .clamp(0, chapter.scalarCount);
     var session = _epubSession;
     final reusable =
@@ -3792,6 +3815,21 @@ final class ReaderController implements Listenable {
     var adopted = replacement == null;
     try {
       if (!active.started) active.layoutWindowAt(target);
+      // A spread's pairing is anchored at the chapter start. When entering at
+      // the end, finish the bounded progressive layout before choosing the
+      // final spread so its first page has the same even index as a forward
+      // walk. Paginated sessions are completed in the background anyway; this
+      // only completes that work before publishing this edge navigation.
+      if (epubEdge == EpubPositionEdge.end && key.spread) {
+        while (!active.complete) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+          if (!_isCurrentLayout(generation, revision)) return;
+          final progressed = active.lastNodeIndex + 1 < active.totalNodes
+              ? active.layoutForward(maxNodes: 24, maxMicros: 8000)
+              : active.layoutBackward(maxNodes: 24, maxMicros: 8000);
+          if (progressed == 0) break;
+        }
+      }
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
       try {
@@ -3824,6 +3862,7 @@ final class ReaderController implements Listenable {
             offset: offset,
             length: length,
             replaceReadingOffset: replaceReadingOffset,
+            epubEdge: epubEdge,
             annotationError: annotationError,
             session: replacement,
             sessionKey: replacement == null ? null : key,
@@ -4431,6 +4470,7 @@ final class ReaderController implements Listenable {
     int? offset,
     int? length,
     bool replaceReadingOffset = false,
+    EpubPositionEdge epubEdge = EpubPositionEdge.startOrInterior,
     double? height,
   }) async {
     ui.Image? ownedImage;
@@ -4448,6 +4488,7 @@ final class ReaderController implements Listenable {
           offset: offset,
           length: length,
           replaceReadingOffset: replaceReadingOffset,
+          epubEdge: epubEdge,
         );
         return;
       }

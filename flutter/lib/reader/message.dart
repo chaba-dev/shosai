@@ -969,6 +969,7 @@ final class _ReaderEpubPageLoaded extends ReaderMessage {
     required this.height,
     required this.annotations,
     required this.replaceReadingOffset,
+    required this.epubEdge,
     this.offset,
     this.length,
     this.annotationError,
@@ -985,6 +986,7 @@ final class _ReaderEpubPageLoaded extends ReaderMessage {
   final double height;
   final List<FlutterAnnotation> annotations;
   final bool replaceReadingOffset;
+  final EpubPositionEdge epubEdge;
   final int? offset;
   final int? length;
   final String? annotationError;
