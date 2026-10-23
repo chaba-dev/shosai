@@ -252,6 +252,7 @@ void main() {
                 notices,
                 openBooks,
                 pagesChanged,
+                places,
               ) => _MountCounter(
                 child: Scaffold(
                   body: TextButton(
