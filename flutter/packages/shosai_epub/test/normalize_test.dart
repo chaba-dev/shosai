@@ -2326,6 +2326,10 @@ void main() {
           EpubTextOrientation.sideways,
         ),
         ('-webkit-text-orientation: vertical-right', EpubTextOrientation.mixed),
+        (
+          '-epub-text-orientation: use-glyph-orientation',
+          EpubTextOrientation.mixed,
+        ),
         ('text-orientation: bogus', EpubTextOrientation.mixed),
       ]) {
         final spans = orientationOf(
@@ -2338,6 +2342,22 @@ void main() {
           expected,
           reason: declaration,
         );
+      }
+    });
+
+    test('inherit, unset and initial read the parent and the default', () {
+      for (final (value, expected) in [
+        ('inherit', EpubTextOrientation.upright),
+        ('unset', EpubTextOrientation.upright),
+        ('initial', EpubTextOrientation.mixed),
+      ]) {
+        final spans = orientationOf(
+          '<p style="text-orientation: upright">AB<span class="x" '
+              'style="text-orientation: $value">CD</span></p>',
+          '.x { text-orientation: sideways }',
+        );
+        expect(spans.last.$1, endsWith('CD'), reason: value);
+        expect(spans.last.$2, expected, reason: value);
       }
     });
 

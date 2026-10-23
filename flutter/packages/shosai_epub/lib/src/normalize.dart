@@ -716,6 +716,9 @@ EpubComputedStyle _applyDeclaration(
       // `sideways-right`, `vertical-right` and `use-glyph-orientation` are
       // the legacy and prefixed spellings.
       return switch (lower) {
+        'inherit' ||
+        'unset' => _copyWith(style, orientation: parent.orientation),
+        'initial' => _copyWith(style, orientation: EpubTextOrientation.mixed),
         'mixed' || 'vertical-right' || 'use-glyph-orientation' => _copyWith(
           style,
           orientation: EpubTextOrientation.mixed,
