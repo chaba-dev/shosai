@@ -19,9 +19,12 @@ class _AnnotationAssociationDialogState
     final contentWidth = math.min(520.0, MediaQuery.sizeOf(context).width - 96);
     return ShadDialog(
       title: const Text('Associate highlights?'),
+      // Large text stacks the actions; otherwise Shad lays them in a row, or
+      // stacks them at full width on a phone. Forcing a row there gives the
+      // full-width buttons an unbounded width and the dialog never lays out.
       actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
           ? Axis.vertical
-          : Axis.horizontal,
+          : null,
       actions: [
         ShadButton.outline(
           height: shosaiShadButtonHeight(context),
@@ -146,9 +149,12 @@ class _NoteDialogState extends State<_NoteDialog> {
         FlutterNoteKind.book => l10n.readerBookNoteTitle,
         null => l10n.readerHighlightNoteTitle,
       }),
+      // Large text stacks the actions; otherwise Shad lays them in a row, or
+      // stacks them at full width on a phone. Forcing a row there gives the
+      // full-width buttons an unbounded width and the dialog never lays out.
       actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
           ? Axis.vertical
-          : Axis.horizontal,
+          : null,
       actions: [
         ShadButton.outline(
           height: shosaiShadButtonHeight(context),
