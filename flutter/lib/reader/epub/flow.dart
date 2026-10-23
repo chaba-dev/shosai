@@ -84,8 +84,9 @@ class FlowTextBlock {
   /// The upright glyphs of each line, measured when the line is first painted.
   final Map<int, List<_UprightGlyph>> _uprightLines = {};
 
-  /// One painter per upright grapheme and style, shared by the block's lines.
-  final Map<(String, TextStyle), TextPainter> _uprightPainters = {};
+  /// One painter per upright grapheme (or tate-chū-yoko run), style and use
+  /// of vertical forms, shared by the block's lines.
+  final Map<(String, TextStyle, bool), TextPainter> _uprightPainters = {};
 
   double get width => painter.width;
   double get height => painter.height;
@@ -132,6 +133,7 @@ class FlowTextBlock {
         canvas.save();
         canvas.translate(glyph.center.dx, glyph.center.dy);
         canvas.rotate(-math.pi / 2);
+        if (glyph.squeeze != 1) canvas.scale(glyph.squeeze, 1);
         glyphPainter.paint(
           canvas,
           Offset(-glyphPainter.width / 2, -glyphPainter.height / 2),
@@ -156,32 +158,147 @@ class FlowTextBlock {
         unit - markerOffset,
         runEnd - markerOffset,
       );
+      if (run.combined) {
+        // Tate-chū-yoko is one unit that a line never breaks: it is drawn
+        // whole on the line it starts on.
+        if (run.start < from) continue;
+        final glyph = _combinedGlyph(run);
+        if (glyph != null) glyphs.add(glyph);
+        continue;
+      }
       for (final grapheme in runText.characters) {
         final start = unit;
         unit += grapheme.length;
-        final boxes = painter.getBoxesForSelection(
-          TextSelection(baseOffset: start, extentOffset: unit),
+        final glyph = _uprightGlyph(start, unit, grapheme, run.style);
+        if (glyph == null) continue;
+        glyphs.add(
+          _UprightGlyph(center: glyph.box.center, painter: glyph.painter),
         );
-        if (boxes.isEmpty) continue;
-        var rect = boxes.first.toRect();
-        for (final box in boxes.skip(1)) {
-          rect = rect.expandToInclude(box.toRect());
-        }
-        final glyphPainter = _uprightPainters[(grapheme, run.style)] ??=
-            TextPainter(
-              text: TextSpan(
-                text: grapheme,
-                style: run.style.copyWith(
-                  fontFeatures: const [ui.FontFeature.enable('vert')],
-                  decoration: TextDecoration.none,
-                ),
-              ),
-              textDirection: ui.TextDirection.ltr,
-            )..layout();
-        glyphs.add(_UprightGlyph(center: rect.center, painter: glyphPainter));
       }
     }
     return glyphs;
+  }
+
+  /// A tate-chū-yoko run drawn as horizontal text across its column,
+  /// squeezed to the one em its laid-out text takes along the line.
+  _UprightGlyph? _combinedGlyph(UprightRun run) {
+    final glyph = _uprightGlyph(
+      run.start,
+      run.end,
+      map.text.substring(
+        run.start - map.codeUnitOffset,
+        run.end - map.codeUnitOffset,
+      ),
+      run.style,
+      verticalForms: false,
+    );
+    if (glyph == null) return null;
+    final advance = glyph.box.width;
+    final width = glyph.painter.width;
+    return _UprightGlyph(
+      center: glyph.box.center,
+      painter: glyph.painter,
+      squeeze: width > advance && width > 0 ? advance / width : 1,
+    );
+  }
+
+  /// Where each grapheme of the tate-chū-yoko runs that start in the code
+  /// units [from] to [to] is drawn, in block coordinates.
+  ///
+  /// A run takes one em along its line, and its graphemes sit side by side
+  /// across the line: on the page, the first is leftmost. Each cell spans the
+  /// run's em along the line and its grapheme's share of the drawn text
+  /// across it, so selection, highlights and hit testing see the characters
+  /// where they are painted. [index] and [count] place a cell in its run.
+  List<({int start, int end, int index, int count, Rect rect})> combinedCells(
+    int from,
+    int to,
+  ) {
+    final cells = <({int start, int end, int index, int count, Rect rect})>[];
+    for (final run in upright) {
+      if (!run.combined || run.start < from) continue;
+      if (run.start >= to) break;
+      final glyph = _combinedGlyph(run);
+      if (glyph == null) continue;
+      final runText = map.text.substring(
+        run.start - map.codeUnitOffset,
+        run.end - map.codeUnitOffset,
+      );
+      final boxes = painter.getBoxesForSelection(
+        TextSelection(baseOffset: run.start, extentOffset: run.end),
+      );
+      var along = boxes.first.toRect();
+      for (final box in boxes.skip(1)) {
+        along = along.expandToInclude(box.toRect());
+      }
+      final half = glyph.painter.width / 2;
+      final count = runText.characters.length;
+      var index = 0;
+      var unit = 0;
+      for (final grapheme in runText.characters) {
+        final start = unit;
+        unit += grapheme.length;
+        final drawn = glyph.painter.getBoxesForSelection(
+          TextSelection(baseOffset: start, extentOffset: unit),
+        );
+        if (drawn.isEmpty) continue;
+        var left = drawn.first.left;
+        var right = drawn.first.right;
+        for (final box in drawn.skip(1)) {
+          left = math.min(left, box.left);
+          right = math.max(right, box.right);
+        }
+        // The glyph is turned back a quarter turn, so its text runs towards
+        // the block's top.
+        cells.add((
+          start: run.start + start,
+          end: run.start + unit,
+          index: index++,
+          count: count,
+          rect: Rect.fromLTRB(
+            along.left,
+            glyph.center.dy - glyph.squeeze * (right - half),
+            along.right,
+            glyph.center.dy - glyph.squeeze * (left - half),
+          ),
+        ));
+      }
+    }
+    return cells;
+  }
+
+  /// The laid-out box of the code units [start] to [end], and a painter that
+  /// draws [text] upright in [style], in the font's vertical forms unless
+  /// [verticalForms] is false (tate-chū-yoko sets its text as horizontal).
+  ({Rect box, TextPainter painter})? _uprightGlyph(
+    int start,
+    int end,
+    String text,
+    TextStyle style, {
+    bool verticalForms = true,
+  }) {
+    final boxes = painter.getBoxesForSelection(
+      TextSelection(baseOffset: start, extentOffset: end),
+    );
+    if (boxes.isEmpty) return null;
+    var rect = boxes.first.toRect();
+    for (final box in boxes.skip(1)) {
+      rect = rect.expandToInclude(box.toRect());
+    }
+    final glyphPainter = _uprightPainters[(text, style, verticalForms)] ??=
+        TextPainter(
+          text: TextSpan(
+            text: text,
+            style: style.copyWith(
+              fontFeatures: [
+                if (verticalForms) const ui.FontFeature.enable('vert'),
+              ],
+              decoration: TextDecoration.none,
+            ),
+          ),
+          textDirection: ui.TextDirection.ltr,
+        )..layout();
+    return (box: rect, painter: glyphPainter);
   }
 
   /// Releases the measured paragraph behind this block.
@@ -198,10 +315,17 @@ class FlowTextBlock {
 /// One upright character of a vertical line: where its box's centre is, in
 /// block coordinates, and the painter that draws it.
 class _UprightGlyph {
-  const _UprightGlyph({required this.center, required this.painter});
+  const _UprightGlyph({
+    required this.center,
+    required this.painter,
+    this.squeeze = 1,
+  });
 
   final Offset center;
   final TextPainter painter;
+
+  /// How much a tate-chū-yoko run is narrowed to fit its em square.
+  final double squeeze;
 }
 
 /// A measured image block (or a visible alt-text fallback).
@@ -1665,6 +1789,29 @@ class _FlowContext {
       maxWidth - (marker != null ? markerIndent : 0),
     );
     painter.layout(maxWidth: width);
+    // A line may still break inside tate-chū-yoko where its text allows it
+    // (between two kanji, before a full stop that may not start a line):
+    // the spans of a run broken across lines are laid out again without it.
+    final broken = [
+      for (final run in built.upright)
+        if (run.combined &&
+            painter.getLineBoundary(TextPosition(offset: run.start)) !=
+                painter.getLineBoundary(TextPosition(offset: run.end - 1)))
+          run,
+    ];
+    if (broken.isNotEmpty) {
+      _painters.remove(painter);
+      painter.dispose();
+      return _textBlock(
+        withoutCombining(spans, broken, codeUnitOffset: markerPrefix.length),
+        maxWidth: maxWidth,
+        baseFontSize: baseFontSize,
+        align: align,
+        direction: direction,
+        marker: marker,
+        markerIndent: markerIndent,
+      );
+    }
     final lines = <FlowLine>[];
     final metrics = painter.computeLineMetrics();
     final bounds = _lineBounds(

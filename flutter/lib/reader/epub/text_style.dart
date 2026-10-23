@@ -367,11 +367,15 @@ final class CanonicalCursor {
 /// in the same line for their advance and line breaking, painted transparent,
 /// and drawn again upright over their own boxes (see
 /// [FlowTextBlock.paint]).
+///
+/// A [combined] run is tate-chū-yoko: its text is laid out one em long, and
+/// drawn upright and side by side in that em square.
 class UprightRun {
   const UprightRun({
     required this.start,
     required this.end,
     required this.style,
+    this.combined = false,
   });
 
   /// Painter code units of the run.
@@ -380,6 +384,9 @@ class UprightRun {
 
   /// The run's own style, with its ink: the laid-out text is transparent.
   final TextStyle style;
+
+  /// Whether the run is drawn as one unit, its characters side by side.
+  final bool combined;
 }
 
 /// Whether [rune] is drawn upright in vertical text.
@@ -445,7 +452,11 @@ bool isUprightInVertical(int rune) {
   final segments = <TextMapSegment>[];
   final children = <TextSpan>[];
   final upright = <UprightRun>[];
-  for (final span in spans) {
+  // The children of each tate-chū-yoko grapheme: its span, the index of its
+  // run's first grapheme here, and the advance it must take.
+  final graphemes = <({int child, int span, int run, double em})>[];
+  for (var spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+    final span = spans[spanIndex];
     if (span.text.isEmpty) continue;
     final start = buffer.length;
     buffer.write(span.text);
@@ -471,9 +482,10 @@ bool isUprightInVertical(int rune) {
     var runStart = 0;
     bool? runUpright;
     void flush(int end) {
-      if (runUpright == null || end <= runStart) return;
+      final isUpright = runUpright;
+      if (isUpright == null || end <= runStart) return;
       final text = span.text.substring(runStart, end);
-      if (runUpright) {
+      if (isUpright) {
         children.add(TextSpan(text: text, style: hidden));
         upright.add(
           UprightRun(
@@ -488,11 +500,76 @@ bool isUprightInVertical(int rune) {
       runStart = end;
     }
 
+    void combine(int from, int to) {
+      // The first grapheme advances one em and the others nothing, so the
+      // run takes one character's place and keeps its text's own line
+      // breaking rules and line height; a flow that breaks a line inside it
+      // anyway lays it out again without it. Each grapheme alternates a value on
+      // an axis no font has, which draws nothing differently but keeps the
+      // paragraph from shaping it with its neighbours (ligatures, kerning).
+      // Its advance, still shaped in context (joining forms), is measured in
+      // the laid-out block below and cancelled by its letter spacing. The run
+      // is drawn with its normal shaping.
+      final first = graphemes.length;
+      var index = 0;
+      for (final grapheme in span.text.substring(from, to).characters) {
+        graphemes.add((
+          child: children.length,
+          span: spanIndex,
+          run: first,
+          em: index == 0 ? style.fontSize! : 0,
+        ));
+        children.add(
+          TextSpan(
+            text: grapheme,
+            style: hidden.copyWith(
+              fontVariations: [
+                ...?style.fontVariations,
+                ui.FontVariation(
+                  _shapingBoundaryAxis,
+                  (graphemes.length % 2).toDouble(),
+                ),
+              ],
+            ),
+          ),
+        );
+        index++;
+      }
+      upright.add(
+        UprightRun(
+          start: start + codeUnitOffset + from,
+          end: start + codeUnitOffset + to,
+          style: style,
+          combined: true,
+        ),
+      );
+      runStart = to;
+      runUpright = null;
+    }
+
+    final combined = span.combine;
+    if (combined != null && combined.all) {
+      combine(0, span.text.length);
+      continue;
+    }
     // Orientation applies to whole grapheme clusters (UAX #50, 3.2.1): a
     // variation selector, a combining mark or an emoji joined by ZWJ goes
     // with its base, so the upright repaint shapes what the line shaped.
+    final digits = combined == null
+        ? const <({int start, int end})>[]
+        : _digitRuns(span.text, combined.digits);
+    var nextDigits = 0;
     var unit = 0;
     for (final cluster in span.text.characters) {
+      if (nextDigits < digits.length && unit == digits[nextDigits].start) {
+        flush(unit);
+        combine(unit, digits[nextDigits].end);
+        nextDigits++;
+      }
+      if (unit < runStart) {
+        unit += cluster.length;
+        continue;
+      }
       final isUpright = isUprightInVertical(cluster.runes.first);
       if (runUpright != isUpright) {
         flush(unit);
@@ -501,6 +578,44 @@ bool isUprightInVertical(int rune) {
       unit += cluster.length;
     }
     flush(unit);
+  }
+  if (graphemes.isNotEmpty) {
+    final unspaced = _graphemeAdvances(children, graphemes);
+    for (final (index, grapheme) in graphemes.indexed) {
+      final child = children[grapheme.child];
+      children[grapheme.child] = TextSpan(
+        text: child.text,
+        style: child.style!.copyWith(
+          letterSpacing: grapheme.em - unspaced[index],
+        ),
+      );
+    }
+    // A text engine may not space every script (Flutter leaves an Arabic
+    // run's letter spacing out): a span whose run is not one em long is
+    // built again without tate-chū-yoko, and turns with the line as other
+    // horizontal script does.
+    final spaced = _graphemeAdvances(children, graphemes);
+    final runs = <int, double>{};
+    for (final (index, grapheme) in graphemes.indexed) {
+      runs[grapheme.run] = (runs[grapheme.run] ?? 0) + spaced[index];
+    }
+    final failed = {
+      for (final MapEntry(key: run, value: advance) in runs.entries)
+        if ((advance - graphemes[run].em).abs() > 0.01) graphemes[run].span,
+    };
+    if (failed.isNotEmpty) {
+      return buildBlockText(
+        [
+          for (final (index, span) in spans.indexed)
+            failed.contains(index) ? (span.copy()..combine = null) : span,
+        ],
+        typography,
+        baseFontSize,
+        selectableOverride: selectableOverride,
+        codeUnitOffset: codeUnitOffset,
+        vertical: vertical,
+      );
+    }
   }
   return (
     span: TextSpan(children: children),
@@ -511,6 +626,101 @@ bool isUprightInVertical(int rune) {
     ),
     upright: upright,
   );
+}
+
+/// [spans] with tate-chū-yoko turned off on the spans that hold [runs],
+/// which [buildBlockText] built from them at [codeUnitOffset].
+List<EpubTextSpan> withoutCombining(
+  List<EpubTextSpan> spans,
+  Iterable<UprightRun> runs, {
+  int codeUnitOffset = 0,
+}) {
+  final result = <EpubTextSpan>[];
+  var start = codeUnitOffset;
+  for (final span in spans) {
+    final end = start + span.text.length;
+    final holds = runs.any((run) => run.start >= start && run.start < end);
+    result.add(holds ? (span.copy()..combine = null) : span);
+    start = end;
+  }
+  return result;
+}
+
+/// A variation axis no font defines. A tate-chū-yoko run's transparent
+/// layout alternates its value from grapheme to grapheme so the paragraph
+/// shapes each grapheme alone.
+const String _shapingBoundaryAxis = 'ZTCY';
+
+/// The advance each tate-chū-yoko grapheme of [combined] takes when
+/// [children] are laid out in one line.
+List<double> _graphemeAdvances(
+  List<TextSpan> children,
+  List<({int child, int span, int run, double em})> combined,
+) {
+  final measure = TextPainter(
+    text: TextSpan(children: children),
+    textDirection: ui.TextDirection.ltr,
+  )..layout();
+  final starts = <int>[];
+  var unit = 0;
+  for (final child in children) {
+    starts.add(unit);
+    unit += child.text!.length;
+  }
+  final advances = [
+    for (final grapheme in combined)
+      measure
+          .getBoxesForSelection(
+            TextSelection(
+              baseOffset: starts[grapheme.child],
+              extentOffset:
+                  starts[grapheme.child] +
+                  children[grapheme.child].text!.length,
+            ),
+          )
+          .fold(0.0, (width, box) => width + box.right - box.left),
+  ];
+  measure.dispose();
+  return advances;
+}
+
+/// The runs of ASCII digits in [text] that `text-combine-upright: digits`
+/// combines: those no longer than [longest].
+///
+/// Runs are found on grapheme boundaries, so a run never ends inside a
+/// cluster. A digit that carries a mark or a keycap still counts towards its
+/// run's length, but its run does not combine.
+List<({int start, int end})> _digitRuns(String text, int longest) {
+  bool isDigit(int unit) => unit >= 0x30 && unit <= 0x39;
+  final runs = <({int start, int end})>[];
+  var unit = 0;
+  int? start;
+  var count = 0;
+  var plain = true;
+  void close() {
+    final runStart = start;
+    if (runStart != null && plain && count <= longest) {
+      runs.add((start: runStart, end: unit));
+    }
+    start = null;
+  }
+
+  for (final cluster in text.characters) {
+    if (isDigit(cluster.codeUnitAt(0))) {
+      if (start == null) {
+        start = unit;
+        count = 0;
+        plain = true;
+      }
+      count++;
+      plain = plain && cluster.length == 1;
+    } else {
+      close();
+    }
+    unit += cluster.length;
+  }
+  close();
+  return runs;
 }
 
 /// Flutter style for one engine span.

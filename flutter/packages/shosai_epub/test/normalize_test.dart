@@ -2223,6 +2223,79 @@ void main() {
     });
   });
 
+  group('text-combine-upright', () {
+    List<EpubTextSpan> spansOf(String body, [String sheet = '']) {
+      final chapter = normalizeChapter(
+        xhtml:
+            '<html><body style="writing-mode: vertical-rl">$body</body>'
+            '</html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: [CssStylesheet.parse(sheet, const EpubLimits())],
+        limits: const EpubLimits(),
+      );
+      return (chapter.nodes.single as EpubParagraph).spans;
+    }
+
+    test('every spelling marks its text for tate-chū-yoko', () {
+      for (final declaration in [
+        'text-combine-upright: all',
+        '-epub-text-combine-horizontal: all',
+        '-ms-text-combine-horizontal: all',
+        '-epub-text-combine: horizontal',
+        '-webkit-text-combine: horizontal',
+      ]) {
+        final spans = spansOf(
+          '<p>明治<span class="tcy">38</span>年</p>',
+          '.tcy { $declaration }',
+        );
+        expect(
+          [for (final span in spans) (span.text, span.combine)],
+          [('明治', null), ('38', const EpubTextCombine.all()), ('年', null)],
+          reason: declaration,
+        );
+      }
+    });
+
+    test(
+      'digits keep their count, and none or a bad value combine nothing',
+      () {
+        EpubTextCombine? combineOf(String value) => spansOf(
+          '<p><span style="text-combine-upright: $value">12</span>月</p>',
+        ).first.combine;
+
+        expect(combineOf('digits'), const EpubTextCombine.digits(2));
+        expect(combineOf('digits 3'), const EpubTextCombine.digits(3));
+        expect(combineOf('digits 7'), isNull);
+        expect(combineOf('none'), isNull);
+        expect(combineOf('sideways'), isNull);
+      },
+    );
+
+    test('the value is inherited, and none turns it off', () {
+      final spans = spansOf(
+        '<p style="text-combine-upright: digits 4">平成<b>31</b>年'
+        '<span style="text-combine-upright: none">2019</span></p>',
+      );
+      expect(
+        [for (final span in spans) (span.text, span.combine)],
+        [
+          ('平成', const EpubTextCombine.digits(4)),
+          ('31', const EpubTextCombine.digits(4)),
+          ('年', const EpubTextCombine.digits(4)),
+          ('2019', null),
+        ],
+      );
+    });
+
+    test('neighbouring combined boxes stay apart', () {
+      final spans = spansOf(
+        '<p><span class="tcy">!!</span><span class="tcy">12</span></p>',
+        '.tcy { text-combine-upright: all }',
+      );
+      expect([for (final span in spans) span.text], ['!!', '12']);
+    });
+  });
+
   group('fixtures', () {
     // The package lives under flutter/packages in the repository, but tests
     // must not depend on their own nesting depth: search upward for the
