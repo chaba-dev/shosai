@@ -12,7 +12,7 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/epub/content.dart' show ReaderEpubPage;
 import 'package:shosai_flutter/reader/epub/pages.dart' show TextPageSlice;
 import 'package:shosai_flutter/reader/view.dart'
-    show ReaderEpubPageContentPainter;
+    show PagePainter, ReaderEpubPageContentPainter;
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import '../support/bridge_pdf_engine.dart';
@@ -31,11 +31,16 @@ class _ChromeBridge extends HarnessBridge {
     this.title,
     this.failOpen = false,
     this.hangOpen = false,
+    this.rightToLeft = false,
   });
 
   final String? title;
   final bool failOpen;
   final bool hangOpen;
+  final bool rightToLeft;
+
+  @override
+  bool get pdfEngineRightToLeft => rightToLeft;
 
   @override
   Future<FlutterDocumentSummary> openDocument({
@@ -541,6 +546,41 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       expect(find.text('33% · page 1 of 3'), findsOneWidget);
+    });
+
+    testWidgets('a right-to-left PDF turns leftward, first page on the right', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _ChromeBridge(rightToLeft: true);
+      await _open(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
+      );
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('reader-edge-next'))).dx,
+        lessThan(
+          tester
+              .getCenter(find.byKey(const ValueKey('reader-edge-previous')))
+              .dx,
+        ),
+        reason: 'the next page is behind the left margin',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
+      final spread = tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((paint) => paint.painter)
+          .whereType<PagePainter>()
+          .single
+          .spread!;
+      expect(spread.facingUnit, 2);
+      expect(spread.facingLeft, 0, reason: 'page 3 is on the left');
+      expect(spread.firstLeft, greaterThan(0));
     });
 
     testWidgets('one page reads a PDF a page at a time', (tester) async {

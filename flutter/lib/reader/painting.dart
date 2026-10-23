@@ -13,6 +13,7 @@ class PagePainter extends CustomPainter {
     required this.savedSelections,
     required this.annotations,
     this.currentUnit = 0,
+    this.spread,
     this.paintContent = true,
   });
 
@@ -27,6 +28,10 @@ class PagePainter extends CustomPainter {
   final List<ReaderSelection> savedSelections;
   final List<FlutterAnnotation> annotations;
   final int currentUnit;
+
+  /// The PDF spread the surface spans, whose second page's area highlights
+  /// are painted too, each page's beside the other.
+  final ReaderPdfSpread? spread;
   final bool paintContent;
 
   @override
@@ -55,7 +60,8 @@ class PagePainter extends CustomPainter {
       );
     }
     for (final annotation in annotations) {
-      if (annotation.unit.toInt() != currentUnit ||
+      final unit = annotation.unit.toInt();
+      if ((unit != currentUnit && unit != spread?.facingUnit) ||
           annotation.textRange != null) {
         continue;
       }
@@ -63,6 +69,7 @@ class PagePainter extends CustomPainter {
         canvas,
         annotation.rectangles ?? const [],
         _highlightColor(annotation.color),
+        spread?.leftOf(unit, currentUnit) ?? 0,
       );
     }
     if (anchor != null && focus != null) {
@@ -100,10 +107,13 @@ class PagePainter extends CustomPainter {
     }
   }
 
+  /// Paints a page's [rectangles], moved right by [dx] to where the page
+  /// lies in the surface.
   void _paintRectangles(
     Canvas canvas,
     List<FlutterSelectionRect> rectangles,
     Color color,
+    double dx,
   ) {
     final fill = Paint()
       ..color = color
@@ -113,7 +123,12 @@ class PagePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
     for (final rect in rectangles) {
-      final area = Rect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom);
+      final area = Rect.fromLTRB(
+        rect.left + dx,
+        rect.top,
+        rect.right + dx,
+        rect.bottom,
+      );
       canvas.drawRect(area, fill);
       canvas.drawLine(area.bottomLeft, area.bottomRight, border);
     }
@@ -130,6 +145,7 @@ class PagePainter extends CustomPainter {
       oldDelegate.focus != focus ||
       oldDelegate.fit != fit ||
       oldDelegate.currentUnit != currentUnit ||
+      oldDelegate.spread != spread ||
       oldDelegate.savedSelections != savedSelections ||
       oldDelegate.annotations != annotations;
 }
