@@ -59,7 +59,7 @@ enum ReaderProgressKind { none, loading, single, range }
 enum ReaderModalEffect {
   selectionNote,
   annotationNote,
-  bookmarkNote,
+  placeNote,
   associationPicker,
   documentPicker,
 }
@@ -421,6 +421,7 @@ final class ReaderModel {
     List<FlutterAnnotation> annotations = const [],
     List<FlutterSearchMatch> searchResults = const [],
     List<FlutterBookmark> bookmarks = const [],
+    List<FlutterNote> notes = const [],
     Set<String> annotationOperations = const {},
     this.selectionError,
     this.relayoutError,
@@ -430,6 +431,7 @@ final class ReaderModel {
     this.annotationsReady = false,
     this.searchBusy = false,
     this.bookmarkBusy = false,
+    this.notesBusy = false,
     this.toolError,
     this.persistenceError,
     this.openPanel,
@@ -468,6 +470,7 @@ final class ReaderModel {
        annotations = List.unmodifiable(annotations.map(_freezeAnnotation)),
        searchResults = List.unmodifiable(searchResults),
        bookmarks = List.unmodifiable(bookmarks),
+       notes = List.unmodifiable(notes),
        annotationOperations = Set.unmodifiable(annotationOperations);
 
   final String? openPath;
@@ -543,6 +546,9 @@ final class ReaderModel {
   final List<FlutterAnnotation> annotations;
   final List<FlutterSearchMatch> searchResults;
   final List<FlutterBookmark> bookmarks;
+
+  /// The book's notes: its book notes, then its page notes in reading order.
+  final List<FlutterNote> notes;
   final Set<String> annotationOperations;
   final String? selectionError;
 
@@ -565,6 +571,9 @@ final class ReaderModel {
   final bool annotationsReady;
   final bool searchBusy;
   final bool bookmarkBusy;
+
+  /// Whether a page note or book note is being edited or saved.
+  final bool notesBusy;
   final String? toolError;
 
   /// Reading-position restoration/save feedback, independent of tool chrome.
@@ -660,6 +669,7 @@ final class ReaderModel {
     List<FlutterAnnotation>? annotations,
     List<FlutterSearchMatch>? searchResults,
     List<FlutterBookmark>? bookmarks,
+    List<FlutterNote>? notes,
     Set<String>? annotationOperations,
     Object? selectionError = _unchanged,
     Object? relayoutError = _unchanged,
@@ -669,6 +679,7 @@ final class ReaderModel {
     bool? annotationsReady,
     bool? searchBusy,
     bool? bookmarkBusy,
+    bool? notesBusy,
     Object? toolError = _unchanged,
     Object? persistenceError = _unchanged,
     Object? openPanel = _unchanged,
@@ -743,6 +754,7 @@ final class ReaderModel {
           : List.unmodifiable(annotations),
       searchResults: searchResults ?? this.searchResults,
       bookmarks: bookmarks ?? this.bookmarks,
+      notes: notes ?? this.notes,
       annotationOperations: annotationOperations == null
           ? this.annotationOperations
           : Set.unmodifiable(annotationOperations),
@@ -764,6 +776,7 @@ final class ReaderModel {
       annotationsReady: annotationsReady ?? this.annotationsReady,
       searchBusy: searchBusy ?? this.searchBusy,
       bookmarkBusy: bookmarkBusy ?? this.bookmarkBusy,
+      notesBusy: notesBusy ?? this.notesBusy,
       toolError: identical(toolError, _unchanged)
           ? this.toolError
           : toolError as String?,
@@ -808,7 +821,24 @@ enum ReaderContentState { loading, ready, failed }
 /// focus nodes when the controller asks, and never moves focus on its own.
 enum ReaderFocusTarget { surface, actions, header, panel }
 
-enum _ReaderNoteTarget { selection, annotation, bookmark }
+enum _ReaderNoteTarget { selection, annotation, place }
+
+/// What a page note or book note editor writes: a new note at a place, or the
+/// body of note [id] when it is set.
+final class _PlaceNoteTarget {
+  const _PlaceNoteTarget({
+    required this.bookId,
+    required this.kind,
+    this.unit,
+    this.offset,
+    this.id,
+  });
+  final int bookId;
+  final FlutterNoteKind kind;
+  final int? unit;
+  final int? offset;
+  final String? id;
+}
 
 enum ReaderSelectionMovement {
   previousGrapheme,

@@ -20,8 +20,9 @@ Complete this phase before committing the first database migration.
 
 * [x] Select natural document boundaries for the first release: one EPUB spine
 item across block/page fragments, or one PDF page.
-* [x] Model highlights as independent annotations with an optional note while
-preserving existing bookmark notes and lifecycle.
+* [x] Model highlights as independent annotations with an optional note.
+Bookmarks keep their lifecycle; their notes become page notes (amended
+2026-10-20).
 * [x] Ship exact-version offsets and geometry plus bounded quote recovery first;
 defer EPUB CFI behind the versioned anchor contract.
 * [x] Keep PDF highlights in SQLite first, then add native import and
@@ -135,6 +136,9 @@ behavior alongside, but independent from, bookmarks.
 none, same identity, timestamps, tombstones and provenance as highlights.
 Notes across the library are listed from the store alone, books most
 recently read first.
+* [x] Bookmark notes become page notes: a migration moves each bookmark's note
+to a page note at the bookmark's place, and bookmarks keep no note. The reader
+writes, edits, opens and deletes page notes and book notes in its Notes panel.
 * [ ] Notes surface scoped to this book or all books, grouped by place; open a
 note at its anchor.
 * [ ] Library-wide search over book text and notes from every screen, scoped

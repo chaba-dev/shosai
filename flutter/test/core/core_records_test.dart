@@ -300,12 +300,11 @@ void main() {
     );
     expect(bookmark!.unit, BigInt.two);
     expect(bookmark.bookId, book.bookId);
-    await bridge.updateBookmarkNote(id: bookmark.id, note: 'Remember');
     final [listed] = await bridge.listBookmarks(
       bookId: book.bookId,
       cancellationId: bridge.createCancellation(),
     );
-    expect(listed.note, 'Remember');
+    expect(listed.title, 'Chapter 3');
     expect(
       await bridge.exportBookmarks(bookId: book.bookId),
       contains('Chapter 3'),
@@ -426,6 +425,91 @@ void main() {
     );
     expect(matches.single.unit, BigInt.one);
     expect(matches.single.offset, BigInt.from(19));
+  });
+
+  test('page notes and book notes are listed apart from highlights', () async {
+    final book = await import(_epubFixture);
+    final document = await bridge.openLibraryBook(
+      bookId: book.bookId,
+      cancellationId: bridge.createCancellation(),
+    );
+    const chapter = 'The lead Café text tail.';
+    const path = 'OEBPS/chapter.xhtml';
+    final text = EpubReaderText(
+      unitCount: 3,
+      text: (unit) async => unit == 1 ? chapter : '',
+      resourcePath: (unit) async => unit == 1 ? path : 'other.xhtml',
+    );
+    final records = bridge.records;
+    await records.createAnnotation(
+      document: document,
+      surface: _surface(chapter, resourcePath: path),
+      unit: BigInt.one,
+      start: BigInt.from(9),
+      end: BigInt.from(13),
+      displayScale: 1,
+      color: FlutterHighlightColor.green,
+      cancellationId: bridge.createCancellation(),
+    );
+
+    final page = await records.createNote(
+      document: document,
+      text: text,
+      unit: BigInt.one,
+      offset: BigInt.from(4),
+      body: 'The lead matters.',
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(page.kind, FlutterNoteKind.page);
+    expect(page.unit, BigInt.one);
+    expect(page.offset, BigInt.from(4));
+    final whole = await records.createNote(
+      document: document,
+      text: text,
+      body: 'Reading group pick.',
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(whole.kind, FlutterNoteKind.book);
+    expect(whole.unit, isNull);
+
+    expect(
+      await records.updateNote(
+        document: document,
+        id: page.id,
+        body: 'The lead matters most.',
+      ),
+      isTrue,
+    );
+    final listed = await records.listNotes(
+      document: document,
+      text: text,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(listed.map((note) => (note.kind, note.body)), [
+      (FlutterNoteKind.book, 'Reading group pick.'),
+      (FlutterNoteKind.page, 'The lead matters most.'),
+    ]);
+    expect(listed.last.resolution, FlutterAnnotationResolution.exact);
+    final [highlight] = await records.listAnnotations(
+      document: document,
+      text: text,
+      scale: 1,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(highlight.quote, 'Café');
+
+    expect(
+      await records.deleteAnnotation(document: document, id: whole.id),
+      isTrue,
+    );
+    expect(
+      await records.listNotes(
+        document: document,
+        text: text,
+        cancellationId: bridge.createCancellation(),
+      ),
+      hasLength(1),
+    );
   });
 
   test('PDF annotations keep page rectangles in page points', () async {

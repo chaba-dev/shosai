@@ -101,10 +101,7 @@ abstract interface class ShosaiRecords {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   });
-
-  Future<void> updateBookmarkNote({required int id, String? note});
 
   Future<void> deleteBookmark({required int id});
 
@@ -142,9 +139,35 @@ abstract interface class ShosaiRecords {
     String? body,
   });
 
+  /// Delete highlight or note [id].
   Future<bool> deleteAnnotation({
     required FlutterDocumentSummary document,
     required String id,
+  });
+
+  /// [document]'s page notes and book notes, resolved against [text].
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    required BigInt cancellationId,
+  });
+
+  /// Write [body] as a page note at [unit] and [offset] of [text], or as a
+  /// book note when [unit] is null.
+  Future<FlutterNote> createNote({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  });
+
+  /// Rewrite note [id]; false when [document] has no such live note.
+  Future<bool> updateNote({
+    required FlutterDocumentSummary document,
+    required String id,
+    required String body,
   });
 
   Future<FlutterAnnotationAssociationSourcePage>

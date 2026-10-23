@@ -314,7 +314,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerAddNote => 'メモを追加';
 
   @override
-  String get readerBookmarkNoteTitle => 'ブックマークのメモ';
+  String get readerPageNoteTitle => 'ページのメモ';
+
+  @override
+  String get readerBookNoteTitle => '本のメモ';
 
   @override
   String get readerHighlightNoteTitle => 'ハイライトのメモ';
@@ -324,6 +327,17 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get readerNoteCancel => 'キャンセル';
+
+  @override
+  String readerPlaceNotesHeading(int count) {
+    return 'メモ · $count';
+  }
+
+  @override
+  String get readerNoPlaceNotes => 'このページや本全体についてメモを書けます。';
+
+  @override
+  String get readerDeleteNote => 'メモを削除';
 
   @override
   String get readerExportMarkdown => 'Markdownで書き出す';

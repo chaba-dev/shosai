@@ -66,11 +66,6 @@ final class ReaderBookmarkToggled extends ReaderMessage {
   const ReaderBookmarkToggled();
 }
 
-final class ReaderBookmarkNoteRequested extends ReaderMessage {
-  const ReaderBookmarkNoteRequested([this.bookmark]);
-  final FlutterBookmark? bookmark;
-}
-
 final class ReaderBookmarkDeleted extends ReaderMessage {
   const ReaderBookmarkDeleted(this.id);
   final int id;
@@ -78,6 +73,35 @@ final class ReaderBookmarkDeleted extends ReaderMessage {
 
 final class ReaderBookmarkNavigated extends ReaderMessage {
   const ReaderBookmarkNavigated(this.unit, {this.offset});
+  final int unit;
+  final int? offset;
+}
+
+/// Writes a new page note at the place being read.
+final class ReaderPageNoteRequested extends ReaderMessage {
+  const ReaderPageNoteRequested();
+}
+
+/// Writes the book's note, or edits it when the book has one.
+final class ReaderBookNoteRequested extends ReaderMessage {
+  const ReaderBookNoteRequested();
+}
+
+/// Edits a page note or book note.
+final class ReaderNoteEditRequested extends ReaderMessage {
+  const ReaderNoteEditRequested(this.note);
+  final FlutterNote note;
+}
+
+/// Deletes a page note or book note.
+final class ReaderNoteDeleted extends ReaderMessage {
+  const ReaderNoteDeleted(this.id);
+  final String id;
+}
+
+/// Goes to the place a page note is written at.
+final class ReaderNoteNavigated extends ReaderMessage {
+  const ReaderNoteNavigated(this.unit, {this.offset});
   final int unit;
   final int? offset;
 }
@@ -246,31 +270,48 @@ final class _ReaderBookmarkFinished extends ReaderMessage {
   final BigInt cancellation;
 }
 
-final class _ReaderBookmarkNoteEdited extends ReaderMessage {
-  const _ReaderBookmarkNoteEdited({
-    required this.generation,
-    required this.revision,
-    required this.bookId,
-    required this.unit,
-    required this.offset,
-    required this.bookmarkId,
-    required this.note,
+final class _ReaderNotesCompleted extends ReaderMessage {
+  const _ReaderNotesCompleted(this.generation, this.revision, this.items);
+  final int generation;
+  final int revision;
+  final List<FlutterNote> items;
+}
+
+final class _ReaderNotesFailed extends ReaderMessage {
+  const _ReaderNotesFailed(
+    this.generation,
+    this.revision,
+    this.error, {
+    this.persistence = false,
   });
   final int generation;
   final int revision;
-  final int bookId;
-  final int unit;
-  final int? offset;
-  final int? bookmarkId;
-  final String? note;
+  final String error;
+  final bool persistence;
 }
 
-final class _ReaderBookmarkNoteEditFailed extends ReaderMessage {
-  const _ReaderBookmarkNoteEditFailed(
-    this.generation,
-    this.revision,
-    this.error,
-  );
+final class _ReaderNotesFinished extends ReaderMessage {
+  const _ReaderNotesFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
+/// The note editor's result for a page note or book note: [body] is null when
+/// the editor was dismissed.
+final class _ReaderPlaceNoteEdited extends ReaderMessage {
+  const _ReaderPlaceNoteEdited({
+    required this.generation,
+    required this.revision,
+    required this.target,
+    required this.body,
+  });
+  final int generation;
+  final int revision;
+  final _PlaceNoteTarget target;
+  final String? body;
+}
+
+final class _ReaderPlaceNoteEditFailed extends ReaderMessage {
+  const _ReaderPlaceNoteEditFailed(this.generation, this.revision, this.error);
   final int generation;
   final int revision;
   final String error;
@@ -891,8 +932,8 @@ final class _ReaderNoteEditorFinished extends ReaderMessage {
 
   /// Controller-wide ownership token of the editor that finished, so a stale
   /// completion cannot clear a newer editor's slot even when the per-operation
-  /// revisions collide (bookmark editors count with `_bookmarkRevision`,
-  /// selection/annotation editors with `_noteRevision`).
+  /// revisions collide (page and book note editors count with
+  /// `_notesRevision`, selection/annotation editors with `_noteRevision`).
   final int token;
 }
 

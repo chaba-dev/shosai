@@ -612,11 +612,17 @@ abstract class AppLocalizations {
   /// **'Add note'**
   String get readerAddNote;
 
-  /// The controller-injected note dialog title for a saved place.
+  /// A note on a page or place in the book, with no text range: the note dialog title and the Notes panel's new-note action.
   ///
   /// In en, this message translates to:
-  /// **'Bookmark note'**
-  String get readerBookmarkNoteTitle;
+  /// **'Page note'**
+  String get readerPageNoteTitle;
+
+  /// A note about the whole book: the note dialog title and the Notes panel's new-note action.
+  ///
+  /// In en, this message translates to:
+  /// **'Book note'**
+  String get readerBookNoteTitle;
 
   /// The controller-injected note dialog title for a highlight (retained selection behavior).
   ///
@@ -635,6 +641,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cancel'**
   String get readerNoteCancel;
+
+  /// Notes panel: the page notes and book notes section heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes · {count}'**
+  String readerPlaceNotesHeading(int count);
+
+  /// Notes panel: the empty page notes and book notes section.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a note on this page or about the whole book.'**
+  String get readerNoPlaceNotes;
+
+  /// Notes panel: deletes a page note or book note.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete note'**
+  String get readerDeleteNote;
 
   /// Iced reference key: export-markdown. 4C's delivery is the clipboard plus a brief notice (contract 9.2 item 1).
   ///

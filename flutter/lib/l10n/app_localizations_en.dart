@@ -319,7 +319,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerAddNote => 'Add note';
 
   @override
-  String get readerBookmarkNoteTitle => 'Bookmark note';
+  String get readerPageNoteTitle => 'Page note';
+
+  @override
+  String get readerBookNoteTitle => 'Book note';
 
   @override
   String get readerHighlightNoteTitle => 'Highlight note';
@@ -329,6 +332,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readerNoteCancel => 'Cancel';
+
+  @override
+  String readerPlaceNotesHeading(int count) {
+    return 'Notes · $count';
+  }
+
+  @override
+  String get readerNoPlaceNotes =>
+      'Write a note on this page or about the whole book.';
+
+  @override
+  String get readerDeleteNote => 'Delete note';
 
   @override
   String get readerExportMarkdown => 'Export as Markdown';

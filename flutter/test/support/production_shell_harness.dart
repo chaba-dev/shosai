@@ -795,18 +795,7 @@ class HarnessBridge
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) async => null;
-
-  @override
-  Future<void> updateBookmark({
-    required int id,
-    String? title,
-    String? note,
-  }) async {}
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) async {}
 
   @override
   Future<void> deleteBookmark({required int id}) async {}

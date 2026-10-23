@@ -6565,144 +6565,160 @@ void main() {
     await bridge.disposed.future;
   });
 
-  test('bookmarks support note creation, editing, and deletion', () async {
+  test('page notes and book notes are written, edited and deleted', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-    final edits = Queue<String?>.from(['first note', 'edited note']);
+    final edits = Queue<String?>.from([
+      'first note',
+      'about the book',
+      'edited note',
+    ]);
+    final kinds = <FlutterNoteKind>[];
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      noteEditor: (_) async => edits.removeFirst(),
+      placeNoteEditor: (kind, _) async {
+        kinds.add(kind);
+        return edits.removeFirst();
+      },
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
-    final bookmark = _bookmark(11, note: 'first note');
-    bridge.bookmarkToggleCompleters.add(
-      Completer<FlutterBookmark?>()..complete(bookmark),
-    );
-    bridge.bookmarkListCompleters.add(
-      Completer<List<FlutterBookmark>>()..complete([bookmark]),
-    );
 
-    controller.dispatch(const ReaderBookmarkNoteRequested());
-    await _waitUntil(() => !controller.model.bookmarkBusy);
-    expect(bridge.toggledBookmarkNotes, ['first note']);
-    expect(bridge.updatedBookmarkNotes, isEmpty);
+    controller.dispatch(const ReaderPageNoteRequested());
+    await _waitUntil(() => controller.model.notes.length == 1);
+    final page = controller.model.notes.single;
+    expect(page.kind, FlutterNoteKind.page);
+    expect(page.unit, BigInt.zero);
+    expect(page.body, 'first note');
 
-    final edited = _bookmark(11, note: 'edited note');
-    bridge.bookmarkListCompleters.add(
-      Completer<List<FlutterBookmark>>()..complete([edited]),
-    );
-    controller.dispatch(ReaderBookmarkNoteRequested(bookmark));
-    await _waitUntil(() => !controller.model.bookmarkBusy);
-    expect(bridge.updatedBookmarkNotes.last, (11, 'edited note'));
+    controller.dispatch(const ReaderBookNoteRequested());
+    await _waitUntil(() => controller.model.notes.length == 2);
+    expect(controller.model.notes.last.kind, FlutterNoteKind.book);
+    expect(controller.model.notes.last.unit, isNull);
 
-    bridge.bookmarkListCompleters.add(
-      Completer<List<FlutterBookmark>>()..complete(const []),
-    );
-    controller.dispatch(const ReaderBookmarkDeleted(11));
-    await _waitUntil(() => !controller.model.bookmarkBusy);
-    expect(bridge.deletedBookmarkIds, [11]);
-    expect(controller.model.bookmarks, isEmpty);
+    controller.dispatch(ReaderNoteEditRequested(page));
+    await _waitUntil(() => controller.model.notes.first.body == 'edited note');
+    expect(kinds, [
+      FlutterNoteKind.page,
+      FlutterNoteKind.book,
+      FlutterNoteKind.page,
+    ]);
+
+    controller.dispatch(ReaderNoteDeleted(page.id));
+    await _waitUntil(() => controller.model.notes.length == 1);
+    expect(bridge.deleteCalls, 1);
+    expect(controller.model.notesBusy, isFalse);
+    expect(controller.model.toolError, isNull);
     controller.dispose();
     await bridge.disposed.future;
   });
 
-  test(
-    'toggling a noted bookmark deletes it instead of creating another',
-    () async {
-      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-      final noted = _bookmark(11, note: 'keep');
-      bridge.bookmarkListCompleters.add(
-        Completer<List<FlutterBookmark>>()..complete([noted]),
-      );
-      final controller = _epubController(bridge);
-      controller.dispatch(
-        const ReaderOpenRequested('/tmp/book.epub', bookId: 7),
-      );
-      await bridge.waitForOp(1);
-      await _waitUntil(() => controller.model.bookmarks.isNotEmpty);
-      bridge.bookmarkListCompleters.add(
-        Completer<List<FlutterBookmark>>()..complete(const []),
-      );
+  test('a dismissed or empty note editor writes nothing', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final edits = Queue<String?>.from([null, '   ']);
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      placeNoteEditor: (_, _) async => edits.removeFirst(),
+    );
+    await _openControlled(controller, bridge, '/tmp/book.epub');
 
-      controller.dispatch(const ReaderBookmarkToggled());
-      await _waitUntil(() => !controller.model.bookmarkBusy);
+    controller.dispatch(const ReaderPageNoteRequested());
+    await _waitUntil(() => !controller.model.notesBusy);
+    controller.dispatch(const ReaderBookNoteRequested());
+    await _waitUntil(() => !controller.model.notesBusy);
 
-      expect(bridge.deletedBookmarkIds, [11]);
-      expect(bridge.toggledBookmarkOffsets, isEmpty);
-      controller.dispose();
-      await bridge.disposed.future;
-    },
-  );
+    expect(edits, isEmpty);
+    expect(bridge.placeNotes, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
 
-  test(
-    'stale bookmark note dialog cannot mutate a replacement document',
-    () async {
-      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-      final editor = Completer<String?>();
-      final controller = ReaderController(
-        bridge: bridge,
-        decoder: (pixels, {required width, required height}) => _testImage(),
-        noteEditor: (_) => editor.future,
-      );
-      await _openControlled(controller, bridge, '/tmp/one.epub');
-      controller.dispatch(const ReaderBookmarkNoteRequested());
-      controller.dispatch(
-        const ReaderOpenRequested('/tmp/two.epub', bookId: 7),
-      );
-      editor.complete('must not leak');
-      await bridge.waitForOp(2);
+  test('toggling a bookmarked place deletes its bookmark', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    bridge.bookmarkListCompleters.add(
+      Completer<List<FlutterBookmark>>()..complete([_bookmark(11)]),
+    );
+    final controller = _epubController(bridge);
+    controller.dispatch(const ReaderOpenRequested('/tmp/book.epub', bookId: 7));
+    await bridge.waitForOp(1);
+    await _waitUntil(() => controller.model.bookmarks.isNotEmpty);
+    bridge.bookmarkListCompleters.add(
+      Completer<List<FlutterBookmark>>()..complete(const []),
+    );
 
-      expect(bridge.updatedBookmarkNotes, isEmpty);
-      expect(bridge.toggledBookmarkOffsets, isEmpty);
-      controller.dispose();
-      await bridge.disposed.future;
-    },
-  );
+    controller.dispatch(const ReaderBookmarkToggled());
+    await _waitUntil(() => !controller.model.bookmarkBusy);
 
-  test('suspending cancels a bookmark note draft without a write', () async {
+    expect(bridge.deletedBookmarkIds, [11]);
+    expect(bridge.toggledBookmarkOffsets, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('a stale note dialog cannot write to a replacement document', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final editor = Completer<String?>();
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      noteEditor: (_) => editor.future,
+    );
+    await _openControlled(controller, bridge, '/tmp/one.epub');
+    controller.dispatch(const ReaderPageNoteRequested());
+    controller.dispatch(const ReaderOpenRequested('/tmp/two.epub', bookId: 7));
+    editor.complete('must not leak');
+    await bridge.waitForOp(2);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(bridge.placeNotes, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('suspending cancels a note draft without a write', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
     final editor = Completer<String?>();
     var cancellations = 0;
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      bookmarkNoteEditor: (_) => editor.future,
+      placeNoteEditor: (_, _) => editor.future,
       noteEditorCanceller: () => cancellations += 1,
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
 
-    controller.dispatch(const ReaderBookmarkNoteRequested());
+    controller.dispatch(const ReaderPageNoteRequested());
+    expect(controller.model.modalEffect, ReaderModalEffect.placeNote);
     controller.dispatch(const ReaderSuspended());
     editor.complete('must not save');
     await Future<void>.delayed(Duration.zero);
 
     expect(cancellations, 1);
-    expect(bridge.toggledBookmarkNotes, isEmpty);
-    expect(bridge.updatedBookmarkNotes, isEmpty);
-    expect(controller.model.toolError, contains('bookmark note was not saved'));
+    expect(bridge.placeNotes, isEmpty);
+    expect(controller.model.toolError, contains('note was not saved'));
     controller.dispose();
     await bridge.disposed.future;
   });
 
-  test('dispose drains an in-flight bookmark note creation', () async {
+  test('dispose drains an in-flight note write', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
-    final create = Completer<FlutterBookmark?>();
-    bridge.bookmarkToggleCompleters.add(create);
+    final gate = Completer<void>();
+    bridge.noteWriteGate = gate;
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
-      bookmarkNoteEditor: (_) async => 'note',
+      placeNoteEditor: (_, _) async => 'note',
     );
     await _openControlled(controller, bridge, '/tmp/book.epub');
 
-    controller.dispatch(const ReaderBookmarkNoteRequested());
-    await _waitUntil(() => bridge.toggledBookmarkNotes.isNotEmpty);
+    controller.dispatch(const ReaderBookNoteRequested());
+    await _waitUntil(() => bridge.noteWrites == 1);
     controller.dispose();
     expect(bridge.isDisposed, isFalse);
 
-    create.complete(_bookmark(11, note: 'note'));
+    gate.complete();
     await bridge.disposed.future;
-    expect(bridge.toggledBookmarkNotes, ['note']);
+    expect(bridge.placeNotes.single.body, 'note');
   });
 
   test(
@@ -7418,11 +7434,10 @@ FlutterAnnotation _annotation(String id, {int unit = 0}) => FlutterAnnotation(
   color: FlutterHighlightColor.yellow,
 );
 
-FlutterBookmark _bookmark(int id, {String? note}) => FlutterBookmark(
+FlutterBookmark _bookmark(int id) => FlutterBookmark(
   id: id,
   bookId: 7,
   unit: BigInt.zero,
-  note: note,
   color: 'yellow',
   createdAt: '2026-09-11T00:00:00Z',
 );
@@ -7621,8 +7636,6 @@ final class _ControlledBridge
   final savedReadingStates = <FlutterReadingState>[];
   final savedReadingStateUnitCounts = <BigInt>[];
   final toggledBookmarkOffsets = <BigInt?>[];
-  final toggledBookmarkNotes = <String?>[];
-  final updatedBookmarkNotes = <(int, String?)>[];
   final deletedBookmarkIds = <int>[];
   final searchCompleters = Queue<Completer<List<FlutterSearchMatch>>>();
   final associationCompleters =
@@ -7755,28 +7768,12 @@ final class _ControlledBridge
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) async {
     toggledBookmarkOffsets.add(offset);
-    toggledBookmarkNotes.add(note);
     if (bookmarkToggleCompleters.isNotEmpty) {
       return bookmarkToggleCompleters.removeFirst().future;
     }
     return null;
-  }
-
-  @override
-  Future<void> updateBookmark({
-    required int id,
-    String? title,
-    String? note,
-  }) async {
-    updatedBookmarkNotes.add((id, note));
-  }
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) async {
-    updatedBookmarkNotes.add((id, note));
   }
 
   @override
@@ -8057,7 +8054,10 @@ final class _ControlledBridge
   }) async {
     deleteCalls += 1;
     final changed = await (deleteCompleter?.future ?? Future.value(true));
-    if (changed) storedAnnotations.removeWhere((item) => item.id == id);
+    if (changed) {
+      storedAnnotations.removeWhere((item) => item.id == id);
+      placeNotes.removeWhere((item) => item.id == id);
+    }
     return changed;
   }
 

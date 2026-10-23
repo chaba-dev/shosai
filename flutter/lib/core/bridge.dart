@@ -101,12 +101,7 @@ abstract interface class FlutterBridge {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   });
-
-  Future<void> updateBookmark({required int id, String? title, String? note});
-
-  Future<void> updateBookmarkNote({required int id, String? note});
 
   Future<void> deleteBookmark({required int id});
 
@@ -141,6 +136,28 @@ abstract interface class FlutterBridge {
   Future<bool> deleteAnnotation({
     required FlutterDocumentHandle document,
     required String id,
+  });
+
+  /// [document]'s page notes and book notes.
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  });
+
+  /// Write [body] as a page note at [unit] and [offset], or as a book note
+  /// when [unit] is null.
+  Future<FlutterNote> createNote({
+    required FlutterDocumentHandle document,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  });
+
+  Future<bool> updateNote({
+    required FlutterDocumentHandle document,
+    required String id,
+    required String body,
   });
 
   Future<FlutterAnnotationAssociationSourcePage>
@@ -214,6 +231,52 @@ class FlutterAnnotation {
           rectangles == other.rectangles &&
           color == other.color &&
           body == other.body;
+}
+
+/// A page note (at a place) or a book note (on the whole book).
+enum FlutterNoteKind { page, book }
+
+/// A page note or book note of the open document, resolved against it.
+class FlutterNote {
+  final String id;
+  final FlutterNoteKind kind;
+
+  /// The EPUB spine index or PDF page of a page note; null for a book note.
+  final BigInt? unit;
+
+  /// An EPUB page note's place in its spine item, in Unicode scalars.
+  final BigInt? offset;
+  final FlutterAnnotationResolution resolution;
+  final String body;
+
+  /// ISO 8601 UTC.
+  final String modifiedAt;
+
+  const FlutterNote({
+    required this.id,
+    required this.kind,
+    this.unit,
+    this.offset,
+    required this.resolution,
+    required this.body,
+    required this.modifiedAt,
+  });
+
+  @override
+  int get hashCode =>
+      Object.hash(id, kind, unit, offset, resolution, body, modifiedAt);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNote &&
+          id == other.id &&
+          kind == other.kind &&
+          unit == other.unit &&
+          offset == other.offset &&
+          resolution == other.resolution &&
+          body == other.body &&
+          modifiedAt == other.modifiedAt;
 }
 
 enum FlutterAnnotationAssociationOutcome { associated, alreadyAssociated }
@@ -314,7 +377,6 @@ class FlutterBookmark {
   final BigInt unit;
   final BigInt? offset;
   final String? title;
-  final String? note;
   final String color;
   final String createdAt;
 
@@ -324,7 +386,6 @@ class FlutterBookmark {
     required this.unit,
     this.offset,
     this.title,
-    this.note,
     required this.color,
     required this.createdAt,
   });
@@ -336,7 +397,6 @@ class FlutterBookmark {
       unit.hashCode ^
       offset.hashCode ^
       title.hashCode ^
-      note.hashCode ^
       color.hashCode ^
       createdAt.hashCode;
 
@@ -350,7 +410,6 @@ class FlutterBookmark {
           unit == other.unit &&
           offset == other.offset &&
           title == other.title &&
-          note == other.note &&
           color == other.color &&
           createdAt == other.createdAt;
 }

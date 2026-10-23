@@ -57,9 +57,6 @@ class _PanelBridge extends HarnessBridge {
   /// Every `toggleBookmark` call as (unit, offset).
   final List<(int, int?)> toggles = [];
 
-  /// Every `updateBookmarkNote` call as (id, note).
-  final List<(int, String?)> noteUpdates = [];
-
   /// Every `deleteBookmark` call.
   final List<int> deletes = [];
 
@@ -111,7 +108,6 @@ class _PanelBridge extends HarnessBridge {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) async {
     toggles.add((unit.toInt(), offset?.toInt()));
     final existing = bookmarks
@@ -129,33 +125,11 @@ class _PanelBridge extends HarnessBridge {
       bookId: bookId,
       unit: unit,
       offset: offset,
-      note: note,
       color: 'yellow',
       createdAt: '2026-09-20T00:00:00Z',
     );
     bookmarks = [...bookmarks, created];
     return created;
-  }
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) async {
-    noteUpdates.add((id, note));
-    bookmarks = [
-      for (final bookmark in bookmarks)
-        if (bookmark.id == id)
-          FlutterBookmark(
-            id: bookmark.id,
-            bookId: bookmark.bookId,
-            unit: bookmark.unit,
-            offset: bookmark.offset,
-            title: bookmark.title,
-            note: note,
-            color: bookmark.color,
-            createdAt: bookmark.createdAt,
-          )
-        else
-          bookmark,
-    ];
   }
 
   @override
@@ -272,20 +246,15 @@ Future<ui.Image> _testImage() async {
   }
 }
 
-FlutterBookmark _bookmark({
-  int id = 1,
-  BigInt? unit,
-  BigInt? offset,
-  String? note,
-}) => FlutterBookmark(
-  id: id,
-  bookId: 1,
-  unit: unit ?? BigInt.zero,
-  offset: offset,
-  note: note,
-  color: 'yellow',
-  createdAt: '2026-09-20T00:00:00Z',
-);
+FlutterBookmark _bookmark({int id = 1, BigInt? unit, BigInt? offset}) =>
+    FlutterBookmark(
+      id: id,
+      bookId: 1,
+      unit: unit ?? BigInt.zero,
+      offset: offset,
+      color: 'yellow',
+      createdAt: '2026-09-20T00:00:00Z',
+    );
 
 List<ReaderContentsEntry> _fixtureEntries() => const [
   ReaderContentsEntry(depth: 0, title: 'Headwaters', unit: 0),
@@ -532,38 +501,6 @@ void main() {
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
-      final bridge = _PanelBridge(
-        unitCount: 3,
-        bookmarks: [_bookmark(id: 7, note: 'A short note')],
-      );
-      await _open(
-        tester,
-        _reader(
-          bridge: bridge,
-          initialBookId: 1,
-          contentsLoader: (_) async => const [],
-        ),
-      );
-      await _openNotes(tester);
-
-      expect(find.text('BOOKMARKS · 1'), findsOneWidget);
-      expect(find.text('A short note'), findsOneWidget);
-      expect(find.text('Edit note'), findsOneWidget);
-
-      await tester.tap(
-        find.byKey(const ValueKey('reader-saved-place-delete-7')),
-      );
-      await tester.pump();
-      await _settle(tester);
-      expect(bridge.deletes, [7]);
-      expect(find.text('No bookmarks yet'), findsOneWidget);
-      expect(find.text('BOOKMARKS · 0'), findsOneWidget);
-    });
-
-    testWidgets('the note editor runs through the controller-owned dialog', (
-      tester,
-    ) async {
-      _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3, bookmarks: [_bookmark(id: 7)]);
       await _open(
         tester,
@@ -575,23 +512,77 @@ void main() {
       );
       await _openNotes(tester);
 
-      await tester.tap(find.byKey(const ValueKey('reader-saved-place-note-7')));
+      expect(find.text('BOOKMARKS · 1'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('reader-saved-place-delete-7')),
+      );
+      await tester.pump();
+      await _settle(tester);
+      expect(bridge.deletes, [7]);
+      expect(find.text('No bookmarks yet'), findsOneWidget);
+      expect(find.text('BOOKMARKS · 0'), findsOneWidget);
+    });
+
+    testWidgets('page notes are written and edited in the controller-owned '
+        'dialog', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _PanelBridge(unitCount: 3);
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialBookId: 1,
+          contentsLoader: (_) async => const [],
+        ),
+      );
+      await _openNotes(tester);
+
+      expect(find.text('NOTES · 0'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
       await tester.pumpAndSettle();
       // The controller-owned modal is open while the editor runs.
       expect(find.byType(ShadDialog), findsOneWidget);
-      expect(find.text('Bookmark note'), findsOneWidget);
-
-      await tester.enterText(
+      expect(
         find.descendant(
           of: find.byType(ShadDialog),
-          matching: find.byType(ShadInput),
+          matching: find.text('Page note'),
         ),
-        'Edited note',
+        findsOneWidget,
       );
-      await tester.tap(find.widgetWithText(ShadButton, 'Save'));
-      await tester.pumpAndSettle();
-      expect(bridge.noteUpdates, [(7, 'Edited note')]);
+
+      Future<void> write(String body) async {
+        await tester.enterText(
+          find.descendant(
+            of: find.byType(ShadDialog),
+            matching: find.byType(ShadInput),
+          ),
+          body,
+        );
+        await tester.tap(find.widgetWithText(ShadButton, 'Save'));
+        await tester.pumpAndSettle();
+      }
+
+      await write('A short note');
       expect(find.byType(ShadDialog), findsNothing);
+      expect(find.text('NOTES · 1'), findsOneWidget);
+      expect(find.text('A short note'), findsOneWidget);
+      final id = bridge.placeNotes.single.id;
+
+      await tester.tap(find.byKey(ValueKey('reader-place-note-edit-$id')));
+      await tester.pumpAndSettle();
+      await write('Edited note');
+      expect(bridge.placeNotes.single.body, 'Edited note');
+      expect(find.text('Edited note'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('reader-notes-add-book')));
+      await tester.pumpAndSettle();
+      await write('About the whole book');
+      expect(bridge.placeNotes.map((note) => note.kind), [
+        FlutterNoteKind.page,
+        FlutterNoteKind.book,
+      ]);
+      expect(find.text('NOTES · 2'), findsOneWidget);
     });
 
     testWidgets('Markdown export copies through the sink and reports success', (

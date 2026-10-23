@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:shosai_flutter/core/records.dart';
@@ -10,11 +11,73 @@ import 'package:shosai_flutter/core/bridge.dart';
 /// Mixed into a bridge fake: `class Fake with BridgePdfEngine, BridgeRecords
 /// implements FlutterBridge`. The controllers use the records of a bridge
 /// that is a [RecordsHost].
+///
+/// The mixin also keeps the bridge's page notes and book notes, so a fake
+/// answers note calls without writing them itself.
 mixin BridgeRecords implements RecordsHost {
   @override
   late final ShosaiRecords records = BridgeForwardingRecords(
     this as FlutterBridge,
   );
+
+  /// The page notes and book notes [createNote] wrote, in creation order.
+  final List<FlutterNote> placeNotes = [];
+  int _nextNote = 0;
+
+  /// When set, note writes wait for it, so a test can hold one in flight.
+  Completer<void>? noteWriteGate;
+
+  /// The note writes started, held or not.
+  int noteWrites = 0;
+
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentHandle document,
+    required BigInt cancellationId,
+  }) async => List.of(placeNotes);
+
+  Future<FlutterNote> createNote({
+    required FlutterDocumentHandle document,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) async {
+    noteWrites += 1;
+    await noteWriteGate?.future;
+    final note = FlutterNote(
+      id: 'note-${++_nextNote}',
+      kind: unit == null ? FlutterNoteKind.book : FlutterNoteKind.page,
+      unit: unit,
+      offset: offset,
+      resolution: FlutterAnnotationResolution.exact,
+      body: body,
+      modifiedAt: '2026-01-01T00:00:00.000Z',
+    );
+    placeNotes.add(note);
+    return note;
+  }
+
+  Future<bool> updateNote({
+    required FlutterDocumentHandle document,
+    required String id,
+    required String body,
+  }) async {
+    noteWrites += 1;
+    await noteWriteGate?.future;
+    final index = placeNotes.indexWhere((note) => note.id == id);
+    if (index < 0) return false;
+    final note = placeNotes[index];
+    placeNotes[index] = FlutterNote(
+      id: note.id,
+      kind: note.kind,
+      unit: note.unit,
+      offset: note.offset,
+      resolution: note.resolution,
+      body: body,
+      modifiedAt: note.modifiedAt,
+    );
+    return true;
+  }
 }
 
 /// [ShosaiRecords] answered by [bridge]'s record methods; annotation and
@@ -118,18 +181,12 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     required BigInt unit,
     BigInt? offset,
     String? title,
-    String? note,
   }) => bridge.toggleBookmark(
     bookId: bookId,
     unit: unit,
     offset: offset,
     title: title,
-    note: note,
   );
-
-  @override
-  Future<void> updateBookmarkNote({required int id, String? note}) =>
-      bridge.updateBookmarkNote(id: id, note: note);
 
   @override
   Future<void> deleteBookmark({required int id}) =>
@@ -150,6 +207,39 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     scale: scale,
     cancellationId: cancellationId,
   );
+
+  @override
+  Future<List<FlutterNote>> listNotes({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    required BigInt cancellationId,
+  }) => bridge.listNotes(
+    document: document.handle,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<FlutterNote> createNote({
+    required FlutterDocumentSummary document,
+    required ReaderText text,
+    BigInt? unit,
+    BigInt? offset,
+    required String body,
+    required BigInt cancellationId,
+  }) => bridge.createNote(
+    document: document.handle,
+    unit: unit,
+    offset: offset,
+    body: body,
+    cancellationId: cancellationId,
+  );
+
+  @override
+  Future<bool> updateNote({
+    required FlutterDocumentSummary document,
+    required String id,
+    required String body,
+  }) => bridge.updateNote(document: document.handle, id: id, body: body);
 
   @override
   Future<FlutterAnnotation> createAnnotation({
