@@ -4,6 +4,8 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
+import 'package:shosai_flutter/reader/epub/pages.dart';
+import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 
 import '../support/epub_navigation_fixture.dart';
@@ -349,5 +351,184 @@ void main() {
       }
       expect(checked, greaterThan(0));
     });
+  });
+
+  group('a second level', () {
+    test('stands under its base, and can span several bases', () {
+      final built = buildBlockText(
+        [
+          EpubTextSpan(text: '東', ruby: 'とう', rubyUnder: 'Tōkyō'),
+          EpubTextSpan(text: '京', ruby: 'きょう')..rubyUnderContinued = true,
+          EpubTextSpan(text: '都'),
+        ],
+        typography,
+        20,
+      );
+      expect(
+        [
+          for (final ruby in built.rubies)
+            (
+              built.map.text.substring(ruby.start, ruby.end),
+              ruby.annotation.map.text,
+              ruby.under,
+            ),
+        ],
+        [('東', 'とう', false), ('東京', 'Tōkyō', true), ('京', 'きょう', false)],
+      );
+    });
+
+    test('a base shorter than either level is spaced out to the longer', () {
+      final built = buildBlockText(
+        [EpubTextSpan(text: '猫', ruby: 'ねこ', rubyUnder: 'abcdefgh')],
+        typography,
+        20,
+      );
+      final under = built.rubies.singleWhere((ruby) => ruby.under);
+      expect(
+        boxOf(built, 0, 1).width,
+        closeTo(widthOf(under.annotation.span), 0.01),
+      );
+    });
+
+    for (final vertical in [false, true]) {
+      final mode = vertical ? 'vertical' : 'horizontal';
+      test(
+        '$mode: nested levels are painted on both sides of their base',
+        () async {
+          final book = openEpubBytes(
+            buildTestEpub(
+              chapters: {
+                'OPS/Text/chapter-1.xhtml':
+                    '<p id="start">甲<ruby><ruby '
+                    'style="text-combine-upright: all">38<rt>さんはち</rt>'
+                    '</ruby><rt>thirty-eight</rt></ruby>乙</p>',
+              },
+              nav: '<ol><li><a href="../Text/chapter-1.xhtml">一</a></li></ol>',
+            ),
+          );
+          final chapter = book.chapters.single;
+          expect(chapter.canonicalText, '甲38乙\n');
+          expect(chapter.anchors['start'], 0);
+          final flow = layoutChapterFlow(
+            chapter: chapter,
+            spec: ChapterLayoutSpec(
+              width: 400,
+              height: 400,
+              typography: typography.copyWith(lineHeight: 1.2),
+              vertical: vertical,
+            ),
+            images: const {},
+          );
+          addTearDown(() => disposeFlowBlocks(flow.blocks));
+          final text = flow.blocks.single.text!;
+          expect(
+            [
+              for (final ruby in text.rubies)
+                (
+                  text.map.text.substring(ruby.start, ruby.end),
+                  ruby.annotation.map.text,
+                  ruby.under,
+                ),
+            ],
+            [('38', 'さんはち', false), ('38', 'thirty-eight', true)],
+          );
+          if (vertical) {
+            final combined = text.redrawn.singleWhere((run) => run.combined);
+            expect(text.map.text.substring(combined.start, combined.end), '38');
+          }
+          // Over and under one line: the gap holds two half ems.
+          expect(text.lines.single.height, closeTo(20 * 2.25, 0.5));
+          final base = text.painter
+              .getBoxesForSelection(
+                const TextSelection(baseOffset: 1, extentOffset: 3),
+              )
+              .map((box) => box.toRect())
+              .reduce((left, right) => left.expandToInclude(right));
+          final placed = text.debugRubyOrigins();
+          expect(placed, hasLength(2));
+          final (overOrigin, underOrigin) = (placed[0]!, placed[1]!);
+          expect(overOrigin.dy, closeTo(base.center.dy - 10 - 10, 0.5));
+          expect(underOrigin.dy, closeTo(base.center.dy + 10, 0.5));
+
+          final box = vertical
+              ? const EpubPageBox(
+                  size: Size(240, 440),
+                  origin: Offset(20, 20),
+                  contentWidth: 200,
+                  contentHeight: 400,
+                  vertical: true,
+                )
+              : const EpubPageBox(
+                  size: Size(440, 240),
+                  origin: Offset(20, 20),
+                  contentWidth: 400,
+                  contentHeight: 200,
+                );
+          final page = paginateFlow(
+            flow: flow,
+            pageHeight: box.blockExtent,
+            pageWidth: box.inlineExtent,
+          ).pages.single;
+          final blockOrigin = placedPageText(page.slices.single).single.origin;
+          final recorder = ui.PictureRecorder();
+          paintPageSlices(Canvas(recorder), page, typography.palette, box);
+          final image = await recorder.endRecording().toImage(
+            box.size.width.toInt(),
+            box.size.height.toInt(),
+          );
+          final bytes = (await image.toByteData())!;
+          image.dispose();
+          bool hasInk(Rect area) {
+            final clipped = area.inflate(1).intersect(Offset.zero & box.size);
+            for (var y = clipped.top.floor(); y < clipped.bottom.ceil(); y++) {
+              for (
+                var x = clipped.left.floor();
+                x < clipped.right.ceil();
+                x++
+              ) {
+                final pixel = (y * box.size.width.toInt() + x) * 4;
+                if (bytes.getUint8(pixel + 3) > 64) return true;
+              }
+            }
+            return false;
+          }
+
+          for (var index = 0; index < text.rubies.length; index++) {
+            final ruby = text.rubies[index];
+            final origin = placed[index]! + blockOrigin;
+            final annotation = Rect.fromLTWH(
+              origin.dx,
+              origin.dy,
+              widthOf(ruby.annotation.span),
+              10,
+            );
+            expect(
+              hasInk(box.rectToPage(annotation)),
+              isTrue,
+              reason: '$mode ${ruby.under ? 'under' : 'over'} annotation',
+            );
+          }
+
+          final surface = buildPageSelectionSurface(
+            page: page,
+            canonicalText: chapter.canonicalText,
+            resourcePath: chapter.resource,
+            box: box,
+          );
+          expect(surface.text, '甲38乙\n');
+          expect(surface.text, isNot(contains('さんはち')));
+          expect(surface.text, isNot(contains('thirty-eight')));
+          expect(
+            surface.endpoints.map((endpoint) => endpoint.offset).toSet(),
+            containsAll(<BigInt>[
+              BigInt.zero,
+              BigInt.one,
+              BigInt.from(3),
+              BigInt.from(4),
+            ]),
+          );
+        },
+      );
+    }
   });
 }

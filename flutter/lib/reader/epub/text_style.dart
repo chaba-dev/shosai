@@ -8,6 +8,7 @@
 /// prototype's local theme file.
 library;
 
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:characters/characters.dart';
@@ -401,13 +402,14 @@ class RedrawnRun {
 
 /// A ruby annotation: the painter code units of its base, and the annotation's
 /// own laid-out text, which [FlowTextBlock.paint] sets over the base (to its
-/// right in a vertical line).
+/// right in a vertical line), or under it for a second level.
 class RubyRun {
   const RubyRun({
     required this.start,
     required this.end,
     required this.baseSize,
     required this.annotation,
+    this.under = false,
   });
 
   /// Painter code units of the base.
@@ -420,6 +422,10 @@ class RubyRun {
   /// The annotation's text, half the base's size, as [buildBlockText] built
   /// it; its upright characters are redrawn as a vertical block's are.
   final BuiltBlockText annotation;
+
+  /// Whether the annotation is the second level (`<rtc>`), set under the
+  /// base (to its left in a vertical line).
+  final bool under;
 }
 
 /// Emphasis marks (傍点): the code units of each character of a span that
@@ -665,13 +671,17 @@ BuiltBlockText buildBlockText(
     // A base shorter than its ruby is spaced out to the ruby's length, and
     // its graphemes are redrawn centred in their widened boxes.
     double? spacing;
-    final ruby = span.ruby;
-    if (ruby != null) {
-      // A base can continue over the next spans (markup inside it); its
-      // annotation stands over all of them.
+    void annotate(
+      String ruby, {
+      required bool under,
+      required bool Function(EpubTextSpan span) continues,
+    }) {
+      // A base can continue over the next spans (markup inside it, or the
+      // first level's bases under one second-level annotation); its
+      // annotation stands beside all of them.
       var baseEnd = buffer.length;
       var next = spanIndex + 1;
-      while (next < spans.length && spans[next].rubyContinued) {
+      while (next < spans.length && continues(spans[next])) {
         baseEnd += spans[next].text.length;
         next++;
       }
@@ -699,6 +709,7 @@ BuiltBlockText buildBlockText(
           end: baseEnd + codeUnitOffset,
           baseSize: style.fontSize ?? baseFontSize,
           annotation: annotation,
+          under: under,
         ),
       );
       // Only a base of one span whose characters stand alone (kanji, kana)
@@ -709,8 +720,15 @@ BuiltBlockText buildBlockText(
           !combinesAll &&
           !continued &&
           span.text.runes.every(isUprightInVertical)) {
-        spacing = extra / span.text.characters.length;
+        spacing = math.max(spacing ?? 0, extra / span.text.characters.length);
       }
+    }
+
+    if (span.ruby case final ruby?) {
+      annotate(ruby, under: false, continues: (span) => span.rubyContinued);
+    }
+    if (span.rubyUnder case final ruby?) {
+      annotate(ruby, under: true, continues: (span) => span.rubyUnderContinued);
     }
     if (!vertical) {
       if (spacing == null) {

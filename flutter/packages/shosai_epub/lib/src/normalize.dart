@@ -1732,15 +1732,23 @@ class _NormalizeContext {
 
   /// Collects a `<ruby>` element: its bases are collected as ordinary inline
   /// content, so their anchors, links and whitespace are what they would be
-  /// outside it, and each `<rt>` annotation is set on the base it pairs with,
+  /// outside it, and each annotation is set on the base it pairs with,
   /// staying out of the text.
   ///
-  /// A base is the content before an `<rt>`, or the `<rb>` elements before a
-  /// run of `<rt>`s, paired in order. Whitespace-only text between the parts
-  /// of a ruby is not content. `<rtc>` (a second annotation level) is not
-  /// drawn, an annotation of a base that holds ruby of its own is dropped
-  /// (only the inner one is drawn), and a base without an annotation is plain
-  /// text.
+  /// A ruby is a run of segments, each its bases and then its annotations.
+  /// The bases are its `<rb>` elements, or all its content when it has none.
+  /// Its annotations come in levels: the `<rt>`s directly inside the ruby
+  /// are one, and each `<rtc>` is another. The `<rt>`s of a level pair with
+  /// the bases in order, and the text of an `<rtc>` outside any `<rt>`
+  /// annotates all of them. The first level stands over the bases
+  /// ([EpubTextSpan.ruby]) and the second under them
+  /// ([EpubTextSpan.rubyUnder]), as CSS `ruby-position: alternate` sets them;
+  /// a third is not drawn.
+  ///
+  /// Whitespace-only text between the parts of a ruby is not content. An
+  /// outer annotation of a nested ruby takes the other level when its normal
+  /// one is occupied; when both are occupied it is dropped. A base without an
+  /// annotation is plain text.
   void _collectRuby(
     XmlElement ruby,
     double baseFontSize,
@@ -1748,15 +1756,39 @@ class _NormalizeContext {
     List<EpubTextSpan> spans,
     int depth,
   ) {
-    // The span ranges of `<rb>`s waiting for their annotations, and where
-    // the content since the last annotation starts.
-    final bases = <(int, int)>[];
+    // The span ranges of the segment's `<rb>`s, and where its content since
+    // the last `<rb>` starts.
+    var rbs = <(int, int)>[];
     var looseStart = spans.length;
+    // The segment's bases, once its first annotation fixes them; the level
+    // being read, and the next base its `<rt>`s pair with.
+    List<(int, int)>? bases;
+    var level = 0;
+    var next = 0;
+    var direct = false;
+
+    List<(int, int)> annotated() =>
+        bases ??= rbs.isNotEmpty ? [...rbs] : [(looseStart, spans.length)];
+    void endSegment() {
+      if (bases == null) return;
+      bases = null;
+      rbs = [];
+      level = 0;
+      direct = false;
+      looseStart = spans.length;
+    }
+
+    void annotate(int start, int end, String text) {
+      if (level > 2) return;
+      _setRuby(spans, start, end, _annotationText(text), under: level == 2);
+    }
+
     for (final child in ruby.children) {
       if (child is XmlText) {
         final text = _rubyText(child);
         if (text.isEmpty) continue;
-        bases.clear();
+        endSegment();
+        rbs.clear();
         final span = _textSpanFor(ruby, text, baseFontSize, link);
         _takePendingSpan(span);
         spans.add(span);
@@ -1768,25 +1800,51 @@ class _NormalizeContext {
       _noteAnchor(child);
       switch (child.name.local) {
         case 'rt':
-          final (start, end) = bases.isNotEmpty
-              ? bases.removeAt(0)
-              : (looseStart, spans.length);
-          _setRuby(
-            spans,
-            start,
-            end,
-            _collectVisibleText(child).trim().split(RegExp(r'\s+')).join(' '),
-          );
-          looseStart = spans.length;
+          final paired = annotated();
+          if (!direct) {
+            direct = true;
+            level++;
+            next = 0;
+          }
+          if (next < paired.length) {
+            final (start, end) = paired[next];
+            annotate(start, end, _collectVisibleText(child));
+          }
+          next++;
         case 'rtc':
-          break;
+          final paired = annotated();
+          direct = false;
+          level++;
+          next = 0;
+          final spanning = StringBuffer();
+          for (final part in child.children) {
+            if (part is XmlText) {
+              spanning.write(part.value);
+              continue;
+            }
+            if (part is! XmlElement) continue;
+            if (styleOf(part).display == EpubDisplay.none) continue;
+            _noteAnchor(part);
+            if (part.name.local != 'rt') {
+              spanning.write(_collectVisibleText(part));
+              continue;
+            }
+            if (next < paired.length) {
+              final (start, end) = paired[next];
+              annotate(start, end, _collectVisibleText(part));
+            }
+            next++;
+          }
+          annotate(paired.first.$1, paired.last.$2, spanning.toString());
         case 'rb':
+          endSegment();
           final start = spans.length;
           _collectInline(child, baseFontSize, link, spans, depth + 1);
-          bases.add((start, spans.length));
+          rbs.add((start, spans.length));
           looseStart = spans.length;
         default:
-          bases.clear();
+          endSegment();
+          rbs.clear();
           _collectInline(
             child,
             baseFontSize,
@@ -1799,6 +1857,10 @@ class _NormalizeContext {
       }
     }
   }
+
+  /// An annotation's text with its whitespace collapsed and trimmed.
+  static String _annotationText(String text) =>
+      text.trim().split(RegExp(r'\s+')).join(' ');
 
   /// The content of [text], a child of a `<ruby>`: without the collapsible
   /// whitespace at an edge it shares with the ruby or with one of its
@@ -1852,23 +1914,40 @@ class _NormalizeContext {
 
   /// Sets [annotation] on the base made of [spans] [start] to [end]: on its
   /// first span with text, and marks the rest up to its last span with text
-  /// as continuing it. A base that already holds ruby keeps only its own.
+  /// as continuing it; [under] prefers the second level. A nested ruby's outer
+  /// annotation takes the other level when the preferred one is occupied.
   void _setRuby(
     List<EpubTextSpan> spans,
     int start,
     int end,
-    String annotation,
-  ) {
-    if (annotation.isEmpty) return;
+    String annotation, {
+    bool under = false,
+  }) {
+    if (annotation.isEmpty || end <= start) return;
     final base = spans.sublist(start, end);
-    if (base.any((span) => span.ruby != null || span.rubyContinued)) return;
+    bool occupied(bool below) => base.any(
+      (span) => below
+          ? span.rubyUnder != null || span.rubyUnderContinued
+          : span.ruby != null || span.rubyContinued,
+    );
+    var placeUnder = under;
+    if (occupied(placeUnder)) placeUnder = !placeUnder;
+    if (occupied(placeUnder)) return;
     bool hasText(EpubTextSpan span) => span.text.trim().isNotEmpty;
     final first = base.indexWhere(hasText);
     if (first < 0) return;
     final last = base.lastIndexWhere(hasText);
-    base[first].ruby = annotation;
+    if (placeUnder) {
+      base[first].rubyUnder = annotation;
+    } else {
+      base[first].ruby = annotation;
+    }
     for (var index = first + 1; index <= last; index++) {
-      base[index].rubyContinued = true;
+      if (placeUnder) {
+        base[index].rubyUnderContinued = true;
+      } else {
+        base[index].rubyContinued = true;
+      }
     }
   }
 
@@ -2000,13 +2079,16 @@ class _NormalizeContext {
       for (final target in splits) {
         piece.text = String.fromCharCodes(text.runes.take(target - position));
         rebuilt.add(piece);
-        // A later piece continues the first one's ruby base, so the
-        // annotation is drawn once over the whole base.
+        // A later piece continues the first one's ruby base, so each
+        // annotation is drawn once beside the whole base.
         piece = span.copy()
           ..text = String.fromCharCodes(text.runes.skip(target - position))
           ..anchorIds = const []
           ..ruby = null
-          ..rubyContinued = span.ruby != null || span.rubyContinued;
+          ..rubyContinued = span.ruby != null || span.rubyContinued
+          ..rubyUnder = null
+          ..rubyUnderContinued =
+              span.rubyUnder != null || span.rubyUnderContinued;
         pieceStart = target;
       }
       piece.text = String.fromCharCodes(text.runes.skip(pieceStart - position));
@@ -2072,10 +2154,13 @@ class _NormalizeContext {
           current.emphasis == next.emphasis &&
           !(current.combine?.all ?? false) &&
           // A ruby base starts its own span; its continuations merge into it,
-          // and nothing else does.
+          // and nothing else does. So does a base of the second level.
           next.ruby == null &&
           next.rubyContinued ==
-              (current.ruby != null || current.rubyContinued)) {
+              (current.ruby != null || current.rubyContinued) &&
+          next.rubyUnder == null &&
+          next.rubyUnderContinued ==
+              (current.rubyUnder != null || current.rubyUnderContinued)) {
         current.text = current.text + next.text;
         spans.removeAt(index + 1);
       } else {
@@ -2298,7 +2383,9 @@ class _NormalizeContext {
               ..text = '\n'
               ..math = null
               ..ruby = null
-              ..rubyContinued = false,
+              ..rubyContinued = false
+              ..rubyUnder = null
+              ..rubyUnderContinued = false,
           );
         }
         output.addAll(run);

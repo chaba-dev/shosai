@@ -252,6 +252,25 @@ void main() {
     expect(dog.dy - cat.dy, closeTo(10, 0.5), reason: 'one annotation higher');
   });
 
+  test('a mark on the second ruby level stands outside its annotation', () {
+    for (final (vertical, emphasis) in [
+      (false, const EpubTextEmphasis(under: true)),
+      (true, const EpubTextEmphasis(left: true)),
+    ]) {
+      final text = layOut([
+        EpubTextSpan(text: '猫', rubyUnder: 'cat', emphasis: emphasis),
+        EpubTextSpan(text: '犬', emphasis: emphasis),
+      ], vertical: vertical);
+      final cat = text.debugEmphasisCentres(0).single;
+      final dog = text.debugEmphasisCentres(1).single;
+      expect(
+        cat.dy - dog.dy,
+        closeTo(10, 0.5),
+        reason: '$vertical: one annotation farther outside',
+      );
+    }
+  });
+
   test('table cells paint emphasis outside the text painter clip', () async {
     final row = EpubTableRow(
       cells: [
@@ -302,7 +321,6 @@ void main() {
     ).pages.single;
     final text =
         flow.blocks.single.table!.rows.single.cells.single.blocks.single;
-    final textTop = 20 + 6.0;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     paintPageSlices(
@@ -326,7 +344,14 @@ void main() {
     final over = text.debugEmphasisCentres(0).single + const Offset(26, 26);
     final under = text.debugEmphasisCentres(1).single + const Offset(26, 26);
     final stacked = text.debugEmphasisCentres(2).single + const Offset(26, 26);
-    expect(stacked.dy, lessThan(textTop));
+    final stackedBase = text.painter
+        .getBoxesForSelection(
+          const TextSelection(baseOffset: 2, extentOffset: 3),
+        )
+        .single
+        .toRect()
+        .shift(const Offset(26, 26));
+    expect(stacked.dy, lessThan(stackedBase.center.dy - 10));
     for (final center in [over, under, stacked]) {
       expect(
         centreIsInk(center),
@@ -390,7 +415,9 @@ void main() {
         ).lineHeight,
         stacked,
       );
-      // Marks on the other side share the gap with no annotation.
+      // Marks on the other side stand in the gap the next line's ruby
+      // stands in, so the gap holds both too; marks under a line in a
+      // chapter without ruby need only one half em.
       for (final (vertical, emphasis) in [
         (false, const EpubTextEmphasis(under: true)),
         (true, const EpubTextEmphasis(left: true)),
@@ -403,24 +430,39 @@ void main() {
             tight,
             vertical: vertical,
           ).lineHeight,
+          stacked,
+        );
+        expect(
+          chapterTypography(
+            chapterOf([EpubTextSpan(text: '猫', emphasis: emphasis)]),
+            tight,
+            vertical: vertical,
+          ).lineHeight,
           annotatedLineHeight,
         );
       }
-      // The side is the line's: `under` is a horizontal line's.
-      expect(
-        chapterTypography(
-          chapterOf([
-            EpubTextSpan(
-              text: '猫',
-              ruby: 'ねこ',
-              emphasis: const EpubTextEmphasis(under: true),
-            ),
-          ]),
-          tight,
-          vertical: true,
-        ).lineHeight,
-        stacked,
-      );
+      // Ruby on one character and marks on another over their line share
+      // one half em; marks under it take another. The side is the line's:
+      // `under` is a horizontal line's, `left` a vertical one's.
+      for (final (vertical, emphasis, least) in [
+        (false, sesame, annotatedLineHeight),
+        (false, const EpubTextEmphasis(under: true), stacked),
+        (true, const EpubTextEmphasis(under: true), annotatedLineHeight),
+        (true, const EpubTextEmphasis(left: true), stacked),
+      ]) {
+        expect(
+          chapterTypography(
+            chapterOf([
+              EpubTextSpan(text: '猫', ruby: 'ねこ'),
+              EpubTextSpan(text: '犬', emphasis: emphasis),
+            ]),
+            tight,
+            vertical: vertical,
+          ).lineHeight,
+          least,
+          reason: '$vertical $emphasis',
+        );
+      }
     });
   });
 }
