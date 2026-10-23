@@ -500,7 +500,7 @@
   },
   "readerBackTo": "Back to {place}",
   "@readerBackTo": {
-    "description": "The BackPill after a jump: returns to the EPUB section the jump left from, by its contents title.",
+    "description": "The BackPill after a jump: returns to the EPUB section the jump left from, by its contents title, or to the book a note or search hit was opened from, by its title.",
     "placeholders": {
       "place": {
         "type": "String"

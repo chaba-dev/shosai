@@ -293,7 +293,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         if (place != null) requests.go(place);
         return;
       }
-      _openAt = place == null ? null : (book.bookId, place);
+      _openAt = place == null
+          ? null
+          : (book.bookId, _wayBackTo(shell.currentBook, book, place));
       // The library's open effect is still waiting on the reader, so the
       // shell opens or focuses the book itself.
       _shell.dispatch(ShellBookOpened(book));
@@ -303,6 +305,51 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     controller.dispatch(LibraryBookOpened(book));
     // A library that is busy refuses the open; the place goes with it.
     if (!_shell.model.reading) _openAt = null;
+  }
+
+  /// [place] in [to], opened from [from], the book being read, with the way
+  /// Back leads from it: to [from] where it is read, then through the return
+  /// points [from] had, or, when [place] is itself a Back, the ones it
+  /// carries. Each point names the book it is in, except [to]'s own.
+  ReaderPlace _wayBackTo(
+    OpenBook? from,
+    FlutterLibraryBook to,
+    ReaderPlace place,
+  ) {
+    // A tab can temporarily show a document opened by path. Its reader's
+    // return points belong to that document, not to the library book that
+    // owns the tab, so do not mislabel them as places in the book.
+    final fromOwnBook =
+        from != null &&
+        from.path == from.book.pathKey &&
+        from.bookId == from.book.bookId;
+    final points =
+        place.returnPoints ??
+        switch (_reader) {
+          (final id, _, final requests) when fromOwnBook && id == from.id =>
+            requests.wayBack?.call(),
+          _ => null,
+        };
+    if (points == null || from == null) return place;
+    return ReaderPlace(
+      place.unit,
+      offset: place.offset,
+      length: place.length,
+      annotationId: place.annotationId,
+      note: place.note,
+      returnPoints: [
+        for (final point in points)
+          (
+            unit: point.unit,
+            offset: point.offset,
+            book: switch (point.book) {
+              null => from.book,
+              final book when book.bookId == to.bookId => null,
+              final book => book,
+            },
+          ),
+      ],
+    );
   }
 
   void _scheduleRestoredOpen() {
@@ -497,7 +544,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     final requests = ReaderPlaceRequests(
       openSearch: () => unawaited(_openSearch()),
       openBook: (book, place) {
-        if (mounted) _openBookAt(book, place);
+        // The reader can report twice before Flutter replaces it, or report
+        // after it has become stale. Only the reader still current may move
+        // the shell; otherwise a later callback can overwrite the way Back.
+        if (mounted &&
+            _shell.model.currentBookId == open.id &&
+            _reader?.$1 == open.id) {
+          _openBookAt(book, place);
+        }
       },
     );
     if (_openAt case (final id, final place) when id == open.id) {

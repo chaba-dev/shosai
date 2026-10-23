@@ -227,17 +227,29 @@ class _ReaderScreenState extends State<ReaderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    widget.placeRequests?.addListener(_placeRequested);
+    widget.placeRequests
+      ?..addListener(_placeRequested)
+      ..wayBack = _wayBack;
   }
 
   @override
   void didUpdateWidget(ReaderScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.placeRequests, widget.placeRequests)) {
-      oldWidget.placeRequests?.removeListener(_placeRequested);
-      widget.placeRequests?.addListener(_placeRequested);
+      _releasePlaceRequests(oldWidget.placeRequests);
+      widget.placeRequests
+        ?..addListener(_placeRequested)
+        ..wayBack = _wayBack;
     }
   }
+
+  void _releasePlaceRequests(ReaderPlaceRequests? requests) {
+    requests?.removeListener(_placeRequested);
+    if (requests?.wayBack == _wayBack) requests!.wayBack = null;
+  }
+
+  List<ReaderReturnPoint>? _wayBack() =>
+      _controllerInitialized ? _controller.wayBack : null;
 
   void _placeRequested() {
     if (widget.placeRequests?.take() case final place?) {
@@ -476,7 +488,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.placeRequests?.removeListener(_placeRequested);
+    _releasePlaceRequests(widget.placeRequests);
     _controller.removeListener(_modelChanged);
     _controller.dispose();
     _path.dispose();

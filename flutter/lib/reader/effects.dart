@@ -273,6 +273,11 @@ final class ReaderPlaceRequests extends ChangeNotifier {
   /// Opens another book at a place, such as one a note in All books sits in.
   final ReaderBookOpener? openBook;
 
+  /// The way Back leads from the reader showing the book
+  /// ([ReaderController.wayBack]), which a book opened in its stead at a
+  /// place starts with; the reader answers it while it shows.
+  List<ReaderReturnPoint>? Function()? wayBack;
+
   ReaderPlace? _pending;
 
   /// Asks the reader to go to [place].
