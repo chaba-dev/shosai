@@ -43,10 +43,32 @@ mixin BridgeRecords implements RecordsHost {
   Future<FlutterLibraryNotesPage> libraryNotes({
     required int limit,
     required int offset,
+    List<int>? after,
     required BigInt cancellationId,
   }) async {
     libraryNotesCalls += 1;
     if (libraryNotesFailure case final failure?) throw failure;
+    // The core's page limit.
+    if (limit > 100) {
+      throw const FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.invalidRequest,
+        message: 'A library notes page lists 1 to 100 books.',
+      );
+    }
+    if (after != null) {
+      final before = [
+        for (final book in libraryBookNotes.take(after.length))
+          book.book.bookId,
+      ];
+      if (before.join(',') != after.join(',')) {
+        return const FlutterLibraryNotesPage(
+          books: [],
+          hasMore: false,
+          changed: true,
+        );
+      }
+      offset = after.length;
+    }
     final end = (offset + limit).clamp(0, libraryBookNotes.length);
     return FlutterLibraryNotesPage(
       books: libraryBookNotes.sublist(offset.clamp(0, end), end),
@@ -138,10 +160,12 @@ final class BridgeForwardingRecords implements ShosaiRecords {
   Future<FlutterLibraryNotesPage> libraryNotes({
     required int limit,
     required int offset,
+    List<int>? after,
     required BigInt cancellationId,
   }) => bridge.libraryNotes(
     limit: limit,
     offset: offset,
+    after: after,
     cancellationId: cancellationId,
   );
 

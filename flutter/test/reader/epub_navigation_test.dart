@@ -455,6 +455,61 @@ void main() {
       await drainHarness(tester);
     });
 
+    testWidgets('a note opens where it resolves in this edition', (
+      tester,
+    ) async {
+      bool current(int entry) =>
+          tester
+              .getSemantics(
+                find.byKey(ValueKey('reader-contents-entry-$entry')),
+              )
+              .getSemanticsData()
+              .flagsCollection
+              .isSelected ==
+          ui.Tristate.isTrue;
+      FlutterNote note(FlutterAnnotationResolution resolution) => FlutterNote(
+        id: 'note',
+        kind: FlutterNoteKind.page,
+        unit: BigInt.two,
+        offset: BigInt.from(5),
+        resolution: resolution,
+        body: 'Moved',
+        modifiedAt: '2026-10-01T00:00:00.000Z',
+      );
+      // Written in chapter 2 of another edition; here it resolves in 3.
+      const place = ReaderPlace(
+        1,
+        offset: 21,
+        annotationId: 'note',
+        note: true,
+      );
+
+      final recovered = bridge()
+        ..placeNotes.add(note(FlutterAnnotationResolution.recovered));
+      await openReader(tester, recovered, place: place);
+      await settleEpubPage(tester);
+      await openContents(tester);
+      expect(current(2), isTrue, reason: 'the resolved chapter');
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+
+      // A note this edition lost opens where the book was left, and says so.
+      final orphaned = bridge(
+        readingState: FlutterReadingState(unit: BigInt.zero, zoom: 1),
+      )..placeNotes.add(note(FlutterAnnotationResolution.orphaned));
+      await openReader(tester, orphaned, place: place);
+      await settleEpubPage(tester);
+      expect(
+        find.text("This note's place isn't in this edition of the book."),
+        findsOneWidget,
+      );
+      await openContents(tester);
+      expect(current(0), isTrue, reason: 'the saved position');
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
     testWidgets('a later row of the same chapter is the current one', (
       tester,
     ) async {

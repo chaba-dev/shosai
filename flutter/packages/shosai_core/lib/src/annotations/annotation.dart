@@ -467,14 +467,25 @@ final class BookNotes {
 
 /// A page of the library's books that have notes, most recently read first.
 final class LibraryNotesPage {
-  const LibraryNotesPage(this.books, {required this.hasMore});
+  const LibraryNotesPage(this.books, {required this.hasMore}) : changed = false;
+
+  /// The books listed before the page are no longer the library's first:
+  /// the page lists nothing, and the listing starts again.
+  const LibraryNotesPage.changed()
+    : books = const [],
+      hasMore = false,
+      changed = true;
 
   final List<BookNotes> books;
   final bool hasMore;
+  final bool changed;
 }
 
 /// Most books one [LibraryNotesPage] lists.
 const maxLibraryNotesBooksPerPage = 100;
+
+/// Most books a [LibraryNotesPage] can follow.
+const maxLibraryNotesBooksBefore = 65536;
 
 /// An annotation as stored.
 final class StoredAnnotation {

@@ -60,9 +60,12 @@ abstract interface class FlutterBridge {
 
   /// A page of the library's books that have notes, most recently read
   /// first, each with its notes in reading order.
+  /// A page of the library's books with notes; [after] continues a listing
+  /// and makes the page `changed` when those books are no longer the first.
   Future<FlutterLibraryNotesPage> libraryNotes({
     required int limit,
     required int offset,
+    List<int>? after,
     required BigInt cancellationId,
   });
 
@@ -720,7 +723,15 @@ class FlutterLibraryNotesPage {
   final List<FlutterBookNotes> books;
   final bool hasMore;
 
-  const FlutterLibraryNotesPage({required this.books, required this.hasMore});
+  /// The books the page was asked to follow are no longer the library's
+  /// first: it lists nothing, and the listing starts again.
+  final bool changed;
+
+  const FlutterLibraryNotesPage({
+    required this.books,
+    required this.hasMore,
+    this.changed = false,
+  });
 }
 
 class FlutterLibraryPage {

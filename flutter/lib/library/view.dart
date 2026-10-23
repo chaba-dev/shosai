@@ -149,7 +149,23 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     final unit = note.unit;
     _openAt = (
       book.book.bookId,
-      unit == null ? null : ReaderPlace(unit, offset: note.offset),
+      unit == null
+          ? null
+          : ReaderPlace(
+              unit,
+              offset: note.offset,
+              annotationId: note.id,
+              note: note.kind != FlutterNoteEntryKind.highlight,
+            ),
+    );
+    // The book's tab may hold another document the reader opened in its
+    // place; the note is this book's.
+    _shell.dispatch(
+      ShellLocatorChanged(
+        book.book.bookId,
+        path: book.book.pathKey,
+        bookId: book.book.bookId,
+      ),
     );
     controller.dispatch(LibraryBookOpened(book.book));
     // A library that is busy refuses the open; the place goes with it.

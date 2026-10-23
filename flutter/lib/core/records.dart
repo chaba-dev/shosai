@@ -53,9 +53,12 @@ abstract interface class ShosaiRecords {
 
   /// A page of the library's books that have notes, most recently read
   /// first, each with its notes in reading order.
+  /// A page of the library's books with notes; [after] continues a listing
+  /// and makes the page `changed` when those books are no longer the first.
   Future<FlutterLibraryNotesPage> libraryNotes({
     required int limit,
     required int offset,
+    List<int>? after,
     required BigInt cancellationId,
   });
 

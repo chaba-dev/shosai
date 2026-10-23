@@ -16,18 +16,31 @@ final class ReaderOpenRequested extends ReaderMessage {
 
 /// A place in a book: an EPUB spine index or PDF page, and where in its text,
 /// in Unicode scalars, when known.
+///
+/// A highlight's or note's place names it by [annotationId]: [unit] and
+/// [offset] are where it was made, and the reader resolves it in the book as
+/// it opens, as it lists the book's notes.
 final class ReaderPlace {
-  const ReaderPlace(this.unit, {this.offset});
+  const ReaderPlace(this.unit, {this.offset, this.annotationId, this.note});
 
   final int unit;
   final int? offset;
+  final String? annotationId;
+
+  /// Whether [annotationId] is a page note's or book note's, not a
+  /// highlight's.
+  final bool? note;
 
   @override
   bool operator ==(Object other) =>
-      other is ReaderPlace && other.unit == unit && other.offset == offset;
+      other is ReaderPlace &&
+      other.unit == unit &&
+      other.offset == offset &&
+      other.annotationId == annotationId &&
+      other.note == note;
 
   @override
-  int get hashCode => Object.hash(unit, offset);
+  int get hashCode => Object.hash(unit, offset, annotationId, note);
 }
 
 final class ReaderLayoutChanged extends ReaderMessage {

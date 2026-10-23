@@ -310,11 +310,13 @@ final class CoreRecords implements ShosaiRecords {
   Future<FlutterLibraryNotesPage> libraryNotes({
     required int limit,
     required int offset,
+    List<int>? after,
     required BigInt cancellationId,
   }) => _guard(() async {
     final page = await _core.annotations.libraryNotes(
       offset: offset,
       limit: limit,
+      after: after,
       cancellation: _token(cancellationId),
     );
     return FlutterLibraryNotesPage(
@@ -326,6 +328,7 @@ final class CoreRecords implements ShosaiRecords {
           ),
       ],
       hasMore: page.hasMore,
+      changed: page.changed,
     );
   });
 
@@ -956,10 +959,12 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   Future<FlutterLibraryNotesPage> libraryNotes({
     required int limit,
     required int offset,
+    List<int>? after,
     required BigInt cancellationId,
   }) => records.libraryNotes(
     limit: limit,
     offset: offset,
+    after: after,
     cancellationId: cancellationId,
   );
 

@@ -47,6 +47,10 @@ Widget _reader(
         onPressed: () => locatorChanged('${book.pathKey}#later', bookId),
         child: const Text('Turn page'),
       ),
+      TextButton(
+        onPressed: () => locatorChanged('/books/other.pdf', null),
+        child: const Text('Open another file'),
+      ),
     ],
   ),
 );
@@ -375,6 +379,116 @@ void main() {
     );
     expect(more, findsNothing);
     expect(bridge.libraryNotesCalls, 2);
+  });
+
+  testWidgets('More pages through every book and starts again when they '
+      'are reordered', (tester) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    FlutterBookNotes entry(int i) => FlutterBookNotes(
+      book: FlutterLibraryBook(
+        bookId: 1000 + i,
+        title: 'Book $i',
+        format: FlutterBookFormat.epub,
+        pathKey: '/books/book-$i.epub',
+        managed: true,
+        progress: 0,
+        dateAdded: '2026-10-01',
+      ),
+      notes: [
+        FlutterNoteEntry(
+          id: 'note-$i',
+          kind: FlutterNoteEntryKind.book,
+          body: 'Note $i',
+          modifiedAt: '2026-10-01T00:00:00.000Z',
+        ),
+      ],
+    );
+    // More books than one page of the core's lists.
+    bridge.libraryBookNotes = [for (var i = 0; i < 101; i += 1) entry(i)];
+    await tester.tap(_sidebarNotes);
+    await tester.pumpAndSettle();
+    final scrollable = find
+        .descendant(
+          of: find.byKey(const ValueKey('shell-notes')),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    final more = find.byKey(const ValueKey('shell-notes-more'));
+    Future<void> tapMore() async {
+      await tester.scrollUntilVisible(more, 600, scrollable: scrollable);
+      await tester.ensureVisible(more);
+      await tester.pumpAndSettle();
+      await tester.tap(more);
+      await tester.pumpAndSettle();
+    }
+
+    await tapMore();
+    // A book read meanwhile moves to the front: More lists from the first
+    // book again instead of repeating one and skipping it.
+    bridge.libraryBookNotes.insert(0, bridge.libraryBookNotes.removeAt(70));
+    await tapMore();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('shell-note-note-70')),
+      -600,
+      scrollable: scrollable,
+    );
+    expect(find.text('${ShellNotesController.pageSize} notes'), findsOneWidget);
+
+    // 20 books, then four pages of 20 and the last book.
+    for (var page = 0; page < 5; page += 1) {
+      await tapMore();
+      expect(
+        find.byKey(const ValueKey('shell-notes-more-error')),
+        findsNothing,
+      );
+    }
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('shell-note-note-100')),
+      600,
+      scrollable: scrollable,
+    );
+    expect(more, findsNothing);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('shell-note-note-0')),
+      -600,
+      scrollable: scrollable,
+    );
+    expect(find.text('101 notes'), findsOneWidget);
+  });
+
+  testWidgets('a note opens its own book in a tab that showed another file', (
+    tester,
+  ) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    final [quiet, ...] = harnessLibraryBooks();
+    await _open(tester, 1);
+    await tester.tap(find.text('Open another file'));
+    await tester.pumpAndSettle();
+
+    bridge.libraryBookNotes = [
+      FlutterBookNotes(
+        book: quiet,
+        notes: const [
+          FlutterNoteEntry(
+            id: 'quiet-page',
+            kind: FlutterNoteEntryKind.page,
+            body: 'The lead matters.',
+            unit: 2,
+            offset: 30,
+            modifiedAt: '2026-10-01T00:00:00.000Z',
+          ),
+        ],
+      ),
+    ];
+    await tester.tap(find.byTooltip('Notes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('shell-note-quiet-page-open')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Reading $_quiet at /books/quiet-cartographer.epub:1'),
+      findsOneWidget,
+    );
+    expect(find.text('Opened at 2:30'), findsOneWidget);
   });
 
   testWidgets('a failed notes list says why and retries', (tester) async {

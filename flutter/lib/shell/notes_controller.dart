@@ -42,6 +42,12 @@ class ShellNotesController extends ChangeNotifier {
         }
       case _ShellNotesLoaded(:final revision, :final page, :final append):
         if (revision != _revision) return;
+        // Books read or added since the list began reorder it: it is listed
+        // again from the first book rather than continued.
+        if (page.changed) {
+          _load(append: false);
+          return;
+        }
         _emit(
           ShellNotesModel(
             status: ShellNotesStatus.loaded,
@@ -85,13 +91,19 @@ class ShellNotesController extends ChangeNotifier {
         error: () => null,
       ),
     );
-    final offset = append ? _model.books.length : 0;
+    // More follows the books listed: books are ordered by when they were
+    // read, which changes while the place is shown, so the page is listed
+    // only while they are still the first.
+    final after = append
+        ? [for (final book in _model.books) book.book.bookId]
+        : null;
     _active += 1;
     unawaited(() async {
       try {
         final page = await _records.libraryNotes(
           limit: pageSize,
-          offset: offset,
+          offset: after?.length ?? 0,
+          after: after,
           cancellationId: cancellation,
         );
         dispatch(_ShellNotesLoaded(revision, page, append: append));
