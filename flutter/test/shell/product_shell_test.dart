@@ -62,8 +62,100 @@ Widget _reader(
         ),
         child: const Text('Open the atlas note'),
       ),
+      TextButton(
+        onPressed: () {
+          final open = places.openBook;
+          if (open == null) return;
+          final atlas = harnessLibraryBooks()[3];
+          open(atlas, const ReaderPlace(4, offset: 12));
+          open(atlas, const ReaderPlace(4, offset: 12));
+        },
+        child: const Text('Open the atlas note twice'),
+      ),
+      // Back to the first book, past a jump in this one and one in the first.
+      TextButton(
+        onPressed: () => places.openBook?.call(
+          harnessLibraryBooks()[0],
+          ReaderPlace(
+            1,
+            offset: 5,
+            returnPoints: [
+              (unit: 0, offset: 3, book: harnessLibraryBooks()[0]),
+              (unit: 2, offset: null, book: null),
+            ],
+          ),
+        ),
+        child: const Text('Back to the first book'),
+      ),
     ],
   ),
+);
+
+/// [_reader], whose way back is a jump from page 2 and where it reads, page 7.
+Widget _readerWithWayBack(
+  FlutterBridge bridge,
+  FlutterLibraryBook book,
+  FlutterReaderSettings? settings,
+  String path,
+  int? bookId,
+  void Function(String path, int? bookId) locatorChanged,
+  ReaderNoticeReporter notices,
+  Widget openBooksAction,
+  void Function(bool twoPages) pagesChanged,
+  ReaderPlaceRequests places,
+) {
+  places.wayBack = () => const [
+    (unit: 1, offset: null, book: null),
+    (unit: 6, offset: 40, book: null),
+  ];
+  return _reader(
+    bridge,
+    book,
+    settings,
+    path,
+    bookId,
+    locatorChanged,
+    notices,
+    openBooksAction,
+    pagesChanged,
+    places,
+  );
+}
+
+/// Pumps the product's reader, which decodes its pages outside the fake
+/// clock, until [done].
+Future<void> _readerSettles(WidgetTester tester, bool Function() done) async {
+  for (var round = 0; round < 20 && !done(); round += 1) {
+    await pumpHarnessFrames(tester, frames: 4);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+  }
+  await pumpHarnessFrames(tester, frames: 4);
+  expect(done(), isTrue, reason: 'the reader never settled');
+}
+
+/// The product's reader, over the harness bridge.
+Widget _realReader(
+  FlutterBridge bridge,
+  FlutterLibraryBook book,
+  FlutterReaderSettings? settings,
+  String path,
+  int? bookId,
+  void Function(String path, int? bookId) locatorChanged,
+  ReaderNoticeReporter noticeReporter,
+  Widget openBooksAction,
+  void Function(bool twoPages) pagesChanged,
+  ReaderPlaceRequests placeRequests,
+) => ReaderScreen(
+  bridge: bridge,
+  initialPath: path,
+  initialBookId: bookId,
+  placeRequests: placeRequests,
+  onLocatorChanged: locatorChanged,
+  noticeReporter: noticeReporter,
+  openBooksAction: openBooksAction,
+  onPagesChanged: pagesChanged,
 );
 
 /// The places a reader stand-in was asked to go to: the one it opened at,
@@ -104,6 +196,10 @@ class _PlaceLogState extends State<_PlaceLog> {
     children: [
       for (final place in _places) ...[
         Text('At ${place.unit}:${place.offset}'),
+        if (place.returnPoints case final points?)
+          Text(
+            'Back through ${[for (final point in points) '${point.book?.bookId ?? 'here'}:${point.unit}:${point.offset}'].join(' ')}',
+          ),
         if (place.annotationId case final id?)
           Text('Resolving $id as ${place.note! ? 'a note' : 'a highlight'}'),
       ],
@@ -408,6 +504,75 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Reading $_atlas'), findsOneWidget);
     expect(find.text('At 4:12'), findsOneWidget);
+  });
+
+  testWidgets('a book opened from another one leads Back to it', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const Size(1440, 900),
+      readerBuilder: _readerWithWayBack,
+    );
+    await tester.tap(_card(1));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Open the atlas note'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+    expect(find.text('At 4:12'), findsOneWidget);
+    // The first book's own return points name it.
+    expect(find.text('Back through 1:1:null 1:6:40'), findsOneWidget);
+
+    // Back hands over what is left of the way: this book's points name it,
+    // and the first book's become its own.
+    await tester.tap(find.text('Back to the first book'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+    expect(find.text('At 1:5'), findsOneWidget);
+    expect(find.text('Back through here:0:3 4:2:null'), findsOneWidget);
+  });
+
+  testWidgets('a direct file is not mislabeled as the tab’s library book', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const Size(1440, 900),
+      readerBuilder: _readerWithWayBack,
+    );
+    await tester.tap(_card(1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open another file'));
+    await tester.pump();
+
+    await tester.tap(find.text('Open the atlas note'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+    expect(find.text('At 4:12'), findsOneWidget);
+    expect(
+      find.textContaining('Back through'),
+      findsNothing,
+      reason: 'the direct file has no library book destination for Back',
+    );
+  });
+
+  testWidgets('a duplicate open keeps the first request’s way Back', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const Size(1440, 900),
+      readerBuilder: _readerWithWayBack,
+    );
+    await tester.tap(_card(1));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Open the atlas note twice'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+    expect(find.text('At 4:12'), findsOneWidget);
+    expect(find.text('Back through 1:1:null 1:6:40'), findsOneWidget);
   });
 
   testWidgets('the Notes place lists every book’s notes and opens one there', (
@@ -987,6 +1152,62 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.getRect(last).bottom, lessThanOrEqualTo(844 - 300));
+    });
+
+    testWidgets('Back returns to the book a hit was opened from', (
+      tester,
+    ) async {
+      final bridge = withHits(
+        await _pump(tester, const Size(1440, 900), readerBuilder: _realReader),
+      );
+      const donau =
+          'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster';
+      final back = find.byKey(const ValueKey('reader-back-pill'));
+      await _open(tester, 3);
+      await _readerSettles(tester, () => harnessReaderPageReady(tester));
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await _readerSettles(
+        tester,
+        () => bridge.savedReadingStates.lastOrNull?.unit == BigInt.one,
+      );
+      final read = bridge.savedReadingStates.last;
+      expect(read.unit, BigInt.one);
+
+      await commandK(tester);
+      await tester.tap(find.text('All books'));
+      await tester.enterText(
+        find.byKey(const ValueKey('shell-search-field')),
+        'lead',
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('shell-search-text-4-0')));
+      await _readerSettles(tester, () => back.evaluate().isNotEmpty);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('reader-header-title')),
+          matching: find.text('atlas.pdf'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Back to $donau'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('reader-back')));
+      final donauTitle = find.descendant(
+        of: find.byKey(const ValueKey('reader-header-title')),
+        matching: find.text('donau.pdf'),
+      );
+      await _readerSettles(tester, () => donauTitle.evaluate().isNotEmpty);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('reader-header-title')),
+          matching: find.text('donau.pdf'),
+        ),
+        findsOneWidget,
+      );
+      expect(back, findsNothing, reason: 'nothing is left to go back to');
+      expect(bridge.savedReadingStates.last.unit, read.unit);
+      expect(bridge.savedReadingStates.last.offset, read.offset);
     });
 
     testWidgets('a phone shows it full screen', (tester) async {

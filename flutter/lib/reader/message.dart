@@ -27,6 +27,7 @@ final class ReaderPlace {
     this.length,
     this.annotationId,
     this.note,
+    this.returnPoints,
   });
 
   final int unit;
@@ -38,6 +39,12 @@ final class ReaderPlace {
   /// highlight's.
   final bool? note;
 
+  /// The return points a book opened here starts with, the latest last, in
+  /// place of the one back to where it was left: the way Back leads to the
+  /// book it was opened from. Only a book that opens at this place takes
+  /// them.
+  final List<ReaderReturnPoint>? returnPoints;
+
   @override
   bool operator ==(Object other) =>
       other is ReaderPlace &&
@@ -45,10 +52,18 @@ final class ReaderPlace {
       other.offset == offset &&
       other.length == length &&
       other.annotationId == annotationId &&
-      other.note == note;
+      other.note == note &&
+      listEquals(other.returnPoints, returnPoints);
 
   @override
-  int get hashCode => Object.hash(unit, offset, length, annotationId, note);
+  int get hashCode => Object.hash(
+    unit,
+    offset,
+    length,
+    annotationId,
+    note,
+    returnPoints == null ? null : Object.hashAll(returnPoints!),
+  );
 }
 
 /// Returns to where the last jump left from (the BackPill, Alt+← or ⌘[).
@@ -777,7 +792,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     this.restorationError,
     this.offset,
     this.toolError,
-    this.returnPoint,
+    this.returnPoints = const [],
     this.match,
   });
 
@@ -795,8 +810,9 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final int? offset;
   final String? toolError;
 
-  /// Where the book was left, when it opened at another place.
-  final ReaderReturnPoint? returnPoint;
+  /// The return points the book opens with: where it was left, when it
+  /// opened at another place, or the way back to the book it was opened from.
+  final List<ReaderReturnPoint> returnPoints;
 
   /// The search match the book opened at: its page, which on a PDF spread
   /// may be the second, and where in that page's text it runs.

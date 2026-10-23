@@ -218,7 +218,7 @@ On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears 
 
 **StatusBar.** Section title, progress track, then `percent · pages a–b of n` in tabular figures; one page in view reads `page 104 of 502`. The fill is `accent`; bookmarks are `vermilion` ticks. Clicking or dragging the track jumps, and the jump is recorded for Back. On phones it shrinks to the percentage and a page number.
 
-**BackPill.** After any jump (a reference, a contents entry, a search result, a note, the progress track) an `inverse` capsule floats bottom centre and names the origin in the reader's terms: **Back to page 61**, **Back to Chapter III**, never "Back" alone. It stays until you go back, close it, or turn three pages away. Jumps stack; each Back steps one level. Keyboard: Alt+← on Linux and Windows, ⌘[ on macOS.
+**BackPill.** After any jump (a reference, a contents entry, a search result, a note, the progress track) an `inverse` capsule floats bottom centre and names the origin in the reader's terms: **Back to page 61**, **Back to Chapter III**, or the book's title when a hit or note opened another book, never "Back" alone. It stays until you go back, close it, or turn three pages away. Jumps stack; each Back steps one level. Keyboard: Alt+← on Linux and Windows, ⌘[ on macOS.
 
 ### Reading
 

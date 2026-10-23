@@ -9,7 +9,8 @@ import 'package:flutter/foundation.dart'
         FlutterError,
         FlutterErrorDetails,
         Listenable,
-        VoidCallback;
+        VoidCallback,
+        listEquals;
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
     show shosaiJapaneseInterfaceFontFamily;
@@ -1514,6 +1515,8 @@ final class ReaderController implements Listenable {
   }) async {
     FlutterDocumentSummary? opened;
     PdfEngineDocument? ownedPdf;
+    // Resolving a note's place below keeps the way Back leads from it.
+    final returnPoints = place?.returnPoints;
     try {
       if (bookId != null) await drainBookWrites(bookId);
       opened = bookId == null
@@ -1622,10 +1625,17 @@ final class ReaderController implements Listenable {
           offset: unit == restoredUnit ? restoredOffset : null,
           toolError: toolError,
           // A book opened at a note or search hit returns to where it was
-          // left.
-          returnPoint: place != null && restored != null
-              ? (unit: restored.unit.toInt(), offset: restored.offset?.toInt())
-              : null,
+          // left, or, opened from another book, to that book.
+          returnPoints:
+              returnPoints ??
+              [
+                if (place != null && restored != null)
+                  (
+                    unit: restored.unit.toInt(),
+                    offset: restored.offset?.toInt(),
+                    book: null,
+                  ),
+              ],
           match: switch (place) {
             ReaderPlace(:final offset?, :final length?) => (
               unit: restoredUnit,
@@ -1785,7 +1795,7 @@ final class ReaderController implements Listenable {
         focus: message.offset,
         toolError: message.toolError,
         persistenceError: message.restorationError,
-        returnPoints: [?message.returnPoint],
+        returnPoints: message.returnPoints,
       ),
     );
     _notesRequested();
@@ -2573,7 +2583,12 @@ final class ReaderController implements Listenable {
   /// Runs [navigate] and, when it started a move, records where the reader
   /// was so Back returns there; jumps stack, the latest last.
   void _jump(void Function() navigate) {
-    final from = _model.readingLocation;
+    final here = _model.readingLocation;
+    final ReaderReturnPoint from = (
+      unit: here.unit,
+      offset: here.offset,
+      book: null,
+    );
     final before = _activeRelayoutIntent;
     navigate();
     if (identical(_activeRelayoutIntent, before) || _model.document == null) {
@@ -2592,6 +2607,21 @@ final class ReaderController implements Listenable {
         ],
       ),
     );
+  }
+
+  /// The return points a book opened from this one starts with: this
+  /// book's and, last, where it is read now; null before a document opened.
+  List<ReaderReturnPoint>? get wayBack {
+    if (_model.document == null) return null;
+    final here = _model.readingLocation;
+    final ReaderReturnPoint point = (
+      unit: here.unit,
+      offset: here.offset,
+      book: null,
+    );
+    final points = _model.returnPoints;
+    if (points.isNotEmpty && points.last == point) return points;
+    return [...points.skip(points.length >= _maxReturnPoints ? 1 : 0), point];
   }
 
   /// Turns a page with [turn]; three turns the reader took away from a jump
@@ -2615,6 +2645,19 @@ final class ReaderController implements Listenable {
     final points = _model.returnPoints;
     if (points.isEmpty) return;
     final to = points.last;
+    // The book this one was opened from opens again where it was read, with
+    // the return points it had then.
+    if (to.book case final book?) {
+      _bookOpener?.call(
+        book,
+        ReaderPlace(
+          to.unit,
+          offset: to.offset,
+          returnPoints: points.sublist(0, points.length - 1),
+        ),
+      );
+      return;
+    }
     final before = _activeRelayoutIntent;
     _unitRequested(to.unit, offset: to.offset, replaceReadingOffset: true);
     if (identical(_activeRelayoutIntent, before)) return;

@@ -609,8 +609,9 @@ class _ReaderErrorSurfaces extends StatelessWidget {
 
 /// The BackPill (`docs/design-system.md`, BackPill): after a jump, an
 /// `inverse` capsule at the bottom centre names where the jump left from in
-/// the reader's terms, **Back to page 61** or **Back to Chapter III**, with a
-/// close button. Each Back steps one jump back.
+/// the reader's terms, **Back to page 61** or **Back to Chapter III**, or the
+/// book it left when it opened this one at a note or search hit, with a close
+/// button. Each Back steps one jump back.
 class _ReaderBackPill extends StatelessWidget {
   const _ReaderBackPill({required this.model, required this.dispatch});
 
@@ -623,7 +624,9 @@ class _ReaderBackPill extends StatelessWidget {
     final palette = ShellPalette.of(context);
     final to = model.returnPoints.last;
     final pdf = model.document?.format == FlutterBookFormat.pdf;
-    final label = pdf
+    final label = to.book != null
+        ? l10n.readerBackTo(to.book!.title)
+        : pdf
         ? l10n.readerBackToPage(to.unit + 1)
         : l10n.readerBackTo(
             _noteSection(

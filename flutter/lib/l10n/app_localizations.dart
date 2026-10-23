@@ -636,7 +636,7 @@ abstract class AppLocalizations {
   /// **'Back to page {page}'**
   String readerBackToPage(int page);
 
-  /// The BackPill after a jump: returns to the EPUB section the jump left from, by its contents title.
+  /// The BackPill after a jump: returns to the EPUB section the jump left from, by its contents title, or to the book a note or search hit was opened from, by its title.
   ///
   /// In en, this message translates to:
   /// **'Back to {place}'**
