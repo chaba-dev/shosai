@@ -275,6 +275,31 @@ void main() {
       expect((await settings.load()).pdfZoom, ReaderSettings.maxPdfZoom);
     });
 
+    test('settings saved before the Pages setting still load', () async {
+      await Preferences(t.store).setAll({
+        'reader.mode': 'continuous',
+        'reader.theme': 'dark',
+        'reader.epub_font_size': '22',
+        'reader.epub_line_spacing': '2.0',
+        'reader.pdf_zoom': '${ReaderSettings.pdfZoomFitWidth}',
+      });
+
+      expect(
+        await ReaderSettingsStore(t.store).load(),
+        const ReaderSettings(
+          continuous: true,
+          theme: ReaderTheme.dark,
+          epubFontSize: 22,
+          epubLineSpacing: 2,
+          pdfZoom: ReaderSettings.pdfZoomFitWidth,
+        ),
+      );
+      expect(
+        await LibrarySettingsStore(t.store).loadSort(),
+        LibrarySort.recent,
+      );
+    });
+
     test('a damaged stored value falls back to its default', () async {
       await Preferences(t.store).setAll({
         'reader.mode': 'sideways',
