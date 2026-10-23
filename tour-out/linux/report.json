@@ -1,0 +1,387 @@
+{
+  "steps": [
+    {
+      "key": "platform",
+      "value": "linux"
+    },
+    {
+      "key": "window",
+      "value": "Size(1280.0, 720.0) @2.0"
+    },
+    {
+      "key": "books",
+      "value": [
+        "attention.pdf",
+        "gibbon.epub",
+        "kusamakura.epub",
+        "origin.epub",
+        "shannon.pdf"
+      ]
+    },
+    {
+      "key": "imported",
+      "value": 4
+    },
+    {
+      "key": "shot",
+      "value": "01-library"
+    },
+    {
+      "key": "shot",
+      "value": "02-origin-open"
+    },
+    {
+      "key": "origin-status-open",
+      "value": [
+        "5% · chapter 1 of 19"
+      ]
+    },
+    {
+      "key": "focus-after-open",
+      "value": "FocusNode#2b2d6([PRIMARY FOCUS])(context: Focus, PRIMARY FOCUS)"
+    },
+    {
+      "key": "origin-status-after-arrow-right",
+      "value": [
+        "5% · chapter 1 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-unfocused",
+      "value": [
+        "5% · chapter 1 of 19"
+      ]
+    },
+    {
+      "key": "focus-after-click",
+      "value": "FocusNode#011ac(reader surface [PRIMARY FOCUS])(context: Focus-[<'reader-selection-focus'>], PRIMARY FOCUS)"
+    },
+    {
+      "key": "origin-status-after-arrow-right-clicked",
+      "value": [
+        "5% · chapter 1 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-space",
+      "value": [
+        "On the Origin of Species",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-0",
+      "value": [
+        "DETEAILED CONTENTS. ON THE ORIGIN OF SPECIES.",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-1",
+      "value": [
+        "ON THE ORIGIN OF SPECIES.",
+        "16% · chapter 3 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-2",
+      "value": [
+        "INTRODUCTION.",
+        "16% · chapter 3 of 19"
+      ]
+    },
+    {
+      "key": "origin-status-after-page-down-3",
+      "value": [
+        "CHAPTER I. VARIATION UNDER DOMESTICATION.",
+        "21% · chapter 4 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "03-origin-turned"
+    },
+    {
+      "key": "origin-status-turned",
+      "value": [
+        "CHAPTER I. VARIATION UNDER DOMESTICATION.",
+        "21% · chapter 4 of 19"
+      ]
+    },
+    {
+      "key": "origin-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "04-origin-contents"
+    },
+    {
+      "key": "shot",
+      "value": "05-origin-contents-jump"
+    },
+    {
+      "key": "origin-status-chapter-iv",
+      "value": [
+        "CHAPTER IV. NATURAL SELECTION.",
+        "37% · chapter 7 of 19"
+      ]
+    },
+    {
+      "key": "origin-back-pill",
+      "value": true
+    },
+    {
+      "key": "origin-status-after-back",
+      "value": [
+        "CHAPTER I. VARIATION UNDER DOMESTICATION.",
+        "21% · chapter 4 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "06-origin-back"
+    },
+    {
+      "key": "origin-contents-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "07-origin-selection"
+    },
+    {
+      "key": "shot",
+      "value": "08-origin-highlighted"
+    },
+    {
+      "key": "origin-highlight-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "09-origin-notes-opened"
+    },
+    {
+      "key": "shot",
+      "value": "10-origin-page-note-editor"
+    },
+    {
+      "key": "shot",
+      "value": "11-origin-notes-panel"
+    },
+    {
+      "key": "origin-notes-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "12-origin-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "13-origin-night-larger"
+    },
+    {
+      "key": "origin-status-larger",
+      "value": [
+        "CHAPTER I. VARIATION UNDER DOMESTICATION.",
+        "21% · chapter 4 of 19"
+      ]
+    },
+    {
+      "key": "origin-display-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "14-pdf-open"
+    },
+    {
+      "key": "pdf-status-open",
+      "value": [
+        "7% · page 1 of 15"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "15-pdf-turned"
+    },
+    {
+      "key": "pdf-status-turned",
+      "value": [
+        "Model Architecture",
+        "13% · page 2 of 15"
+      ]
+    },
+    {
+      "key": "pdf-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "16-pdf-display-panel"
+    },
+    {
+      "key": "shot",
+      "value": "17-pdf-night-zoomed"
+    },
+    {
+      "key": "pdf-display-ok",
+      "value": true
+    },
+    {
+      "key": "pdf-selection-first-drag",
+      "value": "no selection actions"
+    },
+    {
+      "key": "shot",
+      "value": "18-pdf-selection"
+    },
+    {
+      "key": "pdf-highlight-FAILED",
+      "value": "Bad state: no \"Green\" on screen\n#0      _tapText (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:455:34)\n#1      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:211:13)\n<asynchronous suspension>\n#2      _try (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:388:5)\n<asynchronous suspension>\n#3      main.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:202:5)"
+    },
+    {
+      "key": "pdf-links-on-page",
+      "value": 30
+    },
+    {
+      "key": "pdf-page-rect",
+      "value": "Rect.fromLTRB(100.0, 80.0, 851.0, 3087.0) spread false"
+    },
+    {
+      "key": "pdf-link-target",
+      "value": "page 10 url null at Offset(507.3, 206.8)"
+    },
+    {
+      "key": "shot",
+      "value": "19-pdf-link-tapped"
+    },
+    {
+      "key": "pdf-status-after-link",
+      "value": [
+        "Model Architecture",
+        "13% · page 2 of 15"
+      ]
+    },
+    {
+      "key": "pdf-link-back-pill",
+      "value": false
+    },
+    {
+      "key": "pdf-link-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "20-gibbon-chapter"
+    },
+    {
+      "key": "gibbon-link-tap",
+      "value": "at Offset(755.5, 172.0) after 240 taps"
+    },
+    {
+      "key": "gibbon-link-found",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "21-gibbon-footnote-tapped"
+    },
+    {
+      "key": "gibbon-status-after-link",
+      "value": [
+        "Introduction.",
+        "12% · chapter 7 of 59"
+      ]
+    },
+    {
+      "key": "gibbon-back-pill",
+      "value": [
+        "Back to Introduction."
+      ]
+    },
+    {
+      "key": "gibbon-status-after-back",
+      "value": [
+        "Introduction.",
+        "12% · chapter 7 of 59"
+      ]
+    },
+    {
+      "key": "gibbon-ok",
+      "value": true
+    },
+    {
+      "key": "neko-FAILED",
+      "value": "Bad state: no \"草枕\" on screen\n#0      _openFromLibrary (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:485:34)\n#1      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:264:13)\n<asynchronous suspension>\n#2      _try (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:388:5)\n<asynchronous suspension>\n#3      main.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:262:5)"
+    },
+    {
+      "key": "shot",
+      "value": "22-search-text-this-book"
+    },
+    {
+      "key": "shot",
+      "value": "23-search-text"
+    },
+    {
+      "key": "search-FAILED",
+      "value": "Bad state: No element\n#0      Iterable.single (dart:core/iterable.dart:694:25)\n#1      WidgetController.state (package:flutter_test/src/controller.dart:927:42)\n#2      WidgetTester.showKeyboard.<anonymous closure> (package:flutter_test/src/widget_tester.dart:1125:42)\n#3      _rootRun (dart:async/zone_root.dart:35:13)\n#4      _CustomZone.run (dart:async/zone.dart:726:19)\n#5      TestAsyncUtils.guard (package:flutter_test/src/test_async_utils.dart:74:41)"
+    },
+    {
+      "key": "shot",
+      "value": "24-notes-place"
+    },
+    {
+      "key": "shot",
+      "value": "25-bookmarks-place"
+    },
+    {
+      "key": "shot",
+      "value": "26-library-after"
+    },
+    {
+      "key": "notes-place-ok",
+      "value": true
+    },
+    {
+      "key": "origin-status-reopened",
+      "value": [
+        "Contents",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "27-origin-reopened"
+    },
+    {
+      "key": "open-books-ok",
+      "value": true
+    },
+    {
+      "key": "shot",
+      "value": "28-relaunch"
+    },
+    {
+      "key": "relaunch-reading",
+      "value": false
+    },
+    {
+      "key": "origin-status-relaunch",
+      "value": [
+        "Contents",
+        "11% · chapter 2 of 19"
+      ]
+    },
+    {
+      "key": "shot",
+      "value": "29-origin-relaunch"
+    },
+    {
+      "key": "relaunch-ok",
+      "value": true
+    }
+  ]
+}

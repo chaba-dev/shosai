@@ -1,0 +1,228 @@
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.1.0 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  file_selector_android 0.5.2+6 (0.5.2+11 available)
+  file_selector_ios 0.5.3+6 (0.5.3+7 available)
+  file_selector_macos 0.9.5+1 (0.9.5+2 available)
+  flutter_shaders 0.1.3 (0.1.5 available)
+  hooks 2.0.2 (2.2.0 available)
+  intl 0.20.2 (0.20.3 available)
+  jni 1.0.3 (1.1.0 available)
+  jni_flutter 1.0.3 (1.0.4+1 available)
+  lucide_icons_flutter 3.1.19 (4.0.1 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.17.0 (1.19.0 available)
+  native_toolchain_c 0.19.2 (0.19.5 available)
+  objective_c 9.5.0 (9.6.2 available)
+  package_config 2.2.0 (3.0.0 available)
+! pdfium_dart 0.2.5 from path third_party/pdfium_dart (overridden)
+  pdfium_flutter 0.2.3 (0.4.0 available)
+  pdfrx 2.4.7 (2.9.0 available)
+! pdfrx_engine 0.4.5 from path third_party/pdfrx_engine (overridden)
+  petitparser 7.0.2 (7.1.0 available)
+  platform 3.1.6 (3.2.0 available)
+  record_use 0.6.0 (1.1.1 available)
+  shadcn_ui 0.56.3 (0.57.2 available)
+  sqlite3 3.5.2 (3.7.1 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  synchronized 3.4.0+1 (3.5.0 available)
+  test_api 0.7.10 (0.7.15 available)
+  theme_extensions_builder_annotation 7.4.0 (7.5.0 available)
+  two_dimensional_scrollables 0.5.4 (0.5.5 available)
+  unorm_dart 0.3.2 (0.3.3 available)
+  url_launcher_android 6.3.30 (6.3.33 available)
+  vector_graphics 1.2.3 (1.2.4 available)
+  vector_graphics_compiler 1.3.0 (1.3.2 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 15.3.0 (15.4.0 available)
+  xml 7.0.1 (7.1.0 available)
+Got dependencies!
+37 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Running Gradle task 'assembleProfile'...                           32.7s
+✓ Built build/app/outputs/flutter-apk/app-profile.apk (75.6MB)
+Installing build/app/outputs/flutter-apk/app-profile.apk...         3.7s
+I/.shosai_flutter(23466): Compiler allocated 4618KB to compile void android.view.ViewRootImpl.performTraversals()
+VMServiceFlutterDriver: Connecting to Flutter application at http://127.0.0.1:40129/y5z5KqehHhw=/
+VMServiceFlutterDriver: Isolate found with number: 5877012765659827
+VMServiceFlutterDriver: Isolate 5877012765659827 is runnable.
+VMServiceFlutterDriver: Isolate is not paused. Assuming application is ready.
+I/Choreographer(23466): Skipped 82 frames!  The application may be doing too much work on its main thread.
+I/flutter (23466): TOUR downloaded: origin.epub 610265 B
+I/flutter (23466): TOUR downloaded: gibbon.epub 846075 B
+VMServiceFlutterDriver: Connected to Flutter application.
+I/flutter (23466): TOUR downloaded: attention.pdf 2215244 B
+I/flutter (23466): TOUR downloaded: shannon.pdf 366296 B
+I/flutter (23466): TOUR downloaded: kusamakura.epub 17940673 B
+I/flutter (23466): TOUR platform: android
+I/flutter (23466): TOUR window: Instance of 'Size' @2.625
+I/flutter (23466): TOUR books: [attention.pdf, gibbon.epub, kusamakura.epub, origin.epub, shannon.pdf]
+I/flutter (23466): TOUR imported: 4
+D/ProfileInstaller(23466): Installing profile for dev.shosai.shosai_flutter
+I/flutter (23466): TOUR shot: 01-library
+VMServiceFlutterDriver: request_data message is taking a long time to complete...
+W/WindowOnBackDispatcher(23466): OnBackInvokedCallback is not enabled for the application.
+W/WindowOnBackDispatcher(23466): Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+I/flutter (23466): TOUR shot: 02-origin-open
+I/flutter (23466): TOUR origin-status-open: [Aa, 5% · chapter 1]
+I/flutter (23466): TOUR focus-after-open: Instance of 'FocusNode'
+I/flutter (23466): TOUR origin-FAILED: Null check operator used on a null value
+I/flutter (23466): #0      KeyEventSimulator._findPhysicalKey (package:flutter_test/src/event_simulation.dart:692)
+I/flutter (23466): #1      KeyEventSimulator.simulateKeyDownEvent (package:flutter_test/src/event_simulation.dart:762)
+I/flutter (23466): #2      simulateKeyDownEvent (package:flutter_test/src/event_simulation.dart:894)
+I/flutter (23466): #3      WidgetController.sendKeyEvent (package:flutter_test/src/controller.dart:2212)
+I/flutter (23466): #4      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:94)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): TOUR shot: 03-origin-contents
+I/flutter (23466): TOUR shot: 04-origin-contents-jump
+I/flutter (23466): TOUR origin-status-chapter-iv: [Aa, 37% · chapter 7]
+I/flutter (23466): TOUR origin-back-pill: true
+I/flutter (23466): TOUR origin-status-after-back: [Aa, 5% · chapter 1]
+I/flutter (23466): TOUR shot: 05-origin-back
+I/flutter (23466): TOUR origin-contents-ok: true
+I/flutter (23466): TOUR shot: 06-origin-selection
+I/flutter (23466): TOUR origin-highlight-FAILED: Bad state: no "Yellow" on screen
+I/flutter (23466): #0      _tapText (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:455)
+I/flutter (23466): #1      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:142)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #2      _try (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:388)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #3      main.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:139)
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~27vBNNmwYjmZDHVUuXTDIw==/com.google.android.googlequicksearchbox-7A_OvqzELV88dVL_DMfmaQ==/base.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~27vBNNmwYjmZDHVUuXTDIw==/com.google.android.googlequicksearchbox-7A_OvqzELV88dVL_DMfmaQ==/split_config.xxhdpi.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~27vBNNmwYjmZDHVUuXTDIw==/com.google.android.googlequicksearchbox-7A_OvqzELV88dVL_DMfmaQ==/split_lens_ondevice_engine_play_ml_module.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~P-EffkOpkwWTAAm-WL7YtQ==/com.google.android.marvin.talkback-KbQrh8sAuHl65o-GJpQ16w==/base.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~P-EffkOpkwWTAAm-WL7YtQ==/com.google.android.marvin.talkback-KbQrh8sAuHl65o-GJpQ16w==/split_config.arm64_v8a.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~dQYMeDQY_WfiNilV-qcxIQ==/com.google.android.apps.translate-5Ovcm0Bss6AOxL2hE0iLmg==/base.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~mQVto-Oa1PBG5ijqKgYy3Q==/org.mozilla.focus-T19K0gzClOTJlz7mA2zvjQ==/base.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~mQVto-Oa1PBG5ijqKgYy3Q==/org.mozilla.focus-T19K0gzClOTJlz7mA2zvjQ==/split_config.arm64_v8a.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~mQVto-Oa1PBG5ijqKgYy3Q==/org.mozilla.focus-T19K0gzClOTJlz7mA2zvjQ==/split_config.xxhdpi.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~zLPU1MXeEp4isw7q_B_QJQ==/org.wikipedia-U-lEwIYDOp3A_JU6go2uAQ==/base.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~zLPU1MXeEp4isw7q_B_QJQ==/org.wikipedia-U-lEwIYDOp3A_JU6go2uAQ==/split_config.arm64_v8a.apk' with 1 weak references
+W/.shosai_flutter(23466): ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~zLPU1MXeEp4isw7q_B_QJQ==/org.wikipedia-U-lEwIYDOp3A_JU6go2uAQ==/split_config.xxhdpi.apk' with 1 weak references
+I/flutter (23466): TOUR shot: 07-origin-notes-opened
+I/ImeTracker(23466): dev.shosai.shosai_flutter:103755: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+D/InputMethodManager(23466): showSoftInput() view=io.flutter.embedding.android.FlutterView{6c1eb78 VFE...... .F....ID 0,0-1080,2337 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+I/ImeTracker(23466): dev.shosai.shosai_flutter:f3da327e: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+D/InputMethodManager(23466): showSoftInput() view=io.flutter.embedding.android.FlutterView{6c1eb78 VFE...... .F....ID 0,0-1080,2337 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+I/AssistStructure(23466): Flattened final assist data: 420 bytes, containing 1 windows, 3 views
+D/InsetsController(23466): show(ime(), fromIme=true)
+W/InteractionJankMonitor(23466): Initializing without READ_DEVICE_CONFIG permission. enabled=false, interval=1, missedFrameThreshold=3, frameTimeThreshold=64, package=dev.shosai.shosai_flutter
+I/ImeTracker(23466): dev.shosai.shosai_flutter:f3da327e: onShown
+I/flutter (23466): TOUR shot: 08-origin-page-note-editor
+I/ImeTracker(23466): dev.shosai.shosai_flutter:8a660bb8: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+D/InputMethodManager(23466): showSoftInput() view=io.flutter.embedding.android.FlutterView{6c1eb78 VFE...... .F...... 0,0-1080,2337 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+D/InsetsController(23466): show(ime(), fromIme=true)
+I/ImeTracker(23466): dev.shosai.shosai_flutter:8a660bb8: onCancelled at PHASE_CLIENT_APPLY_ANIMATION
+I/ImeTracker(23466): dev.shosai.shosai_flutter:4f1b5090: onRequestHide at ORIGIN_CLIENT reason HIDE_SOFT_INPUT fromUser false
+D/InsetsController(23466): hide(ime(), fromIme=true)
+W/WindowOnBackDispatcher(23466): sendCancelIfRunning: isInProgress=falsecallback=ImeCallback=ImeOnBackInvokedCallback@1013193 Callback=android.window.IOnBackInvokedCallback$Stub$Proxy@31118fd
+I/ImeTracker(23466): dev.shosai.shosai_flutter:131a2363: onRequestHide at ORIGIN_CLIENT reason HIDE_SOFT_INPUT_ON_ANIMATION_STATE_CHANGED fromUser false
+I/ImeTracker(23466): dev.shosai.shosai_flutter:4f1b5090: onHidden
+I/flutter (23466): TOUR shot: 09-origin-notes-panel
+I/flutter (23466): TOUR origin-notes-ok: true
+I/flutter (23466): TOUR shot: 10-origin-display-panel
+I/flutter (23466): TOUR origin-display-FAILED: Null check operator used on a null value
+I/flutter (23466): #0      KeyEventSimulator._findPhysicalKey (package:flutter_test/src/event_simulation.dart:692)
+I/flutter (23466): #1      KeyEventSimulator.simulateKeyDownEvent (package:flutter_test/src/event_simulation.dart:762)
+I/flutter (23466): #2      simulateKeyDownEvent (package:flutter_test/src/event_simulation.dart:894)
+I/flutter (23466): #3      WidgetController.sendKeyEvent (package:flutter_test/src/controller.dart:2212)
+I/flutter (23466): #4      _dismiss (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:470)
+I/flutter (23466): #5      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:170)
+W/WindowOnBackDispatcher(23466): OnBackInvokedCallback is not enabled for the application.
+W/WindowOnBackDispatcher(23466): Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+I/flutter (23466): TOUR shot: 11-pdf-open
+I/flutter (23466): TOUR pdf-status-open: [Aa, 7% · page 1]
+I/flutter (23466): TOUR shot: 12-pdf-turned
+I/flutter (23466): TOUR pdf-status-turned: [Aa, 13% · page 2]
+I/flutter (23466): TOUR pdf-ok: true
+I/flutter (23466): TOUR shot: 13-pdf-display-panel
+I/flutter (23466): TOUR pdf-display-FAILED: Null check operator used on a null value
+I/flutter (23466): #0      KeyEventSimulator._findPhysicalKey (package:flutter_test/src/event_simulation.dart:692)
+I/flutter (23466): #1      KeyEventSimulator.simulateKeyDownEvent (package:flutter_test/src/event_simulation.dart:762)
+I/flutter (23466): #2      simulateKeyDownEvent (package:flutter_test/src/event_simulation.dart:894)
+I/flutter (23466): #3      WidgetController.sendKeyEvent (package:flutter_test/src/controller.dart:2212)
+I/flutter (23466): #4      _dismiss (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:470)
+I/flutter (23466): #5      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:193)
+I/flutter (23466): TOUR pdf-selection-first-drag: no selection actions
+I/flutter (23466): TOUR shot: 14-pdf-selection
+I/flutter (23466): TOUR pdf-highlight-FAILED: Bad state: no "Green" on screen
+I/flutter (23466): #0      _tapText (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:455)
+I/flutter (23466): #1      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:211)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #2      _try (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:388)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #3      main.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:202)
+I/flutter (23466): TOUR pdf-links-on-page: 30
+I/flutter (23466): TOUR pdf-page-rect: Instance of 'Rect' spread false
+I/flutter (23466): TOUR pdf-link-target: page 10 url null at Instance of 'Offset'
+I/flutter (23466): TOUR shot: 15-pdf-link-tapped
+I/flutter (23466): TOUR pdf-status-after-link: [Aa, 13% · page 2]
+I/flutter (23466): TOUR pdf-link-back-pill: false
+I/flutter (23466): TOUR pdf-link-ok: true
+W/WindowOnBackDispatcher(23466): OnBackInvokedCallback is not enabled for the application.
+W/WindowOnBackDispatcher(23466): Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+I/flutter (23466): TOUR shot: 16-gibbon-chapter
+I/flutter (23466): TOUR gibbon-link-tap: none after 1728 taps
+I/flutter (23466): TOUR gibbon-link-tap: at Instance of 'Offset' after 1580 taps
+I/flutter (23466): TOUR gibbon-link-found: true
+I/flutter (23466): TOUR shot: 17-gibbon-footnote-tapped
+I/flutter (23466): TOUR gibbon-status-after-link: [Aa, 12% · chapter 7]
+I/flutter (23466): TOUR gibbon-back-pill: [Back to Introduction.]
+I/flutter (23466): TOUR gibbon-status-after-back: [Aa, 12% · chapter 7]
+I/flutter (23466): TOUR gibbon-ok: true
+I/flutter (23466): TOUR neko-FAILED: Bad state: no "草枕" on screen
+I/flutter (23466): #0      _openFromLibrary (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:485)
+I/flutter (23466): #1      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:264)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #2      _try (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:388)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #3      main.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:262)
+W/WindowOnBackDispatcher(23466): OnBackInvokedCallback is not enabled for the application.
+W/WindowOnBackDispatcher(23466): Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+I/ImeTracker(23466): dev.shosai.shosai_flutter:9a89a851: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+D/InputMethodManager(23466): showSoftInput() view=io.flutter.embedding.android.FlutterView{6c1eb78 VFE...... .F...... 0,0-1080,2337 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+I/AssistStructure(23466): Flattened final assist data: 420 bytes, containing 1 windows, 3 views
+D/InsetsController(23466): show(ime(), fromIme=true)
+I/ImeTracker(23466): dev.shosai.shosai_flutter:9a89a851: onShown
+I/ImeTracker(23466): dev.shosai.shosai_flutter:c3927d94: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+D/InputMethodManager(23466): showSoftInput() view=io.flutter.embedding.android.FlutterView{6c1eb78 VFE...... .F...... 0,0-1080,2337 #1 aid=1073741824} flags=0 reason=SHOW_SOFT_INPUT
+D/InsetsController(23466): show(ime(), fromIme=true)
+I/ImeTracker(23466): dev.shosai.shosai_flutter:c3927d94: onCancelled at PHASE_CLIENT_APPLY_ANIMATION
+I/flutter (23466): TOUR shot: 18-search-text-this-book
+I/flutter (23466): TOUR search-FAILED: Bad state: no "All books" on screen
+I/flutter (23466): #0      _tapText (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:455)
+I/flutter (23466): #1      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:285)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #2      _try (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:388)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #3      main.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:277)
+I/flutter (23466): TOUR notes-place-FAILED: Bad state: no way to the library
+I/flutter (23466): #0      _toLibrary (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:500)
+I/flutter (23466): #1      main.<anonymous closure>.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:306)
+I/flutter (23466): #2      _try (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:388)
+I/flutter (23466): #3      main.<anonymous closure> (file:///tmp/shosai-tour/flutter/integration_test/release_tour_test.dart:305)
+I/flutter (23466): <asynchronous suspension>
+I/flutter (23466): #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192)
+I/flutter (23466): TOUR origin-status-reopened: []
+I/flutter (23466): TOUR shot: 19-origin-reopened
+I/flutter (23466): TOUR open-books-ok: true
+I/ImeTracker(23466): dev.shosai.shosai_flutter:bb4f60d5: onRequestHide at ORIGIN_CLIENT reason HIDE_SOFT_INPUT fromUser false
+D/InsetsController(23466): hide(ime(), fromIme=true)
+W/WindowOnBackDispatcher(23466): sendCancelIfRunning: isInProgress=falsecallback=ImeCallback=ImeOnBackInvokedCallback@1013193 Callback=android.window.IOnBackInvokedCallback$Stub$Proxy@e811746
+I/ImeTracker(23466): dev.shosai.shosai_flutter:b4af5b4c: onRequestHide at ORIGIN_CLIENT reason HIDE_SOFT_INPUT_ON_ANIMATION_STATE_CHANGED fromUser false
+I/ImeTracker(23466): dev.shosai.shosai_flutter:bb4f60d5: onHidden
+I/flutter (23466): TOUR shot: 20-relaunch
+I/flutter (23466): TOUR relaunch-reading: false
+W/WindowOnBackDispatcher(23466): OnBackInvokedCallback is not enabled for the application.
+W/WindowOnBackDispatcher(23466): Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+I/flutter (23466): TOUR origin-status-relaunch: [Aa, 5% · chapter 1]
+I/flutter (23466): TOUR shot: 21-origin-relaunch
+I/flutter (23466): TOUR relaunch-ok: true
+I/flutter (23466): 02:24 +1: (tearDownAll)
+I/flutter (23466): 02:25 +2: All tests passed!
+All tests passed.
+EXIT=0

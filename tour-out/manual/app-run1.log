@@ -1,0 +1,95 @@
+
+(dev.shosai.shosai_flutter:707624): Atk-CRITICAL **: 11:08:51.484: atk_socket_embed: assertion 'plug_id != NULL' failed
+The Dart VM service is listening on http://127.0.0.1:36729/jBspJ2kgnGw=/
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:08:51.565: GModule (/nix/store/9qha30lg85na0ris64vwbhl6arsl1kxx-fcitx5-with-addons-5.1.19/lib/gtk-3.0/3.0.0/immodules/im-fcitx5.so) initialization check failed: GLib version too old (micro mismatch)
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:08:51.565: Loading IM context type 'fcitx5' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.312: GModule (/nix/store/9qha30lg85na0ris64vwbhl6arsl1kxx-fcitx5-with-addons-5.1.19/lib/gtk-3.0/3.0.0/immodules/im-fcitx5.so) initialization check failed: GLib version too old (micro mismatch)
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.312: Loading IM context type 'fcitx5' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.315: GModule (/nix/store/9qha30lg85na0ris64vwbhl6arsl1kxx-fcitx5-with-addons-5.1.19/lib/gtk-3.0/3.0.0/immodules/im-fcitx5.so) initialization check failed: GLib version too old (micro mismatch)
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.315: Loading IM context type 'fcitx5' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.315: GModule (/nix/store/9qha30lg85na0ris64vwbhl6arsl1kxx-fcitx5-with-addons-5.1.19/lib/gtk-3.0/3.0.0/immodules/im-fcitx5.so) initialization check failed: GLib version too old (micro mismatch)
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.315: Loading IM context type 'fcitx5' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.316: GModule (/nix/store/9qha30lg85na0ris64vwbhl6arsl1kxx-fcitx5-with-addons-5.1.19/lib/gtk-3.0/3.0.0/immodules/im-fcitx5.so) initialization check failed: GLib version too old (micro mismatch)
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:11:57.316: Loading IM context type 'fcitx5' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:12:17.294: GModule (/nix/store/9qha30lg85na0ris64vwbhl6arsl1kxx-fcitx5-with-addons-5.1.19/lib/gtk-3.0/3.0.0/immodules/im-fcitx5.so) initialization check failed: GLib version too old (micro mismatch)
+
+(dev.shosai.shosai_flutter:707624): Gtk-WARNING **: 11:12:17.294: Loading IM context type 'fcitx5' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.294: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
+
+(dev.shosai.shosai_flutter:707624): Gtk-CRITICAL **: 11:12:17.295: gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed

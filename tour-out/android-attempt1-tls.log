@@ -1,0 +1,95 @@
+List of devices attached
+19291JEG500637	device
+
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.1.0 available)
+  cross_file 0.3.5+5 (0.4.0 available)
+  file_selector_android 0.5.2+6 (0.5.2+11 available)
+  file_selector_ios 0.5.3+6 (0.5.3+7 available)
+  file_selector_macos 0.9.5+1 (0.9.5+2 available)
+  flutter_shaders 0.1.3 (0.1.5 available)
+  hooks 2.0.2 (2.2.0 available)
+  intl 0.20.2 (0.20.3 available)
+  jni 1.0.3 (1.1.0 available)
+  jni_flutter 1.0.3 (1.0.4+1 available)
+  lucide_icons_flutter 3.1.19 (4.0.1 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.17.0 (1.19.0 available)
+  native_toolchain_c 0.19.2 (0.19.5 available)
+  objective_c 9.5.0 (9.6.2 available)
+  package_config 2.2.0 (3.0.0 available)
+! pdfium_dart 0.2.5 from path third_party/pdfium_dart (overridden)
+  pdfium_flutter 0.2.3 (0.4.0 available)
+  pdfrx 2.4.7 (2.9.0 available)
+! pdfrx_engine 0.4.5 from path third_party/pdfrx_engine (overridden)
+  petitparser 7.0.2 (7.1.0 available)
+  platform 3.1.6 (3.2.0 available)
+  record_use 0.6.0 (1.1.1 available)
+  shadcn_ui 0.56.3 (0.57.2 available)
+  sqlite3 3.5.2 (3.7.1 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  synchronized 3.4.0+1 (3.5.0 available)
+  test_api 0.7.10 (0.7.15 available)
+  theme_extensions_builder_annotation 7.4.0 (7.5.0 available)
+  two_dimensional_scrollables 0.5.4 (0.5.5 available)
+  unorm_dart 0.3.2 (0.3.3 available)
+  url_launcher_android 6.3.30 (6.3.33 available)
+  vector_graphics 1.2.3 (1.2.4 available)
+  vector_graphics_compiler 1.3.0 (1.3.2 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 15.3.0 (15.4.0 available)
+  xml 7.0.1 (7.1.0 available)
+Got dependencies!
+37 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Running Gradle task 'assembleProfile'...                           53.0s
+✓ Built build/app/outputs/flutter-apk/app-profile.apk (61.3MB)
+Installing build/app/outputs/flutter-apk/app-profile.apk...      2,597ms
+I/.shosai_flutter(21265): hiddenapi: Accessing hidden method Landroid/view/accessibility/AccessibilityNodeInfo;->getSourceNodeId()J (runtime_flags=0, domain=platform, api=unsupported,test-api) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+I/.shosai_flutter(21265): hiddenapi: Accessing hidden method Landroid/view/accessibility/AccessibilityRecord;->getSourceNodeId()J (runtime_flags=0, domain=platform, api=unsupported) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+I/.shosai_flutter(21265): hiddenapi: Accessing hidden field Landroid/view/accessibility/AccessibilityNodeInfo;->mChildNodeIds:Landroid/util/LongArray; (runtime_flags=0, domain=platform, api=unsupported) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+I/.shosai_flutter(21265): hiddenapi: Accessing hidden method Landroid/util/LongArray;->get(I)J (runtime_flags=0, domain=platform, api=unsupported) from Lio/flutter/view/AccessibilityViewEmbedder$ReflectionAccessors; (domain=app, TargetSdkVersion=36) using reflection: allowed
+D/CompatibilityChangeReporter(21265): Compat change id reported: 279646685; UID 10454; state: DISABLED
+D/CompatibilityChangeReporter(21265): Compat change id reported: 237531167; UID 10454; state: DISABLED
+W/Parcel  (21265): Expecting binder but got null!
+I/flutter (21265): 00:00 +0: release tour
+I/Choreographer(21265): Skipped 46 frames!  The application may be doing too much work on its main thread.
+I/.shosai_flutter(21265): Compiler allocated 4618KB to compile void android.view.ViewRootImpl.performTraversals()
+VMServiceFlutterDriver: Connecting to Flutter application at http://127.0.0.1:35073/QwdpFuLG3P4=/
+VMServiceFlutterDriver: Isolate found with number: 4645026104844851
+VMServiceFlutterDriver: Isolate 4645026104844851 is runnable.
+I/Choreographer(21265): Skipped 69 frames!  The application may be doing too much work on its main thread.
+VMServiceFlutterDriver: Isolate is not paused. Assuming application is ready.
+VMServiceFlutterDriver: Connected to Flutter application.
+I/flutter (21265): HandshakeException: Handshake error in client (OS Error: 
+I/flutter (21265): 	CERTIFICATE_VERIFY_FAILED: self signed certificate in certificate chain(handshake.cc:298))
+I/flutter (21265): #0      _SecureFilterImpl._handshake (dart:io-patch/secure_socket_patch.dart:101)
+I/flutter (21265): #1      _SecureFilterImpl.handshake (dart:io-patch/secure_socket_patch.dart:146)
+I/flutter (21265): #2      _RawSecureSocket._secureHandshake (dart:io/secure_socket.dart:994)
+I/flutter (21265): #3      _RawSecureSocket._tryFilter (dart:io/secure_socket.dart:1124)
+I/flutter (21265): <asynchronous suspension>
+I/flutter (21265): #4      _RawSecureSocket._secureHandshake (dart:io/secure_socket.dart:1002)
+I/flutter (21265): <asynchronous suspension>
+I/flutter (21265): #5      _RawSecureSocket._tryFilter (dart:io/secure_socket.dart:1124)
+I/flutter (21265): <asynchronous suspension>
+I/flutter (21265): #6      _RawSecureSocket._secureHandshake (dart:io/secure_socket.dart:1002)
+I/flutter (21265): <asynchronous suspension>
+I/flutter (21265): #7      _RawSecureSocket._tryFilter (dart:io/secure_socket.dart:1124)
+I/flutter (21265): <asynchronous suspension>
+I/flutter (21265): 00:01 +0: release tour [E]
+I/flutter (21265):   Test failed. See exception logs above.
+I/flutter (21265):   The test description was: release tour
+I/flutter (21265):   
+I/flutter (21265): 00:01 +0 -1: (tearDownAll)
+I/flutter (21265): 00:01 +1 -1: Some tests failed.
+Failure Details:
+Failure in method: release tour
+Instance of 'FlutterErrorDetails'
+end of failure 1
+
+
+
+EXIT=1

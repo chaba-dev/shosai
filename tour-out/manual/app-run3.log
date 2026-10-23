@@ -1,0 +1,7 @@
+
+(dev.shosai.shosai_flutter:714020): Atk-CRITICAL **: 11:17:22.127: atk_socket_embed: assertion 'plug_id != NULL' failed
+The Dart VM service is listening on http://127.0.0.1:38697/uYyR-IrXuwk=/
+
+(dev.shosai.shosai_flutter:714020): Gtk-WARNING **: 11:17:22.174: GModule (/nix/store/9qha30lg85na0ris64vwbhl6arsl1kxx-fcitx5-with-addons-5.1.19/lib/gtk-3.0/3.0.0/immodules/im-fcitx5.so) initialization check failed: GLib version too old (micro mismatch)
+
+(dev.shosai.shosai_flutter:714020): Gtk-WARNING **: 11:17:22.174: Loading IM context type 'fcitx5' failed
