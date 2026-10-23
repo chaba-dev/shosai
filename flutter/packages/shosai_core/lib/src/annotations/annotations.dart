@@ -203,9 +203,16 @@ final class Annotations {
   /// A page of the library's books that have annotations, most recently
   /// read first, each with its annotations in reading order. Read from the
   /// store alone: nothing is resolved, so no book need be open.
+  ///
+  /// [after] continues a listing: the ids of the books it listed, in order.
+  /// The page follows them only while they are still the library's first
+  /// books, read in one statement with the page; a book read or added since
+  /// reorders them, and the page is [LibraryNotesPage.changed] instead, so a
+  /// listing never repeats a book or skips one. [offset] is then theirs.
   Future<LibraryNotesPage> libraryNotes({
     int offset = 0,
     int limit = 20,
+    List<int>? after,
     CancellationToken? cancellation,
   }) async {
     if (offset < 0 || limit < 1 || limit > maxLibraryNotesBooksPerPage) {
@@ -214,8 +221,18 @@ final class Annotations {
         'from a non-negative offset.',
       );
     }
+    if (after != null && after.length > maxLibraryNotesBooksBefore) {
+      throw const CoreException.invalidRequest(
+        'A library notes page follows at most $maxLibraryNotesBooksBefore '
+        'books.',
+      );
+    }
     cancellation.throwIfCancelled();
-    final page = await _records.libraryNotes(offset, limit);
+    final page = await _records.libraryNotes(
+      after?.length ?? offset,
+      limit,
+      after == null ? null : List.unmodifiable(after),
+    );
     cancellation.throwIfCancelled();
     return page;
   }

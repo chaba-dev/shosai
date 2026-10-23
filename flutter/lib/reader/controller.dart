@@ -1159,7 +1159,55 @@ final class ReaderController implements Listenable {
       ),
     );
     unawaited(
-      _openEffect(path, message.bookId, generation, cancellation, openLayout),
+      _openEffect(
+        path,
+        message.bookId,
+        generation,
+        cancellation,
+        openLayout,
+        place: message.place,
+      ),
+    );
+  }
+
+  /// Where highlight or note [id] resolves in [document], or null when it is
+  /// not there (orphaned, ambiguous or gone).
+  Future<ReaderPlace?> _resolvedPlace(
+    FlutterDocumentSummary document,
+    PdfEngineDocument? pdf,
+    String id, {
+    required bool note,
+    required double scale,
+    required BigInt cancellation,
+  }) async {
+    final text = _readerText(document, cancellation, pdf: pdf);
+    bool found(FlutterAnnotationResolution resolution) =>
+        resolution == FlutterAnnotationResolution.exact ||
+        resolution == FlutterAnnotationResolution.recovered;
+    if (note) {
+      final notes = await _records.listNotes(
+        document: document,
+        text: text,
+        cancellationId: cancellation,
+      );
+      final match = notes.where((item) => item.id == id).firstOrNull;
+      final unit = match?.unit;
+      if (match == null || unit == null || !found(match.resolution)) {
+        return null;
+      }
+      return ReaderPlace(unit.toInt(), offset: match.offset?.toInt());
+    }
+    final annotations = await _records.listAnnotations(
+      document: document,
+      text: text,
+      scale: scale,
+      cancellationId: cancellation,
+    );
+    final match = annotations.where((item) => item.id == id).firstOrNull;
+    if (match == null || !found(match.resolution)) return null;
+    return ReaderPlace(
+      match.unit.toInt(),
+      offset: match.textRange?.start.toInt(),
     );
   }
 
@@ -1168,8 +1216,9 @@ final class ReaderController implements Listenable {
     int? bookId,
     int generation,
     BigInt cancellation,
-    ReaderLayout layout,
-  ) async {
+    ReaderLayout layout, {
+    ReaderPlace? place,
+  }) async {
     FlutterDocumentSummary? opened;
     PdfEngineDocument? ownedPdf;
     try {
@@ -1210,10 +1259,38 @@ final class ReaderController implements Listenable {
               'Reading position could not be restored: ${_describeError(error)}';
         }
       }
-      final restoredUnit = (restored?.unit.toInt() ?? 0).clamp(
+      // A highlight's or note's place is where it resolves in this book: an
+      // edition its annotations were associated with may have moved it, and
+      // one that lost it opens where it was left.
+      if (place?.annotationId case final id?) {
+        try {
+          place = await _resolvedPlace(
+            document,
+            pdf,
+            id,
+            note: place!.note ?? false,
+            scale: restored?.zoom ?? layout.scale,
+            cancellation: cancellation,
+          );
+          if (place == null) {
+            toolError = "This note's place isn't in this edition of the book.";
+          }
+        } catch (error) {
+          place = null;
+          toolError =
+              "This note's place couldn't be found: "
+              '${_describeError(error)}';
+        }
+      }
+      // A place to open at, such as a note's, wins over the saved position;
+      // the saved zoom still applies.
+      final restoredUnit = (place?.unit ?? restored?.unit.toInt() ?? 0).clamp(
         0,
         document.logicalUnitCount.toInt() - 1,
       );
+      final restoredOffset = place == null
+          ? restored?.offset?.toInt()
+          : place.offset;
       // A PDF read in spreads opens on the spread that holds its page.
       final unit = pdf != null && layout.spread
           ? pdfSpreadStart(restoredUnit)
@@ -1235,7 +1312,7 @@ final class ReaderController implements Listenable {
             cancellationId: cancellation,
           );
         } catch (error) {
-          toolError = 'Bookmarks are unavailable: ${_describeError(error)}';
+          toolError ??= 'Bookmarks are unavailable: ${_describeError(error)}';
         }
       }
       dispatch(
@@ -1249,7 +1326,7 @@ final class ReaderController implements Listenable {
           restoredLayout: restored != null,
           restorationFailed: restorationFailed,
           restorationError: restorationError,
-          offset: unit == restoredUnit ? restored?.offset?.toInt() : null,
+          offset: unit == restoredUnit ? restoredOffset : null,
           toolError: toolError,
         ),
       );
@@ -1271,7 +1348,6 @@ final class ReaderController implements Listenable {
         if (!_isCurrent(generation)) return;
         // A position saved on a spread's second page reopens there: its
         // offset moves past the first page's text.
-        final restoredOffset = restored?.offset?.toInt();
         dispatch(
           _ReaderSurfaceLoaded(
             generation: generation,

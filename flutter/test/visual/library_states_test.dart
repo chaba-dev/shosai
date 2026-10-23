@@ -75,7 +75,7 @@ void main() {
         locale: locale,
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
         ),
       ),
       ready: ready,
@@ -244,7 +244,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () => find.byType(LibrarySkeletonCard).evaluate().isNotEmpty,
@@ -270,7 +270,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () => find.byType(LibraryBookCard).evaluate().isNotEmpty,
@@ -327,7 +327,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () => harnessImagesReady(tester),
@@ -351,7 +351,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () => harnessImagesReady(tester),
@@ -388,7 +388,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         // The feedback is the state; the covers are awaited too so the capture
@@ -426,7 +426,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () =>
@@ -452,7 +452,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () =>
@@ -479,7 +479,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
           ),
         ),
         ready: () => harnessImagesReady(tester),
@@ -507,7 +507,7 @@ void main() {
         productionShell(
           home: ProductShell(
             bridgeFactory: () => bridge,
-            readerBuilder: (_, _, _, _, _, _, _, _, _) => const SizedBox(),
+            readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
             androidImport: AndroidDocumentImportAdapter(
               channel: _CleanupChannel([1, 0]),
             ),

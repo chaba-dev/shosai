@@ -307,6 +307,32 @@ final class CoreRecords implements ShosaiRecords {
   });
 
   @override
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  }) => _guard(() async {
+    final page = await _core.annotations.libraryNotes(
+      offset: offset,
+      limit: limit,
+      after: after,
+      cancellation: _token(cancellationId),
+    );
+    return FlutterLibraryNotesPage(
+      books: [
+        for (final book in page.books)
+          FlutterBookNotes(
+            book: _libraryBook(book.book),
+            notes: [for (final note in book.notes) _noteEntry(note)],
+          ),
+      ],
+      hasMore: page.hasMore,
+      changed: page.changed,
+    );
+  });
+
+  @override
   Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -930,6 +956,19 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
   }) => records.libraryCover(bookId: bookId, cancellationId: cancellationId);
 
   @override
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    List<int>? after,
+    required BigInt cancellationId,
+  }) => records.libraryNotes(
+    limit: limit,
+    offset: offset,
+    after: after,
+    cancellationId: cancellationId,
+  );
+
+  @override
   Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -1355,6 +1394,24 @@ HighlightColor _highlightColor(FlutterHighlightColor color) =>
 
 FlutterHighlightColor _flutterColor(HighlightColor color) =>
     FlutterHighlightColor.values.byName(color.name);
+
+FlutterNoteEntry _noteEntry(NoteEntry note) => FlutterNoteEntry(
+  id: note.id,
+  kind: switch (note.kind) {
+    AnnotationKind.highlight => FlutterNoteEntryKind.highlight,
+    AnnotationKind.pageNote => FlutterNoteEntryKind.page,
+    AnnotationKind.bookNote => FlutterNoteEntryKind.book,
+  },
+  color: switch (note.color) {
+    final color? => _flutterColor(color),
+    null => null,
+  },
+  quote: note.quote,
+  body: note.body,
+  unit: note.unit,
+  offset: note.offset,
+  modifiedAt: note.modifiedAt,
+);
 
 BookFormat _bookFormat(FlutterBookFormat format) => switch (format) {
   FlutterBookFormat.epub => BookFormat.epub,

@@ -1044,6 +1044,18 @@ abstract class AppLocalizations {
   /// **'Select text in a book to highlight it, or add a note to a page. Every note and highlight appears here.'**
   String get shellNotesEmptyBody;
 
+  /// The Bookshelf shell: the Notes place while the library's notes are listed.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading notes…'**
+  String get shellNotesLoading;
+
+  /// The Bookshelf shell: lists the next books' notes in the Notes place.
+  ///
+  /// In en, this message translates to:
+  /// **'More notes'**
+  String get shellNotesMore;
+
   /// The Bookshelf shell: the Bookmarks place before any bookmark exists.
   ///
   /// In en, this message translates to:

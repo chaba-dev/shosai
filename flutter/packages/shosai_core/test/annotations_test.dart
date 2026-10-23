@@ -1357,6 +1357,32 @@ void main() {
         throwsCoreError(CoreErrorKind.cancelled),
       );
     });
+
+    test(
+      'a page follows the books listed before it only while they lead',
+      () async {
+        final ids = <int>[];
+        for (var index = 0; index < 3; index++) {
+          final id = await book('epub', title: 'Book $index');
+          await read(id, '2026-01-0${index + 1}T00:00:00.000Z');
+          await annotations.createNote(id, const BookAnchor(), 'Note $index');
+          ids.add(id);
+        }
+        final first = await annotations.libraryNotes(limit: 2);
+        final shown = [for (final b in first.books) b.book.id];
+
+        final next = await annotations.libraryNotes(limit: 2, after: shown);
+        expect(next.changed, isFalse);
+        expect(next.books.map((b) => b.book.title), ['Book 0']);
+
+        // Reading Book 0 moves it to the front: the page would repeat Book 1
+        // and never list Book 0.
+        await read(ids[0], '2026-02-01T00:00:00.000Z');
+        final changed = await annotations.libraryNotes(limit: 2, after: shown);
+        expect(changed.changed, isTrue);
+        expect(changed.books, isEmpty);
+      },
+    );
   });
 
   group('migration', () {

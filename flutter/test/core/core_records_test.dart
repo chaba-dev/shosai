@@ -510,6 +510,27 @@ void main() {
       ),
       hasLength(1),
     );
+
+    // The library's notes list the book's highlight and page note in
+    // reading order, from the store alone.
+    final library = await records.libraryNotes(
+      limit: 20,
+      offset: 0,
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(library.hasMore, isFalse);
+    final [listedBook] = library.books;
+    expect(listedBook.book.bookId, book.bookId);
+    expect(
+      listedBook.notes.map(
+        (note) => (note.kind, note.unit, note.offset, note.quote, note.body),
+      ),
+      [
+        (FlutterNoteEntryKind.page, 1, 4, null, 'The lead matters most.'),
+        (FlutterNoteEntryKind.highlight, 1, 9, 'Café', null),
+      ],
+    );
+    expect(listedBook.notes.last.color, FlutterHighlightColor.green);
   });
 
   test(

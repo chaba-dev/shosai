@@ -548,6 +548,12 @@ class AppLocalizationsJa extends AppLocalizations {
       '本の文章を選んでハイライトするか、ページにノートを追加してください。すべてのノートとハイライトがここに並びます。';
 
   @override
+  String get shellNotesLoading => 'ノートを読み込んでいます…';
+
+  @override
+  String get shellNotesMore => 'さらに表示';
+
+  @override
   String get shellBookmarksEmptyHeading => 'ブックマークはまだありません';
 
   @override

@@ -73,8 +73,11 @@ final class AnnotationRecords {
   Future<bool> updateNote(AnnotationOwner owner, String id, String body) =>
       _store.transaction((db) => _updateNote(db, owner, id, body));
 
-  Future<LibraryNotesPage> libraryNotes(int offset, int limit) =>
-      _store.read((db) => _libraryNotes(db, offset, limit));
+  Future<LibraryNotesPage> libraryNotes(
+    int offset,
+    int limit,
+    List<int>? after,
+  ) => _store.read((db) => _libraryNotes(db, offset, limit, after));
 
   Future<bool> delete(AnnotationOwner owner, String id) =>
       _store.transaction((db) => _delete(db, owner, id));
@@ -569,9 +572,16 @@ bool _updateNote(Database db, AnnotationOwner owner, String id, String body) {
   return true;
 }
 
-LibraryNotesPage _libraryNotes(Database db, int offset, int limit) {
+LibraryNotesPage _libraryNotes(
+  Database db,
+  int offset,
+  int limit,
+  List<int>? after,
+) {
   // Library books whose documents hold live annotations, in the library's
-  // recent order.
+  // recent order: from the first when the books before the page are checked
+  // in the same statement.
+  final from = after == null ? offset : 0;
   final books = db.select(
     '''SELECT $bookColumns,
          (SELECT v.document_id FROM annotation_document_versions v
@@ -583,12 +593,20 @@ LibraryNotesPage _libraryNotes(Database db, int offset, int limit) {
          WHERE dv.document_id = document AND a.deleted_at IS NULL)
        ORDER BY last_read DESC, date_added DESC, id DESC
        LIMIT ? OFFSET ?''',
-    [limit + 1, offset],
+    [offset - from + limit + 1, from],
   );
+  if (after != null) {
+    final before = [for (final row in books.take(offset)) row['id'] as int];
+    if (before.length != after.length ||
+        before.indexed.any((entry) => after[entry.$1] != entry.$2)) {
+      return const LibraryNotesPage.changed();
+    }
+  }
+  final page = books.skip(offset - from).toList();
   return LibraryNotesPage([
-    for (final row in books.take(limit))
+    for (final row in page.take(limit))
       BookNotes(bookFromRow(row), noteEntries(db, row['document'] as String)),
-  ], hasMore: books.length > limit);
+  ], hasMore: page.length > limit);
 }
 
 /// The live annotations of document [documentId] as the notes surfaces list
