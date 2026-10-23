@@ -171,12 +171,14 @@ final class _RelayoutIntent {
     required this.offset,
     required this.length,
     required this.replaceReadingOffset,
+    required this.epubEdge,
   });
 
   final int unit;
   final int? offset;
   final int? length;
   final bool replaceReadingOffset;
+  final EpubPositionEdge epubEdge;
 }
 
 /// The layout identity of one Dart-rendered EPUB chapter.

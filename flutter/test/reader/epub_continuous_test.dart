@@ -234,7 +234,10 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
     await settle(tester);
-    expect(dartPage(tester)!.unit, 0);
+    final previous = dartPage(tester)!;
+    expect(previous.unit, 0);
+    expect(previous.continuous, isTrue);
+    expect(previous.canonicalStart, 0);
 
     await closeReader(tester);
   });
