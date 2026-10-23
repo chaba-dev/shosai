@@ -2174,6 +2174,55 @@ void main() {
     });
   });
 
+  group('named entities', () {
+    test('resolves outside comments, CDATA and the DOCTYPE', () {
+      expect(
+        resolveNamedEntities(
+          '<!DOCTYPE html [<!ENTITY x "&nbsp;">]>'
+          '<p>a&nbsp;b&lt;c&#160;&unknown;</p>'
+          '<!-- &nbsp; --><![CDATA[&nbsp;]]>< &mdash;&amp',
+          [],
+        ),
+        '<!DOCTYPE html [<!ENTITY x "&nbsp;">]>'
+        '<p>a\u00a0b&lt;c&#160;&unknown;</p>'
+        '<!-- &nbsp; --><![CDATA[&nbsp;]]>< \u2014&amp',
+      );
+    });
+
+    test('a reference runs to the next semicolon, wherever it is', () {
+      const cases = {
+        '&nbsp foo; bar': '&nbsp foo; bar',
+        '&&nbsp;': '&&nbsp;',
+        '&oops &nbsp; &copy;': '&oops &nbsp; ©',
+        '&nbsp': '&nbsp',
+        '&nbsp;&copy;&lt;&mdash;': '\u00a0©&lt;\u2014',
+        'é&nbsp;😀&mdash;é': 'é\u00a0😀\u2014é',
+        'a < b &nbsp;': 'a < b \u00a0',
+        '<!-- &nbsp;': '<!-- &nbsp;',
+        '<![CDATA[&nbsp;': '<![CDATA[&nbsp;',
+        '<!DOCTYPE x [ &nbsp;': '<!DOCTYPE x [ &nbsp;',
+      };
+      for (final MapEntry(key: input, value: resolved) in cases.entries) {
+        expect(resolveNamedEntities(input, []), resolved, reason: input);
+      }
+    });
+
+    test('a long chapter full of references resolves quickly', () {
+      // Copying the rest of the chapter at every character took about 40 s
+      // on a chapter this size, and minutes on longer ones.
+      const count = 10000; // About 450 KB.
+      final xhtml = '<pre>a &lt; b &amp;&amp; c &gt; d&nbsp;e</pre>\n' * count;
+      final watch = Stopwatch()..start();
+      final resolved = resolveNamedEntities(xhtml, []);
+      watch.stop();
+      expect(
+        resolved,
+        '<pre>a &lt; b &amp;&amp; c &gt; d\u00a0e</pre>\n' * count,
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+  });
+
   group('fixtures', () {
     // The package lives under flutter/packages in the repository, but tests
     // must not depend on their own nesting depth: search upward for the

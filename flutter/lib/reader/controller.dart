@@ -51,6 +51,7 @@ final class ReaderController implements Listenable {
     ReaderExternalLinkOpener? externalLinkOpener,
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
+    ReaderPagesSink? pagesSink,
     ReaderNoticeReporter? noticeReporter,
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
@@ -94,6 +95,7 @@ final class ReaderController implements Listenable {
        _externalLinkOpener = externalLinkOpener ?? ((_) async {}),
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
+       _pagesSink = pagesSink ?? ((_) {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
        _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
        _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
@@ -140,6 +142,7 @@ final class ReaderController implements Listenable {
   final ReaderExternalLinkOpener _externalLinkOpener;
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
+  final ReaderPagesSink _pagesSink;
   final ReaderNoticeReporter _reportNotice;
   final EpubImageDecoder _epubImageDecoder;
   final EpubFontRegistrar _epubFontRegistrar;
@@ -1039,6 +1042,7 @@ final class ReaderController implements Listenable {
         pageImage: null,
         epubPage: null,
         pdfSpread: null,
+        pdfRightToLeft: false,
         readingPage: null,
         error: null,
         selectionSurface: null,
@@ -1312,6 +1316,7 @@ final class ReaderController implements Listenable {
     _emit(
       _model.copyWith(
         document: message.document,
+        pdfRightToLeft: message.pdfDocument?.rightToLeft ?? false,
         unit: message.unit,
         readingOffset: message.offset,
         bookmarks: message.bookmarks,
@@ -1607,7 +1612,13 @@ final class ReaderController implements Listenable {
       pdf.render(unit, scale),
       pdf.render(facing, scale),
     ], eagerError: true);
-    return (composePdfSpread(pages[0], pages[1]), scale);
+    // A right-to-left spread shows its first page on the right.
+    return (
+      pdf.rightToLeft
+          ? composePdfSpread(pages[1], pages[0])
+          : composePdfSpread(pages[0], pages[1]),
+      scale,
+    );
   }
 
   /// The page shown beside [unit] when [layout] reads in spreads: the next
@@ -1636,10 +1647,11 @@ final class ReaderController implements Listenable {
       pdf.selectionSurface(unit, scale),
       pdf.selectionSurface(facing, scale),
     ], eagerError: true);
-    final merged = mergePdfSpreadSurfaces(pages[0], pages[1]);
-    return (
-      surface: merged.surface,
-      spread: ReaderPdfSpread(facingUnit: facing, textShift: merged.textShift),
+    return mergePdfSpreadSurfaces(
+      pages[0],
+      pages[1],
+      facingUnit: facing,
+      rightToLeft: pdf.rightToLeft,
     );
   }
 
@@ -2512,7 +2524,11 @@ final class ReaderController implements Listenable {
     // The view decides whether two pages fit and reports the spread with the
     // viewport, which lays the page out again; the setting needs no relayout
     // of its own.
-    if (message.twoPages case final twoPages?) _typographyTwoPages = twoPages;
+    if (message.twoPages case final twoPages?
+        when twoPages != _typographyTwoPages) {
+      _typographyTwoPages = twoPages;
+      _pagesSink(twoPages);
+    }
     if (message.rasterFit case final fit?) {
       _rasterFit = fit;
       if (fit != ReaderRasterFit.manual) _rasterZoom = _baseScale;
@@ -5733,6 +5749,7 @@ final class ReaderController implements Listenable {
       // A PDF spread describes the released document's surface; a document
       // opened through the same controller starts without one.
       pdfSpread: null,
+      pdfRightToLeft: false,
       readingPage: null,
       selectionSurface: null,
       selectionPhase: ReaderSelectionPhase.idle,

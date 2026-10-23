@@ -84,16 +84,32 @@ class _StubLibraryBridge
     );
   }
 
-  @override
-  Future<FlutterReaderSettings> loadReaderSettings({
-    required BigInt cancellationId,
-  }) async => const FlutterReaderSettings(
+  FlutterReaderSettings storedSettings = const FlutterReaderSettings(
     continuous: false,
     theme: 'light',
     epubFontSize: 18,
     epubLineSpacing: 1.5,
     pdfZoom: 0,
   );
+  final savedSettings = <FlutterReaderSettings>[];
+
+  /// Holds each settings write's completion until it completes. The store
+  /// applies writes in the order they are made, as SQLite does.
+  Completer<void>? saveGate;
+
+  @override
+  Future<FlutterReaderSettings> loadReaderSettings({
+    required BigInt cancellationId,
+  }) async => storedSettings;
+
+  @override
+  Future<void> saveReaderSettings({
+    required FlutterReaderSettings value,
+  }) async {
+    savedSettings.add(value);
+    storedSettings = value;
+    await saveGate?.future;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -244,6 +260,140 @@ void main() {
     controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
     await _settle();
     expect(bridge.pages, hasLength(2));
+
+    // The order is saved with the settings.
+    expect(bridge.savedSettings.single.librarySort, FlutterLibrarySort.title);
+    expect(controller.model.settings?.librarySort, FlutterLibrarySort.title);
+    expect(controller.model.error, isNull);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('the first page lists the shelf in its saved order', () async {
+    final bridge = _StubLibraryBridge()
+      ..storedSettings = const FlutterReaderSettings(
+        continuous: false,
+        theme: 'light',
+        epubFontSize: 18,
+        epubLineSpacing: 1.5,
+        pdfZoom: 0,
+        librarySort: FlutterLibrarySort.author,
+      );
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    expect(bridge.sorts.single, FlutterLibrarySort.author);
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
+    );
+    await _settle();
+    expect(controller.model.sort, FlutterLibrarySort.author);
+
+    // The next page continues in that order.
+    controller.dispatch(const LibraryMoreRequested());
+    await _settle();
+    expect(bridge.sorts.last, FlutterLibrarySort.author);
+    expect(bridge.offsets.last, 1);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('an order chosen before the settings arrive is kept', () async {
+    final bridge = _StubLibraryBridge()
+      ..storedSettings = const FlutterReaderSettings(
+        continuous: false,
+        theme: 'light',
+        epubFontSize: 18,
+        epubLineSpacing: 1.5,
+        pdfZoom: 0,
+        librarySort: FlutterLibrarySort.author,
+      );
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
+    await _settle();
+    expect(bridge.sorts.last, FlutterLibrarySort.title);
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    expect(controller.model.sort, FlutterLibrarySort.title);
+    expect(controller.model.settings?.librarySort, FlutterLibrarySort.title);
+    // It is saved too, so the next start lists the shelf in it.
+    expect(bridge.storedSettings.librarySort, FlutterLibrarySort.title);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('changes made while the settings save are all kept', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (initial) async => initial.copyWith(theme: 'dark'),
+    );
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    // The dialog's write is still running when the order and the Pages
+    // setting change.
+    bridge.saveGate = Completer<void>();
+    controller.dispatch(const LibrarySettingsRequested());
+    await _settle();
+    controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
+    controller.dispatch(const LibraryPagesChanged(false));
+    await _settle();
+    bridge.saveGate!.complete();
+    await _settle();
+
+    const expected = (theme: 'dark', sort: FlutterLibrarySort.title);
+    for (final settings in [
+      bridge.storedSettings,
+      controller.model.settings!,
+    ]) {
+      expect((theme: settings.theme, sort: settings.librarySort), expected);
+      expect(settings.twoPages, isFalse);
+    }
+    expect(controller.model.error, isNull);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('the Pages setting is saved with the settings', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(bridge);
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    controller.dispatch(const LibraryPagesChanged(false));
+    await _settle();
+    expect(controller.model.settings?.twoPages, isFalse);
+    expect(bridge.savedSettings.single.twoPages, isFalse);
+
+    // The setting already in place is not saved again.
+    controller.dispatch(const LibraryPagesChanged(false));
+    await _settle();
+    expect(bridge.savedSettings, hasLength(1));
 
     controller.dispose();
     await _settle();

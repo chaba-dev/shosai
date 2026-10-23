@@ -88,9 +88,20 @@ void main() {
   });
 
   test('a merged surface puts the second page beside the first', () {
-    final merged = mergePdfSpreadSurfaces(_page('abc'), _page('de', width: 80));
+    final merged = mergePdfSpreadSurfaces(
+      _page('abc'),
+      _page('de', width: 80),
+      facingUnit: 2,
+    );
     final surface = merged.surface;
-    expect(merged.textShift, 4, reason: 'three characters and a line break');
+    expect(
+      merged.spread.textShift,
+      4,
+      reason: 'three characters and a line break',
+    );
+    expect(merged.spread.facingUnit, 2);
+    expect(merged.spread.firstLeft, 0);
+    expect(merged.spread.facingLeft, 100);
     expect(surface.text, 'abc\nde');
     expect(surface.width, 180);
     expect(surface.height, 200);
@@ -108,6 +119,44 @@ void main() {
     expect([for (final c in carets) c.offset.toInt()], [4, 5, 6]);
     expect([for (final c in carets) c.x], [100, 110, 120]);
     expect([for (final c in carets) c.alongLine], [100, 110, 120]);
+  });
+
+  test('a right-to-left surface puts the first page on the right', () {
+    final merged = mergePdfSpreadSurfaces(
+      _page('abc'),
+      _page('de', width: 80),
+      facingUnit: 2,
+      rightToLeft: true,
+    );
+    final surface = merged.surface;
+    expect(surface.text, 'abc\nde', reason: 'the first page still reads first');
+    expect(surface.width, 180);
+    expect(merged.spread.firstLeft, 80);
+    expect(merged.spread.facingLeft, 0);
+    expect(
+      [for (final e in surface.endpoints) e.rect.left],
+      [80, 90, 100, 0, 10],
+    );
+    expect(
+      [for (final e in surface.endpoints) e.offset.toInt()],
+      [0, 1, 2, 4, 5],
+    );
+    expect(
+      [for (final c in surface.visualLines.first.carets) c.x],
+      [80, 90, 100, 110],
+    );
+    expect([for (final c in surface.visualLines.last.carets) c.x], [0, 10, 20]);
+  });
+
+  test('a spread page\'s geometry moves to where the page lies', () {
+    const spread = ReaderPdfSpread(
+      facingUnit: 3,
+      textShift: 4,
+      firstLeft: 80,
+      facingLeft: 0,
+    );
+    expect(spread.leftOf(2, 2), 80);
+    expect(spread.leftOf(3, 2), 0);
   });
 
   test('spread offsets convert to each page\'s own', () {

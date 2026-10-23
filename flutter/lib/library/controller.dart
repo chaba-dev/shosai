@@ -75,6 +75,18 @@ class LibraryController implements Listenable {
   String? _displayedQuery;
   FlutterBookFormat? _displayedFormat;
   FlutterLibrarySort? _displayedSort;
+
+  /// Whether the shelf's order was chosen in this session, so the saved one
+  /// no longer applies.
+  bool _sortChosen = false;
+
+  /// Whether a settings write is running. Writes run one at a time, each
+  /// with the settings as they are when it starts: a change made meanwhile
+  /// sets [_settingsQueued] and is written next, and [_settingsNotify] says
+  /// whether a written change came from the settings dialog.
+  bool _settingsWriting = false;
+  bool _settingsQueued = false;
+  bool _settingsNotify = false;
   int? _stalledAppendOffset;
   bool _closing = false;
   bool _bridgeDisposed = false;
@@ -100,6 +112,7 @@ class LibraryController implements Listenable {
         message is! _LibraryCoverLoaded &&
         message is! _LibraryCoverFailed &&
         message is! _LibraryCoverEffectFinished &&
+        message is! _LibrarySettingsSaved &&
         message is! _LibraryCleanupStatusChanged) {
       return;
     }
@@ -168,9 +181,70 @@ class LibraryController implements Listenable {
         _load();
       case LibrarySortChanged():
         if (message.sort == _model.sort) return;
-        _emit(_model.copyWith(sort: message.sort, hasMore: false));
+        _sortChosen = true;
+        final settings = _model.settings?.copyWith(librarySort: message.sort);
+        _emit(
+          _model.copyWith(
+            sort: message.sort,
+            settings: settings ?? _model.settings,
+            hasMore: false,
+          ),
+        );
+        if (settings != null) _saveSettings();
         _loadRevision += 1;
         _load();
+      case LibraryPagesChanged():
+        final settings = _model.settings;
+        if (settings == null || settings.twoPages == message.twoPages) return;
+        _emit(
+          _model.copyWith(
+            settings: settings.copyWith(twoPages: message.twoPages),
+          ),
+        );
+        _saveSettings();
+      case _LibrarySettingsEdited():
+        // The dialog edits the display settings; the order and the Pages
+        // setting it opened with may have changed since.
+        final edited = message.settings;
+        _emit(
+          _model.copyWith(
+            settings: _model.settings!.copyWith(
+              continuous: edited.continuous,
+              theme: edited.theme,
+              epubFontSize: edited.epubFontSize,
+              epubLineSpacing: edited.epubLineSpacing,
+              pdfZoom: edited.pdfZoom,
+            ),
+          ),
+        );
+        _saveSettings(notify: true);
+      case _LibrarySettingsSaved():
+        _activeEffects -= 1;
+        _settingsWriting = false;
+        if (_settingsQueued) {
+          // The next write saves a newer change and reports for both.
+          _settingsNotify = _settingsNotify || message.notify;
+          _saveSettings();
+        } else if (!_closing) {
+          if (message.error case final error?) {
+            _emit(
+              _model.copyWith(error: error, failure: LibraryFailure.settings),
+            );
+          } else {
+            if (message.notify) {
+              _reportNotice(
+                const NoticeRequest(
+                  text: LibrarySettingsSavedNotice(),
+                  kind: NoticeKind.success,
+                ),
+              );
+            }
+            if (_model.failure == LibraryFailure.settings) {
+              _emit(_model.copyWith(error: null, failure: LibraryFailure.none));
+            }
+          }
+        }
+        _disposeBridgeIfIdle();
       case LibraryImportRequested():
         _import();
       case LibraryCoverRequested():
@@ -205,7 +279,7 @@ class LibraryController implements Listenable {
           if (!message.append) {
             _displayedQuery = _model.query;
             _displayedFormat = _model.format;
-            _displayedSort = _model.sort;
+            _displayedSort = message.sort;
             // A replacement load is a new collection: whatever offset stalled
             // before it is not this collection's.
             _stalledAppendOffset = null;
@@ -227,7 +301,11 @@ class LibraryController implements Listenable {
                       ]
                     : message.page.books.map(_withoutCover).toList(),
               ),
-              settings: message.settings ?? _model.settings,
+              // An order chosen while the settings loaded is the one kept.
+              settings:
+                  message.settings?.copyWith(librarySort: message.sort) ??
+                  _model.settings,
+              sort: message.sort,
               bookCount: message.page.bookCount,
               continueReading: switch (message.page.continueReading) {
                 final book? => _withoutCover(book),
@@ -242,6 +320,12 @@ class LibraryController implements Listenable {
               hasMore: message.page.hasMore,
             ),
           );
+          // An order chosen before the saved settings arrived is saved now
+          // that there are settings to save it with.
+          if (message.settings case final loaded?
+              when loaded.librarySort != message.sort) {
+            _saveSettings();
+          }
         }
       case _LibraryFailed():
         _releaseCancellation(message.cancellation);
@@ -277,7 +361,6 @@ class LibraryController implements Listenable {
         } else {
           _emit(
             _model.copyWith(
-              settings: message.settings ?? _model.settings,
               error: null,
               failure: LibraryFailure.none,
               managedFileDeletionPending:
@@ -427,6 +510,7 @@ class LibraryController implements Listenable {
     final query = _model.query;
     final format = _model.format;
     final sort = _model.sort;
+    final sortChosen = _sortChosen;
     final offset = append ? _model.books.length : 0;
     late final BigInt cancellation;
     try {
@@ -457,19 +541,31 @@ class LibraryController implements Listenable {
     _emit(_model.copyWith(loading: true, loadingMore: append));
     unawaited(() async {
       try {
+        final settings = _model.settings == null
+            ? await _records.loadReaderSettings(cancellationId: cancellation)
+            : null;
+        // The first page lists the shelf in its saved order, unless an order
+        // was chosen before the settings arrived.
+        final pageSort = settings != null && !sortChosen
+            ? settings.librarySort
+            : sort;
         final page = await _records.libraryPage(
           query: query,
           format: format,
-          sort: sort,
+          sort: pageSort,
           limit: libraryPageSize,
           offset: offset,
           cancellationId: cancellation,
         );
-        final settings = _model.settings == null
-            ? await _records.loadReaderSettings(cancellationId: cancellation)
-            : null;
         dispatch(
-          _LibraryLoaded(revision, page, settings, append, cancellation),
+          _LibraryLoaded(
+            revision,
+            page,
+            settings,
+            append,
+            cancellation,
+            pageSort,
+          ),
         );
       } catch (error) {
         dispatch(
@@ -655,22 +751,11 @@ class LibraryController implements Listenable {
     unawaited(() async {
       try {
         final settings = await _editSettings(initial);
-        if (settings == null) return;
-        if (!_ownsAdapter(adapterRevision)) return;
-        await _records.saveReaderSettings(value: settings);
-        dispatch(
-          _LibraryMutationCompleted(
-            failure: LibraryFailure.settings,
-            settings: settings,
-            // The write is authoritative: it has already persisted, and a
-            // concurrent load's cancellation does not supersede it, so its
-            // success feedback stands.
-            notice: const NoticeRequest(
-              text: LibrarySettingsSavedNotice(),
-              kind: NoticeKind.success,
-            ),
-          ),
-        );
+        // Once the dialog has closed, a concurrent load's cancellation does
+        // not supersede its change: the write and its feedback stand.
+        if (settings != null && _ownsAdapter(adapterRevision)) {
+          dispatch(_LibrarySettingsEdited(settings));
+        }
       } catch (error) {
         dispatch(
           _LibraryMutationCompleted(
@@ -681,6 +766,33 @@ class LibraryController implements Listenable {
       } finally {
         dispatch(const _LibraryEffectFinished());
       }
+    }());
+  }
+
+  /// Saves the model's settings in the background, after the write already
+  /// running if there is one. A change takes effect before it is saved; a
+  /// failed write reports as a settings failure unless a newer one follows,
+  /// and [notify] reports the settings dialog's success.
+  void _saveSettings({bool notify = false}) {
+    _settingsNotify = _settingsNotify || notify;
+    if (_settingsWriting) {
+      _settingsQueued = true;
+      return;
+    }
+    final settings = _model.settings!;
+    final reports = _settingsNotify;
+    _settingsWriting = true;
+    _settingsQueued = false;
+    _settingsNotify = false;
+    _activeEffects += 1;
+    unawaited(() async {
+      String? error;
+      try {
+        await _records.saveReaderSettings(value: settings);
+      } catch (caught) {
+        error = safeError(caught);
+      }
+      dispatch(_LibrarySettingsSaved(error, notify: reports));
     }());
   }
 

@@ -139,7 +139,7 @@ class _ReaderStage extends StatelessWidget {
     final edgeColor = phone && paper ? colors.foreground : palette.inkMuted;
     // A right-to-left book turns leftward: its next page is behind the left
     // margin. Each chevron still points away from the page.
-    final rightToLeft = model.epubPage?.rightToLeft ?? false;
+    final rightToLeft = model.rightToLeft;
     Widget edge(int delta, {required bool left}) => SizedBox(
       width: edgeWidth,
       child: Visibility(

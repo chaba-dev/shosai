@@ -614,7 +614,7 @@ class _ReaderStatusLine extends StatelessWidget {
                               ),
                             )
                           : null,
-                      rightToLeft: model.epubPage?.rightToLeft ?? false,
+                      rightToLeft: model.rightToLeft,
                       increasedValue: _unitStepValue(context, model, 1),
                       decreasedValue: _unitStepValue(context, model, -1),
                       onStep: total > 0 && !model.busy

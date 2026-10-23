@@ -406,6 +406,7 @@ final class ReaderModel {
     this.pageImage,
     this.epubPage,
     this.pdfSpread,
+    this.pdfRightToLeft = false,
     this.readingPage,
     this.locationRequestRevision = 0,
     FlutterSelectionSurface? selectionSurface,
@@ -485,6 +486,14 @@ final class ReaderModel {
   /// The second page shown beside [unit] when a PDF is read in spreads, or
   /// null for one page. [selectionSurface] and [pageImage] then span both.
   final ReaderPdfSpread? pdfSpread;
+
+  /// Whether the open PDF reads right to left (its viewer preferences say
+  /// `/Direction /R2L`).
+  final bool pdfRightToLeft;
+
+  /// Whether pages turn leftward: the next page is behind the left margin,
+  /// and a spread's first page is on the right.
+  bool get rightToLeft => epubPage?.rightToLeft ?? pdfRightToLeft;
 
   /// The page being read when a PDF is read in spreads: [unit] or the
   /// spread's second page. A place on the second page may have no offset (a
@@ -636,6 +645,7 @@ final class ReaderModel {
     Object? pageImage = _unchanged,
     Object? epubPage = _unchanged,
     Object? pdfSpread = _unchanged,
+    bool? pdfRightToLeft,
     Object? readingPage = _unchanged,
     int? locationRequestRevision,
     Object? selectionSurface = _unchanged,
@@ -702,6 +712,7 @@ final class ReaderModel {
       pdfSpread: identical(pdfSpread, _unchanged)
           ? this.pdfSpread
           : pdfSpread as ReaderPdfSpread?,
+      pdfRightToLeft: pdfRightToLeft ?? this.pdfRightToLeft,
       readingPage: identical(readingPage, _unchanged)
           ? this.readingPage
           : readingPage as int?,

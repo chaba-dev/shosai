@@ -2,11 +2,11 @@
 ///
 /// A spread pairs pages the way a printed book opens: the cover is shown
 /// alone, then (2, 3), (4, 5) and so on, so left pages are even and right
-/// pages odd. A last page without a partner is shown alone too. The reader keeps one surface and one
-/// raster for what it shows, so a spread is built as a single page: the second
-/// page's raster sits to the right of the first's, and its selection geometry
-/// and text follow the first page's, its offsets moved past the first page's
-/// text. Saved highlights and new ones convert between the spread's offsets
+/// pages odd. A last page without a partner is shown alone too. The reader
+/// keeps one surface and one raster for what it shows, so a spread is built as
+/// a single page: the second page's raster sits beside the first's (to its
+/// right, or to its left in a right-to-left document), and its text follows
+/// the first page's, its offsets moved past the first page's text. Saved highlights and new ones convert between the spread's offsets
 /// and each page's own with [ReaderPdfSpread].
 library;
 
@@ -38,7 +38,12 @@ int pdfSpreadStep(int page, int delta) {
 
 /// Where the second page of a spread lives in the spread's surface.
 final class ReaderPdfSpread {
-  const ReaderPdfSpread({required this.facingUnit, required this.textShift});
+  const ReaderPdfSpread({
+    required this.facingUnit,
+    required this.textShift,
+    this.firstLeft = 0,
+    this.facingLeft = 0,
+  });
 
   /// The second page's unit; the first is the reader's unit.
   final int facingUnit;
@@ -46,6 +51,21 @@ final class ReaderPdfSpread {
   /// The second page's offset 0 in the spread's text: the first page's text
   /// and a line break come before it.
   final int textShift;
+
+  /// Where the first page's left edge lies in the spread's surface.
+  final double firstLeft;
+
+  /// Where the second page's left edge lies in the spread's surface.
+  final double facingLeft;
+
+  /// Where [unit]'s left edge lies in the spread's surface, given the
+  /// spread's first unit: page geometry such as an area highlight moves
+  /// right by it.
+  double leftOf(int unit, int firstUnit) => unit == facingUnit
+      ? facingLeft
+      : unit == firstUnit
+      ? firstLeft
+      : 0;
 
   /// The unit that [offset] in the spread's surface belongs to, given the
   /// spread's first unit.
@@ -60,27 +80,35 @@ final class ReaderPdfSpread {
   bool operator ==(Object other) =>
       other is ReaderPdfSpread &&
       other.facingUnit == facingUnit &&
-      other.textShift == textShift;
+      other.textShift == textShift &&
+      other.firstLeft == firstLeft &&
+      other.facingLeft == facingLeft;
 
   @override
-  int get hashCode => Object.hash(facingUnit, textShift);
+  int get hashCode => Object.hash(facingUnit, textShift, firstLeft, facingLeft);
 }
 
-/// One surface for two pages laid side by side, [first] on the left.
-({FlutterSelectionSurface surface, int textShift}) mergePdfSpreadSurfaces(
+/// One surface for two pages laid side by side, [first] on the left, or on
+/// the right when [rightToLeft]. [first]'s text comes first either way.
+({FlutterSelectionSurface surface, ReaderPdfSpread spread})
+mergePdfSpreadSurfaces(
   FlutterSelectionSurface first,
-  FlutterSelectionSurface second,
-) {
+  FlutterSelectionSurface second, {
+  required int facingUnit,
+  bool rightToLeft = false,
+}) {
   final firstLength = first.text.runes.length;
   final shift = firstLength + 1;
-  final dx = first.width;
+  final firstLeft = rightToLeft ? second.width : 0.0;
+  final dx = rightToLeft ? 0.0 : first.width;
   final big = BigInt.from(shift);
-  FlutterSelectionRect moved(FlutterSelectionRect rect) => FlutterSelectionRect(
-    left: rect.left + dx,
-    top: rect.top,
-    right: rect.right + dx,
-    bottom: rect.bottom,
-  );
+  FlutterSelectionRect moved(FlutterSelectionRect rect, double dx) =>
+      FlutterSelectionRect(
+        left: rect.left + dx,
+        top: rect.top,
+        right: rect.right + dx,
+        bottom: rect.bottom,
+      );
   Uint32List boundaries(Uint32List left, Uint32List right) {
     final values = <int>{
       ...left,
@@ -99,13 +127,21 @@ final class ReaderPdfSpread {
       copyEligible: first.copyEligible && second.copyEligible,
       resourcePath: first.resourcePath,
       endpoints: [
-        ...first.endpoints,
+        for (final endpoint in first.endpoints)
+          firstLeft == 0
+              ? endpoint
+              : FlutterSelectionEndpoint(
+                  offset: endpoint.offset,
+                  rangeStart: endpoint.rangeStart,
+                  rangeEnd: endpoint.rangeEnd,
+                  rect: moved(endpoint.rect, firstLeft),
+                ),
         for (final endpoint in second.endpoints)
           FlutterSelectionEndpoint(
             offset: endpoint.offset + big,
             rangeStart: endpoint.rangeStart + big,
             rangeEnd: endpoint.rangeEnd + big,
-            rect: moved(endpoint.rect),
+            rect: moved(endpoint.rect, dx),
           ),
       ],
       graphemeBoundaries: boundaries(
@@ -114,28 +150,38 @@ final class ReaderPdfSpread {
       ),
       wordBoundaries: boundaries(first.wordBoundaries, second.wordBoundaries),
       visualLines: [
-        ...first.visualLines,
-        for (final line in second.visualLines)
-          FlutterSelectionVisualLine(
-            carets: [
-              for (final caret in line.carets)
-                FlutterSelectionCaret(
-                  offset: caret.offset + big,
-                  x: caret.x + dx,
-                  alongLine: caret.vertical
-                      ? caret.alongLine
-                      : caret.alongLine + dx,
-                  vertical: caret.vertical,
-                  top: caret.top,
-                  bottom: caret.bottom,
-                ),
-            ],
-          ),
+        for (final line in first.visualLines)
+          firstLeft == 0 ? line : _movedLine(line, BigInt.zero, firstLeft),
+        for (final line in second.visualLines) _movedLine(line, big, dx),
       ],
     ),
-    textShift: shift,
+    spread: ReaderPdfSpread(
+      facingUnit: facingUnit,
+      textShift: shift,
+      firstLeft: firstLeft,
+      facingLeft: dx,
+    ),
   );
 }
+
+/// [line] with its offsets moved by [shift] and its carets right by [dx].
+FlutterSelectionVisualLine _movedLine(
+  FlutterSelectionVisualLine line,
+  BigInt shift,
+  double dx,
+) => FlutterSelectionVisualLine(
+  carets: [
+    for (final caret in line.carets)
+      FlutterSelectionCaret(
+        offset: caret.offset + shift,
+        x: caret.x + dx,
+        alongLine: caret.vertical ? caret.alongLine : caret.alongLine + dx,
+        vertical: caret.vertical,
+        top: caret.top,
+        bottom: caret.bottom,
+      ),
+  ],
+);
 
 /// The bitmap size of a spread of two pages of [first] and [second] pixels,
 /// side by side.

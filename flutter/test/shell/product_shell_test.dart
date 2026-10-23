@@ -29,6 +29,7 @@ Widget _reader(
   void Function(String path, int? bookId) locatorChanged,
   ReaderNoticeReporter _,
   Widget openBooksAction,
+  void Function(bool twoPages) _,
 ) => Scaffold(
   body: Column(
     children: [
@@ -182,6 +183,7 @@ void main() {
             locatorChanged,
             notices,
             openBooks,
+            pagesChanged,
           ) => _MountCounter(
             child: _reader(
               bridge,
@@ -192,6 +194,7 @@ void main() {
               locatorChanged,
               notices,
               openBooks,
+              pagesChanged,
             ),
           ),
     );

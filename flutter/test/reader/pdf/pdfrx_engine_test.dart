@@ -6,6 +6,36 @@ import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 const _fixture = '../fixtures/sample.pdf';
 
+/// A one-page PDF whose catalog carries [catalogExtra], written to a
+/// temporary file.
+Future<String> _pdfWith(String catalogExtra) async {
+  final objects = [
+    '<< /Type /Catalog /Pages 2 0 R $catalogExtra >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>',
+  ];
+  final pdf = StringBuffer('%PDF-1.7\n');
+  final offsets = <int>[];
+  for (var index = 0; index < objects.length; index += 1) {
+    offsets.add(pdf.length);
+    pdf.write('${index + 1} 0 obj\n${objects[index]}\nendobj\n');
+  }
+  final xref = pdf.length;
+  pdf.write('xref\n0 ${objects.length + 1}\n0000000000 65535 f \n');
+  for (final offset in offsets) {
+    pdf.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  pdf.write(
+    'trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n'
+    'startxref\n$xref\n%%EOF\n',
+  );
+  final directory = await Directory.systemTemp.createTemp('shosai-pdf-');
+  addTearDown(() => directory.delete(recursive: true));
+  final file = File('${directory.path}/direction.pdf');
+  await file.writeAsString(pdf.toString());
+  return file.path;
+}
+
 void main() {
   final engine = PdfrxPdfEngine();
 
@@ -84,6 +114,24 @@ void main() {
     final outline = await document.outline();
     final links = await document.links(0);
     stdout.writeln('OUTLINE: ${outline.length} LINKS: ${links.length}');
+  });
+
+  test('reads the viewer preferences\' direction', () async {
+    final rightToLeft = await engine.open(
+      await _pdfWith('/ViewerPreferences << /Direction /R2L >>'),
+    );
+    addTearDown(rightToLeft.dispose);
+    expect(rightToLeft.rightToLeft, isTrue);
+
+    final leftToRight = await engine.open(
+      await _pdfWith('/ViewerPreferences << /Direction /L2R >>'),
+    );
+    addTearDown(leftToRight.dispose);
+    expect(leftToRight.rightToLeft, isFalse);
+
+    final undeclared = await engine.open(_fixture);
+    addTearDown(undeclared.dispose);
+    expect(undeclared.rightToLeft, isFalse);
   });
 
   test('a missing file fails to open with a clear error', () async {

@@ -55,6 +55,12 @@ final class LibrarySortChanged extends LibraryMessage {
   final FlutterLibrarySort sort;
 }
 
+/// The reader's Pages setting changed: two pages side by side, or one.
+final class LibraryPagesChanged extends LibraryMessage {
+  const LibraryPagesChanged(this.twoPages);
+  final bool twoPages;
+}
+
 final class LibraryImportRequested extends LibraryMessage {
   const LibraryImportRequested();
 }
@@ -89,12 +95,32 @@ final class _LibraryLoaded extends LibraryMessage {
     this.settings,
     this.append,
     this.cancellation,
+    this.sort,
   );
   final int revision;
   final FlutterLibraryPage page;
   final FlutterReaderSettings? settings;
   final bool append;
   final BigInt cancellation;
+
+  /// The order [page] is listed in.
+  final FlutterLibrarySort sort;
+}
+
+/// The settings dialog closed with [settings].
+final class _LibrarySettingsEdited extends LibraryMessage {
+  const _LibrarySettingsEdited(this.settings);
+  final FlutterReaderSettings settings;
+}
+
+/// A settings write finished, with its error if it failed.
+final class _LibrarySettingsSaved extends LibraryMessage {
+  const _LibrarySettingsSaved(this.error, {required this.notify});
+  final String? error;
+
+  /// Whether the write carried a change from the settings dialog, whose
+  /// success is reported.
+  final bool notify;
 }
 
 final class _LibraryFailed extends LibraryMessage {
@@ -123,7 +149,6 @@ final class _LibraryMutationCompleted extends LibraryMessage {
   const _LibraryMutationCompleted({
     required this.failure,
     this.error,
-    this.settings,
     this.cancellation,
     this.refresh = false,
     this.managedFileDeletionPending = false,
@@ -131,7 +156,6 @@ final class _LibraryMutationCompleted extends LibraryMessage {
   });
   final LibraryFailure failure;
   final String? error;
-  final FlutterReaderSettings? settings;
   final BigInt? cancellation;
   final bool refresh;
   final bool managedFileDeletionPending;
