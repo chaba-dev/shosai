@@ -365,6 +365,37 @@ void main() {
     );
   });
 
+  test('text-orientation: upright stands each Latin letter and digit up in '
+      'an em of its own', () {
+    final runs = uprightWidths([
+      EpubTextSpan(text: '西暦'),
+      EpubTextSpan(text: '1905年', orientation: EpubTextOrientation.upright),
+    ]);
+    expect(
+      [for (final run in runs) (run.$1, run.$3)],
+      [
+        ('西暦', false),
+        ('1', true),
+        ('9', true),
+        ('0', true),
+        ('5', true),
+        ('年', false),
+      ],
+    );
+    for (final run in runs.where((run) => run.$3)) {
+      expect(run.$2, closeTo(18, 0.01), reason: run.$1);
+    }
+  });
+
+  test('text-orientation: sideways turns kanji and kana with the line', () {
+    final runs = uprightWidths([
+      EpubTextSpan(text: '吾輩は'),
+      EpubTextSpan(text: '猫', orientation: EpubTextOrientation.sideways),
+      EpubTextSpan(text: 'である'),
+    ]);
+    expect([for (final run in runs) run.$1], ['吾輩は', 'である']);
+  });
+
   test('text-combine-upright: digits keeps a keycap or a marked digit whole, '
       'so the laid-out text stays the mapped text', () {
     final built = buildBlockText(
