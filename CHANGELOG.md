@@ -128,6 +128,7 @@ All notable changes to this project will be documented in this file.
 - Packaged-host fixes from the Linux and macOS release checks (#165)
 - *(reader)* Step the progress track a whole spread in a PDF read in spreads (#205)
 - *(library)* Show the reader a settings change it could not save (#206)
+- *(app)* Show the app as Shōsai, and Shōsai Dev for test builds (#219)
 
 ### 🚜 Refactor
 
