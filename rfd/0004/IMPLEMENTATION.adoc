@@ -87,7 +87,9 @@ setting that is saved; one page where two do not fit (PR #180).
 * [ ] RFD 6 selection, highlights and notes in both formats.
 * [x] EPUB writing direction from the spine's page progression and CSS
 `writing-mode`, including vertical Japanese text; horizontal when undeclared
-(PRs #181 and #182), with tate-chū-yoko (PR #186) and ruby (PR #189).
+(PRs #181 and #182), with tate-chū-yoko (PR #186), ruby (PR #189) and its
+second level `<rtc>` (PR #212), emphasis marks (PR #211), and line spacing that
+makes room for them (PR #207).
 * [x] PDF pages re-rendered at the current zoom and display density (PR #179).
 
 === 3. Notes and search
