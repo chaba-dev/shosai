@@ -2375,6 +2375,228 @@ void main() {
     });
   });
 
+  group('text-emphasis', () {
+    List<(String, EpubTextEmphasis?)> emphasisOf(
+      String body, [
+      String sheet = '',
+    ]) {
+      final chapter = normalizeChapter(
+        xhtml: '<html><body>$body</body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: [CssStylesheet.parse(sheet, const EpubLimits())],
+        limits: const EpubLimits(),
+      );
+      return [
+        for (final span in (chapter.nodes.single as EpubParagraph).spans)
+          (span.text, span.emphasis),
+      ];
+    }
+
+    EpubTextEmphasis? marked(String declaration) => emphasisOf(
+      '<p>甲<span class="e">乙</span>丙</p>',
+      '.e { $declaration }',
+    ).firstWhere((span) => span.$1.contains('乙')).$2;
+
+    test('every spelling and keyword of the style is read', () {
+      for (final (declaration, expected) in [
+        (
+          'text-emphasis-style: filled sesame',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.sesame),
+        ),
+        (
+          '-epub-text-emphasis-style: open dot',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.dot, filled: false),
+        ),
+        (
+          '-webkit-text-emphasis-style: double-circle',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.doubleCircle),
+        ),
+        ('text-emphasis-style: open', const EpubTextEmphasis(filled: false)),
+        (
+          'text-emphasis-style: triangle filled',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.triangle),
+        ),
+        ('text-emphasis-style: "＊"', const EpubTextEmphasis(string: '＊')),
+        ("text-emphasis-style: '※※'", const EpubTextEmphasis(string: '※')),
+        (r'text-emphasis-style: "\25B2"', const EpubTextEmphasis(string: '▲')),
+        (
+          r'''text-emphasis-style: '\'' ''',
+          const EpubTextEmphasis(string: "'"),
+        ),
+        (
+          'text-emphasis: filled circle #333',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.circle),
+        ),
+        (
+          '-webkit-text-emphasis: red sesame',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.sesame),
+        ),
+        ('text-emphasis: red', null),
+        ('text-emphasis-style: none', null),
+        ('text-emphasis-style: bogus', null),
+        ('text-emphasis-style: filled open', null),
+        ('text-emphasis-style: "x" dot', null),
+      ]) {
+        expect(marked(declaration), expected, reason: declaration);
+      }
+    });
+
+    test(
+      'invalid shorthand and position declarations leave inherited values',
+      () {
+        for (final declaration in [
+          'text-emphasis: nonsense',
+          'text-emphasis: dot nonsense',
+          'text-emphasis: none dot',
+          'text-emphasis: dot rgb(nonsense)',
+          'text-emphasis: dot color-mix(in srgb, red, blue)',
+          'text-emphasis: dot rgb(10%, 20, 30)',
+          'text-emphasis: dot hsl(10, 20, 30)',
+          'text-emphasis: dot rgb(none, 0, 0)',
+          'text-emphasis: dot rgb(1. 2 3)',
+          'text-emphasis-position: under under',
+          'text-emphasis-position: over right right',
+        ]) {
+          final spans = emphasisOf(
+            '<p style="text-emphasis: open sesame; '
+                'text-emphasis-position: under left">甲<span class="e">乙</span>'
+                '</p>',
+            '.e { $declaration }',
+          );
+          expect(
+            spans.last.$2,
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              filled: false,
+              under: true,
+              left: true,
+            ),
+            reason: declaration,
+          );
+        }
+      },
+    );
+
+    test('none plus a color resets inherited emphasis', () {
+      final spans = emphasisOf(
+        '<p style="text-emphasis: open sesame">甲<span class="e">乙</span>'
+            '</p>',
+        '.e { text-emphasis: none red }',
+      );
+      expect(spans.last.$2, isNull);
+    });
+
+    test(
+      'valid shorthand colors are accepted without changing palette ink',
+      () {
+        for (final color in [
+          'rebeccapurple',
+          '#1234',
+          'rgb(10 20 30 / 40%)',
+          'hsl(10 20 30)',
+          'hsl(10 20% 30)',
+        ]) {
+          expect(
+            marked('text-emphasis: dot $color'),
+            const EpubTextEmphasis(shape: EpubEmphasisShape.dot),
+            reason: color,
+          );
+        }
+      },
+    );
+
+    test('the position is read with the style', () {
+      for (final (position, under, left) in [
+        ('over right', false, false),
+        ('under right', true, false),
+        ('over left', false, true),
+        ('left under', true, true),
+        ('under', true, false),
+        ('bogus', false, false),
+        ('over under', false, false),
+        ('right', false, false),
+      ]) {
+        for (final property in [
+          'text-emphasis-position',
+          '-epub-text-emphasis-position',
+          '-webkit-text-emphasis-position',
+        ]) {
+          expect(
+            marked('text-emphasis-style: dot; $property: $position'),
+            EpubTextEmphasis(
+              shape: EpubEmphasisShape.dot,
+              under: under,
+              left: left,
+            ),
+            reason: '$property: $position',
+          );
+        }
+      }
+    });
+
+    test('the style and position are inherited, and a different one splits '
+        'the text', () {
+      expect(
+        emphasisOf(
+          '<p style="text-emphasis-style: sesame; '
+          'text-emphasis-position: under left">甲<b>乙</b><span '
+          'style="text-emphasis-style: none">丙</span>丁</p>',
+        ),
+        [
+          (
+            '甲',
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              under: true,
+              left: true,
+            ),
+          ),
+          (
+            '乙',
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              under: true,
+              left: true,
+            ),
+          ),
+          ('丙', null),
+          (
+            '丁',
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              under: true,
+              left: true,
+            ),
+          ),
+        ],
+      );
+      // Spans that differ only in emphasis do not merge.
+      expect(
+        emphasisOf(
+          '<p>甲<span style="text-emphasis-style: dot">乙</span>丙</p>',
+        ).map((span) => span.$1),
+        ['甲', '乙', '丙'],
+      );
+    });
+
+    test('the shape follows the writing mode when none is given', () {
+      expect(
+        const EpubTextEmphasis().shapeIn(vertical: true),
+        EpubEmphasisShape.sesame,
+      );
+      expect(
+        const EpubTextEmphasis(filled: false).shapeIn(vertical: false),
+        EpubEmphasisShape.circle,
+      );
+      expect(
+        const EpubTextEmphasis(
+          shape: EpubEmphasisShape.dot,
+        ).shapeIn(vertical: true),
+        EpubEmphasisShape.dot,
+      );
+    });
+  });
+
   group('ruby', () {
     ({List<EpubContentNode> blocks, String canonicalText}) chapterOf(
       String body,
@@ -2461,14 +2683,17 @@ void main() {
       );
     });
 
-    test('nested ruby keeps every annotation out of the text', () {
+    test('nested ruby puts its outer annotation on the other level', () {
       final parsed = parsedOf(
         '<p><ruby><ruby>猫<rt>ねこ</rt></ruby><rt>cat</rt></ruby></p>',
       );
       expect(parsed.text, '猫\n');
       expect(
-        [for (final span in parsed.spans) (span.text, span.ruby)],
-        [('猫', 'ねこ')],
+        [
+          for (final span in parsed.spans)
+            (span.text, span.ruby, span.rubyUnder),
+        ],
+        [('猫', 'ねこ', 'cat')],
       );
       expect(
         parsedOf(
@@ -2552,11 +2777,67 @@ void main() {
       ]);
     });
 
-    test('a second annotation level is not drawn', () {
+    List<(String, String?, String?)> levelsOf(String body) => [
+      for (final span in (chapterOf(body).blocks.single as EpubParagraph).spans)
+        (span.text, span.ruby, span.rubyUnder),
+    ];
+
+    test('an rtc is a second level, set under the bases', () {
       expect(
-        rubyOf('<p><ruby>旧<rt>きゅう</rt><rtc><rt>old</rt></rtc></ruby></p>'),
-        [('旧', 'きゅう')],
+        levelsOf('<p><ruby>旧<rt>きゅう</rt><rtc><rt>old</rt></rtc></ruby></p>'),
+        [('旧', 'きゅう', 'old')],
       );
+      // An rtc on its own is the first level.
+      expect(levelsOf('<p><ruby>旧<rtc>きゅう</rtc></ruby></p>'), [
+        ('旧', 'きゅう', null),
+      ]);
+      // A third level is not drawn.
+      expect(
+        levelsOf(
+          '<p><ruby>旧<rt>きゅう</rt><rtc>old</rtc><rtc>alt</rtc></ruby></p>',
+        ),
+        [('旧', 'きゅう', 'old')],
+      );
+    });
+
+    test('an rtc\'s rts pair with the bases, and its own text spans them', () {
+      expect(
+        levelsOf(
+          '<p><ruby><rb>東</rb><rb>京</rb><rt>とう</rt><rt>きょう</rt>'
+          '<rtc><rt>East</rt><rt>capital</rt></rtc></ruby></p>',
+        ),
+        [('東', 'とう', 'East'), ('京', 'きょう', 'capital')],
+      );
+      final parsed = chapterOf(
+        '<p><ruby><rb>東</rb><rb>京</rb><rt>とう</rt><rt>きょう</rt>'
+        '<rtc> Tō<rp>(</rp>kyō </rtc></ruby>都</p>',
+      );
+      expect(
+        [
+          for (final span in (parsed.blocks.single as EpubParagraph).spans)
+            (span.text, span.ruby, span.rubyUnder, span.rubyUnderContinued),
+        ],
+        [
+          ('東', 'とう', 'Tōkyō', false),
+          ('京', 'きょう', null, true),
+          ('都', null, null, false),
+        ],
+      );
+      expect(parsed.canonicalText.trim(), '東京都');
+    });
+
+    test('each segment pairs its own levels', () {
+      expect(
+        levelsOf(
+          '<p><ruby>東<rt>とう</rt><rtc>east</rtc>京<rt>きょう</rt>'
+          '<rtc>capital</rtc></ruby></p>',
+        ),
+        [('東', 'とう', 'east'), ('京', 'きょう', 'capital')],
+      );
+      // An rtc before any rt is the first level, and rts after it the second.
+      expect(levelsOf('<p><ruby>旧<rtc>old</rtc><rt>きゅう</rt></ruby></p>'), [
+        ('旧', 'old', 'きゅう'),
+      ]);
     });
 
     test('a table cell keeps the base and drops the annotation', () {

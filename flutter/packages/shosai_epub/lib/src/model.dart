@@ -59,6 +59,71 @@ class EpubTextCombine {
   String toString() => all ? 'all' : 'digits $digits';
 }
 
+/// The shape of an emphasis mark, from CSS `text-emphasis-style`.
+enum EpubEmphasisShape { dot, circle, doubleCircle, triangle, sesame }
+
+/// Emphasis marks (傍点, 圏点): a small mark set beside each character, from
+/// CSS `text-emphasis-style` and `text-emphasis-position` (or their `-epub-`
+/// and `-webkit-` spellings, and the `text-emphasis` shorthand). Their colour
+/// is the text's: the reader's palette owns ink.
+class EpubTextEmphasis {
+  const EpubTextEmphasis({
+    this.shape,
+    this.filled = true,
+    this.string,
+    this.under = false,
+    this.left = false,
+  });
+
+  /// The mark's shape, or null for the writing mode's own: sesame in a
+  /// vertical line, a circle in a horizontal one.
+  final EpubEmphasisShape? shape;
+
+  /// Whether the shape is solid (`filled`) or drawn in outline (`open`).
+  final bool filled;
+
+  /// The mark an author gave as a string, instead of a shape.
+  final String? string;
+
+  /// Whether a horizontal line sets the marks under it instead of over it.
+  final bool under;
+
+  /// Whether a vertical line sets the marks to its left instead of its right.
+  final bool left;
+
+  /// The shape a line draws, when the mark is not a [string]: [vertical]
+  /// decides the default.
+  EpubEmphasisShape shapeIn({required bool vertical}) =>
+      shape ?? (vertical ? EpubEmphasisShape.sesame : EpubEmphasisShape.circle);
+
+  EpubTextEmphasis at({required bool under, required bool left}) =>
+      EpubTextEmphasis(
+        shape: shape,
+        filled: filled,
+        string: string,
+        under: under,
+        left: left,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is EpubTextEmphasis &&
+      other.shape == shape &&
+      other.filled == filled &&
+      other.string == string &&
+      other.under == under &&
+      other.left == left;
+
+  @override
+  int get hashCode => Object.hash(shape, filled, string, under, left);
+
+  @override
+  String toString() => string != null
+      ? '"$string"'
+      : '${filled ? 'filled' : 'open'} ${shape?.name ?? 'default'}'
+            '${under ? ' under' : ''}${left ? ' left' : ''}';
+}
+
 enum EpubFontStyle { normal, italic }
 
 enum EpubFontWeight { normal, bold }
@@ -161,7 +226,10 @@ class EpubTextSpan {
     this.combine,
     this.ruby,
     this.rubyContinued = false,
+    this.rubyUnder,
+    this.rubyUnderContinued = false,
     this.orientation = EpubTextOrientation.mixed,
+    this.emphasis,
   });
 
   String text;
@@ -190,6 +258,9 @@ class EpubTextSpan {
   /// How a vertical line sets this span's characters.
   EpubTextOrientation orientation;
 
+  /// The emphasis marks set beside this span's characters, or null.
+  EpubTextEmphasis? emphasis;
+
   /// The ruby annotation (furigana) set beside this span's text, from the
   /// `<rt>` of a `<ruby>` element. It is not part of the canonical stream:
   /// search, copy and offsets see the base text only. A span with ruby never
@@ -202,6 +273,15 @@ class EpubTextSpan {
 
   /// Whether this span continues the ruby base of the span before it.
   bool rubyContinued;
+
+  /// A second ruby annotation, set under this span's text (to its left in a
+  /// vertical line), from an `<rtc>`. Its base is grouped as [ruby]'s is,
+  /// with [rubyUnderContinued], and can span several of the first level's
+  /// bases.
+  String? rubyUnder;
+
+  /// Whether this span continues the second-level ruby base before it.
+  bool rubyUnderContinued;
 
   /// Element ids/legacy anchor names that resolve to this span's start.
   List<String> anchorIds = const [];
@@ -231,7 +311,10 @@ class EpubTextSpan {
     combine: combine,
     ruby: ruby,
     rubyContinued: rubyContinued,
+    rubyUnder: rubyUnder,
+    rubyUnderContinued: rubyUnderContinued,
     orientation: orientation,
+    emphasis: emphasis,
   );
 }
 

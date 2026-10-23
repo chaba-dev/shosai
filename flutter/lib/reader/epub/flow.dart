@@ -66,6 +66,7 @@ class FlowTextBlock {
     required this.textDirection,
     this.redrawn = const [],
     this.rubies = const [],
+    this.emphasis = const [],
   });
 
   final TextPainter painter;
@@ -83,8 +84,11 @@ class FlowTextBlock {
   /// spaced out under a longer annotation.
   final List<RedrawnRun> redrawn;
 
-  /// The ruby annotations [paint] sets over their bases.
+  /// The ruby annotations [paint] sets beside their bases.
   final List<RubyRun> rubies;
+
+  /// The emphasis marks [paint] sets beside their characters.
+  final List<EmphasisRun> emphasis;
 
   /// The redrawn glyphs of each line, measured when the line is first painted.
   final Map<int, List<_RedrawnGlyph>> _redrawnLines = {};
@@ -95,6 +99,14 @@ class FlowTextBlock {
 
   /// Each ruby annotation, laid out and placed when it is first painted.
   final Map<int, ({Offset origin, FlowTextBlock text})?> _placedRubies = {};
+
+  /// Where each emphasis run's marks stand, the centres of their half-em
+  /// squares, and a string mark laid out, when the run is first painted.
+  final Map<
+    int,
+    ({FlowTextBlock? string, List<({int start, Offset center})> at})
+  >
+  _placedEmphasis = {};
 
   double get width => painter.width;
   double get height => painter.height;
@@ -163,13 +175,38 @@ class FlowTextBlock {
 
   /// Paints the ruby of the lines [lineStart] to [lineEnd], each annotation
   /// centred over its base's box, above the line (to its right on a vertical
-  /// page). A base broken across lines takes its ruby on its first line.
+  /// page), or below it (to its left) for a second level. A base broken
+  /// across lines takes its ruby on its first line.
+  ///
+  /// The emphasis marks of those lines are painted with it, beside each
+  /// character, outside a ruby annotation on the same side.
   void paintRuby(Canvas canvas, {int lineStart = 0, int? lineEnd}) {
-    if (rubies.isEmpty) return;
+    if (rubies.isEmpty && emphasis.isEmpty) return;
     final end = math.min(lineEnd ?? lines.length, lines.length);
     if (lineStart >= end) return;
     final from = lines[lineStart].codeUnitStart;
     final to = lines[end - 1].codeUnitEnd;
+    for (var index = 0; index < emphasis.length; index++) {
+      final run = emphasis[index];
+      if (run.characters.last.start < from) continue;
+      if (run.characters.first.start >= to) break;
+      final placed = _placedEmphasis[index] ??= _placeEmphasis(run);
+      for (final character in placed.at) {
+        if (character.start < from || character.start >= to) continue;
+        final string = placed.string;
+        if (string != null) {
+          canvas.save();
+          canvas.translate(
+            character.center.dx - string.width / 2,
+            character.center.dy - string.height / 2,
+          );
+          string.paint(canvas);
+          canvas.restore();
+        } else {
+          _paintEmphasisShape(canvas, character.center, run);
+        }
+      }
+    }
     for (var index = 0; index < rubies.length; index++) {
       final ruby = rubies[index];
       if (ruby.start < from) continue;
@@ -185,24 +222,132 @@ class FlowTextBlock {
     }
   }
 
-  ({Offset origin, FlowTextBlock text})? _placeRuby(RubyRun ruby) {
-    final boxes = painter.getBoxesForSelection(
-      TextSelection(baseOffset: ruby.start, extentOffset: ruby.end),
-    );
-    if (boxes.isEmpty) return null;
-    final first = boxes.first.toRect();
-    var base = first;
-    for (final box in boxes.skip(1)) {
-      final rect = box.toRect();
-      if ((rect.top - first.top).abs() > first.height / 2) continue;
-      base = base.expandToInclude(rect);
+  /// Test-only: where each ruby annotation's top-left corner stands, as
+  /// [paintRuby] places it, or null for one with no base box.
+  List<Offset?> debugRubyOrigins() => [
+    for (var index = 0; index < rubies.length; index++)
+      (_placedRubies.containsKey(index)
+              ? _placedRubies[index]
+              : _placedRubies[index] = _placeRuby(rubies[index]))
+          ?.origin,
+  ];
+
+  /// Test-only: where the marks of the emphasis run [index] stand, the
+  /// centres [paintRuby] draws them on.
+  List<Offset> debugEmphasisCentres(int index) => [
+    for (final character in (_placedEmphasis[index] ??= _placeEmphasis(
+      emphasis[index],
+    )).at)
+      character.center,
+  ];
+
+  ({FlowTextBlock? string, List<({int start, Offset center})> at})
+  _placeEmphasis(EmphasisRun run) {
+    final half = run.baseSize * rubyScale / 2;
+    final at = <({int start, Offset center})>[];
+    for (final character in run.characters) {
+      final boxes = painter.getBoxesForSelection(
+        TextSelection(baseOffset: character.start, extentOffset: character.end),
+      );
+      if (boxes.isEmpty) continue;
+      final box = boxes.first.toRect();
+      // A tate-chū-yoko run's later characters take no room of their own:
+      // the run is one character, with one mark.
+      if (box.width < 0.01) continue;
+      // A mark on the side of a ruby annotation stands outside it.
+      var clear = 0.0;
+      for (var index = 0; index < rubies.length; index++) {
+        final ruby = rubies[index];
+        if (ruby.start > character.start) break;
+        if (character.start >= ruby.end || ruby.under != run.under) continue;
+        final annotation = _placedRubies.containsKey(index)
+            ? _placedRubies[index]
+            : _placedRubies[index] = _placeRuby(ruby);
+        clear = annotation?.text.height ?? 0;
+        break;
+      }
+      at.add((
+        start: character.start,
+        center: Offset(
+          box.center.dx,
+          run.under
+              ? box.center.dy + run.baseSize / 2 + clear + half
+              : box.center.dy - run.baseSize / 2 - clear - half,
+        ),
+      ));
     }
-    final annotation = ruby.annotation;
+    final string = run.string;
+    return (string: string == null ? null : _annotationBlock(string), at: at);
+  }
+
+  /// Draws [run]'s shape on the half-em square centred on [center], upright
+  /// on the page: turned back on a vertical block's turned canvas.
+  static void _paintEmphasisShape(
+    Canvas canvas,
+    Offset center,
+    EmphasisRun run,
+  ) {
+    final paint = Paint()
+      ..color = run.color
+      ..style = run.filled ? PaintingStyle.fill : PaintingStyle.stroke
+      ..strokeWidth = 0.16
+      ..strokeJoin = StrokeJoin.round;
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    if (run.vertical) canvas.rotate(-math.pi / 2);
+    // The shapes are drawn on a square two units across.
+    final unit = run.baseSize * rubyScale / 2;
+    canvas.scale(unit);
+    switch (run.shape) {
+      case EpubEmphasisShape.dot:
+        canvas.drawCircle(Offset.zero, run.filled ? 0.28 : 0.24, paint);
+      case EpubEmphasisShape.circle:
+        canvas.drawCircle(Offset.zero, run.filled ? 0.62 : 0.56, paint);
+      case EpubEmphasisShape.doubleCircle:
+        canvas.drawCircle(
+          Offset.zero,
+          0.62,
+          Paint()
+            ..color = run.color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.16,
+        );
+        canvas.drawCircle(Offset.zero, run.filled ? 0.32 : 0.26, paint);
+      case EpubEmphasisShape.triangle:
+        // Pointing up the page, its centroid on the centre.
+        canvas.drawPath(
+          Path()
+            ..moveTo(0, -0.7)
+            ..lineTo(0.62, 0.38)
+            ..lineTo(-0.62, 0.38)
+            ..close(),
+          paint,
+        );
+      case EpubEmphasisShape.sesame:
+        // The 丶 of vertical text: a stroke that swells from a fine head at
+        // the top left to a round tail at the bottom right, its weight on
+        // the centre.
+        canvas.drawPath(
+          Path()
+            ..moveTo(-0.34, -0.5)
+            ..cubicTo(-0.02, -0.36, 0.4, -0.1, 0.38, 0.16)
+            ..cubicTo(0.36, 0.42, 0.04, 0.46, -0.06, 0.24)
+            ..cubicTo(-0.12, 0.08, -0.18, -0.24, -0.34, -0.5)
+            ..close(),
+          paint,
+        );
+    }
+    canvas.restore();
+  }
+
+  /// An annotation's laid-out text as a one-line block of its own, which
+  /// paints its upright characters as a vertical block does.
+  FlowTextBlock _annotationBlock(BuiltBlockText annotation) {
     final annotationPainter = TextPainter(
       text: annotation.span,
       textDirection: ui.TextDirection.ltr,
     )..layout();
-    final text = FlowTextBlock(
+    return FlowTextBlock(
       painter: annotationPainter,
       map: annotation.map,
       lines: [
@@ -221,13 +366,31 @@ class FlowTextBlock {
       textDirection: ui.TextDirection.ltr,
       redrawn: annotation.redrawn,
     );
-    // The annotation stands on the base's em square, centred on its box:
+  }
+
+  ({Offset origin, FlowTextBlock text})? _placeRuby(RubyRun ruby) {
+    final boxes = painter.getBoxesForSelection(
+      TextSelection(baseOffset: ruby.start, extentOffset: ruby.end),
+    );
+    if (boxes.isEmpty) return null;
+    final first = boxes.first.toRect();
+    var base = first;
+    for (final box in boxes.skip(1)) {
+      final rect = box.toRect();
+      if ((rect.top - first.top).abs() > first.height / 2) continue;
+      base = base.expandToInclude(rect);
+    }
+    final text = _annotationBlock(ruby.annotation);
+    // The annotation stands on the base's em square (or hangs from it),
+    // centred on its box:
     // the laid-out box is the font's ascent and descent, which can reach well
     // past the em, and an upright character is drawn centred on it.
     return (
       origin: Offset(
-        base.center.dx - annotationPainter.width / 2,
-        base.center.dy - ruby.baseSize / 2 - annotationPainter.height,
+        base.center.dx - text.width / 2,
+        ruby.under
+            ? base.center.dy + ruby.baseSize / 2
+            : base.center.dy - ruby.baseSize / 2 - text.height,
       ),
       text: text,
     );
@@ -414,6 +577,10 @@ class FlowTextBlock {
       placed?.text.dispose();
     }
     _placedRubies.clear();
+    for (final placed in _placedEmphasis.values) {
+      placed.string?.dispose();
+    }
+    _placedEmphasis.clear();
   }
 }
 
@@ -736,6 +903,81 @@ class ChapterLayoutSpec {
   int get hashCode => Object.hash(width, height, typography, vertical);
 }
 
+/// The least line height a chapter with ruby or emphasis marks is laid out
+/// at, in ems: the gap between two lines' em squares holds an annotation or
+/// a mark (half an em) and a quarter of an em between it and the next line,
+/// as the line height of 1.75 Japanese ebooks set does.
+const double annotatedLineHeight = 1 + rubyScale + 0.25;
+
+/// [typography] for [chapter]: a chapter with ruby or emphasis marks has the
+/// line height that makes room for them ([annotatedLineHeight]) when the
+/// reader's is less. The gap between two lines holds what stands over the
+/// one and under the other: a ruby base with marks on its annotation's side
+/// stacks them outside it, and a second ruby level (`<rtc>`) stands under
+/// its base, so the gap may hold two or more half ems.
+///
+/// Every line of the chapter takes it, not only the ones with ruby, so the
+/// lines keep an even pitch on the page, as a printed book with ruby sets
+/// them. [vertical] tells which side a span's marks are on.
+ReaderEpubTypography chapterTypography(
+  EpubChapter chapter,
+  ReaderEpubTypography typography, {
+  bool vertical = false,
+}) {
+  // The annotations over and under one character, in half ems.
+  var over = 0;
+  var under = 0;
+  void spans(List<EpubTextSpan> spans) {
+    for (final span in spans) {
+      final emphasis = span.emphasis;
+      final marksUnder =
+          emphasis != null && (vertical ? emphasis.left : emphasis.under);
+      over = math.max(
+        over,
+        (span.ruby != null || span.rubyContinued ? 1 : 0) +
+            (emphasis != null && !marksUnder ? 1 : 0),
+      );
+      under = math.max(
+        under,
+        (span.rubyUnder != null || span.rubyUnderContinued ? 1 : 0) +
+            (marksUnder ? 1 : 0),
+      );
+    }
+  }
+
+  void visit(EpubContentNode node) {
+    switch (node) {
+      case EpubHeading(spans: final list) || EpubParagraph(spans: final list):
+        spans(list);
+      case EpubBlockQuote(:final children) || EpubFigure(:final children):
+        children.forEach(visit);
+      case EpubUnorderedList(:final items) || EpubOrderedList(:final items):
+        items.forEach(spans);
+      case EpubImage(:final caption):
+        spans(caption);
+      case EpubTable(:final caption, :final rowGroups):
+        spans(caption);
+        for (final group in rowGroups) {
+          for (final row in group.rows) {
+            for (final cell in row.cells) {
+              cell.children.forEach(visit);
+            }
+          }
+        }
+      case EpubMathNode() || EpubCodeBlock() || EpubHorizontalRule():
+        break;
+    }
+  }
+
+  chapter.blocks.forEach(visit);
+  final halves = over + under;
+  if (halves == 0) return typography;
+  final least = annotatedLineHeight + (halves - 1) * rubyScale;
+  return typography.lineHeight >= least
+      ? typography
+      : typography.copyWith(lineHeight: least);
+}
+
 /// Lay out one chapter into a flow.
 ChapterFlow layoutChapterFlow({
   required EpubChapter chapter,
@@ -744,6 +986,11 @@ ChapterFlow layoutChapterFlow({
 }) {
   final context = _FlowContext(
     spec: spec,
+    typography: chapterTypography(
+      chapter,
+      spec.typography,
+      vertical: spec.vertical,
+    ),
     images: images,
     maxBlockHeight: math.max(120.0, spec.height - 8),
     canonicalText: chapter.canonicalText,
@@ -867,8 +1114,16 @@ class ChapterLayoutSession {
     return result;
   }
 
+  /// The typography the chapter's blocks are laid out with.
+  late final ReaderEpubTypography _typography = chapterTypography(
+    chapter,
+    spec.typography,
+    vertical: spec.vertical,
+  );
+
   _FlowContext _newContext() => _FlowContext(
     spec: spec,
+    typography: _typography,
     images: images,
     maxBlockHeight: _maxBlockHeight,
     canonicalText: chapter.canonicalText,
@@ -1264,6 +1519,7 @@ EpubTextSpan _syntheticSpan(
 class _FlowContext {
   _FlowContext({
     required this.spec,
+    required this.typography,
     required this.images,
     required this.maxBlockHeight,
     required this.canonicalText,
@@ -1323,7 +1579,9 @@ class _FlowContext {
   double cursor = 0;
   int overflowClippedBlocks = 0;
 
-  ReaderEpubTypography get typography => spec.typography;
+  /// The spec's typography, with room for the chapter's ruby and emphasis
+  /// marks ([chapterTypography]).
+  final ReaderEpubTypography typography;
   double get baseFontSize => typography.fontSize;
 
   double _spacingEm(EpubNodeStyle? style, double defaultBefore) {
@@ -1990,6 +2248,7 @@ class _FlowContext {
       textDirection: flutterTextDirection(direction),
       redrawn: built.redrawn,
       rubies: built.rubies,
+      emphasis: built.emphasis,
     );
   }
 
