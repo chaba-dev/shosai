@@ -272,7 +272,7 @@ Head, then scope and count, then the book note and groups per section in reading
 | Font | **Book’s own** (default), Serif, Sans | Not shown: PDF pages keep their fonts |
 | Typeface | The current type set’s name, opening the TypefacePicker | Same |
 
-Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live and are kept per book, except Typeface, which is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; theme, text size, line spacing and Pages are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
 
 **TypefacePicker.** The six type sets as a radio list (`role="radiogroup"`), each row showing the set’s name in its sans, its faces in `ui-caption` and a one-line specimen in its serif, so the choice is made by looking rather than by name. The current set carries a check in `accent`. Choosing applies at once to the interface, the editorial text and the reader’s Serif and Sans fonts; a book’s own fonts are untouched. Rows never preview with system fallbacks: a set that is not bundled is not listed.
 

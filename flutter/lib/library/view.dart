@@ -38,7 +38,7 @@ typedef ProductReaderBuilder =
       void Function(String path, int? bookId) locatorChanged,
       ReaderNoticeReporter noticeReporter,
       Widget openBooksAction,
-      void Function(bool twoPages) pagesChanged,
+      ReaderDisplaySink displayChanged,
       ReaderPlaceRequests placeRequests,
     );
 
@@ -539,8 +539,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   /// The failed settings write, reported over the reader: the library's own
-  /// alert is under the reader's route, and a Pages change made in the reader
-  /// is lost on the next launch unless it is saved. It stays until a retry
+  /// alert is under the reader's route, and a Display change made in the
+  /// reader is lost on the next launch unless it is saved. It stays until a retry
   /// saves the settings or it is dismissed.
   Widget? _settingsFailure() {
     final model = controller.model;
@@ -617,10 +617,19 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             onPressed: () => _shell.dispatch(const ShellSwitcherOpened()),
           ),
         ),
-        // The Pages setting is saved with the library's settings, so the next
-        // book opens with it too.
-        (twoPages) {
-          if (mounted) controller.dispatch(LibraryPagesChanged(twoPages));
+        // The Display settings are saved with the library's settings, so the
+        // next book opens with them too.
+        (change) {
+          if (mounted) {
+            controller.dispatch(
+              LibraryDisplayChanged(
+                theme: change.theme,
+                fontSize: change.fontSize,
+                lineSpacing: change.lineSpacing,
+                twoPages: change.twoPages,
+              ),
+            );
+          }
         },
         requests,
       ),

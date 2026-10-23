@@ -193,18 +193,21 @@ class LibraryController implements Listenable {
         if (settings != null) _saveSettings();
         _loadRevision += 1;
         _load();
-      case LibraryPagesChanged():
+      case LibraryDisplayChanged():
         final settings = _model.settings;
-        if (settings == null || settings.twoPages == message.twoPages) return;
-        _emit(
-          _model.copyWith(
-            settings: settings.copyWith(twoPages: message.twoPages),
-          ),
+        if (settings == null) return;
+        final changed = settings.copyWith(
+          theme: message.theme,
+          epubFontSize: message.fontSize,
+          epubLineSpacing: message.lineSpacing,
+          twoPages: message.twoPages,
         );
+        if (changed == settings) return;
+        _emit(_model.copyWith(settings: changed));
         _saveSettings();
       case LibrarySettingsSaveRetried():
         // Unlike the library alert's Retry, which reopens the dialog, this
-        // saves the settings already in place: a Pages change made in the
+        // saves the settings already in place: a Display change made in the
         // reader is retried where it was made.
         if (_model.failure == LibraryFailure.settings &&
             _model.settings != null) {

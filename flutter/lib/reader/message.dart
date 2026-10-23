@@ -305,8 +305,9 @@ final class ReaderPageInputSubmitted extends ReaderMessage {
 
 /// Changes reader-local typography presentation (RD-09).
 ///
-/// The controller clamps the supplied values. Persisting the change, per-book
-/// override precedence and the typed fit/zoom codec are 5A/6B (contract §4.8).
+/// The controller clamps the supplied values and hands global Display changes
+/// to the application settings sink. Per-book override precedence and the
+/// typed fit/zoom codec are 5A/6B (contract §4.8).
 final class ReaderTypographyChanged extends ReaderMessage {
   const ReaderTypographyChanged({
     this.fontSize,

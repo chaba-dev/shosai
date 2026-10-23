@@ -64,7 +64,7 @@ final class ReaderController implements Listenable {
     ReaderBookOpener? bookOpener,
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
-    ReaderPagesSink? pagesSink,
+    ReaderDisplaySink? displaySink,
     ReaderNoticeReporter? noticeReporter,
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
@@ -112,7 +112,7 @@ final class ReaderController implements Listenable {
        _bookOpener = bookOpener,
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
-       _pagesSink = pagesSink ?? ((_) {}),
+       _displaySink = displaySink ?? ((_) {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
        _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
        _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
@@ -167,7 +167,7 @@ final class ReaderController implements Listenable {
   final ReaderBookOpener? _bookOpener;
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
-  final ReaderPagesSink _pagesSink;
+  final ReaderDisplaySink _displaySink;
   final ReaderNoticeReporter _reportNotice;
   final EpubImageDecoder _epubImageDecoder;
   final EpubFontRegistrar _epubFontRegistrar;
@@ -3075,12 +3075,19 @@ final class ReaderController implements Listenable {
   ///
   /// Font size, line spacing and zoom are clamped to the pinned ranges; a
   /// layout-affecting change is applied through the guarded relayout path so a
-  /// failed layout reports through the existing error surface. Persisting the
-  /// value, per-book precedence and the typed fit codec are 5A/6B.
+  /// failed layout reports through the existing error surface. Global Display
+  /// changes are handed to the settings sink; per-book precedence and the
+  /// typed fit codec are 5A/6B.
   void _typographyChanged(ReaderTypographyChanged message) {
     if (_closing) return;
     final document = _model.document;
     final before = _model.typography;
+    final (fontBefore, spacingBefore, themeBefore, pagesBefore) = (
+      _typographyFontSize,
+      _typographyLineSpacing,
+      _typographyTheme,
+      _typographyTwoPages,
+    );
     final fontSize = message.fontSize?.clamp(8.0, 48.0);
     final lineSpacing = message.lineSpacing?.clamp(1.0, 2.4);
     final theme = message.theme;
@@ -3092,10 +3099,22 @@ final class ReaderController implements Listenable {
     // The view decides whether two pages fit and reports the spread with the
     // viewport, which lays the page out again; the setting needs no relayout
     // of its own.
-    if (message.twoPages case final twoPages?
-        when twoPages != _typographyTwoPages) {
-      _typographyTwoPages = twoPages;
-      _pagesSink(twoPages);
+    if (message.twoPages case final twoPages?) _typographyTwoPages = twoPages;
+    // The settings the library keeps are saved as they change, so the next
+    // book opens with them too.
+    final ReaderDisplayChange change = (
+      theme: _typographyTheme == themeBefore ? null : _typographyTheme,
+      fontSize: _typographyFontSize == fontBefore ? null : _typographyFontSize,
+      lineSpacing: _typographyLineSpacing == spacingBefore
+          ? null
+          : _typographyLineSpacing,
+      twoPages: _typographyTwoPages == pagesBefore ? null : _typographyTwoPages,
+    );
+    if (change.theme != null ||
+        change.fontSize != null ||
+        change.lineSpacing != null ||
+        change.twoPages != null) {
+      _displaySink(change);
     }
     if (message.rasterFit case final fit?) {
       _rasterFit = fit;
