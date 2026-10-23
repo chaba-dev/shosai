@@ -684,8 +684,8 @@ void main() {
     await openReader(tester, harness);
     await settle(tester);
 
-    // Saved places are listed in the Notes panel.
-    await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+    // Saved places are listed in the Contents panel.
+    await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settle(tester);
     final open = find.byKey(const ValueKey('reader-saved-place-open-7'));

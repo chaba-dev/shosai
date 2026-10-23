@@ -823,21 +823,13 @@ enum ReaderFocusTarget { surface, actions, header, panel }
 
 enum _ReaderNoteTarget { selection, annotation, place }
 
-/// What a page note or book note editor writes: a new note at a place, or the
-/// body of note [id] when it is set.
+/// Where a new page note or book note editor writes: at [unit] and [offset],
+/// or on the whole book when [unit] is null.
 final class _PlaceNoteTarget {
-  const _PlaceNoteTarget({
-    required this.bookId,
-    required this.kind,
-    this.unit,
-    this.offset,
-    this.id,
-  });
-  final int bookId;
+  const _PlaceNoteTarget({required this.kind, this.unit, this.offset});
   final FlutterNoteKind kind;
   final int? unit;
   final int? offset;
-  final String? id;
 }
 
 enum ReaderSelectionMovement {

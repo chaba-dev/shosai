@@ -558,18 +558,6 @@ abstract class AppLocalizations {
   /// **'Bookmarks · {count}'**
   String readerBookmarksHeading(int count);
 
-  /// Notes panel: the highlights section heading.
-  ///
-  /// In en, this message translates to:
-  /// **'Highlights · {count}'**
-  String readerHighlightsHeading(int count);
-
-  /// Notes panel: the empty highlights section.
-  ///
-  /// In en, this message translates to:
-  /// **'Select text to highlight it.'**
-  String get readerNoHighlights;
-
   /// Iced reference key: no-bookmarks.
   ///
   /// In en, this message translates to:
@@ -642,17 +630,35 @@ abstract class AppLocalizations {
   /// **'Cancel'**
   String get readerNoteCancel;
 
-  /// Notes panel: the page notes and book notes section heading.
+  /// Notes panel: how many highlights, page notes and book notes are listed.
   ///
   /// In en, this message translates to:
-  /// **'Notes · {count}'**
-  String readerPlaceNotesHeading(int count);
+  /// **'{count, plural, =1{1 note} other{{count} notes}}'**
+  String readerNotesCount(int count);
 
-  /// Notes panel: the empty page notes and book notes section.
+  /// Notes panel: the empty state.
   ///
   /// In en, this message translates to:
-  /// **'Write a note on this page or about the whole book.'**
-  String get readerNoPlaceNotes;
+  /// **'No notes yet. Select text to highlight it, or add a note to this page.'**
+  String get readerNotesEmpty;
+
+  /// A note card's place on a PDF page.
+  ///
+  /// In en, this message translates to:
+  /// **'page {page}'**
+  String readerPageNumber(int page);
+
+  /// A page note card's meta line on a PDF page.
+  ///
+  /// In en, this message translates to:
+  /// **'Page note · page {page}'**
+  String readerPageNoteAt(int page);
+
+  /// Notes panel: opens a note card's actions.
+  ///
+  /// In en, this message translates to:
+  /// **'Note actions'**
+  String get readerNoteActions;
 
   /// Notes panel: deletes a page note or book note.
   ///
@@ -941,12 +947,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Purple'**
   String get readerHighlightPurple;
-
-  /// NEW: no Iced string (RFD 6 authority). One saved highlight's navigation label in the annotation strip (RD-12).
-  ///
-  /// In en, this message translates to:
-  /// **'Highlight {number}'**
-  String readerHighlightLabel(int number);
 
   /// NEW: no Iced string (RFD 6 authority). The resolution suffix of a highlight recovered by quote context (RD-12).
   ///

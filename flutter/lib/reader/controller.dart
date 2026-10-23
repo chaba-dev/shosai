@@ -79,9 +79,7 @@ final class ReaderController implements Listenable {
        _noteEditor = noteEditor ?? ((_) async => null),
        _placeNoteEditor =
            placeNoteEditor ??
-           (noteEditor == null
-               ? ((_, _) async => null)
-               : (_, body) => noteEditor(body)),
+           (noteEditor == null ? ((_) async => null) : (_) => noteEditor(null)),
        _noteEditorCanceller = noteEditorCanceller ?? (() {}),
        _annotationAssociationPicker =
            annotationAssociationPicker ??
@@ -408,6 +406,7 @@ final class ReaderController implements Listenable {
           ReaderSelectionCancelled() ||
           ReaderAnnotationUpdated() ||
           ReaderAnnotationNoteRequested() ||
+          ReaderAnnotationNoteSaved() ||
           ReaderAnnotationDeleted() ||
           ReaderAnnotationNavigated() ||
           ReaderAnnotationReloadRequested() ||
@@ -418,7 +417,7 @@ final class ReaderController implements Listenable {
           ReaderBookmarkNavigated() ||
           ReaderPageNoteRequested() ||
           ReaderBookNoteRequested() ||
-          ReaderNoteEditRequested() ||
+          ReaderNoteSaved() ||
           ReaderNoteDeleted() ||
           ReaderNoteNavigated() => true,
           _ => false,
@@ -460,8 +459,8 @@ final class ReaderController implements Listenable {
         _placeNoteRequested(FlutterNoteKind.page);
       case ReaderBookNoteRequested():
         _placeNoteRequested(FlutterNoteKind.book);
-      case ReaderNoteEditRequested():
-        _placeNoteRequested(message.note.kind, note: message.note);
+      case ReaderNoteSaved():
+        _placeNoteSaved(message.id, message.body);
       case ReaderNoteDeleted():
         _placeNoteDeleted(message.id);
       case ReaderNoteNavigated():
@@ -826,6 +825,8 @@ final class ReaderController implements Listenable {
         unawaited(_updateAnnotation(message));
       case ReaderAnnotationNoteRequested():
         _noteRequested(message.id);
+      case ReaderAnnotationNoteSaved():
+        _annotationNoteSaved(message.id, message.body);
       case _ReaderAnnotationNoteCompleted():
         _noteCompleted(message);
       case _ReaderAnnotationNoteFailed():
@@ -2763,12 +2764,10 @@ final class ReaderController implements Listenable {
     );
   }
 
-  /// Opens the note editor for a new page note, a new book note, or an
-  /// existing note's body.
-  void _placeNoteRequested(FlutterNoteKind kind, {FlutterNote? note}) {
+  /// Opens the note editor for a new page note or book note.
+  void _placeNoteRequested(FlutterNoteKind kind) {
     final document = _model.document;
-    final bookId = document?.bookId;
-    if (bookId == null ||
+    if (document?.bookId == null ||
         _model.notesBusy ||
         _activeNoteEditor != null ||
         _closing ||
@@ -2779,16 +2778,13 @@ final class ReaderController implements Listenable {
     // A page note marks the page being read, in its own offsets, like a
     // bookmark.
     final (:unit, :offset) = _model.readingLocation;
-    final target = note != null
-        ? _PlaceNoteTarget(bookId: bookId, kind: note.kind, id: note.id)
-        : kind == FlutterNoteKind.page
+    final target = kind == FlutterNoteKind.page
         ? _PlaceNoteTarget(
-            bookId: bookId,
             kind: kind,
             unit: unit,
             offset: document!.format == FlutterBookFormat.pdf ? null : offset,
           )
-        : _PlaceNoteTarget(bookId: bookId, kind: kind);
+        : _PlaceNoteTarget(kind: kind);
     final generation = _model.generation;
     final revision = ++_notesRevision;
     final token = ++_noteEditorToken;
@@ -2799,7 +2795,7 @@ final class ReaderController implements Listenable {
     _emit(_model.copyWith(notesBusy: true, toolError: null));
     unawaited(() async {
       try {
-        final body = await _placeNoteEditor(target.kind, note?.body);
+        final body = await _placeNoteEditor(target.kind);
         dispatch(
           _ReaderPlaceNoteEdited(
             generation: generation,
@@ -2837,18 +2833,37 @@ final class ReaderController implements Listenable {
       generation: message.generation,
       revision: message.revision,
       document: document,
-      mutation: (cancellation, text) => target.id == null
-          ? _records.createNote(
-              document: document,
-              text: text,
-              unit: target.unit == null ? null : BigInt.from(target.unit!),
-              offset: target.offset == null
-                  ? null
-                  : BigInt.from(target.offset!),
-              body: body,
-              cancellationId: cancellation,
-            )
-          : _records.updateNote(document: document, id: target.id!, body: body),
+      mutation: (cancellation, text) => _records.createNote(
+        document: document,
+        text: text,
+        unit: target.unit == null ? null : BigInt.from(target.unit!),
+        offset: target.offset == null ? null : BigInt.from(target.offset!),
+        body: body,
+        cancellationId: cancellation,
+      ),
+    );
+  }
+
+  /// Writes the body a note was edited to in place; an empty body is not
+  /// saved.
+  void _placeNoteSaved(String id, String body) {
+    final document = _model.document;
+    final trimmed = body.trim();
+    if (document?.bookId == null ||
+        trimmed.isEmpty ||
+        _model.notesBusy ||
+        _closing ||
+        _suspended ||
+        _recovering) {
+      return;
+    }
+    final revision = ++_notesRevision;
+    _startNotesEffect(
+      generation: _model.generation,
+      revision: revision,
+      document: document!,
+      mutation: (_, _) =>
+          _records.updateNote(document: document, id: id, body: trimmed),
     );
   }
 
@@ -2872,8 +2887,9 @@ final class ReaderController implements Listenable {
 
   /// Runs [mutation], if any, then lists the book's notes again.
   ///
-  /// A mutation is a book write: its failure is a persistence error, while a
-  /// list that fails after it committed is only a tool error.
+  /// Notes belong to library books. A mutation is a book write: its failure
+  /// is a persistence error, while a list that fails after it committed is
+  /// only a tool error.
   void _startNotesEffect({
     required int generation,
     required int revision,
@@ -4955,6 +4971,26 @@ final class ReaderController implements Listenable {
         dispatch(_ReaderNoteEditorFinished(token));
       }
     }());
+  }
+
+  /// Writes a highlight's note as edited in place, as the note editor's
+  /// result is written.
+  void _annotationNoteSaved(String id, String body) {
+    final annotation = _model.annotations
+        .where((item) => item.id == id)
+        .firstOrNull;
+    if (annotation == null) return;
+    final trimmed = body.trim();
+    unawaited(
+      _updateAnnotation(
+        ReaderAnnotationUpdated(
+          id,
+          annotation.color,
+          trimmed.isEmpty ? null : trimmed,
+        ),
+        fromNote: true,
+      ),
+    );
   }
 
   void _noteCompleted(_ReaderAnnotationNoteCompleted message) {

@@ -279,14 +279,6 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String readerHighlightsHeading(int count) {
-    return 'ハイライト · $count';
-  }
-
-  @override
-  String get readerNoHighlights => 'テキストを選ぶとハイライトできます。';
-
-  @override
   String get readerNoBookmarks => 'ブックマークはありません';
 
   @override
@@ -329,12 +321,26 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerNoteCancel => 'キャンセル';
 
   @override
-  String readerPlaceNotesHeading(int count) {
-    return 'メモ · $count';
+  String readerNotesCount(int count) {
+    return 'メモ $count件';
   }
 
   @override
-  String get readerNoPlaceNotes => 'このページや本全体についてメモを書けます。';
+  String get readerNotesEmpty =>
+      'まだメモはありません。テキストを選んでハイライトするか、このページにメモを追加してください。';
+
+  @override
+  String readerPageNumber(int page) {
+    return '$pageページ';
+  }
+
+  @override
+  String readerPageNoteAt(int page) {
+    return 'ページのメモ · $pageページ';
+  }
+
+  @override
+  String get readerNoteActions => 'メモの操作';
 
   @override
   String get readerDeleteNote => 'メモを削除';
@@ -489,11 +495,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get readerHighlightPurple => '紫';
-
-  @override
-  String readerHighlightLabel(int number) {
-    return 'ハイライト$number';
-  }
 
   @override
   String get readerAnnotationRecovered => '復元';

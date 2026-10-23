@@ -60,6 +60,19 @@ class _PanelBridge extends HarnessBridge {
   /// Every `deleteBookmark` call.
   final List<int> deletes = [];
 
+  /// Every `deleteAnnotation` call; a deleted note leaves [placeNotes].
+  final List<String> deletedAnnotations = [];
+
+  @override
+  Future<bool> deleteAnnotation({
+    required FlutterDocumentHandle document,
+    required String id,
+  }) async {
+    deletedAnnotations.add(id);
+    placeNotes.removeWhere((note) => note.id == id);
+    return true;
+  }
+
   /// Export calls and the Markdown handed to the sink.
   int exportCalls = 0;
   final List<String> sinkTexts = [];
@@ -510,7 +523,7 @@ void main() {
           contentsLoader: (_) async => const [],
         ),
       );
-      await _openNotes(tester);
+      await _openContents(tester);
 
       expect(find.text('BOOKMARKS · 1'), findsOneWidget);
 
@@ -524,8 +537,8 @@ void main() {
       expect(find.text('BOOKMARKS · 0'), findsOneWidget);
     });
 
-    testWidgets('page notes are written and edited in the controller-owned '
-        'dialog', (tester) async {
+    testWidgets('page notes and book notes are written in the dialog and '
+        'edited in place', (tester) async {
       _setView(tester, const Size(1280, 800));
       final bridge = _PanelBridge(unitCount: 3);
       await _open(
@@ -538,7 +551,13 @@ void main() {
       );
       await _openNotes(tester);
 
-      expect(find.text('NOTES · 0'), findsOneWidget);
+      expect(
+        find.text(
+          'No notes yet. Select text to highlight it, or add a note to this '
+          'page.',
+        ),
+        findsOneWidget,
+      );
       await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
       await tester.pumpAndSettle();
       // The controller-owned modal is open while the editor runs.
@@ -550,39 +569,73 @@ void main() {
         ),
         findsOneWidget,
       );
-
-      Future<void> write(String body) async {
-        await tester.enterText(
-          find.descendant(
-            of: find.byType(ShadDialog),
-            matching: find.byType(ShadInput),
-          ),
-          body,
-        );
-        await tester.tap(find.widgetWithText(ShadButton, 'Save'));
-        await tester.pumpAndSettle();
-      }
-
-      await write('A short note');
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(ShadDialog),
+          matching: find.byType(ShadInput),
+        ),
+        'A short note',
+      );
+      await tester.tap(find.widgetWithText(ShadButton, 'Save'));
+      await tester.pumpAndSettle();
       expect(find.byType(ShadDialog), findsNothing);
-      expect(find.text('NOTES · 1'), findsOneWidget);
+      expect(find.text('1 note'), findsOneWidget);
       expect(find.text('A short note'), findsOneWidget);
       final id = bridge.placeNotes.single.id;
 
-      await tester.tap(find.byKey(ValueKey('reader-place-note-edit-$id')));
+      // Editing happens in the card, with Save and Cancel.
+      await tester.tap(find.byKey(ValueKey('reader-place-note-$id-actions')));
       await tester.pumpAndSettle();
-      await write('Edited note');
+      await tester.tap(find.text('Edit note').last);
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('reader-note-edit-field'));
+      await tester.enterText(field, '   ');
+      await tester.pump();
+      expect(
+        tester
+            .widget<ShadButton>(
+              find.byKey(const ValueKey('reader-note-edit-save')),
+            )
+            .onPressed,
+        isNull,
+        reason: 'a page note is not saved empty',
+      );
+      await tester.enterText(field, 'Edited note');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('reader-note-edit-save')));
+      await tester.pump();
+      await _settle(tester);
       expect(bridge.placeNotes.single.body, 'Edited note');
       expect(find.text('Edited note'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('reader-notes-add-book')));
       await tester.pumpAndSettle();
-      await write('About the whole book');
-      expect(bridge.placeNotes.map((note) => note.kind), [
-        FlutterNoteKind.page,
-        FlutterNoteKind.book,
-      ]);
-      expect(find.text('NOTES · 2'), findsOneWidget);
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(ShadDialog),
+          matching: find.byType(ShadInput),
+        ),
+        'About the whole book',
+      );
+      await tester.tap(find.widgetWithText(ShadButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 notes'), findsOneWidget);
+      // The book note comes first, then the page note.
+      final book = bridge.placeNotes.last.id;
+      expect(
+        tester.getRect(find.byKey(ValueKey('reader-place-note-$book'))).top,
+        lessThan(
+          tester.getRect(find.byKey(ValueKey('reader-place-note-$id'))).top,
+        ),
+      );
+      expect(find.text('Page note · page 1'), findsOneWidget);
+
+      await tester.tap(find.byKey(ValueKey('reader-place-note-$id-actions')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete note').last);
+      await tester.pump();
+      await _settle(tester);
+      expect(bridge.deletedAnnotations, [id]);
     });
 
     testWidgets('Markdown export copies through the sink and reports success', (
@@ -602,7 +655,7 @@ void main() {
           noticeReporter: notices.add,
         ),
       );
-      await _openNotes(tester);
+      await _openContents(tester);
 
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
@@ -614,7 +667,7 @@ void main() {
       expect(
         notices.single.text.resolve(
           AppLocalizations.of(
-            tester.element(find.byKey(const ValueKey('reader-panel-notes'))),
+            tester.element(find.byKey(const ValueKey('reader-panel-contents'))),
           ),
         ),
         'Bookmarks copied as Markdown',
@@ -644,7 +697,7 @@ void main() {
           noticeReporter: notices.add,
         ),
       );
-      await _openNotes(tester);
+      await _openContents(tester);
 
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
@@ -750,7 +803,7 @@ void main() {
           exportSink: (markdown) async => sinkTexts.add(markdown),
         ),
       );
-      await _openNotes(tester);
+      await _openContents(tester);
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
       expect(bridge.heldExports, hasLength(1));
@@ -766,8 +819,11 @@ void main() {
       expect(sinkTexts, isEmpty);
 
       // The replacement's own export still works.
-      if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isEmpty) {
-        await _openNotes(tester);
+      if (find
+          .byKey(const ValueKey('reader-panel-contents'))
+          .evaluate()
+          .isEmpty) {
+        await _openContents(tester);
       }
       await tester.tap(find.byKey(const ValueKey('reader-bookmark-export')));
       await tester.pump();
@@ -1089,8 +1145,9 @@ void main() {
   });
 
   group('notes panel', () {
-    testWidgets('highlight cards keep their size at 200% text and wrap '
-        'their actions inside the panel', (tester) async {
+    testWidgets('note cards stay inside the panel at 200% text', (
+      tester,
+    ) async {
       _setView(tester, const Size(1024, 800));
       tester.platformDispatcher.textScaleFactorTestValue = 2;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
@@ -1104,7 +1161,9 @@ void main() {
               id: id,
               unit: BigInt.one,
               resolution: resolution,
+              quote: 'A quoted passage long enough to wrap across the card',
               color: FlutterHighlightColor.yellow,
+              body: 'A note under the quote',
             ),
         ];
       await _open(tester, _reader(bridge: bridge));
@@ -1115,37 +1174,18 @@ void main() {
       );
       for (final id in ['exact', 'orphaned']) {
         final card = find.byKey(ValueKey('reader-annotation-$id'));
+        await tester.ensureVisible(card);
+        await tester.pump();
         expect(card, findsOneWidget);
         final cardRect = tester.getRect(card);
         expect(cardRect.left, greaterThanOrEqualTo(panel.left));
         expect(cardRect.right, lessThanOrEqualTo(panel.right));
         // Painted at its laid-out size: nothing scales the card down.
-        for (final action in ['navigate', 'color', 'note', 'delete']) {
-          final finder = find.byKey(ValueKey('reader-annotation-$action-$id'));
-          expect(
-            tester.getRect(finder).size,
-            tester.getSize(finder),
-            reason: '$action of $id is drawn at its own size',
-          );
-        }
+        final actions = find.byKey(ValueKey('reader-annotation-$id-actions'));
+        expect(tester.getRect(actions).size, tester.getSize(actions));
+        expect(tester.getRect(actions).right, lessThanOrEqualTo(panel.right));
       }
-      // The scaled label pushes the actions under it.
-      expect(
-        tester
-            .getRect(
-              find.byKey(const ValueKey('reader-annotation-delete-orphaned')),
-            )
-            .top,
-        greaterThanOrEqualTo(
-          tester
-              .getRect(
-                find.byKey(
-                  const ValueKey('reader-annotation-navigate-orphaned'),
-                ),
-              )
-              .bottom,
-        ),
-      );
+      expect(find.textContaining('— unavailable'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
@@ -1182,13 +1222,13 @@ void main() {
           ),
         );
         expect(find.text('33% · page 1 of 3'), findsOneWidget);
-        await _openNotes(tester);
+        await _openContents(tester);
         await tester.tap(
           find.byKey(const ValueKey('reader-saved-place-open-7')),
         );
         await tester.pump();
         await _settle(tester);
-        await _openNotes(tester);
+        await _openContents(tester);
 
         // The spread shows the bookmarked place, so the toolbar marks it,
         // and it is the place saved.
@@ -1427,10 +1467,17 @@ void main() {
     testWidgets('a note chosen in the slide-over keeps focus in the panel, '
         'and Escape closes it', (tester) async {
       _setView(tester, const Size(1024, 800));
-      final bridge = _PanelBridge(
-        unitCount: 3,
-        bookmarks: [_bookmark(id: 7, unit: BigInt.two)],
-      );
+      final bridge = _PanelBridge(unitCount: 3)
+        ..placeNotes.add(
+          FlutterNote(
+            id: 'note-7',
+            kind: FlutterNoteKind.page,
+            unit: BigInt.two,
+            resolution: FlutterAnnotationResolution.exact,
+            body: 'The map on page 3',
+            modifiedAt: '2026-09-20T00:00:00Z',
+          ),
+        );
       await _open(
         tester,
         _reader(
@@ -1440,7 +1487,10 @@ void main() {
         ),
       );
       await _openNotes(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-saved-place-open-7')));
+      expect(find.text('Page note · page 3'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('reader-place-note-note-7-open')),
+      );
       await tester.pump();
       await _settle(tester);
       expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);

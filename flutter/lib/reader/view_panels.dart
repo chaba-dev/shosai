@@ -329,8 +329,8 @@ class _ReaderPanelGroup extends StatelessWidget {
 /// whole: its heading, a few chapter rows, and the page field with its error.
 const double _contentsPanelMinHeight = 200;
 
-/// The Contents panel: the chapter list, then a field to go to a page
-/// (RD-07, RD-10).
+/// The Contents panel: the chapter list and the book's bookmarks, then a
+/// field to go to a page (RD-07, RD-08, RD-10).
 class _ReaderContentsPanel extends StatefulWidget {
   const _ReaderContentsPanel({required this.model, required this.dispatch});
 
@@ -445,7 +445,33 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: _chapterSection(l10n, contents, dispatch),
+              children: [
+                ..._chapterSection(l10n, contents, dispatch),
+                // The book's bookmarks follow its chapters; notes have their
+                // own panel (RFD 6).
+                if (model.document?.bookId != null) ...[
+                  const SizedBox(height: ShosaiTokens.space2),
+                  _ReaderPanelGroup(
+                    key: const ValueKey('reader-contents-bookmarks-count'),
+                    text: l10n.readerBookmarksHeading(model.bookmarks.length),
+                  ),
+                  const SizedBox(height: ShosaiTokens.space2),
+                  ...[
+                    for (final row in _readerBookmarkRows(
+                      context,
+                      l10n,
+                      model,
+                      dispatch,
+                    ))
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: ShosaiTokens.space2,
+                        ),
+                        child: row,
+                      ),
+                  ],
+                ],
+              ],
             ),
           ),
         ),
@@ -1209,201 +1235,74 @@ class _ReaderSegmented extends StatelessWidget {
   }
 }
 
-/// The Notes panel: the book's bookmarks, page and book notes, and
-/// highlights (RD-08, RD-12).
-class _ReaderNotesPanel extends StatelessWidget {
-  const _ReaderNotesPanel({required this.model, required this.dispatch});
-
-  final ReaderModel model;
-  final void Function(ReaderMessage) dispatch;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final enabled = _readerChromeEnabled(model);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _ReaderPanelHeading(
-          headingKey: const ValueKey('reader-notes-heading'),
-          title: l10n.readerNotesAction,
-          closeKey: const ValueKey('reader-notes-close'),
-          closeLabel: l10n.readerCloseNotes,
-          onClose: () => dispatch(const ReaderPanelToggled(ReaderPanel.notes)),
-          actions: [
-            // Highlights saved against an earlier version of the book can be
-            // associated with this one; a failed load can be retried.
-            if (model.document != null)
-              _ReaderToolButton(
-                key: const ValueKey('reader-notes-association'),
-                icon: model.annotationsReady
-                    ? LucideIcons.link
-                    : LucideIcons.refreshCw,
-                label: model.annotationsReady
-                    ? 'Associate highlights from an earlier version…'
-                    : 'Retry loading highlights',
-                onPressed: enabled && model.annotationOperations.isEmpty
-                    ? () => dispatch(
-                        model.annotationsReady
-                            ? const ReaderAnnotationAssociationRequested()
-                            : const ReaderAnnotationReloadRequested(),
-                      )
-                    : null,
-              ),
+/// The book's saved places and the Markdown export action (RD-08), listed in
+/// the Contents panel under the chapters.
+List<Widget> _readerBookmarkRows(
+  BuildContext context,
+  AppLocalizations l10n,
+  ReaderModel model,
+  void Function(ReaderMessage) dispatch,
+) {
+  final palette = ShellPalette.of(context);
+  if (model.bookmarks.isEmpty) {
+    return [
+      Padding(
+        key: const ValueKey('reader-contents-empty'),
+        padding: const EdgeInsets.symmetric(horizontal: ShosaiTokens.space1),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 2,
+          children: [
+            Text(
+              l10n.readerNoBookmarks,
+              style: shellInterfaceStyle(
+                13,
+                18,
+                weight: FontWeight.w500,
+              ).copyWith(color: palette.ink),
+            ),
+            Text(
+              l10n.readerBookmarkEmptyHint,
+              style: shellInterfaceStyle(
+                12,
+                16,
+              ).copyWith(color: palette.inkMuted),
+            ),
           ],
         ),
-        Flexible(
-          child: SingleChildScrollView(
-            key: const ValueKey('reader-notes-scroll'),
-            padding: const EdgeInsets.fromLTRB(
-              ShosaiTokens.space3,
-              0,
-              ShosaiTokens.space3,
-              ShosaiTokens.space3,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: ShosaiTokens.space2,
-              children: [
-                _ReaderPanelGroup(
-                  key: const ValueKey('reader-contents-bookmarks-count'),
-                  text: l10n.readerBookmarksHeading(model.bookmarks.length),
-                ),
-                ..._bookmarks(context, l10n),
-                _ReaderPanelGroup(
-                  key: const ValueKey('reader-notes-place-count'),
-                  text: l10n.readerPlaceNotesHeading(model.notes.length),
-                ),
-                ..._placeNotes(l10n),
-                _ReaderPanelGroup(
-                  key: const ValueKey('reader-notes-highlights-count'),
-                  text: l10n.readerHighlightsHeading(model.annotations.length),
-                ),
-                if (model.annotations.isEmpty)
-                  _ReaderPanelNote(text: l10n.readerNoHighlights)
-                else
-                  for (final annotation in model.annotations)
-                    Align(
-                      // The card owns its menu controller, so its identity
-                      // must follow the annotation.
-                      key: ValueKey(annotation.id),
-                      alignment: AlignmentDirectional.centerStart,
-                      child: _AnnotationCard(
-                        annotation: annotation,
-                        model: model,
-                        dispatch: dispatch,
-                      ),
-                    ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// The book's page notes and book notes, and the actions that write them.
-  List<Widget> _placeNotes(AppLocalizations l10n) {
-    final enabled =
-        _readerChromeEnabled(model) &&
-        model.document?.bookId != null &&
-        !model.notesBusy &&
-        model.modalEffect == null;
-    return [
-      if (model.notes.isEmpty)
-        _ReaderPanelNote(text: l10n.readerNoPlaceNotes)
-      else
-        for (final note in model.notes)
-          _ReaderPlaceNoteRow(note: note, enabled: enabled, dispatch: dispatch),
-      Wrap(
-        spacing: ShosaiTokens.space2,
-        runSpacing: ShosaiTokens.space2,
-        children: [
-          _ReaderAlertAction(
-            key: const ValueKey('reader-notes-add-page'),
-            label: l10n.readerPageNoteTitle,
-            contentSized: true,
-            onPressed: enabled
-                ? () => dispatch(const ReaderPageNoteRequested())
-                : null,
-          ),
-          _ReaderAlertAction(
-            key: const ValueKey('reader-notes-add-book'),
-            label: l10n.readerBookNoteTitle,
-            contentSized: true,
-            onPressed: enabled
-                ? () => dispatch(const ReaderBookNoteRequested())
-                : null,
-          ),
-        ],
       ),
     ];
   }
-
-  /// The saved places and the Markdown export action (RD-08).
-  List<Widget> _bookmarks(BuildContext context, AppLocalizations l10n) {
-    final palette = ShellPalette.of(context);
-    if (model.bookmarks.isEmpty) {
-      return [
-        Padding(
-          key: const ValueKey('reader-contents-empty'),
-          padding: const EdgeInsets.symmetric(horizontal: ShosaiTokens.space1),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: 2,
-            children: [
-              Text(
-                l10n.readerNoBookmarks,
-                style: shellInterfaceStyle(
-                  13,
-                  18,
-                  weight: FontWeight.w500,
-                ).copyWith(color: palette.ink),
-              ),
-              Text(
-                l10n.readerBookmarkEmptyHint,
-                style: shellInterfaceStyle(
-                  12,
-                  16,
-                ).copyWith(color: palette.inkMuted),
-              ),
-            ],
-          ),
-        ),
-      ];
-    }
-    final exportFailed =
-        model.exportState == ReaderExportState.failed &&
-        model.exportError != null;
-    return [
-      for (final bookmark in model.bookmarks)
-        _ReaderSavedPlaceRow(
-          bookmark: bookmark,
-          enabled: !model.bookmarkBusy,
-          dispatch: dispatch,
-        ),
-      if (exportFailed)
-        _ReaderPanelNote(
-          key: const ValueKey('reader-bookmark-export-error'),
-          text: model.exportError!,
-          danger: true,
-          liveRegion: true,
-        ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: _ReaderAlertAction(
-          key: const ValueKey('reader-bookmark-export'),
-          label: l10n.readerExportMarkdown,
-          contentSized: true,
-          onPressed:
-              model.exportState == ReaderExportState.busy || model.bookmarkBusy
-              ? null
-              : () => dispatch(const ReaderBookmarkExportRequested()),
-        ),
+  final exportFailed =
+      model.exportState == ReaderExportState.failed &&
+      model.exportError != null;
+  return [
+    for (final bookmark in model.bookmarks)
+      _ReaderSavedPlaceRow(
+        bookmark: bookmark,
+        enabled: !model.bookmarkBusy,
+        dispatch: dispatch,
       ),
-    ];
-  }
+    if (exportFailed)
+      _ReaderPanelNote(
+        key: const ValueKey('reader-bookmark-export-error'),
+        text: model.exportError!,
+        danger: true,
+        liveRegion: true,
+      ),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: _ReaderAlertAction(
+        key: const ValueKey('reader-bookmark-export'),
+        label: l10n.readerExportMarkdown,
+        contentSized: true,
+        onPressed:
+            model.exportState == ReaderExportState.busy || model.bookmarkBusy
+            ? null
+            : () => dispatch(const ReaderBookmarkExportRequested()),
+      ),
+    ),
+  ];
 }
 
 /// One saved place (RD-08): a card with the title, page, and delete action.
@@ -1481,110 +1380,6 @@ class _ReaderSavedPlaceRow extends StatelessWidget {
                     : null,
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// One page note or book note: where it is written, its body, and the edit
-/// and delete actions. A page note's place opens it.
-class _ReaderPlaceNoteRow extends StatelessWidget {
-  const _ReaderPlaceNoteRow({
-    required this.note,
-    required this.enabled,
-    required this.dispatch,
-  });
-
-  final FlutterNote note;
-  final bool enabled;
-  final void Function(ReaderMessage) dispatch;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final palette = ShellPalette.of(context);
-    final unit = note.unit?.toInt();
-    // An orphaned note's stored place is not in this edition.
-    final found = switch (note.resolution) {
-      FlutterAnnotationResolution.exact ||
-      FlutterAnnotationResolution.recovered => true,
-      FlutterAnnotationResolution.ambiguous ||
-      FlutterAnnotationResolution.orphaned => false,
-    };
-    final place = unit == null
-        ? l10n.readerBookNoteTitle
-        : l10n.readerPageShort(unit + 1);
-    return Container(
-      key: ValueKey('reader-place-note-${note.id}'),
-      padding: const EdgeInsets.all(ShosaiTokens.space2),
-      decoration: BoxDecoration(
-        color: palette.surface,
-        borderRadius: BorderRadius.circular(ShosaiTokens.radiusMd),
-        boxShadow: palette.raised,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(right: ShosaiTokens.space1),
-                child: Icon(
-                  unit == null ? LucideIcons.bookText : LucideIcons.stickyNote,
-                  size: 14,
-                  color: palette.inkMuted,
-                ),
-              ),
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: _ReaderLinkButton(
-                    key: ValueKey('reader-place-note-open-${note.id}'),
-                    label: place,
-                    onPressed: enabled && found && unit != null
-                        ? () => dispatch(
-                            ReaderNoteNavigated(
-                              unit,
-                              offset: note.offset?.toInt(),
-                            ),
-                          )
-                        : null,
-                  ),
-                ),
-              ),
-              _ReaderToolButton(
-                key: ValueKey('reader-place-note-edit-${note.id}'),
-                icon: LucideIcons.pencil,
-                label: l10n.readerEditNote,
-                onPressed: enabled
-                    ? () => dispatch(ReaderNoteEditRequested(note))
-                    : null,
-              ),
-              _ReaderToolButton(
-                key: ValueKey('reader-place-note-delete-${note.id}'),
-                icon: LucideIcons.x,
-                label: l10n.readerDeleteNote,
-                onPressed: enabled
-                    ? () => dispatch(ReaderNoteDeleted(note.id))
-                    : null,
-              ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: ShosaiTokens.space1,
-            ),
-            child: Text(
-              note.body,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: shosaiInterfaceStyleForText(
-                shellInterfaceStyle(13, 18).copyWith(color: palette.ink),
-                note.body,
-              ),
-            ),
           ),
         ],
       ),

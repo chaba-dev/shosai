@@ -1155,28 +1155,16 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
 
-      bool opens(String id) => tester
-          .widget<ShadButton>(
-            find.descendant(
-              of: find.byKey(ValueKey('reader-place-note-open-$id')),
-              matching: find.byType(ShadButton),
-            ),
-          )
-          .enabled;
-      expect(opens('found'), isTrue);
-      expect(opens('lost'), isFalse);
-      // It can still be edited.
-      expect(
-        tester
-            .widget<ShadButton>(
-              find.descendant(
-                of: find.byKey(const ValueKey('reader-place-note-edit-lost')),
-                matching: find.byType(ShadButton),
-              ),
-            )
-            .enabled,
-        isTrue,
+      // The lost note's card opens its editor instead of its old place.
+      await tester.tap(
+        find.byKey(const ValueKey('reader-place-note-lost-open')),
       );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('reader-note-edit-field')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Page note — '), findsNWidgets(2));
     });
 
     testWidgets('a resize keeps focus in the open panel', (tester) async {
@@ -1274,7 +1262,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
       await tester.pump();
 
-      await tester.tap(find.widgetWithText(ShadButton, 'Highlight 1'));
+      await tester.tap(
+        find.byKey(const ValueKey('reader-annotation-one-open')),
+      );
       await tester.pump();
       // The controller explicitly returns focus to the surface after
       // navigation, so a surface-only shortcut reaches the selection.
@@ -1406,7 +1396,7 @@ void main() {
         annotationEditors.add(completer);
         return completer.future;
       },
-      placeNoteEditor: (_, _) {
+      placeNoteEditor: (_) {
         final completer = Completer<String?>();
         placeEditors.add(completer);
         return completer.future;
@@ -1469,7 +1459,7 @@ void main() {
         bridge: bridge,
         decoder: (pixels, {required int width, required int height}) async =>
             _testImage(),
-        placeNoteEditor: (_, _) {
+        placeNoteEditor: (_) {
           final completer = Completer<String?>();
           editors.add(completer);
           return completer.future;

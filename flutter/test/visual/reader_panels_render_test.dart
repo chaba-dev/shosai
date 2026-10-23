@@ -24,6 +24,14 @@ class _PanelRenderBridge extends HarnessBridge {
   _PanelRenderBridge({super.books, super.unitCount, this.bookmarks = const []});
 
   final List<FlutterBookmark> bookmarks;
+  List<FlutterAnnotation> annotations = const [];
+
+  @override
+  Future<List<FlutterAnnotation>> listAnnotations({
+    required FlutterDocumentHandle document,
+    required double scale,
+    required BigInt cancellationId,
+  }) async => annotations;
 
   @override
   Future<List<FlutterBookmark>> listBookmarks({
@@ -483,7 +491,10 @@ void main() {
       'reader-notes-1280-en',
       const HarnessView(size: Size(1280, 800)),
       _reader(
-        bridge: _PanelRenderBridge(books: harnessLibraryBooks(), unitCount: 4),
+        bridge: _withNotes(
+          _PanelRenderBridge(books: harnessLibraryBooks(), unitCount: 4),
+          ja: false,
+        ),
         locale: const Locale('en'),
         initialBookId: 1,
       ),
@@ -529,7 +540,10 @@ void main() {
       'reader-notes-390-ja-t200',
       const HarnessView(size: Size(390, 844), textScale: 2),
       _reader(
-        bridge: _PanelRenderBridge(books: harnessLibraryBooks(), unitCount: 4),
+        bridge: _withNotes(
+          _PanelRenderBridge(books: harnessLibraryBooks(), unitCount: 4),
+          ja: true,
+        ),
         locale: const Locale('ja'),
         initialBookId: 1,
       ),
@@ -621,4 +635,51 @@ void main() {
     );
     expectOnlyKnownDefects(defects, const <KnownRenderDefect>[]);
   });
+}
+
+/// [bridge] with a book note, a page note and a highlight with its note, so
+/// the Notes panel renders each kind of card.
+_PanelRenderBridge _withNotes(_PanelRenderBridge bridge, {required bool ja}) {
+  FlutterNote note(String id, BigInt? unit, String body) => FlutterNote(
+    id: id,
+    kind: unit == null ? FlutterNoteKind.book : FlutterNoteKind.page,
+    unit: unit,
+    resolution: FlutterAnnotationResolution.exact,
+    body: body,
+    modifiedAt: '2026-09-20T00:00:00Z',
+  );
+  bridge.placeNotes.addAll([
+    note(
+      'book',
+      null,
+      ja
+          ? '読書会の課題。第三章と第四章から読む。'
+          : 'Reading group pick. Chapters III and IV first.',
+    ),
+    note(
+      'page',
+      BigInt.one,
+      ja
+          ? '図1はこの後のすべての節が参照するモデル。'
+          : 'Fig. 1 is the model every later section refers back to.',
+    ),
+  ]);
+  bridge.annotations = [
+    FlutterAnnotation(
+      id: 'highlight',
+      unit: BigInt.two,
+      resolution: FlutterAnnotationResolution.exact,
+      textRange: FlutterAnnotationTextRange(
+        start: BigInt.zero,
+        end: BigInt.from(40),
+      ),
+      quote: ja
+          ? '海辺の図書館には、古い地図と潮の記録が並んでいた。'
+          : 'The library by the sea kept old maps beside the records of the '
+                'tides.',
+      color: FlutterHighlightColor.yellow,
+      body: ja ? '地図の章へのつながり。' : 'The link to the chapter on maps.',
+    ),
+  ];
+  return bridge;
 }

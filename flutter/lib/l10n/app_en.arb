@@ -426,19 +426,6 @@
       }
     }
   },
-  "readerHighlightsHeading": "Highlights · {count}",
-  "@readerHighlightsHeading": {
-    "description": "Notes panel: the highlights section heading.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "readerNoHighlights": "Select text to highlight it.",
-  "@readerNoHighlights": {
-    "description": "Notes panel: the empty highlights section."
-  },
   "readerNoBookmarks": "No bookmarks yet",
   "@readerNoBookmarks": {
     "description": "Iced reference key: no-bookmarks."
@@ -502,18 +489,40 @@
   "@readerBookNoteTitle": {
     "description": "A note about the whole book: the note dialog title and the Notes panel's new-note action."
   },
-  "readerPlaceNotesHeading": "Notes · {count}",
-  "@readerPlaceNotesHeading": {
-    "description": "Notes panel: the page notes and book notes section heading.",
+  "readerNotesCount": "{count, plural, =1{1 note} other{{count} notes}}",
+  "@readerNotesCount": {
+    "description": "Notes panel: how many highlights, page notes and book notes are listed.",
     "placeholders": {
       "count": {
         "type": "int"
       }
     }
   },
-  "readerNoPlaceNotes": "Write a note on this page or about the whole book.",
-  "@readerNoPlaceNotes": {
-    "description": "Notes panel: the empty page notes and book notes section."
+  "readerNotesEmpty": "No notes yet. Select text to highlight it, or add a note to this page.",
+  "@readerNotesEmpty": {
+    "description": "Notes panel: the empty state."
+  },
+  "readerPageNumber": "page {page}",
+  "@readerPageNumber": {
+    "description": "A note card's place on a PDF page.",
+    "placeholders": {
+      "page": {
+        "type": "int"
+      }
+    }
+  },
+  "readerPageNoteAt": "Page note · page {page}",
+  "@readerPageNoteAt": {
+    "description": "A page note card's meta line on a PDF page.",
+    "placeholders": {
+      "page": {
+        "type": "int"
+      }
+    }
+  },
+  "readerNoteActions": "Note actions",
+  "@readerNoteActions": {
+    "description": "Notes panel: opens a note card's actions."
   },
   "readerDeleteNote": "Delete note",
   "@readerDeleteNote": {
@@ -734,15 +743,6 @@
   "readerHighlightPurple": "Purple",
   "@readerHighlightPurple": {
     "description": "NEW: no Iced string (RFD 6 authority). The purple highlight color action (RD-12)."
-  },
-  "readerHighlightLabel": "Highlight {number}",
-  "@readerHighlightLabel": {
-    "description": "NEW: no Iced string (RFD 6 authority). One saved highlight's navigation label in the annotation strip (RD-12).",
-    "placeholders": {
-      "number": {
-        "type": "int"
-      }
-    }
   },
   "readerAnnotationRecovered": "recovered",
   "@readerAnnotationRecovered": {
