@@ -2335,6 +2335,89 @@ void main() {
       );
     });
 
+    ({String text, Map<String, int> anchors, List<EpubTextSpan> spans})
+    parsedOf(String body) {
+      final chapter = normalizeChapter(
+        xhtml: '<html><body>$body</body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: const [],
+        limits: const EpubLimits(),
+      );
+      final paragraph = chapter.nodes.whereType<EpubParagraph>().firstOrNull;
+      return (
+        text: extractCanonicalText(chapter.nodes),
+        anchors: chapter.anchors,
+        spans: paragraph?.spans ?? const [],
+      );
+    }
+
+    test('anchors inside ruby bases resolve to their own characters', () {
+      final rb = parsedOf(
+        '<p><ruby><rb id="east">東</rb><rb id="capital">京</rb>'
+        '<rt>とう</rt><rt>きょう</rt></ruby></p>',
+      );
+      expect(rb.anchors['east'], 0);
+      expect(rb.anchors['capital'], 1);
+      final inner = parsedOf(
+        '<p><ruby>漢<a id="middle"></a>字<rt>かんじ</rt></ruby></p>',
+      );
+      expect(inner.anchors['middle'], 1);
+      // The base keeps one annotation over both its characters.
+      expect(
+        [
+          for (final span in inner.spans)
+            (span.text, span.ruby, span.rubyContinued),
+        ],
+        [('漢', 'かんじ', false), ('字', null, true)],
+      );
+    });
+
+    test('a link inside a ruby base is kept', () {
+      final parsed = parsedOf(
+        '<p><ruby><a href="#note">猫</a><rt>ねこ</rt></ruby></p>',
+      );
+      expect(
+        [for (final span in parsed.spans) (span.text, span.ruby, span.link)],
+        [('猫', 'ねこ', '#note')],
+      );
+    });
+
+    test('nested ruby keeps every annotation out of the text', () {
+      final parsed = parsedOf(
+        '<p><ruby><ruby>猫<rt>ねこ</rt></ruby><rt>cat</rt></ruby></p>',
+      );
+      expect(parsed.text, '猫\n');
+      expect(
+        [for (final span in parsed.spans) (span.text, span.ruby)],
+        [('猫', 'ねこ')],
+      );
+      expect(
+        parsedOf(
+          '<table><tr><td><ruby>猫<rtc>cat</rtc></ruby></td></tr></table>',
+        ).text,
+        isNot(contains('cat')),
+      );
+    });
+
+    test('a table cell places an anchor after ruby where its text is', () {
+      final chapter = normalizeChapter(
+        xhtml:
+            '<html><body><table><tr><td>A<ruby> 猫<rt>ねこ</rt></ruby>'
+            '<span id="after">B</span></td></tr></table></body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: const [],
+        limits: const EpubLimits(),
+      );
+      final text = extractCanonicalText(chapter.nodes);
+      expect(text, contains('A猫B'));
+      expect(
+        String.fromCharCodes(
+          text.runes.skip(chapter.anchors['after']!).take(1),
+        ),
+        'B',
+      );
+    });
+
     test('the annotation stays out of the canonical text', () {
       final chapter = chapterOf('<p><ruby>漢字<rt>かんじ</rt></ruby>を読む。</p>');
       expect(chapter.canonicalText, '漢字を読む。\n');

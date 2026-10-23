@@ -1388,7 +1388,7 @@ class _NormalizeContext {
       return;
     }
     if (element.name.local == 'ruby') {
-      _collectRuby(element, baseFontSize, link, spans);
+      _collectRuby(element, baseFontSize, link, spans, depth);
       return;
     }
     for (final child in element.children) {
@@ -1436,83 +1436,128 @@ class _NormalizeContext {
     }
   }
 
-  /// Collects a `<ruby>` element: each base becomes a span that carries its
-  /// `<rt>` annotation, and the annotation stays out of the text.
+  /// Collects a `<ruby>` element: its bases are collected as ordinary inline
+  /// content, so their anchors, links and whitespace are what they would be
+  /// outside it, and each `<rt>` annotation is set on the base it pairs with,
+  /// staying out of the text.
   ///
-  /// A base is the text before an `<rt>`, or the `<rb>` elements before a run
-  /// of `<rt>`s, paired in order. Bases keep their element's style; markup
-  /// inside a base or an annotation contributes its text only. `<rtc>` (a
-  /// second annotation level) is not drawn, and a base without an
-  /// annotation is plain text.
+  /// A base is the content before an `<rt>`, or the `<rb>` elements before a
+  /// run of `<rt>`s, paired in order. Whitespace-only text between the parts
+  /// of a ruby is not content. `<rtc>` (a second annotation level) is not
+  /// drawn, an annotation of a base that holds ruby of its own is dropped
+  /// (only the inner one is drawn), and a base without an annotation is plain
+  /// text.
   void _collectRuby(
     XmlElement ruby,
     double baseFontSize,
     String? link,
     List<EpubTextSpan> spans,
+    int depth,
   ) {
-    final segments = <(String, XmlElement)>[];
-    final loose = StringBuffer();
-
-    void emit(String text, XmlElement owner, String? annotation) {
-      final base = text.trim();
-      if (base.isEmpty) return;
-      final span = _textSpanFor(owner, base, baseFontSize, link)
-        ..ruby = annotation;
-      _takePendingSpan(span);
-      spans.add(span);
-      _inlineRawOffset += base.runes.length;
-    }
-
-    void flushLoose() {
-      emit(loose.toString(), ruby, null);
-      loose.clear();
-    }
-
-    void flushSegments() {
-      for (final (text, owner) in segments) {
-        emit(text, owner, null);
-      }
-      segments.clear();
-    }
-
+    // The span ranges of `<rb>`s waiting for their annotations, and where
+    // the content since the last annotation starts.
+    final bases = <(int, int)>[];
+    var looseStart = spans.length;
     for (final child in ruby.children) {
       if (child is XmlText) {
-        if (child.value.trim().isNotEmpty) flushSegments();
-        loose.write(child.value);
+        final text = _rubyText(child);
+        if (text.isEmpty) continue;
+        bases.clear();
+        final span = _textSpanFor(ruby, text, baseFontSize, link);
+        _takePendingSpan(span);
+        spans.add(span);
+        _inlineRawOffset += text.runes.length;
         continue;
       }
       if (child is! XmlElement) continue;
       if (styleOf(child).display == EpubDisplay.none) continue;
       _noteAnchor(child);
       switch (child.name.local) {
-        case 'rb':
-          if (loose.toString().trim().isNotEmpty) flushLoose();
-          loose.clear();
-          segments.add((_collectVisibleText(child), child));
         case 'rt':
-          final annotation = _collectVisibleText(
-            child,
-          ).trim().split(RegExp(r'\s+')).join(' ');
-          if (segments.isNotEmpty) {
-            final (text, owner) = segments.removeAt(0);
-            emit(text, owner, annotation.isEmpty ? null : annotation);
-          } else {
-            emit(
-              loose.toString(),
-              ruby,
-              annotation.isEmpty ? null : annotation,
-            );
-            loose.clear();
-          }
+          final (start, end) = bases.isNotEmpty
+              ? bases.removeAt(0)
+              : (looseStart, spans.length);
+          _setRuby(
+            spans,
+            start,
+            end,
+            _collectVisibleText(child).trim().split(RegExp(r'\s+')).join(' '),
+          );
+          looseStart = spans.length;
         case 'rtc':
           break;
+        case 'rb':
+          final start = spans.length;
+          _collectInline(child, baseFontSize, link, spans, depth + 1);
+          bases.add((start, spans.length));
+          looseStart = spans.length;
         default:
-          if (segments.isNotEmpty) flushSegments();
-          loose.write(_collectVisibleText(child));
+          bases.clear();
+          _collectInline(
+            child,
+            baseFontSize,
+            child.name.local == 'a'
+                ? (child.getAttribute('href') ?? link)
+                : link,
+            spans,
+            depth + 1,
+          );
       }
     }
-    flushSegments();
-    flushLoose();
+  }
+
+  /// The content of [text], a child of a `<ruby>`: without the whitespace at
+  /// an edge it shares with the ruby or with one of its annotation or base
+  /// elements, so a ruby written over several lines adds no spaces to its
+  /// text. Whitespace-only text between its parts is no content at all.
+  static String _rubyText(XmlText text) {
+    bool isEdge(XmlNode? node) =>
+        node == null ||
+        node is XmlElement &&
+            const {'rt', 'rtc', 'rb', 'rp'}.contains(node.name.local);
+    XmlNode? sibling(XmlNode node, int step) {
+      final siblings = node.parent!.children;
+      for (
+        var index = siblings.indexOf(node) + step;
+        index >= 0 && index < siblings.length;
+        index += step
+      ) {
+        final candidate = siblings[index];
+        if (candidate is XmlElement) return candidate;
+        if (candidate is XmlText && candidate.value.trim().isNotEmpty) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+
+    var value = text.value;
+    if (value.trim().isEmpty) return '';
+    if (isEdge(sibling(text, -1))) value = value.trimLeft();
+    if (isEdge(sibling(text, 1))) value = value.trimRight();
+    return value;
+  }
+
+  /// Sets [annotation] on the base made of [spans] [start] to [end]: on its
+  /// first span with text, and marks the rest up to its last span with text
+  /// as continuing it. A base that already holds ruby keeps only its own.
+  void _setRuby(
+    List<EpubTextSpan> spans,
+    int start,
+    int end,
+    String annotation,
+  ) {
+    if (annotation.isEmpty) return;
+    final base = spans.sublist(start, end);
+    if (base.any((span) => span.ruby != null || span.rubyContinued)) return;
+    bool hasText(EpubTextSpan span) => span.text.trim().isNotEmpty;
+    final first = base.indexWhere(hasText);
+    if (first < 0) return;
+    final last = base.lastIndexWhere(hasText);
+    base[first].ruby = annotation;
+    for (var index = first + 1; index <= last; index++) {
+      base[index].rubyContinued = true;
+    }
   }
 
   void _collapseWhitespace(List<EpubTextSpan> spans) {
@@ -1643,11 +1688,13 @@ class _NormalizeContext {
       for (final target in splits) {
         piece.text = String.fromCharCodes(text.runes.take(target - position));
         rebuilt.add(piece);
-        // The first piece keeps the ruby, so it is drawn once.
+        // A later piece continues the first one's ruby base, so the
+        // annotation is drawn once over the whole base.
         piece = span.copy()
           ..text = String.fromCharCodes(text.runes.skip(target - position))
           ..anchorIds = const []
-          ..ruby = null;
+          ..ruby = null
+          ..rubyContinued = span.ruby != null || span.rubyContinued;
         pieceStart = target;
       }
       piece.text = String.fromCharCodes(text.runes.skip(pieceStart - position));
@@ -1710,8 +1757,11 @@ class _NormalizeContext {
           current.link == next.link &&
           current.combine == next.combine &&
           !(current.combine?.all ?? false) &&
-          current.ruby == null &&
-          next.ruby == null) {
+          // A ruby base starts its own span; its continuations merge into it,
+          // and nothing else does.
+          next.ruby == null &&
+          next.rubyContinued ==
+              (current.ruby != null || current.rubyContinued)) {
         current.text = current.text + next.text;
         spans.removeAt(index + 1);
       } else {
@@ -1933,7 +1983,8 @@ class _NormalizeContext {
             run.first.copy()
               ..text = '\n'
               ..math = null
-              ..ruby = null,
+              ..ruby = null
+              ..rubyContinued = false,
           );
         }
         output.addAll(run);
@@ -2377,13 +2428,22 @@ class _NormalizeContext {
       );
       return;
     }
-    // A table cell keeps a ruby's base text and drops its annotation.
-    if (element.name.local == 'rt') return;
+    // A table cell keeps a ruby's base text and drops its annotations, and
+    // the whitespace between a ruby's parts, as [_collectRuby] does.
+    if (element.name.local == 'rt' || element.name.local == 'rtc') return;
+    final isRuby = element.name.local == 'ruby';
     final nestedLink = element.name.local == 'a'
         ? element.getAttribute('href')
         : link;
     for (final child in element.children) {
       if (child is XmlText) {
+        if (isRuby) {
+          final text = _rubyText(child);
+          if (text.isNotEmpty) {
+            spans.add(_textSpanFor(element, text, baseFontSize, nestedLink));
+          }
+          continue;
+        }
         _collectTableCellText(child, element, baseFontSize, nestedLink, spans);
       } else if (child is XmlElement) {
         if (styleOf(child).display == EpubDisplay.none) continue;
