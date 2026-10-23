@@ -621,6 +621,56 @@ void main() {
     expect(line(stop), line(eight));
   });
 
+  test('tate-chū-yoko whose text breaks a line inside it is laid out '
+      'without it', () async {
+    await loadHarnessFonts();
+    // A line may break between 一 and 二 but not before 。, so with two ems
+    // to a line the run's empty second character would start the next one.
+    const tcy = '<span style="text-combine-upright: all">';
+    final book = openEpubBytes(
+      buildTestEpub(
+        chapters: {
+          'OPS/Text/chapter-1.xhtml':
+              '<p>甲$tcy一二</span>。乙</p><p>丙${tcy}38</span>。丁</p>',
+        },
+        nav: '<ol><li><a href="../Text/chapter-1.xhtml">一</a></li></ol>',
+        pageProgression: 'rtl',
+        bodyAttributes: ' style="writing-mode: vertical-rl"',
+      ),
+    );
+    final session = ChapterLayoutSession(
+      chapter: book.chapters.first,
+      spec: const ChapterLayoutSpec(
+        width: 36,
+        height: 600,
+        typography: typography,
+        vertical: true,
+      ),
+      images: const {},
+    );
+    addTearDown(session.dispose);
+    session.layoutWindowAt(0);
+    final blocks = [for (final block in session.blocks) block.text!];
+    for (final block in blocks) {
+      for (final run in block.upright.where((run) => run.combined)) {
+        expect(
+          block.painter.getLineBoundary(TextPosition(offset: run.start)),
+          block.painter.getLineBoundary(TextPosition(offset: run.end - 1)),
+        );
+      }
+    }
+    String combined(FlowTextBlock block) => [
+      for (final run in block.upright)
+        if (run.combined) block.map.text.substring(run.start, run.end),
+    ].join();
+    // 一二 falls back to upright characters; 38 stays combined.
+    expect(blocks.map(combined), ['', '38']);
+    expect(
+      blocks.first.upright.map((run) => run.combined),
+      everyElement(false),
+    );
+  });
+
   test('a line of tate-chū-yoko alone keeps the line height', () {
     double lineHeight(double factor) {
       final built = buildBlockText(

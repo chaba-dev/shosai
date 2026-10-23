@@ -502,9 +502,9 @@ bool isUprightInVertical(int rune) {
 
     void combine(int from, int to) {
       // The first grapheme advances one em and the others nothing, so the
-      // run takes one character's place and, its followers taking no room, a
-      // line cannot break inside it; the text keeps its own line breaking
-      // rules and line height around it. Each grapheme alternates a value on
+      // run takes one character's place and keeps its text's own line
+      // breaking rules and line height; a flow that breaks a line inside it
+      // anyway lays it out again without it. Each grapheme alternates a value on
       // an axis no font has, which draws nothing differently but keeps the
       // paragraph from shaping it with its neighbours (ligatures, kerning).
       // Its advance, still shaped in context (joining forms), is measured in
@@ -525,7 +525,10 @@ bool isUprightInVertical(int rune) {
             style: hidden.copyWith(
               fontVariations: [
                 ...?style.fontVariations,
-                ui.FontVariation(_shapingBoundaryAxis, (index % 2).toDouble()),
+                ui.FontVariation(
+                  _shapingBoundaryAxis,
+                  (graphemes.length % 2).toDouble(),
+                ),
               ],
             ),
           ),
@@ -623,6 +626,24 @@ bool isUprightInVertical(int rune) {
     ),
     upright: upright,
   );
+}
+
+/// [spans] with tate-chū-yoko turned off on the spans that hold [runs],
+/// which [buildBlockText] built from them at [codeUnitOffset].
+List<EpubTextSpan> withoutCombining(
+  List<EpubTextSpan> spans,
+  Iterable<UprightRun> runs, {
+  int codeUnitOffset = 0,
+}) {
+  final result = <EpubTextSpan>[];
+  var start = codeUnitOffset;
+  for (final span in spans) {
+    final end = start + span.text.length;
+    final holds = runs.any((run) => run.start >= start && run.start < end);
+    result.add(holds ? (span.copy()..combine = null) : span);
+    start = end;
+  }
+  return result;
 }
 
 /// A variation axis no font defines. A tate-chū-yoko run's transparent

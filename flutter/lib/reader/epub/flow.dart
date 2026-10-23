@@ -1776,19 +1776,40 @@ class _FlowContext {
     }
     children.add(built.span);
     final textAlign = flutterTextAlign(align ?? EpubTextAlign.start);
-    final painter = _registerPainter(
-      TextPainter(
-        text: TextSpan(children: children),
-        textAlign: textAlign,
-        textDirection: flutterTextDirection(direction),
-        textWidthBasis: TextWidthBasis.parent,
-      ),
+    final painter = TextPainter(
+      text: TextSpan(children: children),
+      textAlign: textAlign,
+      textDirection: flutterTextDirection(direction),
+      textWidthBasis: TextWidthBasis.parent,
     );
     final width = math.max(
       20.0,
       maxWidth - (marker != null ? markerIndent : 0),
     );
     painter.layout(maxWidth: width);
+    // A line may still break inside tate-chū-yoko where its text allows it
+    // (between two kanji, before a full stop that may not start a line):
+    // the spans of a run broken across lines are laid out again without it.
+    final broken = [
+      for (final run in built.upright)
+        if (run.combined &&
+            painter.getLineBoundary(TextPosition(offset: run.start)) !=
+                painter.getLineBoundary(TextPosition(offset: run.end - 1)))
+          run,
+    ];
+    if (broken.isNotEmpty) {
+      painter.dispose();
+      return _textBlock(
+        withoutCombining(spans, broken, codeUnitOffset: markerPrefix.length),
+        maxWidth: maxWidth,
+        baseFontSize: baseFontSize,
+        align: align,
+        direction: direction,
+        marker: marker,
+        markerIndent: markerIndent,
+      );
+    }
+    _registerPainter(painter);
     final lines = <FlowLine>[];
     final metrics = painter.computeLineMetrics();
     final bounds = _lineBounds(
