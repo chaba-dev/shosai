@@ -88,6 +88,7 @@
   "readerBackTo": "{place}に戻る",
   "readerBackDismiss": "ここにとどまる",
   "readerNotesCount": "メモ {count}件",
+  "readerNotesScope": "表示するメモ",
   "readerNotesEmpty": "まだメモはありません。テキストを選んでハイライトするか、このページにメモを追加してください。",
   "readerPageNumber": "{page}ページ",
   "readerPageNoteAt": "ページのメモ · {page}ページ",

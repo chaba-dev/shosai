@@ -17,6 +17,8 @@ import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
+import 'package:shosai_flutter/shell/notes_controller.dart'
+    show ShellNotesController, ShellNotesModel, ShellNotesStatus;
 import 'package:shosai_flutter/notices/reader_notice_text.dart';
 import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/continuous.dart';
@@ -58,6 +60,7 @@ final class ReaderController implements Listenable {
     ReaderProgressSource? progressSource,
     ReaderContentsLoader? contentsLoader,
     ReaderExternalLinkOpener? externalLinkOpener,
+    ReaderBookOpener? bookOpener,
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
     ReaderPagesSink? pagesSink,
@@ -104,6 +107,7 @@ final class ReaderController implements Listenable {
        _progressSource = progressSource,
        _contentsLoader = contentsLoader,
        _externalLinkOpener = externalLinkOpener ?? ((_) async {}),
+       _bookOpener = bookOpener,
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
        _pagesSink = pagesSink ?? ((_) {}),
@@ -155,6 +159,9 @@ final class ReaderController implements Listenable {
   final ReaderProgressSource? _progressSource;
   final ReaderContentsLoader? _contentsLoader;
   final ReaderExternalLinkOpener _externalLinkOpener;
+
+  /// Opens another library book in the shell; null outside it.
+  final ReaderBookOpener? _bookOpener;
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
   final ReaderPagesSink _pagesSink;
@@ -280,6 +287,8 @@ final class ReaderController implements Listenable {
   int _searchRevision = 0;
   int _bookmarkRevision = 0;
   int _notesRevision = 0;
+  int _libraryNotesRevision = 0;
+  BigInt? _libraryNotesCancellation;
   String _searchQuery = '';
   String? _searchError;
   int _searchCurrentIndex = 0;
@@ -529,6 +538,7 @@ final class ReaderController implements Listenable {
           ReaderNoteSaved() ||
           ReaderNoteDeleted() ||
           ReaderNoteNavigated() ||
+          ReaderLibraryNoteOpened() ||
           ReaderPlaceRequested() ||
           ReaderReturnRequested() => true,
           _ => false,
@@ -619,6 +629,26 @@ final class ReaderController implements Listenable {
         if (_model.noteEdit != null) _emit(_model.copyWith(noteEdit: null));
       case ReaderNoteDeleted():
         _placeNoteDeleted(message.id);
+      case ReaderNotesScopeChanged(:final scope):
+        if (scope == _model.notesScope || _model.document?.bookId == null) {
+          return;
+        }
+        _emit(_model.copyWith(notesScope: scope));
+        if (scope == ReaderNotesScope.allBooks) {
+          _libraryNotesRequested(append: false);
+        }
+      case ReaderLibraryNotesMoreRequested():
+        final notes = _model.libraryNotes;
+        if (_model.notesScope != ReaderNotesScope.allBooks || notes.loading) {
+          return;
+        }
+        if (notes.status == ShellNotesStatus.failed) {
+          _libraryNotesRequested(append: false);
+        } else if (notes.hasMore) {
+          _libraryNotesRequested(append: true);
+        }
+      case ReaderLibraryNoteOpened(:final book, :final note):
+        _libraryNoteOpened(book, note);
       case ReaderNoteNavigated():
         _jump(
           () => _unitRequested(
@@ -875,7 +905,59 @@ final class ReaderController implements Listenable {
               ]),
             ),
           );
+          // All books lists this book's notes too.
+          if (_model.notesScope == ReaderNotesScope.allBooks) {
+            _libraryNotesRequested(append: false);
+          }
         }
+      case _ReaderLibraryNotesLoaded(:final page, :final append):
+        if (_isCurrent(message.generation) &&
+            message.revision == _libraryNotesRevision) {
+          // Books read since the list began reorder it: it is listed again
+          // from the first book.
+          if (page.changed) {
+            _libraryNotesRequested(append: false);
+            return;
+          }
+          _emit(
+            _model.copyWith(
+              libraryNotes: ShellNotesModel(
+                status: ShellNotesStatus.loaded,
+                books: List.unmodifiable([
+                  if (append) ..._model.libraryNotes.books,
+                  ...page.books,
+                ]),
+                hasMore: page.hasMore,
+              ),
+            ),
+          );
+        }
+      case _ReaderLibraryNotesFailed(:final error, :final append):
+        if (_isCurrent(message.generation) &&
+            message.revision == _libraryNotesRevision) {
+          // A page that fails after others keeps what was listed.
+          _emit(
+            _model.copyWith(
+              libraryNotes: _model.libraryNotes.copyWith(
+                status: append
+                    ? ShellNotesStatus.loaded
+                    : ShellNotesStatus.failed,
+                books: append ? null : const [],
+                hasMore: append ? null : false,
+                error: () => error,
+              ),
+            ),
+          );
+        }
+      case _ReaderLibraryNotesFinished(:final cancellation):
+        if (_libraryNotesCancellation == cancellation) {
+          _libraryNotesCancellation = null;
+        }
+        _toolCancellations.remove(cancellation);
+        _bridge.releaseCancellation(id: cancellation);
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
       case _ReaderNotesFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _notesRevision) {
@@ -1301,6 +1383,7 @@ final class ReaderController implements Listenable {
     _searchError = null;
     _searchCurrentIndex = 0;
     _exportRevision += 1;
+    _libraryNotesRevision += 1;
     _retireDocumentPicker();
     _emit(
       _model.copyWith(
@@ -1308,6 +1391,10 @@ final class ReaderController implements Listenable {
         openBookId: message.bookId,
         document: null,
         noteEdit: null,
+        // Every book opens on its own notes; a file outside the library has
+        // no All books to switch to.
+        notesScope: ReaderNotesScope.thisBook,
+        libraryNotes: const ShellNotesModel(),
         unit: 0,
         readingOffset: null,
         pageImage: null,
@@ -3136,6 +3223,93 @@ final class ReaderController implements Listenable {
       revision: revision,
       document: document!,
     );
+  }
+
+  /// Lists every book's notes for All books: the first page again, or the
+  /// page after those listed.
+  void _libraryNotesRequested({required bool append}) {
+    if (_closing || _suspended) return;
+    final generation = _model.generation;
+    final revision = ++_libraryNotesRevision;
+    if (_libraryNotesCancellation case final previous?) {
+      _bridge.cancel(id: previous);
+    }
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      dispatch(
+        _ReaderLibraryNotesFailed(
+          generation,
+          revision,
+          _describeError(error),
+          append: append,
+        ),
+      );
+      return;
+    }
+    _libraryNotesCancellation = cancellation;
+    _toolCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    // More follows the books listed, while they are still the first.
+    final after = append
+        ? [for (final book in _model.libraryNotes.books) book.book.bookId]
+        : null;
+    _emit(
+      _model.copyWith(
+        libraryNotes: _model.libraryNotes.copyWith(
+          status: append ? null : ShellNotesStatus.loading,
+          appending: append,
+          error: () => null,
+        ),
+      ),
+    );
+    unawaited(() async {
+      try {
+        final page = await _records.libraryNotes(
+          limit: ShellNotesController.pageSize,
+          offset: after?.length ?? 0,
+          after: after,
+          cancellationId: cancellation,
+        );
+        dispatch(
+          _ReaderLibraryNotesLoaded(generation, revision, page, append: append),
+        );
+      } catch (error) {
+        dispatch(
+          _ReaderLibraryNotesFailed(
+            generation,
+            revision,
+            _describeError(error),
+            append: append,
+          ),
+        );
+      } finally {
+        dispatch(_ReaderLibraryNotesFinished(cancellation));
+      }
+    }());
+  }
+
+  /// Opens a note from All books where it resolves, as the Notes place does:
+  /// this book's goes there as any place asked for, and another book's opens
+  /// that book there. A book note opens its book where it was left.
+  void _libraryNoteOpened(FlutterLibraryBook book, FlutterNoteEntry note) {
+    final unit = note.unit;
+    // Its unit and offset are where it was made; the reader resolves it by
+    // its id in the edition it opens.
+    final place = unit == null
+        ? null
+        : ReaderPlace(
+            unit,
+            offset: note.offset,
+            annotationId: note.id,
+            note: note.kind != FlutterNoteEntryKind.highlight,
+          );
+    if (book.bookId == _model.document?.bookId) {
+      if (place != null) _dispatch(ReaderPlaceRequested(place));
+      return;
+    }
+    _bookOpener?.call(book, place);
   }
 
   /// Opens the note editor for a new page note or book note.
@@ -5133,6 +5307,11 @@ final class ReaderController implements Listenable {
     List<FlutterAnnotation> annotations, {
     bool? annotationsReady,
   }) {
+    // All books lists this book's highlights too, as the store has them.
+    if ((annotationsReady ?? _model.annotationsReady) &&
+        _model.notesScope == ReaderNotesScope.allBooks) {
+      _libraryNotesRequested(append: false);
+    }
     _emit(
       _model.copyWith(
         annotations: List.unmodifiable(annotations),

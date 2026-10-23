@@ -339,6 +339,9 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get readerNotesScope => '表示するメモ';
+
+  @override
   String get readerNotesEmpty =>
       'まだメモはありません。テキストを選んでハイライトするか、このページにメモを追加してください。';
 

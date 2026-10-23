@@ -605,6 +605,76 @@ void main() {
         await drainHarness(tester);
       });
 
+      Future<void> openAllBooksNote(WidgetTester tester, String id) async {
+        await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+        await settleNative(tester);
+        await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
+        await settleNative(tester);
+        await tester.tap(find.byKey(ValueKey('shell-note-$id-open')));
+        await settleNative(tester, rounds: 8);
+        await settleEpubPage(tester);
+        await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+        await settleNative(tester);
+      }
+
+      FlutterBookNotes listed(_NavigationBridge harness, String id, int unit) =>
+          FlutterBookNotes(
+            book: harness.books.first,
+            notes: [
+              FlutterNoteEntry(
+                id: id,
+                kind: FlutterNoteEntryKind.page,
+                body: id,
+                unit: unit,
+                offset: 0,
+                modifiedAt: '2026-10-01T00:00:00.000Z',
+              ),
+            ],
+          );
+
+      testWidgets('from All books goes where this edition has it', (
+        tester,
+      ) async {
+        final harness = bridge()
+          ..placeNotes.add(
+            note('moved', 2, FlutterAnnotationResolution.recovered),
+          );
+        // Listed where it was made, in another edition's chapter 2.
+        harness.libraryBookNotes = [listed(harness, 'moved', 1)];
+        await openReader(tester, harness);
+        await settleEpubPage(tester);
+
+        await openAllBooksNote(tester, 'moved');
+        await openContents(tester);
+        expect(current(tester, 2), isTrue, reason: 'where it resolves');
+
+        await tester.pumpWidget(const SizedBox());
+        await drainHarness(tester);
+      });
+
+      testWidgets('yields to a note opened from All books', (tester) async {
+        final requests = ReaderPlaceRequests();
+        final harness = bridge()
+          ..placeNotes.addAll([note('far', 2), note('near', 1)]);
+        harness.libraryBookNotes = [listed(harness, 'near', 1)];
+        await openReader(tester, harness, placeRequests: requests);
+        await settleEpubPage(tester);
+        final older = Completer<void>();
+        harness.noteListGates.add(older);
+
+        requests.go(place('far', 2));
+        await tester.pump();
+        await openAllBooksNote(tester, 'near');
+        older.complete();
+        await settleNative(tester, rounds: 8);
+        await settleEpubPage(tester);
+        await openContents(tester);
+        expect(current(tester, 1), isTrue, reason: 'the note chosen last');
+
+        await tester.pumpWidget(const SizedBox());
+        await drainHarness(tester);
+      });
+
       testWidgets('yields to a newer place', (tester) async {
         final requests = ReaderPlaceRequests();
         final harness = bridge()..placeNotes.add(note('far', 2));

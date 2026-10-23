@@ -54,6 +54,14 @@ Widget _reader(
         onPressed: () => locatorChanged('/books/other.pdf', null),
         child: const Text('Open another file'),
       ),
+      // A note in the reader's All books that sits in another book.
+      TextButton(
+        onPressed: () => places.openBook?.call(
+          harnessLibraryBooks()[3],
+          const ReaderPlace(4, offset: 12),
+        ),
+        child: const Text('Open the atlas note'),
+      ),
     ],
   ),
 );
@@ -309,6 +317,20 @@ void main() {
     await tester.tap(find.byTooltip('Close $_quiet'));
     await tester.pumpAndSettle();
     expect(find.text('READING NOW'), findsNothing);
+  });
+
+  testWidgets('a reader opens another book’s note in the shell', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(1440, 900));
+    await tester.tap(_card(1));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_quiet'), findsOneWidget);
+
+    await tester.tap(find.text('Open the atlas note'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+    expect(find.text('At 4:12'), findsOneWidget);
   });
 
   testWidgets('the Notes place lists every book’s notes and opens one there', (

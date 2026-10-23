@@ -205,6 +205,7 @@ Widget _reader({
   ReaderDocumentPickerAdapter? documentPicker,
   ReaderExportSink? exportSink,
   ReaderNoticeReporter? noticeReporter,
+  ReaderPlaceRequests? placeRequests,
   Locale? locale,
 }) => productionShell(
   locale: locale,
@@ -219,6 +220,7 @@ Widget _reader({
     documentPicker: documentPicker,
     exportSink: exportSink,
     noticeReporter: noticeReporter,
+    placeRequests: placeRequests,
   ),
 );
 
@@ -785,6 +787,235 @@ void main() {
         expect(field, findsNothing, reason: button);
         expect(bridge.placeNotes.single.body, 'First');
       }
+    });
+
+    testWidgets('All books lists every book’s notes and opens one there', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final [quiet, umibe, ...] = harnessLibraryBooks();
+      final bridge = _PanelBridge(unitCount: 3)
+        ..libraryBookNotes = [
+          FlutterBookNotes(
+            book: quiet,
+            notes: const [
+              FlutterNoteEntry(
+                id: 'quiet-page',
+                kind: FlutterNoteEntryKind.page,
+                body: 'Here, in this book.',
+                unit: 2,
+                offset: 0,
+                modifiedAt: '2026-10-02T00:00:00.000Z',
+              ),
+            ],
+          ),
+          FlutterBookNotes(
+            book: umibe,
+            notes: const [
+              FlutterNoteEntry(
+                id: 'umibe-highlight',
+                kind: FlutterNoteEntryKind.highlight,
+                color: FlutterHighlightColor.blue,
+                quote: 'The tide keeps the shelves.',
+                unit: 1,
+                offset: 30,
+                modifiedAt: '2026-10-01T00:00:00.000Z',
+              ),
+            ],
+          ),
+        ];
+      bridge.placeNotes.add(
+        FlutterNote(
+          id: 'quiet-page',
+          kind: FlutterNoteKind.page,
+          unit: BigInt.two,
+          offset: BigInt.zero,
+          resolution: FlutterAnnotationResolution.exact,
+          body: 'Here, in this book.',
+          modifiedAt: '2026-10-02T00:00:00.000Z',
+        ),
+      );
+      final opened = <(int, ReaderPlace?)>[];
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialBookId: 1,
+          contentsLoader: (_) async => const [],
+          placeRequests: ReaderPlaceRequests(
+            openBook: (book, place) => opened.add((book.bookId, place)),
+          ),
+        ),
+      );
+      await _openNotes(tester);
+
+      await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
+      await tester.pump();
+      await _settle(tester);
+      expect(bridge.libraryNotesCalls, 1);
+      expect(find.text('2 notes'), findsOneWidget);
+      expect(find.text('${quiet.title} · Page note'), findsOneWidget);
+      expect(find.text('The tide keeps the shelves.'), findsOneWidget);
+
+      // A note in another book opens that book at its place.
+      await tester.tap(
+        find.byKey(const ValueKey('shell-note-umibe-highlight-open')),
+      );
+      await tester.pump();
+      // It keeps its identity, so that book resolves it in its edition.
+      expect(opened, [
+        (
+          2,
+          const ReaderPlace(
+            1,
+            offset: 30,
+            annotationId: 'umibe-highlight',
+            note: false,
+          ),
+        ),
+      ]);
+
+      // This book's note goes to its place here, and Back returns.
+      await tester.tap(
+        find.byKey(const ValueKey('shell-note-quiet-page-open')),
+      );
+      await tester.pump();
+      await _settle(tester);
+      expect(opened, hasLength(1));
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('reader-notes-this-book')));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('reader-place-note-quiet-page')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a file opened from outside the library shows its own '
+        'notes', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _PanelBridge(unitCount: 3);
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialBookId: 1,
+          contentsLoader: (_) async => const [],
+          documentPicker: () async =>
+              const ReaderPickedDocument('/books/replacement.pdf'),
+        ),
+      );
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
+      await tester.pump();
+      await _settle(tester);
+      expect(
+        find.byKey(const ValueKey('reader-notes-library-empty')),
+        findsOneWidget,
+      );
+
+      await _pressOpenBook(tester);
+      await _settle(tester, frames: 6);
+      await _openNotes(tester);
+      expect(
+        find.byKey(const ValueKey('reader-notes-all-books')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('reader-notes-library-empty')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('reader-notes-empty')), findsOneWidget);
+    });
+
+    testWidgets('All books starts again when More finds them reordered', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      FlutterBookNotes entry(int i) => FlutterBookNotes(
+        book: FlutterLibraryBook(
+          bookId: 1000 + i,
+          title: 'Book $i',
+          format: FlutterBookFormat.epub,
+          pathKey: '/books/book-$i.epub',
+          managed: true,
+          progress: 0,
+          dateAdded: '2026-10-01',
+        ),
+        notes: [
+          FlutterNoteEntry(
+            id: 'note-$i',
+            kind: FlutterNoteEntryKind.book,
+            body: 'Note $i',
+            modifiedAt: '2026-10-01T00:00:00.000Z',
+          ),
+        ],
+      );
+      final bridge = _PanelBridge(unitCount: 3)
+        ..libraryBookNotes = [for (var i = 0; i < 25; i += 1) entry(i)];
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialBookId: 1,
+          contentsLoader: (_) async => const [],
+        ),
+      );
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
+      await tester.pump();
+      await _settle(tester);
+      expect(find.text('20 notes'), findsOneWidget);
+
+      // A book read meanwhile moves to the front: More lists from the first
+      // book again instead of repeating one and skipping another.
+      bridge.libraryBookNotes.insert(0, bridge.libraryBookNotes.removeAt(22));
+      final more = find.byKey(const ValueKey('reader-notes-library-more'));
+      await tester.ensureVisible(more);
+      await tester.pump();
+      await tester.tap(more);
+      await tester.pump();
+      await _settle(tester);
+      expect(bridge.libraryNotesCalls, 3);
+      expect(find.text('20 notes'), findsOneWidget);
+    });
+
+    testWidgets('a failed All books list can be retried', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _PanelBridge(unitCount: 3)
+        ..libraryNotesFailure = FlutterBridgeError(
+          kind: FlutterBridgeErrorKind.backendUnavailable,
+          message: 'The library is unavailable.',
+        );
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialBookId: 1,
+          contentsLoader: (_) async => const [],
+        ),
+      );
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
+      await tester.pump();
+      await _settle(tester);
+      expect(
+        find.textContaining('The library is unavailable.'),
+        findsOneWidget,
+      );
+
+      bridge.libraryNotesFailure = null;
+      await tester.tap(
+        find.byKey(const ValueKey('reader-notes-library-retry')),
+      );
+      await tester.pump();
+      await _settle(tester);
+      expect(bridge.libraryNotesCalls, 2);
+      expect(
+        find.byKey(const ValueKey('reader-notes-library-empty')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('Markdown export copies through the sink and reports success', (

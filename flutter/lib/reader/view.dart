@@ -277,6 +277,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         progressSource: widget.progressSource,
         contentsLoader: widget.contentsLoader,
         externalLinkOpener: widget.externalLinkOpener,
+        bookOpener: widget.placeRequests?.openBook,
         documentPickerAdapter: widget.documentPicker,
         exportSink: widget.exportSink ?? _copyExportToClipboard,
         pagesSink: widget.onPagesChanged,

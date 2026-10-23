@@ -192,6 +192,26 @@ final class ReaderNoteNavigated extends ReaderMessage {
   final int? offset;
 }
 
+/// Lists this book's notes or every book's in the Notes panel.
+final class ReaderNotesScopeChanged extends ReaderMessage {
+  const ReaderNotesScopeChanged(this.scope);
+  final ReaderNotesScope scope;
+}
+
+/// Lists the next page of books in the Notes panel's All books, or retries
+/// the list or the page that failed.
+final class ReaderLibraryNotesMoreRequested extends ReaderMessage {
+  const ReaderLibraryNotesMoreRequested();
+}
+
+/// Opens a note from All books at its place: in this book the reader goes
+/// there, and another book is opened there.
+final class ReaderLibraryNoteOpened extends ReaderMessage {
+  const ReaderLibraryNoteOpened(this.book, this.note);
+  final FlutterLibraryBook book;
+  final FlutterNoteEntry note;
+}
+
 /// Toggles one of the three mutually exclusive reader panels (RD-13).
 ///
 /// Toggling the open panel closes it; opening a panel closes the other two.
@@ -398,6 +418,37 @@ final class _ReaderPlaceResolveFinished extends ReaderMessage {
 
 final class _ReaderNotesFinished extends ReaderMessage {
   const _ReaderNotesFinished(this.cancellation);
+  final BigInt cancellation;
+}
+
+final class _ReaderLibraryNotesLoaded extends ReaderMessage {
+  const _ReaderLibraryNotesLoaded(
+    this.generation,
+    this.revision,
+    this.page, {
+    required this.append,
+  });
+  final int generation;
+  final int revision;
+  final FlutterLibraryNotesPage page;
+  final bool append;
+}
+
+final class _ReaderLibraryNotesFailed extends ReaderMessage {
+  const _ReaderLibraryNotesFailed(
+    this.generation,
+    this.revision,
+    this.error, {
+    required this.append,
+  });
+  final int generation;
+  final int revision;
+  final String error;
+  final bool append;
+}
+
+final class _ReaderLibraryNotesFinished extends ReaderMessage {
+  const _ReaderLibraryNotesFinished(this.cancellation);
   final BigInt cancellation;
 }
 
