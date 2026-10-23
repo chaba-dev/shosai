@@ -58,6 +58,14 @@ abstract interface class FlutterBridge {
     required BigInt cancellationId,
   });
 
+  /// A page of the library's books that have notes, most recently read
+  /// first, each with its notes in reading order.
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    required BigInt cancellationId,
+  });
+
   Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -639,6 +647,80 @@ class FlutterNotesSummary {
       other is FlutterNotesSummary &&
           count == other.count &&
           latest == other.latest;
+}
+
+/// What a note in the library's notes list is.
+enum FlutterNoteEntryKind { highlight, page, book }
+
+/// One highlight, page note or book note as the library's notes list it:
+/// read from the store alone, so its book need not be open, and placed as
+/// it was made.
+class FlutterNoteEntry {
+  final String id;
+  final FlutterNoteEntryKind kind;
+
+  /// A highlight's colour; null for notes.
+  final FlutterHighlightColor? color;
+
+  /// A highlight's text as it was selected; null for notes and for PDF
+  /// highlights of unmapped text.
+  final String? quote;
+  final String? body;
+
+  /// The EPUB spine index or PDF page it was made on; null for a book note.
+  final int? unit;
+
+  /// Where in [unit] it starts, in Unicode scalars of the unit's text; null
+  /// when unknown.
+  final int? offset;
+
+  /// ISO 8601 UTC.
+  final String modifiedAt;
+
+  const FlutterNoteEntry({
+    required this.id,
+    required this.kind,
+    this.color,
+    this.quote,
+    this.body,
+    this.unit,
+    this.offset,
+    required this.modifiedAt,
+  });
+
+  @override
+  int get hashCode =>
+      Object.hash(id, kind, color, quote, body, unit, offset, modifiedAt);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterNoteEntry &&
+          id == other.id &&
+          kind == other.kind &&
+          color == other.color &&
+          quote == other.quote &&
+          body == other.body &&
+          unit == other.unit &&
+          offset == other.offset &&
+          modifiedAt == other.modifiedAt;
+}
+
+/// A library book and its notes in reading order: book notes first, then
+/// each unit's notes by where they start.
+class FlutterBookNotes {
+  final FlutterLibraryBook book;
+  final List<FlutterNoteEntry> notes;
+
+  const FlutterBookNotes({required this.book, required this.notes});
+}
+
+/// A page of the library's books that have notes, most recently read first.
+class FlutterLibraryNotesPage {
+  final List<FlutterBookNotes> books;
+  final bool hasMore;
+
+  const FlutterLibraryNotesPage({required this.books, required this.hasMore});
 }
 
 class FlutterLibraryPage {

@@ -30,6 +30,26 @@ mixin BridgeRecords implements RecordsHost {
   /// The note writes started, held or not.
   int noteWrites = 0;
 
+  /// The library's books with notes, most recently read first, as
+  /// [libraryNotes] lists them.
+  List<FlutterBookNotes> libraryBookNotes = [];
+
+  /// The library notes pages asked for.
+  int libraryNotesCalls = 0;
+
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    required BigInt cancellationId,
+  }) async {
+    libraryNotesCalls += 1;
+    final end = (offset + limit).clamp(0, libraryBookNotes.length);
+    return FlutterLibraryNotesPage(
+      books: libraryBookNotes.sublist(offset.clamp(0, end), end),
+      hasMore: end < libraryBookNotes.length,
+    );
+  }
+
   Future<List<FlutterNote>> listNotes({
     required FlutterDocumentHandle document,
     required BigInt cancellationId,
@@ -109,6 +129,17 @@ final class BridgeForwardingRecords implements ShosaiRecords {
     required int bookId,
     required BigInt cancellationId,
   }) => bridge.libraryCover(bookId: bookId, cancellationId: cancellationId);
+
+  @override
+  Future<FlutterLibraryNotesPage> libraryNotes({
+    required int limit,
+    required int offset,
+    required BigInt cancellationId,
+  }) => bridge.libraryNotes(
+    limit: limit,
+    offset: offset,
+    cancellationId: cancellationId,
+  );
 
   @override
   Future<FlutterImportReport> importPaths({
