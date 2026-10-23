@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/reader/controller.dart';
@@ -763,6 +764,124 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);
     });
+
+    testWidgets('a long Back label fits a phone at a large text size', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 720);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 3;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final requests = ReaderPlaceRequests();
+      final harness = bridge(
+        readingState: FlutterReadingState(
+          unit: BigInt.from(2),
+          offset: BigInt.from(200),
+          zoom: 1,
+        ),
+      );
+      await openReader(tester, harness, placeRequests: requests);
+      await settleEpubPage(tester);
+      requests.go(const ReaderPlace(0, offset: 0));
+      await settleEpubPage(tester);
+
+      final pill = find.byKey(const ValueKey('reader-back-pill'));
+      expect(pill, findsOneWidget);
+      expect(find.textContaining('Back to'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      expect(tester.getRect(pill).width, lessThanOrEqualTo(360));
+      expect(
+        find.byKey(const ValueKey('reader-back-dismiss')).hitTestable(),
+        findsOneWidget,
+        reason: 'the close button stays on screen',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets('a turn the reader refuses does not count against Back', (
+      tester,
+    ) async {
+      final requests = ReaderPlaceRequests();
+      final harness = bridge();
+      await openReader(tester, harness, placeRequests: requests);
+      await settleEpubPage(tester);
+      // The last chapter's one page: there is nothing after it.
+      requests.go(const ReaderPlace(2, offset: 0));
+      await settleEpubPage(tester);
+      for (var turn = 0; turn < 3; turn += 1) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await settleEpubPage(tester);
+      }
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await drainHarness(tester);
+    });
+
+    testWidgets(
+      'Alt+← goes back, but moves by word in a text field',
+      (tester) async {
+        final harness = bridge();
+        await openReader(tester, harness);
+        await settleEpubPage(tester);
+        Future<void> jump() async {
+          await openContents(tester);
+          await tester.tap(inContents('Chapter three deep'));
+          await settleEpubPage(tester);
+          if (find
+              .byKey(const ValueKey('reader-panel-contents'))
+              .evaluate()
+              .isNotEmpty) {
+            await tester.tap(
+              find.byKey(const ValueKey('reader-header-contents')),
+            );
+            await settleEpubPage(tester);
+          }
+        }
+
+        final mac = defaultTargetPlatform == TargetPlatform.macOS;
+        Future<void> press({required bool back}) async {
+          final (key, modifier) = back == mac
+              ? (LogicalKeyboardKey.bracketLeft, LogicalKeyboardKey.metaLeft)
+              : (LogicalKeyboardKey.arrowLeft, LogicalKeyboardKey.altLeft);
+          await tester.sendKeyDownEvent(modifier);
+          await tester.sendKeyEvent(key);
+          await tester.sendKeyUpEvent(modifier);
+          await settleEpubPage(tester);
+        }
+
+        final pill = find.byKey(const ValueKey('reader-back-pill'));
+        await jump();
+        expect(pill, findsOneWidget);
+        // The other platform's shortcut does nothing here.
+        await press(back: false);
+        expect(pill, findsOneWidget);
+
+        // In the search field the key moves the caret instead.
+        await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+        await settleNative(tester);
+        final field = find.byType(EditableText);
+        expect(field, findsOneWidget);
+        await tester.enterText(field, 'two words');
+        await press(back: true);
+        expect(pill, findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+        await settleNative(tester);
+        await press(back: true);
+        expect(pill, findsNothing);
+
+        await tester.pumpWidget(const SizedBox());
+        await drainHarness(tester);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.macOS,
+      }),
+    );
 
     testWidgets('a book opened at a place goes back to where it was left', (
       tester,

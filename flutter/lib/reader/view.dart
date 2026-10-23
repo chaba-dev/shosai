@@ -536,157 +536,153 @@ class _ReaderScreenState extends State<ReaderScreen>
           builder: (context) => Scaffold(
             backgroundColor: ShellPalette.of(context).chrome,
             body: SafeArea(
-              child: CallbackShortcuts(
-                // The retired more panel's Open book action lives on as a
-                // shortcut; the library is the usual way to open a book.
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.keyO, control: true):
-                      _openBook,
-                  const SingleActivator(LogicalKeyboardKey.keyO, meta: true):
-                      _openBook,
-                  // Back after a jump: Alt+← on Linux and Windows, ⌘[ on
-                  // macOS.
-                  const SingleActivator(
-                    LogicalKeyboardKey.arrowLeft,
-                    alt: true,
-                  ): () =>
-                      _controller.dispatch(const ReaderReturnRequested()),
-                  const SingleActivator(
-                    LogicalKeyboardKey.bracketLeft,
-                    meta: true,
-                  ): () =>
-                      _controller.dispatch(const ReaderReturnRequested()),
-                },
-                child: // The chrome rows are bounded by the height the reader is
-                    // actually laid out with, not by the ambient `MediaQuery`: a
-                    // host may install a `MediaQuery` whose size does not match
-                    // the reader's viewport (the widget tests do that to set a
-                    // text scale), and a zero height there would collapse the
-                    // chrome.
-                    LayoutBuilder(
-                      builder: (context, constraints) => Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Every fixed chrome row is bounded to a share of the
-                          // viewport and scrolls inside that bound, so a very
-                          // short viewport with a scaled interface cannot push
-                          // the document out of reach.
-                          _boundedChrome(
-                            viewportHeight: constraints.maxHeight,
-                            share: _readerHeaderBoundShare,
-                            child: _ReaderToolbar(
-                              model: model,
-                              layout: layout,
-                              dispatch: _controller.dispatch,
-                              backFocus: _backFocus,
-                              contentsFocus: _contentsFocus,
-                              typographyFocus: _typographyFocus,
-                              notesFocus: _notesFocus,
-                              openBooksAction: widget.openBooksAction,
-                            ),
-                          ),
-                          // The search bar is its own row under the toolbar
-                          // (RD-11); search is independent of the panels.
-                          if (model.searchOpen &&
-                              model.document != null &&
-                              model.typography.searchable)
+              // Back after a jump: Alt+← on Linux and Windows, ⌘[ on macOS.
+              child: Focus(
+                canRequestFocus: false,
+                skipTraversal: true,
+                onKeyEvent: _returnKey,
+                child: CallbackShortcuts(
+                  // The retired more panel's Open book action lives on as a
+                  // shortcut; the library is the usual way to open a book.
+                  bindings: {
+                    const SingleActivator(
+                      LogicalKeyboardKey.keyO,
+                      control: true,
+                    ): _openBook,
+                    const SingleActivator(LogicalKeyboardKey.keyO, meta: true):
+                        _openBook,
+                  },
+                  child: // The chrome rows are bounded by the height the reader is
+                      // actually laid out with, not by the ambient `MediaQuery`: a
+                      // host may install a `MediaQuery` whose size does not match
+                      // the reader's viewport (the widget tests do that to set a
+                      // text scale), and a zero height there would collapse the
+                      // chrome.
+                      LayoutBuilder(
+                        builder: (context, constraints) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Every fixed chrome row is bounded to a share of the
+                            // viewport and scrolls inside that bound, so a very
+                            // short viewport with a scaled interface cannot push
+                            // the document out of reach.
                             _boundedChrome(
                               viewportHeight: constraints.maxHeight,
-                              share: _readerSearchBoundShare,
-                              child: _ReaderSearchBar(
+                              share: _readerHeaderBoundShare,
+                              child: _ReaderToolbar(
                                 model: model,
-                                compact: phone,
+                                layout: layout,
                                 dispatch: _controller.dispatch,
+                                backFocus: _backFocus,
+                                contentsFocus: _contentsFocus,
+                                typographyFocus: _typographyFocus,
+                                notesFocus: _notesFocus,
+                                openBooksAction: widget.openBooksAction,
                               ),
                             ),
-                          // A content failure is shown inside the document view;
-                          // the alert is for an open that never produced one.
-                          if (model.error != null &&
-                              !(model.document != null &&
-                                  model.contentState ==
-                                      ReaderContentState.failed))
+                            // The search bar is its own row under the toolbar
+                            // (RD-11); search is independent of the panels.
+                            if (model.searchOpen &&
+                                model.document != null &&
+                                model.typography.searchable)
+                              _boundedChrome(
+                                viewportHeight: constraints.maxHeight,
+                                share: _readerSearchBoundShare,
+                                child: _ReaderSearchBar(
+                                  model: model,
+                                  compact: phone,
+                                  dispatch: _controller.dispatch,
+                                ),
+                              ),
+                            // A content failure is shown inside the document view;
+                            // the alert is for an open that never produced one.
+                            if (model.error != null &&
+                                !(model.document != null &&
+                                    model.contentState ==
+                                        ReaderContentState.failed))
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxHeight:
+                                      constraints.maxHeight *
+                                      _readerAlertBoundShare,
+                                ),
+                                child: SingleChildScrollView(
+                                  child: _ReaderFailureAlert(
+                                    error: model.error!,
+                                    onRetry: model.openPath == null
+                                        ? null
+                                        : () => _controller.dispatch(
+                                            ReaderOpenRequested(
+                                              model.openPath!,
+                                              bookId: model.openBookId,
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            Expanded(child: _readerBody(model, layout)),
                             ConstrainedBox(
                               constraints: BoxConstraints(
                                 maxHeight:
                                     constraints.maxHeight *
                                     _readerAlertBoundShare,
                               ),
-                              child: SingleChildScrollView(
-                                child: _ReaderFailureAlert(
-                                  error: model.error!,
-                                  onRetry: model.openPath == null
-                                      ? null
-                                      : () => _controller.dispatch(
-                                          ReaderOpenRequested(
-                                            model.openPath!,
-                                            bookId: model.openBookId,
-                                          ),
-                                        ),
+                              child: _ReaderErrorSurfaces(model: model),
+                            ),
+                            // The place stays mounted while an open is in flight:
+                            // its `loading` wording is a live region, so the
+                            // opening state must not remove it.
+                            _boundedChrome(
+                              viewportHeight: constraints.maxHeight,
+                              share: _readerStatusBoundShare,
+                              child: phone
+                                  ? _ReaderPhoneBar(
+                                      model: model,
+                                      dispatch: _controller.dispatch,
+                                      contentsFocus: _contentsFocus,
+                                      typographyFocus: _typographyFocus,
+                                      notesFocus: _notesFocus,
+                                    )
+                                  : _ReaderStatusLine(
+                                      model: model,
+                                      dispatch: _controller.dispatch,
+                                    ),
+                            ),
+                            if (widget.debugPathEntry) ...[
+                              const SizedBox(height: 12),
+                              // A dev/test-only entry, bounded so a short viewport
+                              // at a scaled interface cannot overflow the reader
+                              // column.
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxHeight:
+                                      constraints.maxHeight *
+                                      _readerDevEntryBoundShare,
                                 ),
-                              ),
-                            ),
-                          Expanded(child: _readerBody(model, layout)),
-                          ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxHeight:
-                                  constraints.maxHeight *
-                                  _readerAlertBoundShare,
-                            ),
-                            child: _ReaderErrorSurfaces(model: model),
-                          ),
-                          // The place stays mounted while an open is in flight:
-                          // its `loading` wording is a live region, so the
-                          // opening state must not remove it.
-                          _boundedChrome(
-                            viewportHeight: constraints.maxHeight,
-                            share: _readerStatusBoundShare,
-                            child: phone
-                                ? _ReaderPhoneBar(
-                                    model: model,
-                                    dispatch: _controller.dispatch,
-                                    contentsFocus: _contentsFocus,
-                                    typographyFocus: _typographyFocus,
-                                    notesFocus: _notesFocus,
-                                  )
-                                : _ReaderStatusLine(
-                                    model: model,
-                                    dispatch: _controller.dispatch,
-                                  ),
-                          ),
-                          if (widget.debugPathEntry) ...[
-                            const SizedBox(height: 12),
-                            // A dev/test-only entry, bounded so a short viewport
-                            // at a scaled interface cannot overflow the reader
-                            // column.
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxHeight:
-                                    constraints.maxHeight *
-                                    _readerDevEntryBoundShare,
-                              ),
-                              child: SingleChildScrollView(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: ShosaiTokens.space4,
-                                  ),
-                                  child: _ReaderControls(
-                                    model: model,
-                                    path: _path.value,
-                                    pathFieldKey: _pathFieldKey,
-                                    openFocus: _openFocus,
-                                    open: _open,
-                                    // A single row keeps the dev-only entry short
-                                    // enough not to push the chrome out of a small
-                                    // viewport at a scaled interface.
-                                    horizontal: true,
+                                child: SingleChildScrollView(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: ShosaiTokens.space4,
+                                    ),
+                                    child: _ReaderControls(
+                                      model: model,
+                                      path: _path.value,
+                                      pathFieldKey: _pathFieldKey,
+                                      openFocus: _openFocus,
+                                      open: _open,
+                                      // A single row keeps the dev-only entry short
+                                      // enough not to push the chrome out of a small
+                                      // viewport at a scaled interface.
+                                      horizontal: true,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
+                ),
               ),
             ),
           ),
@@ -694,6 +690,32 @@ class _ReaderScreenState extends State<ReaderScreen>
       ),
     );
     return _withReaderLocalizations(context, reader);
+  }
+
+  /// Back after a jump, unless a text field takes the key for moving by
+  /// word.
+  KeyEventResult _returnKey(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final keyboard = HardwareKeyboard.instance;
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    final back = mac
+        ? event.logicalKey == LogicalKeyboardKey.bracketLeft &&
+              keyboard.isMetaPressed &&
+              !keyboard.isControlPressed &&
+              !keyboard.isAltPressed
+        : event.logicalKey == LogicalKeyboardKey.arrowLeft &&
+              keyboard.isAltPressed &&
+              !keyboard.isControlPressed &&
+              !keyboard.isMetaPressed;
+    if (!back || keyboard.isShiftPressed) return KeyEventResult.ignored;
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused != null &&
+        (focused.widget is EditableText ||
+            focused.findAncestorWidgetOfExactType<EditableText>() != null)) {
+      return KeyEventResult.ignored;
+    }
+    _controller.dispatch(const ReaderReturnRequested());
+    return KeyEventResult.handled;
   }
 
   void _openBook() {

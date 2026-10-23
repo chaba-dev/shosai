@@ -108,11 +108,19 @@ final class ReaderPageStepRequested extends ReaderMessage {
 }
 
 final class ReaderUnitRequested extends ReaderMessage {
-  const ReaderUnitRequested(this.unit, {this.offset, this.length});
+  const ReaderUnitRequested(
+    this.unit, {
+    this.offset,
+    this.length,
+    this.turn = false,
+  });
 
   final int unit;
   final int? offset;
   final int? length;
+
+  /// Whether this is a page turn (a PDF's), not a jump to [unit].
+  final bool turn;
 }
 
 final class ReaderSearchRequested extends ReaderMessage {

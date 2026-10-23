@@ -658,30 +658,37 @@ class _ReaderBackPill extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            InkWell(
-              key: const ValueKey('reader-back'),
-              customBorder: const StadiumBorder(),
-              onTap: () => dispatch(const ReaderReturnRequested()),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  minHeight: ShosaiTokens.sizeTouchTarget,
-                ),
-                child: Padding(
-                  padding: const EdgeInsetsDirectional.fromSTEB(14, 0, 8, 0),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    spacing: 6,
-                    children: [
-                      Icon(LucideIcons.arrowLeft, size: 16, color: foreground),
-                      Flexible(
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: style,
+            // A long section title ellipsizes; the close button stays.
+            Flexible(
+              child: InkWell(
+                key: const ValueKey('reader-back'),
+                customBorder: const StadiumBorder(),
+                onTap: () => dispatch(const ReaderReturnRequested()),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minHeight: ShosaiTokens.sizeTouchTarget,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsetsDirectional.fromSTEB(14, 0, 8, 0),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      spacing: 6,
+                      children: [
+                        Icon(
+                          LucideIcons.arrowLeft,
+                          size: 16,
+                          color: foreground,
                         ),
-                      ),
-                    ],
+                        Flexible(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: style,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

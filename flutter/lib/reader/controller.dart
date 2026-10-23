@@ -559,6 +559,8 @@ final class ReaderController implements Listenable {
           height: message.height,
           devicePixelRatio: message.devicePixelRatio,
         );
+      case ReaderUnitRequested(turn: true):
+        _pageTurned(() => _unitRequested(message.unit));
       case ReaderUnitRequested():
         _unitRequested(
           message.unit,
@@ -566,7 +568,7 @@ final class ReaderController implements Listenable {
           length: message.length,
         );
       case ReaderPageStepRequested():
-        _pageStepRequested(message.delta);
+        _pageTurned(() => _pageStepRequested(message.delta));
       case ReaderSearchRequested():
         _searchRequested(message.query);
       case ReaderBookmarkToggled():
@@ -2158,11 +2160,6 @@ final class ReaderController implements Listenable {
   /// is genuinely over the step becomes a chapter change through the normal
   /// guarded relayout path.
   void _pageStepRequested(int delta) {
-    // Three page turns away from a jump close the BackPill.
-    if (_model.returnPoints.isNotEmpty && ++_turnsSinceJump >= 3) {
-      _turnsSinceJump = 0;
-      _emit(_model.copyWith(returnPoints: const []));
-    }
     final page = _model.epubPage;
     final session = _epubSession;
     final document = _model.document;
@@ -2457,9 +2454,11 @@ final class ReaderController implements Listenable {
     if (identical(_activeRelayoutIntent, before) || _model.document == null) {
       return;
     }
+    // Every jump restarts the turns that close Back, even one from where
+    // the last jump left.
+    _turnsSinceJump = 0;
     final points = _model.returnPoints;
     if (points.isNotEmpty && points.last == from) return;
-    _turnsSinceJump = 0;
     _emit(
       _model.copyWith(
         returnPoints: [
@@ -2468,6 +2467,22 @@ final class ReaderController implements Listenable {
         ],
       ),
     );
+  }
+
+  /// Turns a page with [turn]; three turns the reader took away from a jump
+  /// close the BackPill, and a turn it refused does not count.
+  void _pageTurned(void Function() turn) {
+    final intent = _activeRelayoutIntent;
+    final page = _model.epubPage;
+    turn();
+    if (identical(_activeRelayoutIntent, intent) &&
+        identical(_model.epubPage, page)) {
+      return;
+    }
+    if (_model.returnPoints.isNotEmpty && ++_turnsSinceJump >= 3) {
+      _turnsSinceJump = 0;
+      _emit(_model.copyWith(returnPoints: const []));
+    }
   }
 
   /// Goes back to the last jump's origin and forgets it.
