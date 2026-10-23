@@ -821,6 +821,99 @@
   "@shellNotesMore": {
     "description": "The Bookshelf shell: lists the next books' notes in the Notes place."
   },
+  "shellSearchField": "Search books and notes",
+  "@shellSearchField": {
+    "description": "The search palette's field: its placeholder and accessible name."
+  },
+  "shellSearchScope": "Search in",
+  "@shellSearchScope": {
+    "description": "The search palette: the group of scope options."
+  },
+  "shellSearchThisBook": "This book",
+  "@shellSearchThisBook": {
+    "description": "The search palette: search only the book being read."
+  },
+  "shellSearchAllBooks": "All books",
+  "@shellSearchAllBooks": {
+    "description": "The search palette: search every library book."
+  },
+  "shellSearchFilter": "Find",
+  "@shellSearchFilter": {
+    "description": "The search palette: the group of filter options."
+  },
+  "shellSearchEverything": "Everything",
+  "@shellSearchEverything": {
+    "description": "The search palette: find book text and notes."
+  },
+  "shellSearchText": "Text",
+  "@shellSearchText": {
+    "description": "The search palette: find book text only."
+  },
+  "shellSearchNotes": "Notes",
+  "@shellSearchNotes": {
+    "description": "The search palette: find notes and highlights only."
+  },
+  "shellSearchHint": "Type to search the text and notes of your books.",
+  "@shellSearchHint": {
+    "description": "The search palette before a query is typed."
+  },
+  "shellSearchSearching": "Searching…",
+  "@shellSearchSearching": {
+    "description": "The search palette while books are still being searched."
+  },
+  "shellSearchClose": "Close search",
+  "@shellSearchClose": {
+    "description": "The search palette's close button."
+  },
+  "shellSearchPartial": "Only the beginning of this long book was searched.",
+  "@shellSearchPartial": {
+    "description": "A search result group: the book was too long to search whole."
+  },
+  "shellSearchNoMatches": "No matches for “{query}”",
+  "@shellSearchNoMatches": {
+    "description": "The search palette when nothing matched.",
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "shellSearchNotesGroup": "Notes · {count}",
+  "@shellSearchNotesGroup": {
+    "description": "The search palette's notes group heading with how many notes matched.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shellSearchMatches": "{count, plural, =1{1 match} other{{count} matches}}",
+  "@shellSearchMatches": {
+    "description": "A search result group: how many matches a book has.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shellSearchMoreMatches": "{count}+ matches",
+  "@shellSearchMoreMatches": {
+    "description": "A search result group: a book with more matches than are shown.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shellSearchBookFailed": "This book could not be searched: {error}",
+  "@shellSearchBookFailed": {
+    "description": "A search result group: why the book could not be read.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "shellBookmarksEmptyHeading": "No bookmarks yet",
   "@shellBookmarksEmptyHeading": {
     "description": "The Bookshelf shell: the Bookmarks place before any bookmark exists."
@@ -828,14 +921,6 @@
   "shellBookmarksEmptyBody": "Bookmark a page from the reader’s toolbar and it appears here.",
   "@shellBookmarksEmptyBody": {
     "description": "The Bookshelf shell: the Bookmarks place's empty state, saying what to do."
-  },
-  "shellSearchEmptyHeading": "Search books and notes",
-  "@shellSearchEmptyHeading": {
-    "description": "The Bookshelf shell: the Search place's title."
-  },
-  "shellSearchEmptyBody": "Searching book text and notes across the library is coming. To find a book now, search the library by title or author.",
-  "@shellSearchEmptyBody": {
-    "description": "The Bookshelf shell: the Search place until the search palette (RFD 6) exists."
   },
   "libraryBookCount": "{count, plural, =1{1 book} other{{count} books}}",
   "@libraryBookCount": {

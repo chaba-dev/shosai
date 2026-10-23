@@ -54,6 +54,7 @@ class ReaderScreen extends StatefulWidget {
     this.initialPath,
     this.initialBookId,
     this.initialPlace,
+    this.placeRequests,
     this.initialSettings,
     this.onLocatorChanged,
     this.progressSource,
@@ -82,6 +83,10 @@ class ReaderScreen extends StatefulWidget {
 
   /// Where [initialPath] opens instead of its saved reading position.
   final ReaderPlace? initialPlace;
+
+  /// Places the shell asks this reader to go to; a request made before the
+  /// document opened is where it opens.
+  final ReaderPlaceRequests? placeRequests;
   final FlutterReaderSettings? initialSettings;
   final void Function(String path, int? bookId)? onLocatorChanged;
 
@@ -213,6 +218,22 @@ class _ReaderScreenState extends State<ReaderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.placeRequests?.addListener(_placeRequested);
+  }
+
+  @override
+  void didUpdateWidget(ReaderScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.placeRequests, widget.placeRequests)) {
+      oldWidget.placeRequests?.removeListener(_placeRequested);
+      widget.placeRequests?.addListener(_placeRequested);
+    }
+  }
+
+  void _placeRequested() {
+    if (widget.placeRequests?.take() case final place?) {
+      _controller.dispatch(ReaderPlaceRequested(place));
+    }
   }
 
   @override
@@ -231,6 +252,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           View.of(context).devicePixelRatio,
         ),
         baseScale: View.of(context).devicePixelRatio,
+        librarySearchOpener: widget.placeRequests?.openSearch,
         noteEditor: _editNote,
         placeNoteEditor: _editPlaceNote,
         noteEditorCanceller: _cancelNoteEditor,
@@ -306,7 +328,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         ReaderOpenRequested(
           path,
           bookId: widget.initialBookId,
-          place: widget.initialPlace,
+          place: widget.initialPlace ?? widget.placeRequests?.take(),
         ),
       );
     }
@@ -443,6 +465,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.placeRequests?.removeListener(_placeRequested);
     _controller.removeListener(_modelChanged);
     _controller.dispose();
     _path.dispose();

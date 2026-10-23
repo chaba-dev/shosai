@@ -69,6 +69,7 @@ final class SearchMatch {
     required this.offset,
     required this.length,
     required this.context,
+    this.contextOffset = 0,
   });
 
   /// The EPUB spine index or PDF page.
@@ -84,16 +85,21 @@ final class SearchMatch {
   /// match itself, trimmed, with line breaks as spaces.
   final String context;
 
+  /// Where the match starts in [context], in Unicode scalars: the context
+  /// may hold the query more than once.
+  final int contextOffset;
+
   @override
   bool operator ==(Object other) =>
       other is SearchMatch &&
       other.unit == unit &&
       other.offset == offset &&
       other.length == length &&
-      other.context == context;
+      other.context == context &&
+      other.contextOffset == contextOffset;
 
   @override
-  int get hashCode => Object.hash(unit, offset, length, context);
+  int get hashCode => Object.hash(unit, offset, length, context, contextOffset);
 
   @override
   String toString() => 'SearchMatch($unit, $offset, $length, $context)';
@@ -349,7 +355,11 @@ final class _Search {
           'The search found more than ${limits.maxMatches} matches.',
         );
       }
-      final context = _context(original, originalStart, originalEnd);
+      final (context, contextOffset) = _context(
+        original,
+        originalStart,
+        originalEnd,
+      );
       resultBytes += searchMatchBaseBytes + utf8Length(context);
       if (resultBytes > limits.maxResultBytes) {
         throw CoreException.limitExceeded(
@@ -362,6 +372,7 @@ final class _Search {
           offset: originalStart,
           length: originalEnd - originalStart,
           context: context,
+          contextOffset: contextOffset,
         ),
       );
       keptEnd = end;
@@ -370,12 +381,27 @@ final class _Search {
   }
 }
 
-String _context(Int32List original, int start, int end) {
+/// The context around the match at [start]..[end] of [original], and where
+/// the match starts in it, in scalars. Space is trimmed from its ends, but
+/// never from the match.
+(String, int) _context(Int32List original, int start, int end) {
   final from = start < searchContextScalars ? 0 : start - searchContextScalars;
   final to = end + searchContextScalars > original.length
       ? original.length
       : end + searchContextScalars;
-  return String.fromCharCodes(original, from, to).trim().replaceAll('\n', ' ');
+  bool space(int scalar) => String.fromCharCode(scalar).trim().isEmpty;
+  var first = from;
+  while (first < start && space(original[first])) {
+    first++;
+  }
+  var last = to;
+  while (last > end && space(original[last - 1])) {
+    last--;
+  }
+  return (
+    String.fromCharCodes(original, first, last).replaceAll('\n', ' '),
+    start - first,
+  );
 }
 
 Int32List _failures(Int32List pattern) {

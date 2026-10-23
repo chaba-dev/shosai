@@ -1056,6 +1056,108 @@ abstract class AppLocalizations {
   /// **'More notes'**
   String get shellNotesMore;
 
+  /// The search palette's field: its placeholder and accessible name.
+  ///
+  /// In en, this message translates to:
+  /// **'Search books and notes'**
+  String get shellSearchField;
+
+  /// The search palette: the group of scope options.
+  ///
+  /// In en, this message translates to:
+  /// **'Search in'**
+  String get shellSearchScope;
+
+  /// The search palette: search only the book being read.
+  ///
+  /// In en, this message translates to:
+  /// **'This book'**
+  String get shellSearchThisBook;
+
+  /// The search palette: search every library book.
+  ///
+  /// In en, this message translates to:
+  /// **'All books'**
+  String get shellSearchAllBooks;
+
+  /// The search palette: the group of filter options.
+  ///
+  /// In en, this message translates to:
+  /// **'Find'**
+  String get shellSearchFilter;
+
+  /// The search palette: find book text and notes.
+  ///
+  /// In en, this message translates to:
+  /// **'Everything'**
+  String get shellSearchEverything;
+
+  /// The search palette: find book text only.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get shellSearchText;
+
+  /// The search palette: find notes and highlights only.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get shellSearchNotes;
+
+  /// The search palette before a query is typed.
+  ///
+  /// In en, this message translates to:
+  /// **'Type to search the text and notes of your books.'**
+  String get shellSearchHint;
+
+  /// The search palette while books are still being searched.
+  ///
+  /// In en, this message translates to:
+  /// **'Searching…'**
+  String get shellSearchSearching;
+
+  /// The search palette's close button.
+  ///
+  /// In en, this message translates to:
+  /// **'Close search'**
+  String get shellSearchClose;
+
+  /// A search result group: the book was too long to search whole.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the beginning of this long book was searched.'**
+  String get shellSearchPartial;
+
+  /// The search palette when nothing matched.
+  ///
+  /// In en, this message translates to:
+  /// **'No matches for “{query}”'**
+  String shellSearchNoMatches(String query);
+
+  /// The search palette's notes group heading with how many notes matched.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes · {count}'**
+  String shellSearchNotesGroup(int count);
+
+  /// A search result group: how many matches a book has.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 match} other{{count} matches}}'**
+  String shellSearchMatches(int count);
+
+  /// A search result group: a book with more matches than are shown.
+  ///
+  /// In en, this message translates to:
+  /// **'{count}+ matches'**
+  String shellSearchMoreMatches(int count);
+
+  /// A search result group: why the book could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'This book could not be searched: {error}'**
+  String shellSearchBookFailed(String error);
+
   /// The Bookshelf shell: the Bookmarks place before any bookmark exists.
   ///
   /// In en, this message translates to:
@@ -1067,18 +1169,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Bookmark a page from the reader’s toolbar and it appears here.'**
   String get shellBookmarksEmptyBody;
-
-  /// The Bookshelf shell: the Search place's title.
-  ///
-  /// In en, this message translates to:
-  /// **'Search books and notes'**
-  String get shellSearchEmptyHeading;
-
-  /// The Bookshelf shell: the Search place until the search palette (RFD 6) exists.
-  ///
-  /// In en, this message translates to:
-  /// **'Searching book text and notes across the library is coming. To find a book now, search the library by title or author.'**
-  String get shellSearchEmptyBody;
 
   /// The library title row: how many books the library holds.
   ///

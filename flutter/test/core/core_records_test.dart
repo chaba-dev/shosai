@@ -577,6 +577,52 @@ void main() {
       expect(listed.map((a) => a.id), [highlight.id]);
     },
   );
+  test('library search finds notes and book text across the library', () async {
+    final epub = await import(_epubFixture);
+    final pdf = await import(_pdfFixture);
+    final document = await bridge.openLibraryBook(
+      bookId: epub.bookId,
+      cancellationId: bridge.createCancellation(),
+    );
+    final records = bridge.records;
+    await records.createNote(
+      document: document,
+      text: EpubReaderText(
+        unitCount: 1,
+        text: (_) async => 'Chapter text.',
+        resourcePath: (_) async => 'OEBPS/chapter.xhtml',
+      ),
+      unit: BigInt.zero,
+      offset: BigInt.zero,
+      body: 'The lead matters.',
+      cancellationId: bridge.createCancellation(),
+    );
+
+    final [notes] = await records.searchLibraryNotes(
+      query: 'LEAD',
+      cancellationId: bridge.createCancellation(),
+    );
+    expect(notes.book.bookId, epub.bookId);
+    final [hit] = notes.hits;
+    expect(hit.note.kind, FlutterNoteEntryKind.page);
+    expect(hit.matches, const [
+      FlutterNoteMatch(field: FlutterNoteField.body, offset: 4, length: 4),
+    ]);
+
+    // The PDF is opened, its text read and saved, then released.
+    final found = <FlutterBookTextHits>[];
+    await records.searchLibraryText(
+      query: 'PAGE 1',
+      bookId: pdf.bookId,
+      onBook: found.add,
+      cancellationId: bridge.createCancellation(),
+    );
+    final [text] = found;
+    expect(text.book.bookId, pdf.bookId);
+    expect(text.error, isNull);
+    expect(text.matches.single.unit, BigInt.one);
+    expect(text.matches.single.offset, BigInt.zero);
+  });
 
   test('PDF annotations keep page rectangles in page points', () async {
     final book = await import(_pdfFixture);

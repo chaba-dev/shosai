@@ -202,4 +202,23 @@ abstract interface class ShosaiRecords {
     required String query,
     required BigInt cancellationId,
   });
+
+  /// The notes of every library book, or of book [bookId], whose quote or
+  /// body holds [query]; books most recently read first.
+  Future<List<FlutterBookNoteHits>> searchLibraryNotes({
+    required String query,
+    int? bookId,
+    required BigInt cancellationId,
+  });
+
+  /// The text matches of [query] in every library book, or in book
+  /// [bookId], reported to [onBook] one book at a time, most recently read
+  /// first; books without matches are left out. Completes when every book
+  /// has been searched.
+  Future<void> searchLibraryText({
+    required String query,
+    int? bookId,
+    required void Function(FlutterBookTextHits hits) onBook,
+    required BigInt cancellationId,
+  });
 }

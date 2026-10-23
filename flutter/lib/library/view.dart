@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
@@ -36,7 +37,7 @@ typedef ProductReaderBuilder =
       ReaderNoticeReporter noticeReporter,
       Widget openBooksAction,
       void Function(bool twoPages) pagesChanged,
-      ReaderPlace? initialPlace,
+      ReaderPlaceRequests placeRequests,
     );
 
 class ProductShell extends StatefulWidget {
@@ -85,13 +86,19 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   )..addListener(_notesChanged);
   bool _notesShowing = false;
 
-  /// The book a note was opened in and the note's place: the reader built
-  /// next for that book opens there instead of where it was left.
-  (int, ReaderPlace?)? _openAt;
+  /// The search palette's searches; its query carries over between openings.
+  late final ShellSearchController _search = ShellSearchController(
+    bridge: widget.bridgeFactory(),
+  );
+  Route<ShellSearchChoice>? _searchRoute;
+
+  /// The book a note or search hit was opened in and its place: the reader
+  /// built next for that book opens there instead of where it was left.
+  (int, ReaderPlace)? _openAt;
 
   /// The reader for the current open book, built once per book so a locator
-  /// report does not rebuild it.
-  (int, Widget)? _reader;
+  /// report does not rebuild it, and the places the shell asks it to go to.
+  (int, Widget, ReaderPlaceRequests)? _reader;
 
   /// The open books the reader showed during one presentation; their saves
   /// are drained before the library reloads.
@@ -147,8 +154,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// Opens [book] at [note]'s place; a book note opens where it was left.
   void _openNote(FlutterBookNotes book, FlutterNoteEntry note) {
     final unit = note.unit;
-    _openAt = (
-      book.book.bookId,
+    _openBookAt(
+      book.book,
       unit == null
           ? null
           : ReaderPlace(
@@ -158,16 +165,141 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               note: note.kind != FlutterNoteEntryKind.highlight,
             ),
     );
-    // The book's tab may hold another document the reader opened in its
-    // place; the note is this book's.
-    _shell.dispatch(
-      ShellLocatorChanged(
-        book.book.bookId,
-        path: book.book.pathKey,
-        bookId: book.book.bookId,
+  }
+
+  /// Opens the search palette over whatever shows, on the book being read
+  /// when there is one, and reads the hit chosen in it.
+  Future<void> _openSearch() async {
+    if (!mounted || _searchRoute != null) return;
+    final shell = _shell.model;
+    _search.dispatch(
+      ShellSearchOpened(book: shell.reading ? shell.currentBook?.book : null),
+    );
+    final navigator = Navigator.of(context);
+    final route = RawDialogRoute<ShellSearchChoice>(
+      barrierDismissible: true,
+      barrierLabel: AppLocalizations.of(context).shellSearchClose,
+      barrierColor: ShellPalette.of(context).dark
+          ? ShosaiTokens.colorDarkScrim
+          : ShosaiTokens.colorLightScrim,
+      pageBuilder: (context, _, _) => LayoutBuilder(
+        builder: (context, constraints) => ListenableBuilder(
+          listenable: _search,
+          builder: (context, _) => ShellSearchPalette(
+            layout: ShellLayout.forWidth(constraints.maxWidth),
+            model: _search.model,
+            onQuery: (query) =>
+                _search.dispatch(ShellSearchQueryChanged(query)),
+            onScope: (scope) =>
+                _search.dispatch(ShellSearchScopeChanged(scope)),
+            onFilter: (filter) =>
+                _search.dispatch(ShellSearchFilterChanged(filter)),
+            onChosen: (choice) => Navigator.of(context).pop(choice),
+            onClose: () => Navigator.of(context).pop(),
+          ),
+        ),
       ),
     );
-    controller.dispatch(LibraryBookOpened(book.book));
+    _searchRoute = route;
+    _dialogRoutes.add(route);
+    final ShellSearchChoice? choice;
+    try {
+      choice = await navigator.push(route);
+    } finally {
+      _dialogRoutes.remove(route);
+      _searchRoute = null;
+    }
+    if (!mounted || choice == null) return;
+    final (book, place) = choice;
+    _openBookAt(
+      book,
+      place == null
+          ? null
+          : ReaderPlace(
+              place.unit,
+              offset: place.offset,
+              length: place.length,
+              annotationId: place.annotationId,
+              note: place.note,
+            ),
+    );
+  }
+
+  /// Ctrl+K or ⌘K, or `/` outside a text field, opens the search palette from
+  /// any screen.
+  KeyEventResult _searchShortcut(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final keyboard = HardwareKeyboard.instance;
+    final command = keyboard.isControlPressed || keyboard.isMetaPressed;
+    final key = event.logicalKey;
+    final open =
+        (command && !keyboard.isAltPressed && key == LogicalKeyboardKey.keyK) ||
+        (!command &&
+            !keyboard.isAltPressed &&
+            key == LogicalKeyboardKey.slash &&
+            !_typing());
+    if (!open) return KeyEventResult.ignored;
+    unawaited(_openSearch());
+    return KeyEventResult.handled;
+  }
+
+  /// Whether the focused widget takes text, where `/` is typed.
+  bool _typing() {
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused == null) return false;
+    return focused.widget is EditableText ||
+        focused.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  /// [child] with the search shortcuts.
+  Widget _searchShortcuts(Widget child) => Focus(
+    // Focused while nothing inside is, so the keys still reach it.
+    autofocus: true,
+    skipTraversal: true,
+    onKeyEvent: _searchShortcut,
+    child: child,
+  );
+
+  /// Reads [book] at [place], or where it was left when [place] is null: the
+  /// reader showing it goes there, and another opens there.
+  void _openBookAt(FlutterLibraryBook book, ReaderPlace? place) {
+    // The book's tab may hold another document its reader opened in the
+    // book's place; the place is this book's, so the tab is bound back to it
+    // and its reader built again.
+    final entry = _shell.model.openBooks
+        .where((open) => open.id == book.bookId)
+        .firstOrNull;
+    final rebound =
+        entry != null &&
+        (entry.path != book.pathKey || entry.bookId != book.bookId);
+    if (rebound) {
+      if (_reader?.$1 == book.bookId) _reader = null;
+      _shell.dispatch(
+        ShellLocatorChanged(
+          book.bookId,
+          path: book.pathKey,
+          bookId: book.bookId,
+        ),
+      );
+    }
+    final shell = _shell.model;
+    if (shell.reading) {
+      if (_reader case (
+        final id,
+        _,
+        final requests,
+      ) when id == book.bookId && shell.currentBookId == id) {
+        if (place != null) requests.go(place);
+        return;
+      }
+      _openAt = place == null ? null : (book.bookId, place);
+      // The library's open effect is still waiting on the reader, so the
+      // shell opens or focuses the book itself.
+      _shell.dispatch(ShellBookOpened(book));
+      return;
+    }
+    _openAt = place == null ? null : (book.bookId, place);
+    controller.dispatch(LibraryBookOpened(book));
     // A library that is busy refuses the open; the place goes with it.
     if (!_shell.model.reading) _openAt = null;
   }
@@ -246,6 +378,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     _shell.dispose();
     _notes.removeListener(_notesChanged);
     _notes.dispose();
+    _search.dispose();
     _session.dispose();
     super.dispose();
   }
@@ -276,9 +409,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   Future<void> _presentReader() async {
     if (!mounted) return;
     final route = MaterialPageRoute<void>(
-      builder: (_) => ListenableBuilder(
-        listenable: Listenable.merge([_shell, controller]),
-        builder: (context, _) => _readerFrame(),
+      builder: (_) => _searchShortcuts(
+        ListenableBuilder(
+          listenable: Listenable.merge([_shell, controller]),
+          builder: (context, _) => _readerFrame(),
+        ),
       ),
     );
     _readerRoute = route;
@@ -318,16 +453,16 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   Widget _readerFor(OpenBook open) {
-    if (_reader case (final id, final reader) when id == open.id) {
+    if (_reader case (final id, final reader, _) when id == open.id) {
       return reader;
     }
     _shownBooks.add(open.id);
-    final ReaderPlace? place;
-    if (_openAt case (final id, final at) when id == open.id) {
-      place = at;
+    final requests = ReaderPlaceRequests(
+      openSearch: () => unawaited(_openSearch()),
+    );
+    if (_openAt case (final id, final place) when id == open.id) {
+      requests.go(place);
       _openAt = null;
-    } else {
-      place = null;
     }
     // A global key moves the reader when the layout changes (the rail beside
     // it on a tablet, alone on a phone) instead of remounting it: the reader
@@ -363,15 +498,18 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         (twoPages) {
           if (mounted) controller.dispatch(LibraryPagesChanged(twoPages));
         },
-        place,
+        requests,
       ),
     );
-    _reader = (open.id, reader);
+    _reader = (open.id, reader, requests);
     return reader;
   }
 
   ShellActions get _shellActions => ShellActions(
-    selectPlace: (place) => _shell.dispatch(ShellPlaceSelected(place)),
+    // Search is a palette over the screen, not a place of its own.
+    selectPlace: (place) => place == ShellPlace.search
+        ? unawaited(_openSearch())
+        : _shell.dispatch(ShellPlaceSelected(place)),
     openBook: (open) => _shell.model.reading
         ? _shell.dispatch(ShellBookActivated(open.id))
         : controller.dispatch(LibraryBookOpened(open.book)),
@@ -748,36 +886,38 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       // The shell's window class and the library's header breakpoint are both
       // measured on the client width, so the probes sit outside the safe
       // area, which insets the content rather than the window.
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final layout = ShellLayout.forWidth(constraints.maxWidth);
-          final shell = _shell.model;
-          return ShellFrame(
-            layout: layout,
-            model: shell.copyWith(reading: false),
-            covers: controller.model.covers,
-            actions: _shellActions,
-            child: shell.place == ShellPlace.library
-                ? SafeArea(
-                    bottom: layout != ShellLayout.phone,
-                    child: _libraryPlace(layout),
-                  )
-                : shell.place == ShellPlace.notes
-                ? ListenableBuilder(
-                    listenable: _notes,
-                    builder: (context, _) => ShellNotesPage(
-                      layout: layout,
-                      model: _notes.model,
-                      onOpen: _openNote,
-                      onRetry: () =>
-                          _notes.dispatch(const ShellNotesRequested()),
-                      onMore: () =>
-                          _notes.dispatch(const ShellNotesMoreRequested()),
-                    ),
-                  )
-                : ShellPlacePage(layout: layout, place: shell.place),
-          );
-        },
+      body: _searchShortcuts(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final layout = ShellLayout.forWidth(constraints.maxWidth);
+            final shell = _shell.model;
+            return ShellFrame(
+              layout: layout,
+              model: shell.copyWith(reading: false),
+              covers: controller.model.covers,
+              actions: _shellActions,
+              child: shell.place == ShellPlace.library
+                  ? SafeArea(
+                      bottom: layout != ShellLayout.phone,
+                      child: _libraryPlace(layout),
+                    )
+                  : shell.place == ShellPlace.notes
+                  ? ListenableBuilder(
+                      listenable: _notes,
+                      builder: (context, _) => ShellNotesPage(
+                        layout: layout,
+                        model: _notes.model,
+                        onOpen: _openNote,
+                        onRetry: () =>
+                            _notes.dispatch(const ShellNotesRequested()),
+                        onMore: () =>
+                            _notes.dispatch(const ShellNotesMoreRequested()),
+                      ),
+                    )
+                  : ShellPlacePage(layout: layout, place: shell.place),
+            );
+          },
+        ),
       ),
     );
   }
