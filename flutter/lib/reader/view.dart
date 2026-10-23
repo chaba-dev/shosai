@@ -204,6 +204,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   };
   final FocusNode _openFocus = FocusNode(debugLabel: 'open document');
   final FocusNode _readerFocus = FocusNode(debugLabel: 'reader surface');
+
+  /// The document the surface last took the keyboard for.
+  FlutterDocumentSummary? _surfaceFocusedFor;
   final FocusNode _actionFocus = FocusNode(debugLabel: 'selection actions');
   final FocusNode _backFocus = FocusNode(debugLabel: 'reader back');
   final FocusNode _contentsFocus = FocusNode(debugLabel: 'reader contents');
@@ -525,6 +528,12 @@ class _ReaderScreenState extends State<ReaderScreen>
     final previousStageModel = _stageModel;
     _stageModel = model;
     if (model.openPanel != null) _lastOpenPanel = model.openPanel;
+    if (model.document case final document?
+        when !identical(document, _surfaceFocusedFor)) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _focusSurfaceIfUnclaimed(document),
+      );
+    }
     final openPath = model.openPath;
     if (openPath != null) {
       // Persist the accepted locator as one pair. In particular, clear a
@@ -542,6 +551,26 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (previousStageModel == null ||
         _stageAppearanceChanged(previousStageModel, model)) {
       _stageChanged();
+    }
+  }
+
+  /// Gives a newly shown document the keyboard, so its page keys work
+  /// without a click first, unless focus is already somewhere of its own.
+  ///
+  /// The surface's own autofocus loses to a key-catching ancestor the shell
+  /// focuses before the document exists; that ancestor (or no focus at all)
+  /// counts as unclaimed. A surface not built yet is tried again on the next
+  /// model change.
+  void _focusSurfaceIfUnclaimed(FlutterDocumentSummary document) {
+    if (!mounted ||
+        !identical(_controller.model.document, document) ||
+        _readerFocus.context == null) {
+      return;
+    }
+    _surfaceFocusedFor = document;
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary == null || _readerFocus.ancestors.contains(primary)) {
+      _readerFocus.requestFocus();
     }
   }
 
@@ -1114,10 +1143,7 @@ class _ReaderContentPane extends StatelessWidget {
             dispatch(const ReaderSelectionCopyRequested()),
         const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () =>
             dispatch(const ReaderSelectionCopyRequested()),
-        const SingleActivator(LogicalKeyboardKey.pageUp): () =>
-            dispatch(pageStepMessage(model, -1)),
-        const SingleActivator(LogicalKeyboardKey.pageDown): () =>
-            dispatch(pageStepMessage(model, 1)),
+        ...readerPageKeys(model, dispatch),
       },
       child: Column(
         children: [
