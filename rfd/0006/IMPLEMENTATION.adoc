@@ -147,7 +147,11 @@ place. All books is done in the shell's Notes place, which lists every book's
 notes, most recently read first, and opens a note's book at its place. Still
 to come: the panel's This book / All books switch.
 * [ ] Library-wide search over book text and notes from every screen, scoped
-and filtered as the RFD describes, with a return point for Back.
+and filtered as the RFD describes, with a return point for Back. The search
+palette is done: Ctrl+K or ⌘K, `/` and the Search place open it over the
+library or the reader, with This book / All books and Everything / Text /
+Notes, and a hit opens its book there. Still to come: the return point for
+Back and the current match marked on the page.
 * [ ] Keep bookmarks and highlights as independent domain records without
 compatibility adapters for the unreleased Iced UI or development schema.
 * [ ] Reopen unchanged documents and verify exact anchors survive restart,
