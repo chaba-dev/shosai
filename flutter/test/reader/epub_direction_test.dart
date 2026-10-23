@@ -3,7 +3,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderPlace, ReaderPlaceRequests;
 import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/view.dart';
 
@@ -50,6 +53,7 @@ void main() {
     WidgetTester tester,
     HarnessBridge harness, {
     FlutterReaderSettings? settings,
+    ReaderPlaceRequests? placeRequests,
   }) async {
     tester.view.physicalSize = const ui.Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -62,6 +66,7 @@ void main() {
           initialPath: '/books/long.epub',
           initialBookId: 1,
           initialSettings: settings,
+          placeRequests: placeRequests,
           epubImageDecoder: (bytes) async => null,
         ),
       ),
@@ -221,6 +226,63 @@ void main() {
     );
 
     await closeReader(tester);
+  });
+
+  testWidgets('chapter-edge back keeps final spreads in RTL and vertical '
+      'books and counts as one Back-pill turn', (tester) async {
+    final cases = <({Uint8List bytes, bool vertical})>[
+      (
+        bytes: longChapterEpub(paragraphs: 80, pageProgression: 'rtl'),
+        vertical: false,
+      ),
+      (
+        bytes: verticalJapaneseEpub(paragraphs: 30, pageProgression: null),
+        vertical: true,
+      ),
+    ];
+    for (final testCase in cases) {
+      final requests = ReaderPlaceRequests();
+      final harness = bridge(null, epub: testCase.bytes);
+      final parsed = openEpubBytes(testCase.bytes);
+      await openReader(tester, harness, placeRequests: requests);
+      requests.go(const ReaderPlace(1, offset: 0));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+      await settle(tester);
+      final last = page(tester);
+      expect(last.unit, parsed.chapters.first.spine);
+      expect(last.spread, isTrue);
+      expect(last.pageIndex.isEven, isTrue);
+      expect(last.targetScalar, parsed.chapters.first.scalarCount);
+      expect(
+        last.canonicalEnd,
+        greaterThanOrEqualTo(parsed.chapters.first.scalarCount - 1),
+      );
+      expect(last.rightToLeft, isTrue);
+      expect(last.box.vertical, testCase.vertical);
+      expect(last.box.origin.dx, greaterThan(last.facingBox?.origin.dx ?? -1));
+      expect(
+        find.byKey(const ValueKey('reader-back-pill')),
+        findsOneWidget,
+        reason: 'one accepted chapter-edge turn keeps Back available',
+      );
+
+      if (!testCase.vertical) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+        await settle(tester);
+        expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+        await settle(tester);
+        expect(
+          find.byKey(const ValueKey('reader-back-pill')),
+          findsNothing,
+          reason: 'the chapter-edge turn counts once toward the three turns',
+        );
+      }
+      await closeReader(tester);
+    }
   });
 
   testWidgets('a drag down a column selects and copies its text', (

@@ -692,9 +692,11 @@ PaginatedChapter paginateWindow(
 ///
 /// With [spread] the window is a two-page spread of [windowSize]: each page is
 /// laid out at [epubSpreadPageWidth], the page holding [scalar] takes the first
-/// slot and the page after it the second; with [rightToLeft] the first slot is
-/// the right one. The spread's surface covers both pages, so a selection can
-/// run from one page onto the next.
+/// slot and the page after it the second. A chapter-[EpubPositionEdge.end]
+/// target keeps the chapter's normal even-page spread pairing, so its final
+/// page is either the facing page or an unpaired first page. With
+/// [rightToLeft] the first slot is the right one. The spread's surface covers
+/// both pages, so a selection can run from one page onto the next.
 ///
 /// A [vertical] chapter's pages are turned a quarter turn (see
 /// [EpubPageBox]); its session is laid out with the page's height as its line
@@ -706,6 +708,7 @@ ReaderEpubPage pageWindowFor({
   required int chapterCount,
   required Size windowSize,
   bool spread = false,
+  EpubPositionEdge edge = EpubPositionEdge.startOrInterior,
   bool rightToLeft = false,
   bool vertical = false,
 }) {
@@ -714,9 +717,10 @@ ReaderEpubPage pageWindowFor({
       ? Size(epubSpreadPageWidth(windowSize.width), windowSize.height)
       : windowSize;
   final paginated = paginateWindow(flow, pageSize, vertical: vertical);
-  final index = paginated
+  var index = paginated
       .pageOfCanonical(scalar)
       .clamp(0, paginated.pages.length - 1);
+  if (spread && edge == EpubPositionEdge.end && index.isOdd) index -= 1;
   final page = paginated.pages[index];
   final boxes = spread
       ? epubSpreadBoxesFor(

@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
+import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/controller.dart'
     show ReaderPlace, ReaderPlaceRequests;
@@ -57,6 +59,18 @@ class _AnchorBridge extends HarnessBridge {
 void main() {
   final bytes = pageAnchorEpub();
   final book = openEpubBytes(bytes);
+  final emptyBytes = buildTestEpub(
+    chapters: {
+      'OPS/Text/chapter-1.xhtml': '<main></main>',
+      'OPS/Text/chapter-2.xhtml': '<p>After the empty chapter.</p>',
+    },
+    nav:
+        '<ol>'
+        '<li><a href="../Text/chapter-1.xhtml">Empty chapter</a></li>'
+        '<li><a href="../Text/chapter-2.xhtml">Next chapter</a></li>'
+        '</ol>',
+  );
+  final emptyBook = openEpubBytes(emptyBytes);
 
   // The chapter under test must actually contain a row whose cells are all
   // empty after the real parse; otherwise this fixture would not exercise
@@ -100,7 +114,41 @@ void main() {
     return harness;
   }
 
-  Future<void> openReader(WidgetTester tester, _AnchorBridge harness) async {
+  _AnchorBridge emptyBridge() {
+    final harness = _AnchorBridge(
+      books: const [
+        FlutterLibraryBook(
+          bookId: 1,
+          title: 'Empty Chapter',
+          format: FlutterBookFormat.epub,
+          pathKey: '/books/page-anchor.epub',
+          managed: true,
+          progress: 0,
+          dateAdded: '2026-10-23',
+        ),
+      ],
+      unitCount: 2,
+      readingState: FlutterReadingState(
+        unit: BigInt.one,
+        offset: BigInt.zero,
+        zoom: 1,
+      ),
+    );
+    harness.epubBytes = emptyBytes;
+    return harness;
+  }
+
+  Future<void> openReader(
+    WidgetTester tester,
+    _AnchorBridge harness, {
+    ui.Size? size,
+    void Function(ChapterLayoutSession)? sessionObserver,
+  }) async {
+    if (size != null) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+    }
     await renderHarnessState(
       tester,
       productionShell(
@@ -109,6 +157,7 @@ void main() {
           initialPath: '/books/page-anchor.epub',
           initialBookId: 1,
           epubImageDecoder: (bytes) async => null,
+          debugEpubSessionObserver: sessionObserver,
         ),
       ),
       ready: () => harnessReaderPageReady(tester),
@@ -242,6 +291,170 @@ void main() {
       reason: 'the walk returns to the chapter start',
     );
 
+    await closeReader(tester);
+  });
+
+  testWidgets('PageUp at the first chapter start is refused', (tester) async {
+    final harness = bridge();
+    await openReader(tester, harness, size: const ui.Size(600, 800));
+    await settleEpubPage(tester);
+    final before = dartPage(tester)!.page;
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+
+    final after = dartPage(tester)!.page;
+    expect(tester.takeException(), isNull);
+    expect(after.unit, before.unit);
+    expect(after.canonicalStart, before.canonicalStart);
+    expect(after.spread, isFalse);
+    await closeReader(tester);
+  });
+
+  testWidgets('a single page back from a chapter start lands on the previous '
+      "chapter's last page and saves its start", (tester) async {
+    final harness = bridge();
+    await openReader(tester, harness, size: const ui.Size(600, 800));
+    await settleEpubPage(tester);
+
+    // Walk to the start of chapter two, remembering chapter one's last page.
+    final starts = await walkForward(tester);
+    expect(dartPage(tester)!.page.unit, book.chapters[1].spine);
+    expect(dartPage(tester)!.page.canonicalStart, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+    final page = dartPage(tester)!.page;
+    expect(page.unit, book.chapters.first.spine);
+    expect(page.spread, isFalse);
+    // The page is laid out afresh around the chapter end, so its break may
+    // differ from the walk's; what matters is that it ends the chapter.
+    // (The chapter's last scalar can lie past its last drawn line.)
+    expect(
+      page.canonicalEnd,
+      greaterThanOrEqualTo(book.chapters.first.scalarCount - 1),
+      reason: 'one page back shows the end of the chapter before',
+    );
+    expect(page.canonicalStart, greaterThan(0));
+    expect(starts.length, greaterThan(2));
+    await settleNative(tester, rounds: 2);
+    expect(
+      harness.savedReadingStates.last.offset?.toInt(),
+      page.canonicalStart,
+    );
+
+    // Walking on back stays in that chapter, page by page.
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+    final before = dartPage(tester)!.page;
+    expect(before.unit, book.chapters.first.spine);
+    expect(before.canonicalStart, lessThan(page.canonicalStart));
+
+    await closeReader(tester);
+  });
+
+  testWidgets('a spread back from a chapter start keeps the final pairing', (
+    tester,
+  ) async {
+    final harness = bridge(
+      readingState: FlutterReadingState(
+        unit: BigInt.one,
+        offset: BigInt.zero,
+        zoom: 1,
+      ),
+    );
+    await openReader(tester, harness, size: const ui.Size(1280, 800));
+    await settleEpubPage(tester);
+    expect(dartPage(tester)!.page.unit, book.chapters[1].spine);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+    final last = dartPage(tester)!.page;
+    expect(last.unit, book.chapters.first.spine);
+    expect(last.spread, isTrue);
+    expect(last.pageIndex.isEven, isTrue);
+    expect(last.targetScalar, chapter.scalarCount);
+    expect(last.canonicalEnd, greaterThanOrEqualTo(chapter.scalarCount - 1));
+    await settleNative(tester, rounds: 2);
+    expect(
+      harness.savedReadingStates.last.offset?.toInt(),
+      last.canonicalStart,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+    final previous = dartPage(tester)!.page;
+    expect(previous.pageIndex, last.pageIndex - 2);
+    expect(previous.canonicalEnd, lessThanOrEqualTo(last.canonicalStart));
+    await closeReader(tester);
+  });
+
+  testWidgets('a resize keeps a pending chapter-end target and releases its '
+      'superseded session', (tester) async {
+    final sessions = <ChapterLayoutSession>[];
+    final harness = bridge(
+      readingState: FlutterReadingState(
+        unit: BigInt.one,
+        offset: BigInt.zero,
+        zoom: 1,
+      ),
+    );
+    await openReader(
+      tester,
+      harness,
+      size: const ui.Size(1280, 800),
+      sessionObserver: sessions.add,
+    );
+    await settleEpubPage(tester);
+
+    final held = Completer<List<FlutterAnnotation>>();
+    harness.annotationListCompleters.add(held);
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleNative(tester, rounds: 3);
+    expect(
+      harness.annotationListCompleters,
+      isEmpty,
+      reason: 'the end-targeted relayout is waiting for annotations',
+    );
+    final superseded = sessions.last;
+    expect(superseded.isDisposed, isFalse);
+
+    tester.view.physicalSize = const ui.Size(1400, 800);
+    await settleNative(tester, rounds: 5);
+    final installed = sessions.last;
+    final last = dartPage(tester)!.page;
+    expect(last.unit, book.chapters.first.spine);
+    expect(last.targetScalar, chapter.scalarCount);
+    expect(last.pageIndex.isEven, isTrue);
+    expect(last.canonicalEnd, greaterThanOrEqualTo(chapter.scalarCount - 1));
+    expect(installed, isNot(same(superseded)));
+    expect(installed.isDisposed, isFalse);
+    expect(superseded.isDisposed, isFalse);
+
+    held.complete(const []);
+    await settleNative(tester, rounds: 3);
+    expect(superseded.isDisposed, isTrue);
+    expect(installed.isDisposed, isFalse);
+    await closeReader(tester);
+  });
+
+  testWidgets('a page back reaches the last page of an empty chapter', (
+    tester,
+  ) async {
+    expect(emptyBook.chapters.first.scalarCount, 0);
+    final harness = emptyBridge();
+    await openReader(tester, harness, size: const ui.Size(600, 800));
+    await settleEpubPage(tester);
+    expect(dartPage(tester)!.page.unit, emptyBook.chapters[1].spine);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settleEpubPage(tester);
+    final last = dartPage(tester)!.page;
+    expect(last.unit, emptyBook.chapters.first.spine);
+    expect(last.targetScalar, 0);
+    expect(last.pageCount, 1);
+    expect(last.pageIndex, last.pageCount - 1);
+    expect(last.canonicalStart, 0);
     await closeReader(tester);
   });
 

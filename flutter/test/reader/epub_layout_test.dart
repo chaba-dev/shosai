@@ -255,7 +255,90 @@ void main() {
     expect(last.pageIndex, last.pageCount - 1);
     expect(last.facing, isNull);
     expect(last.canonicalEnd, last.page.canonicalEnd);
+
+    // Entering the chapter from the next one keeps the spreads paired from
+    // page zero: when the last page has an odd index, it is the facing page of
+    // the final spread rather than the first page of an overlapping spread.
+    final endAligned = pageWindowFor(
+      session: session,
+      scalar: chapter.scalarCount,
+      unit: chapter.spine,
+      chapterCount: book.chapters.length,
+      windowSize: spreadSize,
+      spread: true,
+      edge: EpubPositionEdge.end,
+    );
+    final expectedStart = (last.pageCount - 1).isOdd
+        ? last.pageCount - 2
+        : last.pageCount - 1;
+    expect(endAligned.pageIndex, expectedStart);
+    expect(endAligned.pageIndex.isEven, isTrue);
+    expect(endAligned.canonicalEnd, last.canonicalEnd);
+    expect(
+      endAligned.facing?.index,
+      expectedStart + 1 < last.pageCount ? expectedStart + 1 : null,
+    );
   });
+
+  test(
+    'chapter-end spread alignment covers paired and unpaired last pages',
+    () {
+      const spreadSize = Size(1360, 800);
+      final lastPageParities = <bool>{};
+      for (final paragraphs in [24, 32, 40, 48, 56]) {
+        final book = openEpubBytes(longChapterEpub(paragraphs: paragraphs));
+        final chapter = book.chapters.first;
+        final pageBox = epubPageBoxFor(
+          Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
+        );
+        final session = ChapterLayoutSession(
+          chapter: chapter,
+          spec: spec(
+            width: pageBox.contentWidth,
+            height: pageBox.contentHeight,
+          ),
+          images: const {},
+        );
+        addTearDown(session.dispose);
+        session.layoutWindowAt(0);
+        while (!session.complete) {
+          if (session.layoutForward(maxNodes: 64, maxMicros: 20000) == 0) break;
+        }
+
+        final rawEnd = pageWindowFor(
+          session: session,
+          scalar: chapter.scalarCount,
+          unit: chapter.spine,
+          chapterCount: book.chapters.length,
+          windowSize: spreadSize,
+          spread: true,
+        );
+        final alignedEnd = pageWindowFor(
+          session: session,
+          scalar: chapter.scalarCount,
+          unit: chapter.spine,
+          chapterCount: book.chapters.length,
+          windowSize: spreadSize,
+          spread: true,
+          edge: EpubPositionEdge.end,
+        );
+        final lastIsFacing = rawEnd.pageIndex.isOdd;
+        lastPageParities.add(lastIsFacing);
+        expect(
+          alignedEnd.pageIndex,
+          lastIsFacing ? rawEnd.pageIndex - 1 : rawEnd.pageIndex,
+        );
+        expect(alignedEnd.pageIndex.isEven, isTrue);
+        expect(alignedEnd.canonicalEnd, rawEnd.canonicalEnd);
+        expect(alignedEnd.facing != null, lastIsFacing);
+      }
+      expect(
+        lastPageParities,
+        {false, true},
+        reason: 'the fixture range exercises both final spread shapes',
+      );
+    },
+  );
 
   test('a right-to-left spread reads its right slot first', () {
     final book = openEpubBytes(
