@@ -4,9 +4,9 @@
 /// lists, `!important`, inline `style`, source order, and the property subset
 /// the normalized model can express (display, font-size/-family/-weight/-style,
 /// text-align, direction, margins, text-indent, width/height/max-width,
-/// white-space, writing-mode, text-orientation and text-combine-upright with
-/// their `-epub-`,
-/// `-webkit-` and `-ms-` aliases). `@font-face` is collected for embedded font
+/// white-space, writing-mode, text-orientation, text-combine-upright and the
+/// text-emphasis style and position with their `-epub-`, `-webkit-` and
+/// `-ms-` aliases). `@font-face` is collected for embedded font
 /// admission.
 ///
 /// Deliberately unsupported and reported as a warning, never silently applied:
@@ -605,6 +605,14 @@ const Set<String> kSupportedCssProperties = {
   'text-orientation',
   '-epub-text-orientation',
   '-webkit-text-orientation',
+  'text-emphasis',
+  '-webkit-text-emphasis',
+  'text-emphasis-style',
+  '-epub-text-emphasis-style',
+  '-webkit-text-emphasis-style',
+  'text-emphasis-position',
+  '-epub-text-emphasis-position',
+  '-webkit-text-emphasis-position',
 };
 
 List<CssDeclaration> _parseDeclarations(String body, [List<String>? warnings]) {
@@ -726,6 +734,9 @@ class EpubComputedStyle {
     this.writingMode = EpubWritingMode.horizontalTb,
     this.combine,
     this.orientation = EpubTextOrientation.mixed,
+    this.emphasis,
+    this.emphasisUnder = false,
+    this.emphasisLeft = false,
   });
 
   final EpubDisplay display;
@@ -754,6 +765,13 @@ class EpubComputedStyle {
 
   /// Inherited, as CSS `text-orientation` is.
   final EpubTextOrientation orientation;
+
+  /// The emphasis mark (`text-emphasis-style`), or null for `none`; its
+  /// position is [emphasisUnder] and [emphasisLeft]. All three are
+  /// inherited, as CSS `text-emphasis-style` and `-position` are.
+  final EpubTextEmphasis? emphasis;
+  final bool emphasisUnder;
+  final bool emphasisLeft;
 
   bool get isBlockLike => display != EpubDisplay.inline;
 }

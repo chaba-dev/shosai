@@ -14,6 +14,7 @@
 /// its anchor offsets match the retained Rust stream for that case.
 library;
 
+import 'package:characters/characters.dart';
 import 'package:xml/xml.dart';
 
 import 'canonical.dart';
@@ -730,6 +731,39 @@ EpubComputedStyle _applyDeclaration(
         ),
         _ => style,
       };
+    case 'text-emphasis-style' ||
+        '-epub-text-emphasis-style' ||
+        '-webkit-text-emphasis-style':
+      return _applyEmphasisStyle(style, value, parent);
+    // The shorthand also takes a colour, which the reader's palette owns.
+    case 'text-emphasis' || '-webkit-text-emphasis':
+      return _applyEmphasisStyle(style, value, parent, shorthand: true);
+    case 'text-emphasis-position' ||
+        '-epub-text-emphasis-position' ||
+        '-webkit-text-emphasis-position':
+      final words = lower.split(RegExp(r'\s+')).toSet();
+      if (words.length == 1 && const {'inherit', 'unset'}.contains(lower)) {
+        return _copyWith(
+          style,
+          emphasisUnder: parent.emphasisUnder,
+          emphasisLeft: parent.emphasisLeft,
+        );
+      }
+      if (lower == 'initial') {
+        return _copyWith(style, emphasisUnder: false, emphasisLeft: false);
+      }
+      // `over` or `under`, and `right` (the default) or `left`.
+      final valid =
+          words.every(const {'over', 'under', 'right', 'left'}.contains) &&
+          !words.containsAll(const {'over', 'under'}) &&
+          !words.containsAll(const {'right', 'left'}) &&
+          (words.contains('over') || words.contains('under'));
+      if (!valid) return style;
+      return _copyWith(
+        style,
+        emphasisUnder: words.contains('under'),
+        emphasisLeft: words.contains('left'),
+      );
     // The legacy property took `horizontal` for what is now `all`.
     case '-epub-text-combine' || '-webkit-text-combine':
       return switch (lower.split(RegExp(r'\s+')).first) {
@@ -870,6 +904,74 @@ EpubLength? _resolveCssLength(String value) {
   return EpubPixelLength(pixels);
 }
 
+/// [style] with the emphasis mark of a `text-emphasis-style` [value], or of
+/// a `text-emphasis` [shorthand], whose other words (a colour) are skipped.
+/// A value that is not one leaves [style] as it is.
+EpubComputedStyle _applyEmphasisStyle(
+  EpubComputedStyle style,
+  String value,
+  EpubComputedStyle parent, {
+  bool shorthand = false,
+}) {
+  final lower = value.toLowerCase();
+  if (lower == 'inherit' || lower == 'unset') {
+    return parent.emphasis == null
+        ? _copyWith(style, noEmphasis: true)
+        : _copyWith(style, emphasis: parent.emphasis);
+  }
+  if (lower == 'initial' || lower == 'none') {
+    return _copyWith(style, noEmphasis: true);
+  }
+  // A string is the mark itself, its first character.
+  final quoted = RegExp(r"""(["'])(.*?)\1""").firstMatch(value);
+  final string = quoted?.group(2);
+  final words =
+      (quoted == null
+              ? value
+              : value.replaceRange(quoted.start, quoted.end, ' '))
+          .toLowerCase()
+          .split(RegExp(r'\s+'))
+          .where((word) => word.isNotEmpty);
+  bool? filled;
+  EpubEmphasisShape? shape;
+  for (final word in words) {
+    final fill = switch (word) {
+      'filled' => true,
+      'open' => false,
+      _ => null,
+    };
+    final named = switch (word) {
+      'dot' => EpubEmphasisShape.dot,
+      'circle' => EpubEmphasisShape.circle,
+      'double-circle' => EpubEmphasisShape.doubleCircle,
+      'triangle' => EpubEmphasisShape.triangle,
+      'sesame' => EpubEmphasisShape.sesame,
+      _ => null,
+    };
+    if (fill != null && filled == null) {
+      filled = fill;
+    } else if (named != null && shape == null) {
+      shape = named;
+    } else if (!shorthand || fill != null || named != null) {
+      return style;
+    }
+  }
+  if (string != null) {
+    if (filled != null || shape != null || string.isEmpty) return style;
+    return _copyWith(
+      style,
+      emphasis: EpubTextEmphasis(string: string.characters.first),
+    );
+  }
+  if (filled == null && shape == null) {
+    return shorthand ? _copyWith(style, noEmphasis: true) : style;
+  }
+  return _copyWith(
+    style,
+    emphasis: EpubTextEmphasis(shape: shape, filled: filled ?? true),
+  );
+}
+
 EpubComputedStyle _copyWith(
   EpubComputedStyle style, {
   EpubDisplay? display,
@@ -892,6 +994,10 @@ EpubComputedStyle _copyWith(
   EpubTextCombine? combine,
   bool noCombine = false,
   EpubTextOrientation? orientation,
+  EpubTextEmphasis? emphasis,
+  bool noEmphasis = false,
+  bool? emphasisUnder,
+  bool? emphasisLeft,
 }) => EpubComputedStyle(
   display: display ?? style.display,
   bold: bold ?? style.bold,
@@ -912,6 +1018,9 @@ EpubComputedStyle _copyWith(
   writingMode: writingMode ?? style.writingMode,
   combine: noCombine ? null : combine ?? style.combine,
   orientation: orientation ?? style.orientation,
+  emphasis: noEmphasis ? null : emphasis ?? style.emphasis,
+  emphasisUnder: emphasisUnder ?? style.emphasisUnder,
+  emphasisLeft: emphasisLeft ?? style.emphasisLeft,
 );
 
 // ---------------------------------------------------------------------------
@@ -1396,6 +1505,10 @@ class _NormalizeContext {
       link: link,
       combine: style.combine,
       orientation: style.orientation,
+      emphasis: style.emphasis?.at(
+        under: style.emphasisUnder,
+        left: style.emphasisLeft,
+      ),
     );
   }
 
@@ -1798,6 +1911,7 @@ class _NormalizeContext {
           current.link == next.link &&
           current.combine == next.combine &&
           current.orientation == next.orientation &&
+          current.emphasis == next.emphasis &&
           !(current.combine?.all ?? false) &&
           // A ruby base starts its own span; its continuations merge into it,
           // and nothing else does.

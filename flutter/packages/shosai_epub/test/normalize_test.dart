@@ -2375,6 +2375,159 @@ void main() {
     });
   });
 
+  group('text-emphasis', () {
+    List<(String, EpubTextEmphasis?)> emphasisOf(
+      String body, [
+      String sheet = '',
+    ]) {
+      final chapter = normalizeChapter(
+        xhtml: '<html><body>$body</body></html>',
+        chapterPath: 'OPS/chapter.xhtml',
+        stylesheets: [CssStylesheet.parse(sheet, const EpubLimits())],
+        limits: const EpubLimits(),
+      );
+      return [
+        for (final span in (chapter.nodes.single as EpubParagraph).spans)
+          (span.text, span.emphasis),
+      ];
+    }
+
+    EpubTextEmphasis? marked(String declaration) => emphasisOf(
+      '<p>甲<span class="e">乙</span>丙</p>',
+      '.e { $declaration }',
+    ).firstWhere((span) => span.$1.contains('乙')).$2;
+
+    test('every spelling and keyword of the style is read', () {
+      for (final (declaration, expected) in [
+        (
+          'text-emphasis-style: filled sesame',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.sesame),
+        ),
+        (
+          '-epub-text-emphasis-style: open dot',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.dot, filled: false),
+        ),
+        (
+          '-webkit-text-emphasis-style: double-circle',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.doubleCircle),
+        ),
+        ('text-emphasis-style: open', const EpubTextEmphasis(filled: false)),
+        (
+          'text-emphasis-style: triangle filled',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.triangle),
+        ),
+        ('text-emphasis-style: "＊"', const EpubTextEmphasis(string: '＊')),
+        ("text-emphasis-style: '※※'", const EpubTextEmphasis(string: '※')),
+        (
+          'text-emphasis: filled circle #333',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.circle),
+        ),
+        (
+          '-webkit-text-emphasis: red sesame',
+          const EpubTextEmphasis(shape: EpubEmphasisShape.sesame),
+        ),
+        ('text-emphasis: red', null),
+        ('text-emphasis-style: none', null),
+        ('text-emphasis-style: bogus', null),
+        ('text-emphasis-style: filled open', null),
+        ('text-emphasis-style: "x" dot', null),
+      ]) {
+        expect(marked(declaration), expected, reason: declaration);
+      }
+    });
+
+    test('the position is read with the style', () {
+      for (final (position, under, left) in [
+        ('over right', false, false),
+        ('under right', true, false),
+        ('over left', false, true),
+        ('left under', true, true),
+        ('under', true, false),
+        ('bogus', false, false),
+        ('over under', false, false),
+        ('right', false, false),
+      ]) {
+        for (final property in [
+          'text-emphasis-position',
+          '-epub-text-emphasis-position',
+          '-webkit-text-emphasis-position',
+        ]) {
+          expect(
+            marked('text-emphasis-style: dot; $property: $position'),
+            EpubTextEmphasis(
+              shape: EpubEmphasisShape.dot,
+              under: under,
+              left: left,
+            ),
+            reason: '$property: $position',
+          );
+        }
+      }
+    });
+
+    test('the style and position are inherited, and a different one splits '
+        'the text', () {
+      expect(
+        emphasisOf(
+          '<p style="text-emphasis-style: sesame; '
+          'text-emphasis-position: under left">甲<b>乙</b><span '
+          'style="text-emphasis-style: none">丙</span>丁</p>',
+        ),
+        [
+          (
+            '甲',
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              under: true,
+              left: true,
+            ),
+          ),
+          (
+            '乙',
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              under: true,
+              left: true,
+            ),
+          ),
+          ('丙', null),
+          (
+            '丁',
+            const EpubTextEmphasis(
+              shape: EpubEmphasisShape.sesame,
+              under: true,
+              left: true,
+            ),
+          ),
+        ],
+      );
+      // Spans that differ only in emphasis do not merge.
+      expect(
+        emphasisOf(
+          '<p>甲<span style="text-emphasis-style: dot">乙</span>丙</p>',
+        ).map((span) => span.$1),
+        ['甲', '乙', '丙'],
+      );
+    });
+
+    test('the shape follows the writing mode when none is given', () {
+      expect(
+        const EpubTextEmphasis().shapeIn(vertical: true),
+        EpubEmphasisShape.sesame,
+      );
+      expect(
+        const EpubTextEmphasis(filled: false).shapeIn(vertical: false),
+        EpubEmphasisShape.circle,
+      );
+      expect(
+        const EpubTextEmphasis(
+          shape: EpubEmphasisShape.dot,
+        ).shapeIn(vertical: true),
+        EpubEmphasisShape.dot,
+      );
+    });
+  });
+
   group('ruby', () {
     ({List<EpubContentNode> blocks, String canonicalText}) chapterOf(
       String body,
