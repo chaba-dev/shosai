@@ -24,15 +24,17 @@ FlutterBookmark? _currentBookmark(ReaderModel model) {
 
 /// The title of the Contents entry the reader is in, when the entries are
 /// loaded and the entry has one.
-String? _currentSectionTitle(ReaderModel model) {
+String? _currentSectionTitle(ReaderModel model, AppLocalizations l10n) {
   final contents = model.contents;
-  if (contents.status != ReaderContentsStatus.ready) return null;
+  if (model.document == null) return null;
   for (final entry in contents.entries) {
     if (entry.current && entry.title.trim().isNotEmpty) {
       return entry.title.trim();
     }
   }
-  return null;
+  return model.document!.format == FlutterBookFormat.epub
+      ? l10n.readerChapterNumber(model.unit + 1)
+      : l10n.readerPageNumber(model.readingLocation.unit + 1);
 }
 
 /// Whether the chrome may start a new action: a document is open and no open,
@@ -75,7 +77,7 @@ class _ReaderToolbar extends StatelessWidget {
     final phone = layout == ShellLayout.phone;
     final title = _ReaderToolbarTitle(
       title: model.document?.title ?? l10n.readerFallbackTitle,
-      section: _currentSectionTitle(model),
+      section: _currentSectionTitle(model, l10n),
     );
     final search = _ReaderToolButton(
       key: const ValueKey('reader-header-search'),
@@ -562,7 +564,7 @@ class _ReaderStatusLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
     final document = model.document;
-    final section = _currentSectionTitle(model);
+    final section = _currentSectionTitle(model, AppLocalizations.of(context));
     final total = document?.logicalUnitCount.toInt() ?? 0;
     final style = shellInterfaceStyle(12, 16).copyWith(
       color: palette.inkMuted,
@@ -599,23 +601,18 @@ class _ReaderStatusLine extends StatelessWidget {
               child: document != null && model.progress.hasDocument
                   ? _ReaderProgressTrack(
                       value: model.progress.percentage / 100,
-                      marks: [
-                        if (total > 0)
-                          for (final bookmark in model.bookmarks)
-                            (bookmark.unit.toInt() + .5) / total,
-                      ],
+                      marks: model.progress.marks,
                       valueLabel: _readerStatusLabel(
                         AppLocalizations.of(context),
                         model.progress,
-                        total: total,
+                        total: document.format == FlutterBookFormat.epub
+                            ? 0
+                            : total,
                         short: false,
                       ),
                       onJump: total > 0 && !model.busy
-                          ? (fraction) => dispatch(
-                              ReaderUnitRequested(
-                                (fraction * total).floor().clamp(0, total - 1),
-                              ),
-                            )
+                          ? (fraction) =>
+                                dispatch(ReaderProgressRequested(fraction))
                           : null,
                       rightToLeft: model.rightToLeft,
                       increasedValue: _unitStepValue(context, model, 1),
@@ -658,8 +655,7 @@ String? _unitStepValue(BuildContext context, ReaderModel model, int delta) {
   if (total <= 0 || unit < 0 || unit >= total) return null;
   final l10n = AppLocalizations.of(context);
   if (model.document?.format == FlutterBookFormat.epub) {
-    final percent = ((unit + 1) / total * 100).round();
-    return l10n.readerChapterOfStatus(percent, unit + 1, total);
+    return l10n.readerChapterNumber(unit + 1);
   }
   // A spread's place names both of its pages and counts the second as read,
   // as the status does once the step has shown it.

@@ -165,7 +165,7 @@ void main() {
     // The left end of the track is the end of the book. The place beside the
     // track changes its width, so each tap measures it again.
     var rect = tester.getRect(track);
-    await tester.tapAt(Offset(rect.left + 4, rect.center.dy));
+    await tester.tapAt(Offset(rect.left, rect.center.dy));
     await settle(tester);
     expect(page(tester).unit, 1);
     rect = tester.getRect(track);

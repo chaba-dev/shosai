@@ -435,7 +435,7 @@ void main() {
       await tester.pump();
       await _settle(tester);
       // The status wording follows the navigated unit.
-      expect(find.text('50% · chapter 2 of 4'), findsOneWidget);
+      expect(find.text('25% · page 1'), findsOneWidget);
     });
 
     testWidgets('a short window at 200% text scrolls the whole panel and '
@@ -1559,7 +1559,7 @@ void main() {
       expect(tester.getSemantics(trackFinder).label, 'Reading progress');
       // The track spans the status line between the section and the place.
       expect(tester.getSize(trackFinder).width, greaterThan(200));
-      expect(opening, contains('of 3'));
+      expect(opening, contains('page 1'));
       Focus.of(tester.element(trackFinder)).requestFocus();
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -1924,7 +1924,7 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pump();
     await _settle(tester, frames: 8);
-    expect(find.textContaining('chapter 3 of 3'), findsOneWidget);
+    expect(find.text('67% · page 1'), findsOneWidget);
   });
 
   group('panel modality', () {
@@ -2096,7 +2096,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.go);
       await tester.pump();
       await _settle(tester);
-      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
+      expect(find.text('33% · page 1'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('reader-page-input-error')),
         findsNothing,
@@ -2117,8 +2117,8 @@ void main() {
         find.byKey(const ValueKey('reader-page-input-error')),
         findsOneWidget,
       );
-      expect(find.text('Enter a page between 1 and 3.'), findsOneWidget);
-      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
+      expect(find.text('Enter a chapter between 1 and 3.'), findsOneWidget);
+      expect(find.text('33% · page 1'), findsOneWidget);
 
       // A non-numeric draft is rejected the same way.
       await tester.enterText(
@@ -2128,7 +2128,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.go);
       await tester.pump();
       await _settle(tester);
-      expect(find.text('Enter a page between 1 and 3.'), findsOneWidget);
+      expect(find.text('Enter a chapter between 1 and 3.'), findsOneWidget);
     });
 
     testWidgets('bookmark toggle runs through the rendered control', (
@@ -2251,13 +2251,13 @@ void main() {
       await _settle(tester);
       expect(find.text('1 / 2'), findsOneWidget);
       // The pinned reference navigates to the first result on completion.
-      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
+      expect(find.text('36% · page 1'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('reader-search-next')));
       await tester.pump();
       await _settle(tester);
       expect(find.text('2 / 2'), findsOneWidget);
-      expect(find.text('100% · chapter 3 of 3'), findsOneWidget);
+      expect(find.text('72% · page 1'), findsOneWidget);
 
       // Stepping wraps.
       await tester.tap(find.byKey(const ValueKey('reader-search-next')));
