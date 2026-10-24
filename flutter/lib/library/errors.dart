@@ -1,4 +1,6 @@
 import 'package:shosai_flutter/android_document_import_adapter.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
+import 'package:shosai_flutter/l10n/app_localizations_en.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -14,18 +16,21 @@ final class SafeUserError implements Exception {
   final String message;
 }
 
-String documentImportErrorText(DocumentImportError error) => switch (error) {
-  DocumentImportError.unavailable => 'The document provider is unavailable.',
-  DocumentImportError.busy => 'The document provider is busy. Try again.',
-  DocumentImportError.permissionDenied =>
-    'Permission to read the selected document was denied.',
-  DocumentImportError.tooLarge =>
-    'The selection or document exceeds the import limit.',
-  DocumentImportError.readFailed => 'The selected document could not be read.',
-  DocumentImportError.cancelled => 'Import cancelled.',
-  DocumentImportError.invalidRequest =>
-    'The document provider request is no longer valid.',
-};
+String documentImportErrorText(
+  DocumentImportError error, [
+  AppLocalizations? localizations,
+]) {
+  final l10n = localizations ?? AppLocalizationsEn();
+  return switch (error) {
+    DocumentImportError.unavailable => l10n.importProviderUnavailable,
+    DocumentImportError.busy => l10n.importProviderBusy,
+    DocumentImportError.permissionDenied => l10n.importPermissionDenied,
+    DocumentImportError.tooLarge => l10n.importSelectionTooLarge,
+    DocumentImportError.readFailed => l10n.importReadFailed,
+    DocumentImportError.cancelled => l10n.importCancelled,
+    DocumentImportError.invalidRequest => l10n.importInvalidRequest,
+  };
+}
 
 String documentImportErrorToken(DocumentImportError error) =>
     'provider_error:${error.name}';

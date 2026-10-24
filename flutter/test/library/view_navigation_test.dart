@@ -1020,11 +1020,11 @@ void main() {
         await tester.tap(navigationEntry('本を追加'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
-        await tester.tap(find.text('Choose files'));
+        await tester.tap(find.text('ファイルを選択'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         await tester.pump(const Duration(milliseconds: 400));
-        await tester.tap(find.text('Import'));
+        await tester.tap(find.text('追加'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
 

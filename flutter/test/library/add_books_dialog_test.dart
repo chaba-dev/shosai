@@ -24,6 +24,11 @@ const _choices = [
 ];
 
 class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
+  _Bridge({this.failImport = false, this.cancelImport = false});
+
+  final bool failImport;
+  final bool cancelImport;
+
   /// The path imports the library asked for, in order.
   final imports = <({List<String> paths, bool managed})>[];
 
@@ -37,10 +42,14 @@ class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
   }) async {
     imports.add((paths: pathKeys, managed: managed));
     return FlutterImportReport(
-      imported: BigInt.from(pathKeys.length),
-      failed: BigInt.zero,
-      cancelled: false,
-      items: const [],
+      imported: failImport || cancelImport
+          ? BigInt.zero
+          : BigInt.from(pathKeys.length),
+      failed: failImport ? BigInt.one : BigInt.zero,
+      cancelled: cancelImport,
+      items: failImport
+          ? [FlutterImportItem(pathKey: pathKeys.first, error: 'unsupported')]
+          : const [],
     );
   }
 
@@ -116,9 +125,11 @@ Future<void> _pumpShell(
   WidgetTester tester, {
   NavigatorObserver? observer,
   _Bridge? bridge,
+  Locale locale = const Locale('en'),
 }) async {
   await tester.pumpWidget(
     ShadApp(
+      locale: locale,
       theme: shosaiShadTheme(Brightness.light),
       navigatorObservers: [?observer],
       // Mirrors the production composition in `ShosaiShell`: the generated
@@ -458,4 +469,56 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
+
+  for (final outcome in ['decline', 'failure', 'cancelled']) {
+    testWidgets(
+      'iOS Japanese import localizes review and cleans copies on $outcome',
+      (tester) async {
+        final inbox = (await tester.runAsync(
+          () => Directory.systemTemp.createTemp('shosai-import-ja'),
+        ))!;
+        addTearDown(() => inbox.delete(recursive: true));
+        final file = File('${inbox.path}/book.epub');
+        await tester.runAsync(() => file.writeAsString('book'));
+        _PickerStub(tester, picked: [file.path]);
+        final bridge = _Bridge(
+          failImport: outcome == 'failure',
+          cancelImport: outcome == 'cancelled',
+        );
+        await _pumpShell(tester, bridge: bridge, locale: const Locale('ja'));
+        await tester.tap(find.widgetWithText(ShadButton, '本を追加'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.text('追加する本を確認'), findsOneWidget);
+        expect(find.text('アプリ内にコピーを保存'), findsOneWidget);
+        expect(find.text('選択した本のコピーをShōsai内に保存します。'), findsOneWidget);
+        expect(find.text('Import'), findsNothing);
+        await tester.tap(
+          find
+              .widgetWithText(ShadButton, outcome == 'decline' ? 'キャンセル' : '追加')
+              .last,
+        );
+        for (var attempt = 0; file.existsSync() && attempt < 50; attempt++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+        expect(file.existsSync(), isFalse);
+        expect(bridge.imports, hasLength(outcome == 'decline' ? 0 : 1));
+        for (var attempt = 0; attempt < 5; attempt++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump(const Duration(milliseconds: 400));
+        }
+        if (outcome == 'failure') {
+          expect(find.textContaining('1件を追加できませんでした。'), findsOneWidget);
+          expect(find.textContaining('このファイル形式には対応していません。'), findsOneWidget);
+        }
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    );
+  }
 }

@@ -141,6 +141,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     editSettings: _editSettings,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
+    localizations: () => AppLocalizations.of(context),
     noticeReporter: widget.noticeReporter ?? ignoreNotice,
     evictCover: (bytes) {
       final provider = MemoryImage(bytes);
@@ -711,21 +712,21 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
     final directory = await _showOwnedDialog<bool>(
       (context) => ShadDialog(
-        title: const Text('Add books'),
+        title: Text(AppLocalizations.of(context).addBooksAction),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _DialogActionTile(
               icon: LucideIcons.file,
-              title: 'Choose files',
-              subtitle: 'Select one or more PDF or EPUB files',
+              title: AppLocalizations.of(context).importChooseFiles,
+              subtitle: AppLocalizations.of(context).importChooseFilesHint,
               onPressed: () => Navigator.pop(context, false),
             ),
             _DialogActionTile(
               icon: LucideIcons.folder,
-              title: 'Choose a folder',
-              subtitle: 'Find supported books in all subfolders',
+              title: AppLocalizations.of(context).importChooseFolder,
+              subtitle: AppLocalizations.of(context).importChooseFolderHint,
               onPressed: () => Navigator.pop(context, true),
             ),
           ],
@@ -733,15 +734,19 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       ),
     );
     if (directory == null || !mounted) return null;
+    final l10n = AppLocalizations.of(context);
     final paths = directory
         ? [
-            await getDirectoryPath(confirmButtonText: 'Review books'),
+            await getDirectoryPath(confirmButtonText: l10n.importReviewBooks),
           ].whereType<String>().toList()
         : (await openFiles(
-            acceptedTypeGroups: const [
-              XTypeGroup(label: 'Books', extensions: ['pdf', 'epub']),
+            acceptedTypeGroups: [
+              XTypeGroup(
+                label: l10n.importBooksType,
+                extensions: ['pdf', 'epub'],
+              ),
             ],
-            confirmButtonText: 'Review books',
+            confirmButtonText: l10n.importReviewBooks,
           )).map((file) => file.path).toList();
     if (paths.isEmpty || !mounted) return null;
     return _reviewImport(paths, directory: directory);
@@ -751,9 +756,17 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// into the app's inbox. The library keeps its own copy, so the inbox
   /// copies are deleted once the import has run or been declined.
   Future<LibraryImportSelection?> _pickIosImport() async {
+    final l10n = AppLocalizations.of(context);
     final paths = (await openFiles(
-      acceptedTypeGroups: const [_iosBookTypes],
-      confirmButtonText: 'Review books',
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: l10n.importBooksType,
+          extensions: ['pdf', 'epub'],
+          // iOS filters by UTI rather than extension.
+          uniformTypeIdentifiers: ['com.adobe.pdf', 'org.idpf.epub-container'],
+        ),
+      ],
+      confirmButtonText: l10n.importReviewBooks,
     )).map((file) => file.path).toList(growable: false);
     if (paths.isEmpty) return null;
     final reviewed = mounted
@@ -784,7 +797,10 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return null;
     }
     if (selected case DocumentSelectionFailure(:final error)) {
-      throw SafeUserError(documentImportErrorText(error));
+      if (!mounted) return null;
+      throw SafeUserError(
+        documentImportErrorText(error, AppLocalizations.of(context)),
+      );
     }
     if (selected is! DocumentSelection || selected.documents.isEmpty) {
       return null;
@@ -943,15 +959,18 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     bool managedOnly = false,
   }) async {
     var managed = true;
+    final l10n = AppLocalizations.of(context);
     return _showOwnedDialog<LibraryImportSelection>(
       (context) => StatefulBuilder(
         builder: (context, setState) => ShadDialog(
-          title: Text(directory ? 'Review folder import' : 'Review books'),
+          title: Text(
+            directory ? l10n.importReviewFolder : l10n.importReviewBooks,
+          ),
           actions: [
             ShadButton.outline(
               height: shosaiShadButtonHeight(context),
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
+              child: Text(l10n.cancelImportAction),
             ),
             ShadButton(
               height: shosaiShadButtonHeight(context),
@@ -963,7 +982,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                   directory: directory,
                 ),
               ),
-              child: const Text('Import'),
+              child: Text(l10n.importAction),
             ),
           ],
           child: SizedBox(
@@ -1001,12 +1020,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 ),
                 const SizedBox(height: 8),
                 _SettingSwitch(
-                  title: 'Copy into managed storage',
+                  title: l10n.importManagedCopy,
                   subtitle: managedOnly
-                      ? 'Shōsai keeps its own copy of each picked book.'
+                      ? l10n.importPickedCopyHint
                       : managed
-                      ? 'Shōsai keeps a private copy available to the reader.'
-                      : 'Keep books in their selected locations.',
+                      ? l10n.importPrivateCopyHint
+                      : l10n.importLinkedCopyHint,
                   value: managed,
                   onChanged: managedOnly
                       ? null
@@ -1249,14 +1268,6 @@ class LibraryBanner extends StatelessWidget {
     );
   }
 }
-
-/// The books the iOS picker offers. iOS filters by uniform type identifier,
-/// not by extension.
-const _iosBookTypes = XTypeGroup(
-  label: 'Books',
-  extensions: ['pdf', 'epub'],
-  uniformTypeIdentifiers: ['com.adobe.pdf', 'org.idpf.epub-container'],
-);
 
 /// Deletes the copies the iOS picker left in the app's inbox.
 Future<void> _deletePickedCopies(Iterable<String> paths) async {
