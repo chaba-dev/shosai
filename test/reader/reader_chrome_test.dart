@@ -670,6 +670,12 @@ void main() {
         );
         final surface = find.byKey(const ValueKey('reader-selection-surface'));
         final forward = Offset(rtl ? 180 : -180, 0);
+        for (final key in ['reader-edge-previous', 'reader-edge-next']) {
+          expect(
+            tester.getSize(find.byKey(ValueKey(key))).width,
+            greaterThanOrEqualTo(44),
+          );
+        }
         expect(find.text('33% · page 1'), findsOneWidget);
         await tester.drag(surface, -forward);
         await tester.pumpAndSettle();
