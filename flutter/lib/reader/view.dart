@@ -563,6 +563,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// model change.
   void _focusSurfaceIfUnclaimed(FlutterDocumentSummary document) {
     if (!mounted ||
+        identical(_surfaceFocusedFor, document) ||
         !identical(_controller.model.document, document) ||
         _readerFocus.context == null) {
       return;

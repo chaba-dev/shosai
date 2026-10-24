@@ -101,7 +101,7 @@ class _DocumentViewState extends State<_DocumentView> {
     }
     if (surface == null) {
       return CallbackShortcuts(
-        bindings: readerPageKeys(model, dispatch),
+        bindings: readerPageKeys(model, dispatch, arrows: true),
         child: Focus(
           focusNode: readerFocus,
           autofocus: true,
@@ -167,6 +167,7 @@ class _DocumentViewState extends State<_DocumentView> {
                       Positioned.fill(
                         child: CallbackShortcuts(
                           bindings: {
+                            ...readerPageKeys(model, dispatch, arrows: true),
                             const SingleActivator(
                               LogicalKeyboardKey.escape,
                             ): () =>
@@ -442,21 +443,32 @@ class _DocumentViewState extends State<_DocumentView> {
 ///
 /// Left and Right follow the page on screen, so in a right-to-left book Left
 /// turns forward, as its next-page margin does. Shift-arrows stay with
-/// keyboard selection.
+/// keyboard selection. The arrows are bound only with [arrows], around the
+/// surface itself: elsewhere in the pane they move focus between controls
+/// such as the selection actions.
+///
+/// A continuous page scrolls rather than turns, so it keeps only PageUp and
+/// PageDown, which step between its chapters.
 Map<ShortcutActivator, VoidCallback> readerPageKeys(
   ReaderModel model,
-  void Function(ReaderMessage) dispatch,
-) {
+  void Function(ReaderMessage) dispatch, {
+  bool arrows = false,
+}) {
   final forward = model.rightToLeft ? -1 : 1;
   void step(int delta) => dispatch(pageStepMessage(model, delta));
+  final paged = !model.continuousPresentation;
   return {
     const SingleActivator(LogicalKeyboardKey.pageUp): () => step(-1),
     const SingleActivator(LogicalKeyboardKey.pageDown): () => step(1),
-    const SingleActivator(LogicalKeyboardKey.space): () => step(1),
-    const SingleActivator(LogicalKeyboardKey.space, shift: true): () =>
-        step(-1),
-    const SingleActivator(LogicalKeyboardKey.arrowRight): () => step(forward),
-    const SingleActivator(LogicalKeyboardKey.arrowLeft): () => step(-forward),
+    if (paged) ...{
+      const SingleActivator(LogicalKeyboardKey.space): () => step(1),
+      const SingleActivator(LogicalKeyboardKey.space, shift: true): () =>
+          step(-1),
+    },
+    if (paged && arrows) ...{
+      const SingleActivator(LogicalKeyboardKey.arrowRight): () => step(forward),
+      const SingleActivator(LogicalKeyboardKey.arrowLeft): () => step(-forward),
+    },
   };
 }
 
