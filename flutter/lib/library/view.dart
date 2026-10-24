@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -17,6 +16,7 @@ import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/notices/library_notice_text.dart';
 import 'package:shosai_flutter/notices/notices.dart';
+import 'package:shosai_flutter/opened_documents.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/core/bridge.dart';
@@ -128,6 +128,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// are drained before the library reloads.
   final Set<int> _shownBooks = {};
   List<FlutterLibraryBook>? _listedBooks;
+  final OpenedDocuments _openedDocuments = OpenedDocuments();
   late final AndroidDocumentImportAdapter _androidImport =
       widget.androidImport ?? AndroidDocumentImportAdapter();
   final Set<String> _providerOperations = {};
@@ -142,6 +143,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     localizations: () => AppLocalizations.of(context),
+    openedDocuments: defaultTargetPlatform == TargetPlatform.iOS
+        ? _openedDocuments
+        : null,
     noticeReporter: widget.noticeReporter ?? ignoreNotice,
     evictCover: (bytes) {
       final provider = MemoryImage(bytes);
@@ -773,13 +777,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         ? await _reviewImport(paths, directory: false, managedOnly: true)
         : null;
     if (reviewed == null) {
-      await _deletePickedCopies(paths);
+      await _openedDocuments.discard(paths);
       return null;
     }
     return LibraryImportSelection(
       paths: reviewed.paths,
       managed: true,
-      cleanup: () => _deletePickedCopies(paths),
+      cleanup: () => _openedDocuments.discard(paths),
     );
   }
 
@@ -1266,17 +1270,6 @@ class LibraryBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: alert,
     );
-  }
-}
-
-/// Deletes the copies the iOS picker left in the app's inbox.
-Future<void> _deletePickedCopies(Iterable<String> paths) async {
-  for (final path in paths) {
-    try {
-      await File(path).delete();
-    } on FileSystemException {
-      // iOS also clears the inbox; a copy that is already gone is fine.
-    }
   }
 }
 

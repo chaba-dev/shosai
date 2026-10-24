@@ -85,6 +85,12 @@ final class LibraryImportRequested extends LibraryMessage {
   const LibraryImportRequested();
 }
 
+/// A generation-guarded platform intake completion; the controller owns it.
+final class _LibraryDocumentsOpened extends LibraryMessage {
+  const _LibraryDocumentsOpened(this.paths);
+  final List<String> paths;
+}
+
 final class LibraryCoverRequested extends LibraryMessage {
   const LibraryCoverRequested(this.bookId);
   final int bookId;
