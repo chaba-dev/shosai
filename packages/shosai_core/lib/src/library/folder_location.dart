@@ -136,7 +136,9 @@ final class FolderLocation implements LibraryLocation {
       final path = await _path(key);
       cancellation.throwIfCancelled();
       if ((await FileStat.stat(path)).type != FileSystemEntityType.file) {
-        throw const CoreException.invalidRequest('Read requires a regular file.');
+        throw const CoreException.invalidRequest(
+          'Read requires a regular file.',
+        );
       }
       final file = await File(path).open();
       try {

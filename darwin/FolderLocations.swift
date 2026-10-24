@@ -273,7 +273,6 @@ final class FolderLocations: NSObject {
     picker.canChooseDirectories = true
     picker.canChooseFiles = false
     picker.allowsMultipleSelection = false
-    picker.prompt = "Use this folder"
     picker.begin { response in self.selected(response == .OK ? picker.url : nil) }
     #endif
   }

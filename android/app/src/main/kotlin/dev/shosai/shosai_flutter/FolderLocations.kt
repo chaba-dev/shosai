@@ -236,7 +236,7 @@ internal object FolderLocations {
                     require(start >= 0)
                     if (start != 0L) {
                         try { input.channel.position(start) }
-                        catch (_: Exception) { throw UnsupportedOperationException() }
+                        catch (_: java.io.IOException) { throw UnsupportedOperationException() }
                     }
                     val id = UUID.randomUUID().toString()
                     handles[id] = Handle(input = input)

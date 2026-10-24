@@ -35,7 +35,7 @@ final class FolderGrant {
 
   static Future<FolderGrant?> pick(String id) async {
     if (Platform.isLinux || Platform.isWindows) {
-      final path = await getDirectoryPath(confirmButtonText: 'Use this folder');
+      final path = await getDirectoryPath();
       if (path == null) return null;
       return FolderGrant(
         id,
