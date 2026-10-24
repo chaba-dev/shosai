@@ -816,12 +816,36 @@ void main() {
       expect(open.book.bookId, books[index].bookId);
       expect(open.path, open.book.pathKey);
       expect(open.path, startsWith(after.resolveSymbolicLinksSync()));
+      final bytes = File(open.path).readAsBytesSync();
       final opened = await bridge.openLibraryBook(
         bookId: open.book.bookId,
         cancellationId: bridge.createCancellation(),
       );
       expect(opened.bookId, open.book.bookId);
+      // Moving the managed path must not weaken verified snapshots: an
+      // already-open PDF keeps its bytes, and another open rejects damage.
+      File(open.path).writeAsBytesSync(List.filled(bytes.length, 0));
+      if (open.book.format == FlutterBookFormat.pdf) {
+        expect(opened.contentPath, isNotNull);
+        expect(opened.contentPath, isNot(open.path));
+        expect(File(opened.contentPath!).readAsBytesSync(), bytes);
+      }
       bridge.releaseDocument(handle: opened.handle);
+      await bridge.drain();
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: open.book.bookId,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.message,
+            'message',
+            contains('no longer match'),
+          ),
+        ),
+      );
+      expect(bridge.openDocumentCount, 0);
     }
   });
 

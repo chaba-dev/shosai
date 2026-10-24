@@ -1202,8 +1202,8 @@ void main() {
           t.copyFixture('sample.pdf', 'source.pdf'),
           managed: true,
         );
-        final root = t.path('new-books');
-        Directory(root).createSync();
+        final directory = Directory(t.path('new-books'))..createSync();
+        final root = directory.resolveSymbolicLinksSync();
         final copy = p.join(root, p.basename(book.path));
         File(book.path).renameSync(copy);
         final library = Library(t.store, managedDirectory: root);
@@ -1265,6 +1265,102 @@ void main() {
         }
       },
     );
+
+    test(
+      'debt migration rejects a root redirected during inspection',
+      () async {
+        for (final present in [false, true]) {
+          final t = await TempLibrary.create();
+          await t.library.retryManagedFileDeletions();
+          final root = canonicalBookPath(t.managedDirectory);
+          final copy = p.join(root, '${'d' * 64}.pdf');
+          if (present) File(copy).writeAsStringSync('removed');
+          final oldRoot = t.path('gone/books');
+          final debt = p.join(oldRoot, p.basename(copy));
+          await t.execute(
+            '''INSERT INTO managed_file_deletion_debt (file_path, managed_dir)
+             VALUES (?, ?)''',
+            [debt, oldRoot],
+          );
+          final documents = Directory(t.path('documents'))..createSync();
+          final sentinel = File(p.join(documents.path, p.basename(copy)))
+            ..writeAsStringSync('keep');
+          final holding = t.path('holding');
+          final parentZone = Zone.current;
+          var redirected = false;
+          try {
+            await IOOverrides.runZoned(
+              t.library.retryManagedFileDeletions,
+              fseGetType: (path, followLinks) async {
+                final type = await parentZone.run(
+                  () => FileSystemEntity.type(path, followLinks: followLinks),
+                );
+                if (path == copy && !redirected) {
+                  Directory(root).renameSync(holding);
+                  Link(root).createSync(documents.path);
+                  redirected = true;
+                }
+                return type;
+              },
+            );
+            expect(redirected, isTrue);
+            expect(
+              await t.select(
+                'SELECT file_path FROM managed_file_deletion_debt',
+              ),
+              [
+                {'file_path': debt},
+              ],
+            );
+            expect(sentinel.readAsStringSync(), 'keep');
+          } finally {
+            if (redirected) {
+              Link(root).deleteSync();
+              Directory(holding).renameSync(root);
+            }
+          }
+          for (var retry = 0; retry < 2; retry++) {
+            await t.library.retryManagedFileDeletions();
+            expect(await t.count('managed_file_deletion_debt'), 0);
+            expect(File(copy).existsSync(), isFalse);
+            expect(sentinel.readAsStringSync(), 'keep');
+          }
+        }
+      },
+    );
+
+    test('migration leaves missing and invalid candidates unclaimed', () async {
+      for (final candidate in ['missing', 'wrong size', 'link']) {
+        final t = await TempLibrary.create();
+        final source = t.copyFixture('sample.pdf', 'source.pdf');
+        final book = await t.importBook(source, managed: true);
+        File(book.path).deleteSync();
+        final directory = Directory(t.path('new-books'))..createSync();
+        final root = directory.resolveSymbolicLinksSync();
+        final copy = p.join(root, p.basename(book.path));
+        if (candidate == 'wrong size') File(copy).writeAsStringSync('short');
+        if (candidate == 'link') Link(copy).createSync(source);
+        final library = Library(t.store, managedDirectory: root);
+
+        for (var retry = 0; retry < 2; retry++) {
+          await library.retryManagedFileDeletions();
+          expect((await library.get(book.id))!.path, book.path);
+          await expectLater(
+            library.verifiedPath(book.id),
+            throwsCoreError(CoreErrorKind.notFound),
+          );
+          expect(
+            FileSystemEntity.typeSync(copy, followLinks: false),
+            switch (candidate) {
+              'missing' => FileSystemEntityType.notFound,
+              'wrong size' => FileSystemEntityType.file,
+              _ => FileSystemEntityType.link,
+            },
+          );
+          expect(File(source).existsSync(), isTrue);
+        }
+      }
+    });
 
     test('the orphan sweep is not starved by owned copies', () async {
       final t = await TempLibrary.create();
