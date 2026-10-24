@@ -2,11 +2,15 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
+import 'package:shosai_core/shosai_core.dart' show maxSelectedImportPaths;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/library/errors.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
+import 'package:shosai_flutter/l10n/app_localizations_en.dart';
 import 'package:shosai_flutter/notices/library_notice_text.dart';
 import 'package:shosai_flutter/notices/notices.dart';
+import 'package:shosai_flutter/opened_documents.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
 part 'message.dart';
@@ -26,6 +30,8 @@ class LibraryController implements Listenable {
         _ignoreImportAdapterCancellation,
     LibraryCoverEvicter evictCover = _ignoreCoverEviction,
     NoticeReporter noticeReporter = ignoreNotice,
+    AppLocalizations Function() localizations = AppLocalizationsEn.new,
+    OpenedDocuments? openedDocuments,
   }) : _bridge = bridge,
        _records = recordsOf(bridge),
        _confirmRemoval = confirmRemoval,
@@ -36,7 +42,9 @@ class LibraryController implements Listenable {
        _retryProviderCleanup = retryProviderCleanup,
        _cancelImportAdapter = cancelImportAdapter,
        _evictCover = evictCover,
-       _reportNotice = noticeReporter;
+       _reportNotice = noticeReporter,
+       _localizations = localizations,
+       _openedDocuments = openedDocuments;
 
   final FlutterBridge _bridge;
 
@@ -50,6 +58,10 @@ class LibraryController implements Listenable {
   final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
   final LibraryCoverEvicter _evictCover;
+  final AppLocalizations Function() _localizations;
+  final OpenedDocuments? _openedDocuments;
+  final Set<String> _openedPaths = {};
+  bool _listeningForDocuments = false;
 
   /// Reports brief success feedback to the application notice center.
   ///
@@ -103,6 +115,10 @@ class LibraryController implements Listenable {
   }
 
   void dispatch(LibraryMessage message) {
+    if (_closing && message is _LibraryDocumentsOpened) {
+      unawaited(_openedDocuments?.discard(message.paths));
+      return;
+    }
     if (_closing &&
         message is! _LibraryLoaded &&
         message is! _LibraryFailed &&
@@ -120,6 +136,16 @@ class LibraryController implements Listenable {
       case LibraryStarted():
         _retryCleanup();
         _load();
+        if (!_listeningForDocuments && _openedDocuments != null) {
+          _listeningForDocuments = true;
+          unawaited(
+            _openedDocuments.listen(
+              (paths) => dispatch(_LibraryDocumentsOpened(paths)),
+            ),
+          );
+        }
+      case _LibraryDocumentsOpened(:final paths):
+        _openedPaths.addAll(paths);
       case LibraryRefreshed():
         _coverFailures.clear();
         _emit(_model.copyWith(coverRevision: _model.coverRevision + 1));
@@ -443,6 +469,26 @@ class LibraryController implements Listenable {
           _emit(_model.copyWith(providerCleanupPending: message.pending));
         }
     }
+    _importOpenedDocuments();
+  }
+
+  /// Intake is controller-owned work, not widget state. A reader or a load
+  /// holds the busy effect; retain arrivals until that effect has drained.
+  void _importOpenedDocuments() {
+    if (_closing || !_model.loaded || _model.busy || _openedPaths.isEmpty) {
+      return;
+    }
+    final paths = List<String>.unmodifiable(
+      _openedPaths.take(maxSelectedImportPaths),
+    );
+    _openedPaths.removeAll(paths);
+    _import(
+      LibraryImportSelection(
+        paths: paths,
+        managed: true,
+        cleanup: () => _openedDocuments!.discard(paths),
+      ),
+    );
   }
 
   void _beginEffect({bool importing = false}) {
@@ -598,8 +644,12 @@ class LibraryController implements Listenable {
     }());
   }
 
-  void _import() {
-    if (_closing || _model.busy) return;
+  void _import([LibraryImportSelection? chosen]) {
+    if (_closing || _model.busy) {
+      unawaited(chosen?.cleanup?.call());
+      return;
+    }
+    final l10n = _localizations();
     _beginEffect(importing: true);
     _pendingImportAdapter = true;
     final adapterRevision = ++_adapterRevision;
@@ -607,7 +657,7 @@ class LibraryController implements Listenable {
       BigInt? cancellation;
       LibraryImportSelection? selection;
       try {
-        selection = await _pickImport();
+        selection = chosen ?? await _pickImport();
         _pendingImportAdapter = false;
         if (!_closing) _emit(_model);
         if (selection == null || selection.paths.isEmpty) return;
@@ -623,7 +673,7 @@ class LibraryController implements Listenable {
           final report = await runner(_records, cancellation);
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          terminalStatus = _importReportStatus(report);
+          terminalStatus = _importReportStatus(report, l10n);
           successNotice = _importSuccessNotice(report);
         } else if (selection.directory) {
           final report = await _records.importDirectory(
@@ -633,7 +683,7 @@ class LibraryController implements Listenable {
           );
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          terminalStatus = _importReportStatus(report);
+          terminalStatus = _importReportStatus(report, l10n);
           successNotice = _importSuccessNotice(report);
         } else {
           final report = await _records.importPaths(
@@ -643,7 +693,7 @@ class LibraryController implements Listenable {
           );
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          terminalStatus = _importReportStatus(report);
+          terminalStatus = _importReportStatus(report, l10n);
           successNotice = _importSuccessNotice(report);
         }
         final failure = items.where((item) => item.error != null).firstOrNull;
@@ -652,7 +702,9 @@ class LibraryController implements Listenable {
             failure: LibraryFailure.import,
             error:
                 terminalStatus ??
-                (failure == null ? null : _safeImportError(failure.error!)),
+                (failure == null
+                    ? null
+                    : _safeImportError(failure.error!, l10n)),
             cancellation: cancellation,
             refresh: refresh,
             notice: successNotice,
@@ -663,7 +715,9 @@ class LibraryController implements Listenable {
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.import,
-            error: safeError(error),
+            error: error is SafeUserError
+                ? error.message
+                : l10n.importOperationFailed,
             cancellation: cancellation,
           ),
         );
@@ -813,25 +867,27 @@ class LibraryController implements Listenable {
 
   bool _ownsAdapter(int revision) => !_closing && revision == _adapterRevision;
 
-  String _safeImportError(String error) {
+  String _safeImportError(String error, AppLocalizations l10n) {
     if (error.startsWith('provider_error:')) {
       final name = error.substring('provider_error:'.length);
       final providerError = DocumentImportError.values
           .where((value) => value.name == name)
           .firstOrNull;
-      if (providerError != null) return documentImportErrorText(providerError);
+      if (providerError != null) {
+        return documentImportErrorText(providerError, l10n);
+      }
     }
     final lower = error.toLowerCase();
     if (lower.contains('unsupported')) {
-      return 'This file type is not supported.';
+      return l10n.importUnsupported;
     }
     if (lower.contains('not found') || lower.contains('no such file')) {
-      return 'The selected file could not be found.';
+      return l10n.importNotFound;
     }
     if (lower.contains('limit') || lower.contains('too large')) {
-      return 'The selected book exceeds the supported size limits.';
+      return l10n.importTooLarge;
     }
-    return 'The selected book could not be imported.';
+    return l10n.importFailed;
   }
 
   /// The brief success notice for an import that landed books without failures
@@ -857,7 +913,10 @@ class LibraryController implements Listenable {
     );
   }
 
-  String? _importReportStatus(FlutterImportReport report) {
+  String? _importReportStatus(
+    FlutterImportReport report,
+    AppLocalizations l10n,
+  ) {
     final failure = report.items
         .where((item) => item.error != null)
         .firstOrNull;
@@ -875,14 +934,14 @@ class LibraryController implements Listenable {
     }
     final parts = <String>[];
     if (report.imported > BigInt.zero) {
-      parts.add('Imported ${_bookCount(report.imported)}.');
+      parts.add(l10n.importStatusImported(report.imported.toInt()));
     }
     if (report.failed > BigInt.zero) {
-      parts.add('${report.failed} failed.');
-      if (failure != null) parts.add(_safeImportError(failure.error!));
+      parts.add(l10n.importStatusFailed(report.failed.toInt()));
+      if (failure != null) parts.add(_safeImportError(failure.error!, l10n));
     }
     if (warnings.isNotEmpty) {
-      parts.add('Some imported book details could not be loaded.');
+      parts.add(l10n.importDetailsUnavailable);
     }
     return parts.isEmpty ? null : parts.join(' ');
   }
@@ -911,6 +970,10 @@ class LibraryController implements Listenable {
   void dispose() {
     if (_closing) return;
     _closing = true;
+    _openedDocuments?.cancel();
+    final queued = List<String>.of(_openedPaths);
+    _openedPaths.clear();
+    unawaited(_openedDocuments?.discard(queued));
     for (final cover in _coverCache.values) {
       _evictCover(cover);
     }
@@ -934,6 +997,3 @@ class LibraryController implements Listenable {
     }
   }
 }
-
-String _bookCount(BigInt count) =>
-    '$count book${count == BigInt.one ? '' : 's'}';

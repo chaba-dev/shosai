@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/opened_documents.dart';
 import '../support/bridge_pdf_engine.dart';
 import '../support/bridge_records.dart';
 
@@ -1176,6 +1178,64 @@ void main() {
     },
   );
 
+  for (final closing in [false, true]) {
+    test(
+      'incoming copies while reading are ${closing ? 'released on disposal' : 'imported after closing the reader'}',
+      () async {
+        final inbox = await Directory.systemTemp.createTemp(
+          'shosai-reader-inbox',
+        );
+        addTearDown(() => inbox.delete(recursive: true));
+        final file = await File(
+          '${inbox.path}/incoming.epub',
+        ).writeAsString('book');
+        final documents = _IncomingDocuments();
+        final bridge = _IncomingImportBridge();
+        final reader = Completer<void>();
+        final controller = LibraryController(
+          bridge: bridge,
+          confirmRemoval: (_) async => true,
+          pickImport: () async => null,
+          openBook: (_) => reader.future,
+          drainReaderSaves: (_) async {},
+          editSettings: (_) async => null,
+          openedDocuments: documents,
+        );
+        controller.dispatch(const LibraryStarted());
+        await _settle();
+        bridge.pages.single.complete(
+          FlutterLibraryPage(books: [_book(1, 'Reading')], hasMore: false),
+        );
+        await _settle();
+        controller.dispatch(LibraryBookOpened(controller.model.books.single));
+        await _settle();
+        documents.deliver([file.path]);
+        expect(bridge.importedPaths, isEmpty);
+        expect(await file.exists(), isTrue);
+        if (closing) controller.dispose();
+        reader.complete();
+        await _settle();
+        if (!closing) {
+          bridge.pages.last.complete(
+            FlutterLibraryPage(books: [_book(1, 'Reading')], hasMore: false),
+          );
+        }
+        for (var attempt = 0; await file.exists() && attempt < 50; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(await file.exists(), isFalse);
+        expect(bridge.importedPaths, closing ? isEmpty : [file.path]);
+        controller.dispose();
+        for (final page in bridge.pages) {
+          if (!page.isCompleted) {
+            page.complete(const FlutterLibraryPage(books: [], hasMore: false));
+          }
+        }
+        await _settle();
+      },
+    );
+  }
+
   test('an open effect keeps the book it was dispatched with', () async {
     final bridge = _StubLibraryBridge();
     final opened = <FlutterLibraryBook>[];
@@ -1289,6 +1349,38 @@ class _HeldRemovalBridge extends _StubLibraryBridge {
   Future<FlutterLibraryRemoveOutcome> removeLibraryBook({required int bookId}) {
     removeCalls += 1;
     return removal.future;
+  }
+}
+
+class _IncomingDocuments extends OpenedDocuments {
+  late void Function(List<String>) deliver;
+
+  @override
+  Future<void> listen(void Function(List<String>) onOpened) async {
+    deliver = onOpened;
+  }
+
+  @override
+  void cancel() {}
+}
+
+class _IncomingImportBridge extends _StubLibraryBridge {
+  final importedPaths = <String>[];
+
+  @override
+  Future<FlutterImportReport> importPaths({
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  }) async {
+    expect(managed, isTrue);
+    importedPaths.addAll(pathKeys);
+    return FlutterImportReport(
+      imported: BigInt.from(pathKeys.length),
+      failed: BigInt.zero,
+      cancelled: false,
+      items: const [],
+    );
   }
 }
 

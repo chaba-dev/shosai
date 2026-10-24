@@ -667,5 +667,90 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get importChooseFiles => 'ファイルを選択';
+
+  @override
+  String get importChooseFilesHint => 'PDFまたはEPUBファイルを選択します（複数選択可）';
+
+  @override
+  String get importChooseFolder => 'フォルダを選択';
+
+  @override
+  String get importChooseFolderHint => 'サブフォルダも含めて対応する本を探します';
+
+  @override
+  String get importReviewBooks => '追加する本を確認';
+
+  @override
+  String get importReviewFolder => '追加するフォルダを確認';
+
+  @override
+  String get importBooksType => '本';
+
+  @override
+  String get importAction => '追加';
+
+  @override
+  String get importManagedCopy => 'アプリ内にコピーを保存';
+
+  @override
+  String get importPickedCopyHint => '選択した本のコピーをShōsai内に保存します。';
+
+  @override
+  String get importPrivateCopyHint => '読書用のコピーをShōsai内に保存します。';
+
+  @override
+  String get importLinkedCopyHint => '本を選択した場所に残します。';
+
+  @override
+  String importStatusImported(int count) {
+    return '$count冊を追加しました。';
+  }
+
+  @override
+  String importStatusFailed(int count) {
+    return '$count件を追加できませんでした。';
+  }
+
+  @override
+  String get importDetailsUnavailable => '追加した本の一部の詳細を読み込めませんでした。';
+
+  @override
+  String get importUnsupported => 'このファイル形式には対応していません。';
+
+  @override
+  String get importNotFound => '選択したファイルが見つかりませんでした。';
+
+  @override
+  String get importTooLarge => '選択した本は対応するサイズの上限を超えています。';
+
+  @override
+  String get importFailed => '選択した本を追加できませんでした。';
+
+  @override
+  String get importOperationFailed => '操作を完了できませんでした。';
+
+  @override
+  String get importProviderUnavailable => '書類プロバイダを利用できません。';
+
+  @override
+  String get importProviderBusy => '書類プロバイダは使用中です。もう一度お試しください。';
+
+  @override
+  String get importPermissionDenied => '選択した書類の読み取りが許可されませんでした。';
+
+  @override
+  String get importSelectionTooLarge => '選択した書類の数またはサイズが追加の上限を超えています。';
+
+  @override
+  String get importReadFailed => '選択した書類を読み取れませんでした。';
+
+  @override
+  String get importCancelled => '追加をキャンセルしました。';
+
+  @override
+  String get importInvalidRequest => '書類プロバイダへの要求は無効になりました。';
+
+  @override
   String get shellSwitcherDone => '完了';
 }

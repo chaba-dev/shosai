@@ -1242,6 +1242,168 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 open book} other{{count} open books}}'**
   String shellOpenBooks(int count);
 
+  /// No description provided for @importChooseFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose files'**
+  String get importChooseFiles;
+
+  /// No description provided for @importChooseFilesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Select one or more PDF or EPUB files'**
+  String get importChooseFilesHint;
+
+  /// No description provided for @importChooseFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a folder'**
+  String get importChooseFolder;
+
+  /// No description provided for @importChooseFolderHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Find supported books in all subfolders'**
+  String get importChooseFolderHint;
+
+  /// No description provided for @importReviewBooks.
+  ///
+  /// In en, this message translates to:
+  /// **'Review books'**
+  String get importReviewBooks;
+
+  /// No description provided for @importReviewFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Review folder import'**
+  String get importReviewFolder;
+
+  /// No description provided for @importBooksType.
+  ///
+  /// In en, this message translates to:
+  /// **'Books'**
+  String get importBooksType;
+
+  /// No description provided for @importAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get importAction;
+
+  /// No description provided for @importManagedCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy into managed storage'**
+  String get importManagedCopy;
+
+  /// No description provided for @importPickedCopyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Shōsai keeps its own copy of each picked book.'**
+  String get importPickedCopyHint;
+
+  /// No description provided for @importPrivateCopyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Shōsai keeps a private copy available to the reader.'**
+  String get importPrivateCopyHint;
+
+  /// No description provided for @importLinkedCopyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep books in their selected locations.'**
+  String get importLinkedCopyHint;
+
+  /// No description provided for @importStatusImported.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported {count, plural, =1{1 book} other{{count} books}}.'**
+  String importStatusImported(int count);
+
+  /// No description provided for @importStatusFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} failed.'**
+  String importStatusFailed(int count);
+
+  /// No description provided for @importDetailsUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Some imported book details could not be loaded.'**
+  String get importDetailsUnavailable;
+
+  /// No description provided for @importUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'This file type is not supported.'**
+  String get importUnsupported;
+
+  /// No description provided for @importNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'The selected file could not be found.'**
+  String get importNotFound;
+
+  /// No description provided for @importTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'The selected book exceeds the supported size limits.'**
+  String get importTooLarge;
+
+  /// No description provided for @importFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The selected book could not be imported.'**
+  String get importFailed;
+
+  /// No description provided for @importOperationFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The operation could not be completed.'**
+  String get importOperationFailed;
+
+  /// No description provided for @importProviderUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'The document provider is unavailable.'**
+  String get importProviderUnavailable;
+
+  /// No description provided for @importProviderBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'The document provider is busy. Try again.'**
+  String get importProviderBusy;
+
+  /// No description provided for @importPermissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Permission to read the selected document was denied.'**
+  String get importPermissionDenied;
+
+  /// No description provided for @importSelectionTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'The selection or document exceeds the import limit.'**
+  String get importSelectionTooLarge;
+
+  /// No description provided for @importReadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The selected document could not be read.'**
+  String get importReadFailed;
+
+  /// No description provided for @importCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Import cancelled.'**
+  String get importCancelled;
+
+  /// No description provided for @importInvalidRequest.
+  ///
+  /// In en, this message translates to:
+  /// **'The document provider request is no longer valid.'**
+  String get importInvalidRequest;
+
   /// The tab switcher's action that returns to the current book.
   ///
   /// In en, this message translates to:
