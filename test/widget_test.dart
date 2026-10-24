@@ -2775,17 +2775,16 @@ void main() {
 
     final scaffoldContext = tester.element(find.byType(Scaffold));
     final theme = Theme.of(scaffoldContext);
-    // The persisted reader theme paints the document area only. The surrounding
-    // reader chrome stays on the application palette in every reader theme
-    // (owner decision 2026-09-28, matching the pinned Iced references).
-    expect(theme.brightness, Brightness.light);
+    // Night uses dark reader chrome as well as dark document paper, even
+    // when the embedding application supplies a light theme.
+    expect(theme.brightness, Brightness.dark);
     expect(theme.textTheme.bodyMedium?.fontFamily, 'Inter');
     expect(
       theme.textTheme.bodyMedium?.fontFamilyFallback,
       contains('Noto Sans JP'),
     );
-    expect(theme.textTheme.bodyMedium?.color, ShosaiTokens.appText);
-    expect(theme.scaffoldBackgroundColor, ShosaiTokens.appBackground);
+    expect(theme.textTheme.bodyMedium?.color, ShosaiTokens.appDarkForeground);
+    expect(theme.scaffoldBackgroundColor, ShosaiTokens.appDarkBackground);
     final documentPainter =
         tester
                 .widget<CustomPaint>(
@@ -2821,15 +2820,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // With no book the welcome body sits on the stage, which stays on the
-    // light application palette whatever the page theme: its ink is the
-    // stage's, not the dark page's, so it stays legible.
+    // With no book the welcome body still follows Night's dark stage and
+    // uses its muted light ink, not the light application's muted dark ink.
     final welcome = tester.widget<Text>(
       find.textContaining('local document path'),
     );
-    expect(welcome.style?.color, ShosaiTokens.colorLightInkMuted);
+    expect(welcome.style?.color, ShosaiTokens.colorDarkInkMuted);
     final scaffoldContext = tester.element(find.byType(Scaffold));
-    expect(Theme.of(scaffoldContext).brightness, Brightness.light);
+    expect(Theme.of(scaffoldContext).brightness, Brightness.dark);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });

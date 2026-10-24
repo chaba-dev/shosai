@@ -20,7 +20,7 @@ import 'package:shosai_flutter/theme_tokens.dart';
 // | --- | --- |
 // | `shosaiShadTheme(Brightness.light)` | `app.*` (the design system's light theme, `color.light.*`) |
 // | `shosaiShadTheme(Brightness.dark)` | `app.dark.*` (the design system's dark theme, `color.dark.*`) |
-// | `shosaiReaderShadTheme(<any reader theme>)` | `app.*` (owner decision 2026-09-28: the chrome does not follow the reader theme) |
+// | `shosaiReaderShadTheme(<reader theme>)` | `app.dark.*` for Night, `app.*` for Paper/Sepia |
 // | reader page colors (`pageColors`) | `reader.<theme>.*` (the design system's page themes; the reader palette applies to the document area only) |
 // | radii | `radius.small` / `radius.medium` |
 // | type | `type.family.*` and `type.size.*` |
@@ -176,15 +176,13 @@ const _appDarkColorScheme = ShadColorScheme(
 
 /// The reader chrome palette for [readerTheme].
 ///
-/// Owner decision (2026-09-28): the shared reader chrome keeps the pinned Iced
-/// application palette in **every** reader theme, matching the pinned
-/// references (which recolor only the page); the reader palette applies to the
-/// document area alone, through [shosaiReaderDocumentColors]. The [readerTheme]
-/// argument is retained so call sites stay explicit about the reader theme in
-/// force, and so a future owner decision to theme the chrome again has one
-/// boundary to change.
+/// Night uses dark application chrome for both formats, superseding the
+/// 2026-09-28 light-only mapping. Paper and Sepia keep light chrome; page
+/// colours remain separate through [shosaiReaderDocumentColors].
 ShadColorScheme shosaiReaderColorScheme(String? readerTheme) =>
-    _appLightColorScheme;
+    shosaiAppColorScheme(
+      readerTheme == 'dark' ? Brightness.dark : Brightness.light,
+    );
 
 /// The reader **document** palette for [readerTheme].
 ///
@@ -223,13 +221,11 @@ ShadThemeData shosaiShadTheme(Brightness brightness) {
 
 /// The reader Shad theme for [readerTheme] (`light`, `dark`, `sepia` or null).
 ///
-/// The chrome is light in every reader theme (owner decision 2026-09-28): see
-/// [shosaiReaderColorScheme]. The reader palette is the document's
-/// ([shosaiReaderDocumentColors]).
+/// Chrome uses the matching app brightness, not the document's ink/paper.
 ShadThemeData shosaiReaderShadTheme(String? readerTheme) {
   final colorScheme = shosaiReaderColorScheme(readerTheme);
   return ShadThemeData(
-    brightness: Brightness.light,
+    brightness: readerTheme == 'dark' ? Brightness.dark : Brightness.light,
     colorScheme: colorScheme,
     radius: _shosaiRadius,
     textTheme: _shosaiShadTextTheme(),
@@ -349,12 +345,9 @@ ThemeData _materialTheme(ThemeData base, ColorScheme scheme) {
 
 /// The reader Material theme for [readerTheme].
 ///
-/// Owner decision (2026-09-28): the reader chrome — the scaffold background,
-/// the fixed chrome rows, the panels and the reader dialogs — keeps the
-/// application palette in every reader theme, matching the pinned references.
-/// The reader palette is the *document* palette and is read directly by the
-/// page painters ([pageColors] → [shosaiReaderDocumentColors]), not through
-/// this theme.
+/// The scaffold, chrome rows, panels and dialogs use dark application colours
+/// in Night, light colours otherwise. Page painters read the document palette
+/// separately ([pageColors] → [shosaiReaderDocumentColors]).
 ThemeData shosaiReaderMaterialTheme(BuildContext context, String? readerTheme) {
   final base = Theme.of(context);
   return _materialTheme(base, shosaiReaderMaterialColorScheme(readerTheme));
@@ -362,12 +355,11 @@ ThemeData shosaiReaderMaterialTheme(BuildContext context, String? readerTheme) {
 
 /// The reader **chrome** Material color scheme for [readerTheme].
 ///
-/// Owner decision (2026-09-28): the application (light) palette in every reader
-/// theme, so the scaffold background, tooltips, icons, focus rings and the
-/// Material chrome widgets match the pinned Iced chrome. The document palette
-/// is separate ([shosaiReaderDocumentColors]).
+/// Matches the Shad chrome's brightness, including text, icons and tooltips.
 ColorScheme shosaiReaderMaterialColorScheme(String? readerTheme) =>
-    shosaiMaterialColorScheme(Brightness.light);
+    shosaiMaterialColorScheme(
+      readerTheme == 'dark' ? Brightness.dark : Brightness.light,
+    );
 
 /// The application Material color scheme for [brightness].
 ColorScheme shosaiMaterialColorScheme(Brightness brightness) =>

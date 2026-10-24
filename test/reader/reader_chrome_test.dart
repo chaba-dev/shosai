@@ -742,12 +742,16 @@ void main() {
     }
 
     testWidgets(
-      'PDF pinch zooms from its fitted size, pans, and double tap restores fit',
+      'Night PDF pinch zooms, pans, and double tap restores fit without losing its palette',
       (tester) async {
         _setView(tester, const Size(390, 800));
         await _open(
           tester,
-          _reader(bridge: _ChromeBridge(), initialPath: '/books/atlas.pdf'),
+          _reader(
+            bridge: _ChromeBridge(),
+            initialPath: '/books/atlas.pdf',
+            settings: _epub.copyWith(theme: 'dark'),
+          ),
         );
         final surface = find.byKey(const ValueKey('reader-selection-surface'));
         final center = tester.getCenter(surface);
@@ -801,6 +805,18 @@ void main() {
         expect(
           find.byKey(const ValueKey('reader-fit-contain')),
           findsOneWidget,
+        );
+        expect(
+          _pagePainter(tester).backgroundColor,
+          ShosaiTokens.readerDarkBackground,
+        );
+        expect(
+          _pagePainter(tester).foregroundColor,
+          ShosaiTokens.readerDarkText,
+        );
+        expect(
+          ShadTheme.of(tester.element(surface)).brightness,
+          Brightness.dark,
         );
       },
     );
@@ -932,6 +948,7 @@ void main() {
         _reader(
           bridge: _ChromeBridge()..failSelection = true,
           initialPath: '/books/atlas.pdf',
+          settings: _epub.copyWith(theme: 'dark'),
         ),
       );
       await tester.pumpAndSettle();
@@ -944,6 +961,23 @@ void main() {
         matching: find.byType(RawImage),
       );
       final resting = tester.getTopLeft(image).dx;
+      final pixels = await captureHarnessRgba(tester);
+      final point =
+          tester.getCenter(image) -
+          tester.getTopLeft(find.byKey(harnessBoundaryKey));
+      final width = tester.getSize(find.byKey(harnessBoundaryKey)).width.ceil();
+      final index = (point.dy.toInt() * width + point.dx.toInt()) * 4;
+      expect(
+        Color.fromARGB(
+          pixels[index + 3],
+          pixels[index],
+          pixels[index + 1],
+          pixels[index + 2],
+        ),
+        ShosaiTokens.readerDarkBackground,
+        reason:
+            'the white raster becomes Night paper even without selection geometry',
+      );
       await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
       for (
         var frame = 0;
