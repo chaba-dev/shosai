@@ -136,6 +136,9 @@ All notable changes to this project will be documented in this file.
 - *(library)* Show the reader a settings change it could not save (#206)
 - *(app)* Show the app as Shōsai, and Shōsai Dev for test builds (#219)
 - *(reader)* A page back across a chapter edge lands on the previous chapter's last page (#220)
+- *(reader)* Lay out the note editor's actions on a phone (#213)
+- *(reader)* Turn pages with the arrow keys and Space as soon as a book opens (#214)
+- *(shell)* Bring the open books back when the app starts again (#215)
 
 ### 🚜 Refactor
 
