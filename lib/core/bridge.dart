@@ -852,6 +852,7 @@ class FlutterReaderSettings {
 
   /// The Pages setting: two pages side by side where there is room for them.
   final bool twoPages;
+  final bool animations;
   final FlutterLibrarySort librarySort;
 
   const FlutterReaderSettings({
@@ -861,6 +862,7 @@ class FlutterReaderSettings {
     required this.epubLineSpacing,
     required this.pdfZoom,
     this.twoPages = true,
+    this.animations = true,
     this.librarySort = FlutterLibrarySort.recent,
   });
 
@@ -871,6 +873,7 @@ class FlutterReaderSettings {
     double? epubLineSpacing,
     double? pdfZoom,
     bool? twoPages,
+    bool? animations,
     FlutterLibrarySort? librarySort,
   }) => FlutterReaderSettings(
     continuous: continuous ?? this.continuous,
@@ -879,6 +882,7 @@ class FlutterReaderSettings {
     epubLineSpacing: epubLineSpacing ?? this.epubLineSpacing,
     pdfZoom: pdfZoom ?? this.pdfZoom,
     twoPages: twoPages ?? this.twoPages,
+    animations: animations ?? this.animations,
     librarySort: librarySort ?? this.librarySort,
   );
 
@@ -890,6 +894,7 @@ class FlutterReaderSettings {
       epubLineSpacing.hashCode ^
       pdfZoom.hashCode ^
       twoPages.hashCode ^
+      animations.hashCode ^
       librarySort.hashCode;
 
   @override
@@ -903,6 +908,7 @@ class FlutterReaderSettings {
           epubLineSpacing == other.epubLineSpacing &&
           pdfZoom == other.pdfZoom &&
           twoPages == other.twoPages &&
+          animations == other.animations &&
           librarySort == other.librarySort;
 }
 

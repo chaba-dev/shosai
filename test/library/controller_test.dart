@@ -380,30 +380,40 @@ void main() {
     await _settle();
   });
 
-  test('the Pages setting is saved with the settings', () async {
-    final bridge = _StubLibraryBridge();
-    final controller = _controller(bridge);
+  test(
+    'the Pages and animations settings are saved with the settings',
+    () async {
+      final bridge = _StubLibraryBridge();
+      final controller = _controller(bridge);
 
-    controller.dispatch(const LibraryStarted());
-    await _settle();
-    bridge.pages.single.complete(
-      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
-    );
-    await _settle();
+      controller.dispatch(const LibraryStarted());
+      await _settle();
+      bridge.pages.single.complete(
+        FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+      );
+      await _settle();
 
-    controller.dispatch(const LibraryDisplayChanged(twoPages: false));
-    await _settle();
-    expect(controller.model.settings?.twoPages, isFalse);
-    expect(bridge.savedSettings.single.twoPages, isFalse);
+      expect(controller.model.settings?.animations, isTrue);
+      controller.dispatch(
+        const LibraryDisplayChanged(twoPages: false, animations: false),
+      );
+      await _settle();
+      expect(controller.model.settings?.twoPages, isFalse);
+      expect(bridge.savedSettings.single.twoPages, isFalse);
+      expect(controller.model.settings?.animations, isFalse);
+      expect(bridge.savedSettings.single.animations, isFalse);
 
-    // The setting already in place is not saved again.
-    controller.dispatch(const LibraryDisplayChanged(twoPages: false));
-    await _settle();
-    expect(bridge.savedSettings, hasLength(1));
+      // The setting already in place is not saved again.
+      controller.dispatch(
+        const LibraryDisplayChanged(twoPages: false, animations: false),
+      );
+      await _settle();
+      expect(bridge.savedSettings, hasLength(1));
 
-    controller.dispose();
-    await _settle();
-  });
+      controller.dispose();
+      await _settle();
+    },
+  );
 
   test('the reader\'s theme, text size and line spacing are saved', () async {
     final bridge = _StubLibraryBridge();

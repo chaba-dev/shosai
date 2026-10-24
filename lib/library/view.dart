@@ -674,6 +674,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 fontSize: change.fontSize,
                 lineSpacing: change.lineSpacing,
                 twoPages: change.twoPages,
+                animations: change.animations,
               ),
             );
           }

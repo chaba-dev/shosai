@@ -21,7 +21,14 @@ class _DocumentView extends StatefulWidget {
   State<_DocumentView> createState() => _DocumentViewState();
 }
 
-class _DocumentViewState extends State<_DocumentView> {
+class _DocumentViewState extends State<_DocumentView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pageTurn;
+  late final _turnProgress = _pageTurn.drive(
+    CurveTween(curve: Curves.easeOutCubic),
+  );
+  double _turnDirection = 1;
+
   /// The rendered content box of the selectable surface, i.e. the box the fit
   /// transform maps the surface into.
   final GlobalKey _contentKey = GlobalKey(debugLabel: 'reader content box');
@@ -43,6 +50,11 @@ class _DocumentViewState extends State<_DocumentView> {
   @override
   void initState() {
     super.initState();
+    _pageTurn = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+      value: 1,
+    );
     HardwareKeyboard.instance.addHandler(_keyPressed);
     GestureBinding.instance.pointerRouter.addGlobalRoute(_pointerEvent);
   }
@@ -57,9 +69,49 @@ class _DocumentViewState extends State<_DocumentView> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) _pageTurn.value = 1;
+  }
+
+  @override
+  void didUpdateWidget(_DocumentView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final before = oldWidget.model;
+    final after = widget.model;
+    final oldPage = before.epubPage;
+    final newPage = after.epubPage;
+    if (!after.typography.animations ||
+        MediaQuery.disableAnimationsOf(context) ||
+        before.generation != after.generation ||
+        before.continuousPresentation ||
+        after.continuousPresentation ||
+        before.layout != after.layout ||
+        oldPage?.box.size != newPage?.box.size ||
+        after.selectionPhase != ReaderSelectionPhase.idle) {
+      _pageTurn.value = 1;
+      return;
+    }
+    var direction = after.unit.compareTo(before.unit);
+    if (direction == 0) {
+      direction = (newPage?.canonicalStart ?? 0).compareTo(
+        oldPage?.canonicalStart ?? 0,
+      );
+    }
+    if (direction == 0) {
+      // Empty table rows can occupy distinct pages at the same text offset.
+      direction = (newPage?.pageIndex ?? 0).compareTo(oldPage?.pageIndex ?? 0);
+    }
+    if (direction == 0) return;
+    _turnDirection = (after.rightToLeft ? -direction : direction).toDouble();
+    _pageTurn.forward(from: 0);
+  }
+
+  @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_keyPressed);
     GestureBinding.instance.pointerRouter.removeGlobalRoute(_pointerEvent);
+    _pageTurn.dispose();
     _keyboardHighlight.dispose();
     _contentGeometry.dispose();
     super.dispose();
@@ -69,6 +121,29 @@ class _DocumentViewState extends State<_DocumentView> {
     if (!mounted) return;
     _contentGeometry.value += 1;
   }
+
+  Widget _animatePage(Widget child) => AnimatedBuilder(
+    animation: _pageTurn,
+    builder: (context, child) => ClipRect(
+      // Keep resting page shadows; only the moving page needs a viewport clip.
+      clipBehavior: _pageTurn.value == 1 ? Clip.none : Clip.hardEdge,
+      child: child,
+    ),
+    // Animate only the adopted page: outgoing PDF rasters are already
+    // controller-released, including when text extraction is unavailable.
+    child: FadeTransition(
+      opacity: _turnProgress.drive(Tween<double>(begin: .72, end: 1)),
+      child: SlideTransition(
+        position: _turnProgress.drive(
+          Tween<Offset>(
+            begin: Offset(.06 * _turnDirection, 0),
+            end: Offset.zero,
+          ),
+        ),
+        child: child,
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -112,8 +187,10 @@ class _DocumentViewState extends State<_DocumentView> {
                   key: const ValueKey('reader-document-semantics'),
                   label:
                       '$title, page ${model.unit + 1} of ${document.logicalUnitCount}.',
-                  child: Center(
-                    child: RawImage(image: page, fit: BoxFit.contain),
+                  child: _animatePage(
+                    Center(
+                      child: RawImage(image: page, fit: BoxFit.contain),
+                    ),
                   ),
                 ),
               ),
@@ -342,21 +419,23 @@ class _DocumentViewState extends State<_DocumentView> {
                                     readerFocus.requestFocus();
                                   }
                                 },
-                                child: _ReachableSelectableSurface(
-                                  contentKey: _contentKey,
-                                  onContentGeometryChanged:
-                                      _bumpContentGeometry,
-                                  presentationKey: ValueKey(
-                                    model.continuousPresentation
-                                        ? 'reader-continuous-presentation'
-                                        : 'reader-paginated-presentation',
+                                child: _animatePage(
+                                  _ReachableSelectableSurface(
+                                    contentKey: _contentKey,
+                                    onContentGeometryChanged:
+                                        _bumpContentGeometry,
+                                    presentationKey: ValueKey(
+                                      model.continuousPresentation
+                                          ? 'reader-continuous-presentation'
+                                          : 'reader-paginated-presentation',
+                                    ),
+                                    document: document,
+                                    surface: surface,
+                                    image: page,
+                                    epubPage: model.epubPage,
+                                    model: model,
+                                    dispatch: dispatch,
                                   ),
-                                  document: document,
-                                  surface: surface,
-                                  image: page,
-                                  epubPage: model.epubPage,
-                                  model: model,
-                                  dispatch: dispatch,
                                 ),
                               ),
                             ),

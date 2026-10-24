@@ -441,6 +441,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerPages => 'ページ';
 
   @override
+  String get readerPageAnimations => 'ページアニメーション';
+
+  @override
   String get readerPagesHint => '画面に余裕があるときは見開きで表示します。';
 
   @override

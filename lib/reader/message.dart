@@ -316,6 +316,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
     this.rasterFit,
     this.zoom,
     this.twoPages,
+    this.animations,
   });
 
   final double? fontSize;
@@ -326,6 +327,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
 
   /// The Pages setting: two pages where they fit, or always one.
   final bool? twoPages;
+  final bool? animations;
 }
 
 /// Requests the Markdown export of the current book's bookmarks (RD-08).

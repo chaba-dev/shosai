@@ -840,6 +840,12 @@ abstract class AppLocalizations {
   /// **'Pages'**
   String get readerPages;
 
+  /// Whether page turns are animated in the reader.
+  ///
+  /// In en, this message translates to:
+  /// **'Page animations'**
+  String get readerPageAnimations;
+
   /// NEW: no Iced string. The hint under the Pages field: phones and narrow windows show one page.
   ///
   /// In en, this message translates to:

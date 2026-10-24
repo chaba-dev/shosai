@@ -229,6 +229,7 @@ void main() {
     test('defaults until saved, then round-trips', () async {
       final settings = ReaderSettingsStore(t.store);
       expect(await settings.load(), const ReaderSettings());
+      expect((await settings.load()).animations, isTrue);
 
       const saved = ReaderSettings(
         continuous: true,
@@ -237,12 +238,18 @@ void main() {
         epubLineSpacing: 1.8,
         pdfZoom: ReaderSettings.pdfZoomFitWidth,
         twoPages: false,
+        animations: false,
       );
       await settings.save(saved);
 
       expect(await settings.load(), saved);
+      expect((await ReaderSettingsStore(t.store).load()).animations, isFalse);
       expect(await Preferences(t.store).get('reader.mode'), 'continuous');
       expect(await Preferences(t.store).get('reader.pages'), 'one');
+      await t.store.close();
+      final reopened = await Store.open(t.store.path);
+      addTearDown(reopened.close);
+      expect(await ReaderSettingsStore(reopened).load(), saved);
     });
 
     test('accepts the range ends and rejects values outside them', () async {
@@ -308,6 +315,7 @@ void main() {
         'reader.epub_line_spacing': '9',
         'reader.pdf_zoom': '3.5',
         'reader.pages': 'three',
+        'reader.animations': 'broken',
       });
 
       expect(

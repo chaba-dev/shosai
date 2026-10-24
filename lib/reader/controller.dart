@@ -122,6 +122,7 @@ final class ReaderController implements Listenable {
        _typographyTheme = initialTypography.theme,
        _typographyContinuous = initialTypography.continuous,
        _typographyTwoPages = initialTypography.twoPages,
+       _typographyAnimations = initialTypography.animations,
        _rasterFit = initialTypography.rasterFit,
        _rasterZoom = initialTypography.rasterZoom,
        _baseScale = baseScale ?? initialTypography.rasterZoom,
@@ -329,6 +330,7 @@ final class ReaderController implements Listenable {
   String _typographyTheme;
   final bool _typographyContinuous;
   bool _typographyTwoPages;
+  bool _typographyAnimations;
   ReaderRasterFit _rasterFit;
   double _rasterZoom;
   final double _baseScale;
@@ -3110,6 +3112,7 @@ final class ReaderController implements Listenable {
     if (_closing) return;
     final document = _model.document;
     final before = _model.typography;
+    final animationsBefore = _typographyAnimations;
     final (fontBefore, spacingBefore, themeBefore, pagesBefore) = (
       _typographyFontSize,
       _typographyLineSpacing,
@@ -3128,6 +3131,9 @@ final class ReaderController implements Listenable {
     // viewport, which lays the page out again; the setting needs no relayout
     // of its own.
     if (message.twoPages case final twoPages?) _typographyTwoPages = twoPages;
+    if (message.animations case final animations?) {
+      _typographyAnimations = animations;
+    }
     // The settings the library keeps are saved as they change, so the next
     // book opens with them too.
     final ReaderDisplayChange change = (
@@ -3137,11 +3143,15 @@ final class ReaderController implements Listenable {
           ? null
           : _typographyLineSpacing,
       twoPages: _typographyTwoPages == pagesBefore ? null : _typographyTwoPages,
+      animations: _typographyAnimations == animationsBefore
+          ? null
+          : _typographyAnimations,
     );
     if (change.theme != null ||
         change.fontSize != null ||
         change.lineSpacing != null ||
-        change.twoPages != null) {
+        change.twoPages != null ||
+        change.animations != null) {
       _displaySink(change);
     }
     if (message.rasterFit case final fit?) {
@@ -6661,6 +6671,7 @@ final class ReaderController implements Listenable {
         rasterFit: _rasterFit,
         rasterZoom: _rasterZoom,
         twoPages: _typographyTwoPages,
+        animations: _typographyAnimations,
       );
 
   /// The search bar presentation for [model] (RD-11).

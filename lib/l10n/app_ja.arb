@@ -122,6 +122,7 @@
   "readerFitWidth": "幅に合わせる",
   "readerFitPage": "ページに合わせる",
   "readerPages": "ページ",
+  "readerPageAnimations": "ページアニメーション",
   "readerPagesHint": "画面に余裕があるときは見開きで表示します。",
   "readerOnePage": "単ページ",
   "readerTwoPages": "見開き",

@@ -1386,6 +1386,38 @@ void main() {
   });
 
   group('typography panel', () {
+    for (final locale in [const Locale('en'), const Locale('ja')]) {
+      testWidgets(
+        'page animations is available on phones in ${locale.languageCode}',
+        (tester) async {
+          _setView(tester, const Size(390, 844));
+          await _open(
+            tester,
+            _reader(
+              bridge: _PanelBridge(unitCount: 3),
+              locale: locale,
+              settings: _epubSettings.copyWith(animations: false),
+            ),
+          );
+          await _openTypography(tester);
+          final toggle = find.byKey(
+            const ValueKey('reader-typography-animations'),
+          );
+          expect(
+            find.text(
+              locale.languageCode == 'ja' ? 'ページアニメーション' : 'Page animations',
+            ),
+            findsOneWidget,
+          );
+          expect(tester.widget<ShadSwitch>(toggle).value, isFalse);
+          await tester.ensureVisible(toggle);
+          await tester.tap(toggle);
+          await tester.pumpAndSettle();
+          expect(tester.widget<ShadSwitch>(toggle).value, isTrue);
+        },
+      );
+    }
+
     testWidgets('EPUB shows text size, line spacing and page theme with '
         'clamps', (tester) async {
       _setView(tester, const Size(1280, 800));

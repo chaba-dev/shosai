@@ -938,6 +938,23 @@ class _ReaderDisplayPanel extends StatelessWidget {
                 ],
               ),
             ),
+          _ReaderField(
+            label: l10n.readerPageAnimations,
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Semantics(
+                label: l10n.readerPageAnimations,
+                child: ShadSwitch(
+                  key: const ValueKey('reader-typography-animations'),
+                  value: typography.animations,
+                  onChanged: enabled
+                      ? (value) =>
+                            dispatch(ReaderTypographyChanged(animations: value))
+                      : null,
+                ),
+              ),
+            ),
+          ),
           // A phone in portrait never has room for two pages, so Pages is
           // hidden there.
           if (!_phonePortrait(context))
