@@ -41,7 +41,7 @@ Recorded 2026-10-14:
 Recorded 2026-10-20, the **Bookshelf** look (D1, paper), chosen over colour-only variants of the first draft and then over a study (walnut and brass) and a desk (flat, vermilion) iteration of the same layout:
 
 - A **sidebar** replaces the tab strip on desktop and tablet: the places (Library, Notes, Bookmarks, Search) and the open books as a **Reading now** list, each keeping its place. While reading it collapses to a 64 px **rail** of icons and the open books' covers. Phones get a **bottom bar** for the places and keep the tab switcher for open books.
-- The library is a **shelf**: a Continue reading hero, then the covers in a grid resting on a thin shelf edge under the last row. The hero carries no recent list; the sidebar does.
+- The library is a **shelf**: a Continue reading hero, then the covers in a grid. The hero carries no recent list; the sidebar does.
 - Chrome is warm paper in both themes, and the sidebar, rail, toolbar, status line and panels sit on `chrome` (`#ece5d6`), a shade deeper than the library's `canvas` (`#f6f1e6`); no pure grey anywhere. `ink` is a warm black (`#221d18`) and `ink-muted` `#675d4f`, which holds 4.5:1 on every chrome ground.
 - Book titles are set in the editorial serif wherever they name a book, and the screen, section and panel titles with them: the library title at 40 px. Controls, labels and meta lines stay in Inter.
 - The accent deepens to `#2b3a5c` on light chrome and lifts to `#a8b8df` in dark; the application's `#4d5e86` remains the brand slate for covers and the website.
@@ -83,13 +83,13 @@ Three layers, each with its own tokens. Never mix their roles. Every value, with
 
 ### Chrome
 
-The app frame in light and dark themes: `canvas` (the library's ground), `chrome` (the sidebar and rail, the reader toolbar and status line, panels and sheets), `surface` (cards, menus, the current sidebar entry), `surface-sunken` (progress tracks, skeletons), `stage` and `stage-edge` (the reading stage, centre and rim), `shelf` (the edge under the library's covers), `hover`, `line`, `line-strong`, `ink` and `ink-muted`.
+The app frame in light and dark themes: `canvas` (the library's ground), `chrome` (the sidebar and rail, the reader toolbar and status line, panels and sheets), `surface` (cards, menus, the current sidebar entry), `surface-sunken` (progress tracks, skeletons), `stage` and `stage-edge` (the reading stage, centre and rim), `shelf` (the dark theme's shadow ink and a generated cover's fore-edge shade), `hover`, `line`, `line-strong`, `ink` and `ink-muted`.
 
 - Light chrome is warm paper, and the frame is a shade deeper than the room: `canvas` `#f6f1e6`, `chrome` `#ece5d6`, `surface` `#fdfaf3`. Dark chrome is the same paper by lamplight, a warm near-black rather than grey: `canvas` `#1d1915`, `chrome` `#171412`, `surface` `#2a241e`. Neither theme uses a pure grey.
 - Text is `ink` (a warm black), or `ink-muted` for secondary text. Both hold 4.5:1 on every chrome ground in both themes.
 - `line` is decorative. A control that must be seen (inputs, secondary buttons) uses `line-strong`, which holds 3:1 on every chrome ground except a raised segment, which is lifted by its shadow instead.
 - `control-raised` lifts the chosen segment of a segmented control; in dark it is lighter than `surface` so the choice still reads.
-- The reading stage is a radial gradient from `stage` at the centre to `stage-edge` at the rim, so the pages sit in light. The shelf edge under the library's covers runs from `line` through `shelf` to `surface-sunken`. These are the only gradients in the system.
+- The reading stage is a radial gradient from `stage` at the centre to `stage-edge` at the rim, so the pages sit in light. It is the only gradient in the system.
 - `scrim` dims the page behind slide-over panels and sheets.
 
 ### Accent and brand
@@ -289,7 +289,7 @@ Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. 
 - The book's own cover at 2:3, or a typographic cover: title in `ed-quote` weight 600 and author in `ui-label` on one of five fixed grounds chosen by a hash of the title (`brand-navy`, `brand-charcoal`, and the light-theme `vermilion`, `accent` and `success`), with a `brand-gold` band at the top. Generated covers never change with the app theme, carry a faint sheen (`sh-cover::after`) and stand off the paper under `shadow-cover`.
 - Title in `ed-title`, two lines at most; the meta line is the format badge then `21%`, `Not started` or `Finished`; a 3 px progress bar hides when not started or finished.
 - Click opens the book, or switches to it if it is already open. The context menu holds **Open**, **Book note**, **Show file** and **Remove from library**.
-- The shelf (`sh-shelf`) fills with columns of at least 118 px at a 28 px gap (seven across at 1440 px, six on a tablet) and three columns on phones. A thin shelf edge (`sh-shelf__edge`) runs under the bottom row on desktop and tablet, bleeding to the screen's edges, so the covers rest on something.
+- The shelf (`sh-shelf`) fills with columns of at least 118 px at a 28 px gap (seven across at 1440 px, six on a tablet) and three columns on phones.
 
 ## Iconography
 
