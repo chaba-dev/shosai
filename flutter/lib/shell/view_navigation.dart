@@ -43,7 +43,7 @@ class ShellSidebar extends StatelessWidget {
       explicitChildNodes: true,
       label: l10n.shellPlacesLabel,
       child: Container(
-        width: layout.sidebarWidth,
+        width: layout.sidebarWidth + _startInset(context),
         decoration: BoxDecoration(
           color: palette.chrome,
           border: BorderDirectional(end: BorderSide(color: palette.line)),
@@ -53,99 +53,102 @@ class ShellSidebar extends StatelessWidget {
         // overflowing; while there is room, Add books stays at the foot. The
         // sidebar's padding sits inside the viewport, so its clip leaves room
         // for the 2 px focus ring drawn outside each control.
-        child: CustomScrollView(
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(14, 20, 14, 0),
-              sliver: SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  spacing: 6,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsetsDirectional.fromSTEB(6, 0, 6, 14),
-                      child: Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: ShellWordmark(),
-                      ),
-                    ),
-                    if (layout == ShellLayout.desktop)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _SidebarSearchButton(
-                          onPressed: () =>
-                              actions.selectPlace(ShellPlace.search),
-                        ),
-                      ),
-                    for (final (place, icon) in _places)
-                      _PlaceRow(
-                        icon: icon,
-                        label: shellPlaceLabel(l10n, place),
-                        touch: layout.touch,
-                        current: !model.reading && model.place == place,
-                        onPressed: () => actions.selectPlace(place),
-                      ),
-                    if (open.isNotEmpty)
-                      _SidebarHead(
-                        label: l10n.shellReadingNow,
-                        count: '${open.length}',
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            if (open.isNotEmpty)
+        child: _startSafeArea(
+          context,
+          CustomScrollView(
+            slivers: [
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
-                sliver: SliverReorderableList(
-                  itemCount: open.length,
-                  onReorder: (from, to) =>
-                      actions.moveBook(from, to > from ? to - 1 : to),
-                  proxyDecorator: (child, _, _) =>
-                      Material(type: MaterialType.transparency, child: child),
-                  itemBuilder: (context, index) {
-                    final entry = open[index];
-                    return ReorderableDelayedDragStartListener(
-                      key: ValueKey(entry.id),
-                      index: index,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: _OpenBookRow(
-                          entry: entry,
-                          cover: covers[entry.id],
-                          current: entry.id == model.currentBookId,
-                          touch: layout.touch,
-                          actions: actions,
+                padding: const EdgeInsets.fromLTRB(14, 20, 14, 0),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    spacing: 6,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsetsDirectional.fromSTEB(6, 0, 6, 14),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: ShellWordmark(),
                         ),
                       ),
-                    );
-                  },
+                      if (layout == ShellLayout.desktop)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _SidebarSearchButton(
+                            onPressed: () =>
+                                actions.selectPlace(ShellPlace.search),
+                          ),
+                        ),
+                      for (final (place, icon) in _places)
+                        _PlaceRow(
+                          icon: icon,
+                          label: shellPlaceLabel(l10n, place),
+                          touch: layout.touch,
+                          current: !model.reading && model.place == place,
+                          onPressed: () => actions.selectPlace(place),
+                        ),
+                      if (open.isNotEmpty)
+                        _SidebarHead(
+                          label: l10n.shellReadingNow,
+                          count: '${open.length}',
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: _PlaceRow(
-                        icon: LucideIcons.plus,
-                        label: l10n.addBooksAction,
-                        touch: layout.touch,
-                        current: false,
-                        muted: true,
-                        onPressed: actions.addBooks,
+              if (open.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+                  sliver: SliverReorderableList(
+                    itemCount: open.length,
+                    onReorder: (from, to) =>
+                        actions.moveBook(from, to > from ? to - 1 : to),
+                    proxyDecorator: (child, _, _) =>
+                        Material(type: MaterialType.transparency, child: child),
+                    itemBuilder: (context, index) {
+                      final entry = open[index];
+                      return ReorderableDelayedDragStartListener(
+                        key: ValueKey(entry.id),
+                        index: index,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: _OpenBookRow(
+                            entry: entry,
+                            cover: covers[entry.id],
+                            current: entry.id == model.currentBookId,
+                            touch: layout.touch,
+                            actions: actions,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: _PlaceRow(
+                          icon: LucideIcons.plus,
+                          label: l10n.addBooksAction,
+                          touch: layout.touch,
+                          current: false,
+                          muted: true,
+                          onPressed: actions.addBooks,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -177,7 +180,7 @@ class ShellRail extends StatelessWidget {
       explicitChildNodes: true,
       label: l10n.shellPlacesLabel,
       child: Container(
-        width: layout.railWidth,
+        width: layout.railWidth + _startInset(context),
         decoration: BoxDecoration(
           color: palette.chrome,
           border: BorderDirectional(end: BorderSide(color: palette.line)),
@@ -187,22 +190,16 @@ class ShellRail extends StatelessWidget {
         padding: layout.touch
             ? const EdgeInsetsDirectional.fromSTEB(6, 16, 5, 16)
             : const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-        child: Column(
-          spacing: 8,
-          children: [
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: ShellMark(),
-            ),
-            for (final (place, icon) in _places)
-              _RailButton(
-                icon: icon,
-                label: shellPlaceLabel(l10n, place),
-                touch: layout.touch,
-                onPressed: () => actions.selectPlace(place),
-              ),
-            Expanded(
-              child: Container(
+        child: _startSafeArea(
+          context,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // Keep a cover reachable as well as the fixed controls. Below
+              // that height, scroll the whole rail instead of starving its list.
+              final scroll =
+                  constraints.maxHeight <
+                  38 + 5 * (layout.touch ? 44 : 40) + 6 * 8 + 76;
+              final books = Container(
                 margin: const EdgeInsets.only(top: 6),
                 padding: const EdgeInsets.only(top: 10),
                 decoration: BoxDecoration(
@@ -210,6 +207,8 @@ class ShellRail extends StatelessWidget {
                 ),
                 child: ListView(
                   padding: EdgeInsets.zero,
+                  shrinkWrap: scroll,
+                  physics: scroll ? const NeverScrollableScrollPhysics() : null,
                   children: [
                     for (final entry in model.openBooks)
                       Padding(
@@ -226,19 +225,56 @@ class ShellRail extends StatelessWidget {
                       ),
                   ],
                 ),
-              ),
-            ),
-            _RailButton(
-              icon: LucideIcons.plus,
-              label: l10n.addBooksAction,
-              touch: layout.touch,
-              onPressed: actions.addBooks,
-            ),
-          ],
+              );
+              final column = Column(
+                mainAxisSize: scroll ? MainAxisSize.min : MainAxisSize.max,
+                spacing: 8,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: ShellMark(),
+                  ),
+                  for (final (place, icon) in _places)
+                    _RailButton(
+                      icon: icon,
+                      label: shellPlaceLabel(l10n, place),
+                      touch: layout.touch,
+                      onPressed: () => actions.selectPlace(place),
+                    ),
+                  if (scroll) books else Expanded(child: books),
+                  _RailButton(
+                    icon: LucideIcons.plus,
+                    label: l10n.addBooksAction,
+                    touch: layout.touch,
+                    onPressed: actions.addBooks,
+                  ),
+                ],
+              );
+              return scroll ? SingleChildScrollView(child: column) : column;
+            },
+          ),
         ),
       ),
     );
   }
+}
+
+/// [child] inside the safe area of the start edge the sidebar and rail hold:
+/// clear of the status bar above (an iPad's clock), the home indicator below
+/// and a landscape iPhone's notch at the side. The end edge belongs to the
+/// content beside them, which [ShellFrame] gives the rest of the safe area.
+Widget _startSafeArea(BuildContext context, Widget child) {
+  final rtl = Directionality.of(context) == TextDirection.rtl;
+  return SafeArea(left: !rtl, right: rtl, child: child);
+}
+
+/// The safe area's inset on the start edge: the sidebar and rail grow by it,
+/// so their content keeps its width beside a landscape iPhone's notch.
+double _startInset(BuildContext context) {
+  final padding = MediaQuery.paddingOf(context);
+  return Directionality.of(context) == TextDirection.rtl
+      ? padding.right
+      : padding.left;
 }
 
 /// A 34 px place row (`touch-target` on touch layouts); the current one is a

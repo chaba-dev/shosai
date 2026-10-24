@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
+import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -767,6 +768,85 @@ void main() {
       ),
       isEmpty,
     );
+  });
+
+  test('managed books and their open tabs survive the data directory '
+      'moving, as iOS moves it on every install', () async {
+    final parent = Directory.systemTemp.createTempSync('shosai_records');
+    addTearDown(() => parent.deleteSync(recursive: true));
+    final before = Directory('${parent.path}/before')..createSync();
+    final firstOwner = CoreOwner(
+      await ShosaiCore.open(before.path, pdfEngine: _PdfEngine()),
+    );
+    final first = firstOwner.bridge();
+    final books = <FlutterLibraryBook>[];
+    for (final fixture in [_epubFixture, _pdfFixture]) {
+      final source = File(
+        fixture,
+      ).copySync('${parent.path}/${fixture.split('/').last}');
+      final report = await first.importPaths(
+        pathKeys: [source.path],
+        managed: true,
+        cancellationId: first.createCancellation(),
+      );
+      books.add(report.items.single.book!);
+    }
+    await recordsOf(first).saveOpenBooks((
+      books: [
+        for (final book in books)
+          (book: book, path: book.pathKey, bookId: book.bookId),
+      ],
+      current: books.last.bookId,
+      reading: true,
+    ));
+    first.dispose();
+    await firstOwner.close();
+
+    final after = before.renameSync('${parent.path}/after');
+    final owner = CoreOwner(
+      await ShosaiCore.open(after.path, pdfEngine: _PdfEngine()),
+    );
+    addTearDown(owner.close);
+    final bridge = owner.bridge();
+
+    final restored = (await recordsOf(bridge).loadOpenBooks())!;
+    expect(restored.reading, isTrue);
+    expect(restored.current, books.last.bookId);
+    for (final (index, open) in restored.books.indexed) {
+      expect(open.book.bookId, books[index].bookId);
+      expect(open.path, open.book.pathKey);
+      expect(open.path, startsWith(after.resolveSymbolicLinksSync()));
+      final bytes = File(open.path).readAsBytesSync();
+      final opened = await bridge.openLibraryBook(
+        bookId: open.book.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(opened.bookId, open.book.bookId);
+      // Moving the managed path must not weaken verified snapshots: an
+      // already-open PDF keeps its bytes, and another open rejects damage.
+      File(open.path).writeAsBytesSync(List.filled(bytes.length, 0));
+      if (open.book.format == FlutterBookFormat.pdf) {
+        expect(opened.contentPath, isNotNull);
+        expect(opened.contentPath, isNot(open.path));
+        expect(File(opened.contentPath!).readAsBytesSync(), bytes);
+      }
+      bridge.releaseDocument(handle: opened.handle);
+      await bridge.drain();
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: open.book.bookId,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.message,
+            'message',
+            contains('no longer match'),
+          ),
+        ),
+      );
+      expect(bridge.openDocumentCount, 0);
+    }
   });
 
   group('snapshots', () {

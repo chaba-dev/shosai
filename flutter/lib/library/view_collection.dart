@@ -1,8 +1,7 @@
 part of 'view.dart';
 
 // The library as a shelf (`docs/design-system.md`, Library): the Continue
-// reading hero, then the covers in a grid resting on a thin shelf edge under
-// the last row.
+// reading hero, then the covers in a grid.
 //
 // | Layout | Columns | Gaps (column × row) | Hero |
 // | --- | --- | --- | --- |
@@ -465,30 +464,6 @@ double _textWidth(BuildContext context, String text, TextStyle style) {
   return width;
 }
 
-/// The thin shelf edge under the bottom row (`sh-shelf__edge`): `line`
-/// through `shelf` to `surface-sunken`, bleeding to the screen's edges so the
-/// covers rest on something.
-class _ShelfEdge extends StatelessWidget {
-  const _ShelfEdge();
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = ShellPalette.of(context);
-    return Container(
-      height: 10,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [palette.line, palette.shelf, palette.surfaceSunken],
-          stops: const [0, .6, 1],
-        ),
-        boxShadow: palette.shelfEdgeShadow,
-      ),
-    );
-  }
-}
-
 /// The reference's failure alert: the 13 px danger text on the alert
 /// background, with the retained Flutter retry action.
 ///
@@ -724,13 +699,6 @@ class _LibraryGridState extends State<_LibraryGrid> {
                 ],
               ),
             ),
-            if (!shelf.phone)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: _ShelfEdge(),
-                ),
-              ),
             SliverPadding(
               padding: padding.copyWith(top: 0),
               sliver: SliverMainAxisGroup(

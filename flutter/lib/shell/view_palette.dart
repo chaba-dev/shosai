@@ -60,7 +60,6 @@ final class ShellPalette {
     required this.hover,
     required this.line,
     required this.lineStrong,
-    required this.shelf,
     required this.ink,
     required this.inkMuted,
     required this.accent,
@@ -83,7 +82,6 @@ final class ShellPalette {
     hover: ShosaiTokens.colorLightHover,
     line: ShosaiTokens.colorLightLine,
     lineStrong: ShosaiTokens.colorLightLineStrong,
-    shelf: ShosaiTokens.colorLightShelf,
     ink: ShosaiTokens.colorLightInk,
     inkMuted: ShosaiTokens.colorLightInkMuted,
     accent: ShosaiTokens.colorLightAccent,
@@ -103,7 +101,6 @@ final class ShellPalette {
     hover: ShosaiTokens.colorDarkHover,
     line: ShosaiTokens.colorDarkLine,
     lineStrong: ShosaiTokens.colorDarkLineStrong,
-    shelf: ShosaiTokens.colorDarkShelf,
     ink: ShosaiTokens.colorDarkInk,
     inkMuted: ShosaiTokens.colorDarkInkMuted,
     accent: ShosaiTokens.colorDarkAccent,
@@ -146,8 +143,6 @@ final class ShellPalette {
   /// Secondary buttons' borders.
   final Color lineStrong;
 
-  /// The middle of the shelf edge under the library's covers.
-  final Color shelf;
   final Color ink;
   final Color inkMuted;
 
@@ -247,16 +242,6 @@ final class ShellPalette {
       offset: const Offset(0, 12),
       blurRadius: 30,
       spreadRadius: -24,
-    ),
-  ];
-
-  /// The shelf edge's own shadow on the canvas below it.
-  List<BoxShadow> get shelfEdgeShadow => [
-    BoxShadow(
-      color: shadowBase.withValues(alpha: .45),
-      offset: const Offset(0, 10),
-      blurRadius: 18,
-      spreadRadius: -12,
     ),
   ];
 
