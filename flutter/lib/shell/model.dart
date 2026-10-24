@@ -7,6 +7,16 @@ typedef ShellReaderPresenter = Future<void> Function();
 /// Ends the reader presentation the shell started.
 typedef ShellReaderDismisser = void Function();
 
+/// Reads the open books saved at the last run.
+typedef ShellOpenBooksLoader = Future<FlutterOpenBooks?> Function();
+
+/// Saves the open books, so they come back when the application starts again.
+typedef ShellOpenBooksSaver = Future<void> Function(FlutterOpenBooks value);
+
+/// Reads [book] again, as the restored session was reading it when it was
+/// saved. The library opens it once it is idle.
+typedef ShellReadingResumer = void Function(OpenBook book);
+
 /// The places of the sidebar, the rail and the phone's bottom bar, in their
 /// one order (`docs/design-system.md`, Sidebar).
 enum ShellPlace { library, notes, bookmarks, search }

@@ -70,6 +70,22 @@ final class ShellRestored extends ShellMessage {
   final ShellModel restored;
 }
 
+/// Reads the open books saved at the last run and starts saving them.
+///
+/// A platform restoration ([restoring]) is newer than what was saved, so the
+/// saved books are not restored over it.
+final class ShellStarted extends ShellMessage {
+  const ShellStarted({this.restoring = false});
+  final bool restoring;
+}
+
+/// The saved open books were read (completion of the [ShellStarted] effect).
+final class _ShellOpenBooksLoaded extends ShellMessage {
+  const _ShellOpenBooksLoaded(this.saved, {required this.restoring});
+  final FlutterOpenBooks? saved;
+  final bool restoring;
+}
+
 /// The reader presentation has gone (completion of the presenter effect).
 final class _ShellReaderDismissed extends ShellMessage {
   const _ShellReaderDismissed();

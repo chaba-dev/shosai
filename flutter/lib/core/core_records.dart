@@ -30,6 +30,7 @@ final class ShosaiCore {
       bookmarks = Bookmarks(store),
       settings = ReaderSettingsStore(store),
       librarySettings = LibrarySettingsStore(store),
+      openBooks = OpenBooksStore(store, library),
       annotations = Annotations(store),
       search = LibrarySearch(store, textVersions: libraryTextVersions);
 
@@ -70,6 +71,7 @@ final class ShosaiCore {
   final Bookmarks bookmarks;
   final ReaderSettingsStore settings;
   final LibrarySettingsStore librarySettings;
+  final OpenBooksStore openBooks;
   final Annotations annotations;
   final LibrarySearch search;
 
@@ -426,12 +428,40 @@ final class CoreRecords implements ShosaiRecords {
       });
 
   @override
-  Future<String?> loadOpenBooks() =>
-      _guard(_core.librarySettings.loadOpenBooks);
+  Future<FlutterOpenBooks?> loadOpenBooks() => _guard(() async {
+    final loaded = await _core.openBooks.load();
+    if (loaded == null) return null;
+    return (
+      books: [
+        for (final open in loaded.books)
+          (
+            book: _libraryBook(open.book),
+            path: open.path,
+            bookId: open.openBookId,
+          ),
+      ],
+      current: loaded.current,
+      reading: loaded.reading,
+    );
+  });
 
   @override
-  Future<void> saveOpenBooks(String session) =>
-      _guard(() => _core.librarySettings.saveOpenBooks(session));
+  Future<void> saveOpenBooks(FlutterOpenBooks value) => _guard(
+    () => _core.openBooks.save(
+      OpenBooksSession(
+        books: [
+          for (final open in value.books)
+            (
+              bookId: open.book.bookId,
+              path: open.path,
+              openBookId: open.bookId,
+            ),
+        ],
+        current: value.current,
+        reading: value.reading,
+      ),
+    ),
+  );
 
   @override
   Future<FlutterDocumentSummary> openLibraryBook({

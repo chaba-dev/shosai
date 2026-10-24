@@ -67,19 +67,24 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// The open books and whether the reader was showing, kept across a
   /// platform restoration.
   final RestorableStringN _session = RestorableStringN(null);
-
-  /// The same session saved with the library, so the open books also come
-  /// back when the application starts again (RFD 4, outcome 4). Saves start
-  /// once the saved one is read and applied, in order, one at a time.
-  late final ShosaiRecords _sessionRecords = recordsOf(_sessionBridge);
-  late final FlutterBridge _sessionBridge = widget.bridgeFactory();
-  bool _savedSessionRead = false;
-  String? _savedSession;
-  Future<void> _sessionWrites = Future.value();
   final Set<Route<Object?>> _dialogRoutes = {};
   NavigatorState? _navigator;
   _RestoredSession? _pendingRestoredSession;
   bool _restoredOpenScheduled = false;
+
+  /// Whether a platform restoration brought a session back; it is newer than
+  /// the open books saved with the library.
+  bool _platformRestored = false;
+  bool _started = false;
+
+  /// The open book a restored session was reading: the library opens it
+  /// once it is idle, unless the person has gone to a book first.
+  int? _pendingResume;
+
+  /// The open books are saved with the library through a bridge of their
+  /// own, which outlives the shell until its last save settles.
+  late final FlutterBridge _sessionBridge = widget.bridgeFactory();
+  late final ShosaiRecords _sessionRecords = recordsOf(_sessionBridge);
 
   /// Add books chosen from the rail: the library opens the picker once the
   /// reader has gone and the library is idle again.
@@ -89,6 +94,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     presentReader: _presentReader,
     dismissReader: _dismissReader,
     capturePageMiniature: _capturePageMiniature,
+    loadOpenBooks: _sessionRecords.loadOpenBooks,
+    saveOpenBooks: _sessionRecords.saveOpenBooks,
+    resumeReading: (book) {
+      _pendingResume = book.id;
+      _scheduleRestoredOpen();
+    },
   )..addListener(_shellChanged);
   ModalRoute<void>? _readerRoute;
 
@@ -153,8 +164,10 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void _shellChanged() {
     setState(() {});
     _session.value = _encodeSession(_shell.model);
-    _saveSession();
     final model = _shell.model;
+    // The person went to a book before a restoration could: theirs stands.
+    if (model.openBooks.isNotEmpty) _pendingRestoredSession = null;
+    if (model.reading) _pendingResume = null;
     final notesShowing = model.place == ShellPlace.notes && !model.reading;
     if (notesShowing && !_notesShowing) {
       _notes.dispatch(const ShellNotesRequested());
@@ -391,48 +404,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  /// Reads the session saved at the last run. A platform restoration is
-  /// newer, so it wins when there is one.
-  Future<void> _readSavedSession() async {
-    String? saved;
-    try {
-      saved = await _sessionRecords.loadOpenBooks();
-    } catch (_) {
-      // An unreadable session starts with no open books.
-    }
-    if (!mounted) return;
-    _savedSessionRead = true;
-    _savedSession = saved;
-    if (saved != null &&
-        _pendingRestoredSession == null &&
-        _shell.model.openBooks.isEmpty) {
-      _pendingRestoredSession = _decodeSession(saved);
-      _scheduleRestoredOpen();
-    }
-    _saveSession();
-  }
-
-  void _saveSession() {
-    final session = _session.value;
-    // Nothing is written until the saved session has been read and applied,
-    // so the empty shell of a starting application never replaces it.
-    if (!_savedSessionRead ||
-        _pendingRestoredSession != null ||
-        session == null ||
-        session == _savedSession) {
-      return;
-    }
-    _savedSession = session;
-    _sessionWrites = _sessionWrites.then(
-      (_) => _sessionRecords.saveOpenBooks(session).catchError((Object _) {
-        // A session that cannot be saved costs only the next start's open
-        // books; reading goes on.
-      }),
-    );
-  }
-
   void _scheduleRestoredOpen() {
-    if (_pendingRestoredSession != null &&
+    if ((_pendingRestoredSession != null || _pendingResume != null) &&
         controller.model.loaded &&
         !controller.model.busy &&
         !_restoredOpenScheduled) {
@@ -444,11 +417,20 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         }
         final restored = _pendingRestoredSession;
         _pendingRestoredSession = null;
-        if (restored == null) return;
-        _shell.dispatch(ShellRestored(restored.model));
-        final open = restored.model.currentBook;
-        if (restored.reading && open != null) {
-          controller.dispatch(LibraryBookOpened(open.book));
+        if (restored != null) {
+          final before = _shell.model;
+          _shell.dispatch(ShellRestored(restored.model));
+          // A shell that already had books refused the session, and its
+          // reader with it.
+          if (restored.reading && !identical(_shell.model, before)) {
+            _pendingResume = restored.model.currentBookId;
+          }
+        }
+        final resume = _pendingResume;
+        _pendingResume = null;
+        final open = _shell.model.currentBook;
+        if (resume != null && !_shell.model.reading && open?.id == resume) {
+          controller.dispatch(LibraryBookOpened(open!.book));
         }
       });
     }
@@ -474,6 +456,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
     registerForRestoration(_session, 'open-books');
     if (_session.value case final encoded?) {
+      _platformRestored = true;
       _pendingRestoredSession = _decodeSession(encoded);
       _scheduleRestoredOpen();
     }
@@ -483,12 +466,17 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void initState() {
     super.initState();
     controller.dispatch(const LibraryStarted());
-    unawaited(_readSavedSession());
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // The first restoration has run by now, so the saved open books know
+    // whether a newer session came back.
+    if (!_started) {
+      _started = true;
+      _shell.dispatch(ShellStarted(restoring: _platformRestored));
+    }
     _navigator = Navigator.maybeOf(context);
   }
 
@@ -504,11 +492,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     controller.dispose();
     _shell.removeListener(_shellChanged);
     _shell.dispose();
+    final sessionBridge = _sessionBridge;
+    unawaited(_shell.openBooksSaved.whenComplete(sessionBridge.dispose));
     _notes.removeListener(_notesChanged);
     _notes.dispose();
     _search.dispose();
     _session.dispose();
-    _sessionBridge.dispose();
     super.dispose();
   }
 
