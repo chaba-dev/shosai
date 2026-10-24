@@ -382,6 +382,54 @@ void main() {
     expect(tester.getSize(find.byType(ShellRail)).width, 56);
   });
 
+  testWidgets('the sidebar and rail keep clear of the status bar', (
+    tester,
+  ) async {
+    // An iPad in landscape: the clock above, the home indicator below.
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 20);
+    for (final reading in [false, true]) {
+      await _pumpFrame(
+        tester,
+        size: const Size(1180, 820),
+        model: _model(reading: reading),
+        recorder: _Recorder(),
+      );
+      final mark = find.byType(ShellMark);
+      expect(tester.getTopLeft(mark).dy, greaterThanOrEqualTo(24 + 16));
+      final add = reading
+          ? find.byTooltip('Add books')
+          : find.text('Add books');
+      expect(tester.getBottomLeft(add).dy, lessThanOrEqualTo(820 - 20));
+      // The content beside them keeps its own top and bottom insets.
+      final content = MediaQuery.paddingOf(
+        tester.element(find.byKey(const Key('content'))),
+      );
+      expect(content, const EdgeInsets.only(top: 24, bottom: 20));
+    }
+  });
+
+  testWidgets('the sidebar and rail take a landscape notch, not the content', (
+    tester,
+  ) async {
+    // An iPhone in landscape is a tablet window with the notch at the start.
+    tester.view.padding = const FakeViewPadding(left: 59, bottom: 21);
+    for (final (reading, width) in [(false, 220.0), (true, 56.0)]) {
+      await _pumpFrame(
+        tester,
+        size: const Size(932, 430),
+        model: _model(reading: reading),
+        recorder: _Recorder(),
+      );
+      final side = find.byType(reading ? ShellRail : ShellSidebar);
+      expect(tester.getSize(side).width, width + 59);
+      expect(tester.getTopLeft(find.byType(ShellMark)).dx, greaterThan(59));
+      final content = MediaQuery.paddingOf(
+        tester.element(find.byKey(const Key('content'))),
+      );
+      expect(content, const EdgeInsets.only(bottom: 21));
+    }
+  });
+
   testWidgets('a phone gets the bottom bar, and nothing while reading', (
     tester,
   ) async {

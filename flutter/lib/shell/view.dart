@@ -158,6 +158,9 @@ class ShellFrame extends StatelessWidget {
         ),
       );
     }
+    // The sidebar or rail takes the start edge's safe area, so the content
+    // beside it keeps only the top, bottom and end insets.
+    final rtl = Directionality.of(context) == TextDirection.rtl;
     return ColoredBox(
       color: palette.canvas,
       child: Row(
@@ -177,7 +180,14 @@ class ShellFrame extends StatelessWidget {
               covers: covers,
               actions: actions,
             ),
-          Expanded(child: child),
+          Expanded(
+            child: MediaQuery.removePadding(
+              context: context,
+              removeLeft: !rtl,
+              removeRight: rtl,
+              child: child,
+            ),
+          ),
         ],
       ),
     );
