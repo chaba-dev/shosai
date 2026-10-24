@@ -1049,6 +1049,34 @@ void main() {
       skip: Platform.isLinux ? false : 'reads /proc/self/fd',
     );
 
+    test('the orphan sweep keeps a copy whose content a book holds, '
+        'wherever the book is recorded', () async {
+      final t = await TempLibrary.create();
+      await t.library.retryManagedFileDeletions();
+      final root = canonicalBookPath(t.managedDirectory);
+      // The book is recorded in a directory that still exists, so it does
+      // not follow its content; the copy named by that content stays.
+      final elsewhere = Directory(t.path('elsewhere'))..createSync();
+      final hash = 'c' * 64;
+      final recorded = File(p.join(elsewhere.path, '$hash.pdf'))
+        ..writeAsStringSync('book');
+      final copy = File(p.join(root, '$hash.pdf'))..writeAsStringSync('book');
+      final orphan = File(p.join(root, '${'e' * 64}.pdf'))
+        ..writeAsStringSync('orphan');
+      await t.execute(
+        '''INSERT INTO books (title, format, file_path, storage_kind,
+             original_path, content_hash, file_size)
+           VALUES ('Elsewhere', 'pdf', ?1, 'managed', ?1, ?2, 4)''',
+        [recorded.path, hash],
+      );
+
+      await t.library.retryManagedFileDeletions();
+
+      expect(copy.existsSync(), isTrue);
+      expect(recorded.existsSync(), isTrue);
+      expect(orphan.existsSync(), isFalse);
+    });
+
     test('the orphan sweep is not starved by owned copies', () async {
       final t = await TempLibrary.create();
       await t.library.retryManagedFileDeletions();
