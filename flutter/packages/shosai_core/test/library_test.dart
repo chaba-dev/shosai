@@ -1143,6 +1143,57 @@ void main() {
       expect(orphan.existsSync(), isFalse);
     });
 
+    test(
+      'migrated deletion debts keep content owned at another path',
+      () async {
+        for (final managed in [true, false]) {
+          for (final damaged in [false, true]) {
+            final t = await TempLibrary.create();
+            await t.library.retryManagedFileDeletions();
+            final source = t.copyFixture('sample.pdf', 'source.pdf');
+            final bytes = File(source).readAsBytesSync();
+            final elsewhere = Library(
+              t.store,
+              managedDirectory: t.path('elsewhere'),
+            );
+            final book = (await elsewhere.importFile(
+              source,
+              managed: managed,
+            )).book!;
+            final copy = File(
+              p.join(t.managedDirectory, '${book.contentHash}.pdf'),
+            );
+            File(book.path).copySync(copy.path);
+            if (damaged) File(book.path).writeAsStringSync('damaged');
+            final oldRoot = t.path('gone/books');
+            await t.execute(
+              '''INSERT INTO managed_file_deletion_debt (file_path, managed_dir)
+               VALUES (?, ?)''',
+              [p.join(oldRoot, p.basename(copy.path)), oldRoot],
+            );
+
+            for (var retry = 0; retry < 2; retry++) {
+              await t.library.retryManagedFileDeletions();
+              expect(
+                copy.readAsBytesSync(),
+                bytes,
+                reason: 'managed=$managed, damaged=$damaged, retry=$retry',
+              );
+              expect((await t.library.get(book.id))!.path, book.path);
+              expect(await t.count('managed_file_deletion_debt'), 1);
+            }
+
+            // Ownership, not the debt itself, protects the copy. Once the
+            // book is removed, the migrated debt can finish normally.
+            await elsewhere.remove(book.id);
+            await t.library.retryManagedFileDeletions();
+            expect(copy.existsSync(), isFalse);
+            expect(await t.count('managed_file_deletion_debt'), 0);
+          }
+        }
+      },
+    );
+
     test('the orphan sweep is not starved by owned copies', () async {
       final t = await TempLibrary.create();
       await t.library.retryManagedFileDeletions();

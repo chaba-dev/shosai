@@ -247,12 +247,16 @@ final class LibraryRecords {
         return paths;
       });
 
-  /// The deletion debt at [path]: whether a book uses the path, and the
-  /// managed directory recorded with the debt (null when there is none).
+  /// The deletion debt at [path]: whether a book owns the path or its
+  /// hash-named content, and the managed directory recorded with the debt
+  /// (null when there is none).
   Future<({bool inUse, String? directory})> deletionDebt(
     String path,
   ) => _store.read((db) {
-    final used = db.select('SELECT 1 FROM books WHERE file_path = ?', [path]);
+    final used = db.select(
+      'SELECT 1 FROM books WHERE file_path = ? OR content_hash = ?',
+      [path, privateCopyHash(path)],
+    );
     final directory =
         db
                 .select(
