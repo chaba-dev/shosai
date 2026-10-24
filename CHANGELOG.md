@@ -141,6 +141,8 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Turn pages with the arrow keys and Space as soon as a book opens (#214)
 - *(shell)* Bring the open books back when the app starts again (#215)
 - *(library)* Add books on iOS through the document picker (#222)
+- *(shell)* Clear the iPad status bar and drop the shelf edge (#225)
+- *(library)* Keep imported books when iOS moves the app's files (#226)
 
 ### 🚜 Refactor
 
