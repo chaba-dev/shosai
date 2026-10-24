@@ -101,6 +101,11 @@ All notable changes to this project will be documented in this file.
 - *(shell)* Show each open book's page on the tab switcher cards (#209)
 - *(reader)* Save the theme, text size and line spacing the Display panel sets (#210)
 - *(ios)* Open EPUB and PDF books in Shōsai from other apps (#223)
+- *(reader)* Turn paginated pages with touch swipes (#227)
+- *(reader)* Expand and dismiss phone panels by dragging (#229)
+- *(reader)* Pinch and double tap to zoom PDFs (#232)
+- *(shell)* Reorder phone books with a long press (#233)
+- *(reader)* Animate page changes with a saved motion preference (#235)
 
 ### 🐛 Bug Fixes
 
@@ -143,6 +148,8 @@ All notable changes to this project will be documented in this file.
 - *(library)* Add books on iOS through the document picker (#222)
 - *(shell)* Clear the iPad status bar and drop the shelf edge (#225)
 - *(library)* Keep imported books when iOS moves the app's files (#226)
+- *(reader)* Dismiss floating panels on system Back (#230)
+- *(reader)* Enlarge phone page-turn touch targets (#231)
 
 ### 🚜 Refactor
 
