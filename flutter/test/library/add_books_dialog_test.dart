@@ -16,6 +16,7 @@ import '../support/bridge_records.dart';
 /// The desktop import path has no adapter above the native picker, so the
 /// file-selector channel is the platform boundary these tests stub.
 const _pickerChannel = MethodChannel('plugins.flutter.io/file_selector');
+const _openedChannel = MethodChannel('dev.shosai/opened_documents');
 
 /// The two desktop choices and the picker request each one must produce.
 const _choices = [
@@ -126,6 +127,7 @@ Future<void> _pumpShell(
   NavigatorObserver? observer,
   _Bridge? bridge,
   Locale locale = const Locale('en'),
+  bool settle = true,
 }) async {
   await tester.pumpWidget(
     ShadApp(
@@ -149,7 +151,7 @@ Future<void> _pumpShell(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
 }
 
 Future<void> _openAddBooks(WidgetTester tester) async {
@@ -466,6 +468,71 @@ void main() {
         left = picked.where((path) => File(path).existsSync()).length;
       }
       expect(left, 0, reason: 'the picker copies are removed');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'iOS imports books another app opens in Shōsai',
+    (tester) async {
+      final inbox = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('shosai-opened'),
+      ))!;
+      addTearDown(() => inbox.delete(recursive: true));
+      final opened = [
+        for (final name in ['origin.epub', 'paper.pdf'])
+          (await tester.runAsync(
+            () => File('${inbox.path}/$name').writeAsString(name),
+          ))!.path,
+      ];
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        _openedChannel,
+        (call) async => call.method == 'takePending' ? [opened.first] : null,
+      );
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(_openedChannel, null),
+      );
+      final bridge = _Bridge();
+      await _pumpShell(tester, bridge: bridge, settle: false);
+      for (var attempt = 0; bridge.imports.isEmpty && attempt < 50; attempt++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      expect(find.text('Review books'), findsNothing);
+      expect(bridge.imports.single.paths, [opened.first]);
+      expect(bridge.imports.single.managed, isTrue);
+      await messenger.handlePlatformMessage(
+        _openedChannel.name,
+        _openedChannel.codec.encodeMethodCall(
+          MethodCall('opened', [opened.last]),
+        ),
+        (_) {},
+      );
+      for (
+        var attempt = 0;
+        bridge.imports.length < 2 && attempt < 50;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      expect(bridge.imports.last.paths, [opened.last]);
+      for (
+        var attempt = 0;
+        opened.any((path) => File(path).existsSync()) && attempt < 50;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      expect(opened.where((path) => File(path).existsSync()), isEmpty);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
