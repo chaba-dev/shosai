@@ -569,6 +569,12 @@ void main() {
       final cancel = tester.getRect(find.widgetWithText(ShadButton, 'Cancel'));
       expect(save.width, closeTo(cancel.width, 0.5));
       expect(save.top, lessThan(cancel.top));
+      // The field spans the same width as the actions.
+      final field = tester.getRect(
+        find.byKey(const ValueKey('reader-note-editor-field')),
+      );
+      expect(field.left, closeTo(save.left, 0.5));
+      expect(field.right, closeTo(save.right, 0.5));
       await tester.enterText(
         find.descendant(
           of: find.byType(ShadDialog),
