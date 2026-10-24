@@ -17,7 +17,7 @@ removed on 2026-10-20 (RFD 12, "The first release").
 | File | Role |
 | --- | --- |
 | `assets/theme/tokens.json` | The source. Edit this file only. |
-| `flutter/lib/theme_tokens.dart` | Generated Dart token class, consumed by `flutter/lib/app_theme.dart` and the reader paint path. |
+| `lib/theme_tokens.dart` | Generated Dart token class, consumed by `lib/app_theme.dart` and the reader paint path. |
 | `scripts/generate-theme-tokens.py` | Generates the Dart module and checks it (`--check`). |
 
 ```sh
@@ -29,7 +29,7 @@ The generator's `--check` gate runs in `make test-scripts` through
 `scripts/tests/test_generate_theme_tokens.py`, which also checks that every
 design-system color, radius, spacing and size token is transcribed here with
 the same value. The Dart side cross-checks the JSON in
-`flutter/test/app_theme_test.dart`.
+`test/app_theme_test.dart`.
 
 ## Sections
 
@@ -87,7 +87,7 @@ sides' tests enforce that.
 
 ## Flutter mapping
 
-`flutter/lib/app_theme.dart` builds every theme from the tokens:
+`lib/app_theme.dart` builds every theme from the tokens:
 
 | Flutter theme | Tokens |
 | --- | --- |
@@ -124,14 +124,14 @@ removed app-side test used to compare against `type.family.math.iced`.
 
 ## Rejecting new literal theme colors
 
-* `flutter/test/app_theme_test.dart` scans `flutter/lib` for `Color(0x…)`,
+* `test/app_theme_test.dart` scans `lib` for `Color(0x…)`,
   `Color.from…`, `Color.fromARGB` and `Colors.*` and fails outside the generated
   `theme_tokens.dart`.
 
 ## Open items
 
-* The golden baselines under `flutter/test/goldens/` (Linux reference) and
-  `flutter/test/goldens/macos/` render these tokens; a color change here is
+* The golden baselines under `test/goldens/` (Linux reference) and
+  `test/goldens/macos/` render these tokens; a color change here is
   re-rendered on both platforms in the same change.
 * The design system's type styles and layered shadows are not in this file
   yet; they arrive with the Bookshelf composition that reads them.

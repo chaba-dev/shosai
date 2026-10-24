@@ -68,7 +68,7 @@
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-flutter_dir="$root/flutter"
+flutter_dir="$root"
 test_target="integration_test/native_picker_smoke_test.dart"
 
 artifacts=""

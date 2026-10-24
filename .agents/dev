@@ -14,7 +14,7 @@ if [[ ! -x "$nix_bin" ]]; then
 fi
 
 # A secondary JJ workspace has no .git. Passing it to Nix as a path copies
-# everything, including target/ and flutter/build/, into a new store snapshot.
+# everything, including target/ and build/, into a new store snapshot.
 # Reuse the colocated checkout's Git-filtered flake without changing command cwd.
 flake_root="$repo_root"
 if [[ ! -e "$flake_root/.git" && -f "$repo_root/.jj/repo" ]]; then

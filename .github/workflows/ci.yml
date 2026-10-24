@@ -4,11 +4,22 @@ on:
   push:
     branches: [main]
     paths:
-      - "flutter/**"
+      - "lib/**"
+      - "test/**"
+      - "integration_test/**"
+      - "packages/**"
+      - "third_party/**"
+      - "fonts/**"
+      - "android/**"
+      - "ios/**"
+      - "linux/**"
+      - "macos/**"
+      - "pubspec.*"
+      - "analysis_options.yaml"
+      - "l10n.yaml"
       - "fixtures/**"
       - "assets/**"
       - "scripts/**"
-      - "benchmarks/**"
       - "docs/design-system/**"
       - "Makefile"
       - "flake.nix"
@@ -18,11 +29,22 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "flutter/**"
+      - "lib/**"
+      - "test/**"
+      - "integration_test/**"
+      - "packages/**"
+      - "third_party/**"
+      - "fonts/**"
+      - "android/**"
+      - "ios/**"
+      - "linux/**"
+      - "macos/**"
+      - "pubspec.*"
+      - "analysis_options.yaml"
+      - "l10n.yaml"
       - "fixtures/**"
       - "assets/**"
       - "scripts/**"
-      - "benchmarks/**"
       - "docs/design-system/**"
       - "Makefile"
       - "flake.nix"
@@ -113,4 +135,4 @@ jobs:
       - name: Verify the macOS bundle carries the declared fonts
         run: |
           nix develop .#ci --command python3 scripts/check_flutter_bundle.py \
-            "flutter/build/macos/Build/Products/Debug/shosai_flutter.app"
+            "build/macos/Build/Products/Debug/shosai_flutter.app"

@@ -19,7 +19,7 @@ REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY / "scripts" / "generate-theme-tokens.py"
 TOKENS = REPOSITORY / "assets" / "theme" / "tokens.json"
 DESIGN_SYSTEM_TOKENS = REPOSITORY / "docs" / "design-system" / "tokens.json"
-DART_OUTPUT = REPOSITORY / "flutter" / "lib" / "theme_tokens.dart"
+DART_OUTPUT = REPOSITORY / "lib" / "theme_tokens.dart"
 
 
 def load_generator():

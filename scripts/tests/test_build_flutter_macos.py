@@ -48,7 +48,7 @@ class FlutterMacosBuildTest(unittest.TestCase):
         self.root = pathlib.Path(self.temporary.name).resolve()
         self.repository = self.root / "repository"
         self.scripts = self.repository / "scripts"
-        self.flutter = self.repository / "flutter"
+        self.flutter = self.repository
         self.sdk = self.root / "flutter-sdk"
         self.engine_link = (
             self.sdk
@@ -56,7 +56,6 @@ class FlutterMacosBuildTest(unittest.TestCase):
         )
         self.engine = self.root / "engine-source/FlutterMacOS.xcframework"
         self.scripts.mkdir(parents=True)
-        self.flutter.mkdir()
         self.engine.mkdir(parents=True)
         self.engine_link.parent.mkdir(parents=True)
         self.engine_link.symlink_to(self.engine)

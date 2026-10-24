@@ -8,7 +8,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class FlutterDesktopTitleTest(unittest.TestCase):
     def test_linux_window_title_and_decoration_policy(self):
-        runner = (ROOT / "flutter/linux/runner/my_application.cc").read_text(
+        runner = (ROOT / "linux/runner/my_application.cc").read_text(
             encoding="utf-8"
         )
 
@@ -57,7 +57,7 @@ class FlutterDesktopTitleTest(unittest.TestCase):
         )
 
     def test_macos_hides_the_window_title(self):
-        window = (ROOT / "flutter/macos/Runner/MainFlutterWindow.swift").read_text()
+        window = (ROOT / "macos/Runner/MainFlutterWindow.swift").read_text()
 
         self.assertIn("titleVisibility = .hidden", window)
 

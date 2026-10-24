@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths-ignore:
       - CHANGELOG.md
-      - flutter/pubspec.yaml
+      - pubspec.yaml
   workflow_dispatch:
 
 permissions:
@@ -101,11 +101,11 @@ jobs:
           version="${RELEASE_TAG#v}"
           # The pubspec version is `<semver>+<build>`; the release sets the
           # semantic version and keeps the build number.
-          sed -i.bak -E "s/^version: [^+]*(\+.*)?$/version: ${version}\1/" flutter/pubspec.yaml
-          rm flutter/pubspec.yaml.bak
+          sed -i.bak -E "s/^version: [^+]*(\+.*)?$/version: ${version}\1/" pubspec.yaml
+          rm pubspec.yaml.bak
 
-          if ! grep -Eq "^version: ${version}(\+.*)?$" flutter/pubspec.yaml; then
-            echo "Failed to update the application version in flutter/pubspec.yaml"
+          if ! grep -Eq "^version: ${version}(\+.*)?$" pubspec.yaml; then
+            echo "Failed to update the application version in pubspec.yaml"
             exit 1
           fi
 
@@ -154,8 +154,8 @@ jobs:
 
           generated_dir="$(mktemp -d)"
           trap 'rm -rf "${generated_dir}"' EXIT
-          cp CHANGELOG.md flutter/pubspec.yaml RELEASE_NOTES.md "${generated_dir}/"
-          git restore CHANGELOG.md flutter/pubspec.yaml
+          cp CHANGELOG.md pubspec.yaml RELEASE_NOTES.md "${generated_dir}/"
+          git restore CHANGELOG.md pubspec.yaml
           rm RELEASE_NOTES.md
 
           if git ls-remote --exit-code --heads origin "${branch}" >/dev/null; then
@@ -185,21 +185,21 @@ jobs:
             fi
 
             conflicts="$(git diff --name-only --diff-filter=U)"
-            unexpected_conflicts="$(printf '%s\n' "${conflicts}" | grep -Ev '^(CHANGELOG\.md|flutter/pubspec\.yaml)$' || true)"
+            unexpected_conflicts="$(printf '%s\n' "${conflicts}" | grep -Ev '^(CHANGELOG\.md|pubspec\.yaml)$' || true)"
             if [ -n "${unexpected_conflicts}" ]; then
               echo "Unexpected conflicts while merging ${source_commit}:"
               printf '%s\n' "${unexpected_conflicts}"
               exit 1
             fi
 
-            git checkout "${source_commit}" -- CHANGELOG.md flutter/pubspec.yaml
-            git add CHANGELOG.md flutter/pubspec.yaml
+            git checkout "${source_commit}" -- CHANGELOG.md pubspec.yaml
+            git add CHANGELOG.md pubspec.yaml
             git commit --no-edit
           fi
 
           cp "${generated_dir}/CHANGELOG.md" "${generated_dir}/RELEASE_NOTES.md" .
-          cp "${generated_dir}/pubspec.yaml" flutter/pubspec.yaml
-          git add CHANGELOG.md flutter/pubspec.yaml
+          cp "${generated_dir}/pubspec.yaml" pubspec.yaml
+          git add CHANGELOG.md pubspec.yaml
 
           if git diff --cached --quiet; then
             echo "Release branch already matches generated files"

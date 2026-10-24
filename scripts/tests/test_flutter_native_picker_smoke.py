@@ -49,7 +49,6 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         scripts.mkdir()
         self.runner = scripts / RUNNER.name
         shutil.copy2(RUNNER, self.runner)
-        (self.root / "flutter").mkdir()
 
         self.bin = self.root / "bin"
         self.bin.mkdir()

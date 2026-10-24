@@ -59,7 +59,7 @@ export FLUTTER_ROOT="$flutter_root"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-cd "$repository_root/flutter"
+cd "$repository_root"
 exec env \
   -u SDKROOT \
   -u IPHONEOS_DEPLOYMENT_TARGET \

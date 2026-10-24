@@ -23,7 +23,8 @@ platform build dependencies:
 
 ```sh
 nix develop
-make dev                    # run the Linux host
+flutter pub get
+flutter run                 # select an available host
 ```
 
 `make linux-debug` builds the Linux host without running it, and
@@ -50,11 +51,18 @@ use.
 
 The project is a Flutter application:
 
-- `flutter/lib` contains the Flutter interface, the reader controllers and the PDF engine.
-- `flutter/packages/shosai_epub` is the EPUB engine.
-- `flutter/packages/shosai_core` is the application core: library, storage, reading state, bookmarks, annotations and search.
+- `lib` contains the Flutter interface, the reader controllers and the PDF engine.
+- `packages/shosai_epub` is the EPUB engine.
+- `packages/shosai_core` is the application core: library, storage, reading state, bookmarks, annotations and search.
+- `android`, `ios`, `linux` and `macos` contain the platform hosts.
+- `third_party` contains the patched PDF bindings and their redistribution notices.
 - `fixtures` holds the test documents the packages and the app share.
 - `website` contains the Hugo source for the project website.
+
+Run Flutter and Dart commands from the repository root. Desktop bundles are
+written under `build/linux/` or `build/macos/`. The former Rust benchmarks and
+standalone evaluation app have been retired; reader regression fixtures and
+their generator live in `fixtures/epub-layout/`.
 
 On Apple Silicon macOS, build the Flutter iOS host with
 `make ios-simulator-debug`, `make ios-device-profile`, or

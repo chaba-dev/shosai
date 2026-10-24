@@ -132,7 +132,7 @@ class CheckFlutterBundleTest(unittest.TestCase):
                 "NotoSansJP-Variable.ttf": self.noto_digest,
             },
         )
-        pdfium_notices = self.inventory / "flutter/third_party/pdfium_dart/NOTICES"
+        pdfium_notices = self.inventory / "third_party/pdfium_dart/NOTICES"
         pdfium_notices.parent.mkdir(parents=True)
         pdfium_notices.write_text(_notices(PDFIUM_ENTRIES), encoding="utf-8")
 

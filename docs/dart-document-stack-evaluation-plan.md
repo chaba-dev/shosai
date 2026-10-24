@@ -1,5 +1,12 @@
 # Dart document stack evaluation plan
 
+> **Repository layout (2026-10-24).** This is the historical evaluation and
+> adoption record. The standalone prototype and old benchmark harness have
+> been retired and remain available in repository history. Flutter now lives
+> at the repository root: drop the `flutter/` prefix from source paths below.
+> The prototype's reusable reader fixtures and generator moved to
+> `fixtures/epub-layout/`.
+
 Status: **EPUB adoption decision recorded 2026-09-28; PDF and SQLite
 selected 2026-10-21.** The owner adopted a Dart-owned EPUB parser/normalizer
 with Flutter layout, integrated incrementally behind the retained reader UI
@@ -144,8 +151,9 @@ recorded when the prototype merged**. (The owner recorded one on 2026-09-28; see
 [Adoption decision](#adoption-decision-2026-09-28).) Its evidence, reproduction
 commands, measurements and explicit
 limitations are in
-[`prototypes/epub-dart-eval/EVIDENCE.md`](../prototypes/epub-dart-eval/EVIDENCE.md)
-and [`README.md`](../prototypes/epub-dart-eval/README.md).
+[`prototypes/epub-dart-eval/EVIDENCE.md`](https://github.com/chaba-dev/shosai/blob/adc29e10115df850cf2db721d52634bc26bc4a0e/prototypes/epub-dart-eval/EVIDENCE.md)
+and [`README.md`](https://github.com/chaba-dev/shosai/blob/adc29e10115df850cf2db721d52634bc26bc4a0e/prototypes/epub-dart-eval/README.md)
+in the repository history.
 
 What the slice established:
 
