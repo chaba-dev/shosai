@@ -1,0 +1,84 @@
+== fresh install of the real fixed app: /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/16C7A4C1-9175-4262-BA27-4C9A97616665
+== flutter drive harness (fixed code, mode seed) = install over
+mode seed label s0-seed
+application support /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/Library/Application Support
+downloaded alice.epub 189249 B
+downloaded attention.pdf 2215244 B
+imported 2
+  item /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/tmp/keep-books-l7S8Ks/alice.epub error null
+  item /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/tmp/keep-books-l7S8Ks/attention.pdf error null
+book "attention" pdf managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+book "Alice's Adventures in Wonderland" epub managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+shot s0-seed-01-library
+  mode seed label s0-seed
+  application support /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/Library/Application Support
+  downloaded alice.epub 189249 B
+  downloaded attention.pdf 2215244 B
+  imported 2
+    item /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/tmp/keep-books-l7S8Ks/alice.epub error null
+    item /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/tmp/keep-books-l7S8Ks/attention.pdf error null
+  book "attention" pdf managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+  book "Alice's Adventures in Wonderland" epub managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+  shot s0-seed-01-library
+flutter: 00:05 +2: All tests passed!
+All tests passed.
+  container after: /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/D1431772-EBC8-439F-9180-1C10F325B11D
+== install-over #1 of the real fixed app (simctl install)
+  container: /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/8EF311B2-EE16-4157-993B-82F5660B4E14
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+  launched; screenshot s1-app-after-install-over-1.png
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+== flutter drive harness (fixed code, mode check) = install over
+mode check label s1-check
+application support /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/57062E06-19F4-43E0-83A4-1223E53DD00A/Library/Application Support
+book "attention" pdf managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/57062E06-19F4-43E0-83A4-1223E53DD00A/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+book "Alice's Adventures in Wonderland" epub managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/57062E06-19F4-43E0-83A4-1223E53DD00A/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+shot s1-check-01-library
+open "attention": opened, no missing-file message
+shot s1-check-02-open-attention
+open "Alice's Adventures in Wonderland": opened, no missing-file message
+shot s1-check-03-open-alice-s-adventures-in-wonderland
+  mode check label s1-check
+  application support /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/57062E06-19F4-43E0-83A4-1223E53DD00A/Library/Application Support
+  book "attention" pdf managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/57062E06-19F4-43E0-83A4-1223E53DD00A/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+  book "Alice's Adventures in Wonderland" epub managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/57062E06-19F4-43E0-83A4-1223E53DD00A/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+  shot s1-check-01-library
+  open "attention": opened, no missing-file message
+  shot s1-check-02-open-attention
+  open "Alice's Adventures in Wonderland": opened, no missing-file message
+  shot s1-check-03-open-alice-s-adventures-in-wonderland
+flutter: 00:21 +2: All tests passed!
+All tests passed.
+  container after: /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/57062E06-19F4-43E0-83A4-1223E53DD00A
+== install-over #2 of the real fixed app (simctl install)
+  container: /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/F25A98E7-12C9-4C86-BF7D-48C683DB963E
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+  launched; screenshot s2-app-after-install-over-2.png
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+== flutter drive harness (fixed code, mode check) = install over
+mode check label s2-check
+application support /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/5E7D07B8-79B0-4437-AED5-2846F2BC4879/Library/Application Support
+book "Alice's Adventures in Wonderland" epub managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/5E7D07B8-79B0-4437-AED5-2846F2BC4879/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+book "attention" pdf managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/5E7D07B8-79B0-4437-AED5-2846F2BC4879/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+shot s2-check-01-library
+open "Alice's Adventures in Wonderland": opened, no missing-file message
+shot s2-check-02-open-alice-s-adventures-in-wonderland
+open "attention": opened, no missing-file message
+shot s2-check-03-open-attention
+  mode check label s2-check
+  application support /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/5E7D07B8-79B0-4437-AED5-2846F2BC4879/Library/Application Support
+  book "Alice's Adventures in Wonderland" epub managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/5E7D07B8-79B0-4437-AED5-2846F2BC4879/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+  book "attention" pdf managed true file exists true path /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/5E7D07B8-79B0-4437-AED5-2846F2BC4879/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+  shot s2-check-01-library
+  open "Alice's Adventures in Wonderland": opened, no missing-file message
+  shot s2-check-02-open-alice-s-adventures-in-wonderland
+  open "attention": opened, no missing-file message
+  shot s2-check-03-open-attention
+flutter: 00:21 +2: All tests passed!
+All tests passed.
+  container after: /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/5E7D07B8-79B0-4437-AED5-2846F2BC4879
+== install-over #3 of the real fixed app (simctl install)
+  container: /Users/darwin/Library/Developer/CoreSimulator/Devices/0B527891-4877-4FAC-A6A2-430E92318C3E/data/Containers/Data/Application/36E17675-B1CC-48DD-82F2-6E8446437B0E
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+  launched; screenshot s3-app-after-install-over-3.png
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 

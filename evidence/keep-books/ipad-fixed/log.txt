@@ -1,0 +1,123 @@
+== before any install (current app on the iPad)
+  container: /private/var/mobile/Containers/Data/Application/CD4F345F-A76C-480A-B758-345ABF84B301
+  books dir: .shosai 
+  library rows (title | storage | file_path):
+    facebook_scuba | managed | /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+== install-over #1: real fixed app (devicectl device install app)
+App installed:
+Launched application with dev.shosai.shosai-flutter bundle identifier.
+  launched the real app; state after launch:
+  container: /private/var/mobile/Containers/Data/Application/E2814157-4D55-460F-A4E3-E054DA0218F8
+  books dir: .shosai 
+  library rows (title | storage | file_path):
+    facebook_scuba | managed | /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+== flutter drive --profile --keep-app-running harness (fixed code, mode seed) = install over
+  container: /private/var/mobile/Containers/Data/Application/E2814157-4D55-460F-A4E3-E054DA0218F8
+  books dir: 
+  library rows (title | storage | file_path):
+    facebook_scuba | managed | /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+== flutter drive --profile --keep-app-running harness (fixed code, mode seed) = install over
+mode seed label h1-seed
+application support /var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/Library/Application Support
+downloaded alice.epub 189249 B
+downloaded attention.pdf 2215244 B
+imported 2
+  item /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/tmp/keep-books-mLeG7N/alice.epub error null
+  item /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/tmp/keep-books-mLeG7N/attention.pdf error null
+book "facebook_scuba" pdf managed true file exists false path /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+book "attention" pdf managed true file exists true path /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+book "Alice's Adventures in Wonderland" epub managed true file exists true path /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+shot h1-seed-01-library
+  mode seed label h1-seed
+  application support /var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/Library/Application Support
+  downloaded alice.epub 189249 B
+  downloaded attention.pdf 2215244 B
+  imported 2
+    item /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/tmp/keep-books-mLeG7N/alice.epub error null
+    item /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/tmp/keep-books-mLeG7N/attention.pdf error null
+  book "facebook_scuba" pdf managed true file exists false path /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+  book "attention" pdf managed true file exists true path /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+  book "Alice's Adventures in Wonderland" epub managed true file exists true path /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+  shot h1-seed-01-library
+flutter: 00:05 +2: All tests passed!
+All tests passed.
+  container: /private/var/mobile/Containers/Data/Application/366913A7-E0C8-4690-9B50-042D02BA390E
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+  library rows (title | storage | file_path):
+    facebook_scuba | managed | /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+== install-over #2: real fixed app (devicectl device install app)
+App installed:
+Launched application with dev.shosai.shosai-flutter bundle identifier.
+  launched the real app; state after launch:
+  container: /private/var/mobile/Containers/Data/Application/D6F60FB5-B07F-44D3-8B8D-BDDBA0D75B21
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+== flutter drive --profile --keep-app-running harness (fixed code, mode check) = install over
+mode check label h2-check
+application support /var/mobile/Containers/Data/Application/014AB481-A24F-41C3-8D32-05701D95BFA8/Library/Application Support
+book "facebook_scuba" pdf managed true file exists false path /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+book "attention" pdf managed true file exists true path /private/var/mobile/Containers/Data/Application/014AB481-A24F-41C3-8D32-05701D95BFA8/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+book "Alice's Adventures in Wonderland" epub managed true file exists true path /private/var/mobile/Containers/Data/Application/014AB481-A24F-41C3-8D32-05701D95BFA8/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+shot h2-check-01-library
+open "facebook_scuba": MISSING: The book file is missing: /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf (notFound)
+shot h2-check-02-open-facebook-scuba
+open "attention": opened, no missing-file message
+shot h2-check-03-open-attention
+open "Alice's Adventures in Wonderland": opened, no missing-file message
+shot h2-check-04-open-alice-s-adventures-in-wonderland
+  mode check label h2-check
+  application support /var/mobile/Containers/Data/Application/014AB481-A24F-41C3-8D32-05701D95BFA8/Library/Application Support
+  book "facebook_scuba" pdf managed true file exists false path /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+  book "attention" pdf managed true file exists true path /private/var/mobile/Containers/Data/Application/014AB481-A24F-41C3-8D32-05701D95BFA8/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+  book "Alice's Adventures in Wonderland" epub managed true file exists true path /private/var/mobile/Containers/Data/Application/014AB481-A24F-41C3-8D32-05701D95BFA8/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+  shot h2-check-01-library
+  open "facebook_scuba": MISSING: The book file is missing: /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf (notFound)
+  shot h2-check-02-open-facebook-scuba
+  open "attention": opened, no missing-file message
+  shot h2-check-03-open-attention
+  open "Alice's Adventures in Wonderland": opened, no missing-file message
+  shot h2-check-04-open-alice-s-adventures-in-wonderland
+flutter: 00:31 +2: All tests passed!
+All tests passed.
+  container: /private/var/mobile/Containers/Data/Application/014AB481-A24F-41C3-8D32-05701D95BFA8
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+== install-over #3: real fixed app (devicectl device install app)
+App installed:
+Launched application with dev.shosai.shosai-flutter bundle identifier.
+  launched the real app; state after launch:
+  container: /private/var/mobile/Containers/Data/Application/BADBD5A4-4B26-464F-8559-15BA279C4664
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+== flutter drive --profile --keep-app-running harness (fixed code, mode check) = install over
+mode check label h3-check
+application support /var/mobile/Containers/Data/Application/6A9BC5A9-3901-4B0A-9261-5353A649DBC6/Library/Application Support
+book "Alice's Adventures in Wonderland" epub managed true file exists true path /private/var/mobile/Containers/Data/Application/6A9BC5A9-3901-4B0A-9261-5353A649DBC6/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+book "attention" pdf managed true file exists true path /private/var/mobile/Containers/Data/Application/6A9BC5A9-3901-4B0A-9261-5353A649DBC6/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+book "facebook_scuba" pdf managed true file exists false path /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+shot h3-check-01-library
+open "Alice's Adventures in Wonderland": opened, no missing-file message
+shot h3-check-02-open-alice-s-adventures-in-wonderland
+open "attention": opened, no missing-file message
+shot h3-check-03-open-attention
+open "facebook_scuba": MISSING: The book file is missing: /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf (notFound)
+shot h3-check-04-open-facebook-scuba
+  mode check label h3-check
+  application support /var/mobile/Containers/Data/Application/6A9BC5A9-3901-4B0A-9261-5353A649DBC6/Library/Application Support
+  book "Alice's Adventures in Wonderland" epub managed true file exists true path /private/var/mobile/Containers/Data/Application/6A9BC5A9-3901-4B0A-9261-5353A649DBC6/Library/Application Support/books/4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub
+  book "attention" pdf managed true file exists true path /private/var/mobile/Containers/Data/Application/6A9BC5A9-3901-4B0A-9261-5353A649DBC6/Library/Application Support/books/bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf
+  book "facebook_scuba" pdf managed true file exists false path /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf
+  shot h3-check-01-library
+  open "Alice's Adventures in Wonderland": opened, no missing-file message
+  shot h3-check-02-open-alice-s-adventures-in-wonderland
+  open "attention": opened, no missing-file message
+  shot h3-check-03-open-attention
+  open "facebook_scuba": MISSING: The book file is missing: /private/var/mobile/Containers/Data/Application/EDA8CF56-F6B8-4524-9FEA-50EB67DA1A96/Library/Application Support/books/15ed95a9b616dc189e234586b2e909d084dad74b06c832c85505eaa6882db49e.pdf (notFound)
+  shot h3-check-04-open-facebook-scuba
+flutter: 00:31 +2: All tests passed!
+All tests passed.
+  container: /private/var/mobile/Containers/Data/Application/6A9BC5A9-3901-4B0A-9261-5353A649DBC6
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
+== install-over #4: real fixed app (devicectl device install app)
+App installed:
+Launched application with dev.shosai.shosai-flutter bundle identifier.
+  launched the real app; state after launch:
+  container: /private/var/mobile/Containers/Data/Application/AE754583-56EC-4754-A5E7-6B51F70B004D
+  books dir: 4f81245d31380ac1d6eafb9a321e3691369bc70985736ae4bccf849a4f784036.epub bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697.pdf 
