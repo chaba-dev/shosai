@@ -1896,6 +1896,25 @@ void main() {
   });
 
   group('panel modality', () {
+    for (final size in [const Size(390, 800), const Size(1024, 800)]) {
+      testWidgets(
+        'system Back dismisses floating panels without leaving the reader at $size',
+        (tester) async {
+          _setView(tester, size);
+          await _open(tester, _reader(bridge: _PanelBridge(unitCount: 3)));
+          for (final panel in ['contents', 'typography', 'notes']) {
+            await tester.tap(find.byKey(ValueKey('reader-header-$panel')));
+            await _settle(tester);
+            expect(find.byKey(ValueKey('reader-panel-$panel')), findsOneWidget);
+            await tester.binding.handlePopRoute();
+            await _settle(tester);
+            expect(find.byKey(ValueKey('reader-panel-$panel')), findsNothing);
+            expect(find.byType(ReaderScreen), findsOneWidget);
+          }
+        },
+      );
+    }
+
     bool focusInStage(WidgetTester tester) {
       final context = FocusManager.instance.primaryFocus?.context;
       if (context == null) return false;

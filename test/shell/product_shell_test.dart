@@ -1317,6 +1317,29 @@ void main() {
     expect(find.textContaining('Reading $_quiet'), findsOneWidget);
   });
 
+  testWidgets('Back closes only the topmost switcher, then the reader panel', (
+    tester,
+  ) async {
+    await _pump(tester, const Size(390, 844), readerBuilder: _realReader);
+    await _open(tester, 3);
+    await _readerSettles(tester, () => harnessReaderPageReady(tester));
+    final panel = find.byKey(const ValueKey('reader-panel-notes'));
+    await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    await tester.tap(find.byTooltip('1 open book'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellTabSwitcher), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellTabSwitcher), findsNothing);
+    expect(panel, findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+    expect(find.byType(ReaderScreen), findsOneWidget);
+  });
+
   testWidgets('the tab switcher shows each book’s page as it was left', (
     tester,
   ) async {
