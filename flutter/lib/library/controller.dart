@@ -265,8 +265,8 @@ class LibraryController implements Listenable {
           }
         }
         _disposeBridgeIfIdle();
-      case LibraryImportRequested():
-        _import();
+      case LibraryImportRequested(:final selection):
+        _import(selection);
       case LibraryCoverRequested():
         _loadCover(message.bookId);
       case LibraryOperationCancelled():
@@ -603,8 +603,11 @@ class LibraryController implements Listenable {
     }());
   }
 
-  void _import() {
-    if (_closing || _model.busy) return;
+  void _import([LibraryImportSelection? chosen]) {
+    if (_closing || _model.busy) {
+      unawaited(chosen?.cleanup?.call());
+      return;
+    }
     final l10n = _localizations();
     _beginEffect(importing: true);
     _pendingImportAdapter = true;
@@ -613,7 +616,7 @@ class LibraryController implements Listenable {
       BigInt? cancellation;
       LibraryImportSelection? selection;
       try {
-        selection = await _pickImport();
+        selection = chosen ?? await _pickImport();
         _pendingImportAdapter = false;
         if (!_closing) _emit(_model);
         if (selection == null || selection.paths.isEmpty) return;
