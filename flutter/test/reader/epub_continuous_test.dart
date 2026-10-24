@@ -242,6 +242,25 @@ void main() {
     await closeReader(tester);
   });
 
+  testWidgets('Space and the arrows do not leave a chapter that scrolls', (
+    tester,
+  ) async {
+    await openReader(tester, bridge());
+    await settle(tester);
+
+    for (final key in [
+      LogicalKeyboardKey.space,
+      LogicalKeyboardKey.arrowRight,
+      LogicalKeyboardKey.arrowLeft,
+    ]) {
+      await tester.sendKeyEvent(key);
+      await settle(tester);
+      expect(dartPage(tester)!.unit, 0, reason: '$key');
+    }
+
+    await closeReader(tester);
+  });
+
   testWidgets('a restored location inside the chapter is scrolled into view', (
     tester,
   ) async {

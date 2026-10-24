@@ -605,6 +605,29 @@ void main() {
       );
     });
 
+    testWidgets('the arrows move between the actions without turning the '
+        'page', (tester) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(tester, _reader(bridge: _SelectionBridge(unitCount: 4)));
+      await dragFixtureSelection(tester, from: 4, to: 12);
+      await settleReaderSelection(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
+      await settleReaderSelection(tester);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await settleReaderSelection(tester);
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      expect(
+        tester
+            .widget<Semantics>(
+              find.byKey(const ValueKey('reader-document-semantics')),
+            )
+            .properties
+            .label,
+        contains('page 1 of 4'),
+      );
+    });
+
     testWidgets('the screen-reader select action opens the actions', (
       tester,
     ) async {

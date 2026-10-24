@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show ChangeNotifier;
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/records.dart' show FlutterOpenBooks;
 
 part 'message.dart';
 part 'model.dart';
@@ -30,15 +31,27 @@ typedef ShellPageMiniatureCapture = FutureOr<ui.Image?> Function(int bookId);
 /// [ShellReaderDismisser]. The library's open effect waits on
 /// [readerDismissed], so it keeps refreshing the collection when the reader
 /// goes away, as it did when the reader was a route of its own.
+///
+/// The open books are saved with the library so they come back when the
+/// application starts again (RFD 4, outcome 4). [ShellStarted] reads them;
+/// nothing is saved before that read completes, so the empty shell of a
+/// starting application never replaces them. After it, every change is
+/// saved, one write at a time, the latest one winning.
 class ShellController extends ChangeNotifier {
   ShellController({
     required ShellReaderPresenter presentReader,
     required ShellReaderDismisser dismissReader,
     ShellPageMiniatureCapture? capturePageMiniature,
+    ShellOpenBooksLoader? loadOpenBooks,
+    ShellOpenBooksSaver? saveOpenBooks,
+    ShellReadingResumer? resumeReading,
     ShellModel initial = const ShellModel(),
   }) : _presentReader = presentReader,
        _dismissReader = dismissReader,
        _capturePageMiniature = capturePageMiniature,
+       _loadOpenBooks = loadOpenBooks,
+       _saveOpenBooksAdapter = saveOpenBooks,
+       _resumeReading = resumeReading,
        _model = initial;
 
   static const int pageMiniatureBudgetBytes = 16 * 1024 * 1024;
@@ -46,6 +59,14 @@ class ShellController extends ChangeNotifier {
   final ShellReaderPresenter _presentReader;
   final ShellReaderDismisser _dismissReader;
   final ShellPageMiniatureCapture? _capturePageMiniature;
+  final ShellOpenBooksLoader? _loadOpenBooks;
+  final ShellOpenBooksSaver? _saveOpenBooksAdapter;
+  final ShellReadingResumer? _resumeReading;
+  bool _openBooksRequested = false;
+  bool _openBooksRead = false;
+  Object? _savedKey;
+  FlutterOpenBooks? _queuedSave;
+  Completer<void>? _saving;
   final Map<int, ui.Image> _pages = {};
   late final Map<int, ui.Image> _pageView = UnmodifiableMapView(_pages);
   final Map<int, int> _pageCaptureRevisions = {};
@@ -67,14 +88,29 @@ class ShellController extends ChangeNotifier {
   Future<void> get readerDismissed =>
       _presentation?.future ?? Future<void>.value();
 
+  /// Completes once no save of the open books is in flight or waiting; saves
+  /// still finish after disposal.
+  Future<void> get openBooksSaved => _saving?.future ?? Future<void>.value();
+
   void dispatch(ShellMessage message) {
     if (message case _ShellPageMiniatureCaptured()) {
       _pageCaptured(message);
       return;
     }
     if (_disposed) return;
+    if (message case ShellStarted(:final restoring)) {
+      _readOpenBooks(restoring);
+      return;
+    }
     final previous = _model;
     final next = update(previous, message);
+    if (message is _ShellOpenBooksLoaded) {
+      _openBooksRead = true;
+      // Books opened before the read finished replace the saved ones.
+      if (identical(next, previous) && previous.openBooks.isNotEmpty) {
+        _saveOpenBooks();
+      }
+    }
     if (identical(next, previous)) return;
     _model = next;
     _updatePages(previous, next);
@@ -86,6 +122,57 @@ class ShellController extends ChangeNotifier {
       _dismissReader();
     }
     notifyListeners();
+    _saveOpenBooks();
+    if (message case _ShellOpenBooksLoaded(:final saved?) when saved.reading) {
+      if (next.currentBook case final current?) _resumeReading?.call(current);
+    }
+  }
+
+  void _readOpenBooks(bool restoring) {
+    final load = _loadOpenBooks;
+    if (load == null || _openBooksRequested) return;
+    _openBooksRequested = true;
+    unawaited(() async {
+      FlutterOpenBooks? saved;
+      try {
+        saved = await load();
+      } on Object {
+        // Unreadable open books start the shell with none.
+      }
+      dispatch(_ShellOpenBooksLoaded(saved, restoring: restoring));
+    }());
+  }
+
+  void _saveOpenBooks() {
+    final save = _saveOpenBooksAdapter;
+    if (save == null || !_openBooksRead) return;
+    final model = _model;
+    // The list is replaced whenever a book or its locator changes.
+    final key = (model.openBooks, model.currentBookId, model.reading);
+    if (key == _savedKey) return;
+    _savedKey = key;
+    _queuedSave = (
+      books: [
+        for (final open in model.openBooks)
+          (book: open.book, path: open.path, bookId: open.bookId),
+      ],
+      current: model.currentBookId,
+      reading: model.reading,
+    );
+    if (_saving != null) return;
+    final saving = _saving = Completer<void>();
+    unawaited(() async {
+      for (var value = _queuedSave; value != null; value = _queuedSave) {
+        _queuedSave = null;
+        try {
+          await save(value);
+        } on Object {
+          // Unsaved open books cost only the next start's; reading goes on.
+        }
+      }
+      _saving = null;
+      saving.complete();
+    }());
   }
 
   void _updatePages(ShellModel before, ShellModel after) {
@@ -294,6 +381,26 @@ ShellModel update(ShellModel model, ShellMessage message) {
     case ShellRestored(:final restored):
       if (model.openBooks.isNotEmpty || model.reading) return model;
       return restored.copyWith(reading: false);
+    case _ShellOpenBooksLoaded(:final saved?, :final restoring)
+        when !restoring &&
+            saved.books.isNotEmpty &&
+            model.openBooks.isEmpty &&
+            !model.reading:
+      final books = [
+        for (final open in saved.books)
+          OpenBook(book: open.book, path: open.path, bookId: open.bookId),
+      ];
+      return model.copyWith(
+        openBooks: books,
+        currentBookId: books.any((open) => open.id == saved.current)
+            ? saved.current
+            : null,
+      );
+    case _ShellOpenBooksLoaded():
+      return model;
+    case ShellStarted():
+      // Starts an effect only; ShellController.dispatch consumes it.
+      return model;
     case _ShellReaderDismissed():
       if (!model.reading) return model;
       return model.copyWith(reading: false);

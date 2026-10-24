@@ -22,6 +22,7 @@ export 'src/library/files.dart';
 export 'src/library/inspection.dart';
 export 'src/library/library.dart';
 export 'src/library/library_settings.dart';
+export 'src/library/open_books.dart';
 export 'src/preferences.dart';
 export 'src/reading/bookmarks.dart';
 export 'src/reading/reader_settings.dart';

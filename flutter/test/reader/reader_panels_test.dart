@@ -540,6 +540,53 @@ void main() {
       expect(find.text('BOOKMARKS · 0'), findsOneWidget);
     });
 
+    testWidgets('the note dialog lays out its actions on a phone', (
+      tester,
+    ) async {
+      // A phone is below Shad's small breakpoint, where the dialog stacks
+      // full-width actions; a forced row gave them an unbounded width.
+      _setView(tester, const Size(390, 844));
+      final bridge = _PanelBridge(unitCount: 3);
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          initialBookId: 1,
+          contentsLoader: (_) async => const [],
+        ),
+      );
+      await _openNotes(tester);
+      await tester.tap(find.byKey(const ValueKey('reader-notes-add-page')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      final dialog = tester.getRect(find.byType(ShadDialog));
+      final save = tester.getRect(find.widgetWithText(ShadButton, 'Save'));
+      expect(dialog.width, lessThanOrEqualTo(390));
+      expect(save.left, greaterThanOrEqualTo(dialog.left));
+      expect(save.right, lessThanOrEqualTo(dialog.right));
+      // Stacked at full width, the primary action on top.
+      final cancel = tester.getRect(find.widgetWithText(ShadButton, 'Cancel'));
+      expect(save.width, closeTo(cancel.width, 0.5));
+      expect(save.top, lessThan(cancel.top));
+      // The field spans the same width as the actions.
+      final field = tester.getRect(
+        find.byKey(const ValueKey('reader-note-editor-field')),
+      );
+      expect(field.left, closeTo(save.left, 0.5));
+      expect(field.right, closeTo(save.right, 0.5));
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(ShadDialog),
+          matching: find.byType(ShadInput),
+        ),
+        'From a phone',
+      );
+      await tester.tap(find.widgetWithText(ShadButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(bridge.placeNotes.single.body, 'From a phone');
+    });
+
     testWidgets('page notes and book notes are written in the dialog and '
         'edited in place', (tester) async {
       _setView(tester, const Size(1280, 800));
