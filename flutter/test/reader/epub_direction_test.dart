@@ -135,6 +135,28 @@ void main() {
     await closeReader(tester);
   });
 
+  testWidgets('in right-to-left and vertical books Left turns forward and '
+      'Right back, as their margins do', (tester) async {
+    for (final epub in [
+      longChapterEpub(paragraphs: 80, pageProgression: 'rtl'),
+      verticalJapaneseEpub(paragraphs: 30, pageProgression: null),
+    ]) {
+      await openReader(tester, bridge(null, epub: epub));
+      final first = page(tester);
+      expect(first.spread, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await settle(tester);
+      expect(page(tester).pageIndex, first.pageIndex + 2);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await settle(tester);
+      expect(page(tester).pageIndex, first.pageIndex);
+
+      await closeReader(tester);
+    }
+  });
+
   testWidgets('a right-to-left book\'s progress track starts at its right '
       'end', (tester) async {
     await openReader(tester, bridge('rtl'));
