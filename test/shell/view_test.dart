@@ -372,6 +372,67 @@ void main() {
     expect(recorder.opened, [3]);
   });
 
+  for (final switcher in [false, true]) {
+    testWidgets(
+      'phone books reorder by long-press without opening (switcher: $switcher)',
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        var model = _model(reading: switcher).copyWith(switching: switcher);
+        final opened = <int>[];
+        await tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) {
+                  final actions = ShellActions(
+                    selectPlace: (_) {},
+                    openBook: (entry) => opened.add(entry.id),
+                    closeBook: (_) {},
+                    moveBook: (from, to) => setState(
+                      () => model = update(model, ShellBookMoved(from, to)),
+                    ),
+                    addBooks: null,
+                    loadCover: (_) => false,
+                  );
+                  return switcher
+                      ? ShellTabSwitcher(
+                          model: model,
+                          covers: const {},
+                          actions: actions,
+                        )
+                      : Align(
+                          alignment: Alignment.topLeft,
+                          child: ShellReadingNowCards(
+                            model: model,
+                            covers: const {},
+                            actions: actions,
+                          ),
+                        );
+                },
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final from = tester.getCenter(find.text(_origin.title));
+        final target = tester.getRect(find.text(_shannon.title)).center;
+        final drag = await tester.startGesture(from);
+        await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+        await drag.moveTo(Offset(target.dx.clamp(5, 385), target.dy));
+        await tester.pump(const Duration(milliseconds: 300));
+        await drag.up();
+        await tester.pumpAndSettle();
+        expect(model.openBooks.map((entry) => entry.id), [2, 1, 3]);
+        expect(opened, isEmpty);
+        final first = tester.getTopLeft(find.text(_shannon.title));
+        final second = tester.getTopLeft(find.text(_origin.title));
+        expect(first.dx, lessThan(second.dx));
+      },
+    );
+  }
+
   testWidgets('the tablet rail is 56 px', (tester) async {
     await _pumpFrame(
       tester,

@@ -138,16 +138,107 @@ class ShellReadingNowCards extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             spacing: 12,
             children: [
-              for (final entry in model.openBooks)
-                _ReadingNowCard(
-                  entry: entry,
-                  cover: covers[entry.id],
+              for (var index = 0; index < model.openBooks.length; index++)
+                _ReorderablePhoneBook(
+                  key: ValueKey(model.openBooks[index].id),
+                  model: model,
+                  index: index,
                   actions: actions,
+                  axis: Axis.horizontal,
+                  child: _ReadingNowCard(
+                    entry: model.openBooks[index],
+                    cover: covers[model.openBooks[index].id],
+                    actions: actions,
+                  ),
                 ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Both phone book lists use the shell's existing durable ordering. A normal
+/// drag still scrolls; a long press lifts a book to drop onto another slot.
+class _ReorderablePhoneBook extends StatelessWidget {
+  const _ReorderablePhoneBook({
+    super.key,
+    required this.model,
+    required this.index,
+    required this.actions,
+    required this.child,
+    this.axis = Axis.vertical,
+  });
+
+  final ShellModel model;
+  final int index;
+  final ShellActions actions;
+  final Widget child;
+  final Axis axis;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = WidgetsLocalizations.of(context);
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final earlier = axis == Axis.vertical
+        ? l10n.reorderItemUp
+        : rtl
+        ? l10n.reorderItemRight
+        : l10n.reorderItemLeft;
+    final later = axis == Axis.vertical
+        ? l10n.reorderItemDown
+        : rtl
+        ? l10n.reorderItemLeft
+        : l10n.reorderItemRight;
+    final bookId = model.openBooks[index].id;
+    return Semantics(
+      customSemanticsActions: {
+        if (index > 0)
+          CustomSemanticsAction(label: earlier): () =>
+              actions.moveBook(index, index - 1),
+        if (index + 1 < model.openBooks.length)
+          CustomSemanticsAction(label: later): () =>
+              actions.moveBook(index, index + 1),
+      },
+      child: LayoutBuilder(
+        builder: (context, constraints) => LongPressDraggable<int>(
+          data: bookId,
+          maxSimultaneousDrags: 1,
+          feedback: SizedBox(
+            width: constraints.maxWidth.isFinite
+                ? constraints.maxWidth
+                : ShellReadingNowCards.cardWidth,
+            child: Material(
+              type: MaterialType.transparency,
+              child: Opacity(opacity: .85, child: child),
+            ),
+          ),
+          childWhenDragging: Opacity(opacity: .35, child: child),
+          child: DragTarget<int>(
+            onWillAcceptWithDetails: (details) => details.data != bookId,
+            onAcceptWithDetails: (details) {
+              final from = model.openBooks.indexWhere(
+                (entry) => entry.id == details.data,
+              );
+              if (from >= 0) actions.moveBook(from, index);
+            },
+            builder: (context, candidates, rejected) => DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: candidates.isEmpty
+                    ? null
+                    : Border.all(
+                        color: ShellPalette.of(context).accent,
+                        width: 2,
+                      ),
+              ),
+              position: DecorationPosition.foreground,
+              child: child,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -431,15 +522,27 @@ class _ShellTabSwitcherState extends State<ShellTabSwitcher> {
                         spacing: ShellTabSwitcher.gap,
                         runSpacing: ShellTabSwitcher.gap,
                         children: [
-                          for (final entry in model.openBooks)
+                          for (
+                            var index = 0;
+                            index < model.openBooks.length;
+                            index++
+                          )
                             SizedBox(
+                              key: ValueKey(model.openBooks[index].id),
                               width: width,
-                              child: _TabCard(
-                                entry: entry,
-                                cover: covers[entry.id],
-                                page: pages[entry.id],
-                                current: entry.id == model.currentBookId,
+                              child: _ReorderablePhoneBook(
+                                model: model,
+                                index: index,
                                 actions: actions,
+                                child: _TabCard(
+                                  entry: model.openBooks[index],
+                                  cover: covers[model.openBooks[index].id],
+                                  page: pages[model.openBooks[index].id],
+                                  current:
+                                      model.openBooks[index].id ==
+                                      model.currentBookId,
+                                  actions: actions,
+                                ),
                               ),
                             ),
                           SizedBox(
