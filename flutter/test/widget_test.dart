@@ -1758,6 +1758,60 @@ void main() {
     await bridge.disposed.future;
   });
 
+  for (final size in const [Size(390, 844), Size(600, 800), Size(1280, 800)]) {
+    testWidgets('association dialog lays out its actions and sources at '
+        '${size.width.toInt()} wide', (tester) async {
+      // A phone is below Shad's small breakpoint, where the dialog stacks
+      // full-width actions; a forced row gave them an unbounded width. The
+      // sources stay inside the dialog, which is at most 512 px wide.
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = size;
+      addTearDown(tester.view.reset);
+      final bridge = _ControlledBridge(
+        associationSources: [_associationSource()],
+        associatedAnnotations: [_resolutionAnnotations().first],
+        immediateLists: true,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            debugPathEntry: true,
+            bridge: bridge,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(ShadInput), '/tmp/changed.epub');
+      await tester.tap(find.text('Open document'));
+      await tester.pumpAndSettle();
+      await _openNotesPanel(tester);
+      await tester.tap(
+        find.byTooltip('Associate highlights from an earlier version…'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      final dialog = tester.getRect(find.byType(ShadDialog));
+      final associate = tester.getRect(
+        find.widgetWithText(ShadButton, 'Associate'),
+      );
+      expect(associate.left, greaterThanOrEqualTo(dialog.left));
+      expect(associate.right, lessThanOrEqualTo(dialog.right));
+      final source = tester.getRect(
+        find.byType(ShadRadio<FlutterAnnotationAssociationSource>),
+      );
+      expect(source.right, lessThanOrEqualTo(dialog.right - 24));
+      await tester.tap(find.text('/tmp/original.epub'));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ShadButton, 'Associate'));
+      await tester.pumpAndSettle();
+      expect(bridge.associatedSourceIds, ['source-version']);
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+    });
+  }
+
   testWidgets('association pagination fits a compact short viewport', (
     tester,
   ) async {

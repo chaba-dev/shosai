@@ -16,12 +16,15 @@ class _AnnotationAssociationDialogState
 
   @override
   Widget build(BuildContext context) {
-    final contentWidth = math.min(520.0, MediaQuery.sizeOf(context).width - 96);
+    final contentWidth = _dialogContentWidth(context, 520);
     return ShadDialog(
       title: const Text('Associate highlights?'),
+      // Large text stacks the actions; otherwise Shad lays them in a row, or
+      // stacks them at full width on a phone. Forcing a row there gives the
+      // full-width buttons an unbounded width and the dialog never lays out.
       actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
           ? Axis.vertical
-          : Axis.horizontal,
+          : null,
       actions: [
         ShadButton.outline(
           height: shosaiShadButtonHeight(context),
@@ -146,9 +149,12 @@ class _NoteDialogState extends State<_NoteDialog> {
         FlutterNoteKind.book => l10n.readerBookNoteTitle,
         null => l10n.readerHighlightNoteTitle,
       }),
+      // Large text stacks the actions; otherwise Shad lays them in a row, or
+      // stacks them at full width on a phone. Forcing a row there gives the
+      // full-width buttons an unbounded width and the dialog never lays out.
       actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
           ? Axis.vertical
-          : Axis.horizontal,
+          : null,
       actions: [
         ShadButton.outline(
           height: shosaiShadButtonHeight(context),
@@ -163,7 +169,7 @@ class _NoteDialogState extends State<_NoteDialog> {
       ],
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: math.min(360, MediaQuery.sizeOf(context).width - 96),
+          maxWidth: _dialogContentWidth(context, 360),
         ),
         child: ShadInput(
           key: const ValueKey('reader-note-editor-field'),
@@ -175,4 +181,17 @@ class _NoteDialogState extends State<_NoteDialog> {
       ),
     );
   }
+}
+
+/// The width of a reader dialog's content, at most [max].
+///
+/// Shad's dialog is at most 512 px wide inside 24 px of padding on each side
+/// (its defaults, which the app keeps), so the content never exceeds that.
+/// Below Shad's small breakpoint the dialog stacks its actions at that full
+/// width, and the content takes the same width instead of stopping short.
+double _dialogContentWidth(BuildContext context, double max) {
+  final width = MediaQuery.sizeOf(context).width;
+  final inner = math.min(width, 512.0) - 48;
+  if (width < ShadTheme.of(context).breakpoints.sm.value) return inner;
+  return math.min(max, inner);
 }
