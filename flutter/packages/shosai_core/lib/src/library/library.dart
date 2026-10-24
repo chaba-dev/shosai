@@ -505,15 +505,18 @@ final class Library {
     return RemoveOutcome(removed: true, managedFileDeletionPending: !deleted);
   }
 
-  /// Retry deleting private copies of removed books, least-tried first,
-  /// then delete what a crash left in the managed directory (see
-  /// [_sweepOrphans]). Run at start-up.
+  /// Follow private copies that moved with the managed directory (see
+  /// [_followMovedCopies]), retry deleting private copies of removed books,
+  /// least-tried first, then delete what a crash left in the managed
+  /// directory (see [_sweepOrphans]). Run at start-up, before the library is
+  /// read.
   ///
   /// Only copies recorded in this library's managed directory, while it
   /// still resolves to the path recorded when it was first used, are
   /// deleted; any other debt stays pending.
   Future<({int cleared, int pending})> retryManagedFileDeletions() =>
       _withManagedFiles((root) async {
+        if (root != null) await _followMovedCopies(root);
         final paths = await _records.claimDeletionRetries(
           managedDeletionRetryBatch,
         );
@@ -525,6 +528,44 @@ final class Library {
         await _sweepOrphans(root);
         return (cleared: cleared, pending: paths.length - cleared);
       });
+
+  /// Record private copies at [root] that the database still places in a
+  /// directory that is gone.
+  ///
+  /// The paths are absolute, and the directory they name can move with
+  /// everything in it: iOS gives an app a new container path on every
+  /// install, and the database and the copies move together. A managed book
+  /// whose copy is missing from its recorded path follows its content's
+  /// name (see [privateCopyName]) to [root] when a file of its size is
+  /// there; opening it still checks the content. A deletion debt recorded
+  /// in a directory that no longer exists moves to [root] the same way, or
+  /// is dropped when nothing is left to delete. Runs under the lock with a
+  /// validated root, before the debts are retried and the directory swept.
+  Future<void> _followMovedCopies(String root) async {
+    for (final book in await _records.managedOutside(root)) {
+      if (await FileSystemEntity.type(book.path, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        continue;
+      }
+      final copy = p.join(root, '${book.contentHash}.${book.format.name}');
+      if (!await _isFileOfSize(copy, book.fileSize)) continue;
+      // The inspection awaited filesystem work: do not adopt a path in a
+      // directory that was redirected while it ran.
+      if (!await _resolvesTo(root)) return;
+      await _records.moveManagedCopy(book.id, book.path, copy);
+    }
+    for (final debt in await _records.debtsOutside(root)) {
+      if (await Directory(debt.directory).exists()) continue;
+      final moved = p.join(root, p.basename(debt.path));
+      final type = await FileSystemEntity.type(moved, followLinks: false);
+      if (!await _resolvesTo(root)) return;
+      if (type == FileSystemEntityType.notFound) {
+        await _records.clearDeletionDebt(debt.path);
+      } else {
+        await _records.moveDeletionDebt(debt.path, moved, root);
+      }
+    }
+  }
 
   /// Delete entries of the managed directory [root] that no book or deletion
   /// debt owns: a copy published by an import that died before its commit,
@@ -551,7 +592,7 @@ final class Library {
       await for (final entry in Directory(root).list(followLinks: false)) {
         if (entry is! File) continue;
         final name = p.basename(entry.path);
-        if (_publishedName.hasMatch(name) ||
+        if (privateCopyName.hasMatch(name) ||
             name.startsWith('.shosai-damaged-') ||
             name.startsWith('.shosai-delete-')) {
           pending.add(entry.path);
@@ -642,9 +683,6 @@ final _managedLocks = <String, _Lock>{};
 
 const _lockFileName = '.shosai-lock';
 
-/// The name of a published private copy: `<sha256>.<format>`.
-final _publishedName = RegExp(r'^[0-9a-f]{64}\.(epub|pdf)$');
-
 /// A staging file this old is taken to belong to an import that is no longer
 /// running. A heuristic: nothing records which imports are alive, and an
 /// import that really ran this long would fail when its stage vanished.
@@ -686,6 +724,19 @@ CoreException _redirectedDirectory() => const CoreException(
 String? _metadataText(String? value) {
   final collapsed = value?.trim().replaceAll(RegExp(r'\s+'), ' ');
   return collapsed == null || collapsed.isEmpty ? null : collapsed;
+}
+
+/// Whether [path] is a regular file (not a link) of [size] bytes.
+Future<bool> _isFileOfSize(String path, int size) async {
+  if (await FileSystemEntity.type(path, followLinks: false) !=
+      FileSystemEntityType.file) {
+    return false;
+  }
+  try {
+    return await File(path).length() == size;
+  } on FileSystemException {
+    return false;
+  }
 }
 
 Future<void> _deleteQuietly(String path) async {

@@ -67,7 +67,11 @@ final class OpenBooksStore {
       if (books.any((open) => open.book.id == entry.bookId)) continue;
       final book = await _library.get(entry.bookId);
       if (book == null) continue;
-      books.add((book: book, path: entry.path, openBookId: entry.openBookId));
+      // A tab showing its own book opens it where the library has it now:
+      // the saved path is absolute, and the file may have moved since (iOS
+      // moves the app's files on every install).
+      final path = entry.openBookId == entry.bookId ? book.path : entry.path;
+      books.add((book: book, path: path, openBookId: entry.openBookId));
     }
     final current = books
         .where((open) => open.book.id == saved.current)

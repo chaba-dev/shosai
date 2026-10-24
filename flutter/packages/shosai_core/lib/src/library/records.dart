@@ -114,7 +114,10 @@ final class LibraryRecords {
     });
   }
 
-  /// The paths among [paths] that no book or deletion debt owns.
+  /// The paths among [paths] that no book or deletion debt owns. A private
+  /// copy's name (see [privateCopyName]) is owned by the book with its
+  /// content wherever that book is recorded, so a copy is never taken for an
+  /// orphan while its book points somewhere else.
   Future<List<String>> unowned(List<String> paths) {
     if (paths.isEmpty) return Future.value(const []);
     final candidates = List.of(paths);
@@ -125,29 +128,97 @@ final class LibraryRecords {
           '''SELECT file_path FROM books WHERE file_path IN ($marks)
              UNION
              SELECT file_path FROM managed_file_deletion_debt
-             WHERE file_path IN ($marks)''',
-          [...candidates, ...candidates],
+             WHERE file_path IN ($marks)
+             UNION
+             SELECT content_hash FROM books WHERE content_hash IN ($marks)''',
+          [
+            ...candidates,
+            ...candidates,
+            for (final path in candidates) privateCopyHash(path),
+          ],
         ))
           row.columnAt(0) as String,
       };
       return [
         for (final path in candidates)
-          if (!owned.contains(path)) path,
+          if (!owned.contains(path) && !owned.contains(privateCopyHash(path)))
+            path,
       ];
     });
   }
 
-  /// Whether a book or a deletion debt owns [path].
+  /// Whether a book or a deletion debt owns [path] (see [unowned]).
   Future<bool> isOwned(String path) => _store.read(
     (db) => db
         .select(
           '''SELECT 1 FROM books WHERE file_path = ?1
          UNION ALL
-         SELECT 1 FROM managed_file_deletion_debt WHERE file_path = ?1''',
-          [path],
+         SELECT 1 FROM managed_file_deletion_debt WHERE file_path = ?1
+         UNION ALL
+         SELECT 1 FROM books WHERE content_hash = ?2''',
+          [path, privateCopyHash(path)],
         )
         .isNotEmpty,
   );
+
+  /// Managed books whose private copy is recorded outside [root].
+  Future<List<Book>> managedOutside(String root) => _store.read(
+    (db) => [
+      for (final book
+          in db
+              .select(
+                "SELECT $bookColumns FROM books WHERE storage_kind = 'managed'",
+              )
+              .map(bookFromRow))
+        if (p.dirname(book.path) != root) book,
+    ],
+  );
+
+  /// Record managed book [id]'s copy at [to] instead of [from], unless the
+  /// book has changed since or another book is recorded at [to]. Returns
+  /// whether it moved.
+  Future<bool> moveManagedCopy(int id, String from, String to) =>
+      _store.transaction((db) {
+        if (_bookByPath(db, to) != null) return false;
+        db.execute(
+          """UPDATE books SET file_path = ?
+             WHERE id = ? AND file_path = ? AND storage_kind = 'managed'""",
+          [to, id, from],
+        );
+        if (db.updatedRows == 0) return false;
+        // The copy at its new path is in use, not a removed one.
+        db.execute(
+          'DELETE FROM managed_file_deletion_debt WHERE file_path = ?',
+          [to],
+        );
+        return true;
+      });
+
+  /// Deletion debts recorded in a managed directory other than [root].
+  Future<List<({String path, String directory})>> debtsOutside(String root) =>
+      _store.read(
+        (db) => [
+          for (final row in db.select(
+            '''SELECT file_path, managed_dir FROM managed_file_deletion_debt
+               WHERE managed_dir != ?''',
+            [root],
+          ))
+            (
+              path: row.columnAt(0) as String,
+              directory: row.columnAt(1) as String,
+            ),
+        ],
+      );
+
+  /// Record the debt at [from] as one at [to], in managed directory [root].
+  Future<void> moveDeletionDebt(String from, String to, String root) =>
+      _store.transaction((db) {
+        db.execute(
+          'DELETE FROM managed_file_deletion_debt WHERE file_path = ?',
+          [from],
+        );
+        _recordDeletionDebt(db, to, root);
+      });
 
   /// Record a private copy at [path], in [managedDirectory], to delete.
   Future<void> recordDeletionDebt(String path, String managedDirectory) =>
@@ -176,12 +247,16 @@ final class LibraryRecords {
         return paths;
       });
 
-  /// The deletion debt at [path]: whether a book uses the path, and the
-  /// managed directory recorded with the debt (null when there is none).
+  /// The deletion debt at [path]: whether a book owns the path or its
+  /// hash-named content, and the managed directory recorded with the debt
+  /// (null when there is none).
   Future<({bool inUse, String? directory})> deletionDebt(
     String path,
   ) => _store.read((db) {
-    final used = db.select('SELECT 1 FROM books WHERE file_path = ?', [path]);
+    final used = db.select(
+      'SELECT 1 FROM books WHERE file_path = ? OR content_hash = ?',
+      [path, privateCopyHash(path)],
+    );
     final directory =
         db
                 .select(
@@ -203,6 +278,15 @@ final class LibraryRecords {
 }
 
 const _managedDirectoryKey = 'library.managed_directory';
+
+/// The name of a published private copy: `<sha256>.<format>`, named by its
+/// content.
+final privateCopyName = RegExp(r'^([0-9a-f]{64})\.(epub|pdf)$');
+
+/// The content hash in the name of the private copy at [path], or null when
+/// the name is not a private copy's.
+String? privateCopyHash(String path) =>
+    privateCopyName.firstMatch(p.basename(path))?.group(1);
 
 const bookColumns = '''id, title, author, format, file_path, storage_kind,
   original_path, content_hash, file_size, cover IS NOT NULL, progress,
