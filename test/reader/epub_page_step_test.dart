@@ -258,6 +258,24 @@ void main() {
     },
   );
 
+  testWidgets('phone swipes turn EPUB pages within a chapter and back', (
+    tester,
+  ) async {
+    await openReader(tester, bridge(), size: const ui.Size(390, 800));
+    await settleEpubPage(tester);
+    final first = dartPage(tester)!.page;
+    final surface = find.byKey(const ValueKey('reader-selection-surface'));
+    await tester.drag(surface, const Offset(-200, 0));
+    await settleEpubPage(tester);
+    final next = dartPage(tester)!.page;
+    expect(next.unit, first.unit);
+    expect(next.canonicalStart, greaterThan(first.canonicalStart));
+    await tester.drag(surface, const Offset(200, 0));
+    await settleEpubPage(tester);
+    expect(dartPage(tester)!.page.canonicalStart, first.canonicalStart);
+    await closeReader(tester);
+  });
+
   testWidgets('keyboard PageDown steps forward and PageUp walks back in '
       'order', (tester) async {
     final harness = bridge();
