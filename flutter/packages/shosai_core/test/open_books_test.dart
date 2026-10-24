@@ -99,4 +99,27 @@ void main() {
     expect(loaded.books.single.openBookId, isNull);
     expect(loaded.reading, isFalse);
   });
+
+  test("a tab showing its own book opens it at the library's path, which "
+      'may have moved since it was saved', () async {
+    await store().save(
+      OpenBooksSession(
+        books: [
+          (
+            bookId: pdf.id,
+            path: '/old/container/books/sample.pdf',
+            openBookId: pdf.id,
+          ),
+          (bookId: epub.id, path: '/elsewhere/other.epub', openBookId: null),
+        ],
+        current: pdf.id,
+      ),
+    );
+
+    final loaded = (await store().load())!;
+    expect(
+      [for (final open in loaded.books) open.path],
+      [pdf.path, '/elsewhere/other.epub'],
+    );
+  });
 }
