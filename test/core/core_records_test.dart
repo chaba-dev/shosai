@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_core/shosai_core.dart' show BookAnchor;
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -169,6 +170,56 @@ void main() {
     expect(report.items.single.error, isNull);
     return report.items.single.book!;
   }
+
+  test(
+    'a removed location retains its book and notes as unavailable',
+    () async {
+      final imported = await import(_epubFixture);
+      final book = (await core.library.get(imported.bookId))!;
+      final generation = await core.locations.connect('folder', 'My books');
+      await core.locations.locate(book.contentHash, (
+        locationId: 'folder',
+        key: 'book.epub',
+      ), generation: generation);
+      await core.annotations.createNote(
+        book.id,
+        const BookAnchor(),
+        'A note that outlives the folder.',
+      );
+      await core.locations.remove('folder');
+
+      final page = await bridge.libraryPage(
+        limit: 10,
+        offset: 0,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(page.books.single.bookId, book.id);
+      expect(page.books.single.unavailable, isTrue);
+      final notes = await bridge.libraryNotes(
+        limit: 10,
+        offset: 0,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(
+        notes.books.single.notes.single.body,
+        'A note that outlives the folder.',
+      );
+      expect(notes.books.single.book.unavailable, isTrue);
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: book.id,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.kind,
+            'kind',
+            FlutterBridgeErrorKind.notFound,
+          ),
+        ),
+      );
+    },
+  );
 
   test('library books import, list, open and remove', () async {
     final epub = await import(_epubFixture);

@@ -1036,6 +1036,7 @@
   "importReadFailed": "The selected document could not be read.",
   "importCancelled": "Import cancelled.",
   "importInvalidRequest": "The document provider request is no longer valid.",
+  "libraryBookUnavailable": "Unavailable",
   "shellSwitcherDone": "Done",
   "@shellSwitcherDone": {
     "description": "The tab switcher's action that returns to the current book."
