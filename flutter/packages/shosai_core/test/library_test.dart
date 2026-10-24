@@ -1049,6 +1049,72 @@ void main() {
       skip: Platform.isLinux ? false : 'reads /proc/self/fd',
     );
 
+    test('follow the data directory when it moves, as iOS moves an '
+        "app's container on every install", () async {
+      final t = await TempLibrary.create();
+      final before = p.join(t.directory.path, 'before');
+      final after = p.join(t.directory.path, 'after');
+      var store = await Store.open(p.join(before, 'library.sqlite3'));
+      var library = Library(
+        store,
+        managedDirectory: p.join(before, 'books'),
+        inspectors: const {BookFormat.epub: EpubInspector()},
+      );
+      Future<Book> import(String path, {required bool managed}) async =>
+          (await library.importFile(path, managed: managed)).book!;
+      final epub = await import(
+        t.copyFixture('sample.epub', 'sample.epub'),
+        managed: true,
+      );
+      final pdf = await import(
+        t.copyFixture('sample.pdf', 'sample.pdf'),
+        managed: true,
+      );
+      final edition = t.copyFixture('sample.epub', 'edition.epub');
+      File(edition).writeAsBytesSync(
+        withZipComment(File(edition).readAsBytesSync(), 'edition'),
+      );
+      final referenced = await import(edition, managed: false);
+      // A removed book's copy whose deletion has not finished, recorded in
+      // the directory as it was.
+      final removed = File(p.join(p.dirname(pdf.path), '${'d' * 64}.pdf'))
+        ..writeAsStringSync('removed');
+      await executeSql(
+        store,
+        '''INSERT INTO managed_file_deletion_debt (file_path, managed_dir)
+           VALUES (?, ?)''',
+        [
+          [removed.path, p.dirname(removed.path)],
+        ],
+      );
+      await store.close();
+
+      // The new container holds the same files under another path, and the
+      // old one is gone.
+      Directory(before).renameSync(after);
+      store = await Store.open(p.join(after, 'library.sqlite3'));
+      addTearDown(store.close);
+      library = Library(store, managedDirectory: p.join(after, 'books'));
+      await library.retryManagedFileDeletions();
+
+      final root = canonicalBookPath(p.join(after, 'books'));
+      for (final book in [epub, pdf]) {
+        final path = p.join(root, p.basename(book.path));
+        expect(await library.verifiedPath(book.id), path);
+        expect((await library.get(book.id))!.path, path);
+      }
+      expect(await library.verifiedPath(referenced.id), referenced.path);
+      expect(
+        [
+          for (final entry in Directory(root).listSync())
+            if (p.basename(entry.path) != '.shosai-lock')
+              p.basename(entry.path),
+        ]..sort(),
+        [p.basename(epub.path), p.basename(pdf.path)]..sort(),
+      );
+      expect(await countRows(store, 'managed_file_deletion_debt'), 0);
+    });
+
     test('the orphan sweep keeps a copy whose content a book holds, '
         'wherever the book is recorded', () async {
       final t = await TempLibrary.create();
