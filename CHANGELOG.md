@@ -106,6 +106,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Pinch and double tap to zoom PDFs (#232)
 - *(shell)* Reorder phone books with a long press (#233)
 - *(reader)* Animate page changes with a saved motion preference (#235)
+- *(reader)* Apply shared PDF page themes and Night chrome (#237)
 
 ### 🐛 Bug Fixes
 
