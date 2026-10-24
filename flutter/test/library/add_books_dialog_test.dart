@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -23,8 +24,35 @@ const _choices = [
 ];
 
 class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
+  _Bridge({this.failImport = false, this.cancelImport = false});
+
+  final bool failImport;
+  final bool cancelImport;
+
+  /// The path imports the library asked for, in order.
+  final imports = <({List<String> paths, bool managed})>[];
+
   @override
   bool get isDisposed => false;
+  @override
+  Future<FlutterImportReport> importPaths({
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  }) async {
+    imports.add((paths: pathKeys, managed: managed));
+    return FlutterImportReport(
+      imported: failImport || cancelImport
+          ? BigInt.zero
+          : BigInt.from(pathKeys.length),
+      failed: failImport ? BigInt.one : BigInt.zero,
+      cancelled: cancelImport,
+      items: failImport
+          ? [FlutterImportItem(pathKey: pathKeys.first, error: 'unsupported')]
+          : const [],
+    );
+  }
+
   @override
   void dispose() {}
   @override
@@ -69,13 +97,14 @@ class _PopCounter extends NavigatorObserver {
 
 /// Records native picker requests so a duplicate activation is observable.
 class _PickerStub {
-  _PickerStub(WidgetTester tester) {
+  _PickerStub(WidgetTester tester, {List<String> picked = const []}) {
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       _pickerChannel,
       (call) async {
         calls.add(call.method);
+        arguments.add(call.arguments);
         return switch (call.method) {
-          'openFile' => const <String>[],
+          'openFile' => picked,
           _ => null,
         };
       },
@@ -89,14 +118,18 @@ class _PickerStub {
   }
 
   final List<String> calls = [];
+  final List<Object?> arguments = [];
 }
 
 Future<void> _pumpShell(
   WidgetTester tester, {
   NavigatorObserver? observer,
+  _Bridge? bridge,
+  Locale locale = const Locale('en'),
 }) async {
   await tester.pumpWidget(
     ShadApp(
+      locale: locale,
       theme: shosaiShadTheme(Brightness.light),
       navigatorObservers: [?observer],
       // Mirrors the production composition in `ShosaiShell`: the generated
@@ -111,7 +144,7 @@ Future<void> _pumpShell(
       ],
       supportedLocales: AppLocalizations.supportedLocales,
       home: ProductShell(
-        bridgeFactory: () => _Bridge(),
+        bridgeFactory: () => bridge ?? _Bridge(),
         readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
       ),
     ),
@@ -168,8 +201,8 @@ BoxDecoration _focusedRing() {
   );
 }
 
-/// Every case runs on the desktop import path; the Android and iOS branches
-/// never show the two-choice dialog.
+/// Every case below runs on the desktop import path; the Android and iOS
+/// branches never show the two-choice dialog.
 void _addBooksTest(String description, WidgetTesterCallback callback) =>
     testWidgets(
       description,
@@ -376,5 +409,116 @@ void main() {
 
       expect(picker.calls, ['getDirectoryPath']);
     });
+  }
+
+  testWidgets(
+    'iOS picks books in the document picker and keeps copies',
+    (tester) async {
+      // The picker copies each book into the app's inbox; stand-ins for those
+      // copies show that the library removes them after its own copy.
+      final inbox = await tester.runAsync(
+        () => Directory.systemTemp.createTemp('shosai-inbox'),
+      );
+      addTearDown(() => inbox!.delete(recursive: true));
+      final picked = [
+        for (final name in ['origin.epub', 'paper.pdf'])
+          (await tester.runAsync(
+            () => File('${inbox!.path}/$name').writeAsString(name),
+          ))!.path,
+      ];
+      final picker = _PickerStub(tester, picked: picked);
+      final bridge = _Bridge();
+
+      await _pumpShell(tester, bridge: bridge);
+      await _openAddBooks(tester);
+
+      // No two-choice dialog: the system picker opens at once, offering books
+      // by their uniform type identifiers.
+      expect(find.text('Choose files'), findsNothing);
+      expect(picker.calls, ['openFile']);
+      final request = picker.arguments.single! as Map<Object?, Object?>;
+      expect(request['multiple'], isTrue);
+      final types = (request['acceptedTypeGroups']! as List).single as Map;
+      expect(types['uniformTypeIdentifiers'], [
+        'com.adobe.pdf',
+        'org.idpf.epub-container',
+      ]);
+
+      // The review keeps managed storage on: the inbox copies are temporary.
+      expect(find.text('Review books'), findsOneWidget);
+      expect(
+        tester.widget<ShadSwitch>(find.byType(ShadSwitch)).onChanged,
+        isNull,
+      );
+      await tester.tap(find.widgetWithText(ShadButton, 'Import'));
+      await tester.pump();
+      expect(bridge.imports.single.paths, picked);
+      expect(bridge.imports.single.managed, isTrue);
+
+      // The inbox copies are deleted on real file I/O, which the fake clock
+      // does not advance; wait for it outside the test zone.
+      var left = picked.length;
+      for (var attempt = 0; left > 0 && attempt < 50; attempt += 1) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+        left = picked.where((path) => File(path).existsSync()).length;
+      }
+      expect(left, 0, reason: 'the picker copies are removed');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  for (final outcome in ['decline', 'failure', 'cancelled']) {
+    testWidgets(
+      'iOS Japanese import localizes review and cleans copies on $outcome',
+      (tester) async {
+        final inbox = (await tester.runAsync(
+          () => Directory.systemTemp.createTemp('shosai-import-ja'),
+        ))!;
+        addTearDown(() => inbox.delete(recursive: true));
+        final file = File('${inbox.path}/book.epub');
+        await tester.runAsync(() => file.writeAsString('book'));
+        _PickerStub(tester, picked: [file.path]);
+        final bridge = _Bridge(
+          failImport: outcome == 'failure',
+          cancelImport: outcome == 'cancelled',
+        );
+        await _pumpShell(tester, bridge: bridge, locale: const Locale('ja'));
+        await tester.tap(find.widgetWithText(ShadButton, '本を追加'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.text('追加する本を確認'), findsOneWidget);
+        expect(find.text('アプリ内にコピーを保存'), findsOneWidget);
+        expect(find.text('選択した本のコピーをShōsai内に保存します。'), findsOneWidget);
+        expect(find.text('Import'), findsNothing);
+        await tester.tap(
+          find
+              .widgetWithText(ShadButton, outcome == 'decline' ? 'キャンセル' : '追加')
+              .last,
+        );
+        for (var attempt = 0; file.existsSync() && attempt < 50; attempt++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+        expect(file.existsSync(), isFalse);
+        expect(bridge.imports, hasLength(outcome == 'decline' ? 0 : 1));
+        for (var attempt = 0; attempt < 5; attempt++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump(const Duration(milliseconds: 400));
+        }
+        if (outcome == 'failure') {
+          expect(find.textContaining('1件を追加できませんでした。'), findsOneWidget);
+          expect(find.textContaining('このファイル形式には対応していません。'), findsOneWidget);
+        }
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    );
   }
 }

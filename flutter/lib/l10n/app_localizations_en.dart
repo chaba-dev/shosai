@@ -699,5 +699,104 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get importChooseFiles => 'Choose files';
+
+  @override
+  String get importChooseFilesHint => 'Select one or more PDF or EPUB files';
+
+  @override
+  String get importChooseFolder => 'Choose a folder';
+
+  @override
+  String get importChooseFolderHint => 'Find supported books in all subfolders';
+
+  @override
+  String get importReviewBooks => 'Review books';
+
+  @override
+  String get importReviewFolder => 'Review folder import';
+
+  @override
+  String get importBooksType => 'Books';
+
+  @override
+  String get importAction => 'Import';
+
+  @override
+  String get importManagedCopy => 'Copy into managed storage';
+
+  @override
+  String get importPickedCopyHint =>
+      'Shōsai keeps its own copy of each picked book.';
+
+  @override
+  String get importPrivateCopyHint =>
+      'Shōsai keeps a private copy available to the reader.';
+
+  @override
+  String get importLinkedCopyHint => 'Keep books in their selected locations.';
+
+  @override
+  String importStatusImported(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count books',
+      one: '1 book',
+    );
+    return 'Imported $_temp0.';
+  }
+
+  @override
+  String importStatusFailed(int count) {
+    return '$count failed.';
+  }
+
+  @override
+  String get importDetailsUnavailable =>
+      'Some imported book details could not be loaded.';
+
+  @override
+  String get importUnsupported => 'This file type is not supported.';
+
+  @override
+  String get importNotFound => 'The selected file could not be found.';
+
+  @override
+  String get importTooLarge =>
+      'The selected book exceeds the supported size limits.';
+
+  @override
+  String get importFailed => 'The selected book could not be imported.';
+
+  @override
+  String get importOperationFailed => 'The operation could not be completed.';
+
+  @override
+  String get importProviderUnavailable =>
+      'The document provider is unavailable.';
+
+  @override
+  String get importProviderBusy => 'The document provider is busy. Try again.';
+
+  @override
+  String get importPermissionDenied =>
+      'Permission to read the selected document was denied.';
+
+  @override
+  String get importSelectionTooLarge =>
+      'The selection or document exceeds the import limit.';
+
+  @override
+  String get importReadFailed => 'The selected document could not be read.';
+
+  @override
+  String get importCancelled => 'Import cancelled.';
+
+  @override
+  String get importInvalidRequest =>
+      'The document provider request is no longer valid.';
+
+  @override
   String get shellSwitcherDone => 'Done';
 }
