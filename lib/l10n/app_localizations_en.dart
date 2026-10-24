@@ -815,6 +815,65 @@ class AppLocalizationsEn extends AppLocalizations {
   String get libraryBookUnavailable => 'Unavailable';
 
   @override
+  String get libraryLocations => 'Locations';
+
+  @override
+  String get libraryLocationsDescription =>
+      'Books stay in the folders you choose. Only a book you add or open is read.';
+
+  @override
+  String get locationAddFolder => 'Connect folder';
+
+  @override
+  String get locationClose => 'Close';
+
+  @override
+  String get locationCancel => 'Cancel';
+
+  @override
+  String get locationLoading => 'Loading folder';
+
+  @override
+  String get locationOffline =>
+      'This location is offline. Try again when it is connected.';
+
+  @override
+  String get locationRevoked =>
+      'Access to this folder was revoked. Connect it again. Your notes are still here.';
+
+  @override
+  String get locationMissing =>
+      'The folder or book is missing. Your notes are still here.';
+
+  @override
+  String get locationFailed =>
+      'The folder could not be accessed. Check its permission and connection, then try again.';
+
+  @override
+  String get locationBookAdded =>
+      'Book added. Close Locations to open it from your library.';
+
+  @override
+  String get locationBack => 'Back';
+
+  @override
+  String get locationRemove => 'Disconnect folder';
+
+  @override
+  String get locationRemoveDescription =>
+      'Books and notes stay in your library. Books with no other location become unavailable. No source files are deleted.';
+
+  @override
+  String get locationNoFolders =>
+      'Connect a device folder or a folder offered by your system’s file provider.';
+
+  @override
+  String get locationAddBook => 'Add to library';
+
+  @override
+  String get locationNextPage => 'Next page';
+
+  @override
   String get shellSwitcherDone => 'Done';
 
   @override

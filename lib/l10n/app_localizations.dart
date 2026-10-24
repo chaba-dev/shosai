@@ -1434,6 +1434,108 @@ abstract class AppLocalizations {
   /// **'Unavailable'**
   String get libraryBookUnavailable;
 
+  /// No description provided for @libraryLocations.
+  ///
+  /// In en, this message translates to:
+  /// **'Locations'**
+  String get libraryLocations;
+
+  /// No description provided for @libraryLocationsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Books stay in the folders you choose. Only a book you add or open is read.'**
+  String get libraryLocationsDescription;
+
+  /// No description provided for @locationAddFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect folder'**
+  String get locationAddFolder;
+
+  /// No description provided for @locationClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get locationClose;
+
+  /// No description provided for @locationCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get locationCancel;
+
+  /// No description provided for @locationLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading folder'**
+  String get locationLoading;
+
+  /// No description provided for @locationOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'This location is offline. Try again when it is connected.'**
+  String get locationOffline;
+
+  /// No description provided for @locationRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'Access to this folder was revoked. Connect it again. Your notes are still here.'**
+  String get locationRevoked;
+
+  /// No description provided for @locationMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The folder or book is missing. Your notes are still here.'**
+  String get locationMissing;
+
+  /// No description provided for @locationFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The folder could not be accessed. Check its permission and connection, then try again.'**
+  String get locationFailed;
+
+  /// No description provided for @locationBookAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'Book added. Close Locations to open it from your library.'**
+  String get locationBookAdded;
+
+  /// No description provided for @locationBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Back'**
+  String get locationBack;
+
+  /// No description provided for @locationRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnect folder'**
+  String get locationRemove;
+
+  /// No description provided for @locationRemoveDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Books and notes stay in your library. Books with no other location become unavailable. No source files are deleted.'**
+  String get locationRemoveDescription;
+
+  /// No description provided for @locationNoFolders.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect a device folder or a folder offered by your system’s file provider.'**
+  String get locationNoFolders;
+
+  /// No description provided for @locationAddBook.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to library'**
+  String get locationAddBook;
+
+  /// No description provided for @locationNextPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Next page'**
+  String get locationNextPage;
+
   /// The tab switcher's action that returns to the current book.
   ///
   /// In en, this message translates to:
