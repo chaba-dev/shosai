@@ -150,6 +150,7 @@ All notable changes to this project will be documented in this file.
 - *(core)* Extract platform-neutral reader foundations (#78)
 - *(flutter)* Organize the frontend into Elm modules mirroring Iced (#108)
 - Remove the Iced application and CBZ support (#149)
+- Make the repository root a Flutter project (#228)
 
 ### 📚 Documentation
 
