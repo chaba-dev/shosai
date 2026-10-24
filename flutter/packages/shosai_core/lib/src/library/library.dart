@@ -551,7 +551,7 @@ final class Library {
       await for (final entry in Directory(root).list(followLinks: false)) {
         if (entry is! File) continue;
         final name = p.basename(entry.path);
-        if (_publishedName.hasMatch(name) ||
+        if (privateCopyName.hasMatch(name) ||
             name.startsWith('.shosai-damaged-') ||
             name.startsWith('.shosai-delete-')) {
           pending.add(entry.path);
@@ -641,9 +641,6 @@ final class Library {
 final _managedLocks = <String, _Lock>{};
 
 const _lockFileName = '.shosai-lock';
-
-/// The name of a published private copy: `<sha256>.<format>`.
-final _publishedName = RegExp(r'^[0-9a-f]{64}\.(epub|pdf)$');
 
 /// A staging file this old is taken to belong to an import that is no longer
 /// running. A heuristic: nothing records which imports are alive, and an

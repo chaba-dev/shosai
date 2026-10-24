@@ -114,7 +114,10 @@ final class LibraryRecords {
     });
   }
 
-  /// The paths among [paths] that no book or deletion debt owns.
+  /// The paths among [paths] that no book or deletion debt owns. A private
+  /// copy's name (see [privateCopyName]) is owned by the book with its
+  /// content wherever that book is recorded, so a copy is never taken for an
+  /// orphan while its book points somewhere else.
   Future<List<String>> unowned(List<String> paths) {
     if (paths.isEmpty) return Future.value(const []);
     final candidates = List.of(paths);
@@ -125,26 +128,35 @@ final class LibraryRecords {
           '''SELECT file_path FROM books WHERE file_path IN ($marks)
              UNION
              SELECT file_path FROM managed_file_deletion_debt
-             WHERE file_path IN ($marks)''',
-          [...candidates, ...candidates],
+             WHERE file_path IN ($marks)
+             UNION
+             SELECT content_hash FROM books WHERE content_hash IN ($marks)''',
+          [
+            ...candidates,
+            ...candidates,
+            for (final path in candidates) privateCopyHash(path),
+          ],
         ))
           row.columnAt(0) as String,
       };
       return [
         for (final path in candidates)
-          if (!owned.contains(path)) path,
+          if (!owned.contains(path) && !owned.contains(privateCopyHash(path)))
+            path,
       ];
     });
   }
 
-  /// Whether a book or a deletion debt owns [path].
+  /// Whether a book or a deletion debt owns [path] (see [unowned]).
   Future<bool> isOwned(String path) => _store.read(
     (db) => db
         .select(
           '''SELECT 1 FROM books WHERE file_path = ?1
          UNION ALL
-         SELECT 1 FROM managed_file_deletion_debt WHERE file_path = ?1''',
-          [path],
+         SELECT 1 FROM managed_file_deletion_debt WHERE file_path = ?1
+         UNION ALL
+         SELECT 1 FROM books WHERE content_hash = ?2''',
+          [path, privateCopyHash(path)],
         )
         .isNotEmpty,
   );
@@ -203,6 +215,15 @@ final class LibraryRecords {
 }
 
 const _managedDirectoryKey = 'library.managed_directory';
+
+/// The name of a published private copy: `<sha256>.<format>`, named by its
+/// content.
+final privateCopyName = RegExp(r'^([0-9a-f]{64})\.(epub|pdf)$');
+
+/// The content hash in the name of the private copy at [path], or null when
+/// the name is not a private copy's.
+String? privateCopyHash(String path) =>
+    privateCopyName.firstMatch(p.basename(path))?.group(1);
 
 const bookColumns = '''id, title, author, format, file_path, storage_kind,
   original_path, content_hash, file_size, cover IS NOT NULL, progress,
