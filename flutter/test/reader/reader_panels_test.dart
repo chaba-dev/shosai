@@ -565,6 +565,10 @@ void main() {
       expect(dialog.width, lessThanOrEqualTo(390));
       expect(save.left, greaterThanOrEqualTo(dialog.left));
       expect(save.right, lessThanOrEqualTo(dialog.right));
+      // Stacked at full width, the primary action on top.
+      final cancel = tester.getRect(find.widgetWithText(ShadButton, 'Cancel'));
+      expect(save.width, closeTo(cancel.width, 0.5));
+      expect(save.top, lessThan(cancel.top));
       await tester.enterText(
         find.descendant(
           of: find.byType(ShadDialog),
