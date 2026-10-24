@@ -211,9 +211,44 @@ void _paintPageContent(
       Paint()
         ..colorFilter = recolorImage
             ? ColorFilter.mode(foregroundColor, BlendMode.srcIn)
-            : null,
+            : _pdfPageColorFilter(backgroundColor, foregroundColor),
     );
   }
+}
+
+/// PDF pixels keep their geometry and alpha. Paper is the original raster;
+/// Sepia maps its RGB channels between the page ink and paper. Night reverses
+/// luminance while retaining chroma (rather than turning colours into their
+/// complements), then maps black/white to the shared page ink/paper. Saturated
+/// colours can clip at the gamut boundary, but images retain tonal detail.
+///
+/// This filter belongs on the raster paint, never on the canvas or widget:
+/// saved highlights, search hits and live selection must keep their own colours.
+ColorFilter? _pdfPageColorFilter(Color background, Color foreground) {
+  if (background == ShosaiTokens.readerLightBackground &&
+      foreground == ShosaiTokens.readerLightText) {
+    return null;
+  }
+  final night = background.computeLuminance() < foreground.computeLuminance();
+  const luminance = [0.2126, 0.7152, 0.0722];
+  final paper = [background.r, background.g, background.b];
+  final ink = [foreground.r, foreground.g, foreground.b];
+  return ColorFilter.matrix([
+    for (var row = 0; row < 3; row += 1) ...[
+      for (var column = 0; column < 3; column += 1)
+        (paper[row] - ink[row]) *
+            (night
+                ? 2 * luminance[column] - (row == column ? 1 : 0)
+                : (row == column ? 1 : 0)),
+      0,
+      ink[row] * 255,
+    ],
+    0,
+    0,
+    0,
+    1,
+    0,
+  ]);
 }
 
 /// The document paint colors of the reader palette for [readerTheme].

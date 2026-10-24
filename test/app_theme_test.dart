@@ -226,23 +226,22 @@ void main() {
       );
     });
 
-    test('the chrome keeps the application palette in every reader theme', () {
-      // Owner decision 2026-09-28: the shared reader chrome recolors only the
-      // page; the reader palette is the document palette.
+    test('Night uses dark chrome while Paper and Sepia stay light', () {
       for (final theme in const [null, 'light', 'dark', 'sepia']) {
+        final brightness = theme == 'dark' ? Brightness.dark : Brightness.light;
         expect(
           shosaiReaderShadTheme(theme).colorScheme,
-          shosaiAppColorScheme(Brightness.light),
+          shosaiAppColorScheme(brightness),
           reason: '$theme chrome',
         );
         expect(
           shosaiReaderShadTheme(theme).brightness,
-          Brightness.light,
+          brightness,
           reason: '$theme chrome brightness',
         );
         expect(
           shosaiReaderMaterialColorScheme(theme),
-          shosaiMaterialColorScheme(Brightness.light),
+          shosaiMaterialColorScheme(brightness),
           reason: '$theme chrome Material scheme',
         );
       }
@@ -282,7 +281,7 @@ void main() {
       for (final theme in const [null, 'light', 'dark', 'sepia']) {
         expect(
           shosaiReaderMaterialColorScheme(theme).primary,
-          appAccent,
+          theme == 'dark' ? ShosaiTokens.appDarkPrimary : appAccent,
           reason: '$theme chrome accent',
         );
       }
@@ -466,8 +465,8 @@ void main() {
         'dark': (shosaiShadTheme(Brightness.dark), appDarkInput, appDarkBorder),
         'reader chrome': (
           shosaiReaderShadTheme('dark'),
-          appBorderStrong,
-          appBorder,
+          appDarkInput,
+          appDarkBorder,
         ),
       };
       for (final MapEntry(key: name, value: (theme, expected, line))

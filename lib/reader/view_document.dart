@@ -187,6 +187,9 @@ class _DocumentViewState extends State<_DocumentView>
       return const Center(child: CircularProgressIndicator());
     }
     if (surface == null) {
+      final colors = pageColors(model.typography.theme);
+      final filter = _pdfPageColorFilter(colors.background, colors.foreground);
+      final raster = RawImage(image: page, fit: BoxFit.contain);
       return CallbackShortcuts(
         bindings: readerPageKeys(model, dispatch, arrows: true),
         child: Focus(
@@ -201,7 +204,9 @@ class _DocumentViewState extends State<_DocumentView>
                       '$title, page ${model.unit + 1} of ${document.logicalUnitCount}.',
                   child: _animatePage(
                     Center(
-                      child: RawImage(image: page, fit: BoxFit.contain),
+                      child: filter == null
+                          ? raster
+                          : ColorFiltered(colorFilter: filter, child: raster),
                     ),
                   ),
                 ),

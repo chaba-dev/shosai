@@ -118,20 +118,23 @@ void main() {
       ),
     };
 
-    for (final entry in palettes.entries) {
-      testWidgets('reader renders under the ${entry.key} palette', (
+    for (final (entry, format) in [
+      for (final entry in palettes.entries)
+        for (final format in ['epub', 'pdf']) (entry, format),
+    ]) {
+      testWidgets('$format reader renders under the ${entry.key} palette', (
         tester,
       ) async {
         final bridge = HarnessBridge(books: harnessLibraryBooks());
         await render(
           tester,
-          '2c-reader-${entry.key}-1280',
+          '2c-reader-$format-${entry.key}-1280',
           const HarnessView(size: Size(1280, 800)),
           productionShell(
             home: ReaderScreen(
               bridge: bridge,
-              initialPath: '/books/umibe.epub',
-              initialBookId: 2,
+              initialPath: '/books/umibe.$format',
+              initialBookId: format == 'epub' ? 2 : 3,
               initialSettings: FlutterReaderSettings(
                 continuous: false,
                 theme: entry.key,
@@ -162,29 +165,35 @@ void main() {
         // text both come from the tokens.
         expect(painter.backgroundColor, entry.value.background);
         expect(painter.foregroundColor, entry.value.foreground);
-        expect(painter.recolorImage, isTrue);
-        // The reader palette is the document palette (owner decision
-        // 2026-09-28): the page paper follows it, while the stage and the
-        // shared chrome keep the application palette in every reader theme.
-        final paper = tester.widget<DecoratedBox>(
-          find
-              .descendant(
-                of: find.byKey(const ValueKey('reader-page')),
-                matching: find.byType(DecoratedBox),
-              )
-              .first,
-        );
-        expect(
-          (paper.decoration as BoxDecoration).color,
-          entry.value.background,
-          reason: 'the page paper uses the ${entry.key} palette',
-        );
+        expect(painter.recolorImage, format == 'epub');
+        if (format == 'epub') {
+          final paper = tester.widget<DecoratedBox>(
+            find
+                .descendant(
+                  of: find.byKey(const ValueKey('reader-page')),
+                  matching: find.byType(DecoratedBox),
+                )
+                .first,
+          );
+          expect(
+            (paper.decoration as BoxDecoration).color,
+            entry.value.background,
+            reason: 'the page paper uses the ${entry.key} palette',
+          );
+        }
+        final dark = entry.key == 'dark';
         expect(
           Theme.of(context).colorScheme.surface,
-          ShosaiTokens.appBackground,
+          dark ? ShosaiTokens.appDarkBackground : ShosaiTokens.appBackground,
         );
-        expect(Theme.of(context).colorScheme.onSurface, ShosaiTokens.appText);
-        expect(ShadTheme.of(context).brightness, Brightness.light);
+        expect(
+          Theme.of(context).colorScheme.onSurface,
+          dark ? ShosaiTokens.appDarkForeground : ShosaiTokens.appText,
+        );
+        expect(
+          ShadTheme.of(context).brightness,
+          dark ? Brightness.dark : Brightness.light,
+        );
       });
     }
   });
