@@ -319,6 +319,12 @@ void main() {
       isEmpty,
     );
 
+    expect(
+      (await bridge.loadReaderSettings(
+        cancellationId: bridge.createCancellation(),
+      )).animations,
+      isTrue,
+    );
     const settings = FlutterReaderSettings(
       continuous: true,
       theme: 'sepia',
@@ -326,6 +332,7 @@ void main() {
       epubLineSpacing: 1.8,
       pdfZoom: -1,
       twoPages: false,
+      animations: false,
       librarySort: FlutterLibrarySort.title,
     );
     await bridge.saveReaderSettings(value: settings);

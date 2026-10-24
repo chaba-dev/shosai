@@ -383,6 +383,7 @@ void main() {
                       fontSize: null,
                       lineSpacing: null,
                       twoPages: false,
+                      animations: false,
                     )),
                     child: const Text('One page'),
                   ),
@@ -410,6 +411,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(failure), findsNothing);
     expect(bridge.savedSettings?.twoPages, isFalse);
+    expect(bridge.savedSettings?.animations, isFalse);
     expect(_MountCounter.mounts, 1);
   });
 

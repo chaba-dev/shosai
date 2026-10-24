@@ -241,6 +241,7 @@ final class ReaderTypographyPresentation {
     required this.rasterFit,
     required this.rasterZoom,
     this.twoPages = true,
+    this.animations = true,
   });
 
   final FlutterBookFormat format;
@@ -260,6 +261,9 @@ final class ReaderTypographyPresentation {
   /// either way.
   final bool twoPages;
 
+  /// Animate page turns without affecting document layout.
+  final bool animations;
+
   /// Whether the document is reflowable (EPUB), so the EPUB controls apply.
   bool get reflowable => format == FlutterBookFormat.epub;
 
@@ -278,6 +282,7 @@ final class ReaderTypographyPresentation {
     ReaderRasterFit? rasterFit,
     double? rasterZoom,
     bool? twoPages,
+    bool? animations,
   }) => ReaderTypographyPresentation(
     format: format ?? this.format,
     continuous: continuous ?? this.continuous,
@@ -287,6 +292,7 @@ final class ReaderTypographyPresentation {
     rasterFit: rasterFit ?? this.rasterFit,
     rasterZoom: rasterZoom ?? this.rasterZoom,
     twoPages: twoPages ?? this.twoPages,
+    animations: animations ?? this.animations,
   );
 
   @override
@@ -299,7 +305,8 @@ final class ReaderTypographyPresentation {
       other.epubLineSpacing == epubLineSpacing &&
       other.rasterFit == rasterFit &&
       other.rasterZoom == rasterZoom &&
-      other.twoPages == twoPages;
+      other.twoPages == twoPages &&
+      other.animations == animations;
 
   @override
   int get hashCode => Object.hash(
@@ -311,6 +318,7 @@ final class ReaderTypographyPresentation {
     rasterFit,
     rasterZoom,
     twoPages,
+    animations,
   );
 }
 

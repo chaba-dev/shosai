@@ -64,11 +64,13 @@ final class LibraryDisplayChanged extends LibraryMessage {
     this.fontSize,
     this.lineSpacing,
     this.twoPages,
+    this.animations,
   });
   final String? theme;
   final double? fontSize;
   final double? lineSpacing;
   final bool? twoPages;
+  final bool? animations;
 }
 
 /// Save the settings again after their last write failed.

@@ -644,6 +644,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       rasterFit: fit,
       rasterZoom: fit == ReaderRasterFit.manual ? zoom : baseScale,
       twoPages: settings?.twoPages ?? true,
+      animations: settings?.animations ?? true,
     );
   }
 

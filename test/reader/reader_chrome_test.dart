@@ -117,6 +117,30 @@ class _ChromeBridge extends HarnessBridge {
   /// live in production).
   List<FlutterBookmark> bookmarks = const [];
 
+  bool failSelection = false;
+
+  @override
+  Future<FlutterSelectionSurface> selectionSurface({
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required double scale,
+    required double width,
+    required double fontSize,
+    required double lineSpacing,
+    required BigInt cancellationId,
+  }) {
+    if (failSelection) throw StateError('selection endpoint limit exceeded');
+    return super.selectionSurface(
+      document: document,
+      unit: unit,
+      scale: scale,
+      width: width,
+      fontSize: fontSize,
+      lineSpacing: lineSpacing,
+      cancellationId: cancellationId,
+    );
+  }
+
   @override
   Future<List<FlutterBookmark>> listBookmarks({
     required int bookId,
@@ -828,6 +852,113 @@ void main() {
       });
     }
 
+    for (final rtl in [false, true]) {
+      for (final motion in ['on', 'off', 'disabled', 'reduced']) {
+        testWidgets('PDF page motion follows direction ($rtl, $motion)', (
+          tester,
+        ) async {
+          _setView(tester, const Size(390, 844));
+          tester.platformDispatcher.accessibilityFeaturesTestValue =
+              FakeAccessibilityFeatures(
+                disableAnimations: motion == 'disabled',
+                reduceMotion: motion == 'reduced',
+              );
+          addTearDown(
+            tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+          );
+          await _open(
+            tester,
+            _reader(
+              bridge: _ChromeBridge(rightToLeft: rtl),
+              initialPath: '/books/atlas.pdf',
+              settings: _epub.copyWith(animations: motion != 'off'),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final surface = find.byKey(
+            const ValueKey('reader-selection-surface'),
+          );
+          final resting = tester.getTopLeft(surface).dx;
+          for (final forward in [true, false]) {
+            await tester.tap(
+              find.byKey(
+                ValueKey(forward ? 'reader-edge-next' : 'reader-edge-previous'),
+              ),
+            );
+            final status = forward ? '67% · page 2' : '33% · page 1';
+            for (
+              var frame = 0;
+              frame < 20 && find.text(status).evaluate().isEmpty;
+              frame++
+            ) {
+              await tester.pump(const Duration(milliseconds: 10));
+            }
+            expect(find.text(status), findsOneWidget);
+            final start = tester.getTopLeft(surface).dx - resting;
+            if (motion == 'on') {
+              expect(start.abs(), greaterThan(1));
+              expect(start.sign, (forward != rtl) ? 1 : -1);
+              await tester.pump(const Duration(milliseconds: 100));
+              final middle = tester.getTopLeft(surface).dx - resting;
+              expect(middle.abs(), lessThan(start.abs()));
+              expect(middle.sign, start.sign);
+              if (forward) {
+                // iOS changes reduceMotion without setting disableAnimations.
+                tester.platformDispatcher.accessibilityFeaturesTestValue =
+                    const FakeAccessibilityFeatures(reduceMotion: true);
+                await tester.pump();
+                expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
+                tester.platformDispatcher.accessibilityFeaturesTestValue =
+                    const FakeAccessibilityFeatures();
+                await tester.pump();
+              }
+            } else {
+              expect(start, closeTo(0, .01));
+            }
+            await tester.pump(const Duration(milliseconds: 250));
+            expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
+          }
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+
+    testWidgets('PDF pages still animate when selection extraction fails', (
+      tester,
+    ) async {
+      _setView(tester, const Size(390, 844));
+      await _open(
+        tester,
+        _reader(
+          bridge: _ChromeBridge()..failSelection = true,
+          initialPath: '/books/atlas.pdf',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('reader-selection-surface')),
+        findsNothing,
+      );
+      final image = find.descendant(
+        of: _documentArea,
+        matching: find.byType(RawImage),
+      );
+      final resting = tester.getTopLeft(image).dx;
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      for (
+        var frame = 0;
+        frame < 20 && find.text('67% · page 2').evaluate().isEmpty;
+        frame++
+      ) {
+        await tester.pump(const Duration(milliseconds: 10));
+      }
+      expect(find.text('67% · page 2'), findsOneWidget);
+      expect(tester.getTopLeft(image).dx, greaterThan(resting + 1));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(tester.getTopLeft(image).dx, closeTo(resting, .01));
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('continuous presentation never turns PDF pages on swipe', (
       tester,
     ) async {
@@ -1143,6 +1274,51 @@ void main() {
       expect(saved, [false]);
     });
 
+    for (final animations in [true, false]) {
+      testWidgets(
+        'page animations opens $animations and toggles without layout',
+        (tester) async {
+          _setView(tester, const Size(1280, 800));
+          final bridge = _ChromeBridge();
+          final saved = <ReaderDisplayChange>[];
+          await _open(
+            tester,
+            _reader(
+              bridge: bridge,
+              initialPath: '/books/atlas.pdf',
+              settings: animations ? _epub : _epub.copyWith(animations: false),
+              onDisplayChanged: saved.add,
+            ),
+          );
+          await tester.tap(
+            find.byKey(const ValueKey('reader-header-typography')),
+          );
+          await tester.pumpAndSettle();
+          final toggle = find.byKey(
+            const ValueKey('reader-typography-animations'),
+          );
+          expect(find.text('Page animations'), findsOneWidget);
+          expect(tester.widget<ShadSwitch>(toggle).value, animations);
+          final layouts = bridge.selectionLayouts.length;
+          final pages = bridge.pageCalls;
+          await tester.tap(toggle);
+          await tester.pumpAndSettle();
+          expect(tester.widget<ShadSwitch>(toggle).value, !animations);
+          expect(saved, [
+            (
+              theme: null,
+              fontSize: null,
+              lineSpacing: null,
+              twoPages: null,
+              animations: !animations,
+            ),
+          ]);
+          expect(bridge.selectionLayouts, hasLength(layouts));
+          expect(bridge.pageCalls, pages);
+        },
+      );
+    }
+
     testWidgets('the theme, text size and line spacing are handed over', (
       tester,
     ) async {
@@ -1170,6 +1346,7 @@ void main() {
         fontSize: null,
         lineSpacing: null,
         twoPages: null,
+        animations: null,
       ));
       expect(saved[1].fontSize, greaterThan(18));
       expect((saved[1].theme, saved[1].lineSpacing), (null, null));
