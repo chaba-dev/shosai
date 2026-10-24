@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-23
+## [0.1.0] - 2026-10-24
 
 ### 🚀 Features
 
@@ -150,6 +150,7 @@ All notable changes to this project will be documented in this file.
 - *(rfd)* Choose Flutter for mobile (#65)
 - Define the first release in RFDs 4 and 6 and add the Shōsai design system (#148)
 - *(rfd)* Revise RFD 4 for a Dart-only application core (#151)
+- *(rfd)* Move RFDs to chaba-dev/rfds (#221)
 
 ### ⚡ Performance
 
