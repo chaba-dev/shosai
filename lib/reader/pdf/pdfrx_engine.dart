@@ -245,7 +245,9 @@ final class _PdfrxDocument implements PdfEngineDocument {
       for (final link in links)
         PdfPageLink(
           rects: [
-            for (final rect in link.rects)
+            for (final rect in link.rects.map(
+              (rect) => rect.rotate(loaded.rotation.index, loaded),
+            ))
               PdfLinkRect(rect.left, rect.bottom, rect.right, rect.top),
           ],
           url: link.url,
@@ -253,8 +255,35 @@ final class _PdfrxDocument implements PdfEngineDocument {
             final target? when target >= 1 && target <= pageCount => target - 1,
             _ => null,
           },
+          destination: await _linkDestination(link.dest),
         ),
     ];
+  }
+
+  Future<({double x, double y})?> _linkDestination(pdfrx.PdfDest? dest) async {
+    if (dest == null || dest.pageNumber < 1 || dest.pageNumber > pageCount) {
+      return null;
+    }
+    final params = dest.params;
+    double? at(int index) =>
+        params != null && index < params.length ? params[index] : null;
+    final (x, y) = switch (dest.command) {
+      pdfrx.PdfDestCommand.xyz => (at(0), at(1)),
+      pdfrx.PdfDestCommand.fitH || pdfrx.PdfDestCommand.fitBH => (null, at(0)),
+      pdfrx.PdfDestCommand.fitV || pdfrx.PdfDestCommand.fitBV => (at(0), null),
+      pdfrx.PdfDestCommand.fitR => (at(0), at(3)),
+      _ => (null, null),
+    };
+    if (x == null && y == null) return null;
+    final size = pageSize(dest.pageNumber - 1);
+    return pdfrx.PdfrxEntryFunctions.instance.compute(_destinationOnWorker, (
+      document: _handle.address,
+      page: dest.pageNumber - 1,
+      width: (size.width * 1000).ceil(),
+      height: (size.height * 1000).ceil(),
+      x: x,
+      y: y,
+    ));
   }
 
   @override
@@ -313,6 +342,40 @@ pdfium_bindings.PDFium? _workerPdfium;
 
 pdfium_bindings.PDFium get _pdfium => _workerPdfium ??= pdfium_bindings
     .getPdfium(modulePath: pdfrx.Pdfrx.pdfiumModulePath);
+
+/// PDFium applies the CropBox origin and rotation, just as for painted text.
+({double x, double y})? _destinationOnWorker(
+  ({int document, int page, int width, int height, double? x, double? y})
+  request,
+) => using((arena) {
+  final pdfium = _pdfium;
+  final page = pdfium.FPDF_LoadPage(
+    pdfium_bindings.FPDF_DOCUMENT.fromAddress(request.document),
+    request.page,
+  );
+  if (page == nullptr) return null;
+  try {
+    final box = arena<pdfium_bindings.FS_RECTF>();
+    if (pdfium.FPDF_GetPageBoundingBox(page, box) == 0) return null;
+    final x = arena<Int>();
+    final y = arena<Int>();
+    final ok = pdfium.FPDF_PageToDevice(
+      page,
+      0,
+      0,
+      request.width,
+      request.height,
+      0,
+      request.x ?? box.ref.left,
+      request.y ?? box.ref.top,
+      x,
+      y,
+    );
+    return ok == 0 ? null : (x: x.value / 1000, y: y.value / 1000);
+  } finally {
+    pdfium.FPDF_ClosePage(page);
+  }
+});
 
 /// Runs on pdfrx's worker isolate: the document's title and author.
 (String?, String?) _infoOnWorker(int address) {
