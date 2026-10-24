@@ -5628,7 +5628,9 @@ void main() {
           await tester.tap(
             find.byKey(const ValueKey('reader-selection-surface')),
           );
-          await tester.pump();
+          // Allow the double-tap recognizer's minimum inter-tap timer to end,
+          // but not its 300 ms single-tap delay: keyboard focus is immediate.
+          await tester.pump(const Duration(milliseconds: 50));
           await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
           await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
           await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);

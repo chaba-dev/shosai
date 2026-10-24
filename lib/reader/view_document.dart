@@ -333,10 +333,15 @@ class _DocumentViewState extends State<_DocumentView> {
                                   child: child,
                                 ),
                               ),
-                              child: GestureDetector(
+                              child: Listener(
                                 behavior: HitTestBehavior.translucent,
-                                excludeFromSemantics: true,
-                                onTap: readerFocus.requestFocus,
+                                onPointerDown: (event) {
+                                  if (event.kind !=
+                                          ui.PointerDeviceKind.mouse ||
+                                      (event.buttons & 1) != 0) {
+                                    readerFocus.requestFocus();
+                                  }
+                                },
                                 child: _ReachableSelectableSurface(
                                   contentKey: _contentKey,
                                   onContentGeometryChanged:

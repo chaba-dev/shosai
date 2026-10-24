@@ -656,6 +656,131 @@ void main() {
   });
 
   group('edge navigation', () {
+    for (final fitWidth in [false, true]) {
+      for (final cancel in [false, true]) {
+        testWidgets(
+          'PDF asymmetric pinch beats scrolling (fitWidth: $fitWidth, cancel: $cancel)',
+          (tester) async {
+            _setView(tester, const Size(390, 500));
+            await _open(
+              tester,
+              _reader(
+                bridge: _ChromeBridge(),
+                initialPath: '/books/atlas.pdf',
+                settings: _epub.copyWith(pdfZoom: fitWidth ? -1 : 1),
+              ),
+            );
+            final center = tester.getCenter(
+              find.byKey(const ValueKey('reader-selection-surface')),
+            );
+            final axis = fitWidth ? const Offset(0, 1) : const Offset(1, 0);
+            final stationary = await tester.startGesture(
+              center - axis * 50,
+              pointer: 1,
+            );
+            final moving = await tester.startGesture(
+              center + axis * 50,
+              pointer: 2,
+            );
+            // Cross child drag slop before scale slop, then continue the pinch.
+            await moving.moveBy(axis * 20);
+            await tester.pump(const Duration(milliseconds: 20));
+            await moving.moveBy(axis * 80);
+            await tester.pump();
+            if (cancel) {
+              await moving.cancel();
+            } else {
+              await moving.up();
+            }
+            await stationary.up();
+            await tester.pumpAndSettle();
+            expect(find.text('33% · page 1'), findsOneWidget);
+            await tester.tap(
+              find.byKey(const ValueKey('reader-header-typography')),
+            );
+            await tester.pumpAndSettle();
+            if (cancel) {
+              expect(
+                find.byKey(
+                  ValueKey(
+                    fitWidth ? 'reader-fit-fitWidth' : 'reader-fit-none',
+                  ),
+                ),
+                findsOneWidget,
+              );
+              if (!fitWidth) expect(find.text('100%'), findsOneWidget);
+            } else {
+              expect(find.text(fitWidth ? '144%' : '200%'), findsOneWidget);
+            }
+          },
+        );
+      }
+    }
+
+    testWidgets(
+      'PDF pinch zooms from its fitted size, pans, and double tap restores fit',
+      (tester) async {
+        _setView(tester, const Size(390, 800));
+        await _open(
+          tester,
+          _reader(bridge: _ChromeBridge(), initialPath: '/books/atlas.pdf'),
+        );
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final center = tester.getCenter(surface);
+        final left = await tester.startGesture(
+          center - const Offset(50, 0),
+          pointer: 1,
+        );
+        final right = await tester.startGesture(
+          center + const Offset(50, 0),
+          pointer: 2,
+        );
+        for (var i = 1; i <= 5; i++) {
+          await left.moveTo(center - Offset(50 + i * 10, 0));
+          await right.moveTo(center + Offset(50 + i * 10, 0));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        await left.up();
+        await tester.pump();
+        await right.up();
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('reader-fit-none')), findsOneWidget);
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.tap(
+          find.byKey(const ValueKey('reader-header-typography')),
+        );
+        await tester.pumpAndSettle();
+        // A 420px PDF fitted into 302px, pinched to twice its displayed size.
+        expect(find.text('144%'), findsOneWidget);
+        await tester.tap(
+          find.byKey(const ValueKey('reader-header-typography')),
+        );
+        await tester.pumpAndSettle();
+        await tester.drag(surface, const Offset(-100, 0));
+        await tester.pumpAndSettle();
+        final horizontal = find.byWidgetPredicate(
+          (w) =>
+              w is SingleChildScrollView &&
+              w.scrollDirection == Axis.horizontal,
+        );
+        final scroll = tester.state<ScrollableState>(
+          find
+              .descendant(of: horizontal, matching: find.byType(Scrollable))
+              .first,
+        );
+        expect(scroll.position.pixels, greaterThan(0));
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.tap(surface);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(surface);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('reader-fit-contain')),
+          findsOneWidget,
+        );
+      },
+    );
+
     for (final rtl in [false, true]) {
       testWidgets('phone PDF swipes turn in book order (RTL: $rtl)', (
         tester,
