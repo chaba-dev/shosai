@@ -19,7 +19,7 @@ const double _readerEpubPageMaxWidth =
 
 /// The width of a page-turn margin beside the page.
 const double _readerEdgeWidth = 40;
-const double _readerPhoneEdgeWidth = 24;
+const double _readerPhoneEdgeWidth = ShosaiTokens.sizeTouchTarget;
 
 /// `shadow-page`: a page or spread on the stage.
 List<BoxShadow> _readerPageShadow(ShellPalette palette) => [

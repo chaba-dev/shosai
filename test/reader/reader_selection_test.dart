@@ -780,8 +780,10 @@ void main() {
       tester,
     ) async {
       // A page only slightly taller than the viewport, so a selected range stays
-      // visible at the scroll's end and the clamp is observable.
-      _setView(tester, const Size(390, 500));
+      // visible at the scroll's end and the clamp is observable. Leave enough
+      // width beside the 44px edges for the toolbar to stay on the same side
+      // of the range; a narrower toolbar can legitimately flip above it.
+      _setView(tester, const Size(430, 500));
       await _open(
         tester,
         _reader(
@@ -810,7 +812,7 @@ void main() {
       // Growing the viewport height reduces the maximum scroll offset, so the
       // layout clamps it: the content (and the range) moves without a scroll
       // update notification, and the overlay must re-read the geometry.
-      tester.view.physicalSize = const Size(390, 620);
+      tester.view.physicalSize = const Size(430, 620);
       await settleReaderSelection(tester, rounds: 8);
       final surfaceAfter = tester.getRect(
         find.byKey(const ValueKey('selection-actions')),
