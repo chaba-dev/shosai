@@ -5,7 +5,7 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/records.dart';
 
 /// The Notes place: every highlight and note across the library, books most
-/// recently read first (RFD 6, Notes surface).
+/// recently read first (RFD 16, Notes surface).
 ///
 /// It follows the shell's Elm boundary (`docs/flutter-architecture.md`): the
 /// place renders the immutable [ShellNotesModel] and dispatches

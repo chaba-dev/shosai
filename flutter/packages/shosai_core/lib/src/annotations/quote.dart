@@ -1,4 +1,4 @@
-/// The quote profile annotations are matched by (RFD 6): normalized quote
+/// The quote profile annotations are matched by (RFD 16): normalized quote
 /// text with bounded surrounding context.
 library;
 

@@ -7,20 +7,20 @@
 * Overview
 
 Shōsai (書斎, "study/reading room") is an ebook reader for EPUB and PDF, with
-comic archives planned after the first release (RFD 2). The executable is the
-Dart and Flutter application described in RFD 4: Dart document engines and a
+comic archives planned after the first release (RFD 10). The executable is the
+Dart and Flutter application described in RFD 12: Dart document engines and a
 Dart application core under the Flutter presentation. The earlier Rust/Iced
 desktop application was removed on 2026-10-20 and the tree below records the
 structure as it was; CBZ support left the core the same day and returns as a
 format package after the first release. On 2026-10-21 the owner decided to
 replace the remaining Rust core and the Dart/Rust bridge with Dart before the
-first-release reader work builds on them (RFD 4, milestone M3.0); the same day
+first-release reader work builds on them (RFD 12, milestone M3.0); the same day
 M3.0's removal slice deleted the crates, the bridge and the Rust toolchain.
 
 ** Goals
 
 - Fast ebook reader across desktop, phone, and tablet
-- Support for EPUB and PDF first; CBZ/CBR after the first release (RFD 2)
+- Support for EPUB and PDF first; CBZ/CBR after the first release (RFD 10)
 - Clean library management for book collections
 - Customizable reading experience (fonts, themes, layout)
 - Permissively licensed (Apache-2.0)
@@ -32,13 +32,13 @@ M3.0's removal slice deleted the crates, the bridge and the Rust toolchain.
 
 | Component     | Crate/Tool             | License          | Direction                                      |
 |---------------+------------------------+------------------+------------------------------------------------|
-| Core language | Dart                   | —                | Rust core removed (RFD 4 M3.0, 2026-10-21)     |
+| Core language | Dart                   | —                | Rust core removed (RFD 12 M3.0, 2026-10-21)     |
 | Frontend      | ~iced~ 0.14 → Flutter  | MIT / BSD-3-Clause | Iced removed 2026-10-20; Flutter is the app  |
 | Bridge        | ~flutter_rust_bridge~ → none | MIT        | Removed with the Rust core (M3.0)              |
 | PDF rendering | ~pdfium-render~ → ~pdfrx~ | Apache-2.0 / MIT | Dart-owned PDFium binding, pinned per target |
 | EPUB engine   | ~shosai_epub~ (Dart)   | Apache-2.0       | Adopted 2026-09-28; the one EPUB parser        |
 | EPUB display  | Flutter layout         | —                | ~TextPainter~ layout over the Dart engine      |
-| CBZ support   | after the first release | —               | Returns as a Dart format package (RFD 2)       |
+| CBZ support   | after the first release | —               | Returns as a Dart format package (RFD 10)       |
 | Platform APIs | Flutter plugins/adapters | Varies         | Files, lifecycle, secure storage, notifications |
 | Database      | ~sqlx~ → ~sqlite3~ (Dart) | MIT / Apache-2.0 | Dart SQLite binding; ~drift~ only if justified |
 | Text shaping  | Flutter                | BSD-3-Clause     | Engine-side shaping; ~cosmic-text~ left with Rust |
@@ -88,7 +88,7 @@ shosai/
 This tree records the executable baseline and historical phase results. It is
 not the target frontend architecture.
 
-** Target Architecture — RFD 4 (revised 2026-10-21)
+** Target Architecture — RFD 12 (revised 2026-10-21)
 
 #+begin_src
 Flutter desktop / mobile hosts
@@ -108,8 +108,8 @@ Flutter desktop / mobile hosts
 
 Everything is Dart. Engines never produce geometry for pixels they did not lay
 out; the core is the only database writer; the controller owns every native
-resource. RFD 4 tracks the replacement of the Rust core (M3.0) and the
-first-release outcomes; RFD 5 tracks independently releasable packages.
+resource. RFD 12 tracks the replacement of the Rust core (M3.0) and the
+first-release outcomes; RFD 13 tracks independently releasable packages.
 
 * Phase 1 — Foundation & PDF Viewer (MVP)
 :PROPERTIES:
@@ -247,7 +247,7 @@ first-release outcomes; RFD 5 tracks independently releasable packages.
 - [X] Bookmarks panel sidebar with navigation, notes, and delete
 - [X] Export bookmarks / notes as Markdown
 - [X] 13 bookmark tests
-- [ ] Text highlighting: [[file:../rfd/0006/README.adoc][RFD 6: Cross-format text highlighting]]
+- [ ] Text highlighting: [[https://chaba-rfds.pages.dev/rfd/0016/][RFD 16: Cross-format text highlighting]]
 
 ** DONE In-document search
 - [X] PDF: text extraction from pages, search across document
@@ -278,7 +278,7 @@ first-release outcomes; RFD 5 tracks independently releasable packages.
 *Goal*: Extended format support, mobile, and distribution.
 
 ** DONE Enhanced EPUB rendering
-RFD: [[file:../rfd/0001/README.adoc][RFD 1: Enhanced EPUB rendering]]
+RFD: [[https://chaba-rfds.pages.dev/rfd/0009/][RFD 9: Enhanced EPUB rendering]]
 
 - [X] Evaluate embedding ~wry~ webview for full HTML/CSS fidelity
 - [X] Build the selected native text/layout route using ~cosmic-text~
@@ -286,10 +286,10 @@ RFD: [[file:../rfd/0001/README.adoc][RFD 1: Enhanced EPUB rendering]]
 - [X] CSS ~@font-face~ support with embedded fonts
 
 Implementation is complete.  Native Linux arm64 and Wayland packaged-app
-acceptance evidence remains tracked separately in RFD 1.
+acceptance evidence remains tracked separately in RFD 9.
 
 ** TODO Additional ebook formats
-RFD: [[file:../rfd/0002/README.adoc][RFD 2: Additional ebook formats]]
+RFD: [[https://chaba-rfds.pages.dev/rfd/0010/][RFD 10: Additional ebook formats]]
 
 - [ ] Package CBZ/CBR comic support for the first post-launch release
 - [ ] MOBI / AZW3 (Amazon Kindle) — evaluate legal feasibility
@@ -299,7 +299,7 @@ RFD: [[file:../rfd/0002/README.adoc][RFD 2: Additional ebook formats]]
 - [ ] CBR (RAR-based comic archives) — note: ~unrar~ has restrictive license
 
 ** TODO Cloud sync (optional)
-RFD: [[file:../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
+RFD: [[https://chaba-rfds.pages.dev/rfd/0011/][RFD 11: Cloud synchronization]]
 
 - [ ] Design sync protocol for reading progress, bookmarks, and annotations
 - [ ] Evaluate backends (self-hosted, WebDAV, etc.)
@@ -307,24 +307,24 @@ RFD: [[file:../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
 - [ ] Start with local storage, architecture should support sync later
 
 ** TODO Cross-platform Flutter frontend
-RFD: [[file:../rfd/0004/README.adoc][RFD 4: Cross-platform Flutter frontend]]
+RFD: [[https://chaba-rfds.pages.dev/rfd/0012/][RFD 12: Cross-platform Flutter frontend]]
 
 - [X] Move coherent application policy, EPUB pagination, reader sessions, and
   renderer-neutral geometry from the Iced app into the Rust core (M1)
-- [X] Implement RFD 6's renderer-independent annotation model and SQLite store
+- [X] Implement RFD 16's renderer-independent annotation model and SQLite store
 - [X] Use cross-format highlighting as the first Flutter desktop/mobile slice
   (M2, Linux and a physical Android device)
 - [X] Retire the Iced reference frontend (2026-10-20)
 - [X] Replace the Rust core and the bridge with the Dart PDF engine, the Dart
   SQLite store and ported records, then delete the crates (M3.0 slices,
-  2026-10-21; M3.0's exit gate is tracked in RFD 4)
+  2026-10-21; M3.0's exit gate is tracked in RFD 12)
 - [ ] Build the Bookshelf shell and the PDF and EPUB readers on the Dart core
   (M3), then validate each additional platform before claiming support
 - [ ] Evaluate Flutter Web separately through the bindings' browser builds or
   a service adapter
 
 ** TODO Distribution & packaging
-RFD: [[file:../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]
+RFD: [[https://chaba-rfds.pages.dev/rfd/0013/][RFD 13: Distribution and packaging]]
 
 - [X] CI/CD pipeline for automated builds and releases
 - [X] Portable Linux archives (x86_64 and aarch64)
@@ -343,7 +343,7 @@ pinned PDFium release (~chromium/7811~) and Flutter bundles it as a native
 asset on every target, so a host build no longer copies PDFium itself. The
 Iced-era portable Linux archives, macOS bundle and Nix package that shipped
 their own PDFium were removed with the Iced application; each Flutter
-distribution format (RFD 5) must verify the bundled library, its checksum and
+distribution format (RFD 13) must verify the bundled library, its checksum and
 its license notices. ~flutter test~ does not link native assets, so the Nix
 dev shell keeps ~pdfium-binaries~ only to name a PDFium for tests
 (~SHOSAI_PDFIUM_LIBRARY~).

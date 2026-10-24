@@ -262,7 +262,7 @@ final class ReaderController implements Listenable {
   bool _epubHeightPending = false;
 
   /// The search match a book opened at, marked once the reader settles on
-  /// its page (RFD 6: the current match is marked on the page).
+  /// its page (RFD 16: the current match is marked on the page).
   ({int unit, int offset, int length})? _openMatch;
 
   /// Embedded `@font-face` families already registered in this process.
@@ -2005,7 +2005,7 @@ final class ReaderController implements Listenable {
 
   /// The scale a PDF page's raster renders at in a fit mode: the page fitted
   /// to the content box at the display's pixel ratio, so it is re-rendered
-  /// sharp at the size it is shown (RFD 4, the first release) instead of
+  /// sharp at the size it is shown (RFD 12, the first release) instead of
   /// scaled from the zoom. Null when the zoom applies: a manual zoom, or a box
   /// that is not measured yet.
   ///

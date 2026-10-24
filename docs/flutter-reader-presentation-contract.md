@@ -1,10 +1,10 @@
 # Flutter reader presentation contract
 
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
-> on 2026-10-20 (RFD 4, "The first release"); the `crates/shosai-app` citations
+> on 2026-10-20 (RFD 12, "The first release"); the `crates/shosai-app` citations
 > below refer to the pinned reference revision in the repository history, and
-> the 1C captures under `rfd/0004/evidence/reference-shots-1c/` are the frozen
-> reference. CBZ support was removed the same day (RFD 2).
+> the 1C captures under [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) are the frozen
+> reference. CBZ support was removed the same day (RFD 10).
 
 Typed presentation model, intent ownership, fixture/live boundary and acceptance
 matrix for the reader packages 4B, 4C and 4D of the
@@ -20,13 +20,13 @@ matrix for the reader packages 4B, 4C and 4D of the
 - Governing documents: [restoration plan](flutter-ui-restoration-plan.md)
   (sequencing and acceptance), [reference specification](flutter-ui-reference-spec.md)
   (values, states and `RD-*`/`FM-*` rows), [Flutter architecture](flutter-architecture.md)
-  (Elm boundary), [typography](typography.md), [RFD 4](../rfd/0004/README.adoc)
-  (frontend/core ownership) and [RFD 6](../rfd/0006/README.adoc) (selection and
+  (Elm boundary), [typography](typography.md), [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/)
+  (frontend/core ownership) and [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/) (selection and
   highlighting).
 - Reference base: the pinned Iced revision
   `1e54270a6bb24f15630ece336a0575bdbe5be113` (`main@origin` #108) supplies the
   reader composition and values; 1C's 60 captures
-  ([evidence](../rfd/0004/evidence/reference-shots-1c/README.adoc)) are the reader
+  ([evidence](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c)) are the reader
   reference. Neither establishes Flutter correctness (specification §4.0).
 
 **What this document is not.** It does not add design values, does not restate
@@ -66,7 +66,7 @@ or RFD is changed by package 4A.
 | Real tab/session lifecycle, shell routing, per-tab saves/effects/resources | 5F |
 | Live paginated integration and real progress/page ranges | 5G |
 | Pagination measurement and the decision-12 column rule | 5B (calibrates 5A's rule) |
-| Selection semantics, anchors, colors and persistence | RFD 6 (preserved, not redefined) |
+| Selection semantics, anchors, colors and persistence | RFD 16 (preserved, not redefined) |
 | Reader default persistence and per-book precedence | 5A/6B (see §9.2) |
 
 The plan's delegation contract applies unchanged: this document does not
@@ -77,7 +77,7 @@ requirement recorded here.
 
 This document uses the authority vocabulary of specification §1.1: `Iced`
 (pinned revision values and composition), `Retained Flutter` (existing behavior
-that must survive), `RFD 6`, `Owner` (a decision recorded in the plan) and
+that must survive), `RFD 16`, `Owner` (a decision recorded in the plan) and
 `Plan contract` (a requirement with no Iced reference whose evidence comes from
 the later acceptance package).
 
@@ -103,7 +103,7 @@ the later acceptance package).
    `nqztxuqyrklvmzqnnrqvzlsntyxkkyvo`, which resolves in this repository's JJ
    history at the 4A base). `sha256sum -c captures.sha256` and
    `sha256sum -c fixtures.sha256` pass in
-   `rfd/0004/evidence/reference-shots-1c/` at this base. Verifying the reference
+   [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) at this base. Verifying the reference
    bytes does not accept the reference's open follow-ups or any row.
 4. **The 1C tab capture does not exercise overflow.** `rd-chrome-tabs-w1280-ja`
    opens three books (`Message::OpenLibraryBook` on `slow-rivers.epub`,
@@ -119,7 +119,7 @@ the later acceptance package).
    carries only handle, book id, format, title and `logicalUnitCount`). This
    contract therefore defines a presentation-only tab model for 4B and marks
    every real lifecycle/API question as 5F/5A work.
-6. **Selection has no Iced reference.** RD-12, FM-16 and FM-17 are RFD 6 plus
+6. **Selection has no Iced reference.** RD-12, FM-16 and FM-17 are RFD 16 plus
    the retained Flutter implementation; 4D preserves them and adds no new
    selection semantics.
 
@@ -132,7 +132,7 @@ the later acceptance package).
 | 4A (this document) | Typed presentation model, intents, ownership rules, states, fixture/live boundary, test matrix | Change code, tokens, catalogs, fixtures, plan/spec/RFDs |
 | 4B | Reader header, tab strip, progress/status, edge navigation, panel host/exclusivity, opening/failure chrome; fixture-backed chrome | Define real session lifecycle, bridge session APIs, pagination |
 | 4C | Contents/saved-places panel, typography popover, more panel, search bar presentation; bookmark note/delete and Markdown export parity or named exclusion | Invent TOC bridge APIs, settle zoom/typography persistence codecs |
-| 4D | Selection action surface and annotation menus, preserving #114 context actions and keyboard equivalents | Change RFD 6 semantics, cross-fragment behavior (5I) |
+| 4D | Selection action surface and annotation menus, preserving #114 context actions and keyboard equivalents | Change RFD 16 semantics, cross-fragment behavior (5I) |
 | 5A | Renderer/persistence contract: addresses, layout identity, DTOs, atomic publication | Widget composition |
 | 5E | Durable navigation/TOC resolution, selection geometry and semantic sidecars | Presentation |
 | 5F | Real tab/session lifecycle and shell routing; per-tab saves/effects/resources | Presentation composition (4B owns it) |
@@ -622,7 +622,7 @@ palette via `pageColors`; components never introduce literal colors
 
 ### 4.12 Selection actions and annotation menus (RD-12)
 
-- Reference: RFD 6 plus the retained Flutter implementation
+- Reference: RFD 16 plus the retained Flutter implementation
   (`flutter/lib/reader/view_selection.dart`, `view_document.dart` annotation
   strip, `view_dialogs.dart` note editor); 1C records these as non-Iced
   authority and has no capture.
@@ -633,7 +633,7 @@ palette via `pageColors`; components never introduce literal colors
   unchanged.
 - Required behavior (4D):
   - Preserve the current selection action surface: Copy (only when the surface
-    is copy-eligible), the five RFD 6 colors, Add note, Cancel, keyboard
+    is copy-eligible), the five RFD 16 colors, Add note, Cancel, keyboard
     equivalents (Enter commits, Escape cancels, Shift+arrows extend, F10/context
     menu opens actions).
   - Preserve the annotation context actions salvaged from #114 (navigate,
@@ -641,7 +641,7 @@ palette via `pageColors`; components never introduce literal colors
     rejected visual ancestors.
   - The action surface is positioned relative to the selected range, stays
     within the viewport, and is reachable and dismissible by keyboard.
-  - Overlay painting keeps RFD 6's channel policy (active selection tint,
+  - Overlay painting keeps RFD 16's channel policy (active selection tint,
     search outline/underline, saved highlight fill) — 4D must not change colors
     or precedence.
 - Fixture/live: selection and annotation persistence are live today; no
@@ -684,7 +684,7 @@ without the controller's localization/formatting step.
    selection before any navigation.
 4. Page navigation: arrow keys/PageUp/PageDown/Home/End (existing
    `CallbackShortcuts` in `view_document.dart:83-95`); Shift+arrows remain
-   selection extension (RFD 6) and must not page.
+   selection extension (RFD 16) and must not page.
 5. Tab shortcuts: `Ctrl+W`, `Ctrl+Tab`, `Ctrl+1..9` mirror the Iced reference
    with platform modifier adaptation; on macOS the command modifier is used.
    These are reader-chrome shortcuts and must not fire while a text field
@@ -791,7 +791,7 @@ font coupling, and leaves full height/DPR/layout-identity reporting to 5A/5G.
 | `ReaderMessage` sealed hierarchy | `flutter/lib/reader/message.dart:3` | Intent surface; existing messages reused |
 | `ReaderController.dispatch` | `flutter/lib/reader/controller.dart:160` | Only entry point for intents; `_isCurrent`/revision guards |
 | `ReaderContentState` | `model.dart:303` | Opening/failure states |
-| `ReaderSelectionPhase` | `model.dart:301` | RFD 6 selection state machine (unchanged) |
+| `ReaderSelectionPhase` | `model.dart:301` | RFD 16 selection state machine (unchanged) |
 | `ReaderLayout` | `model.dart:37` | Layout identity inputs reported to Rust |
 | Effect adapters | `flutter/lib/reader/effects.dart:10-18` | Controller-injected platform effects |
 | `FlutterDocumentSummary` | `flutter/lib/src/rust/api.dart:445` | Title/format/unit count |
@@ -842,7 +842,7 @@ per-book settings schema or a pagination API.
 | `G2` many-tab/clipped-label fixture | **proposed, not created** (spec §5.3) | tab overflow, keyboard close of offscreen tabs, clipping |
 | `G6` failure-state fixtures | **proposed, not created** | opening/failure chrome |
 | `G3` long JA/mixed metadata | **proposed, not created** | truncation at `T200` |
-| 1C generated reader tree | existing under `rfd/0004/evidence/reference-shots-1c/fixtures/` | reference comparison only; never acceptance |
+| 1C generated reader tree | existing under [`rfd/0004/evidence/reference-shots-1c/fixtures/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c/fixtures) | reference comparison only; never acceptance |
 
 4B–4D may build widget-local deterministic fixtures; they must not overwrite the
 1B/1C evidence tree or regression fixtures.
@@ -886,7 +886,7 @@ Cross-cutting: `XA-06` (EN/JA/MIX at normal and 200%) and `XA-07`
 | Real tabs/TOC/link activation/typography/progress/selection integration | Fixture-backed components are not live functionality | 5G |
 | Typed raster zoom codec (FitPage/FitWidth/Manual), legacy sentinel decoding, per-book vs default precedence, continuous-fit semantics | Plan contract requirement; persistence design is not presentation | 5A/6B |
 | Per-book typography override persistence | Iced has it (`app.rs:1418-1428`); the Flutter bridge currently stores only global settings and reading-state zoom | 5A/6B |
-| Cross-fragment selection, tile overlays, virtualized accessibility | RFD 6 already requires EPUB selection across visual fragments within one spine item and PDF selection within one page; the plan sequences that work into 5I. Virtualized drag-autoscroll and tile overlays are separately deferred | 5I |
+| Cross-fragment selection, tile overlays, virtualized accessibility | RFD 16 already requires EPUB selection across visual fragments within one spine item and PDF selection within one page; the plan sequences that work into 5I. Virtualized drag-autoscroll and tile overlays are separately deferred | 5I |
 | Minimum readable tab width (decision 11) | Owner decision names the behavior, not a value; 1A has not frozen one | 4B (provisional constant, recorded) + owner/1A |
 
 ### 9.2 Unresolved product questions (not waived)

@@ -1,4 +1,4 @@
-/// Search across the library: book text and notes (RFD 6, Notes and search).
+/// Search across the library: book text and notes (RFD 16, Notes and search).
 library;
 
 import 'dart:convert';

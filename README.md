@@ -41,7 +41,6 @@ application is divided.
 ```sh
 nix develop
 make check
-make check-rfds
 ```
 
 Debug builds of the host keep their database, preferences and managed book
@@ -65,7 +64,9 @@ before Xcode runs. Physical device builds are intentionally unsigned; local deve
 signing must be configured in Xcode before installing them.
 
 Architecture and product proposals follow the
-[Requests for Discussion process](rfd/README.adoc). The
+[Requests for Discussion process](https://chaba-rfds.pages.dev/process/);
+the RFDs live in [chaba-dev/rfds](https://github.com/chaba-dev/rfds) and are
+published at https://chaba-rfds.pages.dev. The
 [project roadmap](docs/roadmap.org) links to the corresponding RFDs.
 
 ## Website

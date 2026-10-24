@@ -1,11 +1,11 @@
 # Reference captures (packages 1B and 1C)
 
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and the
-> `make reference-shots` capture harness were removed on 2026-10-20 (RFD 4, "The
+> `make reference-shots` capture harness were removed on 2026-10-20 (RFD 12, "The
 > first release"), so the capture and `VERIFY=1` procedures below can no longer
-> be run. The committed captures under `rfd/0004/evidence/reference-shots-1b/`
-> and `rfd/0004/evidence/reference-shots-1c/` are the frozen reference; the
-> `1C-CBZ-*` captures record a format that left with CBZ support (RFD 2).
+> be run. The committed captures under [`rfd/0004/evidence/reference-shots-1b/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b)
+> and [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) are the frozen reference; the
+> `1C-CBZ-*` captures record a format that left with CBZ support (RFD 10).
 
 Deterministic, inspected **Iced reference images** for the library, import,
 settings and reader surfaces, each with a provenance manifest. They are the
@@ -19,8 +19,8 @@ writes its own evidence directory:
 
 | Package | Surfaces | Evidence families | Evidence directory |
 | --- | --- | --- | --- |
-| 1B | Library, import, settings | `1B-LIB-*`, `1B-IMPORT`, `1B-SETTINGS` | `rfd/0004/evidence/reference-shots-1b/` |
-| 1C | Reader chrome, panels, formats and modes | `1C-RD-CHROME`, `1C-RD-PANEL`, `1C-SPREAD`, `1C-EPUB-PAG`, `1C-EPUB-CONT`, `1C-PDF-PAG`, `1C-PDF-CONT`, `1C-CBZ-PAG`, `1C-CBZ-CONT` | `rfd/0004/evidence/reference-shots-1c/` |
+| 1B | Library, import, settings | `1B-LIB-*`, `1B-IMPORT`, `1B-SETTINGS` | [`rfd/0004/evidence/reference-shots-1b/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b) |
+| 1C | Reader chrome, panels, formats and modes | `1C-RD-CHROME`, `1C-RD-PANEL`, `1C-SPREAD`, `1C-EPUB-PAG`, `1C-EPUB-CONT`, `1C-PDF-PAG`, `1C-PDF-CONT`, `1C-CBZ-PAG`, `1C-CBZ-CONT` | [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) |
 
 ## What these images are evidence for, and what they are not
 
@@ -29,7 +29,7 @@ renders for a state, so a later package knows what it is rebuilding. It is never
 the acceptance evidence for that row. Every accepting package renders and
 inspects its own states at the row's configuration and runs its own behavior
 checks (specification §4.0 rules 1–3), and a row whose authority is not Iced —
-`Owner`, `RFD 6`, `Retained Flutter`, `Plan contract` — cannot be satisfied by a
+`Owner`, `RFD 16`, `Retained Flutter`, `Plan contract` — cannot be satisfied by a
 capture here at all. The reader rows that fall in that class are named in the
 package 1C manifest under `non_iced_authority` and listed as `pending` in its
 matrix, with the owning package; no image is fabricated for them.
@@ -170,7 +170,7 @@ evidence, and the two forms' behavior is checked by the regression test
 ## Outputs
 
 Each package writes the same six entries into its own evidence directory
-(`rfd/0004/evidence/reference-shots-1b/`, `rfd/0004/evidence/reference-shots-1c/`):
+([`rfd/0004/evidence/reference-shots-1b/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b), [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c)):
 
 | Path | Contents |
 | --- | --- |
@@ -660,7 +660,7 @@ show:
 ### Non-Iced authority
 
 Iced has no production interactive selection or highlighting, so `RD-12`,
-`FM-16` and `FM-17` have no capture here at all. Their authority is RFD 6 plus
+`FM-16` and `FM-17` have no capture here at all. Their authority is RFD 16 plus
 the retained Flutter implementation, owned by 4D/5I, and the package 1C manifest
 records that in `non_iced_authority` next to the pending matrix rows. The same
 section records the other rows Iced cannot evidence (tab overflow, keyboard

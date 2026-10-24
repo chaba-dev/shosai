@@ -448,7 +448,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
               children: [
                 ..._chapterSection(l10n, contents, dispatch),
                 // The book's bookmarks follow its chapters; notes have their
-                // own panel (RFD 6).
+                // own panel (RFD 16).
                 if (model.document?.bookId != null) ...[
                   const SizedBox(height: ShosaiTokens.space2),
                   _ReaderPanelGroup(

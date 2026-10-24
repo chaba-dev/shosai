@@ -8,7 +8,7 @@ import 'package:shosai_flutter/core/bridge.dart';
 
 /// Package 4D's deterministic selectable-surface fixture.
 ///
-/// Selection is live in production (RFD 6 authority; plan decision 8): the
+/// Selection is live in production (RFD 16 authority; plan decision 8): the
 /// bridge resolves the document's own endpoints, grapheme/word boundaries and
 /// visual lines, and the controller's state machine is unchanged. A widget test
 /// cannot lay out a real EPUB chapter with controlled text geometry, so these

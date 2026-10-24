@@ -8,7 +8,7 @@ cannot be claimed, and what a deterministic replacement would have to preserve.
 - Scope: `sample.epub`, `sample.pdf`, `sample.cbz` (`F1`–`F3` in
   [`docs/flutter-ui-reference-spec.md`](../docs/flutter-ui-reference-spec.md)
   §5.1), plus a supporting check of the `epub-conformance/` font chain.
-  `sample.cbz` was removed with CBZ support on 2026-10-20 (RFD 2 returns CBZ as
+  `sample.cbz` was removed with CBZ support on 2026-10-20 (RFD 10 returns CBZ as
   a later format package), and the two `native-computed-style.*` inputs with
   the Rust core on 2026-10-21; their records below are kept as history and
   their hashes can be verified from the repository history.

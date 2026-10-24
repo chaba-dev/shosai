@@ -834,7 +834,7 @@ abstract class AppLocalizations {
   /// **'Fit page'**
   String get readerFitPage;
 
-  /// NEW: no Iced string. The Display settings field that chooses one or two pages (RFD 4).
+  /// NEW: no Iced string. The Display settings field that chooses one or two pages (RFD 12).
   ///
   /// In en, this message translates to:
   /// **'Pages'**
@@ -924,79 +924,79 @@ abstract class AppLocalizations {
   /// **'Close search'**
   String get readerCloseSearch;
 
-  /// NEW: no Iced string (RFD 6 authority). The selection action surface's container label (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The selection action surface's container label (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Selection actions'**
   String get readerSelectionActions;
 
-  /// NEW: no Iced string (RFD 6 authority). The selection copy action, enabled only for a copy-eligible surface (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The selection copy action, enabled only for a copy-eligible surface (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Copy'**
   String get readerCopy;
 
-  /// NEW: no Iced string (RFD 6 authority). The selection cancel action (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The selection cancel action (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Cancel'**
   String get readerSelectionCancel;
 
-  /// NEW: no Iced string (RFD 6 authority). The yellow highlight color action (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The yellow highlight color action (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Yellow'**
   String get readerHighlightYellow;
 
-  /// NEW: no Iced string (RFD 6 authority). The green highlight color action (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The green highlight color action (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Green'**
   String get readerHighlightGreen;
 
-  /// NEW: no Iced string (RFD 6 authority). The blue highlight color action (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The blue highlight color action (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Blue'**
   String get readerHighlightBlue;
 
-  /// NEW: no Iced string (RFD 6 authority). The pink highlight color action (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The pink highlight color action (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Pink'**
   String get readerHighlightPink;
 
-  /// NEW: no Iced string (RFD 6 authority). The purple highlight color action (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The purple highlight color action (RD-12).
   ///
   /// In en, this message translates to:
   /// **'Purple'**
   String get readerHighlightPurple;
 
-  /// NEW: no Iced string (RFD 6 authority). The resolution suffix of a highlight recovered by quote context (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The resolution suffix of a highlight recovered by quote context (RD-12).
   ///
   /// In en, this message translates to:
   /// **'recovered'**
   String get readerAnnotationRecovered;
 
-  /// NEW: no Iced string (RFD 6 authority). The resolution suffix of a highlight with several candidate locations (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The resolution suffix of a highlight with several candidate locations (RD-12).
   ///
   /// In en, this message translates to:
   /// **'ambiguous'**
   String get readerAnnotationAmbiguous;
 
-  /// NEW: no Iced string (RFD 6 authority). The resolution suffix of an orphaned highlight (RD-12).
+  /// NEW: no Iced string (RFD 16 authority). The resolution suffix of an orphaned highlight (RD-12).
   ///
   /// In en, this message translates to:
   /// **'unavailable'**
   String get readerAnnotationUnavailable;
 
-  /// NEW: no Iced string (RFD 6 authority). The recolor annotation action and its menu entry (RD-12, salvaged from #114).
+  /// NEW: no Iced string (RFD 16 authority). The recolor annotation action and its menu entry (RD-12, salvaged from #114).
   ///
   /// In en, this message translates to:
   /// **'Change color'**
   String get readerChangeColor;
 
-  /// NEW: no Iced string (RFD 6 authority). The delete annotation action and its menu entry (RD-12, salvaged from #114).
+  /// NEW: no Iced string (RFD 16 authority). The delete annotation action and its menu entry (RD-12, salvaged from #114).
   ///
   /// In en, this message translates to:
   /// **'Delete highlight'**

@@ -1,7 +1,7 @@
 # 5A renderer and persistence contract
 
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and CBZ
-> support were removed on 2026-10-20 (RFD 4, "The first release"; RFD 2 returns
+> support were removed on 2026-10-20 (RFD 12, "The first release"; RFD 10 returns
 > CBZ as a later format package). Where this contract says PDF/CBZ, only the PDF
 > portion is live code; the CBZ rules are retained as the record for that
 > package.
@@ -21,8 +21,8 @@ its acceptance run below is historical, not a pending dispatch.
 
 ## 1. Authority and the implementation being replaced
 
-[Architecture](flutter-architecture.md), [RFD 4](../rfd/0004/PHASE-0.adoc),
-[RFD 6](../rfd/0006/README.adoc) and restoration decisions 4, 5, 8 and 12 apply.
+[Architecture](flutter-architecture.md), [RFD 12](https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/PHASE-0.adoc),
+[RFD 16](https://chaba-rfds.pages.dev/rfd/0016/) and restoration decisions 4, 5, 8 and 12 apply.
 Rust owns parsing, canonical text, layout, durable resolution, admission and writes.
 Flutter renders immutable state and dispatches typed messages; controller effects
 own handles, image decode, cancellation and guarded completion. No second text
@@ -66,7 +66,7 @@ contract splits for EPUB:
   records that disposition and keeps all package acceptance unchanged. A later
   slice may reuse an operation shape it still needs, but must say so explicitly.
 
-The contract remains fully in force for PDF/CBZ. RFD 4's
+The contract remains fully in force for PDF/CBZ. RFD 12's
 renderer-neutral scene can be encoded as the selected RGBA + sidecars, not Flutter
 reshaping. 1D still owns governing-record reconciliation.
 
@@ -614,7 +614,7 @@ Required 5B acceptance run (each result must identify revision/fixture/hash):
 - CPU raster production, bridge transfer, Dart materialization, decode, first
   content-bearing frame, warm turns, chapter transitions, font relayout and retained
   memory measured separately. Five warmups / ≥50 release samples; p50/p95/max,
-  viewport/DPR/font/device/power/build and cache definitions. RFD 4 ceilings remain
+  viewport/DPR/font/device/power/build and cache definitions. RFD 12 ceilings remain
   warm turn 8/16.7 ms, transition 16.7/33.3 ms, relayout 50/100 ms, DTO transfer
   p95 ≤4 ms, bridge no-op ≤1 ms; desktop steady RSS ≤512 MiB, no retained growth
   over 20 open/render/release cycles. No budget waiver inferred from a prototype.
