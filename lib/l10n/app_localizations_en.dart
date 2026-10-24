@@ -452,6 +452,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerPages => 'Pages';
 
   @override
+  String get readerPageAnimations => 'Page animations';
+
+  @override
   String get readerPagesHint => 'Two pages show when the window has room.';
 
   @override

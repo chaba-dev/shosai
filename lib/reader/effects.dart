@@ -81,6 +81,7 @@ typedef ReaderDisplayChange = ({
   double? fontSize,
   double? lineSpacing,
   bool? twoPages,
+  bool? animations,
 });
 
 /// Saves the Display settings the reader changes.

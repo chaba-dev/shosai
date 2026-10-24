@@ -644,6 +644,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       rasterFit: fit,
       rasterZoom: fit == ReaderRasterFit.manual ? zoom : baseScale,
       twoPages: settings?.twoPages ?? true,
+      animations: settings?.animations ?? true,
     );
   }
 
@@ -824,7 +825,21 @@ class _ReaderScreenState extends State<ReaderScreen>
         ),
       ),
     );
-    return _withReaderLocalizations(context, reader);
+    final panel = model.openPanel;
+    final floatingPanel =
+        panel != null &&
+        !ShellReaderOverlayScope.coveredOf(context) &&
+        _readerPanelPresentation(panel, layout) !=
+            _ReaderPanelPresentation.docked;
+    return PopScope(
+      canPop: !floatingPanel,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && floatingPanel) {
+          _controller.dispatch(ReaderPanelToggled(panel));
+        }
+      },
+      child: _withReaderLocalizations(context, reader),
+    );
   }
 
   /// Back after a jump, unless a text field takes the key for moving by

@@ -117,6 +117,30 @@ class _ChromeBridge extends HarnessBridge {
   /// live in production).
   List<FlutterBookmark> bookmarks = const [];
 
+  bool failSelection = false;
+
+  @override
+  Future<FlutterSelectionSurface> selectionSurface({
+    required FlutterDocumentHandle document,
+    required BigInt unit,
+    required double scale,
+    required double width,
+    required double fontSize,
+    required double lineSpacing,
+    required BigInt cancellationId,
+  }) {
+    if (failSelection) throw StateError('selection endpoint limit exceeded');
+    return super.selectionSurface(
+      document: document,
+      unit: unit,
+      scale: scale,
+      width: width,
+      fontSize: fontSize,
+      lineSpacing: lineSpacing,
+      cancellationId: cancellationId,
+    );
+  }
+
   @override
   Future<List<FlutterBookmark>> listBookmarks({
     required int bookId,
@@ -656,6 +680,305 @@ void main() {
   });
 
   group('edge navigation', () {
+    for (final fitWidth in [false, true]) {
+      for (final cancel in [false, true]) {
+        testWidgets(
+          'PDF asymmetric pinch beats scrolling (fitWidth: $fitWidth, cancel: $cancel)',
+          (tester) async {
+            _setView(tester, const Size(390, 500));
+            await _open(
+              tester,
+              _reader(
+                bridge: _ChromeBridge(),
+                initialPath: '/books/atlas.pdf',
+                settings: _epub.copyWith(pdfZoom: fitWidth ? -1 : 1),
+              ),
+            );
+            final center = tester.getCenter(
+              find.byKey(const ValueKey('reader-selection-surface')),
+            );
+            final axis = fitWidth ? const Offset(0, 1) : const Offset(1, 0);
+            final stationary = await tester.startGesture(
+              center - axis * 50,
+              pointer: 1,
+            );
+            final moving = await tester.startGesture(
+              center + axis * 50,
+              pointer: 2,
+            );
+            // Cross child drag slop before scale slop, then continue the pinch.
+            await moving.moveBy(axis * 20);
+            await tester.pump(const Duration(milliseconds: 20));
+            await moving.moveBy(axis * 80);
+            await tester.pump();
+            if (cancel) {
+              await moving.cancel();
+            } else {
+              await moving.up();
+            }
+            await stationary.up();
+            await tester.pumpAndSettle();
+            expect(find.text('33% · page 1'), findsOneWidget);
+            await tester.tap(
+              find.byKey(const ValueKey('reader-header-typography')),
+            );
+            await tester.pumpAndSettle();
+            if (cancel) {
+              expect(
+                find.byKey(
+                  ValueKey(
+                    fitWidth ? 'reader-fit-fitWidth' : 'reader-fit-none',
+                  ),
+                ),
+                findsOneWidget,
+              );
+              if (!fitWidth) expect(find.text('100%'), findsOneWidget);
+            } else {
+              expect(find.text(fitWidth ? '144%' : '200%'), findsOneWidget);
+            }
+          },
+        );
+      }
+    }
+
+    testWidgets(
+      'PDF pinch zooms from its fitted size, pans, and double tap restores fit',
+      (tester) async {
+        _setView(tester, const Size(390, 800));
+        await _open(
+          tester,
+          _reader(bridge: _ChromeBridge(), initialPath: '/books/atlas.pdf'),
+        );
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final center = tester.getCenter(surface);
+        final left = await tester.startGesture(
+          center - const Offset(50, 0),
+          pointer: 1,
+        );
+        final right = await tester.startGesture(
+          center + const Offset(50, 0),
+          pointer: 2,
+        );
+        for (var i = 1; i <= 5; i++) {
+          await left.moveTo(center - Offset(50 + i * 10, 0));
+          await right.moveTo(center + Offset(50 + i * 10, 0));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        await left.up();
+        await tester.pump();
+        await right.up();
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('reader-fit-none')), findsOneWidget);
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.tap(
+          find.byKey(const ValueKey('reader-header-typography')),
+        );
+        await tester.pumpAndSettle();
+        // A 420px PDF fitted into 302px, pinched to twice its displayed size.
+        expect(find.text('144%'), findsOneWidget);
+        await tester.tap(
+          find.byKey(const ValueKey('reader-header-typography')),
+        );
+        await tester.pumpAndSettle();
+        await tester.drag(surface, const Offset(-100, 0));
+        await tester.pumpAndSettle();
+        final horizontal = find.byWidgetPredicate(
+          (w) =>
+              w is SingleChildScrollView &&
+              w.scrollDirection == Axis.horizontal,
+        );
+        final scroll = tester.state<ScrollableState>(
+          find
+              .descendant(of: horizontal, matching: find.byType(Scrollable))
+              .first,
+        );
+        expect(scroll.position.pixels, greaterThan(0));
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.tap(surface);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(surface);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('reader-fit-contain')),
+          findsOneWidget,
+        );
+      },
+    );
+
+    for (final rtl in [false, true]) {
+      testWidgets('phone PDF swipes turn in book order (RTL: $rtl)', (
+        tester,
+      ) async {
+        _setView(tester, const Size(390, 844));
+        await _open(
+          tester,
+          _reader(
+            bridge: _ChromeBridge(rightToLeft: rtl),
+            initialPath: '/books/atlas.pdf',
+          ),
+        );
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final forward = Offset(rtl ? 180 : -180, 0);
+        for (final key in ['reader-edge-previous', 'reader-edge-next']) {
+          expect(
+            tester.getSize(find.byKey(ValueKey(key))).width,
+            greaterThanOrEqualTo(44),
+          );
+        }
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.drag(surface, -forward);
+        await tester.pumpAndSettle();
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.drag(surface, forward);
+        await tester.pumpAndSettle();
+        expect(find.text('67% · page 2'), findsOneWidget);
+        await tester.drag(surface, -forward);
+        await tester.pumpAndSettle();
+        expect(find.text('33% · page 1'), findsOneWidget);
+
+        await tester.drag(surface, forward * .2);
+        await tester.pumpAndSettle();
+        expect(
+          find.text('33% · page 1'),
+          findsOneWidget,
+          reason: 'small movements must not accidentally turn pages',
+        );
+        final gesture = await tester.startGesture(tester.getCenter(surface));
+        await gesture.moveBy(forward);
+        await tester.pump();
+        await gesture.cancel();
+        await tester.pumpAndSettle();
+        expect(find.text('33% · page 1'), findsOneWidget);
+      });
+    }
+
+    for (final rtl in [false, true]) {
+      for (final motion in ['on', 'off', 'disabled', 'reduced']) {
+        testWidgets('PDF page motion follows direction ($rtl, $motion)', (
+          tester,
+        ) async {
+          _setView(tester, const Size(390, 844));
+          tester.platformDispatcher.accessibilityFeaturesTestValue =
+              FakeAccessibilityFeatures(
+                disableAnimations: motion == 'disabled',
+                reduceMotion: motion == 'reduced',
+              );
+          addTearDown(
+            tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+          );
+          await _open(
+            tester,
+            _reader(
+              bridge: _ChromeBridge(rightToLeft: rtl),
+              initialPath: '/books/atlas.pdf',
+              settings: _epub.copyWith(animations: motion != 'off'),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final surface = find.byKey(
+            const ValueKey('reader-selection-surface'),
+          );
+          final resting = tester.getTopLeft(surface).dx;
+          for (final forward in [true, false]) {
+            await tester.tap(
+              find.byKey(
+                ValueKey(forward ? 'reader-edge-next' : 'reader-edge-previous'),
+              ),
+            );
+            final status = forward ? '67% · page 2' : '33% · page 1';
+            for (
+              var frame = 0;
+              frame < 20 && find.text(status).evaluate().isEmpty;
+              frame++
+            ) {
+              await tester.pump(const Duration(milliseconds: 10));
+            }
+            expect(find.text(status), findsOneWidget);
+            final start = tester.getTopLeft(surface).dx - resting;
+            if (motion == 'on') {
+              expect(start.abs(), greaterThan(1));
+              expect(start.sign, (forward != rtl) ? 1 : -1);
+              await tester.pump(const Duration(milliseconds: 100));
+              final middle = tester.getTopLeft(surface).dx - resting;
+              expect(middle.abs(), lessThan(start.abs()));
+              expect(middle.sign, start.sign);
+              if (forward) {
+                // iOS changes reduceMotion without setting disableAnimations.
+                tester.platformDispatcher.accessibilityFeaturesTestValue =
+                    const FakeAccessibilityFeatures(reduceMotion: true);
+                await tester.pump();
+                expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
+                tester.platformDispatcher.accessibilityFeaturesTestValue =
+                    const FakeAccessibilityFeatures();
+                await tester.pump();
+              }
+            } else {
+              expect(start, closeTo(0, .01));
+            }
+            await tester.pump(const Duration(milliseconds: 250));
+            expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
+          }
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+
+    testWidgets('PDF pages still animate when selection extraction fails', (
+      tester,
+    ) async {
+      _setView(tester, const Size(390, 844));
+      await _open(
+        tester,
+        _reader(
+          bridge: _ChromeBridge()..failSelection = true,
+          initialPath: '/books/atlas.pdf',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('reader-selection-surface')),
+        findsNothing,
+      );
+      final image = find.descendant(
+        of: _documentArea,
+        matching: find.byType(RawImage),
+      );
+      final resting = tester.getTopLeft(image).dx;
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      for (
+        var frame = 0;
+        frame < 20 && find.text('67% · page 2').evaluate().isEmpty;
+        frame++
+      ) {
+        await tester.pump(const Duration(milliseconds: 10));
+      }
+      expect(find.text('67% · page 2'), findsOneWidget);
+      expect(tester.getTopLeft(image).dx, greaterThan(resting + 1));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(tester.getTopLeft(image).dx, closeTo(resting, .01));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('continuous presentation never turns PDF pages on swipe', (
+      tester,
+    ) async {
+      _setView(tester, const Size(390, 844));
+      await _open(
+        tester,
+        _reader(
+          bridge: _ChromeBridge(),
+          initialPath: '/books/atlas.pdf',
+          settings: _continuous,
+        ),
+      );
+      await tester.drag(
+        find.byKey(const ValueKey('reader-selection-surface')),
+        const Offset(-180, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('33% · page 1'), findsOneWidget);
+    });
+
     testWidgets('enabled and disabled states dispatch unit navigation', (
       tester,
     ) async {
@@ -951,6 +1274,51 @@ void main() {
       expect(saved, [false]);
     });
 
+    for (final animations in [true, false]) {
+      testWidgets(
+        'page animations opens $animations and toggles without layout',
+        (tester) async {
+          _setView(tester, const Size(1280, 800));
+          final bridge = _ChromeBridge();
+          final saved = <ReaderDisplayChange>[];
+          await _open(
+            tester,
+            _reader(
+              bridge: bridge,
+              initialPath: '/books/atlas.pdf',
+              settings: animations ? _epub : _epub.copyWith(animations: false),
+              onDisplayChanged: saved.add,
+            ),
+          );
+          await tester.tap(
+            find.byKey(const ValueKey('reader-header-typography')),
+          );
+          await tester.pumpAndSettle();
+          final toggle = find.byKey(
+            const ValueKey('reader-typography-animations'),
+          );
+          expect(find.text('Page animations'), findsOneWidget);
+          expect(tester.widget<ShadSwitch>(toggle).value, animations);
+          final layouts = bridge.selectionLayouts.length;
+          final pages = bridge.pageCalls;
+          await tester.tap(toggle);
+          await tester.pumpAndSettle();
+          expect(tester.widget<ShadSwitch>(toggle).value, !animations);
+          expect(saved, [
+            (
+              theme: null,
+              fontSize: null,
+              lineSpacing: null,
+              twoPages: null,
+              animations: !animations,
+            ),
+          ]);
+          expect(bridge.selectionLayouts, hasLength(layouts));
+          expect(bridge.pageCalls, pages);
+        },
+      );
+    }
+
     testWidgets('the theme, text size and line spacing are handed over', (
       tester,
     ) async {
@@ -978,6 +1346,7 @@ void main() {
         fontSize: null,
         lineSpacing: null,
         twoPages: null,
+        animations: null,
       ));
       expect(saved[1].fontSize, greaterThan(18));
       expect((saved[1].theme, saved[1].lineSpacing), (null, null));

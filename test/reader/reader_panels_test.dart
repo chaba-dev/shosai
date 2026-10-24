@@ -324,6 +324,72 @@ Future<void> _openTypography(WidgetTester tester) async {
 void main() {
   setUpAll(loadHarnessFonts);
 
+  for (final panel in ['contents', 'typography', 'notes']) {
+    testWidgets(
+      'phone $panel sheet expands, collapses and dismisses by dragging',
+      (tester) async {
+        _setView(tester, const Size(390, 800));
+        await _open(tester, _reader(bridge: _PanelBridge(unitCount: 30)));
+        await tester.tap(find.byKey(ValueKey('reader-header-$panel')));
+        await _settle(tester);
+        final host = find.byKey(ValueKey('reader-panel-$panel'));
+        final handle = find.byKey(const ValueKey('reader-panel-drag-handle'));
+        final half = tester.getSize(host).height;
+        await tester.timedDrag(
+          handle,
+          const Offset(0, -280),
+          const Duration(seconds: 1),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getSize(host).height, closeTo(half * 2, 1));
+        await tester.timedDrag(
+          handle,
+          const Offset(0, 250),
+          const Duration(seconds: 1),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getSize(host).height, closeTo(half, 1));
+        await tester.timedDrag(
+          handle,
+          const Offset(0, 170),
+          const Duration(seconds: 1),
+        );
+        await tester.pumpAndSettle();
+        expect(host, findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'phone sheet content scrolls independently and supports accessible expansion',
+    (tester) async {
+      _setView(tester, const Size(390, 800));
+      await _open(tester, _reader(bridge: _PanelBridge(unitCount: 30)));
+      await _openContents(tester);
+      final host = find.byKey(const ValueKey('reader-panel-contents'));
+      final half = tester.getSize(host).height;
+      final first = find.byKey(const ValueKey('reader-contents-entry-0'));
+      final top = tester.getTopLeft(first).dy;
+      await tester.drag(
+        find.byKey(const ValueKey('reader-contents-scroll')),
+        const Offset(0, -150),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(first).dy, lessThan(top));
+      expect(tester.getSize(host).height, half);
+      final node = tester.getSemantics(
+        find.byKey(const ValueKey('reader-panel-sheet')),
+      );
+      tester.binding.renderViews.first.owner!.semanticsOwner!.performAction(
+        node.id,
+        SemanticsAction.increase,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getSize(host).height, closeTo(half * 2, 1));
+    },
+  );
+
   group('contents panel', () {
     testWidgets('renders fixture entries with the chapter fallback and '
         'navigates through rendered controls', (tester) async {
@@ -1320,6 +1386,38 @@ void main() {
   });
 
   group('typography panel', () {
+    for (final locale in [const Locale('en'), const Locale('ja')]) {
+      testWidgets(
+        'page animations is available on phones in ${locale.languageCode}',
+        (tester) async {
+          _setView(tester, const Size(390, 844));
+          await _open(
+            tester,
+            _reader(
+              bridge: _PanelBridge(unitCount: 3),
+              locale: locale,
+              settings: _epubSettings.copyWith(animations: false),
+            ),
+          );
+          await _openTypography(tester);
+          final toggle = find.byKey(
+            const ValueKey('reader-typography-animations'),
+          );
+          expect(
+            find.text(
+              locale.languageCode == 'ja' ? 'ページアニメーション' : 'Page animations',
+            ),
+            findsOneWidget,
+          );
+          expect(tester.widget<ShadSwitch>(toggle).value, isFalse);
+          await tester.ensureVisible(toggle);
+          await tester.tap(toggle);
+          await tester.pumpAndSettle();
+          expect(tester.widget<ShadSwitch>(toggle).value, isTrue);
+        },
+      );
+    }
+
     testWidgets('EPUB shows text size, line spacing and page theme with '
         'clamps', (tester) async {
       _setView(tester, const Size(1280, 800));
@@ -1830,6 +1928,25 @@ void main() {
   });
 
   group('panel modality', () {
+    for (final size in [const Size(390, 800), const Size(1024, 800)]) {
+      testWidgets(
+        'system Back dismisses floating panels without leaving the reader at $size',
+        (tester) async {
+          _setView(tester, size);
+          await _open(tester, _reader(bridge: _PanelBridge(unitCount: 3)));
+          for (final panel in ['contents', 'typography', 'notes']) {
+            await tester.tap(find.byKey(ValueKey('reader-header-$panel')));
+            await _settle(tester);
+            expect(find.byKey(ValueKey('reader-panel-$panel')), findsOneWidget);
+            await tester.binding.handlePopRoute();
+            await _settle(tester);
+            expect(find.byKey(ValueKey('reader-panel-$panel')), findsNothing);
+            expect(find.byType(ReaderScreen), findsOneWidget);
+          }
+        },
+      );
+    }
+
     bool focusInStage(WidgetTester tester) {
       final context = FocusManager.instance.primaryFocus?.context;
       if (context == null) return false;

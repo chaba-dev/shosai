@@ -661,6 +661,10 @@
     "description": "Iced reference key: fit-page."
   },
   "readerPages": "Pages",
+  "readerPageAnimations": "Page animations",
+  "@readerPageAnimations": {
+    "description": "Whether page turns are animated in the reader."
+  },
   "@readerPages": {
     "description": "NEW: no Iced string. The Display settings field that chooses one or two pages (RFD 12)."
   },

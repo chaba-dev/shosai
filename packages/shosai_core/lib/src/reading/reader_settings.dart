@@ -19,6 +19,7 @@ final class ReaderSettings {
     this.epubLineSpacing = 1.6,
     this.pdfZoom = pdfZoomFitPage,
     this.twoPages = true,
+    this.animations = true,
   });
 
   static const pdfZoomFitPage = 0.0;
@@ -41,6 +42,9 @@ final class ReaderSettings {
   /// always one.
   final bool twoPages;
 
+  /// Animate page turns.
+  final bool animations;
+
   /// Whether every value is within its supported range.
   bool get isValid =>
       _within(epubFontSize, minEpubFontSize, maxEpubFontSize) &&
@@ -57,7 +61,8 @@ final class ReaderSettings {
       other.epubFontSize == epubFontSize &&
       other.epubLineSpacing == epubLineSpacing &&
       other.pdfZoom == pdfZoom &&
-      other.twoPages == twoPages;
+      other.twoPages == twoPages &&
+      other.animations == animations;
 
   @override
   int get hashCode => Object.hash(
@@ -67,13 +72,14 @@ final class ReaderSettings {
     epubLineSpacing,
     pdfZoom,
     twoPages,
+    animations,
   );
 
   @override
   String toString() =>
       'ReaderSettings(continuous: $continuous, theme: ${theme.name}, '
       'epubFontSize: $epubFontSize, epubLineSpacing: $epubLineSpacing, '
-      'pdfZoom: $pdfZoom, twoPages: $twoPages)';
+      'pdfZoom: $pdfZoom, twoPages: $twoPages, animations: $animations)';
 }
 
 bool _within(double value, double min, double max) =>
@@ -85,6 +91,7 @@ const _epubFontSizeKey = 'reader.epub_font_size';
 const _epubLineSpacingKey = 'reader.epub_line_spacing';
 const _pdfZoomKey = 'reader.pdf_zoom';
 const _pagesKey = 'reader.pages';
+const _animationsKey = 'reader.animations';
 
 /// Loads and saves [ReaderSettings].
 final class ReaderSettingsStore {
@@ -130,6 +137,7 @@ final class ReaderSettingsStore {
         (v) => ReaderSettings(pdfZoom: v).isValid,
       ),
       twoPages: stored[_pagesKey] != 'one',
+      animations: stored[_animationsKey] != 'off',
     );
     return loaded;
   }
@@ -148,6 +156,7 @@ final class ReaderSettingsStore {
       _epubLineSpacingKey: '${settings.epubLineSpacing}',
       _pdfZoomKey: '${settings.pdfZoom}',
       _pagesKey: settings.twoPages ? 'two' : 'one',
+      _animationsKey: settings.animations ? 'on' : 'off',
     });
   }
 }

@@ -177,6 +177,21 @@ class _ReachableSelectableSurface extends StatelessWidget {
     final fit = _readerFit(model.typography);
     return LayoutBuilder(
       builder: (context, constraints) {
+        Widget gestures(
+          Widget Function(ScrollController, ScrollController) builder,
+        ) => _ReaderPageGestures(
+          model: model,
+          dispatch: dispatch,
+          fittedZoom: document.format == FlutterBookFormat.pdf
+              ? model.typography.rasterZoom *
+                    SurfaceTransform.create(
+                      fit,
+                      Size(surface.width, surface.height),
+                      constraints.biggest,
+                    ).scaleX
+              : null,
+          builder: builder,
+        );
         Widget content(Size size) => KeyedSubtree(
           key: contentKey,
           child: SizedBox.fromSize(
@@ -229,7 +244,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
             fit == BoxFit.contain) {
           return KeyedSubtree(
             key: presentationKey,
-            child: content(constraints.biggest),
+            child: gestures((_, _) => content(constraints.biggest)),
           );
         }
         final natural = fit == BoxFit.fitWidth
@@ -242,28 +257,228 @@ class _ReachableSelectableSurface extends StatelessWidget {
           math.max(constraints.maxWidth, natural.width),
           math.max(constraints.maxHeight, natural.height),
         );
-        final vertical = SingleChildScrollView(
-          key: ValueKey(
-            'reader-vertical-scroll-${model.generation}-${model.unit}',
-          ),
-          child: content(reachable),
-        );
-        if (fit == BoxFit.fitWidth) {
-          return KeyedSubtree(key: presentationKey, child: vertical);
-        }
         return KeyedSubtree(
           key: presentationKey,
-          child: SingleChildScrollView(
-            key: ValueKey(
-              'reader-horizontal-scroll-${model.generation}-${model.unit}',
-            ),
-            scrollDirection: Axis.horizontal,
-            child: vertical,
-          ),
+          child: gestures((horizontal, vertical) {
+            final scrolled = SingleChildScrollView(
+              key: ValueKey(
+                'reader-vertical-scroll-${model.generation}-${model.unit}',
+              ),
+              controller: vertical,
+              child: content(reachable),
+            );
+            if (fit == BoxFit.fitWidth) return scrolled;
+            return SingleChildScrollView(
+              key: ValueKey(
+                'reader-horizontal-scroll-${model.generation}-${model.unit}',
+              ),
+              controller: horizontal,
+              scrollDirection: Axis.horizontal,
+              child: scrolled,
+            );
+          }),
         );
       },
     );
   }
+}
+
+/// Touch page turns and PDF zoom share a recognizer, so a pinch cannot also
+/// turn a page. The same recognizer pans enlarged PDFs, leaving scroll views
+/// to handle wheel/trackpad input without competing for touch pinches.
+class _ReaderPageGestures extends StatefulWidget {
+  const _ReaderPageGestures({
+    required this.model,
+    required this.dispatch,
+    required this.fittedZoom,
+    required this.builder,
+  });
+
+  final ReaderModel model;
+  final void Function(ReaderMessage) dispatch;
+  final double? fittedZoom;
+  final Widget Function(ScrollController, ScrollController) builder;
+
+  @override
+  State<_ReaderPageGestures> createState() => _ReaderPageGesturesState();
+}
+
+class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
+  final _horizontal = ScrollController();
+  final _vertical = ScrollController();
+  final Map<int, Offset> _pointers = {};
+  Offset _distance = Offset.zero;
+  (int, int, int?)? _startedPage;
+  double _startZoom = 1;
+  double _startSpan = 1;
+  double _previewScale = 1;
+  bool _multiTouch = false;
+  bool _cancelled = false;
+
+  @override
+  void dispose() {
+    _horizontal.dispose();
+    _vertical.dispose();
+    super.dispose();
+  }
+
+  (int, int, int?) get _page => (
+    widget.model.generation,
+    widget.model.unit,
+    widget.model.epubPage?.pageIndex,
+  );
+
+  bool get _enabled =>
+      !widget.model.busy &&
+      !widget.model.relayoutBusy &&
+      widget.model.selectionPhase == ReaderSelectionPhase.idle;
+
+  @override
+  void didUpdateWidget(_ReaderPageGestures oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_startedPage != _page) {
+      _startedPage = null;
+      _previewScale = 1;
+    }
+  }
+
+  void _finish() {
+    final started = _startedPage;
+    _startedPage = null;
+    final model = widget.model;
+    final scale = _previewScale;
+    setState(() => _previewScale = 1);
+    if (started != _page || !_enabled || _cancelled) return;
+    if (_multiTouch) {
+      if (widget.fittedZoom != null && (scale - 1).abs() >= .03) {
+        widget.dispatch(ReaderTypographyChanged(zoom: _startZoom * scale));
+      }
+      return;
+    }
+    if (model.continuousPresentation ||
+        _readerFit(model.typography) != BoxFit.contain ||
+        _distance.dx.abs() < 48 ||
+        _distance.dx.abs() < _distance.dy.abs() * 1.5) {
+      return;
+    }
+    final delta = (_distance.dx < 0 ? 1 : -1) * (model.rightToLeft ? -1 : 1);
+    final total = model.document?.logicalUnitCount.toInt() ?? 0;
+    if (_canStepPage(model, delta, total)) {
+      widget.dispatch(pageStepMessage(model, delta));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    onPointerDown: (event) {
+      if (event.kind != ui.PointerDeviceKind.touch) return;
+      if (_pointers.isEmpty) {
+        _cancelled = false;
+        _multiTouch = false;
+        _distance = Offset.zero;
+      }
+      _pointers[event.pointer] = event.localPosition;
+      if (_pointers.length == 2) {
+        _startSpan = (_pointers.values.first - _pointers.values.last).distance;
+      }
+      _multiTouch |= _pointers.length > 1;
+    },
+    onPointerMove: (event) {
+      if (_pointers.containsKey(event.pointer)) {
+        _pointers[event.pointer] = event.localPosition;
+      }
+    },
+    onPointerUp: (event) {
+      if (_pointers.remove(event.pointer) != null && _pointers.isEmpty) {
+        _finish();
+      }
+    },
+    onPointerCancel: (event) {
+      _pointers.remove(event.pointer);
+      _cancelled = true;
+      _startedPage = null;
+      setState(() => _previewScale = 1);
+    },
+    child: GestureDetector(
+      supportedDevices: const {ui.PointerDeviceKind.touch},
+      excludeFromSemantics: true,
+      behavior: HitTestBehavior.opaque,
+      onDoubleTap: widget.fittedZoom == null || !_enabled
+          ? null
+          : () {
+              if (!_enabled) return;
+              widget.dispatch(
+                widget.model.typography.rasterFit == ReaderRasterFit.manual
+                    ? const ReaderTypographyChanged(
+                        rasterFit: ReaderRasterFit.fitPage,
+                      )
+                    : ReaderTypographyChanged(zoom: widget.fittedZoom! * 2),
+              );
+            },
+      onScaleStart: (details) {
+        if (_startedPage != null) return;
+        _startZoom = widget.fittedZoom ?? 1;
+        _startedPage = _enabled && !_cancelled ? _page : null;
+      },
+      onScaleUpdate: (details) {
+        _distance += details.focalPointDelta;
+        _multiTouch |= details.pointerCount > 1;
+        if (!_multiTouch && widget.fittedZoom != null && _enabled) {
+          for (final (controller, delta) in [
+            (_horizontal, details.focalPointDelta.dx),
+            (_vertical, details.focalPointDelta.dy),
+          ]) {
+            if (!controller.hasClients) continue;
+            final position = controller.position;
+            controller.jumpTo(
+              (position.pixels - delta).clamp(
+                position.minScrollExtent,
+                position.maxScrollExtent,
+              ),
+            );
+          }
+        }
+        if (_pointers.length == 2 &&
+            _startSpan > 0 &&
+            widget.fittedZoom != null &&
+            _startedPage == _page &&
+            _enabled) {
+          final scale =
+              (_pointers.values.first - _pointers.values.last).distance /
+              _startSpan;
+          setState(
+            () =>
+                _previewScale = (_startZoom * scale).clamp(.25, 5) / _startZoom,
+          );
+        }
+      },
+      onScaleEnd: (details) {
+        if (_multiTouch || _cancelled || !_enabled) return;
+        for (final (controller, velocity) in [
+          (_horizontal, details.velocity.pixelsPerSecond.dx),
+          (_vertical, details.velocity.pixelsPerSecond.dy),
+        ]) {
+          if (controller.hasClients) {
+            (controller.position as ScrollPositionWithSingleContext)
+                .goBallistic(-velocity);
+          }
+        }
+      },
+      child: ClipRect(
+        clipBehavior: _previewScale == 1 ? Clip.none : Clip.hardEdge,
+        child: Transform.scale(
+          scale: _previewScale,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(
+              dragDevices: {...ScrollConfiguration.of(context).dragDevices}
+                ..remove(ui.PointerDeviceKind.touch),
+            ),
+            child: widget.builder(_horizontal, _vertical),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /// Scrolls a continuous EPUB chapter, and brings the location each explicit

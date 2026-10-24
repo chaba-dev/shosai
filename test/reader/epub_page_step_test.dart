@@ -258,6 +258,43 @@ void main() {
     },
   );
 
+  testWidgets('phone swipes turn EPUB pages within a chapter and back', (
+    tester,
+  ) async {
+    await openReader(tester, bridge(), size: const ui.Size(390, 800));
+    await settleEpubPage(tester);
+    final first = dartPage(tester)!.page;
+    final surface = find.byKey(const ValueKey('reader-selection-surface'));
+    final resting = tester.getTopLeft(surface).dx;
+    await tester.drag(surface, const Offset(-200, 0));
+    for (
+      var frame = 0;
+      frame < 20 && identical(dartPage(tester)!.page, first);
+      frame++
+    ) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(tester.getTopLeft(surface).dx, greaterThan(resting + 1));
+    await settleEpubPage(tester);
+    final next = dartPage(tester)!.page;
+    expect(next.unit, first.unit);
+    expect(next.canonicalStart, greaterThan(first.canonicalStart));
+    expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
+    await tester.drag(surface, const Offset(200, 0));
+    for (
+      var frame = 0;
+      frame < 20 && identical(dartPage(tester)!.page, next);
+      frame++
+    ) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(tester.getTopLeft(surface).dx, lessThan(resting - 1));
+    await settleEpubPage(tester);
+    expect(dartPage(tester)!.page.canonicalStart, first.canonicalStart);
+    expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
+    await closeReader(tester);
+  });
+
   testWidgets('keyboard PageDown steps forward and PageUp walks back in '
       'order', (tester) async {
     final harness = bridge();

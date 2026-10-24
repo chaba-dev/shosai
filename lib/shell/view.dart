@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import 'package:flutter/services.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
@@ -97,6 +98,28 @@ final class ShellActions {
   final VoidCallback? closeSwitcher;
 }
 
+/// A covered reader stays mounted, but must not handle Back intended for the
+/// shell's topmost overlay. This also updates a cached reader when it changes.
+class ShellReaderOverlayScope extends InheritedWidget {
+  const ShellReaderOverlayScope({
+    super.key,
+    required this.covered,
+    required super.child,
+  });
+
+  final bool covered;
+
+  static bool coveredOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<ShellReaderOverlayScope>()
+          ?.covered ??
+      false;
+
+  @override
+  bool updateShouldNotify(ShellReaderOverlayScope oldWidget) =>
+      covered != oldWidget.covered;
+}
+
 /// The shell around [child]: the sidebar on the library side, the rail while
 /// reading, and the bottom bar on a phone's library side.
 ///
@@ -133,9 +156,15 @@ class ShellFrame extends StatelessWidget {
         return Stack(
           fit: StackFit.expand,
           children: [
-            ExcludeFocus(
-              excluding: model.switching,
-              child: ExcludeSemantics(excluding: model.switching, child: child),
+            ShellReaderOverlayScope(
+              covered: model.switching,
+              child: ExcludeFocus(
+                excluding: model.switching,
+                child: ExcludeSemantics(
+                  excluding: model.switching,
+                  child: child,
+                ),
+              ),
             ),
             if (model.switching)
               ShellTabSwitcher(

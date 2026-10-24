@@ -227,6 +227,7 @@ class LibraryController implements Listenable {
           epubFontSize: message.fontSize,
           epubLineSpacing: message.lineSpacing,
           twoPages: message.twoPages,
+          animations: message.animations,
         );
         if (changed == settings) return;
         _emit(_model.copyWith(settings: changed));

@@ -397,6 +397,7 @@ final class CoreRecords implements ShosaiRecords {
       epubLineSpacing: settings.epubLineSpacing,
       pdfZoom: settings.pdfZoom,
       twoPages: settings.twoPages,
+      animations: settings.animations,
       librarySort: FlutterLibrarySort.values.byName(sort.name),
     );
   });
@@ -420,6 +421,7 @@ final class CoreRecords implements ShosaiRecords {
             epubLineSpacing: value.epubLineSpacing,
             pdfZoom: value.pdfZoom,
             twoPages: value.twoPages,
+            animations: value.animations,
           ),
         );
         await _core.librarySettings.saveSort(
