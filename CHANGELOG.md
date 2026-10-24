@@ -100,6 +100,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Back returns to the book a note or search hit was opened from (#208)
 - *(shell)* Show each open book's page on the tab switcher cards (#209)
 - *(reader)* Save the theme, text size and line spacing the Display panel sets (#210)
+- *(ios)* Open EPUB and PDF books in Shōsai from other apps (#223)
 
 ### 🐛 Bug Fixes
 
@@ -139,6 +140,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Lay out the note editor's actions on a phone (#213)
 - *(reader)* Turn pages with the arrow keys and Space as soon as a book opens (#214)
 - *(shell)* Bring the open books back when the app starts again (#215)
+- *(library)* Add books on iOS through the document picker (#222)
 
 ### 🚜 Refactor
 
