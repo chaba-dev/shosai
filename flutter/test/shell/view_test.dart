@@ -430,6 +430,29 @@ void main() {
     }
   });
 
+  testWidgets('a short inset rail scrolls to its books and Add books', (
+    tester,
+  ) async {
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+    final recorder = _Recorder();
+    await _pumpFrame(
+      tester,
+      size: const Size(800, 360),
+      model: _model(reading: true),
+      recorder: recorder,
+    );
+    expect(tester.takeException(), isNull);
+    final add = find.byTooltip('Add books');
+    await tester.ensureVisible(add);
+    await tester.tap(add);
+    expect(recorder.adds, 1);
+    final book = find.byTooltip('吾輩は猫である');
+    await tester.ensureVisible(book);
+    await tester.tap(book);
+    expect(recorder.opened, [3]);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a phone gets the bottom bar, and nothing while reading', (
     tester,
   ) async {

@@ -192,54 +192,66 @@ class ShellRail extends StatelessWidget {
             : const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         child: _startSafeArea(
           context,
-          Column(
-            spacing: 8,
-            children: [
-              const Padding(
-                padding: EdgeInsets.only(bottom: 8),
-                child: ShellMark(),
-              ),
-              for (final (place, icon) in _places)
-                _RailButton(
-                  icon: icon,
-                  label: shellPlaceLabel(l10n, place),
-                  touch: layout.touch,
-                  onPressed: () => actions.selectPlace(place),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // Keep a cover reachable as well as the fixed controls. Below
+              // that height, scroll the whole rail instead of starving its list.
+              final scroll =
+                  constraints.maxHeight <
+                  38 + 5 * (layout.touch ? 44 : 40) + 6 * 8 + 76;
+              final books = Container(
+                margin: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.only(top: 10),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: palette.line)),
                 ),
-              Expanded(
-                child: Container(
-                  margin: const EdgeInsets.only(top: 6),
-                  padding: const EdgeInsets.only(top: 10),
-                  decoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: palette.line)),
-                  ),
-                  child: ListView(
-                    padding: EdgeInsets.zero,
-                    children: [
-                      for (final entry in model.openBooks)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Center(
-                            child: _RailBook(
-                              entry: entry,
-                              cover: covers[entry.id],
-                              current: entry.id == model.currentBookId,
-                              touch: layout.touch,
-                              actions: actions,
-                            ),
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: scroll,
+                  physics: scroll ? const NeverScrollableScrollPhysics() : null,
+                  children: [
+                    for (final entry in model.openBooks)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Center(
+                          child: _RailBook(
+                            entry: entry,
+                            cover: covers[entry.id],
+                            current: entry.id == model.currentBookId,
+                            touch: layout.touch,
+                            actions: actions,
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
-              ),
-              _RailButton(
-                icon: LucideIcons.plus,
-                label: l10n.addBooksAction,
-                touch: layout.touch,
-                onPressed: actions.addBooks,
-              ),
-            ],
+              );
+              final column = Column(
+                mainAxisSize: scroll ? MainAxisSize.min : MainAxisSize.max,
+                spacing: 8,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: ShellMark(),
+                  ),
+                  for (final (place, icon) in _places)
+                    _RailButton(
+                      icon: icon,
+                      label: shellPlaceLabel(l10n, place),
+                      touch: layout.touch,
+                      onPressed: () => actions.selectPlace(place),
+                    ),
+                  if (scroll) books else Expanded(child: books),
+                  _RailButton(
+                    icon: LucideIcons.plus,
+                    label: l10n.addBooksAction,
+                    touch: layout.touch,
+                    onPressed: actions.addBooks,
+                  ),
+                ],
+              );
+              return scroll ? SingleChildScrollView(child: column) : column;
+            },
           ),
         ),
       ),
