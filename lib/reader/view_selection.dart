@@ -229,7 +229,11 @@ class _ReachableSelectableSurface extends StatelessWidget {
             fit == BoxFit.contain) {
           return KeyedSubtree(
             key: presentationKey,
-            child: content(constraints.biggest),
+            child: _ReaderPageSwipe(
+              model: model,
+              dispatch: dispatch,
+              child: content(constraints.biggest),
+            ),
           );
         }
         final natural = fit == BoxFit.fitWidth
@@ -264,6 +268,78 @@ class _ReachableSelectableSurface extends StatelessWidget {
       },
     );
   }
+}
+
+/// Only fitted, paginated pages turn by swiping. Continuous EPUBs and zoomed
+/// PDFs keep their scroll gestures; the child's long press still selects text.
+class _ReaderPageSwipe extends StatefulWidget {
+  const _ReaderPageSwipe({
+    required this.model,
+    required this.dispatch,
+    required this.child,
+  });
+
+  final ReaderModel model;
+  final void Function(ReaderMessage) dispatch;
+  final Widget child;
+
+  @override
+  State<_ReaderPageSwipe> createState() => _ReaderPageSwipeState();
+}
+
+class _ReaderPageSwipeState extends State<_ReaderPageSwipe> {
+  final Set<int> _pointers = {};
+  double _distance = 0;
+  (int, int, int?)? _startedPage;
+
+  (int, int, int?) get _page => (
+    widget.model.generation,
+    widget.model.unit,
+    widget.model.epubPage?.pageIndex,
+  );
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    onPointerDown: (event) {
+      _pointers.add(event.pointer);
+      if (_pointers.length > 1) _startedPage = null;
+    },
+    onPointerUp: (event) => _pointers.remove(event.pointer),
+    onPointerCancel: (event) {
+      _pointers.remove(event.pointer);
+      _startedPage = null;
+    },
+    child: GestureDetector(
+      supportedDevices: const {ui.PointerDeviceKind.touch},
+      excludeFromSemantics: true,
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: (_) {
+        _distance = 0;
+        _startedPage = _pointers.length == 1 ? _page : null;
+      },
+      onHorizontalDragUpdate: (details) => _distance += details.delta.dx,
+      onHorizontalDragCancel: () => _startedPage = null,
+      onHorizontalDragEnd: (_) {
+        final started = _startedPage;
+        _startedPage = null;
+        final model = widget.model;
+        if (started != _page ||
+            _distance.abs() < 48 ||
+            model.continuousPresentation ||
+            model.busy ||
+            model.relayoutBusy ||
+            model.selectionPhase != ReaderSelectionPhase.idle) {
+          return;
+        }
+        final delta = (_distance < 0 ? 1 : -1) * (model.rightToLeft ? -1 : 1);
+        final total = model.document?.logicalUnitCount.toInt() ?? 0;
+        if (_canStepPage(model, delta, total)) {
+          widget.dispatch(pageStepMessage(model, delta));
+        }
+      },
+      child: widget.child,
+    ),
+  );
 }
 
 /// Scrolls a continuous EPUB chapter, and brings the location each explicit

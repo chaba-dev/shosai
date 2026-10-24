@@ -656,6 +656,67 @@ void main() {
   });
 
   group('edge navigation', () {
+    for (final rtl in [false, true]) {
+      testWidgets('phone PDF swipes turn in book order (RTL: $rtl)', (
+        tester,
+      ) async {
+        _setView(tester, const Size(390, 844));
+        await _open(
+          tester,
+          _reader(
+            bridge: _ChromeBridge(rightToLeft: rtl),
+            initialPath: '/books/atlas.pdf',
+          ),
+        );
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final forward = Offset(rtl ? 180 : -180, 0);
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.drag(surface, -forward);
+        await tester.pumpAndSettle();
+        expect(find.text('33% · page 1'), findsOneWidget);
+        await tester.drag(surface, forward);
+        await tester.pumpAndSettle();
+        expect(find.text('67% · page 2'), findsOneWidget);
+        await tester.drag(surface, -forward);
+        await tester.pumpAndSettle();
+        expect(find.text('33% · page 1'), findsOneWidget);
+
+        await tester.drag(surface, forward * .2);
+        await tester.pumpAndSettle();
+        expect(
+          find.text('33% · page 1'),
+          findsOneWidget,
+          reason: 'small movements must not accidentally turn pages',
+        );
+        final gesture = await tester.startGesture(tester.getCenter(surface));
+        await gesture.moveBy(forward);
+        await tester.pump();
+        await gesture.cancel();
+        await tester.pumpAndSettle();
+        expect(find.text('33% · page 1'), findsOneWidget);
+      });
+    }
+
+    testWidgets('continuous presentation never turns PDF pages on swipe', (
+      tester,
+    ) async {
+      _setView(tester, const Size(390, 844));
+      await _open(
+        tester,
+        _reader(
+          bridge: _ChromeBridge(),
+          initialPath: '/books/atlas.pdf',
+          settings: _continuous,
+        ),
+      );
+      await tester.drag(
+        find.byKey(const ValueKey('reader-selection-surface')),
+        const Offset(-180, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('33% · page 1'), findsOneWidget);
+    });
+
     testWidgets('enabled and disabled states dispatch unit navigation', (
       tester,
     ) async {
