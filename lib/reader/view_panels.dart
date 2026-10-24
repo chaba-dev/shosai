@@ -84,12 +84,10 @@ List<Widget> _readerPanelOverlay({
       ),
     ),
     switch (presentation) {
-      _ReaderPanelPresentation.sheet => Positioned(
-        left: 0,
-        right: 0,
-        bottom: 0,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: stage.maxHeight * .8),
+      _ReaderPanelPresentation.sheet => Positioned.fill(
+        child: _ReaderPanelSheet(
+          key: ValueKey(panel),
+          onDismiss: () => dispatch(ReaderPanelToggled(panel)),
           child: host,
         ),
       ),
@@ -112,6 +110,82 @@ List<Widget> _readerPanelOverlay({
       ),
     },
   ];
+}
+
+/// Sheet extent is transient presentation state, like a scroll offset. Only
+/// dismissal changes the reader model, through the existing panel message.
+class _ReaderPanelSheet extends StatefulWidget {
+  const _ReaderPanelSheet({
+    super.key,
+    required this.onDismiss,
+    required this.child,
+  });
+
+  final VoidCallback onDismiss;
+  final Widget child;
+
+  @override
+  State<_ReaderPanelSheet> createState() => _ReaderPanelSheetState();
+}
+
+class _ReaderPanelSheetState extends State<_ReaderPanelSheet> {
+  double _extent = .5;
+  bool _dragging = false;
+
+  void _settle([double velocity = 0]) {
+    if (_extent < .35 || velocity > 700) {
+      widget.onDismiss();
+    } else {
+      setState(() {
+        _dragging = false;
+        _extent = velocity < -700 || _extent >= .75 ? 1 : .5;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => Align(
+      alignment: Alignment.bottomCenter,
+      child: AnimatedContainer(
+        duration: _dragging || MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        height: constraints.maxHeight * _extent,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          excludeFromSemantics: true,
+          onVerticalDragStart: (_) => setState(() => _dragging = true),
+          onVerticalDragUpdate: (details) {
+            if (constraints.maxHeight <= 0) return;
+            setState(
+              () =>
+                  _extent = (_extent - details.delta.dy / constraints.maxHeight)
+                      .clamp(.2, 1.0),
+            );
+          },
+          onVerticalDragEnd: (details) => _settle(details.primaryVelocity ?? 0),
+          onVerticalDragCancel: () => setState(() {
+            _dragging = false;
+            _extent = _extent >= .75 ? 1 : .5;
+          }),
+          child: Semantics(
+            key: const ValueKey('reader-panel-sheet'),
+            label: MaterialLocalizations.of(context).bottomSheetLabel,
+            value: '${(_extent * 100).round()}%',
+            increasedValue: _extent < 1 ? '100%' : null,
+            decreasedValue: _extent > .5 ? '50%' : null,
+            onIncrease: _extent < 1 ? () => setState(() => _extent = 1) : null,
+            onDecrease: _extent > .5
+                ? () => setState(() => _extent = .5)
+                : null,
+            child: widget.child,
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /// The reader panel host: one labelled container for the open panel (RD-13).
@@ -211,17 +285,17 @@ class _ReaderPanelHost extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (presentation == _ReaderPanelPresentation.sheet)
-                      Center(
-                        child: Container(
-                          width: 36,
-                          height: 4,
-                          margin: const EdgeInsets.only(
-                            top: ShosaiTokens.space2,
-                            bottom: ShosaiTokens.space1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: palette.lineStrong.withValues(alpha: .6),
-                            borderRadius: BorderRadius.circular(2),
+                      SizedBox(
+                        key: const ValueKey('reader-panel-drag-handle'),
+                        height: ShosaiTokens.sizeTouchTarget,
+                        child: Center(
+                          child: Container(
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: palette.lineStrong.withValues(alpha: .6),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
                           ),
                         ),
                       ),

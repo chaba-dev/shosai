@@ -324,6 +324,72 @@ Future<void> _openTypography(WidgetTester tester) async {
 void main() {
   setUpAll(loadHarnessFonts);
 
+  for (final panel in ['contents', 'typography', 'notes']) {
+    testWidgets(
+      'phone $panel sheet expands, collapses and dismisses by dragging',
+      (tester) async {
+        _setView(tester, const Size(390, 800));
+        await _open(tester, _reader(bridge: _PanelBridge(unitCount: 30)));
+        await tester.tap(find.byKey(ValueKey('reader-header-$panel')));
+        await _settle(tester);
+        final host = find.byKey(ValueKey('reader-panel-$panel'));
+        final handle = find.byKey(const ValueKey('reader-panel-drag-handle'));
+        final half = tester.getSize(host).height;
+        await tester.timedDrag(
+          handle,
+          const Offset(0, -280),
+          const Duration(seconds: 1),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getSize(host).height, closeTo(half * 2, 1));
+        await tester.timedDrag(
+          handle,
+          const Offset(0, 250),
+          const Duration(seconds: 1),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getSize(host).height, closeTo(half, 1));
+        await tester.timedDrag(
+          handle,
+          const Offset(0, 170),
+          const Duration(seconds: 1),
+        );
+        await tester.pumpAndSettle();
+        expect(host, findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'phone sheet content scrolls independently and supports accessible expansion',
+    (tester) async {
+      _setView(tester, const Size(390, 800));
+      await _open(tester, _reader(bridge: _PanelBridge(unitCount: 30)));
+      await _openContents(tester);
+      final host = find.byKey(const ValueKey('reader-panel-contents'));
+      final half = tester.getSize(host).height;
+      final first = find.byKey(const ValueKey('reader-contents-entry-0'));
+      final top = tester.getTopLeft(first).dy;
+      await tester.drag(
+        find.byKey(const ValueKey('reader-contents-scroll')),
+        const Offset(0, -150),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(first).dy, lessThan(top));
+      expect(tester.getSize(host).height, half);
+      final node = tester.getSemantics(
+        find.byKey(const ValueKey('reader-panel-sheet')),
+      );
+      tester.binding.renderViews.first.owner!.semanticsOwner!.performAction(
+        node.id,
+        SemanticsAction.increase,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getSize(host).height, closeTo(half * 2, 1));
+    },
+  );
+
   group('contents panel', () {
     testWidgets('renders fixture entries with the chapter fallback and '
         'navigates through rendered controls', (tester) async {
