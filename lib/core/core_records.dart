@@ -533,6 +533,7 @@ final class CoreRecords implements ShosaiRecords {
       ),
       unitCount: unitCount.toInt(),
       lastUnit: value.lastUnit?.toInt(),
+      progress: value.progress,
     ),
   );
 

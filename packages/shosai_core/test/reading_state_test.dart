@@ -96,6 +96,27 @@ void main() {
       );
     });
 
+    test('canonical progress is atomic with its durable position', () async {
+      final state = ReadingState(t.store);
+      const position = ReadingPosition(unit: 0, offset: 230, zoom: 1.5);
+      await state.save(epub.id, position, unitCount: 3, progress: .23);
+      expect((await t.library.get(epub.id))!.progress, .23);
+      expect(await state.load(epub.id), position);
+      for (final invalid in [-.1, 1.1, double.nan, double.infinity]) {
+        await expectLater(
+          state.save(
+            epub.id,
+            const ReadingPosition(unit: 1),
+            unitCount: 3,
+            progress: invalid,
+          ),
+          throwsA(isA<CoreException>()),
+        );
+        expect((await t.library.get(epub.id))!.progress, .23);
+        expect(await state.load(epub.id), position);
+      }
+    });
+
     test('a failed progress update rolls back the whole save', () async {
       final state = ReadingState(t.store);
       await state.save(
