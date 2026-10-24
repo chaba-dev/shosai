@@ -50,7 +50,7 @@ abstract interface class PdfEngineDocument {
   ///
   /// Slice 1 of the Dart core reports the flag and does not enforce it, which
   /// is the retained core's behaviour: copy eligibility is decided by text
-  /// mapping alone (RFD 4, M3.0).
+  /// mapping alone (RFD 12, M3.0).
   bool get allowsCopying;
 
   /// Whether the document's viewer preferences read it right to left

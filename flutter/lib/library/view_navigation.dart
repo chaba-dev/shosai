@@ -11,7 +11,7 @@ part of 'view.dart';
 //
 // Deliberate differences from the reference:
 //
-// * The Bookshelf shell's sidebar (RFD 4, 2026-10-20) replaced the reference's
+// * The Bookshelf shell's sidebar (RFD 12, 2026-10-20) replaced the reference's
 //   184 px collection sidebar, so the filter row carries the format entries
 //   and Settings at every width.
 

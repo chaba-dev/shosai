@@ -12,7 +12,7 @@ the Bookshelf look, D1 paper, the 丸に書 mark colors and the Inter + Literata
 type set. The type sizes and layout metrics are still the values transcribed
 from the pinned Iced reference, until the Bookshelf composition replaces the
 screens that read them. The Iced application itself (`crates/shosai-app`) was
-removed on 2026-10-20 (RFD 4, "The first release").
+removed on 2026-10-20 (RFD 12, "The first release").
 
 | File | Role |
 | --- | --- |

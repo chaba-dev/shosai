@@ -213,7 +213,7 @@ ShellModel update(ShellModel model, ShellMessage message) {
       return model.copyWith(place: place, reading: false);
     case ShellBookOpened(:final book, :final path, :final bookId):
       // Opening a book that is already open focuses it instead of opening it
-      // twice (RFD 4, outcome 4); its own place is kept.
+      // twice (RFD 12, outcome 4); its own place is kept.
       final index = model.indexOf(book.bookId);
       final books = [...model.openBooks];
       if (index < 0) {

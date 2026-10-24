@@ -6,7 +6,7 @@
 /// application bridge over the Dart core (`core_records.dart`); the
 /// controllers find the records on any bridge that is a [RecordsHost]. The
 /// methods keep the bridge's request and result types until the Rust bridge
-/// is removed (RFD 4, M3.0).
+/// is removed (RFD 12, M3.0).
 library;
 
 import 'dart:typed_data';

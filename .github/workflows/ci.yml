@@ -7,7 +7,6 @@ on:
       - "flutter/**"
       - "fixtures/**"
       - "assets/**"
-      - "rfd/**"
       - "scripts/**"
       - "benchmarks/**"
       - "docs/design-system/**"
@@ -22,7 +21,6 @@ on:
       - "flutter/**"
       - "fixtures/**"
       - "assets/**"
-      - "rfd/**"
       - "scripts/**"
       - "benchmarks/**"
       - "docs/design-system/**"
@@ -48,13 +46,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - run: nix develop .#ci --command make lint
-
-  rfd-validation:
-    name: RFD validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: make check-rfds
 
   generated-sources:
     name: Generated sources

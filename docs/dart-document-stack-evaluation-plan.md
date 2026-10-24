@@ -32,7 +32,7 @@ an explicit reset decision.
 
 The 2026-09-28 decision amended [architecture rules](flutter-architecture.md) 6
 and 7 for EPUB only, and recorded supersessions in the applicable
-[RFD 4](../rfd/0004/README.adoc), [RFD 6](../rfd/0006/README.adoc), restoration and
+[RFD 12](https://chaba-rfds.pages.dev/rfd/0012/), [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/), restoration and
 renderer-contract documents. Parsing, layout, anchors and persistence remain
 Rust-owned for PDF and CBZ, and Rust keeps storage, records and its other current
 services for every format until a separate decision replaces them. Adoption is a
@@ -261,7 +261,7 @@ not tick any package checkbox.
 The owner decided, in the project's design thread on 2026-10-21, to **replace
 the Rust core (`crates/shosai-core`) and the `flutter_rust_bridge` boundary
 with Dart before the first-release reader work builds on them**. The decision
-is recorded in [RFD 4](../rfd/0004/README.adoc) (Decisions, Architecture,
+is recorded in [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/) (Decisions, Architecture,
 milestone M3.0 in its checklist); this section records what it selects from
 this evaluation.
 
@@ -276,7 +276,7 @@ this evaluation.
   CI jobs are deleted when their last consumer is gone.
 - **Why now:** with EPUB already Dart, the Rust core held one PDFium wrapper
   and the SQLite-backed records (about 17,000 lines of application code plus
-  bridge glue). RFD 4's M3.2 would otherwise build the PDF reader, notes and
+  bridge glue). RFD 12's M3.2 would otherwise build the PDF reader, notes and
   search on the bridge and then redo them. The costs the bridge carried (a
   second language and test suite, a codegen pinned to a Rust toolchain and a
   generator version, a native library to cross-compile and package per
@@ -305,12 +305,12 @@ this evaluation.
 - **Slice 1, PDF engine (2026-10-21).** `pdfrx` 2.4.7 behind the reader's
   own `PdfEngine` contract (`flutter/lib/reader/pdf/`). pdfrx owns the PDFium
   lifecycle, rendering, outline, links and permissions; glyph geometry for the
-  RFD 6 selection surface comes from PDFium's text API through raw
+  RFD 16 selection surface comes from PDFium's text API through raw
   `pdfium_dart` calls on pdfrx's worker isolate, and the retained snapshot,
   row, keyboard-line and grapheme logic is ported to pure Dart with its own
   tests. Closes: the reader's PDF render, selection, search and outline no
   longer cross the bridge; permissions are reported, not enforced (recorded in
-  RFD 4's checklist). Leaves open: PDFium checksum verification (the build
+  RFD 12's checklist). Leaves open: PDFium checksum verification (the build
   hook pins `chromium/7811` by name only), link navigation, the raster budget
   evidence on macOS and Android, and the store-side use of `pdf.rs` until the
   Records slice.
@@ -827,7 +827,7 @@ chooses adoption separately; no phase changes parity acceptance automatically.
 | A. PDF reading experience | Both candidates behind the same existing-UI-shaped adapter; continuous and paginated navigation, fit/zoom, selection/copy/search and accessible controls | Inspect licensed real-world PDFs as well as fixtures on unlocked Linux/macOS sessions. Verify long-document behavior, CJK, links, passwords, malformed-input errors and replacement/disposal. Record unsupported cases. Choose pdfrx, pure Dart, or retain Rust. |
 | B. SQLite packaged-app spike | Direct sqlite3 worker-isolate service; Drift comparison only if it resolves a concrete tooling need | Offline release apps load SQLite on Linux and macOS without accidental dev-shell paths. Verify transactions, concurrent/stale writes, rollback, close-before-delete, reopen and signing/packaging. Choose dependency and provisioning strategy. |
 | C. EPUB vertical slice | One rich chapter through each promising boundary, using existing UI | Demonstrate pagination/continuous flow, images, lists/basic tables, selection across fragments, relayout and stable new-session locations; inspect CJK/bidi and typography. Explicitly list CSS/math limits and compare complexity before choosing a full engine. Delivered as a **standalone full-Dart prototype** ([PR #135](https://github.com/chaba-dev/shosai/pull/135) plus the progressive-layout follow-up in [PR #136](https://github.com/chaba-dev/shosai/pull/136)) that is **not wired into the application**; the hybrid comparison and retained-UI evaluation of the original deliverable remain open, so Phase C is not claimed complete. Prototype evidence is not production acceptance. |
-| D. Adoption decision | Scope, architecture amendments, estimated work and accepted limitations | Owner selects language/engine boundaries and retained product requirements. Update architecture/RFD/parity records before production migration. **Recorded 2026-09-28 for EPUB** (Dart-owned parsing/normalization with Flutter layout) and **2026-10-21 for PDF and SQLite** (pdfrx and direct sqlite3; the Rust core and bridge are removed, RFD 4 M3.0). |
+| D. Adoption decision | Scope, architecture amendments, estimated work and accepted limitations | Owner selects language/engine boundaries and retained product requirements. Update architecture/RFD/parity records before production migration. **Recorded 2026-09-28 for EPUB** (Dart-owned parsing/normalization with Flutter layout) and **2026-10-21 for PDF and SQLite** (pdfrx and direct sqlite3; the Rust core and bridge are removed, RFD 12 M3.0). |
 | E. Incremental implementation | Replace services behind controller-owned adapters, one bounded responsibility at a time | Relevant behavior tests, native checks and visual approvals pass. Remove bridge calls/dependencies only after their final consumers are gone. In progress: the production EPUB engine module and its boundary first, with the production gates above owned per slice. |
 
 A and B can proceed independently when authorized; C did not delay current 4B or
@@ -874,7 +874,7 @@ decision does not force an unrelated database or EPUB rewrite.
 - Which Flutter/dependency versions and SQLite/native-asset provisioning path
   will be supported in release packages? (Open; the M3.0 store and PDF engine
   slices prove loading from the packaged Linux, macOS and Android hosts, and
-  RFD 5 carries the per-target pinning.)
+  RFD 13 carries the per-target pinning.)
 - Which EPUB capabilities are required at adoption? **Boundary decided
   2026-09-28** (Dart parsing/normalization with Flutter layout). Capability scope
   remains governed by the retained reader requirements and the production gates:
@@ -885,7 +885,7 @@ decision does not force an unrelated database or EPUB rewrite.
   accepts a reduced scope explicitly.
 
 pdfrx and direct sqlite3 were the evaluation defaults and are, since
-2026-10-21, the **selected production dependencies** (RFD 4, M3.0); dart-pdf
+2026-10-21, the **selected production dependencies** (RFD 12, M3.0); dart-pdf
 stays a comparison record only.
 
 ## Evidence and reproducibility

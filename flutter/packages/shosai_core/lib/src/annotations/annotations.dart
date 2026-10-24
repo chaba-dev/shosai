@@ -1,4 +1,4 @@
-/// Highlights and notes anchored in book text (RFD 6).
+/// Highlights and notes anchored in book text (RFD 16).
 library;
 
 import 'dart:convert';

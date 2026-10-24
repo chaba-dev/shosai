@@ -8,6 +8,10 @@
 //
 // Each sheet places the approved Iced reference capture, the committed 3A
 // baseline and the 3B candidate side by side under their labels.
+//
+// The Iced 1B reference captures it reads are kept in test/visual/reference/1b/,
+// copied unchanged from RFD 12's 1B reference evidence
+// (https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b).
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -20,9 +24,7 @@ void main() {
   setUpAll(loadHarnessFonts);
 
   final artifacts = harnessArtifactDirectory();
-  final reference = Directory(
-    '../rfd/0004/evidence/reference-shots-1b/captures',
-  );
+  final reference = Directory('test/visual/reference/1b');
   final baselines = Directory('test/goldens');
 
   Future<ui.Image> load(File file) async {

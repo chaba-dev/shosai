@@ -1,5 +1,5 @@
 /// Point bookmarks with optional titles. A note about a place is a page
-/// note, an annotation (RFD 6).
+/// note, an annotation (RFD 16).
 library;
 
 import 'dart:convert';

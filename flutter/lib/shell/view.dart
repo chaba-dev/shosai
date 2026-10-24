@@ -25,7 +25,7 @@ part 'view_phone.dart';
 part 'view_places.dart';
 part 'view_search.dart';
 
-// The Bookshelf shell (RFD 4 outcome 1; `docs/design-system.md`, Navigation):
+// The Bookshelf shell (RFD 12 outcome 1; `docs/design-system.md`, Navigation):
 // the frame around the library-side places and the reader.
 //
 // | Layout | Below 600 px | 600–1199 px | 1200 px and up |
