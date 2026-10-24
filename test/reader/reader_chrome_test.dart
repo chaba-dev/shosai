@@ -853,13 +853,16 @@ void main() {
     }
 
     for (final rtl in [false, true]) {
-      for (final motion in ['on', 'off', 'reduced']) {
+      for (final motion in ['on', 'off', 'disabled', 'reduced']) {
         testWidgets('PDF page motion follows direction ($rtl, $motion)', (
           tester,
         ) async {
           _setView(tester, const Size(390, 844));
           tester.platformDispatcher.accessibilityFeaturesTestValue =
-              FakeAccessibilityFeatures(disableAnimations: motion == 'reduced');
+              FakeAccessibilityFeatures(
+                disableAnimations: motion == 'disabled',
+                reduceMotion: motion == 'reduced',
+              );
           addTearDown(
             tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
           );
@@ -899,6 +902,16 @@ void main() {
               final middle = tester.getTopLeft(surface).dx - resting;
               expect(middle.abs(), lessThan(start.abs()));
               expect(middle.sign, start.sign);
+              if (forward) {
+                // iOS changes reduceMotion without setting disableAnimations.
+                tester.platformDispatcher.accessibilityFeaturesTestValue =
+                    const FakeAccessibilityFeatures(reduceMotion: true);
+                await tester.pump();
+                expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
+                tester.platformDispatcher.accessibilityFeaturesTestValue =
+                    const FakeAccessibilityFeatures();
+                await tester.pump();
+              }
             } else {
               expect(start, closeTo(0, .01));
             }

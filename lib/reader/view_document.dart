@@ -22,7 +22,7 @@ class _DocumentView extends StatefulWidget {
 }
 
 class _DocumentViewState extends State<_DocumentView>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _pageTurn;
   late final _turnProgress = _pageTurn.drive(
     CurveTween(curve: Curves.easeOutCubic),
@@ -55,6 +55,7 @@ class _DocumentViewState extends State<_DocumentView>
       duration: const Duration(milliseconds: 250),
       value: 1,
     );
+    WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_keyPressed);
     GestureBinding.instance.pointerRouter.addGlobalRoute(_pointerEvent);
   }
@@ -68,10 +69,20 @@ class _DocumentViewState extends State<_DocumentView>
     if (event is PointerDownEvent) _keyboardHighlight.value = false;
   }
 
+  // iOS reports Reduce Motion separately from disableAnimations in Flutter.
+  bool get _reducedMotion =>
+      MediaQuery.disableAnimationsOf(context) ||
+      View.of(context).platformDispatcher.accessibilityFeatures.reduceMotion;
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    if (_reducedMotion) _pageTurn.value = 1;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) _pageTurn.value = 1;
+    if (_reducedMotion) _pageTurn.value = 1;
   }
 
   @override
@@ -82,7 +93,7 @@ class _DocumentViewState extends State<_DocumentView>
     final oldPage = before.epubPage;
     final newPage = after.epubPage;
     if (!after.typography.animations ||
-        MediaQuery.disableAnimationsOf(context) ||
+        _reducedMotion ||
         before.generation != after.generation ||
         before.continuousPresentation ||
         after.continuousPresentation ||
@@ -109,6 +120,7 @@ class _DocumentViewState extends State<_DocumentView>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_keyPressed);
     GestureBinding.instance.pointerRouter.removeGlobalRoute(_pointerEvent);
     _pageTurn.dispose();
