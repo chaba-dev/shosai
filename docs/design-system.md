@@ -103,6 +103,9 @@ The app frame in light and dark themes: `canvas` (the library's ground), `chrome
 ### Pages
 
 Page themes are separate from the app theme: a dark app can show a Paper page.
+The reader itself uses dark chrome for Night and light chrome for Paper and
+Sepia, for both EPUB and PDF. This supersedes the older light-only reader
+chrome mapping; it does not change the library's application theme.
 
 | Theme | Ground | Ink | Links |
 | --- | --- | --- | --- |
@@ -163,7 +166,7 @@ The page is set like print, on a stage lit from the centre.
 - **Chapter openings** drop the running head and sink the title. Other pages carry a running head and a centred folio in `book-folio`.
 - **EPUB page numbers** are Shōsai's own pagination at the current size and margins; the same numbers appear in the status line, notes and search results.
 - **The book's direction.** Right-to-left books turn leftward with the first page on the right; vertical Japanese keeps `vertical-rl`. Undeclared books read horizontally. There is no override.
-- **PDF stays the PDF.** Pages re-render at the current zoom so text is sharp on any screen; on phones they fit the width. Night inverts page luminance.
+- **PDF stays the PDF.** Pages re-render at the current zoom so text is sharp on any screen; on phones they fit the width. Paper keeps the original raster. Sepia tints it between the page ink and ground; Night inverts luminance between those colours while retaining chroma, rather than making a colour negative. Saturated image colours may clip to the display gamut. These paint-only transforms never change layout or filter selection, search or saved-highlight overlays.
 
 Layout, pagination and durable anchors come from the Dart document engines and application core; Flutter renders the laid-out pages (see [flutter-architecture.md](flutter-architecture.md)).
 
