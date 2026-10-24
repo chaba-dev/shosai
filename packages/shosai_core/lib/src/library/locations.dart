@@ -134,6 +134,7 @@ final class LibraryLocations {
       return true;
     });
     if (!accepted) throw const LocationException(LocationFailure.revoked);
+    cancellation.throwIfCancelled();
     try {
       await for (final chunk in location.read(
         key,

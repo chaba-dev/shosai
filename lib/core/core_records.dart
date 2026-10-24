@@ -916,6 +916,11 @@ final class CoreRecords implements ShosaiRecords {
     Future<void> Function(UnitTextSource text) read,
     CancellationToken cancellation,
   ) async {
+    if (book.locationFailure != null) {
+      throw const CoreException.notFound(
+        'The book’s location is unavailable. Reconnect it to search this book.',
+      );
+    }
     final opened = await _documents.open(
       book.path,
       format: book.format,

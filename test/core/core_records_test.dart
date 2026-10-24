@@ -205,6 +205,14 @@ void main() {
         'A note that outlives the folder.',
       );
       expect(notes.books.single.book.unavailable, isTrue);
+      final hits = <FlutterBookTextHits>[];
+      await bridge.searchLibraryText(
+        query: 'book',
+        onBook: hits.add,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(hits.single.matches, isEmpty);
+      expect(hits.single.error, contains('location is unavailable'));
       await expectLater(
         bridge.openLibraryBook(
           bookId: book.id,

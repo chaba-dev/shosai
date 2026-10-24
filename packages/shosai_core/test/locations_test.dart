@@ -166,6 +166,33 @@ void main() {
         .read(adapter, generation, book.contentHash, 'a')
         .drain<void>();
     expect((await locations.copies(book.contentHash)).single.failure, isNull);
+
+    final revokedGate = Completer<void>();
+    final revokedStarted = Completer<void>();
+    adapter
+      ..gate = revokedGate
+      ..started = revokedStarted;
+    final staleSuccess = locations
+        .read(adapter, generation, book.contentHash, 'a')
+        .drain<void>();
+    await revokedStarted.future;
+    await expectLater(
+      locations
+          .read(
+            _Location()..failure = LocationFailure.revoked,
+            generation,
+            book.contentHash,
+            'a',
+          )
+          .drain<void>(),
+      throwsA(isA<LocationException>()),
+    );
+    revokedGate.complete();
+    await staleSuccess;
+    expect(
+      (await locations.copies(book.contentHash)).single.failure,
+      LocationFailure.revoked,
+    );
   });
 }
 
