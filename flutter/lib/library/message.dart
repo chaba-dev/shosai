@@ -82,11 +82,13 @@ final class LibrarySettingsFailureDismissed extends LibraryMessage {
 }
 
 final class LibraryImportRequested extends LibraryMessage {
-  const LibraryImportRequested([this.selection]);
+  const LibraryImportRequested();
+}
 
-  /// Books chosen outside the library, such as those another app opened in
-  /// Shōsai; without one, the library asks the picker.
-  final LibraryImportSelection? selection;
+/// A generation-guarded platform intake completion; the controller owns it.
+final class _LibraryDocumentsOpened extends LibraryMessage {
+  const _LibraryDocumentsOpened(this.paths);
+  final List<String> paths;
 }
 
 final class LibraryCoverRequested extends LibraryMessage {

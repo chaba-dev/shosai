@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -92,10 +91,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// reader has gone and the library is idle again.
   bool _pendingImport = false;
 
-  /// Books another app opened in Shōsai on iOS, imported once the library
-  /// is idle.
-  final List<String> _openedPaths = [];
-
   late final ShellController _shell = ShellController(
     presentReader: _presentReader,
     dismissReader: _dismissReader,
@@ -133,7 +128,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// are drained before the library reloads.
   final Set<int> _shownBooks = {};
   List<FlutterLibraryBook>? _listedBooks;
-  final OpenedDocuments _openedDocuments = const OpenedDocuments();
+  final OpenedDocuments _openedDocuments = OpenedDocuments();
   late final AndroidDocumentImportAdapter _androidImport =
       widget.androidImport ?? AndroidDocumentImportAdapter();
   final Set<String> _providerOperations = {};
@@ -148,6 +143,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     localizations: () => AppLocalizations.of(context),
+    openedDocuments: defaultTargetPlatform == TargetPlatform.iOS
+        ? _openedDocuments
+        : null,
     noticeReporter: widget.noticeReporter ?? ignoreNotice,
     evictCover: (bytes) {
       final provider = MemoryImage(bytes);
@@ -167,7 +165,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
     _scheduleRestoredOpen();
     _schedulePendingImport();
-    _scheduleOpenedImport();
   }
 
   void _shellChanged() {
@@ -458,33 +455,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     });
   }
 
-  void _documentsOpened(List<String> paths) {
-    if (!mounted) return;
-    _openedPaths.addAll(paths);
-    _scheduleOpenedImport();
-  }
-
-  /// Imports the opened books as managed copies, with no picker or review:
-  /// the person chose them in the other app. Their inbox copies go after.
-  void _scheduleOpenedImport() {
-    if (_openedPaths.isEmpty ||
-        !controller.model.loaded ||
-        controller.model.busy) {
-      return;
-    }
-    final paths = List<String>.unmodifiable(_openedPaths);
-    _openedPaths.clear();
-    controller.dispatch(
-      LibraryImportRequested(
-        LibraryImportSelection(
-          paths: paths,
-          managed: true,
-          cleanup: () => _deleteInboxCopies(paths),
-        ),
-      ),
-    );
-  }
-
   @override
   String get restorationId => 'product-shell';
 
@@ -502,9 +472,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void initState() {
     super.initState();
     controller.dispatch(const LibraryStarted());
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      unawaited(_openedDocuments.listen(_documentsOpened));
-    }
   }
 
   @override
@@ -526,9 +493,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       for (final route in _dialogRoutes.toList()) {
         navigator.removeRoute(route);
       }
-    }
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      _openedDocuments.cancel();
     }
     controller.removeListener(_changed);
     controller.dispose();
@@ -813,13 +777,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         ? await _reviewImport(paths, directory: false, managedOnly: true)
         : null;
     if (reviewed == null) {
-      await _deleteInboxCopies(paths);
+      await _openedDocuments.discard(paths);
       return null;
     }
     return LibraryImportSelection(
       paths: reviewed.paths,
       managed: true,
-      cleanup: () => _deleteInboxCopies(paths),
+      cleanup: () => _openedDocuments.discard(paths),
     );
   }
 
@@ -1306,18 +1270,6 @@ class LibraryBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: alert,
     );
-  }
-}
-
-/// Deletes the copies iOS left in the app's inbox, from the document
-/// picker or from another app opening a book in Shōsai.
-Future<void> _deleteInboxCopies(Iterable<String> paths) async {
-  for (final path in paths) {
-    try {
-      await File(path).delete();
-    } on FileSystemException {
-      // iOS also clears the inbox; a copy that is already gone is fine.
-    }
   }
 }
 

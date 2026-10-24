@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -25,10 +26,11 @@ const _choices = [
 ];
 
 class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
-  _Bridge({this.failImport = false, this.cancelImport = false});
+  _Bridge({this.failImport = false, this.cancelImport = false, this.loadGate});
 
   final bool failImport;
   final bool cancelImport;
+  final Completer<FlutterLibraryPage>? loadGate;
 
   /// The path imports the library asked for, in order.
   final imports = <({List<String> paths, bool managed})>[];
@@ -70,7 +72,9 @@ class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
     required int limit,
     required int offset,
     required BigInt cancellationId,
-  }) async => const FlutterLibraryPage(books: [], hasMore: false);
+  }) async => loadGate == null
+      ? const FlutterLibraryPage(books: [], hasMore: false)
+      : await loadGate!.future;
   @override
   Future<FlutterReaderSettings> loadReaderSettings({
     required BigInt cancellationId,
@@ -486,10 +490,12 @@ void main() {
           ))!.path,
       ];
       final messenger = tester.binding.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(
-        _openedChannel,
-        (call) async => call.method == 'takePending' ? [opened.first] : null,
-      );
+      var pending = [opened.first];
+      messenger.setMockMethodCallHandler(_openedChannel, (call) async {
+        final paths = pending;
+        pending = [];
+        return paths;
+      });
       addTearDown(
         () => messenger.setMockMethodCallHandler(_openedChannel, null),
       );
@@ -504,11 +510,10 @@ void main() {
       expect(find.text('Review books'), findsNothing);
       expect(bridge.imports.single.paths, [opened.first]);
       expect(bridge.imports.single.managed, isTrue);
+      pending = [opened.last];
       await messenger.handlePlatformMessage(
         _openedChannel.name,
-        _openedChannel.codec.encodeMethodCall(
-          MethodCall('opened', [opened.last]),
-        ),
+        _openedChannel.codec.encodeMethodCall(const MethodCall('opened')),
         (_) {},
       );
       for (
@@ -533,6 +538,81 @@ void main() {
         await tester.pump();
       }
       expect(opened.where((path) => File(path).existsSync()), isEmpty);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'iOS bounds and deduplicates incoming batches before the library loads',
+    (tester) async {
+      final paths = List.generate(257, (index) => '/inbox/$index.epub');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      var pending = [...paths, paths.first];
+      messenger.setMockMethodCallHandler(_openedChannel, (call) async {
+        final result = pending;
+        pending = [];
+        return result;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(_openedChannel, null),
+      );
+      final gate = Completer<FlutterLibraryPage>();
+      final bridge = _Bridge(loadGate: gate);
+      await _pumpShell(tester, bridge: bridge, settle: false);
+      await tester.pump();
+      expect(bridge.imports, isEmpty);
+      gate.complete(const FlutterLibraryPage(books: [], hasMore: false));
+      for (
+        var attempt = 0;
+        // Serial file cleanup resumes on the fake clock once per pump.
+        bridge.imports.length < 2 && attempt < 500;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      expect(bridge.imports.map((batch) => batch.paths.length), [256, 1]);
+      expect(bridge.imports.expand((batch) => batch.paths), paths);
+      expect(bridge.imports.every((batch) => batch.managed), isTrue);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'iOS releases queued incoming copies when the shell closes before loading',
+    (tester) async {
+      final inbox = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('shosai-queued'),
+      ))!;
+      addTearDown(() => inbox.delete(recursive: true));
+      final file = File('${inbox.path}/queued.epub');
+      await tester.runAsync(() => file.writeAsString('book'));
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        _openedChannel,
+        (_) async => [file.path],
+      );
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(_openedChannel, null),
+      );
+      final gate = Completer<FlutterLibraryPage>();
+      final bridge = _Bridge(loadGate: gate);
+      await _pumpShell(tester, bridge: bridge, settle: false);
+      await tester.pump();
+      expect(bridge.imports, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+      for (var attempt = 0; file.existsSync() && attempt < 50; attempt++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      gate.complete(const FlutterLibraryPage(books: [], hasMore: false));
+      await tester.pump();
+      expect(file.existsSync(), isFalse);
+      expect(bridge.imports, isEmpty);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );

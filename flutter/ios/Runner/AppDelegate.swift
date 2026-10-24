@@ -24,9 +24,8 @@ import UIKit
 /// a plain path it can import and then delete.
 final class OpenedDocuments: NSObject, FlutterSceneLifeCycleDelegate {
   private let channel: FlutterMethodChannel
-  /// Paths that arrived before Dart asked for them.
+  /// Native owns every arrival until Dart takes it, even between listeners.
   private var pending: [String] = []
-  private var listening = false
 
   static func register(with registrar: FlutterPluginRegistrar) {
     let instance = OpenedDocuments(
@@ -44,7 +43,6 @@ final class OpenedDocuments: NSObject, FlutterSceneLifeCycleDelegate {
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "takePending":
-      listening = true
       result(pending)
       pending = []
     default:
@@ -58,11 +56,12 @@ final class OpenedDocuments: NSObject, FlutterSceneLifeCycleDelegate {
       url.isFileURL && ["epub", "pdf"].contains(url.pathExtension.lowercased())
     }.map(\.path)
     if paths.isEmpty { return false }
-    if listening {
-      channel.invokeMethod("opened", arguments: paths)
-    } else {
-      pending.append(contentsOf: paths)
+    for path in paths where !pending.contains(path) {
+      pending.append(path)
     }
+    // This is only a wake-up hint. If Dart has no handler, the paths remain
+    // pending and its next listener takes them during startup.
+    channel.invokeMethod("opened", arguments: nil)
     return true
   }
 
