@@ -21,7 +21,7 @@ its acceptance run below is historical, not a pending dispatch.
 
 ## 1. Authority and the implementation being replaced
 
-[Architecture](flutter-architecture.md), [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/),
+[Architecture](flutter-architecture.md), [RFD 12](https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/PHASE-0.adoc),
 [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/) and restoration decisions 4, 5, 8 and 12 apply.
 Rust owns parsing, canonical text, layout, durable resolution, admission and writes.
 Flutter renders immutable state and dispatches typed messages; controller effects

@@ -13,7 +13,7 @@
 //
 // The Iced 1B reference captures it reads are kept in test/visual/reference/1b/,
 // copied unchanged from RFD 12's 1B reference evidence
-// (https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1b).
+// (https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b).
 import 'dart:io';
 import 'dart:ui' as ui;
 

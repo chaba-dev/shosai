@@ -3,7 +3,7 @@
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
 > on 2026-10-20 (RFD 12, "The first release"); the `crates/shosai-app` citations
 > below refer to the pinned reference revision in the repository history, and
-> the 1C captures under [`rfd/0012/evidence/reference-shots-1c/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1c) are the frozen
+> the 1C captures under [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) are the frozen
 > reference. CBZ support was removed the same day (RFD 10).
 
 Typed presentation model, intent ownership, fixture/live boundary and acceptance
@@ -26,7 +26,7 @@ matrix for the reader packages 4B, 4C and 4D of the
 - Reference base: the pinned Iced revision
   `1e54270a6bb24f15630ece336a0575bdbe5be113` (`main@origin` #108) supplies the
   reader composition and values; 1C's 60 captures
-  ([evidence](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1c)) are the reader
+  ([evidence](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c)) are the reader
   reference. Neither establishes Flutter correctness (specification §4.0).
 
 **What this document is not.** It does not add design values, does not restate
@@ -103,7 +103,7 @@ the later acceptance package).
    `nqztxuqyrklvmzqnnrqvzlsntyxkkyvo`, which resolves in this repository's JJ
    history at the 4A base). `sha256sum -c captures.sha256` and
    `sha256sum -c fixtures.sha256` pass in
-   [`rfd/0012/evidence/reference-shots-1c/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1c) at this base. Verifying the reference
+   [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) at this base. Verifying the reference
    bytes does not accept the reference's open follow-ups or any row.
 4. **The 1C tab capture does not exercise overflow.** `rd-chrome-tabs-w1280-ja`
    opens three books (`Message::OpenLibraryBook` on `slow-rivers.epub`,
@@ -842,7 +842,7 @@ per-book settings schema or a pagination API.
 | `G2` many-tab/clipped-label fixture | **proposed, not created** (spec §5.3) | tab overflow, keyboard close of offscreen tabs, clipping |
 | `G6` failure-state fixtures | **proposed, not created** | opening/failure chrome |
 | `G3` long JA/mixed metadata | **proposed, not created** | truncation at `T200` |
-| 1C generated reader tree | existing under [`rfd/0012/evidence/reference-shots-1c/fixtures/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1c/fixtures) | reference comparison only; never acceptance |
+| 1C generated reader tree | existing under [`rfd/0004/evidence/reference-shots-1c/fixtures/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c/fixtures) | reference comparison only; never acceptance |
 
 4B–4D may build widget-local deterministic fixtures; they must not overwrite the
 1B/1C evidence tree or regression fixtures.

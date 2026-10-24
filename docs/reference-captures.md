@@ -3,8 +3,8 @@
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and the
 > `make reference-shots` capture harness were removed on 2026-10-20 (RFD 12, "The
 > first release"), so the capture and `VERIFY=1` procedures below can no longer
-> be run. The committed captures under [`rfd/0012/evidence/reference-shots-1b/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1b)
-> and [`rfd/0012/evidence/reference-shots-1c/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1c) are the frozen reference; the
+> be run. The committed captures under [`rfd/0004/evidence/reference-shots-1b/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b)
+> and [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) are the frozen reference; the
 > `1C-CBZ-*` captures record a format that left with CBZ support (RFD 10).
 
 Deterministic, inspected **Iced reference images** for the library, import,
@@ -19,8 +19,8 @@ writes its own evidence directory:
 
 | Package | Surfaces | Evidence families | Evidence directory |
 | --- | --- | --- | --- |
-| 1B | Library, import, settings | `1B-LIB-*`, `1B-IMPORT`, `1B-SETTINGS` | [`rfd/0012/evidence/reference-shots-1b/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1b) |
-| 1C | Reader chrome, panels, formats and modes | `1C-RD-CHROME`, `1C-RD-PANEL`, `1C-SPREAD`, `1C-EPUB-PAG`, `1C-EPUB-CONT`, `1C-PDF-PAG`, `1C-PDF-CONT`, `1C-CBZ-PAG`, `1C-CBZ-CONT` | [`rfd/0012/evidence/reference-shots-1c/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1c) |
+| 1B | Library, import, settings | `1B-LIB-*`, `1B-IMPORT`, `1B-SETTINGS` | [`rfd/0004/evidence/reference-shots-1b/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b) |
+| 1C | Reader chrome, panels, formats and modes | `1C-RD-CHROME`, `1C-RD-PANEL`, `1C-SPREAD`, `1C-EPUB-PAG`, `1C-EPUB-CONT`, `1C-PDF-PAG`, `1C-PDF-CONT`, `1C-CBZ-PAG`, `1C-CBZ-CONT` | [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c) |
 
 ## What these images are evidence for, and what they are not
 
@@ -170,7 +170,7 @@ evidence, and the two forms' behavior is checked by the regression test
 ## Outputs
 
 Each package writes the same six entries into its own evidence directory
-([`rfd/0012/evidence/reference-shots-1b/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1b), [`rfd/0012/evidence/reference-shots-1c/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/reference-shots-1c)):
+([`rfd/0004/evidence/reference-shots-1b/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1b), [`rfd/0004/evidence/reference-shots-1c/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/reference-shots-1c)):
 
 | Path | Contents |
 | --- | --- |

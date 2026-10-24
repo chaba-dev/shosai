@@ -106,7 +106,7 @@ void main() {
     tester,
   ) async {
     // Faithful reproduction of the historical library tab-strip clipping
-    // (https://github.com/chaba-dev/rfds/blob/main/rfd/0012/evidence/parity-review-2026-09-14/07-golden-clipped-tabs-3x.png)
+    // (https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/parity-review-2026-09-14/07-golden-clipped-tabs-3x.png)
     // at the XA-03 configuration: 900 logical pixels wide, 200% text. The
     // production library no longer clips at this configuration, so the
     // historical failing input is preserved here as its own control.

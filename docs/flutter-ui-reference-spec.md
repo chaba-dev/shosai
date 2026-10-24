@@ -3,7 +3,7 @@
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
 > on 2026-10-20 (RFD 12, "The first release"); its source citations below refer
 > to the pinned reference revision in the repository history, and the captures
-> under [`rfd/0012/evidence/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/) are the frozen reference. CBZ support was removed
+> under [`rfd/0004/evidence/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence) are the frozen reference. CBZ support was removed
 > the same day and returns as a later format package (RFD 10); the CBZ rows are
 > retained as the record of that reference.
 
@@ -18,7 +18,7 @@ verify against one list.
   policy). Supersedes nothing; the restoration plan remains authoritative for
   sequencing, dependencies and acceptance.
 - Governing documents: [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/), its
-  [implementation checklist](https://chaba-rfds.pages.dev/rfd/0012/),
+  [implementation checklist](https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/IMPLEMENTATION.adoc),
   [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/) for selection/highlighting, and the required
   [Flutter architecture](flutter-architecture.md) and [typography](typography.md)
   guidance.
@@ -144,7 +144,7 @@ decision 12 replaces that rule at large book fonts with a column-width criterion
 
 ### 2.3 Historical captures are not a reference set
 
-[`rfd/0012/evidence/parity-review-2026-09-14/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/parity-review-2026-09-14) has no manifest, mixes revisions and
+[`rfd/0004/evidence/parity-review-2026-09-14/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/parity-review-2026-09-14) has no manifest, mixes revisions and
 sizes (one file named `1280x720` is 1600×1000), and is superseded by 1B/1C captures.
 Do not cite it as evidence for any row.
 

@@ -4,7 +4,7 @@
 > support were removed on 2026-10-20 (RFD 12, "The first release"; RFD 10 returns
 > CBZ as a later format package). The Iced references below point at the pinned
 > reference revision in the repository history and the frozen captures under
-> [`rfd/0012/evidence/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/); the CBZ rows, filters and acceptance items are no longer
+> [`rfd/0004/evidence/`](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence); the CBZ rows, filters and acceptance items are no longer
 > part of the first release and stay here as the record for that package.
 
 Restore Iced's information hierarchy and reading workflow in Flutter while keeping
@@ -14,13 +14,13 @@ contract work, not a frontend restart or pixel-identical port.
 - Opened: 2026-09-14. Restructured: 2026-09-20.
 - Status: Stages 1–5 IN PROGRESS; Stage 6 TODO; 4/30 delivery packages fully accepted (1A, 1B, 2A, 5A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A was accepted by the owner and merged at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e); the 2026-09-28 [EPUB adoption decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28) supersedes its Rust-specific EPUB portions without erasing that acceptance. 5B is **paused/superseded** by the same decision and is not dispatched. 3D integration acceptance and earlier gaps remain open.
 - Governing documents: [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/), its
-  [implementation checklist](https://chaba-rfds.pages.dev/rfd/0012/),
-  [performance contract](https://chaba-rfds.pages.dev/rfd/0012/), and
+  [implementation checklist](https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/IMPLEMENTATION.adoc),
+  [performance contract](https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/PHASE-0.adoc), and
   [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/) for selection/highlighting.
 - Required guidance: [Flutter architecture](flutter-architecture.md) and
   [typography](typography.md).
 - Historical context: [original planning thread](https://ampcode.com/threads/T-01a0a37d-11c9-7062-8320-d2229881b01a)
-  and [September 14 captures](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/parity-review-2026-09-14).
+  and [September 14 captures](https://github.com/chaba-dev/shosai/tree/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/evidence/parity-review-2026-09-14).
 
 This document owns restoration sequencing and package acceptance. RFD 12 remains
 the governing proposal; package 1D records the crosswalk and any contract updates
