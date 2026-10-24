@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -706,22 +707,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return _pickAndroidImport();
     }
     if (defaultTargetPlatform == TargetPlatform.iOS) {
-      await _showOwnedDialog<void>(
-        (context) => ShadDialog(
-          title: const Text('Import unavailable'),
-          description: const Text(
-            'Document-provider import has not yet been validated on iOS.',
-          ),
-          actions: [
-            ShadButton.outline(
-              height: shosaiShadButtonHeight(context),
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
-      return null;
+      return _pickIosImport();
     }
     final directory = await _showOwnedDialog<bool>(
       (context) => ShadDialog(
@@ -759,6 +745,29 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           )).map((file) => file.path).toList();
     if (paths.isEmpty || !mounted) return null;
     return _reviewImport(paths, directory: directory);
+  }
+
+  /// iOS opens the system document picker, which copies each chosen book
+  /// into the app's inbox. The library keeps its own copy, so the inbox
+  /// copies are deleted once the import has run or been declined.
+  Future<LibraryImportSelection?> _pickIosImport() async {
+    final paths = (await openFiles(
+      acceptedTypeGroups: const [_iosBookTypes],
+      confirmButtonText: 'Review books',
+    )).map((file) => file.path).toList(growable: false);
+    if (paths.isEmpty) return null;
+    final reviewed = mounted
+        ? await _reviewImport(paths, directory: false, managedOnly: true)
+        : null;
+    if (reviewed == null) {
+      await _deletePickedCopies(paths);
+      return null;
+    }
+    return LibraryImportSelection(
+      paths: reviewed.paths,
+      managed: true,
+      cleanup: () => _deletePickedCopies(paths),
+    );
   }
 
   Future<LibraryImportSelection?> _pickAndroidImport() async {
@@ -994,7 +1003,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 _SettingSwitch(
                   title: 'Copy into managed storage',
                   subtitle: managedOnly
-                      ? 'Android provider documents are copied, then temporary access is released.'
+                      ? 'Shōsai keeps its own copy of each picked book.'
                       : managed
                       ? 'Shōsai keeps a private copy available to the reader.'
                       : 'Keep books in their selected locations.',
@@ -1238,6 +1247,25 @@ class LibraryBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: alert,
     );
+  }
+}
+
+/// The books the iOS picker offers. iOS filters by uniform type identifier,
+/// not by extension.
+const _iosBookTypes = XTypeGroup(
+  label: 'Books',
+  extensions: ['pdf', 'epub'],
+  uniformTypeIdentifiers: ['com.adobe.pdf', 'org.idpf.epub-container'],
+);
+
+/// Deletes the copies the iOS picker left in the app's inbox.
+Future<void> _deletePickedCopies(Iterable<String> paths) async {
+  for (final path in paths) {
+    try {
+      await File(path).delete();
+    } on FileSystemException {
+      // iOS also clears the inbox; a copy that is already gone is fine.
+    }
   }
 }
 
