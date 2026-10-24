@@ -1,10 +1,10 @@
 # Flutter UI reference specification
 
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
-> on 2026-10-20 (RFD 4, "The first release"); its source citations below refer
+> on 2026-10-20 (RFD 12, "The first release"); its source citations below refer
 > to the pinned reference revision in the repository history, and the captures
-> under `rfd/0004/evidence/` are the frozen reference. CBZ support was removed
-> the same day and returns as a later format package (RFD 2); the CBZ rows are
+> under [`rfd/0012/evidence/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/) are the frozen reference. CBZ support was removed
+> the same day and returns as a later format package (RFD 10); the CBZ rows are
 > retained as the record of that reference.
 
 Token and acceptance specification for the Flutter restoration described by
@@ -17,9 +17,9 @@ verify against one list.
   decisions 11 (tab overflow), 12 (EPUB readability fallback) and 13 (notice
   policy). Supersedes nothing; the restoration plan remains authoritative for
   sequencing, dependencies and acceptance.
-- Governing documents: [RFD 4](../rfd/0004/README.adoc), its
-  [implementation checklist](../rfd/0004/IMPLEMENTATION.adoc),
-  [RFD 6](../rfd/0006/README.adoc) for selection/highlighting, and the required
+- Governing documents: [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/), its
+  [implementation checklist](https://chaba-rfds.pages.dev/rfd/0012/),
+  [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/) for selection/highlighting, and the required
   [Flutter architecture](flutter-architecture.md) and [typography](typography.md)
   guidance.
 
@@ -38,7 +38,7 @@ evidence of parity.
 | --- | --- |
 | `Iced` | Design values and composition come from the Iced frontend in `crates/shosai-app`, at the pinned reference revision (§1.3). |
 | `Retained Flutter` | Behavior exists in `flutter/lib` today and must survive restoration, with toolkit-appropriate presentation. |
-| `RFD 6` | Selection/highlighting semantics come from RFD 6, not from Iced. |
+| `RFD 16` | Selection/highlighting semantics come from RFD 16, not from Iced. |
 | `Owner` | A product decision recorded in the restoration plan on 2026-09-20. |
 | `Plan contract` | A requirement introduced by the restoration plan with **no Iced reference**; evidence must come from the later renderer/Flutter acceptance package. Rows using this authority cannot be satisfied by `1B-*`/`1C-*` Iced captures. |
 
@@ -144,7 +144,7 @@ decision 12 replaces that rule at large book fonts with a column-width criterion
 
 ### 2.3 Historical captures are not a reference set
 
-`rfd/0004/evidence/parity-review-2026-09-14/` has no manifest, mixes revisions and
+[`rfd/0012/evidence/parity-review-2026-09-14/`](https://github.com/chaba-dev/rfds/tree/main/rfd/0012/evidence/parity-review-2026-09-14) has no manifest, mixes revisions and
 sizes (one file named `1280x720` is 1600×1000), and is superseded by 1B/1C captures.
 Do not cite it as evidence for any row.
 
@@ -340,7 +340,7 @@ sidebar padding [22, 14] (`app.rs:7082`); library header padding [16, 20]
 
 Each row is a draft specification. Column meanings:
 
-- **Authority** — `Iced`, `Retained Flutter`, `RFD 6`, `Owner` or `Plan contract` (§1.1).
+- **Authority** — `Iced`, `Retained Flutter`, `RFD 16`, `Owner` or `Plan contract` (§1.1).
 - **Source evidence** — code path and line establishing the current value/behavior.
 - **Expected evidence** — deliverables that must exist before acceptance; codes are
   defined in §5.4. `WT` means behavioral test coverage.
@@ -429,7 +429,7 @@ the behavior checks; `1C-*` captures are the Iced reference.
 | RD-09 | Typography controls: EPUB `A−`/`A+` with px label and theme cycle; PDF/CBZ zoom ±, fit width/page | Iced | `app.rs:5862-5948`, `5877-5921` | `1C-RD-PANEL` | `W1280` `EN` | `F1` `F2` | 4C |
 | RD-10 | More panel: page input + `of N`, bookmark toggle, open book, search toggle; compact stacks vertically | Iced | `app.rs:5966-6030` | `1C-RD-PANEL` | `W1280` `C390` | `F1` | 4C |
 | RD-11 | Search bar: input, `n / total`, previous/next, close; wide input capped at 420 | Iced | `app.rs:6223-6276` | `1C-RD-PANEL` | `W1280` `C390` | `F1` | 4C |
-| RD-12 | Selection actions and annotation menus preserved, keyboard equivalents present | RFD 6 | `flutter/lib/reader/view_selection.dart`; plan decision 8 | `WT` + `1C` non-Iced authority record | `W1280` `C390` `T200` | `F4` | 4D |
+| RD-12 | Selection actions and annotation menus preserved, keyboard equivalents present | RFD 16 | `flutter/lib/reader/view_selection.dart`; plan decision 8 | `WT` + `1C` non-Iced authority record | `W1280` `C390` `T200` | `F4` | 4D |
 | RD-13 | Panels are mutually exclusive (settings, more, bookmarks) | Iced | `app.rs:8510-8531` | `WT` | `W1280` | `F1` | 4B |
 | RD-14 | Keyboard: all reader controls reachable; Enter/Space activate; focus visible | Retained Flutter | plan decision 1 | `WT` | `W1280` `C390` `T200` | `F1` | 4B |
 | RD-15 | Large text, compact and palette renders inspected for chrome and panels | Retained Flutter | plan 4D acceptance | `WT` + fixture renders (4D local evidence) — cross-package recheck at XA-06 in 6C | `C390` `JA` `T200` `D2` | `F1` | 4D |
@@ -457,8 +457,8 @@ All six combinations are required; paginated-first is an interim sequence only.
 | FM-13 | PDF/CBZ spread plus typed fit page/fit width/manual; pairing and inner-edge alignment | Iced | `app.rs:4348-4352`, `6413-6480`; `pdf.rs:7-21` | `1C-SPREAD` | `W1280` | `F2` `F3` | 5H |
 | FM-14 | Continuous seam: cuts through text, images and block spacing show no gap, duplicate, artificial background band or cumulative drift, verified against an untiled render | Plan contract | plan continuous requirements; Iced continuous is a single chapter column (`app/epub_view.rs:31-148`) and has **no tiled render**, so Iced screenshots cannot evidence tile seams | `5H-RENDER` (inspected tile-versus-untiled renders, DPR 1 and 2) + `WT`; re-measured in 5J | `W1280` `D2` | `G5` | 5H (5J re-measure) |
 | FM-15 | Mode switch preserves position and does not rebuild durable state from page indices | Iced | plan contract requirements | `WT` | `W1280` | `F4` | 5H |
-| FM-16 | EPUB selection may cross visual fragments within one spine item and clamps at its boundary | RFD 6 | `rfd/0006/README.adoc`; plan decision 8 | `WT` + RFD 6 tests | `W1280` | `F4` | 5I |
-| FM-17 | PDF selection stays within one page | RFD 6 | `rfd/0006/README.adoc`; plan decision 8 | `WT` + RFD 6 tests | `W1280` | `F2` | 5I |
+| FM-16 | EPUB selection may cross visual fragments within one spine item and clamps at its boundary | RFD 16 | [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/); plan decision 8 | `WT` + RFD 16 tests | `W1280` | `F4` | 5I |
+| FM-17 | PDF selection stays within one page | RFD 16 | [RFD 16](https://chaba-rfds.pages.dev/rfd/0016/); plan decision 8 | `WT` + RFD 16 tests | `W1280` | `F2` | 5I |
 | FM-18 | EPUB pages keep document colors; no monochrome tinting of composited RGBA pages | Iced | plan 5G acceptance | `1C-EPUB-PAG` | `W1280` | `F4` `F7` | 5G |
 | FM-19 | DPR 2 sharpness: text and images remain crisp at raster scale, no blur or double-scaling | Retained Flutter | plan 6C; `app.rs:4479-4482` | `6C-A11Y` | `D2` | `G7` | 6C |
 | FM-20 | Resource rejection is distinguishable from a rendering defect | Iced | `pagination.rs` limits; plan 5J | `WT` | `W1280` | `F10` | 5J |
@@ -629,7 +629,7 @@ then, no new fixture may be called redistribution-safe.
 | `1B-IMPORT`, `1B-SETTINGS` | Iced import-workflow and settings capture families from 1B (Iced reference for IM-* and ST-* rows) | Pending (P2, P4) |
 | `1C-RD-CHROME`, `1C-RD-PANEL`, `1C-SPREAD` | Reader chrome, panels and spreads from 1C (Iced reference) | Pending (P2, P4) |
 | `1C-EPUB-PAG`, `1C-EPUB-CONT`, `1C-PDF-PAG`, `1C-PDF-CONT`, `1C-CBZ-PAG`, `1C-CBZ-CONT` | Per-format/mode reader evidence (Iced reference) | Pending (P2, P4) |
-| `1C` non-Iced authority record | RFD 6 and Flutter evidence for selection | Pending |
+| `1C` non-Iced authority record | RFD 16 and Flutter evidence for selection | Pending |
 | `2B-GOLDEN` | Production-shell golden harness (Flutter) | Pending (P6) |
 | `2C-PALETTE` | Mapped palette renders (Flutter) | Pending |
 | `4B-RENDER` | 4B inspected Flutter renders: reader chrome, normal and 200% text, wide and compact | Pending |

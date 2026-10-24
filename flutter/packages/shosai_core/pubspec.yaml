@@ -2,7 +2,7 @@ name: shosai_core
 description: >-
   Dart application core for the Shōsai reader: the SQLite store and the
   library, reading-state, bookmark, annotation and search records over it.
-  Replaces the Rust core (RFD 4, milestone M3.0).
+  Replaces the Rust core (RFD 12, milestone M3.0).
 publish_to: none
 version: 0.1.0
 

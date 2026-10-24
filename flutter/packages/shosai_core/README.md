@@ -2,7 +2,7 @@
 
 The Dart application core of the Shōsai reader: the SQLite store and the
 records kept in it. It replaces the Rust core and the Flutter bridge in
-stacked slices (RFD 4, milestone M3.0) and is independent of Flutter widgets,
+stacked slices (RFD 12, milestone M3.0) and is independent of Flutter widgets,
 so its behaviour is tested with `dart test`.
 
 ## Store
@@ -154,7 +154,7 @@ format engine supplies it through `UnitTextSource`:
   or the page is gone. A PDF annotation without text resolves only on its own
   content.
 
-`shosai-quote-v1` pins Unicode 17.0.0 (RFD 6). NFC comes from `unorm_dart`
+`shosai-quote-v1` pins Unicode 17.0.0 (RFD 16). NFC comes from `unorm_dart`
 0.3.2, pinned exactly: it carries Unicode 17.0.0 data, and 0.3.3 moved to
 Unicode 18. Grapheme clusters come from the package's own UAX #29 segmenter
 (`lib/src/annotations/graphemes.dart`), because `characters`, which the

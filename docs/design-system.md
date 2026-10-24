@@ -1,6 +1,6 @@
 # Design system
 
-Shōsai (書斎, "the study") is a reader for EPUB and PDF on desktop, tablet and phone. This document is how it looks and speaks: one reading experience whatever the format or the screen. It serves the first release defined in [RFD 4](../rfd/0004/README.adoc) and follows [typography.md](typography.md) for fonts.
+Shōsai (書斎, "the study") is a reader for EPUB and PDF on desktop, tablet and phone. This document is how it looks and speaks: one reading experience whatever the format or the screen. It serves the first release defined in [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/) and follows [typography.md](typography.md) for fonts.
 
 ## Where it lives
 
@@ -224,7 +224,7 @@ On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears 
 
 **PageSpread.** The reading surface; see [Reading surfaces](#reading-surfaces). Right-to-left spreads use `sh-spread--rtl`; vertical pages `sh-page--vertical`.
 
-**Highlight.** One selection and highlight model for EPUB and PDF (RFD 6), stored with durable anchors computed in the Dart application core.
+**Highlight.** One selection and highlight model for EPUB and PDF (RFD 16), stored with durable anchors computed in the Dart application core.
 
 - Selecting text raises an `inverse` capsule above the selection (below when there is no room): five colour swatches that save at once, **Note** (saves yellow and opens the editor), **Copy** and **Search**.
 - Fills are `hl-*` at 40% with `radius-xs` corners that wrap per line. A highlight with a note gets a dotted underline (`sh-hl--noted`); the one open in the notes panel or just jumped to gets a 2 px `accent` ring (`sh-hl--focus`).

@@ -41,7 +41,7 @@ const maxProvenanceIdBytes = 4096;
 
 enum HighlightColor { yellow, green, blue, pink, purple }
 
-/// The three kinds of note (RFD 6, Notes and search), all stored and listed
+/// The three kinds of note (RFD 16, Notes and search), all stored and listed
 /// the same way.
 enum AnnotationKind {
   /// A text range, with a color and an optional note.

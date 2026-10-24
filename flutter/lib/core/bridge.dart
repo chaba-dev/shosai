@@ -4,7 +4,7 @@
 /// The application implements it over the Dart application core and the
 /// document engines (`core_records.dart`); tests implement it with
 /// deterministic fakes. The types keep the shapes of the former Rust bridge
-/// (RFD 4, M3.0), so ordinals and offsets are still [BigInt]s.
+/// (RFD 12, M3.0), so ordinals and offsets are still [BigInt]s.
 library;
 
 import 'dart:typed_data';

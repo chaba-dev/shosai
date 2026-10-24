@@ -230,7 +230,7 @@ Rect pageImageSource(ui.Image image) =>
 
 /// The paint color of one annotation highlight.
 ///
-/// These are retained Flutter colors: RFD 6 selection/highlighting has no Iced
+/// These are retained Flutter colors: RFD 16 selection/highlighting has no Iced
 /// reference (plan decision 8), so the values are the ones this application
 /// already painted with, recorded in the shared token source instead of as
 /// literals here.

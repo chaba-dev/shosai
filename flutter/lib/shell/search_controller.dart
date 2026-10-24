@@ -12,7 +12,7 @@ enum ShellSearchScope { thisBook, allBooks }
 enum ShellSearchFilter { everything, text, notes }
 
 /// The search palette: book text and notes across the library or in the book
-/// being read (RFD 6, Search; `docs/design-system.md`, SearchPalette).
+/// being read (RFD 16, Search; `docs/design-system.md`, SearchPalette).
 ///
 /// It follows the shell's Elm boundary (`docs/flutter-architecture.md`): the
 /// palette renders the immutable [ShellSearchModel] and dispatches

@@ -1,6 +1,6 @@
 # Shōsai Flutter frontend
 
-This is the Shōsai application (RFD 4): one Dart and Flutter codebase for the
+This is the Shōsai application (RFD 12): one Dart and Flutter codebase for the
 document engines, the application core and the presentation. EPUB books are
 parsed by the Dart engine (`packages/shosai_epub`) and laid out and painted by
 Flutter; PDF documents are opened, rendered and measured by the Dart PDF

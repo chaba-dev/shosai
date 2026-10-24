@@ -61,7 +61,7 @@ implicit widget state.
 
 The 2026-09-28 owner decision ([evaluation plan](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28))
 adopted Dart-owned EPUB parsing/normalization with Flutter layout. The
-2026-10-21 decision ([RFD 4](../rfd/0004/README.adoc), milestone M3.0)
+2026-10-21 decision ([RFD 12](https://chaba-rfds.pages.dev/rfd/0012/), milestone M3.0)
 replaced the Rust core and the Dart/Rust bridge with Dart for everything else;
 the application has no Rust code. The Elm boundary above is unchanged by either
 decision.

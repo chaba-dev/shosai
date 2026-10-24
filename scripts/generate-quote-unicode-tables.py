@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the Unicode 17.0.0 grapheme-cluster table of shosai-quote-v1.
 
-The quote normalization profile `shosai-quote-v1` (RFD 6, PHASE-0) pins
+The quote normalization profile `shosai-quote-v1` (RFD 16, PHASE-0) pins
 Unicode 17.0.0 data for extended grapheme clusters. No Dart package on pub.dev
 segments by Unicode 17 (`characters` 1.4.1, which the Flutter SDK pins,
 implements Unicode 16), so the Dart core carries its own UAX #29 segmenter and

@@ -1,6 +1,6 @@
 /// The Dart core's SQLite schema, as ordered migrations.
 ///
-/// Written fresh for the Dart core (RFD 4, M3.0): databases written by the
+/// Written fresh for the Dart core (RFD 12, M3.0): databases written by the
 /// retired Rust core are not migrated. Append a migration for every change;
 /// never edit one that has merged.
 library;
@@ -88,7 +88,7 @@ CREATE INDEX bookmarks_book_order_idx
   Migration(5, 'annotations', '''
 -- A work that annotations belong to. Its versions are the contents (by hash)
 -- it has been read in; annotations made on one version resolve against the
--- others by quote (RFD 6).
+-- others by quote (RFD 16).
 CREATE TABLE annotation_documents (
     id     TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
     format TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
@@ -184,7 +184,7 @@ CREATE INDEX annotations_version_live_idx
     ON annotations(version_id, deleted_at, created_at, id);
 '''),
   Migration(6, 'page and book notes', '''
--- Page notes and book notes are annotations too (RFD 6, Notes and search): a
+-- Page notes and book notes are annotations too (RFD 16, Notes and search): a
 -- page note is anchored at a place (an EPUB spine item's scalar offset or a
 -- PDF page) and a book note at nothing. Neither has a color or a quote, and
 -- both have a note. SQLite cannot change a table's CHECK, so the table is
@@ -319,7 +319,7 @@ CREATE TABLE book_text_units (
 ) STRICT;
 '''),
   Migration(8, 'bookmark notes become page notes', '''
--- Bookmarks are places without notes (RFD 6, Notes and search): each
+-- Bookmarks are places without notes (RFD 16, Notes and search): each
 -- bookmark note becomes a page note where the bookmark is, and the bookmark
 -- stays. A content without an annotation document gets one, described by
 -- its library book. A note whose content is in neither waits in

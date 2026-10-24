@@ -16,7 +16,7 @@ import '../support/selection_surface_fixture.dart';
 /// Package 4D: selection actions and annotation menus (row RD-12).
 ///
 /// Selection has no Iced reference (plan decision 8, contract §1 item 6): the
-/// authority is RFD 6 plus the retained Flutter implementation, so these tests
+/// authority is RFD 16 plus the retained Flutter implementation, so these tests
 /// drive the production surfaces with real pointer and keyboard input and
 /// assert the retained actions, gating, focus and dismissal. The selectable
 /// surface's endpoints and boundaries are the deterministic fixture in
@@ -25,7 +25,7 @@ import '../support/selection_surface_fixture.dart';
 class _SelectionBridge extends HarnessBridge {
   _SelectionBridge({super.unitCount, super.pageWidth, super.pageHeight});
 
-  /// Whether the surface reports a complete Unicode mapping (RFD 6: copying is
+  /// Whether the surface reports a complete Unicode mapping (RFD 16: copying is
   /// unavailable for a geometry-only highlight).
   bool copyEligible = true;
 
@@ -268,7 +268,7 @@ void main() {
       await settleReaderSelection(tester);
 
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
-      // Every retained action is rendered: Copy, the five RFD 6 colors,
+      // Every retained action is rendered: Copy, the five RFD 16 colors,
       // Add note and Cancel.
       for (final label in const [
         'Copy',
@@ -354,7 +354,7 @@ void main() {
       expect(
         _disabled(tester, find.text('Copy')),
         isTrue,
-        reason: 'a geometry-only surface cannot copy (RFD 6)',
+        reason: 'a geometry-only surface cannot copy (RFD 16)',
       );
       // The persistence actions stay enabled: the highlight is still available.
       expect(_disabled(tester, find.text('Yellow')), isFalse);
@@ -471,7 +471,7 @@ void main() {
         expect(
           bridge.created.single.color,
           color,
-          reason: '$label commits its own RFD 6 color',
+          reason: '$label commits its own RFD 16 color',
         );
         expect(bridge.created.single.textRange!.start.toInt(), 4);
         expect(bridge.created.single.textRange!.end.toInt(), 12);
