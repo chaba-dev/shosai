@@ -161,6 +161,65 @@ final class LibraryRecords {
         .isNotEmpty,
   );
 
+  /// Managed books whose private copy is recorded outside [root].
+  Future<List<Book>> managedOutside(String root) => _store.read(
+    (db) => [
+      for (final book
+          in db
+              .select(
+                "SELECT $bookColumns FROM books WHERE storage_kind = 'managed'",
+              )
+              .map(bookFromRow))
+        if (p.dirname(book.path) != root) book,
+    ],
+  );
+
+  /// Record managed book [id]'s copy at [to] instead of [from], unless the
+  /// book has changed since or another book is recorded at [to]. Returns
+  /// whether it moved.
+  Future<bool> moveManagedCopy(int id, String from, String to) =>
+      _store.transaction((db) {
+        if (_bookByPath(db, to) != null) return false;
+        db.execute(
+          """UPDATE books SET file_path = ?
+             WHERE id = ? AND file_path = ? AND storage_kind = 'managed'""",
+          [to, id, from],
+        );
+        if (db.updatedRows == 0) return false;
+        // The copy at its new path is in use, not a removed one.
+        db.execute(
+          'DELETE FROM managed_file_deletion_debt WHERE file_path = ?',
+          [to],
+        );
+        return true;
+      });
+
+  /// Deletion debts recorded in a managed directory other than [root].
+  Future<List<({String path, String directory})>> debtsOutside(String root) =>
+      _store.read(
+        (db) => [
+          for (final row in db.select(
+            '''SELECT file_path, managed_dir FROM managed_file_deletion_debt
+               WHERE managed_dir != ?''',
+            [root],
+          ))
+            (
+              path: row.columnAt(0) as String,
+              directory: row.columnAt(1) as String,
+            ),
+        ],
+      );
+
+  /// Record the debt at [from] as one at [to], in managed directory [root].
+  Future<void> moveDeletionDebt(String from, String to, String root) =>
+      _store.transaction((db) {
+        db.execute(
+          'DELETE FROM managed_file_deletion_debt WHERE file_path = ?',
+          [from],
+        );
+        _recordDeletionDebt(db, to, root);
+      });
+
   /// Record a private copy at [path], in [managedDirectory], to delete.
   Future<void> recordDeletionDebt(String path, String managedDirectory) =>
       _store.transaction(
