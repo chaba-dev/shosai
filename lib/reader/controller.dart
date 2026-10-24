@@ -36,6 +36,7 @@ import 'pdf/spread.dart';
 part 'effects.dart';
 part 'message.dart';
 part 'model.dart';
+part 'references.dart';
 
 /// Most jumps Back remembers; the oldest is forgotten first.
 const _maxReturnPoints = 32;
@@ -145,6 +146,8 @@ final class ReaderController implements Listenable {
   /// document summary: opened by the open effect, released with the model's
   /// resources.
   PdfEngineDocument? _pdfDocument;
+  int _referenceRevision = 0;
+  final Set<Future<void>> _referenceEffects = {};
   final NoteEditor _noteEditor;
   final PlaceNoteEditor _placeNoteEditor;
   final NoteEditorCanceller _noteEditorCanceller;
@@ -566,6 +569,7 @@ final class ReaderController implements Listenable {
           ReaderAnnotationNavigated() ||
           ReaderLocationNavigated() ||
           ReaderLinkActivated() ||
+          ReaderReferenceGoToRequested() ||
           ReaderPageInputSubmitted() ||
           ReaderSearchResultStepRequested() ||
           ReaderReturnRequested():
@@ -583,6 +587,34 @@ final class ReaderController implements Listenable {
           ReaderSelectionAllRequested() ||
           ReaderSelectionCancelled():
         _openMatch = null;
+      default:
+    }
+    switch (message) {
+      case ReaderOpenRequested() ||
+          ReaderPageStepRequested() ||
+          ReaderUnitRequested() ||
+          ReaderBookmarkNavigated() ||
+          ReaderNoteNavigated() ||
+          ReaderAnnotationNavigated() ||
+          ReaderPlaceRequested() ||
+          ReaderReturnRequested() ||
+          ReaderPageInputSubmitted() ||
+          ReaderSearchResultStepRequested() ||
+          ReaderLayoutChanged() ||
+          ReaderViewportChanged() ||
+          ReaderTypographyChanged() ||
+          ReaderPanelToggled() ||
+          ReaderSearchToggled() ||
+          ReaderSelectionPointerStarted() ||
+          ReaderSelectionKeyboardExtended() ||
+          ReaderSelectionAllRequested() ||
+          ReaderSuspended() ||
+          ReaderMemoryPressureReceived() ||
+          ReaderReferenceDismissed():
+        _referenceRevision += 1;
+        if (_model.referencePeek != null) {
+          _emit(_model.copyWith(referencePeek: null));
+        }
       default:
     }
     switch (message) {
@@ -725,16 +757,36 @@ final class ReaderController implements Listenable {
       case ReaderContentsRequested():
         _contentsRequested();
       case ReaderLinkActivated():
-        _linkActivated(message.href);
-      case ReaderLocationNavigated():
-        _closeContentsAfterChoice();
+        _linkActivated(message.href, message.label);
+      case ReaderPdfLinkTapped():
+        _pdfLinkTapped(message.x, message.y);
+      case ReaderReferenceDismissed():
+        _focusAdapter(ReaderFocusTarget.surface);
+      case ReaderReferenceGoToRequested():
+        final peek = _model.referencePeek;
+        if (peek == null || _model.busy || _model.relayoutBusy) return;
+        _referenceRevision += 1;
+        _emit(_model.copyWith(referencePeek: null));
         _jump(
           () => _unitRequested(
-            message.unit,
-            offset: message.offset,
+            peek.unit,
+            offset: peek.offset,
             replaceReadingOffset: true,
           ),
         );
+      case _ReaderReferenceLoaded():
+        if (_isCurrent(message.generation) &&
+            message.revision == _referenceRevision) {
+          _selectionCancelled(requestSurfaceFocus: false);
+          _emit(_model.copyWith(referencePeek: message.peek));
+        }
+      case _ReaderReferenceFinished():
+        _activeBridgeOperations -= 1;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
+      case ReaderLocationNavigated():
+        _closeContentsAfterChoice();
+        _referenceRequested(message.unit, message.offset);
       case ReaderPageInputChanged():
         _pageInputChanged(message.draft);
       case ReaderPageInputSubmitted():
@@ -2970,7 +3022,7 @@ final class ReaderController implements Listenable {
   /// `https` and `mailto` are the only external schemes and go to the injected
   /// platform opener; every other scheme is refused, and the reader never
   /// fetches a book resource.
-  void _linkActivated(String href) {
+  void _linkActivated(String href, String? label) {
     final document = _model.document;
     if (document == null || document.format != FlutterBookFormat.epub) return;
     if (_model.busy ||
@@ -2996,13 +3048,10 @@ final class ReaderController implements Listenable {
       href: href,
     );
     if (target == null) return;
-    // A footnote or cross-reference is a jump; Back returns from it.
-    _jump(
-      () => _unitRequested(
-        target.point.spine,
-        offset: target.hasFragment ? target.point.scalar : 0,
-        replaceReadingOffset: true,
-      ),
+    _referenceRequested(
+      target.point.spine,
+      target.hasFragment ? target.point.scalar : 0,
+      label: label,
     );
   }
 
@@ -6707,6 +6756,7 @@ final class ReaderController implements Listenable {
     final document = _model.document;
     final released = _model.copyWith(
       document: null,
+      referencePeek: null,
       pageImage: null,
       epubPage: null,
       // A PDF spread describes the released document's surface; a document
@@ -6750,7 +6800,11 @@ final class ReaderController implements Listenable {
     }
     final pdf = _pdfDocument;
     _pdfDocument = null;
-    unawaited(pdf?.dispose());
+    // A link lookup/preview retains this engine document through its awaits.
+    // Replacement may retire it before the effect finishes, but not dispose it.
+    unawaited(
+      Future.wait(_referenceEffects.toList()).then((_) => pdf?.dispose()),
+    );
   }
 
   void _disposeRequested() {

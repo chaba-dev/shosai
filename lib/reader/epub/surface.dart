@@ -168,14 +168,18 @@ pageSelectionGeometry(FlowPage page, EpubPageBox box) {
   return (endpoints: endpoints, visualLines: visualLines);
 }
 
-/// The link href at [position] in the page window's coordinates, or null.
+/// The link and its painted label at [position], or null.
 ///
 /// The hit test walks the same [placedPageText] geometry the page painter and
 /// the selection surface use, so a link is activated exactly where its glyphs
 /// are painted. A text slice is bounded by its own visible line window rather
 /// than the whole measured block, so a line that belongs to the next page
 /// cannot be hit from this one.
-String? pageLinkAt(FlowPage page, EpubPageBox box, Offset position) {
+({String href, String label})? pageLinkAt(
+  FlowPage page,
+  EpubPageBox box,
+  Offset position,
+) {
   final flow = box.toFlow(position);
   for (final slice in page.slices) {
     for (final placed in placedPageText(slice)) {
@@ -194,8 +198,8 @@ String? pageLinkAt(FlowPage page, EpubPageBox box, Offset position) {
           continue;
         }
       }
-      final href = block.linkAtLocal(local);
-      if (href != null) return href;
+      final link = block.linkAtLocal(local);
+      if (link != null) return link;
     }
   }
   return null;

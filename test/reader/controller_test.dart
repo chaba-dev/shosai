@@ -1,11 +1,31 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/reader/pdf/engine.dart';
 import '../support/bridge_pdf_engine.dart';
 import '../support/bridge_records.dart';
+import '../support/production_shell_harness.dart';
+
+class _ReferenceBridge extends HarnessBridge {
+  _ReferenceBridge() : super(pageWidth: 612, pageHeight: 792);
+
+  Completer<List<PdfPageLink>>? pending;
+
+  @override
+  Future<List<PdfPageLink>> pdfEngineLinks(int page) async {
+    final gate = pending;
+    pending = null;
+    return gate == null ? _links : gate.future;
+  }
+
+  static const _links = [
+    PdfPageLink(rects: [PdfLinkRect(80, 500, 200, 650)], page: 1),
+  ];
+}
 
 class _ReaderBridge
     with BridgePdfEngine, BridgeRecords
@@ -43,6 +63,58 @@ ReaderController _controller({FlutterBridge? bridge}) => ReaderController(
 );
 
 void main() {
+  for (final action in ['keep', 'dismiss', 'navigate', 'suspend', 'replace']) {
+    testWidgets('a delayed PDF preview respects $action', (tester) async {
+      final bridge = _ReferenceBridge();
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) async {
+          final recorder = ui.PictureRecorder();
+          ui.Canvas(recorder);
+          final picture = recorder.endRecording();
+          final image = await picture.toImage(1, 1);
+          picture.dispose();
+          return image;
+        },
+      );
+      addTearDown(controller.dispose);
+      controller.dispatch(const ReaderOpenRequested('/books/references.pdf'));
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        if (controller.model.pageImage != null && !controller.model.busy) break;
+      }
+      expect(controller.model.pageImage, isNotNull);
+      final gate = Completer<List<PdfPageLink>>();
+      bridge.pending = gate;
+      controller.dispatch(const ReaderPdfLinkTapped(100, 200));
+      switch (action) {
+        case 'dismiss':
+          controller.dispatch(const ReaderReferenceDismissed());
+        case 'navigate':
+          controller.dispatch(const ReaderUnitRequested(2));
+        case 'suspend':
+          controller.dispatch(const ReaderSuspended());
+        case 'replace':
+          controller.dispatch(const ReaderOpenRequested('/books/new.pdf'));
+      }
+      gate.complete(_ReferenceBridge._links);
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      if (action == 'keep') {
+        expect(controller.model.referencePeek?.unit, 1);
+        expect(controller.model.unit, 0);
+      } else {
+        expect(controller.model.referencePeek, isNull);
+      }
+      expect(controller.model.returnPoints, isEmpty);
+      expect(controller.model.error, isNull);
+      controller.dispose();
+      await tester.pump();
+      expect(bridge.isDisposed, isTrue);
+    });
+  }
+
   test('panels are mutually exclusive and search is independent', () {
     final controller = _controller();
     addTearDown(controller.dispose);

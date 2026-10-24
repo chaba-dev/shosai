@@ -434,6 +434,12 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('reader-contents-entry-1')));
       await tester.pump();
       await _settle(tester);
+      expect(
+        find.byKey(const ValueKey('reader-reference-peek')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
+      await _settle(tester);
       // The status wording follows the navigated unit.
       expect(find.text('50% · chapter 2 of 4'), findsOneWidget);
     });

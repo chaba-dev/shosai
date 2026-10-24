@@ -756,4 +756,22 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get shellSwitcherDone => '完了';
+
+  @override
+  String get readerReference => '参照';
+
+  @override
+  String get readerReferenceClose => '閉じる';
+
+  @override
+  String get readerReferenceGoTo => '移動';
+
+  @override
+  String readerReferencePage(int page) {
+    return '$pageページ';
+  }
+
+  @override
+  String get readerReferenceNoPreview =>
+      'プレビューできるテキストがありません。ページに移動して参照を確認できます。';
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
@@ -31,6 +32,7 @@ part 'view_dialogs.dart';
 part 'view_document.dart';
 part 'view_notes.dart';
 part 'view_panels.dart';
+part 'view_references.dart';
 part 'view_selection.dart';
 part 'view_stage.dart';
 part 'view_toolbar.dart';
@@ -832,9 +834,11 @@ class _ReaderScreenState extends State<ReaderScreen>
         _readerPanelPresentation(panel, layout) !=
             _ReaderPanelPresentation.docked;
     return PopScope(
-      canPop: !floatingPanel,
+      canPop: !floatingPanel && model.referencePeek == null,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && floatingPanel) {
+        if (!didPop && model.referencePeek != null) {
+          _controller.dispatch(const ReaderReferenceDismissed());
+        } else if (!didPop && floatingPanel) {
           _controller.dispatch(ReaderPanelToggled(panel));
         }
       },
@@ -912,9 +916,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     // while it is covered (a note chosen in the panel) fail, so focus stays on
     // the chosen note; closing the panel returns it to the toolbar.
     final covered =
+        model.referencePeek != null ||
         openPanel != null &&
-        _readerPanelPresentation(openPanel, layout) !=
-            _ReaderPanelPresentation.docked;
+            _readerPanelPresentation(openPanel, layout) !=
+                _ReaderPanelPresentation.docked;
     final stage = LayoutBuilder(
       builder: (context, constraints) => Stack(
         children: [
@@ -956,11 +961,23 @@ class _ReaderScreenState extends State<ReaderScreen>
             focusNode: _panelFocus,
             hostKeys: _panelKeys,
           ),
+          if (model.referencePeek case final peek?)
+            Positioned.fill(
+              child: _ReaderReferenceOverlay(
+                peek: peek,
+                layout: layout,
+                dispatch: _controller.dispatch,
+              ),
+            ),
         ],
       ),
     );
     final panel = openPanel;
-    if (panel == null || covered) return stage;
+    if (panel == null ||
+        _readerPanelPresentation(panel, layout) !=
+            _ReaderPanelPresentation.docked) {
+      return stage;
+    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

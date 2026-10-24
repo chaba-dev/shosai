@@ -954,12 +954,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('reader-selection-surface')),
-        findsNothing,
+        findsOneWidget,
       );
-      final image = find.descendant(
-        of: _documentArea,
-        matching: find.byType(RawImage),
-      );
+      // The raster retains its gesture frame for links even without text.
+      final image = find.byKey(const ValueKey('reader-page-paint'));
       final resting = tester.getTopLeft(image).dx;
       final pixels = await captureHarnessRgba(tester);
       final point =

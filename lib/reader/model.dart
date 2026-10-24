@@ -424,11 +424,27 @@ final class ReaderNoteEdit {
   final String text;
 }
 
+/// A reference's destination and bounded preview, without changing the page.
+final class ReaderReferencePeek {
+  const ReaderReferencePeek({
+    required this.unit,
+    required this.offset,
+    required this.label,
+    required this.preview,
+  });
+
+  final int unit;
+  final int? offset;
+  final String label;
+  final String preview;
+}
+
 final class ReaderModel {
   ReaderModel({
     this.openPath,
     this.openBookId,
     this.document,
+    this.referencePeek,
     this.unit = 0,
     this.readingOffset,
     this.pageImage,
@@ -585,6 +601,7 @@ final class ReaderModel {
 
   /// Where each jump left from, the latest last: Back returns to the last.
   final List<ReaderReturnPoint> returnPoints;
+  final ReaderReferencePeek? referencePeek;
 
   /// Which notes the Notes panel lists.
   final ReaderNotesScope notesScope;
@@ -695,6 +712,7 @@ final class ReaderModel {
     Object? openPath = _unchanged,
     Object? openBookId = _unchanged,
     Object? document = _unchanged,
+    Object? referencePeek = _unchanged,
     int? unit,
     Object? readingOffset = _unchanged,
     Object? pageImage = _unchanged,
@@ -806,6 +824,9 @@ final class ReaderModel {
       bookmarks: bookmarks ?? this.bookmarks,
       notes: notes ?? this.notes,
       returnPoints: returnPoints ?? this.returnPoints,
+      referencePeek: identical(referencePeek, _unchanged)
+          ? this.referencePeek
+          : referencePeek as ReaderReferencePeek?,
       notesScope: notesScope ?? this.notesScope,
       libraryNotes: libraryNotes ?? this.libraryNotes,
       annotationOperations: annotationOperations == null

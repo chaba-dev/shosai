@@ -236,6 +236,8 @@ void main() {
     await settleNative(tester);
     await tester.tap(find.text('Closing'));
     await settleNative(tester);
+    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
+    await settleNative(tester);
 
     expect(dartPage(tester)!.page.unit, 2);
     expect(find.byKey(const ValueKey('reader-layout-refusal')), findsNothing);

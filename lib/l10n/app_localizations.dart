@@ -1415,6 +1415,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Done'**
   String get shellSwitcherDone;
+
+  /// No description provided for @readerReference.
+  ///
+  /// In en, this message translates to:
+  /// **'Reference'**
+  String get readerReference;
+
+  /// No description provided for @readerReferenceClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get readerReferenceClose;
+
+  /// No description provided for @readerReferenceGoTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Go to'**
+  String get readerReferenceGoTo;
+
+  /// No description provided for @readerReferencePage.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {page}'**
+  String readerReferencePage(int page);
+
+  /// No description provided for @readerReferenceNoPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'No text preview available. Go to the page to view this reference.'**
+  String get readerReferenceNoPreview;
 }
 
 class _AppLocalizationsDelegate
