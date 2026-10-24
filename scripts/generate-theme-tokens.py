@@ -3,7 +3,7 @@
 
 `assets/theme/tokens.json` is the single tracked design-token source (plan
 decision 2: "One tracked token source supplies both frontends"). This script
-transcribes it into `flutter/lib/theme_tokens.dart` for the Flutter frontend
+transcribes it into `lib/theme_tokens.dart` for the Flutter frontend
 and can verify that the committed file still matches the source (`--check`).
 
 The generated Dart module holds `dart:ui` colors directly, because the Flutter
@@ -31,7 +31,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOKENS_PATH = REPO_ROOT / "assets" / "theme" / "tokens.json"
-DART_PATH = REPO_ROOT / "flutter" / "lib" / "theme_tokens.dart"
+DART_PATH = REPO_ROOT / "lib" / "theme_tokens.dart"
 
 # The design system's slate accent (light grounds, decided 2026-10-20), and the
 # historical #109 brown that plan decision 2 rejects. Both are checked so a

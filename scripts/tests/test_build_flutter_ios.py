@@ -49,11 +49,10 @@ class FlutterIosBuildTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.repository = pathlib.Path(self.temporary.name).resolve() / "repository"
         self.scripts = self.repository / "scripts"
-        self.flutter_project = self.repository / "flutter"
+        self.flutter_project = self.repository
         self.sdk_cache = self.repository / "sdk"
         self.flutter_sdk = self.sdk_cache / "flutter"
         self.scripts.mkdir(parents=True)
-        self.flutter_project.mkdir()
         (self.flutter_sdk / "bin").mkdir(parents=True)
         shutil.copy2(BUILDER, self.scripts / BUILDER.name)
         self.tools = self.repository / "tools"

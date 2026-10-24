@@ -72,7 +72,7 @@ fi
 export FLUTTER_ROOT="$flutter_root"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$flutter_root/bin:$PATH"
 
-cd "$repository_root/flutter"
+cd "$repository_root"
 exec env \
   -u SDKROOT \
   -u MACOSX_DEPLOYMENT_TARGET \

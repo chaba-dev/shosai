@@ -1,5 +1,11 @@
 # Core test fixtures — provenance record
 
+The reader layout fixtures in `epub-layout/` were moved unchanged from the
+retired Dart evaluation prototype. Run `make epub-layout-fixtures` to regenerate
+them or `make check-epub-layout-fixtures` to verify their recorded hashes.
+The Rust benchmark generator cited in this historical record has been retired
+and remains available in repository history.
+
 Engineering provenance record for the checked-in fixtures directly under
 `fixtures/`. It records what is **verified** about how
 these files came to be, what remains **unknown**, the license basis that can and

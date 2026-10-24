@@ -1,5 +1,10 @@
 # Flutter UI reference specification
 
+> **Repository layout (2026-10-24).** Flutter now lives at the repository root.
+> Historical `flutter/` source citations below use the old layout; drop that
+> prefix for current files. The Rust benchmark harness and its generated F9
+> inputs have been retired; their provenance remains in repository history.
+
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
 > on 2026-10-20 (RFD 12, "The first release"); its source citations below refer
 > to the pinned reference revision in the repository history, and the captures
