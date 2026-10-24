@@ -4579,7 +4579,12 @@ void main() {
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
       if (failure == 'selection') {
-        expect(find.byType(RawImage), findsOneWidget);
+        final paint = tester.widget<CustomPaint>(
+          find.byWidgetPredicate(
+            (widget) => widget is CustomPaint && widget.painter is PagePainter,
+          ),
+        );
+        expect((paint.painter! as PagePainter).image, same(image));
       } else {
         expect(find.byType(CircularProgressIndicator), findsNothing);
         expect(

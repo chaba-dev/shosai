@@ -201,6 +201,10 @@ void main() {
     }
     expect(point, isNotNull, reason: 'the cross-chapter link is painted');
     await tester.tapAt(point!);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsOneWidget);
+    expect(harness.savedReadingStates.last.unit.toInt(), 0);
+    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
     for (var round = 0; round < 8; round += 1) {
       await pumpHarnessFrames(tester, frames: 4);
       await tester.runAsync(

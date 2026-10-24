@@ -944,6 +944,9 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
           },
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            // The document semantics owns its guarded selection action. A
+            // coordinate-based link tap is not a document-wide a11y action.
+            excludeFromSemantics: true,
             // Let the gesture arena distinguish a tap from PDF double-tap
             // zoom, a pinch, a page swipe, and a long-press selection first.
             onTapUp: (details) =>
