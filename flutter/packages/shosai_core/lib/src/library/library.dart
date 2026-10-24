@@ -549,13 +549,17 @@ final class Library {
       }
       final copy = p.join(root, '${book.contentHash}.${book.format.name}');
       if (!await _isFileOfSize(copy, book.fileSize)) continue;
+      // The inspection awaited filesystem work: do not adopt a path in a
+      // directory that was redirected while it ran.
+      if (!await _resolvesTo(root)) return;
       await _records.moveManagedCopy(book.id, book.path, copy);
     }
     for (final debt in await _records.debtsOutside(root)) {
       if (await Directory(debt.directory).exists()) continue;
       final moved = p.join(root, p.basename(debt.path));
-      if (await FileSystemEntity.type(moved, followLinks: false) ==
-          FileSystemEntityType.notFound) {
+      final type = await FileSystemEntity.type(moved, followLinks: false);
+      if (!await _resolvesTo(root)) return;
+      if (type == FileSystemEntityType.notFound) {
         await _records.clearDeletionDebt(debt.path);
       } else {
         await _records.moveDeletionDebt(debt.path, moved, root);

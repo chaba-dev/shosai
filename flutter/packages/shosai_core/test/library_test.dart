@@ -1194,6 +1194,78 @@ void main() {
       },
     );
 
+    test(
+      'migration rejects a root redirected after candidate inspection',
+      () async {
+        final t = await TempLibrary.create();
+        final book = await t.importBook(
+          t.copyFixture('sample.pdf', 'source.pdf'),
+          managed: true,
+        );
+        final root = t.path('new-books');
+        Directory(root).createSync();
+        final copy = p.join(root, p.basename(book.path));
+        File(book.path).renameSync(copy);
+        final library = Library(t.store, managedDirectory: root);
+        final documents = Directory(t.path('documents'))..createSync();
+        final sentinel = File(p.join(documents.path, 'keep.pdf'))
+          ..writeAsStringSync('the person\'s own file');
+        // A debt whose candidate is absent must not be cleared using the
+        // redirected directory's listing either.
+        final oldRoot = t.path('gone/books');
+        final debt = p.join(oldRoot, '${'d' * 64}.pdf');
+        await t.execute(
+          '''INSERT INTO managed_file_deletion_debt (file_path, managed_dir)
+           VALUES (?, ?)''',
+          [debt, oldRoot],
+        );
+        final holding = t.path('holding');
+        final parentZone = Zone.current;
+        var redirects = 0;
+        try {
+          await IOOverrides.runZoned(
+            library.retryManagedFileDeletions,
+            fseGetType: (path, followLinks) => parentZone.run(
+              () => FileSystemEntity.type(path, followLinks: followLinks),
+            ),
+            createFile: (path) {
+              final file = parentZone.run(() => File(path));
+              if (path != copy) return file;
+              return _AfterLengthFile(file, () {
+                redirects++;
+                Directory(root).renameSync(holding);
+                Link(root).createSync(documents.path);
+              });
+            },
+          );
+
+          expect(redirects, 1);
+          expect((await library.get(book.id))!.path, book.path);
+          expect(
+            await t.select('SELECT file_path FROM managed_file_deletion_debt'),
+            [
+              {'file_path': debt},
+            ],
+          );
+          expect(documents.listSync().map((entry) => entry.path), [
+            sentinel.path,
+          ]);
+          expect(sentinel.readAsStringSync(), 'the person\'s own file');
+        } finally {
+          if (redirects > 0) {
+            Link(root).deleteSync();
+            Directory(holding).renameSync(root);
+          }
+        }
+
+        for (var retry = 0; retry < 2; retry++) {
+          await library.retryManagedFileDeletions();
+          expect(await library.verifiedPath(book.id), copy);
+          expect(await t.count('managed_file_deletion_debt'), 0);
+        }
+      },
+    );
+
     test('the orphan sweep is not starved by owned copies', () async {
       final t = await TempLibrary.create();
       await t.library.retryManagedFileDeletions();
@@ -1427,6 +1499,24 @@ final class _RedirectingInspector implements BookInspector {
     Link(managed).createSync(documents.path);
     return const BookMetadata(title: 'Redirected');
   }
+}
+
+/// Redirects the directory after a real candidate-size inspection completes.
+final class _AfterLengthFile implements File {
+  _AfterLengthFile(this._file, this.afterLength);
+
+  final File _file;
+  final void Function() afterLength;
+
+  @override
+  Future<int> length() async {
+    final size = await _file.length();
+    afterLength();
+    return size;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 /// A file whose handles fail to close.
