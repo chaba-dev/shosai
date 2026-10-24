@@ -137,6 +137,7 @@ extension on ReaderController {
   }) async {
     bool current() => _isCurrent(generation) && revision == _referenceRevision;
     try {
+      var source = _model.readingLocation;
       ({double x, double y})? destination;
       if (target == null) {
         for (final unit in [firstUnit, ?spread?.facingUnit]) {
@@ -160,6 +161,10 @@ extension on ReaderController {
             if (link.page case final page?) {
               target = page;
               destination = link.destination;
+              source = (
+                unit: unit,
+                offset: unit == source.unit ? source.offset : null,
+              );
             } else if (link.url case final url?
                 when classifyEpubLink(url.toString()) ==
                     EpubLinkKind.external) {
@@ -204,6 +209,7 @@ extension on ReaderController {
           ReaderReferencePeek(
             unit: target,
             offset: offset,
+            source: (unit: source.unit, offset: source.offset, book: null),
             label:
                 _model.contents.entries
                     .where(

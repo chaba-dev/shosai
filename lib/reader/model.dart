@@ -431,12 +431,16 @@ final class ReaderReferencePeek {
     required this.offset,
     required this.label,
     required this.preview,
+    this.source,
   });
 
   final int unit;
   final int? offset;
   final String label;
   final String preview;
+
+  /// A tapped PDF page can be the facing page, not the active spread's first.
+  final ReaderReturnPoint? source;
 }
 
 final class ReaderModel {

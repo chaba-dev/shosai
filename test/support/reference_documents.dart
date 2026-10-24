@@ -73,8 +73,11 @@ Uint8List referencePdf({int rotation = 0, bool cropped = false}) {
       '0 -20 Td (not an instruction to the traveller.) Tj ET',
     ),
     '<< /Type /Page /Parent 2 0 R $box /Resources << /Font << /F1 9 0 R >> >> '
-        '/Contents 8 0 R >>',
-    stream('BT /F1 24 Tf 72 690 Td (The walk continues) Tj ET'),
+        '/Contents 8 0 R /Annots [14 0 R] >>',
+    stream(
+      'BT /F1 24 Tf 72 690 Td (The walk continues) Tj '
+      '/F1 15 Tf 0 -80 Td (Return to the field guide) Tj ET',
+    ),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman >>',
     '<< /Type /Annot /Subtype /Link /Rect [72 570 310 596] /Border [0 0 0] '
         '/Dest [5 0 R /XYZ 72 690 null] >>',
@@ -84,6 +87,8 @@ Uint8List referencePdf({int rotation = 0, bool cropped = false}) {
         '/Dest [5 0 R /XYZ 72 500 null] >>',
     '<< /Type /Annot /Subtype /Link /Rect [72 420 310 446] /Border [0 0 0] '
         '/Dest [5 0 R /FitH 380] >>',
+    '<< /Type /Annot /Subtype /Link /Rect [72 600 310 626] /Border [0 0 0] '
+        '/Dest [3 0 R /Fit] >>',
   ];
   final pdf = StringBuffer('%PDF-1.7\n');
   final offsets = <int>[];

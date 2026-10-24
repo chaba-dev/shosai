@@ -773,6 +773,7 @@ final class ReaderController implements Listenable {
             offset: peek.offset,
             replaceReadingOffset: true,
           ),
+          source: peek.source,
         );
       case _ReaderReferenceLoaded():
         if (_isCurrent(message.generation) &&
@@ -2662,13 +2663,10 @@ final class ReaderController implements Listenable {
 
   /// Runs [navigate] and, when it started a move, records where the reader
   /// was so Back returns there; jumps stack, the latest last.
-  void _jump(void Function() navigate) {
+  void _jump(void Function() navigate, {ReaderReturnPoint? source}) {
     final here = _model.readingLocation;
-    final ReaderReturnPoint from = (
-      unit: here.unit,
-      offset: here.offset,
-      book: null,
-    );
+    final ReaderReturnPoint from =
+        source ?? (unit: here.unit, offset: here.offset, book: null);
     final before = _activeRelayoutIntent;
     navigate();
     if (identical(_activeRelayoutIntent, before) || _model.document == null) {
