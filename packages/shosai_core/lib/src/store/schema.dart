@@ -378,6 +378,23 @@ INSERT INTO pending_bookmark_notes
 
 ALTER TABLE bookmarks DROP COLUMN note;
 '''),
+  Migration(9, 'device library locations', '''
+-- No credentials or portable paths: these rows describe this device only.
+CREATE TABLE library_locations (
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) BETWEEN 1 AND 1024),
+    label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 1024),
+    generation INTEGER NOT NULL DEFAULT 1,
+    removed INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1))
+) STRICT;
+CREATE TABLE book_locators (
+    content_hash TEXT NOT NULL REFERENCES books(content_hash) ON DELETE CASCADE,
+    location_id TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key TEXT NOT NULL CHECK (length(locator_key) BETWEEN 1 AND 16384),
+    failure TEXT CHECK (failure IN ('offline', 'revoked', 'missing')),
+    PRIMARY KEY (content_hash, location_id, locator_key)
+) STRICT;
+CREATE INDEX book_locators_location_idx ON book_locators(location_id);
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.
