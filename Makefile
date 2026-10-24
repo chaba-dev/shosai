@@ -8,7 +8,7 @@
 .PHONY: android-profile android-release check-android-apk
 .PHONY: macos-debug macos-smoke
 .PHONY: ios-simulator-debug ios-device-profile ios-device-release
-.PHONY: check-rfds changelog next-version
+.PHONY: changelog next-version
 
 ## Run static analysis for the app and Dart packages
 ## The packages' `pub get` must run before the app-root `flutter analyze`: that
@@ -196,11 +196,6 @@ macos-smoke: macos-debug
 ## Build the Linux host in release mode
 linux-release:
 	cd flutter && flutter build linux --release
-
-## Validate RFD sources and the checker regression fixtures
-check-rfds:
-	@./scripts/check-rfd-status.sh
-	@./scripts/check-rfd-status-test.sh
 
 ## Regenerate CHANGELOG.md from conventional commits
 changelog:
