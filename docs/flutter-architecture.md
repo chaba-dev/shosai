@@ -67,16 +67,16 @@ the application has no Rust code. The Elm boundary above is unchanged by either
 decision.
 
 The controllers reach documents through `FlutterBridge`
-(`flutter/lib/core/bridge.dart`) and records through `ShosaiRecords`
-(`flutter/lib/core/records.dart`). The application implements both with
-`ApplicationBridge` (`flutter/lib/core/core_records.dart`): it opens documents
-through the Dart engines (`flutter/lib/core/documents.dart`) and serves records
-from the Dart application core (`flutter/packages/shosai_core`). Tests
+(`lib/core/bridge.dart`) and records through `ShosaiRecords`
+(`lib/core/records.dart`). The application implements both with
+`ApplicationBridge` (`lib/core/core_records.dart`): it opens documents
+through the Dart engines (`lib/core/documents.dart`) and serves records
+from the Dart application core (`packages/shosai_core`). Tests
 implement the same seams with deterministic fakes.
 
 | Responsibility | EPUB | PDF |
 | --- | --- | --- |
-| Parsing, normalization, canonical text, durable locations | Dart engine (`shosai_epub`) | Dart PDF engine (`flutter/lib/reader/pdf`, pdfrx over PDFium) |
+| Parsing, normalization, canonical text, durable locations | Dart engine (`shosai_epub`) | Dart PDF engine (`lib/reader/pdf`, pdfrx over PDFium) |
 | Layout, shaping, paint geometry, selection geometry | Flutter, over the Dart layout | Dart PDF engine |
 | Rendered pixels | Flutter, from the same layout as the geometry | Dart PDF engine raster |
 | Library/import, SQLite storage, bookmarks, annotations, anchors, reading state, search | Dart application core (`shosai_core`) | Dart application core (`shosai_core`) |

@@ -1,5 +1,9 @@
 # Flutter UI restoration plan
 
+> **Repository layout (2026-10-24).** Flutter now lives at the repository root.
+> Historical `flutter/` source citations below use the old layout; drop that
+> prefix for current files. Removed Rust sources remain in repository history.
+
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and CBZ
 > support were removed on 2026-10-20 (RFD 12, "The first release"; RFD 10 returns
 > CBZ as a later format package). The Iced references below point at the pinned

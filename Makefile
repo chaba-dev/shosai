@@ -1,9 +1,9 @@
 .PHONY: lint fmt check-fmt check
-.PHONY: test test-app test-scripts test-epub-prototype
+.PHONY: test test-app test-scripts
 .PHONY: test-packaged-linux test-packaged-macos test-packaged-android
 .PHONY: theme-tokens check-theme-tokens check-l10n-codegen
 .PHONY: design-system design-system-css check-design-system-css
-.PHONY: epub-prototype-fixtures measure-epub-prototype
+.PHONY: epub-layout-fixtures check-epub-layout-fixtures
 .PHONY: dev linux-debug linux-release check-linux-bundle
 .PHONY: android-profile android-release check-android-apk
 .PHONY: macos-debug macos-smoke
@@ -12,22 +12,22 @@
 
 ## Run static analysis for the app and Dart packages
 ## The packages' `pub get` must run before the app-root `flutter analyze`: that
-## command walks into flutter/packages and needs each nested package's own
+## command walks into packages and needs each nested package's own
 ## package config to resolve its `package:test` imports on a fresh checkout.
 lint:
-	cd flutter/packages/shosai_epub && dart pub get
-	cd flutter/packages/shosai_core && dart pub get
-	cd flutter && flutter analyze
-	cd flutter/packages/shosai_epub && dart analyze
-	cd flutter/packages/shosai_core && dart analyze
+	cd packages/shosai_epub && dart pub get
+	cd packages/shosai_core && dart pub get
+	flutter analyze
+	cd packages/shosai_epub && dart analyze
+	cd packages/shosai_core && dart analyze
 
 ## Format all Dart source files
 fmt:
-	cd flutter && dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
+	dart format integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
 
 ## Check Dart formatting without changing files
 check-fmt:
-	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
+	dart format --output=none --set-exit-if-changed integration_test lib test packages/shosai_epub/lib packages/shosai_epub/test packages/shosai_epub/tool packages/shosai_core/lib packages/shosai_core/test
 
 ## Regenerate the Flutter design-token module from assets/theme/tokens.json
 theme-tokens:
@@ -63,37 +63,24 @@ test:
 
 ## Run the app and Dart packages' tests (and the vendored PDFium hook's)
 test-app:
-	cd flutter && flutter test
-	cd flutter/packages/shosai_epub && dart pub get && dart test
-	cd flutter/packages/shosai_core && dart pub get && dart test
-	cd flutter/third_party/pdfium_dart && dart pub get && dart test
+	flutter test
+	cd packages/shosai_epub && dart pub get && dart test
+	cd packages/shosai_core && dart pub get && dart test
+	cd third_party/pdfium_dart && dart pub get && dart test
 
 ## Run tests for repository scripts
 test-scripts:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
-		-s benchmarks/epub-page-turn/2026-08-17/tests
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 		-s scripts/tests
+	$(MAKE) check-epub-layout-fixtures
 
-## Run the Phase C Dart EPUB evaluation prototype's tests (isolated; see
-## prototypes/epub-dart-eval/README.md). Not part of `make test`: the prototype
-## is an evaluation artifact, not a shipped component.
-test-epub-prototype:
-	cd prototypes/epub-dart-eval && dart format --output=none --set-exit-if-changed lib test packages/shosai_epub/lib packages/shosai_epub/test
-	cd prototypes/epub-dart-eval && flutter analyze
-	cd prototypes/epub-dart-eval && flutter test
-	cd prototypes/epub-dart-eval/packages/shosai_epub && dart analyze
-	cd prototypes/epub-dart-eval/packages/shosai_epub && dart test
-	python3 prototypes/epub-dart-eval/tool/generate_fixtures.py --check
+## Regenerate the reader layout fixtures and their SHA256SUMS
+epub-layout-fixtures:
+	python3 fixtures/epub-layout/generate.py
 
-## Regenerate the Phase C prototype fixtures (writes fixtures/ + SHA256SUMS)
-epub-prototype-fixtures:
-	python3 prototypes/epub-dart-eval/tool/generate_fixtures.py
-
-## Build the prototype release bundle and run the measurement harness under
-## Xvfb; writes prototypes/epub-dart-eval/artifacts/measurements/*.json
-measure-epub-prototype:
-	bash prototypes/epub-dart-eval/tool/measure.sh
+## Verify the reader layout fixtures remain reproducible
+check-epub-layout-fixtures:
+	python3 fixtures/epub-layout/generate.py --check
 
 ## Verify generated Flutter localizations match the ARB catalogs
 check-l10n-codegen:
@@ -106,23 +93,23 @@ check:
 
 ## Run the Linux host in debug mode
 dev:
-	cd flutter && flutter run -d linux
+	flutter run -d linux
 
 ## Build the Linux host in debug mode
 linux-debug:
-	cd flutter && flutter build linux --debug
+	flutter build linux --debug
 
 ## Verify the built Linux Flutter host's bundle carries the declared fonts
 ## (the packaged-font regression; needs `linux-debug` first)
 check-linux-bundle:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_flutter_bundle.py \
-		flutter/build/linux/x64/debug/bundle
+		build/linux/x64/debug/bundle
 
 ## Run the packaged-host integration tests on the Linux host under Xvfb, on X11
 ## with Mesa's EGL (from the Nix dev shell). No PDFium override is set, so the
 ## bundle's own PDFium and SQLite must load.
 test-packaged-linux:
-	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
+	env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
 		GDK_BACKEND=x11 \
 		__EGL_VENDOR_LIBRARY_FILENAMES="$${SHOSAI_TEST_EGL_VENDOR:?run in the Nix dev shell}" \
 		xvfb-run -a -s '-screen 0 1280x1024x24' \
@@ -139,24 +126,24 @@ test-packaged-macos:
 ## connected Android device or emulator (ANDROID_DEVICE picks one), likewise
 ## with no PDFium override
 test-packaged-android:
-	cd flutter && env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
+	env -u PDFIUM_PATH -u SHOSAI_PDFIUM_LIBRARY \
 		flutter drive --profile --driver=integration_test/driver.dart \
 		--target=integration_test/packaged_core_test.dart \
 		$(if $(ANDROID_DEVICE),-d $(ANDROID_DEVICE))
 
 ## Build the Android arm64 host in profile mode
 android-profile:
-	cd flutter && flutter build apk --profile --target-platform android-arm64
+	flutter build apk --profile --target-platform android-arm64
 
 ## Build the universal Android APK (every ABI) in release mode
 android-release:
-	cd flutter && flutter build apk --release
+	flutter build apk --release
 
 ## Verify the universal release APK carries Flutter, the app, PDFium and SQLite
 ## for every ABI (needs `android-release` first)
 check-android-apk:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_android_apk.py \
-		flutter/build/app/outputs/flutter-apk/app-release.apk
+		build/app/outputs/flutter-apk/app-release.apk
 
 ## Build the macOS host in debug mode
 macos-debug:
@@ -177,7 +164,7 @@ ios-device-release:
 ## Launch the packaged macOS host and verify that it remains running
 macos-smoke: macos-debug
 	@set -eu; \
-		app="flutter/build/macos/Build/Products/Debug/shosai_flutter.app"; \
+		app="build/macos/Build/Products/Debug/shosai_flutter.app"; \
 		verify_signatures() { \
 			/usr/bin/codesign --verify --deep --strict --verbose=2 "$$app"; \
 		}; \
@@ -195,7 +182,7 @@ macos-smoke: macos-debug
 
 ## Build the Linux host in release mode
 linux-release:
-	cd flutter && flutter build linux --release
+	flutter build linux --release
 
 ## Regenerate CHANGELOG.md from conventional commits
 changelog:

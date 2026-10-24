@@ -13,14 +13,14 @@
 #   --runs N       number of runs to compare (default 2, use 1 to skip the
 #                  reproducibility comparison)
 #   --output DIR   artifact root (default target/flutter-render-harness)
-#   --test PATH    test path relative to flutter/ (default test/visual)
+#   --test PATH    test path relative to the repository root (default test/visual)
 #
 # Exit codes: 0 pass (and identical across runs), 1 failure or drift.
 
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-flutter_dir="$root/flutter"
+flutter_dir="$root"
 runs=2
 output="$root/target/flutter-render-harness"
 test_path="test/visual"

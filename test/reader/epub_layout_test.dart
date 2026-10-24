@@ -1,0 +1,1242 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:characters/characters.dart';
+import 'package:flutter/painting.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_epub/shosai_epub.dart';
+import 'package:shosai_flutter/reader/epub/content.dart';
+import 'package:shosai_flutter/reader/epub/flow.dart';
+import 'package:shosai_flutter/reader/epub/pages.dart';
+import 'package:shosai_flutter/reader/epub/surface.dart';
+import 'package:shosai_flutter/reader/epub/text_style.dart';
+
+import '../support/epub_navigation_fixture.dart';
+
+/// Layout-level tests for the Dart EPUB renderer: the page window, its
+/// selection surface and the windowed chapter session.
+///
+/// The inputs are real fixture archives and the expectations are derived from
+/// the engine's own canonical stream, so these tests do not encode fixture
+/// arithmetic: they assert the invariants the reader depends on (every page
+/// window covers its own canonical range, the surface's geometry addresses the
+/// chapter's stream, and the windowed session reaches the whole chapter).
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  final conformance = openEpubBytes(_fixture('conformance.epub'));
+
+  const typography = ReaderEpubTypography(
+    fontFamily: 'Inter',
+    fontFamilyFallback: ['Noto Sans JP'],
+    fontSize: 18,
+    lineHeight: 1.5,
+    palette: ReaderEpubPalette(
+      background: Color(0xFFFFFFFF),
+      foreground: Color(0xFF1A1A1A),
+      link: Color(0xFF174EA6),
+      tableHeaderBackground: Color(0xFFE8EEF8),
+      tableHeaderBorder: Color(0xFF596B89),
+    ),
+  );
+
+  ChapterLayoutSpec spec({double width = 640, double height = 800}) =>
+      ChapterLayoutSpec(width: width, height: height, typography: typography);
+
+  test('a laid-out chapter paginates into ordered, non-overlapping pages', () {
+    final chapter = conformance.chapters[2];
+    final flow = layoutChapterFlow(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    );
+    final paginated = paginateFlow(flow: flow, pageHeight: 800, pageWidth: 640);
+    expect(paginated.pages, isNotEmpty);
+    expect(paginated.pages.first.index, 0);
+    for (var index = 0; index < paginated.pages.length; index += 1) {
+      final page = paginated.pages[index];
+      expect(page.index, index);
+      expect(page.slices, isNotEmpty);
+      expect(page.canonicalStart, lessThanOrEqualTo(page.canonicalEnd));
+      if (index == 0) continue;
+      final previous = paginated.pages[index - 1];
+      expect(
+        page.canonicalStart,
+        greaterThanOrEqualTo(previous.canonicalStart),
+        reason: 'pages are ordered by their canonical start',
+      );
+      expect(
+        page.canonicalStart,
+        greaterThanOrEqualTo(previous.canonicalEnd),
+        reason: 'a page does not start inside the previous page',
+      );
+    }
+    // Every page a scalar resolves to contains that scalar's start.
+    for (final page in paginated.pages) {
+      expect(
+        paginated.pageOfCanonical(page.canonicalStart),
+        page.index,
+        reason: 'a page resolves its own start',
+      );
+    }
+    expect(
+      paginated.pageOfCanonical(chapter.scalarCount),
+      paginated.pages.length - 1,
+      reason: 'a chapter-end position resolves to the last page',
+    );
+  });
+
+  test('a page window surface addresses the chapter canonical stream', () {
+    final chapter = conformance.chapters[2];
+    final session = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    );
+    addTearDown(session.dispose);
+    session.layoutWindowAt(0);
+    while (!session.complete) {
+      final progressed = session.lastNodeIndex + 1 < session.totalNodes
+          ? session.layoutForward(maxNodes: 64, maxMicros: 20000)
+          : session.layoutBackward(maxNodes: 64, maxMicros: 20000);
+      if (progressed == 0) break;
+    }
+    expect(session.complete, isTrue);
+
+    final page = pageWindowFor(
+      session: session,
+      scalar: 0,
+      unit: chapter.spine,
+      chapterCount: conformance.chapters.length,
+      windowSize: const Size(680, 800),
+    );
+    final surface = page.surface;
+    expect(surface.text, chapter.canonicalText);
+    expect(surface.copyEligible, isTrue);
+    expect(surface.resourcePath, chapter.resource);
+    expect(surface.endpoints, isNotEmpty);
+    expect(page.pageIndex, 0);
+    // The fixture chapter is spine 2 of 8: a step back reaches the previous
+    // chapter even though this page is the chapter's first.
+    expect(page.canGoBackward, isTrue);
+    expect(page.canGoForward, isTrue);
+    expect(page.pageCount, greaterThan(0));
+
+    final box = page.box;
+    for (final endpoint in surface.endpoints) {
+      final start = endpoint.rangeStart.toInt();
+      final end = endpoint.rangeEnd.toInt();
+      expect(end, greaterThan(start), reason: 'a hit zone spans a cluster');
+      expect(
+        endpoint.offset.toInt(),
+        inInclusiveRange(start, end),
+        reason: 'a caret sits on its own cluster boundary',
+      );
+      expect(start, greaterThanOrEqualTo(page.canonicalStart));
+      expect(end, lessThanOrEqualTo(page.canonicalEnd));
+      expect(endpoint.rect.left, greaterThanOrEqualTo(0));
+      expect(endpoint.rect.top, greaterThanOrEqualTo(0));
+      expect(
+        endpoint.rect.right,
+        lessThanOrEqualTo(surface.width + 0.5),
+        reason: 'a hit zone stays inside the page window',
+      );
+      expect(
+        endpoint.rect.bottom,
+        lessThanOrEqualTo(surface.height + 0.5),
+        reason: 'a hit zone stays inside the page window',
+      );
+      expect(
+        endpoint.rect.left,
+        greaterThanOrEqualTo(box.origin.dx - 0.5),
+        reason: 'text is laid out inside the page margin',
+      );
+    }
+    // The boundaries span the page's coverage and are chapter-relative.
+    expect(surface.graphemeBoundaries.first, page.canonicalStart);
+    expect(surface.graphemeBoundaries.last, page.canonicalEnd);
+    expect(surface.wordBoundaries.first, page.canonicalStart);
+    expect(surface.wordBoundaries.last, page.canonicalEnd);
+    expect(surface.visualLines, isNotEmpty);
+    for (final line in surface.visualLines) {
+      expect(line.carets, isNotEmpty);
+      for (final caret in line.carets) {
+        expect(caret.offset.toInt(), inInclusiveRange(0, chapter.scalarCount));
+      }
+    }
+  });
+
+  test('a spread window shows two consecutive pages on one surface', () {
+    final book = openEpubBytes(longChapterEpub(paragraphs: 40));
+    final chapter = book.chapters.first;
+    const spreadSize = Size(1360, 800);
+    final pageBox = epubPageBoxFor(
+      Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
+    );
+    final session = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(width: pageBox.contentWidth, height: pageBox.contentHeight),
+      images: const {},
+    );
+    addTearDown(session.dispose);
+    session.layoutWindowAt(0);
+    while (!session.complete) {
+      final progressed = session.layoutForward(maxNodes: 64, maxMicros: 20000);
+      if (progressed == 0) break;
+    }
+
+    final page = pageWindowFor(
+      session: session,
+      scalar: 0,
+      unit: chapter.spine,
+      chapterCount: book.chapters.length,
+      windowSize: spreadSize,
+      spread: true,
+    );
+    expect(page.pageCount, greaterThan(2), reason: 'the chapter has pages');
+    final facing = page.facing!;
+    final facingBox = page.facingBox!;
+    expect(page.spread, isTrue);
+    expect(facing.index, page.pageIndex + 1);
+    expect(facing.canonicalStart, greaterThanOrEqualTo(page.page.canonicalEnd));
+    expect(page.canonicalStart, page.page.canonicalStart);
+    expect(page.canonicalEnd, facing.canonicalEnd);
+
+    final surface = page.surface;
+    expect(surface.width, spreadSize.width);
+    expect(page.box.size, spreadSize);
+    expect(
+      facingBox.origin.dx,
+      pageBox.size.width + kEpubSpreadGutter + kEpubPageMargin,
+    );
+    var firstPage = 0;
+    var secondPage = 0;
+    for (final endpoint in surface.endpoints) {
+      if (endpoint.rangeStart.toInt() >= facing.canonicalStart) {
+        secondPage += 1;
+        expect(
+          endpoint.rect.left,
+          greaterThanOrEqualTo(facingBox.origin.dx - 0.5),
+          reason: "the second page's text sits in the second slot",
+        );
+      } else {
+        firstPage += 1;
+        expect(
+          endpoint.rect.right,
+          lessThanOrEqualTo(pageBox.size.width + 0.5),
+          reason: "the first page's text sits in the first slot",
+        );
+      }
+    }
+    expect(firstPage, greaterThan(0));
+    expect(secondPage, greaterThan(0));
+    // Lines run in reading order across the fold, so a keyboard movement
+    // from the first page's last line reaches the second page's first.
+    final starts = [
+      for (final line in surface.visualLines)
+        if (line.carets.isNotEmpty) line.carets.first.offset.toInt(),
+    ];
+    for (var index = 1; index < starts.length; index += 1) {
+      expect(starts[index], greaterThanOrEqualTo(starts[index - 1]));
+    }
+
+    // The last page of the chapter has no partner: its slot stays empty and
+    // the spread cannot step further inside the chapter.
+    final last = pageWindowFor(
+      session: session,
+      scalar: chapter.scalarCount,
+      unit: chapter.spine,
+      chapterCount: book.chapters.length,
+      windowSize: spreadSize,
+      spread: true,
+    );
+    expect(last.pageIndex, last.pageCount - 1);
+    expect(last.facing, isNull);
+    expect(last.canonicalEnd, last.page.canonicalEnd);
+
+    // Entering the chapter from the next one keeps the spreads paired from
+    // page zero: when the last page has an odd index, it is the facing page of
+    // the final spread rather than the first page of an overlapping spread.
+    final endAligned = pageWindowFor(
+      session: session,
+      scalar: chapter.scalarCount,
+      unit: chapter.spine,
+      chapterCount: book.chapters.length,
+      windowSize: spreadSize,
+      spread: true,
+      edge: EpubPositionEdge.end,
+    );
+    final expectedStart = (last.pageCount - 1).isOdd
+        ? last.pageCount - 2
+        : last.pageCount - 1;
+    expect(endAligned.pageIndex, expectedStart);
+    expect(endAligned.pageIndex.isEven, isTrue);
+    expect(endAligned.canonicalEnd, last.canonicalEnd);
+    expect(
+      endAligned.facing?.index,
+      expectedStart + 1 < last.pageCount ? expectedStart + 1 : null,
+    );
+  });
+
+  test(
+    'chapter-end spread alignment covers paired and unpaired last pages',
+    () {
+      const spreadSize = Size(1360, 800);
+      final lastPageParities = <bool>{};
+      for (final paragraphs in [24, 32, 40, 48, 56]) {
+        final book = openEpubBytes(longChapterEpub(paragraphs: paragraphs));
+        final chapter = book.chapters.first;
+        final pageBox = epubPageBoxFor(
+          Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
+        );
+        final session = ChapterLayoutSession(
+          chapter: chapter,
+          spec: spec(
+            width: pageBox.contentWidth,
+            height: pageBox.contentHeight,
+          ),
+          images: const {},
+        );
+        addTearDown(session.dispose);
+        session.layoutWindowAt(0);
+        while (!session.complete) {
+          if (session.layoutForward(maxNodes: 64, maxMicros: 20000) == 0) break;
+        }
+
+        final rawEnd = pageWindowFor(
+          session: session,
+          scalar: chapter.scalarCount,
+          unit: chapter.spine,
+          chapterCount: book.chapters.length,
+          windowSize: spreadSize,
+          spread: true,
+        );
+        final alignedEnd = pageWindowFor(
+          session: session,
+          scalar: chapter.scalarCount,
+          unit: chapter.spine,
+          chapterCount: book.chapters.length,
+          windowSize: spreadSize,
+          spread: true,
+          edge: EpubPositionEdge.end,
+        );
+        final lastIsFacing = rawEnd.pageIndex.isOdd;
+        lastPageParities.add(lastIsFacing);
+        expect(
+          alignedEnd.pageIndex,
+          lastIsFacing ? rawEnd.pageIndex - 1 : rawEnd.pageIndex,
+        );
+        expect(alignedEnd.pageIndex.isEven, isTrue);
+        expect(alignedEnd.canonicalEnd, rawEnd.canonicalEnd);
+        expect(alignedEnd.facing != null, lastIsFacing);
+      }
+      expect(
+        lastPageParities,
+        {false, true},
+        reason: 'the fixture range exercises both final spread shapes',
+      );
+    },
+  );
+
+  test('a right-to-left spread reads its right slot first', () {
+    final book = openEpubBytes(
+      longChapterEpub(paragraphs: 40, pageProgression: 'rtl'),
+    );
+    expect(book.pageProgression, EpubDirection.rtl);
+    final chapter = book.chapters.first;
+    const spreadSize = Size(1360, 800);
+    final pageBox = epubPageBoxFor(
+      Size(epubSpreadPageWidth(spreadSize.width), spreadSize.height),
+    );
+    final session = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(width: pageBox.contentWidth, height: pageBox.contentHeight),
+      images: const {},
+    );
+    addTearDown(session.dispose);
+    session.layoutWindowAt(0);
+    while (!session.complete) {
+      if (session.layoutForward(maxNodes: 64, maxMicros: 20000) == 0) break;
+    }
+
+    final page = pageWindowFor(
+      session: session,
+      scalar: 0,
+      unit: chapter.spine,
+      chapterCount: book.chapters.length,
+      windowSize: spreadSize,
+      spread: true,
+      rightToLeft: true,
+    );
+    final facing = page.facing!;
+    expect(page.rightToLeft, isTrue);
+    expect(
+      page.box.origin.dx,
+      pageBox.size.width + kEpubSpreadGutter + kEpubPageMargin,
+      reason: 'the first page sits in the right slot',
+    );
+    expect(page.facingBox!.origin.dx, kEpubPageMargin);
+    for (final endpoint in page.surface.endpoints) {
+      final onFirstPage = endpoint.rangeStart.toInt() < facing.canonicalStart;
+      if (onFirstPage) {
+        expect(endpoint.rect.left, greaterThanOrEqualTo(page.box.origin.dx));
+      } else {
+        expect(endpoint.rect.right, lessThanOrEqualTo(pageBox.size.width));
+      }
+    }
+  });
+
+  test('the windowed session reaches the whole chapter in bounded batches', () {
+    final chapter = conformance.chapters[1];
+    final session = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    );
+    addTearDown(session.dispose);
+    final target = chapter.scalarCount ~/ 2;
+    session.layoutWindowAt(target);
+    expect(session.started, isTrue);
+    expect(
+      session.covers(target),
+      isTrue,
+      reason: 'the first window contains the reader position',
+    );
+    expect(session.laidOutNodes, greaterThan(0));
+    var batches = 0;
+    while (!session.complete && batches < 10000) {
+      batches += 1;
+      final progressed = session.lastNodeIndex + 1 < session.totalNodes
+          ? session.layoutForward(maxNodes: 4, maxMicros: 4000)
+          : session.layoutBackward(maxNodes: 4, maxMicros: 4000);
+      if (progressed == 0) break;
+    }
+    expect(session.complete, isTrue);
+    final flow = session.snapshot();
+    expect(flow.layoutComplete, isTrue);
+    expect(flow.firstNodeIndex, 0);
+    expect(flow.nodeCount, chapter.blocks.length);
+    // The snapshot is normalized: the frame starts at zero and the measured
+    // extent is the flow height (a block may carry its own leading spacing).
+    expect(flow.blocks.first.top, greaterThanOrEqualTo(0));
+    expect(flow.height, greaterThan(flow.blocks.last.top));
+    for (var index = 1; index < flow.blocks.length; index += 1) {
+      expect(
+        flow.blocks[index].top,
+        greaterThanOrEqualTo(flow.blocks[index - 1].top),
+        reason: 'blocks stay in document order',
+      );
+    }
+  });
+
+  test('a very long paragraph keeps line mapping linear and ordered', () {
+    final book = openEpubBytes(
+      _repoFile('fixtures/epub-layout/huge-paragraph.epub'),
+    );
+    final chapter = book.chapters.first;
+    final stopwatch = Stopwatch()..start();
+    final flow = layoutChapterFlow(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    );
+    stopwatch.stop();
+    final textBlocks = flow.blocks
+        .where((block) => block.text != null)
+        .toList(growable: false);
+    expect(textBlocks, isNotEmpty);
+    final lines = textBlocks.expand((block) => block.text!.lines).toList();
+    expect(lines.length, greaterThan(100));
+    for (var index = 1; index < lines.length; index += 1) {
+      expect(
+        lines[index].canonicalStart,
+        greaterThanOrEqualTo(lines[index - 1].canonicalStart),
+        reason: 'line boundaries follow the canonical stream',
+      );
+      expect(
+        lines[index].canonicalEnd,
+        greaterThanOrEqualTo(lines[index].canonicalStart),
+      );
+    }
+    // The per-line mapping is one monotone pass over the block text: a
+    // per-boundary scan of a 64k-scalar paragraph took seconds in the
+    // prototype. The bound is deliberately loose so it fails only on a
+    // quadratic regression, not on a slow machine.
+    expect(
+      stopwatch.elapsedMilliseconds,
+      lessThan(10000),
+      reason: 'laying out one very long paragraph stays bounded',
+    );
+  });
+
+  test('the session releases its measured paragraphs once', () {
+    final chapter = conformance.chapters[2];
+    final session = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    );
+    session.layoutWindowAt(0);
+    expect(session.started, isTrue);
+    session.dispose();
+    // A second release is a no-op rather than a double free.
+    session.dispose();
+    expect(session.laidOutNodes, greaterThan(0));
+  });
+
+  test('the page margin bounds the laid-out content', () {
+    final box = epubPageBoxFor(const Size(680, 800));
+    expect(box.size, const Size(680, 800));
+    expect(box.origin.dx, kEpubPageMargin);
+    expect(box.origin.dy, kEpubPageMargin);
+    expect(box.contentWidth, 680 - 2 * kEpubPageMargin);
+    expect(box.contentHeight, 800 - 2 * kEpubPageMargin);
+    // A tiny window still leaves a usable content box.
+    final small = epubPageBoxFor(const Size(60, 60));
+    expect(small.contentWidth, greaterThanOrEqualTo(40));
+    expect(small.contentHeight, greaterThanOrEqualTo(40));
+  });
+
+  test('chapter image sources are collected in document order', () {
+    final chapter = conformance.chapters[0];
+    final sources = chapterImageSources(chapter);
+    expect(sources, isNotEmpty);
+    expect(sources.toSet().length, sources.length, reason: 'each source once');
+    for (final source in sources) {
+      expect(conformance.resources.containsKey(source), isTrue);
+    }
+  });
+
+  /// A synthetic chapter of [count] paragraphs, each with visible text.
+  EpubChapter paragraphChapter(int count) => EpubChapter(
+    spine: 0,
+    resource: 'chapter.xhtml',
+    title: 'Paragraphs',
+    blocks: [
+      for (var index = 0; index < count; index += 1)
+        EpubParagraph([
+            EpubTextSpan(
+              text: 'Paragraph $index with enough words to measure a line.',
+            ),
+          ], const EpubNodeStyle())
+          ..canonical = EpubCanonicalSpan(index * 48, index * 48 + 47),
+    ],
+    canonicalText: '',
+    anchors: const {},
+    scalarCount: count * 48,
+  );
+
+  /// Asserts the painters created by a failed call are released and the ones the
+  /// session already adopted are not.
+  void expectReleaseBoundary(
+    List<TextPainter> painters, {
+    required int adopted,
+    required int created,
+  }) {
+    for (var index = 0; index < painters.length; index += 1) {
+      final painter = painters[index];
+      if (index < adopted) {
+        expect(
+          painter.debugDisposed,
+          isFalse,
+          reason: 'an adopted painter (${index + 1}) is not released',
+        );
+      } else if (index < created) {
+        expect(
+          painter.debugDisposed,
+          isTrue,
+          reason:
+              'a painter the failed call created (${index + 1}) is released',
+        );
+      }
+    }
+  }
+
+  test('a failed batch rolls its measurement back before it rethrows', () {
+    // A layout failure must not leave a half-adopted range: the retry after the
+    // failure has to produce the same flow a clean layout produces.
+    final chapter = paragraphChapter(40);
+    final clean = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    )..layoutWindowAt(0, viewports: 0.1);
+    while (!clean.complete) {
+      clean.layoutForward(maxNodes: 4, maxMicros: 1000000);
+    }
+    final expected = clean.snapshot();
+
+    final failing = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    )..layoutWindowAt(0, viewports: 0.1);
+    failing.layoutForward(maxNodes: 2, maxMicros: 1000000);
+    failing.layoutForward(maxNodes: 2, maxMicros: 1000000);
+    final before = failing.snapshot();
+    // The failing batch measures one node and then throws.
+    failing.debugFailNodeIndex = failing.lastNodeIndex + 2;
+    expect(
+      () => failing.layoutForward(maxNodes: 4, maxMicros: 1000000),
+      throwsStateError,
+    );
+    final after = failing.snapshot();
+
+    expect(
+      after.blocks.length,
+      before.blocks.length,
+      reason: 'the failing batch adopted nothing',
+    );
+    for (var index = 0; index < before.blocks.length; index += 1) {
+      expect(
+        after.blocks[index].top,
+        before.blocks[index].top,
+        reason: 'adopted block positions are unchanged by the rollback',
+      );
+      expect(after.blocks[index].text?.painter.debugDisposed, isFalse);
+    }
+
+    failing.debugFailNodeIndex = null;
+    while (!failing.complete) {
+      failing.layoutForward(maxNodes: 4, maxMicros: 1000000);
+    }
+    final retried = failing.snapshot();
+    expect(retried.blocks.length, expected.blocks.length);
+    for (var index = 0; index < expected.blocks.length; index += 1) {
+      expect(
+        retried.blocks[index].top,
+        expected.blocks[index].top,
+        reason: 'the retry matches a clean layout',
+      );
+    }
+    clean.dispose();
+    failing.dispose();
+  });
+
+  test('a backward batch that throws after a prepend commits nothing', () {
+    // The staged range is committed only when the whole batch completes: a throw
+    // after an earlier node of the same batch was measured must leave the range
+    // exactly as it was, release the painters the batch created, and let the
+    // retry produce the layout a clean session produces.
+    final chapter = paragraphChapter(40);
+    final clean = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    )..layoutWindowAt(chapter.scalarCount, viewports: 0.1);
+    while (clean.firstNodeIndex > 0) {
+      clean.layoutBackward(maxNodes: 3, maxMicros: 1000000);
+    }
+    final expected = clean.snapshot();
+
+    final session =
+        ChapterLayoutSession(chapter: chapter, spec: spec(), images: const {})
+          ..debugObservePainters = true
+          ..layoutWindowAt(chapter.scalarCount, viewports: 0.1);
+    final before = session.snapshot();
+    final adoptedPainters = session.debugCreatedPainters.length;
+    // The second node of the batch throws: the first prepend is already staged.
+    session.debugFailNodeIndex = session.firstNodeIndex - 2;
+    expect(
+      () => session.layoutBackward(maxNodes: 3, maxMicros: 1000000),
+      throwsA(isA<StateError>()),
+    );
+
+    final after = session.snapshot();
+    expect(
+      after.blocks.length,
+      before.blocks.length,
+      reason: 'a failed backward batch commits nothing',
+    );
+    for (var index = 0; index < before.blocks.length; index += 1) {
+      expect(after.blocks[index].top, before.blocks[index].top);
+    }
+    expect(after.firstNodeIndex, before.firstNodeIndex);
+    expect(after.height, before.height);
+    expectReleaseBoundary(
+      session.debugCreatedPainters,
+      adopted: adoptedPainters,
+      created: session.debugCreatedPainters.length,
+    );
+
+    session.debugFailNodeIndex = null;
+    while (session.firstNodeIndex > 0) {
+      session.layoutBackward(maxNodes: 3, maxMicros: 1000000);
+    }
+    final retried = session.snapshot();
+    expect(retried.blocks.length, expected.blocks.length);
+    for (var index = 0; index < expected.blocks.length; index += 1) {
+      expect(
+        retried.blocks[index].top,
+        expected.blocks[index].top,
+        reason: 'the retry matches a clean layout',
+      );
+    }
+    clean.dispose();
+    session.dispose();
+  });
+
+  /// A chapter of paragraphs and one table, for construction-failure tests.
+  EpubChapter paragraphAndTableChapter() => EpubChapter(
+    spine: 0,
+    resource: 'chapter.xhtml',
+    title: 'Paragraphs and a table',
+    blocks: [
+      EpubParagraph([
+        EpubTextSpan(text: 'Lead paragraph before the table.'),
+      ], const EpubNodeStyle())..canonical = const EpubCanonicalSpan(0, 31),
+      EpubTable(
+        caption: [EpubTextSpan(text: 'Quarterly results')],
+        rowGroups: [
+          EpubTableRowGroup(
+            kind: EpubTableRowGroupKind.body,
+            rows: [
+              EpubTableRow(
+                cells: [
+                  EpubTableCell(
+                    children: [
+                      EpubParagraph(
+                        [EpubTextSpan(text: 'Cell paragraph.')],
+                        const EpubNodeStyle(),
+                      )..canonical = const EpubCanonicalSpan(32, 46),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      )..canonical = const EpubCanonicalSpan(32, 60),
+      for (var index = 0; index < 8; index += 1)
+        EpubParagraph(
+          [EpubTextSpan(text: 'Trailing paragraph $index.')],
+          const EpubNodeStyle(),
+        )..canonical = EpubCanonicalSpan(61 + index * 24, 84 + index * 24),
+    ],
+    canonicalText: '',
+    anchors: const {},
+    scalarCount: 61 + 8 * 24,
+  );
+
+  test('an interrupted window construction releases its painters', () {
+    final chapter = paragraphChapter(12);
+    final clean = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    )..layoutWindowAt(0, viewports: 0.01);
+    while (!clean.complete) {
+      clean.layoutForward(maxNodes: 4, maxMicros: 1000000);
+    }
+    final expected = clean.snapshot();
+
+    final session = ChapterLayoutSession(
+      chapter: chapter,
+      spec: spec(),
+      images: const {},
+    );
+    session.debugFailTextBlockAt = 1;
+    expect(
+      () => session.layoutWindowAt(0, viewports: 0.01),
+      throwsA(isA<StateError>()),
+    );
+    expect(session.debugCreatedPainters, hasLength(1));
+    expect(
+      session.debugCreatedPainters.single.debugDisposed,
+      isTrue,
+      reason: 'a window that never starts releases what it created',
+    );
+    expect(session.snapshot().blocks, isEmpty);
+    expect(session.firstNodeIndex, 0);
+
+    session.debugFailTextBlockAt = null;
+    session.layoutWindowAt(0, viewports: 0.01);
+    while (!session.complete) {
+      session.layoutForward(maxNodes: 4, maxMicros: 1000000);
+    }
+    final retried = session.snapshot();
+    expect(retried.layoutComplete, isTrue);
+    expect(retried.blocks.length, expected.blocks.length);
+    for (var index = 0; index < expected.blocks.length; index += 1) {
+      expect(
+        retried.blocks[index].top,
+        expected.blocks[index].top,
+        reason: 'the retry matches a clean layout',
+      );
+    }
+    clean.dispose();
+    session.dispose();
+  });
+
+  for (final failure in const [
+    (
+      offset: 1,
+      table: false,
+      name: 'a standalone paragraph',
+      what: 'the paragraph painter',
+    ),
+    (
+      offset: 1,
+      table: true,
+      name: 'a table caption',
+      what: 'the caption painter',
+    ),
+    (
+      offset: 2,
+      table: true,
+      name: 'a table cell width measurement',
+      what: 'the scratch cell painter',
+    ),
+    (
+      offset: 3,
+      table: true,
+      name: 'a table cell paragraph after its width measurement',
+      what: 'the final cell painter',
+    ),
+    (
+      offset: 4,
+      table: true,
+      name: 'a paragraph after a completed table',
+      what: 'a later painter',
+    ),
+  ]) {
+    test('an interrupted ${failure.name} construction releases its painters', () {
+      final chapter = failure.table
+          ? paragraphAndTableChapter()
+          : paragraphChapter(12);
+      final clean = ChapterLayoutSession(
+        chapter: chapter,
+        spec: spec(),
+        images: const {},
+      )..layoutWindowAt(0, viewports: 0.01);
+      while (!clean.complete) {
+        clean.layoutForward(maxNodes: 4, maxMicros: 1000000);
+      }
+      final expected = clean.snapshot();
+
+      final session =
+          ChapterLayoutSession(chapter: chapter, spec: spec(), images: const {})
+            ..debugObservePainters = true
+            ..layoutWindowAt(0, viewports: 0.01);
+      final before = session.snapshot();
+      final adoptedPainters = session.debugCreatedPainters.length;
+      expect(
+        adoptedPainters,
+        greaterThan(0),
+        reason: 'the window adopted painters the failure must not release',
+      );
+      final failingPainter = adoptedPainters + failure.offset;
+
+      session.debugFailTextBlockAt = failingPainter;
+      expect(
+        () => session.layoutForward(maxNodes: 3, maxMicros: 1000000),
+        throwsA(isA<StateError>()),
+        reason:
+            'the ${failure.what} failure propagates as the original error '
+            '(a second release of an already-released painter would surface as '
+            'an assertion instead)',
+      );
+
+      final after = session.snapshot();
+      expect(after.blocks.length, before.blocks.length);
+      expect(after.height, before.height);
+      expect(after.firstNodeIndex, before.firstNodeIndex);
+      expect(
+        session.debugCreatedPainters.length,
+        failingPainter,
+        reason: 'the construction reached the painter it failed on',
+      );
+      expectReleaseBoundary(
+        session.debugCreatedPainters,
+        adopted: adoptedPainters,
+        created: failingPainter,
+      );
+
+      // The session still measures cleanly once the failure is cleared, and the
+      // result matches a session that never failed.
+      session.debugFailTextBlockAt = null;
+      while (!session.complete) {
+        session.layoutForward(maxNodes: 4, maxMicros: 1000000);
+      }
+      final retried = session.snapshot();
+      expect(retried.layoutComplete, isTrue);
+      expect(retried.blocks.length, expected.blocks.length);
+      for (var index = 0; index < expected.blocks.length; index += 1) {
+        expect(
+          retried.blocks[index].top,
+          expected.blocks[index].top,
+          reason: 'the retry matches a clean layout',
+        );
+      }
+      clean.dispose();
+      session.dispose();
+    });
+  }
+
+  test('an embedded or monospace span keeps the bundled fallback chain', () {
+    // The routing gate only promises the *bundled* faces can draw a chapter, so
+    // a span that selects an admitted (or platform monospace) face must keep
+    // the bundled primary and its fallbacks behind it.
+    const typography = ReaderEpubTypography(
+      fontFamily: 'Inter',
+      fontFamilyFallback: ['Noto Sans JP'],
+      fontSize: 18,
+      lineHeight: 1.5,
+      palette: ReaderEpubPalette(
+        background: Color(0xFFFFFFFF),
+        foreground: Color(0xFF1A1A1A),
+        link: Color(0xFF174EA6),
+        tableHeaderBackground: Color(0xFFE8EEF8),
+        tableHeaderBorder: Color(0xFF596B89),
+      ),
+      embeddedFamilies: {'Body': 'shosai-epub-1-Body'},
+    );
+
+    final plain = spanStyle(EpubTextSpan(text: 'plain'), typography, 18);
+    expect(plain.fontFamily, 'Inter');
+    expect(plain.fontFamilyFallback, ['Noto Sans JP']);
+
+    final embedded = spanStyle(
+      EpubTextSpan(text: 'embedded', fontFamily: 'Body'),
+      typography,
+      18,
+    );
+    expect(embedded.fontFamily, 'shosai-epub-1-Body');
+    expect(embedded.fontFamilyFallback, ['Inter', 'Noto Sans JP']);
+
+    final monospace = spanStyle(
+      EpubTextSpan(text: 'code', monospace: true),
+      typography,
+      18,
+    );
+    expect(monospace.fontFamily, 'monospace');
+    expect(monospace.fontFamilyFallback, ['Inter', 'Noto Sans JP']);
+  });
+
+  test('an indivisible unit over a work ceiling refuses the chapter', () {
+    // One block is measured by one synchronous call: a paragraph's text, and
+    // every item of a list or every group/row/cell of a table, count against
+    // the ceilings, so the chapter is refused before any layout runs.
+    EpubContentSource source(List<EpubContentNode> blocks) => EpubContentSource(
+      book: EpubBook(
+        title: 'Bound',
+        author: null,
+        language: null,
+        spine: const ['chapter.xhtml'],
+        toc: const [],
+        resources: const {},
+        chapters: [
+          EpubChapter(
+            spine: 0,
+            resource: 'chapter.xhtml',
+            title: 'Chapter',
+            blocks: blocks,
+            canonicalText: '',
+            anchors: const {},
+            scalarCount: 0,
+          ),
+        ],
+        embeddedFonts: const {},
+        warnings: const [],
+      ),
+      embeddedFamilies: const {},
+    );
+
+    final manyItems = source([
+      EpubParagraph(const [], const EpubNodeStyle()),
+      EpubUnorderedList([
+        for (var index = 0; index < kEpubIndivisibleNodeLimit + 1; index += 1)
+          const <EpubTextSpan>[],
+      ]),
+    ]).layoutLimitExceeded(0);
+    expect(manyItems?.limit, EpubLayoutLimit.blockNodes);
+    expect(manyItems?.unit, 0);
+    expect(manyItems?.block, 1);
+
+    final manyRows = source([
+      EpubTable(
+        caption: const [],
+        rowGroups: [
+          EpubTableRowGroup(
+            kind: EpubTableRowGroupKind.body,
+            rows: [
+              for (
+                var index = 0;
+                index < kEpubIndivisibleNodeLimit + 1;
+                index += 1
+              )
+                EpubTableRow(cells: [EpubTableCell(children: const [])]),
+            ],
+          ),
+        ],
+      ),
+    ]).layoutLimitExceeded(0);
+    expect(manyRows?.limit, EpubLayoutLimit.blockNodes);
+
+    final hugeText = source([
+      EpubParagraph(const [], const EpubNodeStyle())
+        ..canonical = const EpubCanonicalSpan(
+          0,
+          kEpubIndivisibleScalarLimit + 1,
+        ),
+    ]).layoutLimitExceeded(0);
+    expect(hugeText?.limit, EpubLayoutLimit.blockText);
+    expect(hugeText?.message, contains('Chapter 1 is too large to display'));
+
+    final bounded = source([
+      EpubUnorderedList([
+        for (var index = 0; index < 8; index += 1) const <EpubTextSpan>[],
+      ]),
+      EpubParagraph(const [], const EpubNodeStyle())
+        ..canonical = const EpubCanonicalSpan(0, kEpubIndivisibleScalarLimit),
+    ]);
+    expect(bounded.layoutLimitExceeded(0), isNull);
+  });
+
+  test('a selection surface maps a span at the block ceiling in one pass', () {
+    // Supplementary characters make code units and scalars differ, so a
+    // mapping that counts either wrongly lands off the clusters.
+    const unit = 'word\u{1F600} ';
+    final repeats = kEpubIndivisibleScalarLimit ~/ unit.runes.length;
+    final book = openEpubBytes(
+      buildTestEpub(
+        // The fixture writes Latin-1, so the emoji goes in as a reference.
+        chapters: {
+          'OPS/Text/chapter-1.xhtml': '<p>${'word&#x1F600; ' * repeats}</p>',
+        },
+        nav: '<ol></ol>',
+      ),
+    );
+    final chapter = book.chapters.single;
+    final source = EpubContentSource(book: book, embeddedFamilies: const {});
+    expect(source.layoutLimitExceeded(0), isNull);
+    const window = Size(800, 600);
+    final flow = layoutChapterFlow(
+      chapter: chapter,
+      spec: const ChapterLayoutSpec(
+        width: 800 - 2 * kEpubPageMargin,
+        height: 600,
+        typography: typography,
+      ),
+      images: const {},
+    );
+    final page = paginateFlow(
+      flow: flow,
+      pageHeight: double.infinity,
+      pageWidth: flow.width,
+    ).pages.single;
+
+    final watch = Stopwatch()..start();
+    final surface = buildPageSelectionSurface(
+      page: page,
+      canonicalText: chapter.canonicalText,
+      resourcePath: chapter.resource,
+      box: epubPageBoxFor(window),
+    );
+    final elapsed = watch.elapsed;
+
+    final scalars = chapter.canonicalText.runes.toList();
+    final clusters = <(int, int)>{
+      for (final endpoint in surface.endpoints)
+        (endpoint.rangeStart.toInt(), endpoint.rangeEnd.toInt()),
+    };
+    var emoji = 0;
+    for (final (start, end) in clusters) {
+      final text = String.fromCharCodes(scalars.sublist(start, end));
+      expect(unit.characters, contains(text));
+      if (text == '\u{1F600}') emoji += 1;
+    }
+    expect(emoji, repeats);
+    // About 0.2 s here; mapping each grapheme from its segment start took 3.3 s.
+    expect(elapsed, lessThan(const Duration(milliseconds: 1500)));
+    disposeFlowBlocks(flow.blocks);
+  });
+
+  test('a decode shared by concurrent callers is adopted once', () async {
+    final bytes = _fixture('nested-image.epub');
+    final book = openEpubBytes(bytes);
+    final source = EpubContentSource(book: book, embeddedFamilies: const {});
+    final chapter = book.chapters[0];
+    var calls = 0;
+    final pending = Completer<ui.Image>();
+    Future<ui.Image?> decode(Uint8List _) {
+      calls += 1;
+      return pending.future;
+    }
+
+    final first = source.ensureImages(chapter, decode);
+    final second = source.ensureImages(chapter, decode);
+    final image = await _testImage(64, 48);
+    pending.complete(image);
+    await Future.wait([first, second]);
+
+    expect(calls, 1, reason: 'the resource was decoded once');
+    expect(source.images, hasLength(1));
+    expect(
+      source.decodedImageBytes,
+      64 * 48 * 4,
+      reason: 'the raster is accounted for once, by its adopting caller',
+    );
+
+    source.dispose();
+    expect(image.debugDisposed, isTrue, reason: 'the owner released it once');
+  });
+
+  test('a decoder that never settles does not hold the chapter open', () async {
+    final bytes = _fixture('nested-image.epub');
+    final book = openEpubBytes(bytes);
+    final source = EpubContentSource(
+      book: book,
+      embeddedFamilies: const {},
+      imageDecodeTimeout: const Duration(milliseconds: 20),
+    );
+
+    await source.ensureImages(
+      book.chapters[0],
+      (_) => Completer<ui.Image?>().future,
+    );
+
+    expect(
+      source.images,
+      isEmpty,
+      reason:
+          'a decode that misses its deadline is refused, not awaited forever',
+    );
+    source.dispose();
+  });
+
+  test('two waiters release an over-budget raster exactly once', () async {
+    final bytes = _fixture('nested-image.epub');
+    final book = openEpubBytes(bytes);
+    final source = EpubContentSource(
+      book: book,
+      embeddedFamilies: const {},
+      rasterBudgetBytes: 64 * 48 * 4 - 1,
+    );
+    final image = await _testImage(64, 48);
+
+    await Future.wait([
+      source.ensureImages(book.chapters[0], (_) async => image),
+      source.ensureImages(book.chapters[0], (_) async => image),
+    ]);
+
+    expect(source.images, isEmpty);
+    expect(
+      image.debugDisposed,
+      isTrue,
+      reason: 'the shared result is released once, not once per waiter',
+    );
+    source.dispose();
+  });
+
+  test('a decoder that throws before returning is refused once', () async {
+    final bytes = _fixture('nested-image.epub');
+    final book = openEpubBytes(bytes);
+    final source = EpubContentSource(
+      book: book,
+      embeddedFamilies: const {},
+      imageDecodeTimeout: const Duration(milliseconds: 20),
+    );
+    var calls = 0;
+    Future<ui.Image?> decode(Uint8List _) {
+      calls += 1;
+      throw StateError('decode failed');
+    }
+
+    await Future.wait([
+      source.ensureImages(book.chapters[0], decode),
+      source.ensureImages(book.chapters[0], decode),
+    ]);
+    await source.ensureImages(book.chapters[0], decode);
+
+    expect(calls, 1, reason: 'a refused resource is not decoded again');
+    expect(source.images, isEmpty);
+    expect(source.decodedImageBytes, 0);
+    source.dispose();
+  });
+
+  test('a timed-out decode is not retried while it is outstanding', () async {
+    final bytes = _fixture('nested-image.epub');
+    final book = openEpubBytes(bytes);
+    final source = EpubContentSource(
+      book: book,
+      embeddedFamilies: const {},
+      imageDecodeTimeout: const Duration(milliseconds: 20),
+    );
+    var calls = 0;
+    final pending = Completer<ui.Image?>();
+    Future<ui.Image?> decode(Uint8List _) {
+      calls += 1;
+      return pending.future;
+    }
+
+    await source.ensureImages(book.chapters[0], decode);
+    await source.ensureImages(book.chapters[0], decode);
+
+    expect(calls, 1, reason: 'a refused resource is not decoded again');
+    expect(source.images, isEmpty);
+    source.dispose();
+  });
+
+  test('a late decode after disposal is released', () async {
+    final bytes = _fixture('nested-image.epub');
+    final book = openEpubBytes(bytes);
+    final source = EpubContentSource(book: book, embeddedFamilies: const {});
+    final pending = Completer<ui.Image?>();
+    final admission = source.ensureImages(
+      book.chapters[0],
+      (_) => pending.future,
+    );
+
+    source.dispose();
+    final image = await _testImage(32, 32);
+    pending.complete(image);
+    await admission;
+
+    expect(source.images, isEmpty);
+    expect(
+      image.debugDisposed,
+      isTrue,
+      reason: 'a raster for a released source is released with it',
+    );
+  });
+
+  test('a raster past the byte budget is released, not adopted', () async {
+    final bytes = _fixture('nested-image.epub');
+    final book = openEpubBytes(bytes);
+    final source = EpubContentSource(
+      book: book,
+      embeddedFamilies: const {},
+      rasterBudgetBytes: 64 * 48 * 4 - 1,
+    );
+    final image = await _testImage(64, 48);
+
+    await source.ensureImages(book.chapters[0], (_) async => image);
+
+    expect(source.images, isEmpty);
+    expect(source.decodedImageBytes, 0);
+    expect(
+      image.debugDisposed,
+      isTrue,
+      reason: 'an over-budget raster is released rather than retained',
+    );
+    source.dispose();
+  });
+}
+
+/// A solid test raster of the given size.
+Future<ui.Image> _testImage(int width, int height) async {
+  final recorder = ui.PictureRecorder();
+  Canvas(recorder).drawRect(
+    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    Paint()..color = const Color(0xFFEEEEEE),
+  );
+  return recorder.endRecording().toImage(width, height);
+}
+
+Uint8List _fixture(String name) => _repoFile('fixtures/epub-conformance/$name');
+
+Uint8List _repoFile(String path) =>
+    Uint8List.fromList(File(path).readAsBytesSync());

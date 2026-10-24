@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-TOOL = ROOT / "flutter/third_party/pdfium_dart/tool/pin_pdfium.py"
+TOOL = ROOT / "third_party/pdfium_dart/tool/pin_pdfium.py"
 
 
 def _load_tool():
@@ -93,7 +93,7 @@ class PinPdfiumTest(unittest.TestCase):
 
     def test_the_committed_notices_stay_lf(self):
         # Flutter's collector splits NOTICES on "\n" + 80 hyphens + "\n".
-        notices = ROOT / "flutter/third_party/pdfium_dart/NOTICES"
+        notices = ROOT / "third_party/pdfium_dart/NOTICES"
         self.assertNotIn(b"\r", notices.read_bytes())
         attributes = subprocess.run(
             ["git", "check-attr", "eol", "--", str(notices.relative_to(ROOT))],

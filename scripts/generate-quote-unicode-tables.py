@@ -40,7 +40,7 @@ FILES = {
 }
 
 ROOT = Path(__file__).resolve().parent.parent
-PACKAGE = ROOT / "flutter" / "packages" / "shosai_core"
+PACKAGE = ROOT / "packages" / "shosai_core"
 TABLE = PACKAGE / "lib" / "src" / "annotations" / "grapheme_table.dart"
 CONFORMANCE = PACKAGE / "test" / "fixtures" / "GraphemeBreakTest-17.0.0.txt"
 

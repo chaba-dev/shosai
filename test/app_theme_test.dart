@@ -1,0 +1,1026 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/main.dart';
+import 'package:shosai_flutter/reader/view.dart';
+import 'package:shosai_flutter/shared/shad_widgets.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
+
+import 'support/production_shell_harness.dart';
+
+/// Package 2C: the shared design tokens and the themes mapped from them.
+///
+/// The expectations in this file are transcribed from the Shōsai design
+/// system (`docs/design-system/tokens.json`, the Bookshelf look, D1 paper)
+/// rather than read back from `lib/theme_tokens.dart`, so a wrong mapping
+/// cannot agree with itself. The generated token file is separately checked
+/// against `assets/theme/tokens.json` by
+/// `scripts/generate-theme-tokens.py --check` and by the source comparison
+/// below.
+void main() {
+  setUpAll(loadHarnessFonts);
+
+  // The design system's light theme (canvas, surface, surface-sunken, ink,
+  // ink-muted, line, line-strong, accent, accent-hover, accent-soft,
+  // on-accent, on-accent-soft, danger, scrim) and its shadow ink.
+  const appBackground = Color(0xFFF6F1E6);
+  const appSurface = Color(0xFFFDFAF3);
+  const appSurfaceMuted = Color(0xFFE6DFD0);
+  const appText = Color(0xFF221D18);
+  const appTextMuted = Color(0xFF675D4F);
+  const appBorder = Color(0xFFD9D0BD);
+  const appBorderStrong = Color(0xFF7D7364);
+  const appAccent = Color(0xFF2B3A5C);
+  const appAccentHovered = Color(0xFF1E2B47);
+  const appAccentSoft = Color(0xFFDDE2EC);
+  const appTextOnAccentSoft = Color(0xFF1E2B47);
+  const appDanger = Color(0xFFA54343);
+  const appTextOnAccent = Color(0xFFFFFFFF);
+  const appShadowBase = Color(0xFF221D18);
+  final appBackdrop = Color.fromRGBO(0x21, 0x20, 0x1E, 0.42);
+
+  // The design system's dark theme, as the dark Shad roles read it.
+  const appDarkBackground = Color(0xFF1D1915);
+  const appDarkSurface = Color(0xFF2A241E);
+  const appDarkSurfaceSunken = Color(0xFF171411);
+  const appDarkForeground = Color(0xFFF1EBE0);
+  const appDarkPrimary = Color(0xFFA8B8DF);
+  const appDarkPrimaryForeground = Color(0xFF141A28);
+  const appDarkAccentSoft = Color(0xFF2A3246);
+  const appDarkOnAccentSoft = Color(0xFFCDD8F0);
+  const appDarkMutedForeground = Color(0xFFAEA597);
+  const appDarkDestructive = Color(0xFFE58A80);
+  const appDarkBorder = Color(0xFF3A322B);
+  const appDarkInput = Color(0xFF7F766A);
+
+  // The design system's page themes (page-paper, page-night, page-sepia).
+  const readerLightBackground = Color(0xFFFFFDF8);
+  const readerLightText = Color(0xFF1A1A1A);
+  const readerDarkBackground = Color(0xFF1F1F24);
+  const readerDarkText = Color(0xFFD9D9D9);
+  const readerSepiaBackground = Color(0xFFF5EBD6);
+  const readerSepiaText = Color(0xFF4D331A);
+
+  group('application palette mapping', () {
+    test('the light Shad scheme is the design system light theme', () {
+      expect(
+        shosaiShadTheme(Brightness.light).colorScheme,
+        const ShadColorScheme(
+          background: appBackground,
+          foreground: appText,
+          card: appSurface,
+          cardForeground: appText,
+          popover: appSurface,
+          popoverForeground: appText,
+          primary: appAccent,
+          primaryForeground: appTextOnAccent,
+          secondary: appSurface,
+          secondaryForeground: appText,
+          muted: appSurfaceMuted,
+          mutedForeground: appTextMuted,
+          accent: appAccentSoft,
+          accentForeground: appTextOnAccentSoft,
+          destructive: appDanger,
+          destructiveForeground: appTextOnAccent,
+          border: appBorder,
+          input: appBorderStrong,
+          ring: appAccent,
+          selection: appAccentSoft,
+        ),
+      );
+    });
+
+    test('the dark Shad scheme is the design system dark theme', () {
+      expect(
+        shosaiShadTheme(Brightness.dark).colorScheme,
+        const ShadColorScheme(
+          background: appDarkBackground,
+          foreground: appDarkForeground,
+          card: appDarkSurface,
+          cardForeground: appDarkForeground,
+          popover: appDarkSurface,
+          popoverForeground: appDarkForeground,
+          primary: appDarkPrimary,
+          primaryForeground: appDarkPrimaryForeground,
+          secondary: appDarkSurface,
+          secondaryForeground: appDarkForeground,
+          muted: appDarkSurfaceSunken,
+          mutedForeground: appDarkMutedForeground,
+          accent: appDarkAccentSoft,
+          accentForeground: appDarkOnAccentSoft,
+          destructive: appDarkDestructive,
+          destructiveForeground: appDarkBackground,
+          border: appDarkBorder,
+          input: appDarkInput,
+          ring: appDarkPrimary,
+          selection: appDarkAccentSoft,
+        ),
+      );
+    });
+
+    test('the accent is the design system slate, not the historical brown', () {
+      for (final brightness in Brightness.values) {
+        final scheme = shosaiShadTheme(brightness).colorScheme;
+        expect(scheme.ring, isNot(const Color(0xFF8A6338)));
+        expect(scheme.primary, isNot(const Color(0xFF8A6338)));
+      }
+      expect(shosaiShadTheme(Brightness.light).colorScheme.primary, appAccent);
+      expect(shosaiShadTheme(Brightness.light).colorScheme.ring, appAccent);
+      expect(
+        shosaiAppColorScheme(Brightness.light).accentForeground,
+        appTextOnAccentSoft,
+      );
+      // The token the accent is mapped from keeps the same value.
+      expect(ShosaiTokens.appAccent, appAccent);
+      expect(ShosaiTokens.appAccentHovered, appAccentHovered);
+    });
+
+    test('the radius is the design system small radius', () {
+      expect(
+        shosaiShadTheme(Brightness.light).radius,
+        BorderRadius.circular(6),
+      );
+      expect(ShosaiTokens.radiusSmall, 6.0);
+      expect(ShosaiTokens.radiusMedium, 10.0);
+      expect(ShosaiTokens.radiusSm, ShosaiTokens.radiusSmall);
+      expect(ShosaiTokens.radiusMd, ShosaiTokens.radiusMedium);
+      expect(ShosaiTokens.radiusXs, ShosaiTokens.radiusProgress);
+    });
+
+    test('the library grid and card metrics are the pinned Iced values', () {
+      // Transcribed from `render_book_card`, `widgets::book_button` and
+      // `grid(...).fluid(220)` at the pinned reference, not read back from the
+      // generated file.
+      expect(ShosaiTokens.layoutLibraryGridMinColumn, 220.0);
+      expect(ShosaiTokens.layoutLibraryGridSpacing, 18.0);
+      expect(ShosaiTokens.layoutLibraryCollectionPaddingVertical, 22.0);
+      expect(ShosaiTokens.layoutLibraryCollectionPaddingHorizontal, 24.0);
+      expect(ShosaiTokens.layoutButtonBookPadding, 8.0);
+      expect(ShosaiTokens.layoutLibraryCardHeight, 330.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverHeight, 210.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverRadius, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverShadowOffset, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardCoverShadowBlur, 12.0);
+      expect(ShosaiTokens.layoutLibraryCardTitleHeight, 32.0);
+      expect(ShosaiTokens.layoutLibraryCardAuthorHeight, 28.0);
+      expect(ShosaiTokens.layoutLibraryCardSpacing, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuWidth, 164.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuPadding, 4.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuActionPaddingVertical, 7.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuActionPaddingHorizontal, 10.0);
+      expect(ShosaiTokens.layoutLibraryCardTriggerPaddingVertical, 5.0);
+      expect(ShosaiTokens.layoutLibraryCardTriggerPaddingHorizontal, 8.0);
+      expect(ShosaiTokens.layoutLibraryCardTriggerOffset, 8.0);
+      expect(ShosaiTokens.layoutLibraryCardRemovePaddingVertical, 3.0);
+      expect(ShosaiTokens.layoutLibraryCardRemovePaddingHorizontal, 6.0);
+      expect(ShosaiTokens.layoutLibraryCardMetadataGap, 6.0);
+      expect(ShosaiTokens.layoutLibraryCardBorderWidth, 1.0);
+      expect(ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha, 0.1);
+      // Retained Flutter: the reference placeholder centres its label with no
+      // inset, so this one is not an Iced value.
+      expect(ShosaiTokens.layoutLibraryCardPlaceholderPadding, 8.0);
+    });
+
+    test('the card trigger refinement values are pinned', () {
+      // The owner-directed refinement of 2026-09-25 (a subtler trigger than the
+      // reference's opaque SURFACE square with its BORDER): the reference's
+      // painted geometry keeps its 13 px glyph, [5, 8] padding and radiusSmall,
+      // and only the fill becomes a translucent ink scrim. These two weights are
+      // Retained Flutter values, not Iced ones.
+      expect(ShosaiTokens.layoutLibraryCardTriggerScrimAlpha, 0.5);
+      expect(ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha, 0.68);
+    });
+
+    test('the Shad type scale is the Iced UI scale', () {
+      final text = shosaiShadTheme(Brightness.light).textTheme;
+      expect(text.h1.fontSize, 32);
+      expect(text.h2.fontSize, 26);
+      expect(text.h3.fontSize, 24);
+      expect(text.h4.fontSize, 20);
+      expect(text.p.fontSize, 16);
+      expect(text.blockquote.fontSize, 16);
+      expect(text.table.fontSize, 16);
+      expect(text.list.fontSize, 16);
+      expect(text.lead.fontSize, 20);
+      expect(text.large.fontSize, 18);
+      expect(text.small.fontSize, 14);
+      expect(text.muted.fontSize, 14);
+      expect(text.family, shosaiInterfaceFontFamily);
+    });
+  });
+
+  group('reader palette mapping', () {
+    test('the light reader chrome is the application palette', () {
+      expect(
+        shosaiReaderShadTheme('light').colorScheme,
+        shosaiAppColorScheme(Brightness.light),
+      );
+      expect(
+        shosaiReaderShadTheme(null).colorScheme,
+        shosaiAppColorScheme(Brightness.light),
+      );
+    });
+
+    test('the chrome keeps the application palette in every reader theme', () {
+      // Owner decision 2026-09-28: the shared reader chrome recolors only the
+      // page; the reader palette is the document palette.
+      for (final theme in const [null, 'light', 'dark', 'sepia']) {
+        expect(
+          shosaiReaderShadTheme(theme).colorScheme,
+          shosaiAppColorScheme(Brightness.light),
+          reason: '$theme chrome',
+        );
+        expect(
+          shosaiReaderShadTheme(theme).brightness,
+          Brightness.light,
+          reason: '$theme chrome brightness',
+        );
+        expect(
+          shosaiReaderMaterialColorScheme(theme),
+          shosaiMaterialColorScheme(Brightness.light),
+          reason: '$theme chrome Material scheme',
+        );
+      }
+      // Plan decision 2 rejects the #109 brown accent.
+      expect(
+        shosaiReaderShadTheme('sepia').colorScheme.primary,
+        isNot(const Color(0xFF8A6338)),
+      );
+    });
+
+    test('reader page colors are the design system page themes', () {
+      final expectations = <String?, ({Color background, Color foreground})>{
+        null: (background: readerLightBackground, foreground: readerLightText),
+        'light': (
+          background: readerLightBackground,
+          foreground: readerLightText,
+        ),
+        'dark': (background: readerDarkBackground, foreground: readerDarkText),
+        'sepia': (
+          background: readerSepiaBackground,
+          foreground: readerSepiaText,
+        ),
+      };
+      expectations.forEach((readerTheme, expected) {
+        final colors = pageColors(readerTheme);
+        expect(colors.background, expected.background, reason: '$readerTheme');
+        expect(colors.foreground, expected.foreground, reason: '$readerTheme');
+        expect(
+          ThemeData.estimateBrightnessForColor(colors.background),
+          isNot(ThemeData.estimateBrightnessForColor(colors.foreground)),
+          reason: '$readerTheme keeps background and foreground distinct',
+        );
+      });
+    });
+
+    test('the chrome interactive color is the application accent', () {
+      for (final theme in const [null, 'light', 'dark', 'sepia']) {
+        expect(
+          shosaiReaderMaterialColorScheme(theme).primary,
+          appAccent,
+          reason: '$theme chrome accent',
+        );
+      }
+    });
+
+    testWidgets('reader document palettes are not interface font sources', (
+      tester,
+    ) async {
+      // Interface fonts are separate from document fonts: the reader chrome
+      // uses the interface family and never forces a document font onto the
+      // page, which the Rust raster supplies. The chrome surfaces keep the
+      // application palette in every reader theme (owner decision 2026-09-28);
+      // the reader theme selects the *document* palette, which the page
+      // painters read through [pageColors].
+      final context = await pumpThemeContext(tester);
+      final theme = shosaiReaderMaterialTheme(context, 'sepia');
+      expect(theme.textTheme.bodyMedium?.fontFamily, shosaiInterfaceFontFamily);
+      expect(
+        theme.textTheme.bodyMedium?.fontFamilyFallback,
+        shosaiInterfaceFontFallback,
+      );
+      expect(theme.scaffoldBackgroundColor, appBackground);
+      expect(theme.colorScheme.surface, appBackground);
+      expect(theme.colorScheme.onSurface, appText);
+      final document = pageColors('sepia');
+      expect(document.background, readerSepiaBackground);
+      expect(document.foreground, readerSepiaText);
+    });
+  });
+
+  group('material mapping', () {
+    test('the application color scheme is mapped from the tokens', () {
+      final scheme = shosaiMaterialColorScheme(Brightness.light);
+      expect(scheme.primary, appAccent);
+      expect(scheme.onPrimary, appTextOnAccent);
+      expect(scheme.primaryContainer, appAccentSoft);
+      expect(scheme.onPrimaryContainer, appTextOnAccentSoft);
+      expect(scheme.secondary, appAccentSoft);
+      expect(scheme.onSecondary, appTextOnAccentSoft);
+      expect(scheme.error, appDanger);
+      expect(scheme.onError, appTextOnAccent);
+      expect(scheme.surface, appBackground);
+      expect(scheme.onSurface, appText);
+      expect(scheme.onSurfaceVariant, appTextMuted);
+      expect(scheme.outline, appBorder);
+      expect(scheme.outlineVariant, appBorderStrong);
+      expect(scheme.surfaceContainerHighest, appSurfaceMuted);
+      expect(scheme.surfaceContainerLow, appSurface);
+      expect(scheme.shadow, appShadowBase);
+      expect(scheme.scrim, appBackdrop);
+
+      final dark = shosaiMaterialColorScheme(Brightness.dark);
+      expect(dark.brightness, Brightness.dark);
+      expect(dark.surface, appDarkBackground);
+      expect(dark.onSurface, appDarkForeground);
+      expect(dark.primary, appDarkPrimary);
+      expect(dark.error, appDarkDestructive);
+      expect(dark.outline, appDarkBorder);
+    });
+
+    testWidgets('the Material interop surfaces are mapped too', (tester) async {
+      final theme = shosaiMaterialTheme(await pumpThemeContext(tester));
+      expect(theme.dividerTheme.color, appBorder);
+      expect(theme.textSelectionTheme.cursorColor, appAccent);
+      expect(theme.textSelectionTheme.selectionColor, appAccentSoft);
+      expect(theme.iconTheme.color, appText);
+      expect(
+        theme.tooltipTheme.decoration,
+        BoxDecoration(
+          color: appSurface,
+          border: Border.all(color: appBorder),
+          borderRadius: BorderRadius.circular(6),
+        ),
+      );
+      expect(theme.tooltipTheme.textStyle?.color, appText);
+      expect(theme.tooltipTheme.textStyle?.fontSize, 12);
+      // The tooltip keeps the bundled interface family and its fallback; a
+      // partial style would fall back to the platform font.
+      expect(
+        theme.tooltipTheme.textStyle?.fontFamily,
+        shosaiInterfaceFontFamily,
+      );
+      expect(
+        theme.tooltipTheme.textStyle?.fontFamilyFallback,
+        shosaiInterfaceFontFallback,
+      );
+
+      final reader = shosaiReaderMaterialTheme(
+        await pumpThemeContext(tester),
+        'sepia',
+      );
+      // The reader chrome keeps the application palette (owner decision
+      // 2026-09-28); only the document area follows the reader theme.
+      expect(reader.dividerTheme.color, appBorder);
+      expect(reader.textSelectionTheme.selectionColor, appAccentSoft);
+      expect(reader.textSelectionTheme.cursorColor, appAccent);
+      expect(reader.iconTheme.color, appText);
+    });
+
+    testWidgets('every Material text role resolves to an Iced UI size', (
+      tester,
+    ) async {
+      final theme = shosaiMaterialTheme(await pumpThemeContext(tester));
+      final text = theme.textTheme;
+      expect(text.displayLarge?.fontSize, 32);
+      expect(text.displayMedium?.fontSize, 32);
+      expect(text.displaySmall?.fontSize, 32);
+      expect(text.headlineLarge?.fontSize, 32);
+      expect(text.headlineMedium?.fontSize, 26);
+      expect(text.headlineSmall?.fontSize, 24);
+      expect(text.titleLarge?.fontSize, 20);
+      expect(text.titleMedium?.fontSize, 16);
+      expect(text.titleSmall?.fontSize, 14);
+      expect(text.bodyLarge?.fontSize, 16);
+      expect(text.bodyMedium?.fontSize, 14);
+      expect(text.bodySmall?.fontSize, 12);
+      expect(text.labelLarge?.fontSize, 14);
+      expect(text.labelMedium?.fontSize, 12);
+      expect(text.labelSmall?.fontSize, 11);
+      expect(text.bodyMedium?.fontFamily, shosaiInterfaceFontFamily);
+      expect(text.bodyMedium?.fontFamilyFallback, shosaiInterfaceFontFallback);
+    });
+
+    testWidgets('a rendered tooltip uses the mapped surface and text', (
+      tester,
+    ) async {
+      const view = HarnessView(size: Size(390, 780));
+      view.apply(tester);
+      await tester.pumpWidget(
+        productionShell(
+          home: Scaffold(
+            body: Center(
+              child: ShadIconAction(
+                tooltip: 'Search and bookmarks',
+                onPressed: () {},
+                icon: const Icon(Icons.search),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.longPress(find.byType(Tooltip));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final message = tester.widget<Text>(
+        find.text('Search and bookmarks', skipOffstage: false),
+      );
+      // The tooltip message is a `Text.rich` styled from the mapped tooltip
+      // theme, so this asserts what the user actually sees, not only the theme
+      // object it came from.
+      expect(message.style?.color, appText);
+      expect(message.style?.fontSize, 12);
+      expect(message.style?.fontFamily, shosaiInterfaceFontFamily);
+      expect(message.style?.fontFamilyFallback, shosaiInterfaceFontFallback);
+      final context = tester.element(find.byType(Tooltip));
+      expect(
+        TooltipTheme.of(context).decoration,
+        BoxDecoration(
+          color: appSurface,
+          border: Border.all(color: appBorder),
+          borderRadius: BorderRadius.circular(6),
+        ),
+      );
+    });
+
+    testWidgets('a rendered input draws its boundary in line-strong', (
+      tester,
+    ) async {
+      // Shad's default input theme borders a field with the decorative `line`
+      // (`border`); the scheme's `input` role is only read when the theme
+      // routes it to the input decoration. Sample the painted edge itself.
+      const view = HarnessView(size: Size(400, 200));
+      view.apply(tester);
+      const boundary = ValueKey('input-boundary');
+      final cases = <String, (ShadThemeData, Color, Color)>{
+        'light': (
+          shosaiShadTheme(Brightness.light),
+          appBorderStrong,
+          appBorder,
+        ),
+        'dark': (shosaiShadTheme(Brightness.dark), appDarkInput, appDarkBorder),
+        'reader chrome': (
+          shosaiReaderShadTheme('dark'),
+          appBorderStrong,
+          appBorder,
+        ),
+      };
+      for (final MapEntry(key: name, value: (theme, expected, line))
+          in cases.entries) {
+        await tester.pumpWidget(
+          productionShell(
+            home: ShadTheme(
+              data: theme,
+              child: Scaffold(
+                backgroundColor: theme.colorScheme.background,
+                body: Center(
+                  child: RepaintBoundary(
+                    key: boundary,
+                    child: const SizedBox(
+                      width: 200,
+                      child: ShadInput(placeholder: Text('Search')),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        final render = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(boundary),
+        );
+        final pixels = await tester.runAsync(() async {
+          final image = await render.toImage();
+          final data = await image.toByteData();
+          final width = image.width;
+          final height = image.height;
+          image.dispose();
+          return (data!, width, height);
+        });
+        final (data, width, height) = pixels!;
+        // The left edge, half way down: a straight run of the 1 px border.
+        final offset = ((height ~/ 2) * width) * 4;
+        final painted = Color.fromARGB(
+          data.getUint8(offset + 3),
+          data.getUint8(offset),
+          data.getUint8(offset + 1),
+          data.getUint8(offset + 2),
+        );
+        expect(painted, expected, reason: '$name input border');
+        expect(painted, isNot(line), reason: '$name input border');
+      }
+    });
+
+    testWidgets('the production shell installs the mapped Material theme', (
+      tester,
+    ) async {
+      const view = HarnessView(size: Size(1280, 800));
+      view.apply(tester);
+      const probe = ValueKey('theme-probe');
+      await tester.pumpWidget(
+        productionShell(
+          home: Builder(
+            key: probe,
+            builder: (context) => const SizedBox.expand(),
+          ),
+        ),
+      );
+      final context = tester.element(find.byKey(probe));
+      final theme = Theme.of(context);
+      expect(theme.colorScheme.surface, appBackground);
+      expect(theme.colorScheme.primary, appAccent);
+      expect(theme.scaffoldBackgroundColor, appBackground);
+      expect(ShadTheme.of(context).colorScheme.primary, appAccent);
+    });
+  });
+
+  group('token source', () {
+    test('the generated Dart tokens match assets/theme/tokens.json', () {
+      final document =
+          jsonDecode(File('assets/theme/tokens.json').readAsStringSync())
+              as Map<String, dynamic>;
+
+      // A `{path}` value names another token; follow it to the literal.
+      String resolve(String value) {
+        final reference = RegExp(r'^\{([A-Za-z0-9_.]+)\}$').firstMatch(value);
+        if (reference == null) return value;
+        Object? node = document;
+        for (final key in reference.group(1)!.split('.')) {
+          node = (node as Map<String, dynamic>)[key];
+        }
+        expect(node, isA<String>(), reason: value);
+        return resolve(node! as String);
+      }
+
+      Color hex(String source) {
+        final value = resolve(source);
+        expect(value.startsWith('#'), isTrue, reason: value);
+        return Color(int.parse(value.substring(1), radix: 16) | 0xFF000000);
+      }
+
+      Color rgb(String value) {
+        final match = RegExp(
+          r'^rgb\(([^,]+), ([^,]+), ([^)]+)\)$',
+        ).firstMatch(value);
+        expect(match, isNotNull, reason: value);
+        return Color.from(
+          alpha: 1,
+          red: double.parse(match!.group(1)!),
+          green: double.parse(match.group(2)!),
+          blue: double.parse(match.group(3)!),
+        );
+      }
+
+      Color rgba(String source) {
+        final value = resolve(source);
+        final match = RegExp(
+          r'^rgba\(#([0-9A-Fa-f]{6}), ([^)]+)\)$',
+        ).firstMatch(value);
+        expect(match, isNotNull, reason: value);
+        return Color.fromRGBO(
+          int.parse(match!.group(1)!.substring(0, 2), radix: 16),
+          int.parse(match.group(1)!.substring(2, 4), radix: 16),
+          int.parse(match.group(1)!.substring(4, 6), radix: 16),
+          double.parse(match.group(2)!),
+        );
+      }
+
+      final color = document['color'] as Map<String, dynamic>;
+      final app = document['app'] as Map<String, dynamic>;
+      final reader = document['reader'] as Map<String, dynamic>;
+      final radius = document['radius'] as Map<String, dynamic>;
+      final type = document['type'] as Map<String, dynamic>;
+      final layout = document['layout'] as Map<String, dynamic>;
+
+      expect(ShosaiTokens.appBackground, hex(app['background'] as String));
+      expect(ShosaiTokens.appAccent, hex(app['accent'] as String));
+      expect(ShosaiTokens.appSurface, hex(app['surface'] as String));
+      expect(
+        ShosaiTokens.appShadowCover,
+        rgba((app['shadow'] as Map<String, dynamic>)['cover'] as String),
+      );
+      expect(ShosaiTokens.appBackdrop, rgba(app['backdrop'] as String));
+      final light = reader['light'] as Map<String, dynamic>;
+      final dark = reader['dark'] as Map<String, dynamic>;
+      final sepia = reader['sepia'] as Map<String, dynamic>;
+      expect(ShosaiTokens.readerLightText, hex(light['text'] as String));
+      expect(
+        ShosaiTokens.readerDarkBackground,
+        hex(dark['background'] as String),
+      );
+      expect(ShosaiTokens.readerSepiaText, hex(sepia['text'] as String));
+      expect(
+        ShosaiTokens.readerCodeBlockFallbackBackground,
+        rgb(
+          (reader['codeBlock'] as Map<String, dynamic>)['fallbackBackground']
+              as String,
+        ),
+      );
+      final colorLight = color['light'] as Map<String, dynamic>;
+      final colorDark = color['dark'] as Map<String, dynamic>;
+      expect(
+        ShosaiTokens.colorLightChrome,
+        hex(colorLight['chrome'] as String),
+      );
+      expect(
+        ShosaiTokens.colorDarkInkMuted,
+        hex(colorDark['inkMuted'] as String),
+      );
+      expect(
+        ShosaiTokens.colorLightControlRaised,
+        hex(colorLight['controlRaised'] as String),
+      );
+      expect(
+        ShosaiTokens.colorDarkBrandMark,
+        hex(colorDark['brandMark'] as String),
+      );
+      expect(ShosaiTokens.colorHlYellow, rgba(color['hlYellow'] as String));
+      expect(ShosaiTokens.readerSepiaLink, hex(sepia['link'] as String));
+      expect(ShosaiTokens.radiusSmall, radius['small']);
+      expect(ShosaiTokens.radiusMedium, radius['medium']);
+      expect(
+        ShosaiTokens.typeSize26,
+        (type['size'] as Map<String, dynamic>)['26'],
+      );
+      expect(
+        ShosaiTokens.typeFamilyUiLatinFlutter,
+        ((type['family'] as Map<String, dynamic>)['ui']
+            as Map<String, dynamic>)['latin']['flutter'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCompactBreakpoint,
+        (layout['library'] as Map<String, dynamic>)['compactBreakpoint'],
+      );
+      expect(
+        ShosaiTokens.layoutReaderSpreadMinWidth,
+        (layout['reader'] as Map<String, dynamic>)['spreadMinWidth'],
+      );
+      final library = layout['library'] as Map<String, dynamic>;
+      final card = library['card'] as Map<String, dynamic>;
+      expect(ShosaiTokens.layoutLibraryCardHeight, card['height']);
+      expect(ShosaiTokens.layoutLibraryCardCoverHeight, card['coverHeight']);
+      expect(
+        ShosaiTokens.layoutLibraryCollectionPaddingHorizontal,
+        library['collectionPaddingHorizontal'],
+      );
+      expect(ShosaiTokens.layoutLibraryCardMetadataGap, card['metadataGap']);
+      expect(ShosaiTokens.layoutLibraryCardBorderWidth, card['borderWidth']);
+      expect(
+        ShosaiTokens.layoutLibraryCardPlaceholderPadding,
+        card['placeholderPadding'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha,
+        card['menuActionHoverAlpha'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardTriggerScrimAlpha,
+        card['triggerScrimAlpha'],
+      );
+      expect(
+        ShosaiTokens.layoutLibraryCardTriggerScrimActiveAlpha,
+        card['triggerScrimActiveAlpha'],
+      );
+      expect(document['meta']['reference_revision'], isNotEmpty);
+    });
+
+    test('no literal theme colors remain in lib/', () {
+      final offenders = <String>[];
+      final files = Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('.dart'))
+          .where((file) => !file.path.endsWith('theme_tokens.dart'));
+      for (final file in files) {
+        for (final finding in dartColorLiterals(file.readAsStringSync())) {
+          offenders.add('${file.path}:${finding.line}: ${finding.description}');
+        }
+      }
+      expect(
+        offenders,
+        isEmpty,
+        reason:
+            'theme colors belong in assets/theme/tokens.json, not in lib/:\n'
+            '${offenders.join('\n')}',
+      );
+    });
+
+    test('the literal scan finds literals and ignores dynamic conversions', () {
+      const source = r"""
+        // Color(0xff112233) in a comment
+        /* Color.fromARGB(255, 0, 0, 0) in a block comment */
+        const message = 'Color(0xff112233) in a string';
+        const a = Color(0xff112233);
+        const b = Color(
+          0xff112233,
+        );
+        const c = Color.fromARGB(255, 0, 0, 0);
+        const d = Color.fromRGBO(0, 0, 0, 0.5);
+        const e = Color.from(alpha: 1, red: 0, green: 0, blue: 0);
+        const f = Colors.red;
+        const named = Color.from(red: 1, green: 0, blue: 0, alpha: 1);
+        const fractional = Color.from(alpha: .5, red: 1, green: 0, blue: 0);
+        const empty = '';
+        const emptyRaw = r'';
+        const emptyTriple = '''''';
+        const separated = Color(0xFF_00_00_00);
+        const exponent = Color.fromRGBO(0, 0, 0, 5e-1);
+        const exponentPlus = Color.fromRGBO(255, 0, 0, 1e+0);
+        Color dynamic1(int alpha) => Color(alpha);
+        Color dynamic2(int a, int r, int g, int b) => Color.fromARGB(a, r, g, b);
+        Color dynamic3(double a, double r, double g, double b) =>
+            Color.from(alpha: a, red: r, green: g, blue: b);
+        Color dynamic4(int r, int g, int b) => Color.fromARGB(255, r, g, b);
+        Color dynamic5(bool useValue, int packed) =>
+            Color(useValue ? packed : 0xff000000);
+        /* outer /* inner */ Colors.red */
+        const afterComment = Colors.red;
+        const afterEmpty = Colors.blue;
+      """;
+      final found = dartColorLiterals(source);
+      expect(
+        found.map((finding) => finding.description).toList(),
+        hasLength(13),
+        reason: 'findings: $found',
+      );
+      expect(
+        found
+            .map((finding) => finding.description)
+            .where((description) => description.contains('dynamic')),
+        isEmpty,
+        reason: 'dynamic conversions are not literals: $found',
+      );
+      expect(
+        found.any((finding) => finding.description.contains('Colors')),
+        isTrue,
+      );
+      expect(
+        found
+            .map((finding) => finding.description)
+            .where((description) => description.contains('0xFF_00_00_00')),
+        hasLength(1),
+        reason: 'a separated hex literal is a literal: $found',
+      );
+      expect(
+        found
+            .map((finding) => finding.description)
+            .where((description) => description.contains('5e-1')),
+        hasLength(1),
+        reason: 'an exponent literal is a literal: $found',
+      );
+      expect(
+        found
+            .map((finding) => finding.description)
+            .where((description) => description.contains('1e+0')),
+        hasLength(1),
+        reason: 'a signed exponent literal is a literal: $found',
+      );
+      expect(
+        found
+            .map((finding) => finding.description)
+            .where((description) => description == 'Colors.blue'),
+        hasLength(1),
+        reason: 'code after an empty string is still code: $found',
+      );
+      // A raw multiline string with double-quote delimiters has to be consumed
+      // as one literal. The earlier scanner treated `r"""` as `r"` and exposed
+      // the rest of the string as code.
+      const multiline = r'''
+        const message = r"""say "Colors.red" here""";
+        const leading = r""""Colors.red" here""";
+        const plainLeading = """"Colors.red" here""";
+        const afterRaw = Colors.blue;
+      ''';
+      final rawFindings = dartColorLiterals(multiline);
+      expect(
+        rawFindings.map((finding) => finding.description).toList(),
+        ['Colors.blue'],
+        reason: 'findings: $rawFindings',
+      );
+      expect(
+        found.any((finding) => finding.description.contains('fromRGBO')),
+        isTrue,
+      );
+    });
+  });
+}
+
+/// Dart source with comments and string literals blanked out.
+///
+/// Blanking preserves line numbers and offsets, so a finding can name its line.
+/// Handles line and block comments, single- and double-quoted strings,
+/// triple-quoted strings and raw strings.
+String stripDartNoise(String source) {
+  final out = StringBuffer();
+  var index = 0;
+  while (index < source.length) {
+    final character = source[index];
+    final next = index + 1 < source.length ? source[index + 1] : '';
+
+    if (character == '/' && next == '/') {
+      while (index < source.length && source[index] != '\n') {
+        out.write(' ');
+        index += 1;
+      }
+      continue;
+    }
+    if (character == '/' && next == '*') {
+      // Dart block comments nest, so the scanner tracks the depth; stopping at
+      // the first `*/` would expose comment text as code.
+      var depth = 0;
+      while (index < source.length) {
+        final opens =
+            source[index] == '/' &&
+            index + 1 < source.length &&
+            source[index + 1] == '*';
+        final closes =
+            source[index] == '*' &&
+            index + 1 < source.length &&
+            source[index + 1] == '/';
+        if (opens) {
+          depth += 1;
+          out.write('  ');
+          index += 2;
+          continue;
+        }
+        if (closes) {
+          depth -= 1;
+          out.write('  ');
+          index += 2;
+          if (depth == 0) break;
+          continue;
+        }
+        out.write(source[index] == '\n' ? '\n' : ' ');
+        index += 1;
+      }
+      continue;
+    }
+
+    final isRaw =
+        (character == 'r' || character == 'R') && (next == "'" || next == '"');
+    if (character == "'" || character == '"' || isRaw) {
+      final quote = isRaw ? next : character;
+      final afterPrefix = isRaw ? index + 2 : index + 1;
+      // Triple delimiters are recognised for raw strings too, so a raw
+      // multiline string is consumed as one literal.
+      final triple =
+          afterPrefix + 1 < source.length &&
+          source[afterPrefix] == quote &&
+          source[afterPrefix + 1] == quote;
+      final delimiter = triple ? quote * 3 : quote;
+      // `afterPrefix` already points past the first quote, so the opening is
+      // the raw prefix plus the whole delimiter. Consuming one character too
+      // many would blank content (an empty string would swallow the code after
+      // it); consuming too few would let the remaining opening quotes close the
+      // literal early.
+      final openingLength = (isRaw ? 1 : 0) + delimiter.length;
+      out.write(' ' * openingLength);
+      index += openingLength;
+      while (index < source.length) {
+        if (!isRaw && source[index] == r'\') {
+          out.write('  ');
+          index += 2;
+          continue;
+        }
+        if (source.startsWith(delimiter, index)) {
+          out.write(' ' * delimiter.length);
+          index += delimiter.length;
+          break;
+        }
+        out.write(source[index] == '\n' ? '\n' : ' ');
+        index += 1;
+      }
+      continue;
+    }
+
+    out.write(character);
+    index += 1;
+  }
+  return out.toString();
+}
+
+/// The top-level arguments of the call whose `(` is at [open].
+List<String> callArguments(String code, int open) {
+  final arguments = <String>[];
+  var depth = 1;
+  var index = open + 1;
+  var current = StringBuffer();
+  while (index < code.length) {
+    final character = code[index];
+    if (character == '(' || character == '[' || character == '{') {
+      depth += 1;
+      current.write(character);
+    } else if (character == ')' || character == ']' || character == '}') {
+      depth -= 1;
+      if (depth == 0) break;
+      current.write(character);
+    } else if (character == ',' && depth == 1) {
+      arguments.add(current.toString());
+      current = StringBuffer();
+    } else {
+      current.write(character);
+    }
+    index += 1;
+  }
+  if (current.toString().trim().isNotEmpty) {
+    arguments.add(current.toString());
+  }
+  return arguments;
+}
+
+/// True when [argument] is a bare numeric literal, named or positional.
+///
+/// A channel expression (`Color(alpha)`, `Color.fromARGB(a, r, g, b)`) is a
+/// dynamic conversion, not a literal, so a data-derived color cannot hide
+/// behind a numeric-looking argument.
+bool isNumericLiteral(String argument) {
+  var value = argument.trim();
+  // Only an anchored `identifier:` prefix is a named argument; anything else
+  // with a colon is an expression (`condition ? a : b`).
+  final named = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*\s*:\s*').firstMatch(value);
+  if (named != null) {
+    value = value.substring(named.end).trim();
+  }
+  // `+` and `-` stay allowed because an exponent may carry a sign; the grammar
+  // below rejects them anywhere else.
+  if (value.isEmpty || RegExp(r'[\s*/?:()\[\]{}]').hasMatch(value)) {
+    return false;
+  }
+  final unsigned = value.startsWith('-') ? value.substring(1) : value;
+  if (unsigned.startsWith('0x') || unsigned.startsWith('0X')) {
+    final digits = unsigned.substring(2);
+    return digits.isNotEmpty && RegExp(r'^[0-9a-fA-F_]+$').hasMatch(digits);
+  }
+  return RegExp(
+    r'^(\d[\d_]*\.?[\d_]*|\.\d[\d_]*)([eE][+-]?\d[\d_]*)?$',
+  ).hasMatch(unsigned);
+}
+
+/// Literal color constructions in Dart source, with the line they appear on.
+///
+/// A construction is a literal only when every one of its arguments is a bare
+/// number, in any named-argument order; `Colors.<name>` is always a finding,
+/// because it can only be a literal.
+List<({int line, String description})> dartColorLiterals(String source) {
+  final code = stripDartNoise(source);
+  final findings = <({int line, String description})>[];
+  int lineOf(int offset) =>
+      '\n'.allMatches(code.substring(0, offset)).length + 1;
+
+  final constructors = <RegExp>[
+    RegExp(r'\bColor\s*\.\s*fromARGB\s*\('),
+    RegExp(r'\bColor\s*\.\s*fromRGBO\s*\('),
+    RegExp(r'\bColor\s*\.\s*from\s*\('),
+    RegExp(r'\bColor\s*\('),
+  ];
+  for (final pattern in constructors) {
+    for (final match in pattern.allMatches(code)) {
+      final arguments = callArguments(code, match.end - 1);
+      if (arguments.isEmpty || !arguments.every(isNumericLiteral)) {
+        continue;
+      }
+      final callee = match
+          .group(0)!
+          .replaceAll(RegExp(r'\s+'), '')
+          .replaceAll('(', '');
+      findings.add((
+        line: lineOf(match.start),
+        description:
+            '$callee(${arguments.map((argument) => argument.trim()).join(', ')})',
+      ));
+    }
+  }
+  for (final match in RegExp(r'\bColors\s*\.\s*[A-Za-z_]+').allMatches(code)) {
+    findings.add((
+      line: lineOf(match.start),
+      description: match.group(0)!.replaceAll(RegExp(r'\s+'), ''),
+    ));
+  }
+  findings.sort((a, b) => a.line.compareTo(b.line));
+  return findings;
+}
+
+/// Pumps a minimal Material app and returns a context inside it.
+///
+/// The theme builders read the ambient theme for their base text styles, so
+/// these tests hand them the same default theme the production shell's
+/// `appBuilder` does.
+Future<BuildContext> pumpThemeContext(WidgetTester tester) async {
+  late BuildContext captured;
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Builder(
+        builder: (context) {
+          captured = context;
+          return const SizedBox.shrink();
+        },
+      ),
+    ),
+  );
+  return captured;
+}

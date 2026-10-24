@@ -76,7 +76,7 @@ NOTICE_MARKERS = {
 # through the patched `pdfium_dart` package's NOTICES. A marker cannot stand
 # for them: Flutter's engine notices already carry FreeType's license, for
 # one. So every entry must arrive whole. SQLite is in the public domain.
-PDFIUM_NOTICES = Path("flutter/third_party/pdfium_dart/NOTICES")
+PDFIUM_NOTICES = Path("third_party/pdfium_dart/NOTICES")
 
 # Flutter's license collector splits a package's NOTICES on this line, reads
 # each entry as "<package names>\n\n<license text>", merges the names of
