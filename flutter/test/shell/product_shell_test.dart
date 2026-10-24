@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import 'package:shosai_flutter/reader/controller.dart'
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
+import '../support/bridge_records.dart';
 import '../support/production_shell_harness.dart';
 
 /// The Bookshelf shell composed by the product shell: the library side in the
@@ -281,6 +283,12 @@ Future<void> _open(WidgetTester tester, int bookId) async {
   await tester.tap(_card(bookId));
   await tester.pumpAndSettle();
 }
+
+/// The Open tag on book [bookId]'s card.
+Finder _openTag(int bookId) => find.descendant(
+  of: _card(bookId),
+  matching: find.textContaining('Open', findRichText: true),
+);
 
 /// A library whose settings writes fail while [failSaves] is set.
 class _FailingSettingsBridge extends HarnessBridge {
@@ -1534,6 +1542,133 @@ void main() {
     );
     expect(find.byTooltip(_quiet), findsOneWidget);
     expect(find.byTooltip(_atlas), findsOneWidget);
+  });
+
+  testWidgets('open books come back when the application starts again', (
+    tester,
+  ) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    await _open(tester, 4);
+    await tester.tap(find.text('Turn page'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // A cold start has no platform restoration: only the saved session.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      productionShell(
+        home: ProductShell(bridgeFactory: () => bridge, readerBuilder: _reader),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Reading $_atlas at /books/atlas.pdf#later:4'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip(_quiet), findsOneWidget);
+    expect(find.byTooltip(_atlas), findsOneWidget);
+  });
+
+  testWidgets('a slow read of the saved books keeps them until it finishes', (
+    tester,
+  ) async {
+    final bridge = HarnessBridge(
+      books: harnessLibraryBooks(),
+      covers: harnessCovers(),
+    );
+    final records = bridge.records as BridgeForwardingRecords;
+    final quiet = harnessLibraryBooks().first;
+    final saved = (
+      books: [(book: quiet, path: '${quiet.pathKey}#later', bookId: 1)],
+      current: 1,
+      reading: false,
+    );
+    records.openBooks = saved;
+    final read = Completer<void>();
+    records.openBooksRead = read.future;
+    await _pump(tester, const Size(1440, 900), bridge: bridge);
+
+    // A change before the read must not replace what it will read.
+    await tester.tap(_sidebarNotes);
+    await tester.pumpAndSettle();
+    expect(records.openBooks, same(saved));
+
+    read.complete();
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ShellSidebar),
+        matching: find.text('Library'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('6 books · 1 open'), findsOneWidget);
+    expect(_openTag(1), findsOneWidget);
+    expect(find.textContaining('Reading '), findsNothing);
+  });
+
+  testWidgets('a book opened before the saved ones are read replaces them', (
+    tester,
+  ) async {
+    final bridge = HarnessBridge(
+      books: harnessLibraryBooks(),
+      covers: harnessCovers(),
+    );
+    final records = bridge.records as BridgeForwardingRecords;
+    final quiet = harnessLibraryBooks().first;
+    records.openBooks = (
+      books: [(book: quiet, path: quiet.pathKey, bookId: 1)],
+      current: 1,
+      reading: true,
+    );
+    final read = Completer<void>();
+    records.openBooksRead = read.future;
+    await _pump(tester, const Size(1440, 900), bridge: bridge);
+    await _open(tester, 4);
+
+    read.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading $_atlas'), findsOneWidget);
+    expect(find.byTooltip(_quiet), findsNothing);
+    expect(
+      [for (final open in records.openBooks!.books) open.book.bookId],
+      [4],
+    );
+
+    // Leaving the reader does not open the book the saved session read.
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reading '), findsNothing);
+    expect(find.text('6 books · 1 open'), findsOneWidget);
+    expect(_openTag(1), findsNothing);
+  });
+
+  testWidgets('a platform restoration wins over the saved open books', (
+    tester,
+  ) async {
+    final bridge = await _pump(tester, const Size(1440, 900));
+    final records = bridge.records as BridgeForwardingRecords;
+    await _open(tester, 1);
+    await tester.tap(find.byTooltip('Library'));
+    await tester.pumpAndSettle();
+    final other = harnessLibraryBooks()[1];
+    records.openBooks = (
+      books: [(book: other, path: other.pathKey, bookId: other.bookId)],
+      current: other.bookId,
+      reading: true,
+    );
+
+    await tester.restartAndRestore();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Reading '), findsNothing);
+    expect(find.text('6 books · 1 open'), findsOneWidget);
+    expect(_openTag(1), findsOneWidget);
+    expect(_openTag(other.bookId), findsNothing);
   });
 
   testWidgets('the title counts the open books and their cards say Open', (

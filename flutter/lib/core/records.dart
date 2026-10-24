@@ -29,6 +29,19 @@ ShosaiRecords recordsOf(FlutterBridge bridge) => switch (bridge) {
   ),
 };
 
+/// One open book: the library book and the reader's last locator in it
+/// (its document [path], and its library book id, null for a document opened
+/// by path).
+typedef FlutterOpenBook = ({FlutterLibraryBook book, String path, int? bookId});
+
+/// The open books in their order, the one being read, and whether the reader
+/// was showing it (RFD 4, outcome 4).
+typedef FlutterOpenBooks = ({
+  List<FlutterOpenBook> books,
+  int? current,
+  bool reading,
+});
+
 /// The open book's text, as annotations and book search read it: PDF page
 /// text from the PDF engine, EPUB chapter text in the canonical stream the
 /// selection surfaces index.
@@ -81,6 +94,14 @@ abstract interface class ShosaiRecords {
   });
 
   Future<void> saveReaderSettings({required FlutterReaderSettings value});
+
+  /// The open books last saved, each with the library's current record, or
+  /// null when none were. Books the library no longer holds are left out,
+  /// and [FlutterOpenBooks.reading] is false when the current book's file is
+  /// gone.
+  Future<FlutterOpenBooks?> loadOpenBooks();
+
+  Future<void> saveOpenBooks(FlutterOpenBooks value);
 
   // Reading.
 
