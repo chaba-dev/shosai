@@ -111,6 +111,24 @@ void main() {
         expect(copies.last.failure, isNull);
         expect((await t.library.get(book.id))!.locationFailure, isNull);
       }
+      await locations.unavailable(
+        'remote',
+        generation,
+        LocationFailure.missing,
+      );
+      expect(
+        (await locations.copies(book.contentHash)).map((copy) => copy.failure),
+        everyElement(LocationFailure.missing),
+      );
+      adapter.failure = null;
+      await locations
+          .read(adapter, generation, book.contentHash, 'b')
+          .drain<void>();
+      expect(
+        (await locations.copies(book.contentHash)).first.failure,
+        LocationFailure.missing,
+      );
+      expect((await locations.copies(book.contentHash)).last.failure, isNull);
       adapter.failure = LocationFailure.revoked;
       await expectLater(
         locations
