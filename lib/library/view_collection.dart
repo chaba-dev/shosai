@@ -620,7 +620,10 @@ class _LibraryGridState extends State<_LibraryGrid> {
     // failures and mutation errors.
     final loadError = widget.model.loadError;
     final pagingFailure = loadError != null && widget.model.pagingFailed;
-    final error = widget.model.error ?? (pagingFailure ? null : loadError);
+    final error =
+        widget.model.error ??
+        (pagingFailure ? null : loadError) ??
+        widget.model.sourceWarning;
     // A page shorter than the viewport has no end to scroll to, so the next
     // page is requested after the frame. Every request is bounded by
     // `_canRequestNextPage` and by the controller's own admission, so a short

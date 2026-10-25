@@ -142,6 +142,7 @@ final class _LibraryLoaded extends LibraryMessage {
     this.sort,
     this.sourceFiles, {
     this.discoveryError,
+    this.sourceWarning,
   });
   final int revision;
   final FlutterLibraryPage page;
@@ -153,6 +154,7 @@ final class _LibraryLoaded extends LibraryMessage {
   final FlutterLibrarySort sort;
   final List<LibrarySourceFile> sourceFiles;
   final String? discoveryError;
+  final String? sourceWarning;
 }
 
 final class _LibrarySettingsLoaded extends LibraryMessage {

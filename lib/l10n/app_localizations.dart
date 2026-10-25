@@ -1530,6 +1530,12 @@ abstract class AppLocalizations {
   /// **'The folder could not be accessed. Check its permission and connection, then try again.'**
   String get locationFailed;
 
+  /// No description provided for @locationScanWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not refresh “{source}”. Check its connection and permissions, or choose a smaller source folder in Settings, then retry. Other books are still available.'**
+  String locationScanWarning(String source);
+
   /// No description provided for @locationBack.
   ///
   /// In en, this message translates to:

@@ -818,6 +818,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationFailed => 'フォルダにアクセスできません。権限と接続を確認して、もう一度お試しください。';
 
   @override
+  String locationScanWarning(String source) {
+    return '「$source」を更新できませんでした。接続と権限を確認するか、設定でより小さい読み込み元フォルダを選択して、再試行してください。他の本は引き続き利用できます。';
+  }
+
+  @override
   String get locationBack => '戻る';
 
   @override

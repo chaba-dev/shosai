@@ -190,7 +190,7 @@ class LibraryController implements Listenable {
       case LibraryRetryRequested():
         switch (_model.failure) {
           case LibraryFailure.load || LibraryFailure.none:
-            _load();
+            _load(refreshSources: true);
           case LibraryFailure.import:
             _import();
           case LibraryFailure.removal:
@@ -386,6 +386,7 @@ class LibraryController implements Listenable {
               loading: false,
               loadingMore: false,
               loadError: message.discoveryError,
+              sourceWarning: message.sourceWarning,
               pagingFailed: false,
               hasMore: message.page.hasMore,
             ),
@@ -650,6 +651,7 @@ class LibraryController implements Listenable {
         final host = _bridge;
         var sourceFiles = <LibrarySourceFile>[];
         String? discoveryError;
+        String? sourceWarning;
         try {
           sourceFiles = host is LibraryFoldersHost
               ? (await (host as LibraryFoldersHost).folders.discover(
@@ -669,6 +671,14 @@ class LibraryController implements Listenable {
                     )
                     .toList()
               : <LibrarySourceFile>[];
+          if (host is LibraryFoldersHost) {
+            final warnings = (host as LibraryFoldersHost).folders.scanWarnings;
+            if (warnings.isNotEmpty) {
+              sourceWarning = warnings
+                  .map(_localizations().locationScanWarning)
+                  .join('\n');
+            }
+          }
         } catch (error) {
           discovery.throwIfCancelled();
           discoveryError = safeError(error);
@@ -694,6 +704,7 @@ class LibraryController implements Listenable {
             pageSort,
             List.unmodifiable(sourceFiles),
             discoveryError: discoveryError,
+            sourceWarning: sourceWarning,
           ),
         );
       } catch (error) {

@@ -869,6 +869,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'The folder could not be accessed. Check its permission and connection, then try again.';
 
   @override
+  String locationScanWarning(String source) {
+    return 'Could not refresh “$source”. Check its connection and permissions, or choose a smaller source folder in Settings, then retry. Other books are still available.';
+  }
+
+  @override
   String get locationBack => 'Back';
 
   @override

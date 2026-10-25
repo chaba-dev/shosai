@@ -10,6 +10,7 @@ import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/library/controller.dart';
 
 const _epubFixture = 'packages/shosai_core/test/fixtures/sample.epub';
 const _pdfFixture = 'packages/shosai_core/test/fixtures/sample.pdf';
@@ -216,8 +217,70 @@ void main() {
         'old.epub',
         'good.pdf',
       });
+      expect(core.folders.scanWarnings, ['Broken']);
+      expect(await core.folders.discover(), hasLength(2));
+      expect(core.folders.scanWarnings, ['Broken']);
       await core.folders.remove('broken');
       expect((await core.folders.discover()).single.entry.name, 'good.pdf');
+      expect(core.folders.scanWarnings, isEmpty);
+    },
+  );
+
+  test(
+    'source warnings retain healthy results and retry a repaired source',
+    () async {
+      final broken = Directory('${directory.path}/broken')..createSync();
+      final healthy = Directory('${directory.path}/healthy')..createSync();
+      var deep = broken;
+      for (var i = 0; i < 34; i++) {
+        deep = Directory('${deep.path}/nested')..createSync();
+      }
+      File('${deep.path}/hidden.epub').writeAsStringSync('metadata only');
+      File('${healthy.path}/good.pdf').writeAsStringSync('metadata only');
+      await core.folders.add(
+        FolderGrant('broken', 'Deep books', 'path', broken.path),
+      );
+      await core.folders.add(
+        FolderGrant('healthy', 'Healthy', 'path', healthy.path),
+      );
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => null,
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+      );
+      addTearDown(controller.dispose);
+      Future<void> loaded() async {
+        for (
+          var i = 0;
+          i < 400 && (controller.model.loading || !controller.model.loaded);
+          i++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        expect(controller.model.loading, isFalse);
+        expect(controller.model.loaded, isTrue);
+      }
+
+      controller.dispatch(const LibraryStarted());
+      await loaded();
+      expect(controller.model.sourceFiles.single.entry.name, 'good.pdf');
+      expect(controller.model.sourceWarning, contains('Deep books'));
+      expect(controller.model.sourceWarning, contains('Settings'));
+      expect(controller.model.loadError, isNull);
+      expect(controller.model.error, isNull);
+      controller.dispatch(const LibraryFormatChanged(FlutterBookFormat.epub));
+      await loaded();
+      expect(controller.model.sourceFiles, isEmpty);
+      expect(controller.model.displayError, contains('Deep books'));
+      Directory('${broken.path}/nested').deleteSync(recursive: true);
+      File('${broken.path}/repaired.epub').writeAsStringSync('metadata only');
+      controller.dispatch(const LibraryRetryRequested());
+      await loaded();
+      expect(controller.model.sourceFiles.single.entry.name, 'repaired.epub');
+      expect(controller.model.sourceWarning, isNull);
+      expect(controller.model.loadError, isNull);
     },
   );
 

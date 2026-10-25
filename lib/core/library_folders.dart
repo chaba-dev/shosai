@@ -55,6 +55,13 @@ final class LibraryFolders {
   final Map<String, int> _generations = {};
   List<FolderGrant> _grants = const [];
   List<LibrarySourceFile> _catalog = const [];
+  Set<String> _scanFailures = const {};
+
+  /// At most one warning per configured connection, never raw provider errors.
+  List<String> get scanWarnings => List.unmodifiable([
+    for (final grant in _grants)
+      if (_scanFailures.contains(grant.id)) grant.label,
+  ]);
   bool _discovered = false;
   bool _catalogLoaded = false;
   Future<void>? _loading;
@@ -179,6 +186,7 @@ final class LibraryFolders {
     }
     if (_discovered && !refresh) return List.unmodifiable(_catalog);
     final next = <LibrarySourceFile>[];
+    final failures = <String>{};
     for (final grant in _grants) {
       cancellation.throwIfCancelled();
       final generation = _generations[grant.id]!;
@@ -234,6 +242,7 @@ final class LibraryFolders {
               LibrarySourceFile(grant.id, grant.label, entry),
         ]);
       } on LocationException catch (error) {
+        failures.add(grant.id);
         await _locations.unavailable(grant.id, generation, error.failure);
         next.addAll([
           for (final file in _catalog)
@@ -247,6 +256,7 @@ final class LibraryFolders {
         ]);
       } on CoreException catch (error) {
         if (error.kind == CoreErrorKind.cancelled) rethrow;
+        failures.add(grant.id);
         // An invalid or over-limit source must not hide other connections or
         // local books, nor reconcile unseen files as missing.
         next.addAll(_catalog.where((file) => file.locationId == grant.id));
@@ -254,6 +264,7 @@ final class LibraryFolders {
     }
     cancellation.throwIfCancelled();
     _catalog = List.unmodifiable(next);
+    _scanFailures = Set.unmodifiable(failures);
     _discovered = true;
     return _catalog;
   });

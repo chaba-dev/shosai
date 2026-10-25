@@ -1053,6 +1053,8 @@
   "locationRevoked": "Access to this folder was revoked. Connect it again. Your notes are still here.",
   "locationMissing": "The folder or book is missing. Your notes are still here.",
   "locationFailed": "The folder could not be accessed. Check its permission and connection, then try again.",
+  "locationScanWarning": "Could not refresh “{source}”. Check its connection and permissions, or choose a smaller source folder in Settings, then retry. Other books are still available.",
+  "@locationScanWarning": {"placeholders": {"source": {"type": "String"}}},
   "locationBack": "Back",
   "locationRemove": "Disconnect folder",
   "locationRemoveDescription": "Books and notes stay in your library. Books with no other location become unavailable. No source files are deleted.",

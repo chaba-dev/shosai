@@ -84,6 +84,7 @@ final class LibraryModel {
     this.loaded = false,
     this.error,
     this.loadError,
+    this.sourceWarning,
     this.pagingFailed = false,
     this.hasMore = false,
     this.failure = LibraryFailure.none,
@@ -140,6 +141,9 @@ final class LibraryModel {
   final String? error;
   final String? loadError;
 
+  /// A partial source scan failed; healthy books and paging remain available.
+  final String? sourceWarning;
+
   /// True when the last load failure was an appended page rather than page one.
   ///
   /// A paging failure keeps the loaded collection and its next page advertised,
@@ -147,7 +151,7 @@ final class LibraryModel {
   /// the page that failed instead of reloading the collection.
   final bool pagingFailed;
 
-  String? get displayError => error ?? loadError;
+  String? get displayError => error ?? loadError ?? sourceWarning;
   final bool hasMore;
   final LibraryFailure failure;
   final bool providerCleanupPending;
@@ -201,6 +205,7 @@ final class LibraryModel {
     bool? loaded,
     Object? error = _same,
     Object? loadError = _same,
+    Object? sourceWarning = _same,
     bool? pagingFailed,
     bool? hasMore,
     LibraryFailure? failure,
@@ -236,6 +241,9 @@ final class LibraryModel {
     loadError: identical(loadError, _same)
         ? this.loadError
         : loadError as String?,
+    sourceWarning: identical(sourceWarning, _same)
+        ? this.sourceWarning
+        : sourceWarning as String?,
     pagingFailed: pagingFailed ?? this.pagingFailed,
     hasMore: hasMore ?? this.hasMore,
     failure: failure ?? this.failure,
