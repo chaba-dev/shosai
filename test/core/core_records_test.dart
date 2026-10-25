@@ -253,6 +253,17 @@ void main() {
       expect(bridge.releaseDocument(handle: opened.handle), isTrue);
 
       chosen.deleteSync();
+      final cached = await bridge.openLibraryBook(
+        bookId: book.id,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(
+        cached.bookId,
+        book.id,
+        reason: 'a cached book opens without its source',
+      );
+      bridge.releaseDocument(handle: cached.handle);
+      await core.fileCache.discardUnkept(book.contentHash, book.format);
       await expectLater(
         bridge.openLibraryBook(
           bookId: book.id,
@@ -290,6 +301,7 @@ void main() {
       );
 
       chosen.writeAsBytesSync([...original, 11]);
+      await core.fileCache.discardUnkept(book.contentHash, book.format);
       await expectLater(
         bridge.openLibraryBook(
           bookId: book.id,
@@ -330,6 +342,40 @@ void main() {
         'These notes follow content, not its grant.',
       );
       expect((await core.library.page()).bookCount, 1);
+
+      await core.folders.setKept(book.id, true);
+      expect((await core.library.get(book.id))!.keptOnDevice, isTrue);
+      await core.folders.remove('new-device-grant');
+      chosen.deleteSync();
+      bridge.dispose();
+      await bridge.drain();
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      final offline = await bridge.openLibraryBook(
+        bookId: book.id,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(
+        offline.bookId,
+        book.id,
+        reason: 'an explicitly kept copy survives disconnect and restart',
+      );
+      bridge.releaseDocument(handle: offline.handle);
+      await core.folders.setKept(book.id, false);
+      expect((await core.library.get(book.id))!.keptOnDevice, isFalse);
+      expect((await core.library.get(book.id))!.locationFailure, isNotNull);
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: book.id,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(isA<FlutterBridgeError>()),
+      );
+      expect(
+        (await core.annotations.summary(book.id)).latest,
+        'These notes follow content, not its grant.',
+      );
     },
   );
 

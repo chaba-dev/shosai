@@ -65,6 +65,8 @@ final class Book {
     required this.dateAdded,
     required this.lastRead,
     this.locationFailure,
+    this.located = false,
+    this.keptOnDevice = false,
   });
 
   final int id;
@@ -95,6 +97,10 @@ final class Book {
   /// path-only import whose availability has not been checked yet.
   final LocationFailure? locationFailure;
 
+  /// A device locator exists; only these books offer offline-cache controls.
+  final bool located;
+  final bool keptOnDevice;
+
   bool get managed => storageKind == StorageKind.managed;
 
   @override
@@ -113,7 +119,9 @@ final class Book {
       other.progress == progress &&
       other.dateAdded == dateAdded &&
       other.lastRead == lastRead &&
-      other.locationFailure == locationFailure;
+      other.locationFailure == locationFailure &&
+      other.located == located &&
+      other.keptOnDevice == keptOnDevice;
 
   @override
   int get hashCode => Object.hash(
@@ -131,6 +139,8 @@ final class Book {
     dateAdded,
     lastRead,
     locationFailure,
+    located,
+    keptOnDevice,
   );
 
   @override

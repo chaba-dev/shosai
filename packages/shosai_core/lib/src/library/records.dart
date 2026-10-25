@@ -292,10 +292,14 @@ String? privateCopyHash(String path) =>
 const bookColumns = '''id, title, author, format, file_path, storage_kind,
   original_path, content_hash, file_size, cover IS NOT NULL, progress,
   date_added, last_read,
+  CASE WHEN EXISTS (SELECT 1 FROM book_file_cache
+    WHERE content_hash = books.content_hash) THEN NULL ELSE
   (SELECT CASE min(CASE coalesce(failure, '')
       WHEN '' THEN 0 WHEN 'offline' THEN 1 WHEN 'revoked' THEN 2 ELSE 3 END)
     WHEN 1 THEN 'offline' WHEN 2 THEN 'revoked' WHEN 3 THEN 'missing' END
-   FROM book_locators WHERE content_hash = books.content_hash)''';
+   FROM book_locators WHERE content_hash = books.content_hash) END,
+  EXISTS (SELECT 1 FROM book_locators WHERE content_hash = books.content_hash),
+  EXISTS (SELECT 1 FROM book_file_cache WHERE content_hash = books.content_hash AND kept = 1)''';
 
 Book bookFromRow(Row row) => Book(
   id: row.columnAt(0) as int,
@@ -315,6 +319,8 @@ Book bookFromRow(Row row) => Book(
     final String name => LocationFailure.values.byName(name),
     _ => null,
   },
+  located: row.columnAt(14) == 1,
+  keptOnDevice: row.columnAt(15) == 1,
 );
 
 Book? _bookById(Database db, int id) => db

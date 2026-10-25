@@ -27,6 +27,7 @@ const libraryTextVersions = {
 final class ShosaiCore {
   ShosaiCore._(this.store, this.library, this.pdfEngine, String dataDirectory)
     : snapshots = DocumentSnapshots('$dataDirectory/snapshots'),
+      fileCache = BookFileCache(store, '$dataDirectory/file-cache'),
       locations = LibraryLocations(store),
       readingState = ReadingState(store),
       bookmarks = Bookmarks(store),
@@ -60,17 +61,20 @@ final class ShosaiCore {
       // Deletion stays recorded and is retried on the next start.
     }
     await core.snapshots.sweep();
+    await core.fileCache.sweep();
     return core;
   }
 
   final Store store;
   final Library library;
   final LibraryLocations locations;
+  final BookFileCache fileCache;
   late final LibraryFolders folders = LibraryFolders(
     Preferences(store),
     library,
     locations,
     snapshots.newPath,
+    fileCache,
   );
 
   /// Reads PDF metadata on import, and PDF text for the bridge's
@@ -1639,6 +1643,8 @@ FlutterLibraryBook _libraryBook(Book book) => FlutterLibraryBook(
   dateAdded: book.dateAdded,
   lastRead: book.lastRead,
   unavailable: book.locationFailure != null,
+  located: book.located,
+  keptOnDevice: book.keptOnDevice,
 );
 
 FlutterBookmark _bookmark(Bookmark bookmark, int bookId) => FlutterBookmark(

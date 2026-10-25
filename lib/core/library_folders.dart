@@ -23,12 +23,14 @@ final class LibraryFolders {
     this._library,
     this._locations,
     this._newPath,
+    this._cache,
   );
 
   final Preferences _preferences;
   final Library _library;
   final LibraryLocations _locations;
   final Future<String> Function() _newPath;
+  final BookFileCache _cache;
   final Map<String, int> _generations = {};
   List<FolderGrant> _grants = const [];
   Future<void>? _loading;
@@ -136,6 +138,7 @@ final class LibraryFolders {
     // Unavailable is durable before attempting platform cleanup. A failed
     // cleanup never deletes a book or makes its annotations inaccessible.
     await _locations.remove(id);
+    await _cache.discardLocation(id);
     await _save(_grants.where((entry) => entry.id != id).toList());
     _grants = List.unmodifiable(_grants.where((entry) => entry.id != id));
     _generations.remove(id);
@@ -228,6 +231,7 @@ final class LibraryFolders {
   Future<T> withBookFile<T>(
     Book book,
     Future<T> Function(String path) read, {
+    bool keep = false,
     CancellationToken? cancellation,
   }) => _serial(() async {
     await _load();
@@ -243,45 +247,71 @@ final class LibraryFolders {
       cancellation.throwIfCancelled();
       final id = copy.locator.locationId;
       final generation = _generations[id];
-      if (generation == null) {
-        lastFailure = const LocationException(LocationFailure.revoked);
-        continue;
-      }
       try {
-        final location = await _grant(id).open();
-        return await _stage(
-          _locations.read(
-            location,
-            generation,
-            book.contentHash,
-            copy.locator.key,
-            cancellation: cancellation,
-          ),
-          (path) async {
-            final fingerprint = await fingerprintFile(
-              path,
+        return await _cache.withFile(
+          book,
+          () async* {
+            if (generation == null) {
+              throw const LocationException(LocationFailure.revoked);
+            }
+            final location = await _grant(id).open();
+            yield* _locations.read(
+              location,
+              generation,
+              book.contentHash,
+              copy.locator.key,
               cancellation: cancellation,
             );
-            if (fingerprint.hash != book.contentHash) {
-              throw const LocationException(LocationFailure.missing);
-            }
-            return read(path);
           },
-          name: 'book.${book.format.name}',
+          read,
+          keep: keep,
           cancellation: cancellation,
         );
       } on LocationException catch (error) {
-        await _locations.failed(
-          book.contentHash,
-          copy.locator,
-          generation: generation,
-          failure: error.failure,
-        );
+        if (generation != null) {
+          await _locations.failed(
+            book.contentHash,
+            copy.locator,
+            generation: generation,
+            failure: error.failure,
+          );
+        }
         lastFailure = error;
       }
     }
     throw lastFailure ?? const LocationException(LocationFailure.revoked);
   });
+
+  Future<void> setKept(
+    int bookId,
+    bool keep, {
+    CancellationToken? cancellation,
+  }) async {
+    final book = await _library.get(bookId);
+    if (book == null || !book.located) {
+      throw const CoreException.notFound('The book has no library location.');
+    }
+    if (keep) {
+      await withBookFile(
+        book,
+        (_) async {},
+        keep: true,
+        cancellation: cancellation,
+      );
+    } else {
+      await _serial(() async {
+        await _load();
+        cancellation.throwIfCancelled();
+        await _cache.release(book);
+        final copies = await _locations.copies(book.contentHash);
+        if (copies.every(
+          (copy) => !_generations.containsKey(copy.locator.locationId),
+        )) {
+          await _cache.discardUnkept(book.contentHash, book.format);
+        }
+      });
+    }
+  }
 
   Future<T> _stage<T>(
     Stream<List<int>> input,

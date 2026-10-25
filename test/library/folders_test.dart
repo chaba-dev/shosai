@@ -50,6 +50,7 @@ void main() {
             library,
             LibraryLocations(store),
             () async => '$stagingPath/stage-${serial++}',
+            BookFileCache(store, '${directory.path}/cache'),
           );
           return (directory, store, library, folders, source);
         }))!;
@@ -156,6 +157,7 @@ void main() {
       library,
       LibraryLocations(store),
       () async => '${directory.path}/unused',
+      BookFileCache(store, '${directory.path}/cache'),
     );
     addTearDown(() async {
       await folders.drain();
