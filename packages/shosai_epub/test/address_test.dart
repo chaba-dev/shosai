@@ -16,6 +16,27 @@ import 'package:test/test.dart';
 /// `epub_toc_locations(&sample.epub)`. A case that cannot be resolved stays
 /// unresolved rather than falling back to a fabricated target.
 void main() {
+  test('book progress weights canonical scalars, not chapter ordinals', () {
+    final book = openEpubBytes(
+      _book(
+        chapters: {
+          'OPS/Text/one.xhtml': '<p>A&#x1F600;B</p>',
+          'OPS/Text/two.xhtml': '<p>abcdefghijkl</p>',
+          'OPS/Text/empty.xhtml': '<main></main>',
+        },
+      ),
+    );
+    expect(book.chapters[0].canonicalText, 'A😀B\n');
+    expect(book.chapters[1].canonicalText, 'abcdefghijkl\n');
+    // Four scalars (not five UTF-16 code units), thirteen, and one empty
+    // chapter position. Chapter one advances before a chapter boundary.
+    expect(book.progressAt(0, 0), 1 / 18);
+    expect(book.progressAt(0, 2), 2 / 18);
+    expect(book.progressAt(1, 3), 7 / 18);
+    expect(book.progressAt(1, 999), 17 / 18);
+    expect(book.progressAt(2, 0), 17 / 18);
+  });
+
   group('reference resolution', () {
     test('resolves a relative reference and its fragment', () {
       expect(resolveEpubReference('OPS/Text', 'chapter-1.xhtml#section'), (

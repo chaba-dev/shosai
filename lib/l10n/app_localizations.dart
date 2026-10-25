@@ -888,6 +888,24 @@ abstract class AppLocalizations {
   /// **'Go to page'**
   String get readerGoToPage;
 
+  /// No description provided for @readerGoToChapter.
+  ///
+  /// In en, this message translates to:
+  /// **'Go to chapter'**
+  String get readerGoToChapter;
+
+  /// No description provided for @readerChapterInputLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapter'**
+  String get readerChapterInputLabel;
+
+  /// No description provided for @readerChapterInputInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a chapter between 1 and {total}.'**
+  String readerChapterInputInvalid(int total);
+
   /// Iced reference key: search.
   ///
   /// In en, this message translates to:

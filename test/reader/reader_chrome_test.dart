@@ -670,12 +670,12 @@ void main() {
       expect(find.text('0% · page 1'), findsOneWidget);
     });
 
-    testWidgets('the default source names the retained logical unit', (
+    testWidgets('the default source names a layout page and book progress', (
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
       await _open(tester, _reader(bridge: _ChromeBridge()));
-      expect(find.text('33% · chapter 1 of 3'), findsOneWidget);
+      expect(find.text('1% · page 1'), findsOneWidget);
     });
   });
 
@@ -1033,7 +1033,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       expect(bridge.events, isNotEmpty);
-      expect(find.text('67% · chapter 2 of 3'), findsOneWidget);
+      expect(find.text('33% · page 1'), findsOneWidget);
       expect(_button(tester, 'reader-edge-previous').enabled, isTrue);
     });
 
@@ -1424,7 +1424,7 @@ void main() {
       );
       await tester.pump();
       expect(bridge.events.length, before);
-      expect(find.text('33% · chapter 1 of 3'), findsOneWidget);
+      expect(find.text('1% · page 1'), findsOneWidget);
     });
 
     testWidgets('reserves its columns invisibly without a document', (

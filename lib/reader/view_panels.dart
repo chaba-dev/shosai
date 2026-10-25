@@ -571,6 +571,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
     void Function(ReaderMessage) dispatch,
   ) {
     final total = document.logicalUnitCount.toInt();
+    final chapter = document.format == FlutterBookFormat.epub;
     final busy = model.busy || model.relayoutBusy;
     final muted = shellInterfaceStyle(12, 16).copyWith(color: palette.inkMuted);
     return Column(
@@ -581,7 +582,7 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
           spacing: ShosaiTokens.space2,
           children: [
             Text(
-              l10n.readerGoToPage,
+              chapter ? l10n.readerGoToChapter : l10n.readerGoToPage,
               style: shellInterfaceStyle(
                 12,
                 16,
@@ -595,7 +596,11 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
                 controller: _pageInput,
                 enabled: !busy,
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                placeholder: Text(l10n.readerPageInputLabel),
+                placeholder: Text(
+                  chapter
+                      ? l10n.readerChapterInputLabel
+                      : l10n.readerPageInputLabel,
+                ),
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.go,
                 onChanged: (value) => dispatch(ReaderPageInputChanged(value)),
@@ -619,7 +624,9 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
               key: const ValueKey('reader-page-input-error'),
               liveRegion: true,
               child: Text(
-                l10n.readerPageInputInvalid(total),
+                chapter
+                    ? l10n.readerChapterInputInvalid(total)
+                    : l10n.readerPageInputInvalid(total),
                 style: shellInterfaceStyle(
                   12,
                   16,

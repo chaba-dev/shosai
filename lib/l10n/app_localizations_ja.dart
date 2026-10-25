@@ -469,6 +469,17 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerGoToPage => 'ページへ移動';
 
   @override
+  String get readerGoToChapter => '章へ移動';
+
+  @override
+  String get readerChapterInputLabel => '章';
+
+  @override
+  String readerChapterInputInvalid(int total) {
+    return '1～$totalの章を入力してください。';
+  }
+
+  @override
   String get readerSearchAction => '検索';
 
   @override

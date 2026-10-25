@@ -706,6 +706,14 @@
   "@readerGoToPage": {
     "description": "Contents: the label of the page field at the bottom."
   },
+  "readerGoToChapter": "Go to chapter",
+  "readerChapterInputLabel": "Chapter",
+  "readerChapterInputInvalid": "Enter a chapter between 1 and {total}.",
+  "@readerChapterInputInvalid": {
+    "placeholders": {
+      "total": { "type": "int" }
+    }
+  },
   "readerSearchAction": "Search",
   "@readerSearchAction": {
     "description": "Iced reference key: search."

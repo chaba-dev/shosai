@@ -48,11 +48,15 @@ final class ReadingState {
   /// [lastUnit] is the last unit in view when it is past the position's own,
   /// as on a PDF spread: the progress counts it as read, so the last spread of
   /// a book finishes it.
+  /// [progress] supplies the book-wide fraction when the reader has canonical
+  /// EPUB offsets or a fixed PDF page range. It is saved atomically with the
+  /// position, without changing the position used for restoration.
   Future<void> save(
     int bookId,
     ReadingPosition position, {
     required int unitCount,
     int? lastUnit,
+    double? progress,
   }) async {
     _validate(position);
     if (unitCount < 1) {
@@ -65,8 +69,15 @@ final class ReadingState {
         'The last unit in view must not come before the position.',
       );
     }
-    final progress = readingProgress(lastUnit ?? position.unit, unitCount);
-    return _store.transaction((db) => _save(db, bookId, position, progress));
+    if (progress != null &&
+        (!progress.isFinite || progress < 0 || progress > 1)) {
+      throw const CoreException.invalidRequest(
+        'Progress must be between 0 and 1.',
+      );
+    }
+    final fraction =
+        progress ?? readingProgress(lastUnit ?? position.unit, unitCount);
+    return _store.transaction((db) => _save(db, bookId, position, fraction));
   }
 }
 

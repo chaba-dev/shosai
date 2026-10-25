@@ -480,6 +480,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerGoToPage => 'Go to page';
 
   @override
+  String get readerGoToChapter => 'Go to chapter';
+
+  @override
+  String get readerChapterInputLabel => 'Chapter';
+
+  @override
+  String readerChapterInputInvalid(int total) {
+    return 'Enter a chapter between 1 and $total.';
+  }
+
+  @override
   String get readerSearchAction => 'Search';
 
   @override
