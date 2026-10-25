@@ -169,6 +169,7 @@ All notable changes to this project will be documented in this file.
 - Define the first release in RFDs 4 and 6 and add the Shōsai design system (#148)
 - *(rfd)* Revise RFD 4 for a Dart-only application core (#151)
 - *(rfd)* Move RFDs to chaba-dev/rfds (#221)
+- *(design-system)* The quiet page on phone and tablet (#239)
 
 ### ⚡ Performance
 
