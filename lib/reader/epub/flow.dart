@@ -130,10 +130,15 @@ class FlowTextBlock {
     ];
   }
 
-  String? linkAtLocal(Offset local) {
+  ({String href, String label})? linkAtLocal(Offset local) {
     final offset = painter.getPositionForOffset(local).offset;
     for (final link in links) {
-      if (offset >= link.start && offset < link.end) return link.href;
+      if (offset >= link.start && offset < link.end) {
+        return (
+          href: link.href,
+          label: painter.text!.toPlainText().substring(link.start, link.end),
+        );
+      }
     }
     return null;
   }

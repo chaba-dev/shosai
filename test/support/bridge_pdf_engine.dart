@@ -81,6 +81,8 @@ mixin BridgePdfEngine implements PdfEngine {
   /// Whether the engine document reads right to left.
   bool get pdfEngineRightToLeft => false;
 
+  Future<List<PdfPageLink>> pdfEngineLinks(int page) async => const [];
+
   /// The layout width the engine document asks the bridge's selection fake
   /// for; the reader's default layout width.
   double get pdfEngineSurfaceWidth => 680;
@@ -183,7 +185,7 @@ final class BridgePdfDocument implements PdfEngineDocument {
   Future<List<PdfOutlineEntry>> outline() async => const [];
 
   @override
-  Future<List<PdfPageLink>> links(int page) async => const [];
+  Future<List<PdfPageLink>> links(int page) => _engine.pdfEngineLinks(page);
 
   @override
   Future<void> dispose() async {

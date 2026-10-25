@@ -220,5 +220,10 @@
   "importSelectionTooLarge": "選択した書類の数またはサイズが追加の上限を超えています。",
   "importReadFailed": "選択した書類を読み取れませんでした。",
   "importCancelled": "追加をキャンセルしました。",
-  "importInvalidRequest": "書類プロバイダへの要求は無効になりました。"
+  "importInvalidRequest": "書類プロバイダへの要求は無効になりました。",
+  "readerReference": "参照",
+  "readerReferenceClose": "閉じる",
+  "readerReferenceGoTo": "移動",
+  "readerReferencePage": "{page}ページ",
+  "readerReferenceNoPreview": "プレビューできるテキストがありません。ページに移動して参照を確認できます。"
 }

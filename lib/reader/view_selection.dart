@@ -744,9 +744,15 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
   /// The pointer that may still become a tap, and where it went down.
   int? _tapPointer;
   Offset? _tapOrigin;
+  final Set<int> _tapPointers = {};
 
   /// Starts a tap candidate for a primary press.
   void _beginTapCandidate(PointerDownEvent event) {
+    _tapPointers.add(event.pointer);
+    if (_tapPointers.length > 1) {
+      _clearTapCandidate();
+      return;
+    }
     final primary =
         event.kind != ui.PointerDeviceKind.mouse || (event.buttons & 1) != 0;
     if (!primary) return;
@@ -775,27 +781,34 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
 
   /// Activates a painted link under a completed tap, if there is one.
   ///
-  /// The retained renderer exposes no link geometry, so only a Dart page
-  /// produces the intent; the controller owns classification and resolution.
-  void _endTapCandidate(PointerUpEvent event, SurfaceTransform transform) {
+  /// EPUB uses its painted link geometry; PDF defers annotation lookup to the
+  /// controller, which owns classification and destination resolution.
+  void _endTapCandidate(Offset position, SurfaceTransform transform) {
     final origin = _tapOrigin;
     final isTap =
-        _tapPointer == event.pointer &&
+        _tapPointer != null &&
         origin != null &&
-        (event.localPosition - origin).distance <= _tapSlop;
+        (position - origin).distance <= _tapSlop;
     _tapPointer = null;
     _tapOrigin = null;
     if (!isTap) return;
     final page = widget.epubPage;
-    if (page == null) return;
-    final source = transform.toSource(event.localPosition);
-    final href =
+    final source = transform.toSource(position);
+    if (page == null) {
+      if (widget.model.document?.format == FlutterBookFormat.pdf) {
+        widget.dispatch(ReaderPdfLinkTapped(source.dx, source.dy));
+      }
+      return;
+    }
+    final link =
         pageLinkAt(page.page, page.box, source) ??
         switch ((page.facing, page.facingBox)) {
           (final facing?, final box?) => pageLinkAt(facing, box, source),
           _ => null,
         };
-    if (href != null) widget.dispatch(ReaderLinkActivated(href));
+    if (link != null) {
+      widget.dispatch(ReaderLinkActivated(link.href, label: link.label));
+    }
   }
 
   @override
@@ -915,12 +928,13 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             }
           },
           onPointerUp: (event) {
-            _endTapCandidate(event, transform);
+            _tapPointers.remove(event.pointer);
             if (event.kind != ui.PointerDeviceKind.touch) {
               widget.dispatch(ReaderSelectionPointerEnded(event.pointer));
             }
           },
           onPointerCancel: (event) {
+            _tapPointers.remove(event.pointer);
             _cancelTapCandidate(event.pointer);
             if (event.kind != ui.PointerDeviceKind.touch ||
                 _touchPointer == event.pointer) {
@@ -930,6 +944,14 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
           },
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            // The document semantics owns its guarded selection action. A
+            // coordinate-based link tap is not a document-wide a11y action.
+            excludeFromSemantics: true,
+            // Let the gesture arena distinguish a tap from PDF double-tap
+            // zoom, a pinch, a page swipe, and a long-press selection first.
+            onTapUp: (details) =>
+                _endTapCandidate(details.localPosition, transform),
+            onTapCancel: _clearTapCandidate,
             onLongPressStart: (details) {
               // A long press is a selection gesture, never a link tap.
               _clearTapCandidate();
