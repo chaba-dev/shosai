@@ -108,6 +108,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Animate page changes with a saved motion preference (#235)
 - *(reader)* Apply shared PDF page themes and Night chrome (#237)
 - *(reader)* Show EPUB layout pages and book-wide progress (#238)
+- *(reader)* Peek at EPUB and PDF references before jumping (#240)
 
 ### 🐛 Bug Fixes
 
