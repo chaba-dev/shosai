@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-24
+## [0.1.0] - 2026-10-25
 
 ### 🚀 Features
 
@@ -107,6 +107,7 @@ All notable changes to this project will be documented in this file.
 - *(shell)* Reorder phone books with a long press (#233)
 - *(reader)* Animate page changes with a saved motion preference (#235)
 - *(reader)* Apply shared PDF page themes and Night chrome (#237)
+- *(reader)* Show EPUB layout pages and book-wide progress (#238)
 
 ### 🐛 Bug Fixes
 
