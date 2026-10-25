@@ -116,6 +116,10 @@ final class LibrarySettingsRequested extends LibraryMessage {
   const LibrarySettingsRequested();
 }
 
+final class LibraryLocationsRequested extends LibraryMessage {
+  const LibraryLocationsRequested();
+}
+
 final class _LibraryLoaded extends LibraryMessage {
   const _LibraryLoaded(
     this.revision,

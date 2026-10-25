@@ -103,6 +103,32 @@ final class LibraryLocations {
     );
   });
 
+  /// A failed folder listing or grant acquisition affects the connection as a
+  /// whole. A successful metadata listing does not validate any book's bytes.
+  Future<void> unavailable(
+    String id,
+    int generation,
+    LocationFailure failure,
+  ) => _store.transaction(
+    (db) => _connectionFailure(db, id, generation, failure),
+  );
+
+  /// An adapter can lose its grant before it opens a stream (for example a
+  /// desktop folder disappearing). Record that failure with the same lifetime
+  /// guards as streamed reads; it must not bypass availability accounting.
+  Future<void> failed(
+    String contentHash,
+    BookLocator locator, {
+    required int generation,
+    required LocationFailure failure,
+  }) => _observed(
+    locator.locationId,
+    generation,
+    contentHash,
+    locator.key,
+    failure,
+  );
+
   /// Read just the requested file/range; record expected availability failures
   /// without removing the book or changing any of its annotations.
   Stream<List<int>> read(
@@ -162,17 +188,7 @@ final class LibraryLocations {
   ) => _store.transaction((db) {
     // A revoked grant affects all its files, not merely the requested one.
     if (failure == LocationFailure.revoked) {
-      db.execute(
-        '''UPDATE book_locators SET failure = 'revoked' WHERE location_id = ?
-           AND EXISTS (SELECT 1 FROM library_locations
-             WHERE id = ? AND generation = ? AND removed = 0)''',
-        [id, id, generation],
-      );
-      db.execute(
-        '''UPDATE library_locations SET generation = generation + 1, removed = 1
-           WHERE id = ? AND generation = ? AND removed = 0''',
-        [id, generation],
-      );
+      _connectionFailure(db, id, generation, failure!);
     } else {
       db.execute(
         '''UPDATE book_locators SET failure = ?
@@ -183,6 +199,27 @@ final class LibraryLocations {
       );
     }
   });
+}
+
+void _connectionFailure(
+  Database db,
+  String id,
+  int generation,
+  LocationFailure failure,
+) {
+  db.execute(
+    '''UPDATE book_locators SET failure = ? WHERE location_id = ?
+       AND EXISTS (SELECT 1 FROM library_locations
+         WHERE id = ? AND generation = ? AND removed = 0)''',
+    [failure.name, id, id, generation],
+  );
+  if (failure == LocationFailure.revoked) {
+    db.execute(
+      '''UPDATE library_locations SET generation = generation + 1, removed = 1
+         WHERE id = ? AND generation = ? AND removed = 0''',
+      [id, generation],
+    );
+  }
 }
 
 bool _hasGeneration(Database db, String id, int generation) => db

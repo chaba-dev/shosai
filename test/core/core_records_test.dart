@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_core/shosai_core.dart' show BookAnchor;
+import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -170,6 +171,167 @@ void main() {
     expect(report.items.single.error, isNull);
     return report.items.single.book!;
   }
+
+  for (final managed in [false, true]) {
+    test('duplicate folder import preserves a local book ($managed)', () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      final file = File(_epubFixture).copySync('${source.path}/chosen.epub');
+      final imported = await core.library.importFile(
+        file.path,
+        managed: managed,
+      );
+      final original = imported.book!;
+      await core.folders.add(
+        FolderGrant('duplicate', 'My books', 'path', source.path),
+      );
+      final page = await core.folders.browse('duplicate');
+      final duplicate = await core.folders.importEntry(
+        'duplicate',
+        page.entries.single,
+      );
+      expect(duplicate.id, original.id);
+      await core.folders.remove('duplicate');
+      expect((await core.library.get(original.id))!.locationFailure, isNull);
+      final opened = await bridge.openLibraryBook(
+        bookId: original.id,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(opened.title, original.title);
+      bridge.releaseDocument(handle: opened.handle);
+      expect((await core.library.page()).bookCount, 1);
+    });
+  }
+
+  test(
+    'folder books open on demand after restart and reconnect without losing notes',
+    () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      final chosen = File(_epubFixture).copySync('${source.path}/chosen.epub');
+      File(_pdfFixture).copySync('${source.path}/unopened.pdf');
+      final original = chosen.readAsBytesSync();
+      await core.folders.add(
+        FolderGrant('device-folder', 'My books', 'path', source.path),
+      );
+      final entries = await core.folders.browse('device-folder');
+      expect(
+        entries.entries.map((entry) => entry.name),
+        containsAll(['chosen.epub', 'unopened.pdf']),
+      );
+      expect(
+        (await core.library.page()).bookCount,
+        0,
+        reason: 'listing never imports an entire library',
+      );
+      final selected = entries.entries.singleWhere(
+        (entry) => entry.name == 'chosen.epub',
+      );
+      final book = await core.folders.importEntry('device-folder', selected);
+      expect((await core.library.page()).bookCount, 1);
+      expect(
+        File(book.path).existsSync(),
+        isFalse,
+        reason: 'the transient staging file is released',
+      );
+      expect(chosen.existsSync(), isTrue);
+      await core.annotations.createNote(
+        book.id,
+        const BookAnchor(),
+        'These notes follow content, not its grant.',
+      );
+
+      bridge.dispose();
+      await bridge.drain();
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      final opened = await bridge.openLibraryBook(
+        bookId: book.id,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(opened.bookId, book.id);
+      expect(opened.logicalUnitCount, greaterThan(BigInt.zero));
+      expect(bridge.releaseDocument(handle: opened.handle), isTrue);
+
+      chosen.deleteSync();
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: book.id,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(
+          isA<FlutterBridgeError>().having(
+            (error) => error.kind,
+            'kind',
+            FlutterBridgeErrorKind.notFound,
+          ),
+        ),
+      );
+      expect(
+        (await bridge.libraryPage(
+          limit: 10,
+          offset: 0,
+          cancellationId: bridge.createCancellation(),
+        )).books.single.unavailable,
+        isTrue,
+      );
+      chosen.writeAsBytesSync(original);
+      final restored = await bridge.openLibraryBook(
+        bookId: book.id,
+        cancellationId: bridge.createCancellation(),
+      );
+      bridge.releaseDocument(handle: restored.handle);
+      expect(
+        (await bridge.libraryPage(
+          limit: 10,
+          offset: 0,
+          cancellationId: bridge.createCancellation(),
+        )).books.single.unavailable,
+        isFalse,
+      );
+
+      chosen.writeAsBytesSync([...original, 11]);
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: book.id,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(isA<FlutterBridgeError>()),
+      );
+      expect(
+        (await bridge.libraryPage(
+          limit: 10,
+          offset: 0,
+          cancellationId: bridge.createCancellation(),
+        )).books.single.unavailable,
+        isTrue,
+        reason: 'replacement bytes are not the old content identity',
+      );
+      chosen.writeAsBytesSync(original);
+      await core.folders.remove('device-folder');
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: book.id,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(isA<FlutterBridgeError>()),
+      );
+      expect(
+        chosen.existsSync(),
+        isTrue,
+        reason: 'disconnect never deletes a source book',
+      );
+      await core.folders.add(
+        FolderGrant('new-device-grant', 'Reconnected', 'path', source.path),
+      );
+      final same = await core.folders.importEntry('new-device-grant', selected);
+      expect(same.id, book.id);
+      expect(
+        (await core.annotations.summary(book.id)).latest,
+        'These notes follow content, not its grant.',
+      );
+      expect((await core.library.page()).bookCount, 1);
+    },
+  );
 
   test(
     'a removed location retains its book and notes as unavailable',

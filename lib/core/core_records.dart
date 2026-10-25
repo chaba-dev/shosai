@@ -9,6 +9,7 @@ import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/documents.dart';
+import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
@@ -65,6 +66,12 @@ final class ShosaiCore {
   final Store store;
   final Library library;
   final LibraryLocations locations;
+  late final LibraryFolders folders = LibraryFolders(
+    Preferences(store),
+    library,
+    locations,
+    snapshots.newPath,
+  );
 
   /// Reads PDF metadata on import, and PDF text for the bridge's
   /// handle-keyed annotation calls.
@@ -84,6 +91,7 @@ final class ShosaiCore {
   /// bridge uses the core: [CoreOwner.close] does, after its bridges drain.
   Future<void> close() async {
     try {
+      await folders.close();
       await snapshots.close();
     } finally {
       await store.close();
@@ -479,22 +487,21 @@ final class CoreRecords implements ShosaiRecords {
     if (book == null) {
       throw const CoreException.notFound('The book is not in the library.');
     }
-    if (book.locationFailure != null) {
-      throw const CoreException.notFound(
-        'The book’s location is unavailable. Reconnect it to read this book.',
-      );
-    }
     // The document reads one snapshot of the file and checks it against the
     // book's content hash: what was verified is what is parsed, rendered,
     // searched and annotated.
     try {
-      final opened = await _documents.open(
-        book.path,
-        format: book.format,
-        expected: (
-          bookId: bookId,
-          title: book.title,
-          contentHash: book.contentHash,
+      final opened = await _core.folders.withBookFile(
+        book,
+        (path) => _documents.open(
+          path,
+          format: book.format,
+          expected: (
+            bookId: bookId,
+            title: book.title,
+            contentHash: book.contentHash,
+          ),
+          cancellation: _token(cancellationId),
         ),
         cancellation: _token(cancellationId),
       );
@@ -916,20 +923,21 @@ final class CoreRecords implements ShosaiRecords {
     Future<void> Function(UnitTextSource text) read,
     CancellationToken cancellation,
   ) async {
-    if (book.locationFailure != null) {
-      throw const CoreException.notFound(
-        'The book’s location is unavailable. Reconnect it to search this book.',
-      );
-    }
-    final opened = await _documents.open(
-      book.path,
-      format: book.format,
-      expected: (
-        bookId: book.id,
-        title: book.title,
-        contentHash: book.contentHash,
+    final opened = await _locationErrors(
+      () => _core.folders.withBookFile(
+        book,
+        (path) => _documents.open(
+          path,
+          format: book.format,
+          expected: (
+            bookId: book.id,
+            title: book.title,
+            contentHash: book.contentHash,
+          ),
+          cancellation: cancellation,
+        ),
+        cancellation: cancellation,
       ),
-      cancellation: cancellation,
     );
     try {
       await read(_documentText(opened));
@@ -968,7 +976,8 @@ FlutterSearchMatch _searchMatch(SearchMatch match) => FlutterSearchMatch(
 /// Disposing it admits no more documents, cancels its operations and
 /// releases its documents; [drain] completes when that work has finished.
 /// The core outlives every bridge; its [CoreOwner] closes it.
-final class ApplicationBridge implements FlutterBridge, RecordsHost {
+final class ApplicationBridge
+    implements FlutterBridge, RecordsHost, LibraryFoldersHost {
   ApplicationBridge(ShosaiCore core)
     : this._(core, OpenDocuments(core.pdfEngine, core.snapshots));
 
@@ -979,6 +988,9 @@ final class ApplicationBridge implements FlutterBridge, RecordsHost {
 
   @override
   final CoreRecords records;
+
+  @override
+  LibraryFolders get folders => records._core.folders;
 
   var _lastCancellation = BigInt.zero;
   final Set<BigInt> _cancellations = {};
@@ -1435,9 +1447,29 @@ final class _LazyPdfText implements ReaderText {
 
 /// Run [body], reporting a core failure as the bridge error the controllers
 /// already present.
-Future<T> _bridgeErrors<T>(Future<T> Function() body) async {
+Future<T> _locationErrors<T>(Future<T> Function() body) async {
   try {
     return await body();
+  } on LocationException catch (error) {
+    throw CoreException(
+      error.failure == LocationFailure.offline
+          ? CoreErrorKind.inaccessible
+          : CoreErrorKind.notFound,
+      switch (error.failure) {
+        LocationFailure.offline =>
+          'The book’s location is offline. Try again when it is connected.',
+        LocationFailure.revoked =>
+          'The book’s location is unavailable. Reconnect the folder to read it.',
+        LocationFailure.missing =>
+          'The book is missing from its location. Your notes are still here.',
+      },
+    );
+  }
+}
+
+Future<T> _bridgeErrors<T>(Future<T> Function() body) async {
+  try {
+    return await _locationErrors(body);
   } on CoreException catch (error) {
     throw FlutterBridgeError(
       kind: switch (error.kind) {

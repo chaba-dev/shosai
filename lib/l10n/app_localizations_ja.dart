@@ -769,6 +769,60 @@ class AppLocalizationsJa extends AppLocalizations {
   String get libraryBookUnavailable => '利用できません';
 
   @override
+  String get libraryLocations => '保存場所';
+
+  @override
+  String get libraryLocationsDescription =>
+      '本は選択したフォルダに残ります。追加または開いた本だけを読み込みます。';
+
+  @override
+  String get locationAddFolder => 'フォルダを接続';
+
+  @override
+  String get locationClose => '閉じる';
+
+  @override
+  String get locationCancel => 'キャンセル';
+
+  @override
+  String get locationLoading => 'フォルダを読み込み中';
+
+  @override
+  String get locationOffline => 'この保存場所はオフラインです。接続後にもう一度お試しください。';
+
+  @override
+  String get locationRevoked => 'フォルダへのアクセスが取り消されました。再接続してください。ノートは残っています。';
+
+  @override
+  String get locationMissing => 'フォルダまたは本が見つかりません。ノートは残っています。';
+
+  @override
+  String get locationFailed => 'フォルダにアクセスできません。権限と接続を確認して、もう一度お試しください。';
+
+  @override
+  String get locationBookAdded => '本を追加しました。保存場所を閉じてライブラリから開けます。';
+
+  @override
+  String get locationBack => '戻る';
+
+  @override
+  String get locationRemove => 'フォルダを切断';
+
+  @override
+  String get locationRemoveDescription =>
+      '本とノートはライブラリに残ります。他の保存場所がない本は利用できなくなります。元のファイルは削除されません。';
+
+  @override
+  String get locationNoFolders =>
+      '端末のフォルダ、またはシステムのファイルプロバイダが提供するフォルダを接続してください。';
+
+  @override
+  String get locationAddBook => 'ライブラリに追加';
+
+  @override
+  String get locationNextPage => '次のページ';
+
+  @override
   String get shellSwitcherDone => '完了';
 
   @override
