@@ -4,12 +4,15 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import '../cancellation.dart';
 import '../errors.dart';
 import '../store/store.dart';
 import 'book.dart';
 import 'files.dart';
 import 'location.dart';
+import 'records.dart';
 
 /// Automatic files share a byte budget and a 256-entry ceiling. Explicitly
 /// kept files are outside that budget and are never automatically evicted.
@@ -28,6 +31,7 @@ final class BookFileCache {
   final String directory;
   final int capacity;
   Future<void> _tail = Future.value();
+  String? _root;
   static final _held = <String>{};
 
   /// Reconcile durable availability before the first library listing.
@@ -50,21 +54,38 @@ final class BookFileCache {
     }
     RandomAccessFile? lock;
     try {
+      await _validateRoot(root);
       lock = await File('$root/.lock').open(mode: FileMode.append);
       await lock.lock(FileLock.exclusive);
+      await _validateRoot(root);
+      _root = root;
       await _reconcile();
       return await effect();
     } finally {
       try {
         await lock?.close();
       } finally {
+        _root = null;
         _held.remove(root);
       }
     }
   }
 
+  Future<void> _validateRoot(String root) async {
+    if (await Directory(directory).resolveSymbolicLinks() != root ||
+        await Directory(root).resolveSymbolicLinks() != root ||
+        !await LibraryRecords(
+          _store,
+        ).claimManagedDirectory(p.normalize(p.absolute(directory)), root)) {
+      throw const CoreException(
+        CoreErrorKind.inaccessible,
+        'The book cache directory has been redirected.',
+      );
+    }
+  }
+
   String _path(String hash, BookFormat format) =>
-      '$directory/$hash.${format.name}';
+      '${_root!}/$hash.${format.name}';
 
   /// Fetch only on a miss. Oversized automatic files are transient: at most
   /// one bounded incoming file exists, and it is removed after consumption.
@@ -94,7 +115,8 @@ final class BookFileCache {
     }
     final retain = kept || book.fileSize <= capacity;
     if (retain && !kept) await _trim(reserve: book.fileSize, entries: 1);
-    final incoming = File(uniqueTemporaryPath(directory, 'incoming'));
+    await _validateRoot(_root!);
+    final incoming = File(uniqueTemporaryPath(_root!, 'incoming'));
     try {
       final output = await incoming.open(mode: FileMode.writeOnly);
       try {
@@ -119,11 +141,21 @@ final class BookFileCache {
       }
       cancellation.throwIfCancelled();
       if (!retain) return await consume(incoming.path);
+      await _validateRoot(_root!);
       await incoming.rename(path);
       await _record(hash, book.format, fingerprint.size, kept);
       return await consume(path);
     } finally {
-      if (await incoming.exists()) await incoming.delete();
+      // A redirected root must not turn cleanup into deletion elsewhere.
+      try {
+        if (await Directory(_root!).resolveSymbolicLinks() == _root &&
+            await incoming.exists()) {
+          await incoming.delete();
+        }
+      } on FileSystemException {
+        // A missing root leaves nothing safe to clean up. A later sweep will
+        // recover an interrupted incoming file if the original root returns.
+      }
     }
   });
 
@@ -191,6 +223,7 @@ final class BookFileCache {
       );
 
   Future<void> _drop(String hash, BookFormat format) async {
+    await _validateRoot(_root!);
     final file = File(_path(hash, format));
     // Delete first: a failed deletion must still count against the budget.
     if (await file.exists()) await file.delete();
@@ -235,12 +268,13 @@ final class BookFileCache {
   Future<void> _reconcile() async {
     final entries = await _entries();
     final names = {for (final row in entries) '${row.hash}.${row.format.name}'};
-    await for (final entry in Directory(directory).list(followLinks: false)) {
+    await for (final entry in Directory(_root!).list(followLinks: false)) {
       final name = entry.path.split(Platform.pathSeparator).last;
       if (entry is File &&
           !names.contains(name) &&
           (RegExp(r'^[0-9a-f]{64}\.(epub|pdf)$').hasMatch(name) ||
               name.startsWith('.shosai-incoming-'))) {
+        await _validateRoot(_root!);
         await entry.delete();
       }
     }

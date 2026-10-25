@@ -23,6 +23,27 @@ void main() {
       );
 
   test(
+    'redirected cache roots cannot delete unrelated files, even after restart',
+    () async {
+      final t = await TempLibrary.create();
+      final cache = BookFileCache(t.store, t.path('cache'));
+      await cache.sweep();
+      Directory(cache.directory).deleteSync(recursive: true);
+      final external = Directory(t.path('unrelated'))..createSync();
+      final sentinel = File('${external.path}/${'a' * 64}.epub')
+        ..writeAsStringSync('not a cache file');
+      Link(cache.directory).createSync(external.path);
+      for (final instance in [cache, BookFileCache(t.store, cache.directory)]) {
+        await expectLater(
+          instance.sweep(),
+          throwsCoreError(CoreErrorKind.inaccessible),
+        );
+        expect(sentinel.readAsStringSync(), 'not a cache file');
+      }
+    },
+  );
+
+  test(
     'byte-bounded eviction is LRU, not import order; a hit survives offline',
     () async {
       final t = await TempLibrary.create();
