@@ -1286,7 +1286,9 @@ class LibraryBookCard extends StatelessWidget {
     final palette = ShellPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final metaStyle = _cardMetaStyle(context);
-    final status = shellReadingStatus(l10n, book.progress);
+    final status = book.unavailable
+        ? l10n.libraryBookUnavailable
+        : shellReadingStatus(l10n, book.progress);
     final wraps = _cardMetadataWraps(context);
     final statusLabel = removing
         ? Container(

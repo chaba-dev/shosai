@@ -812,6 +812,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'The document provider request is no longer valid.';
 
   @override
+  String get libraryBookUnavailable => 'Unavailable';
+
+  @override
   String get shellSwitcherDone => 'Done';
 
   @override

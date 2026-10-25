@@ -26,6 +26,7 @@ const libraryTextVersions = {
 final class ShosaiCore {
   ShosaiCore._(this.store, this.library, this.pdfEngine, String dataDirectory)
     : snapshots = DocumentSnapshots('$dataDirectory/snapshots'),
+      locations = LibraryLocations(store),
       readingState = ReadingState(store),
       bookmarks = Bookmarks(store),
       settings = ReaderSettingsStore(store),
@@ -63,6 +64,7 @@ final class ShosaiCore {
 
   final Store store;
   final Library library;
+  final LibraryLocations locations;
 
   /// Reads PDF metadata on import, and PDF text for the bridge's
   /// handle-keyed annotation calls.
@@ -476,6 +478,11 @@ final class CoreRecords implements ShosaiRecords {
     final book = await _core.library.get(bookId);
     if (book == null) {
       throw const CoreException.notFound('The book is not in the library.');
+    }
+    if (book.locationFailure != null) {
+      throw const CoreException.notFound(
+        'The book’s location is unavailable. Reconnect it to read this book.',
+      );
     }
     // The document reads one snapshot of the file and checks it against the
     // book's content hash: what was verified is what is parsed, rendered,
@@ -909,6 +916,11 @@ final class CoreRecords implements ShosaiRecords {
     Future<void> Function(UnitTextSource text) read,
     CancellationToken cancellation,
   ) async {
+    if (book.locationFailure != null) {
+      throw const CoreException.notFound(
+        'The book’s location is unavailable. Reconnect it to search this book.',
+      );
+    }
     final opened = await _documents.open(
       book.path,
       format: book.format,
@@ -1594,6 +1606,7 @@ FlutterLibraryBook _libraryBook(Book book) => FlutterLibraryBook(
   progress: book.progress,
   dateAdded: book.dateAdded,
   lastRead: book.lastRead,
+  unavailable: book.locationFailure != null,
 );
 
 FlutterBookmark _bookmark(Bookmark bookmark, int bookId) => FlutterBookmark(

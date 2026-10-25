@@ -766,6 +766,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get importInvalidRequest => '書類プロバイダへの要求は無効になりました。';
 
   @override
+  String get libraryBookUnavailable => '利用できません';
+
+  @override
   String get shellSwitcherDone => '完了';
 
   @override

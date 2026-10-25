@@ -1428,6 +1428,12 @@ abstract class AppLocalizations {
   /// **'The document provider request is no longer valid.'**
   String get importInvalidRequest;
 
+  /// No description provided for @libraryBookUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get libraryBookUnavailable;
+
   /// The tab switcher's action that returns to the current book.
   ///
   /// In en, this message translates to:

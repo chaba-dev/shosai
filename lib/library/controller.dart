@@ -561,6 +561,7 @@ class LibraryController implements Listenable {
         progress: book.progress,
         dateAdded: book.dateAdded,
         lastRead: book.lastRead,
+        unavailable: book.unavailable,
       );
 
   void _load({bool append = false}) {
