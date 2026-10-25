@@ -7,13 +7,13 @@ part of 'view.dart';
 // base `1e54270a6bb2`, with the values frozen in
 // `docs/flutter-ui-reference-spec.md` §3.5: a header carrying the page title,
 // subtitle, a 380 px search and the add-books action, and a filter row carrying
-// the format entries and Settings. Neither layout has a drawer.
+// the format entries. Settings belongs to the shell navigation instead.
 //
 // Deliberate differences from the reference:
 //
 // * The Bookshelf shell's sidebar (RFD 12, 2026-10-20) replaced the reference's
-//   184 px collection sidebar, so the filter row carries the format entries
-//   and Settings at every width.
+//   184 px collection sidebar. The filter row carries only format entries;
+//   Settings lives in the sidebar, reader rail, or phone's bottom navigation.
 
 // * The compact row sizes its entries to their labels instead of filling the
 //   width (chosen when a fifth CBZ entry could not share one equal-width row at
@@ -317,7 +317,7 @@ class _LibraryActivityBar extends StatelessWidget {
 
 /// The filter row under the header.
 ///
-/// All/EPUB/PDF and Settings stay directly reachable; the entries size to
+/// All/EPUB/PDF stay directly reachable; the entries size to
 /// their labels so every one of them stays readable, and the row wraps onto a
 /// second line at large text instead of clipping or dropping an entry.
 class LibraryFilterRow extends StatelessWidget {
@@ -325,12 +325,10 @@ class LibraryFilterRow extends StatelessWidget {
     super.key,
     required this.model,
     required this.onFormatChanged,
-    required this.onSettingsRequested,
   });
 
   final LibraryModel model;
   final ValueChanged<FlutterBookFormat?> onFormatChanged;
-  final VoidCallback? onSettingsRequested;
 
   @override
   Widget build(BuildContext context) {
@@ -345,12 +343,6 @@ class LibraryFilterRow extends StatelessWidget {
             model: model,
             l10n: l10n,
             onFormatChanged: onFormatChanged,
-          ),
-          LibraryNavigationButton(
-            label: l10n.filterSettings,
-            selected: false,
-            onPressed: onSettingsRequested,
-            fillWidth: false,
           ),
         ],
       ),

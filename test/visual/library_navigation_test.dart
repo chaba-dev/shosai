@@ -107,10 +107,17 @@ void main() {
         widget is LibraryFilterRow,
   );
 
-  Finder entry(String label) => find.descendant(
-    of: chrome,
-    matching: find.widgetWithText(ShadButton, label),
-  );
+  Finder entry(String label) => label == 'Settings' || label == '設定'
+      ? find.descendant(
+          of: find.byWidgetPredicate(
+            (widget) => widget is ShellSidebar || widget is ShellBottomNav,
+          ),
+          matching: find.text(label),
+        )
+      : find.descendant(
+          of: chrome,
+          matching: find.widgetWithText(ShadButton, label),
+        );
 
   /// A shelf card's own title line.
   ///
@@ -431,12 +438,13 @@ void main() {
             expect(find.byType(ShellSidebar), findsNothing);
             expect(find.byType(ShellBottomNav), findsOneWidget);
             final labels = japanese
-                ? const ['すべて', 'EPUB', 'PDF', '設定']
-                : const ['All', 'EPUB', 'PDF', 'Settings'];
+                ? const ['すべて', 'EPUB', 'PDF']
+                : const ['All', 'EPUB', 'PDF'];
             for (final label in labels) {
               expect(entry(label), findsOneWidget);
               expect(tester.widget<ShadButton>(entry(label)).enabled, isTrue);
             }
+            expect(entry(japanese ? '設定' : 'Settings'), findsOneWidget);
             if (japanese) {
               // A Japanese interface in the compact row, not English chrome
               // with Japanese metadata.
@@ -540,7 +548,7 @@ void main() {
     expect(
       tester.getRect(entry('Settings')).bottom,
       lessThanOrEqualTo(view.size.height),
-      reason: 'Settings stays on screen in the filter row',
+      reason: 'Settings stays on screen in the sidebar',
     );
     await captureState(tester, '3a-library-short-900x400-t200', view, {
       'appLocale': renderedLocale(tester),
