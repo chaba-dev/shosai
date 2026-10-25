@@ -109,6 +109,8 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Apply shared PDF page themes and Night chrome (#237)
 - *(reader)* Show EPUB layout pages and book-wide progress (#238)
 - *(reader)* Peek at EPUB and PDF references before jumping (#240)
+- *(library)* Add content-linked locations and unavailable books (#236)
+- *(library)* Connect platform folders with persistent grants (#241)
 
 ### 🐛 Bug Fixes
 
