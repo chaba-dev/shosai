@@ -290,8 +290,35 @@ final class ReaderLocationNavigated extends ReaderMessage {
 /// source. An external reference never reaches the platform unless its scheme
 /// is one of the allowed ones, and the reader never fetches a book resource.
 final class ReaderLinkActivated extends ReaderMessage {
-  const ReaderLinkActivated(this.href);
+  const ReaderLinkActivated(this.href, {this.label});
   final String href;
+  final String? label;
+}
+
+/// A completed tap in the PDF selection surface (or textless raster) frame.
+final class ReaderPdfLinkTapped extends ReaderMessage {
+  const ReaderPdfLinkTapped(this.x, this.y);
+  final double x;
+  final double y;
+}
+
+final class ReaderReferenceDismissed extends ReaderMessage {
+  const ReaderReferenceDismissed();
+}
+
+final class ReaderReferenceGoToRequested extends ReaderMessage {
+  const ReaderReferenceGoToRequested();
+}
+
+final class _ReaderReferenceLoaded extends ReaderMessage {
+  const _ReaderReferenceLoaded(this.generation, this.revision, this.peek);
+  final int generation;
+  final int revision;
+  final ReaderReferencePeek peek;
+}
+
+final class _ReaderReferenceFinished extends ReaderMessage {
+  const _ReaderReferenceFinished();
 }
 
 /// Updates the more panel's page-input draft (RD-10).

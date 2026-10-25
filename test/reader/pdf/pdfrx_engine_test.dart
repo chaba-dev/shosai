@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
+import '../../support/reference_documents.dart';
+
 const _fixture = 'fixtures/sample.pdf';
 
 /// A one-page PDF whose catalog carries [catalogExtra], written to a
@@ -38,6 +40,63 @@ Future<String> _pdfWith(String catalogExtra) async {
 
 void main() {
   final engine = PdfrxPdfEngine();
+
+  for (final fixture in [
+    (
+      rotation: 0,
+      cropped: false,
+      rect: [72.0, 570.0, 310.0, 596.0],
+      target: (x: 72.0, y: 102.0),
+    ),
+    (
+      rotation: 90,
+      cropped: false,
+      rect: [570.0, 302.0, 596.0, 540.0],
+      target: (x: 690.0, y: 72.0),
+    ),
+    (
+      rotation: 180,
+      cropped: false,
+      rect: [302.0, 196.0, 540.0, 222.0],
+      target: (x: 540.0, y: 690.0),
+    ),
+    (
+      rotation: 270,
+      cropped: false,
+      rect: [196.0, 72.0, 222.0, 310.0],
+      target: (x: 102.0, y: 540.0),
+    ),
+    (
+      rotation: 90,
+      cropped: true,
+      rect: [540.0, 290.0, 566.0, 528.0],
+      target: (x: 660.0, y: 52.0),
+    ),
+  ]) {
+    test('links match painted geometry at ${fixture.rotation} degrees, '
+        'crop=${fixture.cropped}', () async {
+      final directory = await Directory.systemTemp.createTemp('reference-pdf-');
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/references.pdf');
+      await file.writeAsBytes(
+        referencePdf(rotation: fixture.rotation, cropped: fixture.cropped),
+      );
+      final document = await engine.open(file.path);
+      addTearDown(document.dispose);
+      final links = await document.links(0);
+      expect(links, hasLength(4));
+      expect(links.map((link) => link.page), everyElement(1));
+      final rect = links.first.rects.single;
+      expect([rect.left, rect.bottom, rect.right, rect.top], fixture.rect);
+      expect(links.first.destination, fixture.target);
+      expect(links[1].destination, isNotNull, reason: 'named GoTo destination');
+      expect(links[3].destination, isNotNull, reason: 'FitH destination');
+      if (fixture.rotation == 0) {
+        expect(links[1].destination, (x: 72.0, y: 628.0));
+        expect(links[3].destination, (x: 0.0, y: 412.0));
+      }
+    });
+  }
 
   test('opens the fixture and reports its pages', () async {
     final document = await engine.open(_fixture);

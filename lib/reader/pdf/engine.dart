@@ -150,7 +150,12 @@ final class PdfOutlineEntry {
 
 /// One link annotation.
 final class PdfPageLink {
-  const PdfPageLink({required this.rects, this.url, this.page});
+  const PdfPageLink({
+    required this.rects,
+    this.url,
+    this.page,
+    this.destination,
+  });
 
   /// Clickable areas in page points, `(left, bottom, right, top)` with the
   /// PDF's y axis (up), relative to the page's visible box.
@@ -161,6 +166,10 @@ final class PdfPageLink {
 
   /// Zero-based target page, when the link is an internal destination.
   final int? page;
+
+  /// Optional position within the target's rotated visible page, in points
+  /// from its top-left corner. Page-fit destinations have no position.
+  final ({double x, double y})? destination;
 }
 
 /// A rectangle in page points.

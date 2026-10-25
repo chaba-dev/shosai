@@ -1039,5 +1039,11 @@
   "shellSwitcherDone": "Done",
   "@shellSwitcherDone": {
     "description": "The tab switcher's action that returns to the current book."
-  }
+  },
+  "readerReference": "Reference",
+  "readerReferenceClose": "Close",
+  "readerReferenceGoTo": "Go to",
+  "readerReferencePage": "Page {page}",
+  "@readerReferencePage": {"placeholders": {"page": {"type": "int"}}},
+  "readerReferenceNoPreview": "No text preview available. Go to the page to view this reference."
 }

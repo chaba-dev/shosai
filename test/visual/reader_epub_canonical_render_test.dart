@@ -213,9 +213,13 @@ void main() {
       reason: 'the nav document loses to the NCX',
     );
 
-    // Activating the NCX row navigates to the verified cell anchor through the
-    // guarded layout path, not to an unverified position.
+    // The NCX row previews without leaving the page; Go to navigates to its
+    // verified cell anchor through the guarded layout path.
     await tester.tap(inContents('NCX Two'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsOneWidget);
+    expect(harness.savedReadingStates.last.offset, isNull);
+    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
     for (var round = 0; round < 6; round += 1) {
       await pumpHarnessFrames(tester, frames: 4);
       await tester.runAsync(

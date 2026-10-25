@@ -312,6 +312,8 @@ void main() {
     await settle(tester);
     await tester.tap(inContents('Chapter one deep'));
     await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
+    await settle(tester);
 
     final page = dartPage(tester)!;
     final anchor = book.chapters.first.anchors['one-deep']!;
@@ -342,6 +344,8 @@ void main() {
     await tester.pump();
     await settle(tester);
     await tester.tap(inContents(title));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
     await settle(tester);
   }
 
@@ -706,6 +710,8 @@ void main() {
       origin +
           Offset((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2),
     );
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
     await settle(tester);
     expectRevealed(tester, deepAnchor);
     expectWindowCoversView(tester);
@@ -1171,6 +1177,8 @@ void main() {
     await tester.pump();
     await settle(tester);
     await tester.tap(inContents('Tall'));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
     // Frame by frame, while the nodes above are measured: the target line
     // stays where the reader sees it.
     final shownAt = <double>[];

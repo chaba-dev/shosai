@@ -813,4 +813,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get shellSwitcherDone => 'Done';
+
+  @override
+  String get readerReference => 'Reference';
+
+  @override
+  String get readerReferenceClose => 'Close';
+
+  @override
+  String get readerReferenceGoTo => 'Go to';
+
+  @override
+  String readerReferencePage(int page) {
+    return 'Page $page';
+  }
+
+  @override
+  String get readerReferenceNoPreview =>
+      'No text preview available. Go to the page to view this reference.';
 }

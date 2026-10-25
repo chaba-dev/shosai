@@ -166,8 +166,23 @@ class _DocumentViewState extends State<_DocumentView>
     final readerFocus = widget.readerFocus;
     final actionFocus = widget.actionFocus;
     final title = document.title ?? 'Untitled document';
-    final surface = model.selectionSurface;
     final page = image;
+    // Link annotations do not depend on text extraction. A scanned PDF, or
+    // one whose text cannot be mapped, still uses its raster's hit-test frame.
+    final surface =
+        model.selectionSurface ??
+        (document.format == FlutterBookFormat.pdf && page != null
+            ? FlutterSelectionSurface(
+                width: page.width.toDouble(),
+                height: page.height.toDouble(),
+                text: '',
+                copyEligible: false,
+                endpoints: const [],
+                graphemeBoundaries: Uint32List(0),
+                wordBoundaries: Uint32List(0),
+                visualLines: const [],
+              )
+            : null);
     if (model.contentState == ReaderContentState.failed) {
       // The failure message is a document-area text leaf: its ink follows the
       // reader palette (owner decision 2026-09-28) like the paper behind it,
