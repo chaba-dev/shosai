@@ -825,7 +825,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get libraryLocationsDescription =>
-      'Books stay in the folders you choose. Only a book you add or open is read.';
+      'Manage the folders that supply your library.';
+
+  @override
+  String get locationSourceFolder => 'Source folder';
+
+  @override
+  String get locationSourceDescription =>
+      'EPUB and PDF files in this folder and its subfolders appear in your library automatically. Files are fetched only when opened or kept on this device.';
+
+  @override
+  String get locationChooseFolder => 'Change source folder';
+
+  @override
+  String get locationUseFolder => 'Use this folder';
 
   @override
   String get locationAddFolder => 'Connect folder';
@@ -856,10 +869,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'The folder could not be accessed. Check its permission and connection, then try again.';
 
   @override
-  String get locationBookAdded =>
-      'Book added. Return to your library to open it.';
-
-  @override
   String get locationBack => 'Back';
 
   @override
@@ -872,9 +881,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get locationNoFolders =>
       'Connect a device folder or a folder offered by your system’s file provider.';
-
-  @override
-  String get locationAddBook => 'Add to library';
 
   @override
   String get locationNextPage => 'Next page';

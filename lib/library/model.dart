@@ -69,6 +69,7 @@ final class LibraryImportSelection {
 final class LibraryModel {
   const LibraryModel({
     this.books = const [],
+    this.sourceFiles = const [],
     this.covers = const {},
     this.coverRevision = 0,
     this.query = '',
@@ -94,6 +95,7 @@ final class LibraryModel {
   });
 
   final List<FlutterLibraryBook> books;
+  final List<LibrarySourceFile> sourceFiles;
   final Map<int, Uint8List> covers;
   final int coverRevision;
   final String query;
@@ -164,7 +166,9 @@ final class LibraryModel {
   /// Which composition the collection column shows.
   LibraryCollectionState get collectionState {
     if (loading && !loadingMore) return LibraryCollectionState.loading;
-    if (books.isNotEmpty) return LibraryCollectionState.ready;
+    if (books.isNotEmpty || sourceFiles.isNotEmpty) {
+      return LibraryCollectionState.ready;
+    }
     if (query.isEmpty && format == null) return LibraryCollectionState.empty;
     return LibraryCollectionState.noMatches;
   }
@@ -182,6 +186,7 @@ final class LibraryModel {
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
+    List<LibrarySourceFile>? sourceFiles,
     Map<int, Uint8List>? covers,
     int? coverRevision,
     String? query,
@@ -206,6 +211,7 @@ final class LibraryModel {
     Object? removingBookId = _same,
   }) => LibraryModel(
     books: books ?? this.books,
+    sourceFiles: sourceFiles ?? this.sourceFiles,
     covers: covers ?? this.covers,
     coverRevision: coverRevision ?? this.coverRevision,
     query: query ?? this.query,

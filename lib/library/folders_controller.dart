@@ -22,6 +22,14 @@ final class FoldersSelected extends FoldersMessage {
   final String id;
 }
 
+final class FoldersChooseDirectoryRequested extends FoldersMessage {
+  const FoldersChooseDirectoryRequested();
+}
+
+final class FoldersDirectorySaved extends FoldersMessage {
+  const FoldersDirectorySaved();
+}
+
 final class FoldersEntryChosen extends FoldersMessage {
   const FoldersEntryChosen(this.entry);
   final LocationEntry entry;
@@ -41,20 +49,16 @@ final class FoldersRemoveRequested extends FoldersMessage {
 }
 
 final class _FoldersLoaded extends FoldersMessage {
-  const _FoldersLoaded(this.revision, this.grants);
+  const _FoldersLoaded(this.revision, this.grants, {this.selected});
   final int revision;
   final List<FolderGrant> grants;
+  final String? selected;
 }
 
 final class _FoldersListed extends FoldersMessage {
   const _FoldersListed(this.revision, this.page);
   final int revision;
   final LocationPage page;
-}
-
-final class _FoldersImported extends FoldersMessage {
-  const _FoldersImported(this.revision);
-  final int revision;
 }
 
 final class _FoldersFailed extends FoldersMessage {
@@ -73,7 +77,7 @@ final class FoldersModel {
     this.nextCursor,
     this.busy = false,
     this.error,
-    this.added = false,
+    this.choosingDirectory = false,
   });
   final List<FolderGrant> grants;
   final String? selected;
@@ -82,7 +86,7 @@ final class FoldersModel {
   final String? nextCursor;
   final bool busy;
   final Object? error;
-  final bool added;
+  final bool choosingDirectory;
 }
 
 /// Dialog-local navigation state. Folder grants and imported content belong to
@@ -149,38 +153,52 @@ final class FoldersController extends ChangeNotifier {
       case FoldersSelected():
         if (_model.busy) return;
         _emit(FoldersModel(grants: _model.grants, selected: message.id));
-        _browse();
-      case FoldersEntryChosen():
+      case FoldersChooseDirectoryRequested():
         if (_model.busy || _model.selected == null) return;
+        _emit(
+          FoldersModel(
+            grants: _model.grants,
+            selected: _model.selected,
+            choosingDirectory: true,
+          ),
+        );
+        _browse();
+      case FoldersDirectorySaved():
+        if (_model.busy || !_model.choosingDirectory) return;
+        final id = _model.selected!;
+        final directory = _model.parents.lastOrNull;
+        final label = directory == null
+            ? null
+            : _model.parents.map((entry) => entry.name).join('/');
+        _effect((revision, _) async {
+          await _folders.configure(id, directory: directory?.key, label: label);
+          return _FoldersLoaded(revision, await _folders.list(), selected: id);
+        });
+      case FoldersEntryChosen():
+        if (_model.busy || !_model.choosingDirectory) return;
         if (message.entry.isDirectory) {
           _emit(
             FoldersModel(
               grants: _model.grants,
               selected: _model.selected,
+              choosingDirectory: true,
               parents: List.unmodifiable([..._model.parents, message.entry]),
             ),
           );
           _browse();
-        } else {
-          final id = _model.selected!;
-          _effect((revision, cancellation) async {
-            await _folders.importEntry(
-              id,
-              message.entry,
-              cancellation: cancellation,
-            );
-            return _FoldersImported(revision);
-          });
         }
       case FoldersBackRequested():
         if (_model.busy) return;
-        if (_model.parents.isEmpty) {
+        if (!_model.choosingDirectory) {
           _emit(FoldersModel(grants: _model.grants));
+        } else if (_model.parents.isEmpty) {
+          _emit(FoldersModel(grants: _model.grants, selected: _model.selected));
         } else {
           _emit(
             FoldersModel(
               grants: _model.grants,
               selected: _model.selected,
+              choosingDirectory: true,
               parents: List.unmodifiable(
                 _model.parents.take(_model.parents.length - 1),
               ),
@@ -206,28 +224,22 @@ final class FoldersController extends ChangeNotifier {
         });
       case _FoldersLoaded():
         if (message.revision != _revision) return;
-        _emit(FoldersModel(grants: List.unmodifiable(message.grants)));
+        _emit(
+          FoldersModel(
+            grants: List.unmodifiable(message.grants),
+            selected: message.selected,
+          ),
+        );
       case _FoldersListed():
         if (message.revision != _revision) return;
         _emit(
           FoldersModel(
             grants: _model.grants,
             selected: _model.selected,
+            choosingDirectory: true,
             parents: _model.parents,
             entries: message.page.entries,
             nextCursor: message.page.nextCursor,
-          ),
-        );
-      case _FoldersImported():
-        if (message.revision != _revision) return;
-        _emit(
-          FoldersModel(
-            grants: _model.grants,
-            selected: _model.selected,
-            parents: _model.parents,
-            entries: _model.entries,
-            nextCursor: _model.nextCursor,
-            added: true,
           ),
         );
       case _FoldersFailed():
@@ -236,6 +248,7 @@ final class FoldersController extends ChangeNotifier {
           FoldersModel(
             grants: _model.grants,
             selected: _model.selected,
+            choosingDirectory: _model.choosingDirectory,
             parents: _model.parents,
             entries: _model.entries,
             nextCursor: _model.nextCursor,
@@ -269,6 +282,7 @@ final class FoldersController extends ChangeNotifier {
       FoldersModel(
         grants: _model.grants,
         selected: _model.selected,
+        choosingDirectory: _model.choosingDirectory,
         parents: _model.parents,
         entries: _model.entries,
         nextCursor: _model.nextCursor,

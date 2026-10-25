@@ -22,6 +22,10 @@ void main() {
   testWidgets('settings manages multiple independent connections', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final (directory, core) = (await tester.runAsync(() async {
       final directory = await Directory.systemTemp.createTemp(
         'shosai-connections',
@@ -32,6 +36,11 @@ void main() {
       );
       for (final id in ['one', 'two']) {
         final source = Directory('${directory.path}/$id')..createSync();
+        if (id == 'two') {
+          File(
+            'packages/shosai_core/test/fixtures/sample.epub',
+          ).copySync('${source.path}/discovered.epub');
+        }
         await core.folders.add(
           FolderGrant(id, 'Books $id', 'path', source.path),
         );
@@ -40,18 +49,31 @@ void main() {
     }))!;
     final bridge = ApplicationBridge(core);
     addTearDown(() async {
-      await tester.runAsync(() async {
+      await tester.pumpWidget(const SizedBox());
+      var closed = false;
+      final closing = () async {
         bridge.dispose();
         await bridge.drain();
         await core.close();
         await directory.delete(recursive: true);
-      });
+      }().whenComplete(() => closed = true);
+      for (var frame = 0; frame < 500 && !closed; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
+      expect(closed, isTrue);
+      await closing;
     });
     await tester.pumpWidget(
       productionShell(
         home: ProductShell(
           bridgeFactory: () => bridge,
-          readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
+          readerBuilder: (_, book, _, _, _, _, _, _, _, _) => Text(
+            'Reading ${book.title}',
+            key: const ValueKey('source-reader'),
+          ),
         ),
       ),
     );
@@ -67,6 +89,8 @@ void main() {
     }
 
     await settle();
+    expect(find.text('discovered').last, findsOneWidget);
+    expect((await tester.runAsync(core.library.page))!.bookCount, 0);
     expect(find.text('Connections'), findsNothing);
     await tester.tap(find.text('Settings'));
     await settle();
@@ -77,7 +101,13 @@ void main() {
     await tester.tap(find.text('Manage connections'));
     await settle();
     expect(find.text('Books one'), findsOneWidget);
-    expect(find.text('Books two'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(LibraryFoldersDialog),
+        matching: find.text('Books two'),
+      ),
+      findsOneWidget,
+    );
     final first = find.ancestor(
       of: find.text('Books one'),
       matching: find.byType(ListTile),
@@ -89,7 +119,13 @@ void main() {
     await tester.tap(find.widgetWithText(ShadButton, 'Disconnect folder').last);
     await settle();
     expect(find.text('Books one'), findsNothing);
-    expect(find.text('Books two'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(LibraryFoldersDialog),
+        matching: find.text('Books two'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Close'));
     await settle();
     expect(find.text('Library connections'), findsOneWidget);
@@ -104,14 +140,31 @@ void main() {
       (await tester.runAsync(core.folders.list))!.map((grant) => grant.id),
       ['two'],
     );
+    await tester.ensureVisible(find.text('discovered').last);
+    await tester.pump();
+    await tester.tap(find.text('discovered').last);
+    for (
+      var attempt = 0;
+      attempt < 20 &&
+          find.byKey(const ValueKey('source-reader')).evaluate().isEmpty;
+      attempt++
+    ) {
+      await settle();
+    }
+    expect(find.byKey(const ValueKey('source-reader')), findsOneWidget);
+    final book = (await tester.runAsync(core.library.page))!.books.single;
+    expect(find.text('Reading ${book.title}'), findsOneWidget);
+    expect(book.located, isTrue);
     expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Library'));
+    await settle();
     await tester.pumpWidget(const SizedBox());
     await settle();
   });
 
   for (final locale in [const Locale('en'), const Locale('ja')]) {
     testWidgets(
-      'folder selection imports one book and disconnect retains it (${locale.languageCode})',
+      'connection configures a source directory without importing books (${locale.languageCode})',
       (tester) async {
         final setup = (await tester.runAsync(() async {
           final directory = await Directory.systemTemp.createTemp(
@@ -124,9 +177,10 @@ void main() {
             inspectors: {BookFormat.epub: const EpubInspector()},
           );
           final source = Directory('${directory.path}/source')..createSync();
+          Directory('${source.path}/Reading').createSync();
           File(
             'packages/shosai_core/test/fixtures/sample.epub',
-          ).copySync('${source.path}/chosen.epub');
+          ).copySync('${source.path}/Reading/chosen.epub');
           File(
             'packages/shosai_core/test/fixtures/sample.pdf',
           ).copySync('${source.path}/unopened.pdf');
@@ -208,35 +262,26 @@ void main() {
         await settle();
         await tester.tap(find.text('Books'));
         await settle();
-        expect(find.text('chosen.epub'), findsOneWidget);
-        expect(find.text('unopened.pdf'), findsOneWidget);
+        expect(find.text(l10n.locationSourceFolder), findsOneWidget);
+        expect(find.text('chosen.epub'), findsNothing);
+        await tester.tap(find.text(l10n.locationChooseFolder));
+        await settle();
+        expect(find.text('unopened.pdf'), findsNothing);
+        await tester.tap(find.text('Reading'));
+        await settle();
+        expect(find.text('chosen.epub'), findsNothing);
+        await tester.tap(find.text(l10n.locationUseFolder));
+        await settle();
+        expect(find.text(l10n.locationSourceFolder), findsOneWidget);
+        expect(find.text('Reading'), findsOneWidget);
         expect((await tester.runAsync(library.page))!.bookCount, 0);
-        await tester.tap(find.text('chosen.epub'));
-        await settle();
-        expect(find.text(l10n.locationBookAdded), findsOneWidget);
-        expect((await tester.runAsync(library.page))!.bookCount, 1);
-        final book = (await tester.runAsync(library.page))!.books.single;
-        await tester.runAsync(
-          () => Annotations(
-            store,
-          ).createNote(book.id, const BookAnchor(), 'Keep my note.'),
-        );
-        await tester.tap(find.byTooltip(l10n.locationBack));
-        await settle();
-        await tester.tap(find.byTooltip(l10n.locationRemove));
+        final files = (await tester.runAsync(folders.discover))!;
+        expect(files.map((file) => file.entry.name), ['chosen.epub']);
+        await tester.tap(find.widgetWithText(ShadButton, l10n.locationRemove));
         await settle();
         expect(find.text('Books'), findsNothing);
-        expect(
-          (await tester.runAsync(library.page))!.books.single.locationFailure,
-          LocationFailure.revoked,
-        );
-        expect(
-          (await tester.runAsync(
-            () => Annotations(store).summary(book.id),
-          ))!.latest,
-          'Keep my note.',
-        );
-        expect(File('${source.path}/chosen.epub').existsSync(), isTrue);
+        expect((await tester.runAsync(library.page))!.bookCount, 0);
+        expect(File('${source.path}/Reading/chosen.epub').existsSync(), isTrue);
       },
     );
   }

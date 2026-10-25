@@ -107,6 +107,17 @@ final class LibraryBookOpened extends LibraryMessage {
   final FlutterLibraryBook book;
 }
 
+final class LibrarySourceFileOpened extends LibraryMessage {
+  const LibrarySourceFileOpened(this.file);
+  final LibrarySourceFile file;
+}
+
+final class _LibrarySourceFileAdmitted extends LibraryMessage {
+  const _LibrarySourceFileAdmitted(this.book, this.revision);
+  final FlutterLibraryBook book;
+  final int revision;
+}
+
 final class LibraryBookRemovalRequested extends LibraryMessage {
   const LibraryBookRemovalRequested(this.book);
   final FlutterLibraryBook book;
@@ -129,6 +140,7 @@ final class _LibraryLoaded extends LibraryMessage {
     this.append,
     this.cancellation,
     this.sort,
+    this.sourceFiles,
   );
   final int revision;
   final FlutterLibraryPage page;
@@ -138,6 +150,7 @@ final class _LibraryLoaded extends LibraryMessage {
 
   /// The order [page] is listed in.
   final FlutterLibrarySort sort;
+  final List<LibrarySourceFile> sourceFiles;
 }
 
 /// The settings dialog closed with [settings].

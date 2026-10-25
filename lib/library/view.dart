@@ -1280,6 +1280,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             openBookIds: {for (final open in _shell.model.openBooks) open.id},
             sortBooks: (sort) => controller.dispatch(LibrarySortChanged(sort)),
             openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
+            openSourceFile: (file) =>
+                controller.dispatch(LibrarySourceFileOpened(file)),
             openNotes: () =>
                 _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),
             removeBook: (book) =>

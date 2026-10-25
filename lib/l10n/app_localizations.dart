@@ -1455,8 +1455,32 @@ abstract class AppLocalizations {
   /// No description provided for @libraryLocationsDescription.
   ///
   /// In en, this message translates to:
-  /// **'Books stay in the folders you choose. Only a book you add or open is read.'**
+  /// **'Manage the folders that supply your library.'**
   String get libraryLocationsDescription;
+
+  /// No description provided for @locationSourceFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Source folder'**
+  String get locationSourceFolder;
+
+  /// No description provided for @locationSourceDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'EPUB and PDF files in this folder and its subfolders appear in your library automatically. Files are fetched only when opened or kept on this device.'**
+  String get locationSourceDescription;
+
+  /// No description provided for @locationChooseFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Change source folder'**
+  String get locationChooseFolder;
+
+  /// No description provided for @locationUseFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Use this folder'**
+  String get locationUseFolder;
 
   /// No description provided for @locationAddFolder.
   ///
@@ -1506,12 +1530,6 @@ abstract class AppLocalizations {
   /// **'The folder could not be accessed. Check its permission and connection, then try again.'**
   String get locationFailed;
 
-  /// No description provided for @locationBookAdded.
-  ///
-  /// In en, this message translates to:
-  /// **'Book added. Return to your library to open it.'**
-  String get locationBookAdded;
-
   /// No description provided for @locationBack.
   ///
   /// In en, this message translates to:
@@ -1535,12 +1553,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connect a device folder or a folder offered by your system’s file provider.'**
   String get locationNoFolders;
-
-  /// No description provided for @locationAddBook.
-  ///
-  /// In en, this message translates to:
-  /// **'Add to library'**
-  String get locationAddBook;
 
   /// No description provided for @locationNextPage.
   ///

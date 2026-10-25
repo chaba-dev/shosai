@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
 import 'package:shosai_core/shosai_core.dart'
-    show maxSelectedImportPaths, CancellationToken;
+    show maxSelectedImportPaths, CancellationToken, CancellationCheck;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -103,6 +103,8 @@ class LibraryController implements Listenable {
   bool _settingsNotify = false;
   int? _stalledAppendOffset;
   CancellationToken? _keepCancellation;
+  CancellationToken? _sourceCancellation;
+  CancellationToken? _discoveryCancellation;
   bool _closing = false;
   bool _bridgeDisposed = false;
   bool _pendingImportAdapter = false;
@@ -111,7 +113,8 @@ class LibraryController implements Listenable {
   bool get canCancel =>
       _pendingImportAdapter ||
       _foregroundCancellations.isNotEmpty ||
-      _keepCancellation != null;
+      _keepCancellation != null ||
+      _sourceCancellation != null;
 
   bool requestCover(int bookId) {
     if (!_canLoadCover(bookId)) return false;
@@ -154,7 +157,7 @@ class LibraryController implements Listenable {
       case LibraryRefreshed():
         _coverFailures.clear();
         _emit(_model.copyWith(coverRevision: _model.coverRevision + 1));
-        _load();
+        _load(refreshSources: true);
       case LibraryMoreRequested():
         // The scroll trigger can fire again before the model it was built with
         // is replaced, so the request is refused while a load is in flight:
@@ -299,6 +302,8 @@ class LibraryController implements Listenable {
       case LibraryOperationCancelled():
         _adapterRevision += 1;
         _keepCancellation?.cancel();
+        _sourceCancellation?.cancel();
+        _discoveryCancellation?.cancel();
         _pendingImportAdapter = false;
         _cancelImportAdapter();
         for (final cancellation in _foregroundCancellations) {
@@ -307,6 +312,12 @@ class LibraryController implements Listenable {
         _emit(_model);
       case LibraryBookOpened():
         _open(message.book);
+      case LibrarySourceFileOpened():
+        _openSource(message.file);
+      case _LibrarySourceFileAdmitted():
+        if (!_closing && message.revision == _adapterRevision) {
+          _open(message.book);
+        }
       case LibraryBookRemovalRequested():
         _requestRemoval(message.book);
       case LibraryBookKeepRequested():
@@ -351,12 +362,15 @@ class LibraryController implements Listenable {
                       ]
                     : message.page.books.map(_withoutCover).toList(),
               ),
+              sourceFiles: message.sourceFiles,
               // An order chosen while the settings loaded is the one kept.
               settings:
                   message.settings?.copyWith(librarySort: message.sort) ??
                   _model.settings,
               sort: message.sort,
-              bookCount: message.page.bookCount,
+              bookCount: message.page.bookCount == null
+                  ? null
+                  : message.page.bookCount! + message.sourceFiles.length,
               continueReading: switch (message.page.continueReading) {
                 final book? => _withoutCover(book),
                 null => null,
@@ -574,7 +588,7 @@ class LibraryController implements Listenable {
         keptOnDevice: book.keptOnDevice,
       );
 
-  void _load({bool append = false}) {
+  void _load({bool append = false, bool refreshSources = false}) {
     if (_closing) return;
     for (final cancellation in _loadCancellations) {
       _bridge.cancel(id: cancellation);
@@ -612,6 +626,8 @@ class LibraryController implements Listenable {
     // for a first-page load and the grid stays for an appended page, exactly as
     // the reference's `library_loading && library_offset == 0` branch does.
     _emit(_model.copyWith(loading: true, loadingMore: append));
+    _discoveryCancellation?.cancel();
+    final discovery = _discoveryCancellation = CancellationToken();
     unawaited(() async {
       try {
         final settings = _model.settings == null
@@ -622,6 +638,28 @@ class LibraryController implements Listenable {
         final pageSort = settings != null && !sortChosen
             ? settings.librarySort
             : sort;
+        final host = _bridge;
+        final sourceFiles = host is LibraryFoldersHost
+            ? (await (host as LibraryFoldersHost).folders.discover(
+                    refresh: refreshSources,
+                    cancellation: discovery,
+                  ))
+                  .where(
+                    (file) =>
+                        (format == null ||
+                            file.entry.name.toLowerCase().endsWith(
+                              '.${format.name}',
+                            )) &&
+                        (query.isEmpty ||
+                            file.title.toLowerCase().contains(
+                              query.toLowerCase(),
+                            )),
+                  )
+                  .toList()
+            : <LibrarySourceFile>[];
+        sourceFiles.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
         final page = await _records.libraryPage(
           query: query,
           format: format,
@@ -638,6 +676,7 @@ class LibraryController implements Listenable {
             append,
             cancellation,
             pageSort,
+            List.unmodifiable(sourceFiles),
           ),
         );
       } catch (error) {
@@ -861,6 +900,35 @@ class LibraryController implements Listenable {
     }());
   }
 
+  void _openSource(LibrarySourceFile file) {
+    final host = _bridge;
+    if (_closing || _model.busy || host is! LibraryFoldersHost) return;
+    final revision = ++_adapterRevision;
+    final cancellation = _sourceCancellation = CancellationToken();
+    _beginEffect();
+    unawaited(() async {
+      FlutterLibraryBook? book;
+      try {
+        book = await (host as LibraryFoldersHost).admitSourceFile(
+          file,
+          cancellation: cancellation,
+        );
+        cancellation.throwIfCancelled();
+      } catch (error) {
+        book = null;
+        if (_ownsAdapter(revision)) {
+          dispatch(_LibraryReaderClosed(safeError(error)));
+        }
+      } finally {
+        if (identical(_sourceCancellation, cancellation)) {
+          _sourceCancellation = null;
+        }
+        dispatch(const _LibraryEffectFinished());
+      }
+      if (book != null) dispatch(_LibrarySourceFileAdmitted(book, revision));
+    }());
+  }
+
   void _settings() {
     final initial = _model.settings;
     if (_closing || _model.busy || initial == null) return;
@@ -1020,6 +1088,8 @@ class LibraryController implements Listenable {
     if (_closing) return;
     _closing = true;
     _keepCancellation?.cancel();
+    _sourceCancellation?.cancel();
+    _discoveryCancellation?.cancel();
     _openedDocuments?.cancel();
     final queued = List<String>.of(_openedPaths);
     _openedPaths.clear();

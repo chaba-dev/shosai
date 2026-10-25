@@ -279,6 +279,7 @@ class LibraryCollection extends StatelessWidget {
     this.openBookIds = const {},
     this.sortBooks,
     required this.openBook,
+    this.openSourceFile,
     required this.openNotes,
     required this.removeBook,
     this.keepBook,
@@ -298,6 +299,7 @@ class LibraryCollection extends StatelessWidget {
   /// The section head's sort control; null leaves it out.
   final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
+  final ValueChanged<LibrarySourceFile>? openSourceFile;
 
   /// The hero's Notes action: the Notes place.
   final VoidCallback openNotes;
@@ -342,6 +344,7 @@ class LibraryCollection extends StatelessWidget {
       openBookIds: openBookIds,
       sortBooks: sortBooks,
       openBook: openBook,
+      openSourceFile: openSourceFile,
       openNotes: openNotes,
       removeBook: removeBook,
       keepBook: keepBook,
@@ -543,6 +546,7 @@ class _LibraryGrid extends StatefulWidget {
     required this.openBookIds,
     required this.sortBooks,
     required this.openBook,
+    required this.openSourceFile,
     required this.openNotes,
     required this.removeBook,
     required this.keepBook,
@@ -556,6 +560,7 @@ class _LibraryGrid extends StatefulWidget {
   final Set<int> openBookIds;
   final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
+  final ValueChanged<LibrarySourceFile>? openSourceFile;
   final VoidCallback openNotes;
   final ValueChanged<FlutterLibraryBook> removeBook;
   final ValueChanged<FlutterLibraryBook>? keepBook;
@@ -629,6 +634,29 @@ class _LibraryGridState extends State<_LibraryGrid> {
     final padding = _collectionPadding(layout);
     final spacing = _sectionSpacing(layout);
     final loadingMore = widget.model.loadingMore;
+    final items = <Object>[...widget.model.books, ...widget.model.sourceFiles];
+    if (widget.model.sourceFiles.isNotEmpty &&
+        widget.model.sort != FlutterLibrarySort.recent) {
+      String title(Object item) => switch (item) {
+        FlutterLibraryBook() => item.title,
+        LibrarySourceFile() => item.title,
+        _ => throw StateError('Unknown shelf item'),
+      };
+      String author(Object item) =>
+          item is FlutterLibraryBook ? item.author ?? '' : '';
+      items.sort((a, b) {
+        if (widget.model.sort == FlutterLibrarySort.author) {
+          if (author(a).isEmpty != author(b).isEmpty) {
+            return author(a).isEmpty ? 1 : -1;
+          }
+          final order = author(
+            a,
+          ).toLowerCase().compareTo(author(b).toLowerCase());
+          if (order != 0) return order;
+        }
+        return title(a).toLowerCase().compareTo(title(b).toLowerCase());
+      });
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final shelf = LibraryShelf.of(
@@ -685,9 +713,20 @@ class _LibraryGridState extends State<_LibraryGrid> {
                   ),
                   SliverGrid.builder(
                     gridDelegate: shelf.gridDelegate(context),
-                    itemCount: widget.model.books.length,
+                    itemCount: items.length,
                     itemBuilder: (context, index) {
-                      final book = widget.model.books[index];
+                      final item = items[index];
+                      if (item is LibrarySourceFile) {
+                        final file = item;
+                        return _SourceFileCard(
+                          file: file,
+                          shelf: shelf,
+                          onPressed: widget.model.busy
+                              ? null
+                              : () => widget.openSourceFile?.call(file),
+                        );
+                      }
+                      final book = item as FlutterLibraryBook;
                       return LibraryBookCard(
                         book: book,
                         cover: widget.model.covers[book.bookId],
@@ -1248,14 +1287,80 @@ class _Kicker extends StatelessWidget {
   }
 }
 
-/// One book on the shelf (`sh-book`): its cover, its title in `ed-title`, the
-/// format badge and reading status, and a 3 px progress bar while the book is
-/// under way.
-///
-/// The card is a real button: activation opens the book (or switches to it if
-/// it is already open), and the shared focus ring, Enter/Space activation and
-/// button semantics come from it (LB-14). Its `•••` action is a sibling in a
-/// stack over the cover, so a card never nests one button inside another.
+/// Unopened source metadata uses a generated cover until first admission.
+class _SourceFileCard extends StatelessWidget {
+  const _SourceFileCard({
+    required this.file,
+    required this.shelf,
+    required this.onPressed,
+  });
+  final LibrarySourceFile file;
+  final LibraryShelf shelf;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => ShadButton.raw(
+    variant: ShadButtonVariant.ghost,
+    width: double.infinity,
+    height: double.infinity,
+    padding: EdgeInsets.zero,
+    backgroundColor: _triggerNoFill,
+    hoverBackgroundColor: _triggerNoFill,
+    pressedBackgroundColor: _triggerNoFill,
+    foregroundColor: ShellPalette.of(context).ink,
+    onPressed: onPressed,
+    child: Flexible(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: shelf.columnWidth * 1.5,
+            child: ShellGeneratedCover(
+              title: file.title,
+              author: null,
+              type: shelf.coverType,
+            ),
+          ),
+          const SizedBox(height: _cardSpacing),
+          SizedBox(
+            height: _cardTitleBox(context, shelf),
+            child: Text(
+              file.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.start,
+              style: _cardTitleStyle(shelf),
+            ),
+          ),
+          const SizedBox(height: _cardSpacing),
+          Row(
+            spacing: 6,
+            children: [
+              ShellFormatBadge(
+                format: FlutterBookFormat.values.byName(
+                  file.entry.name.split('.').last.toLowerCase(),
+                ),
+              ),
+              Flexible(
+                child: Text(
+                  file.failure == null
+                      ? file.source
+                      : AppLocalizations.of(context).libraryBookUnavailable,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _cardMetaStyle(context),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// One identified book on the shelf, with its cover, format, reading state
+/// and actions. Discovery-only files never receive record-only actions.
 class LibraryBookCard extends StatelessWidget {
   const LibraryBookCard({
     super.key,

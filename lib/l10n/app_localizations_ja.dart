@@ -778,8 +778,20 @@ class AppLocalizationsJa extends AppLocalizations {
   String get manageConnections => '接続を管理';
 
   @override
-  String get libraryLocationsDescription =>
-      '本は選択したフォルダに残ります。追加または開いた本だけを読み込みます。';
+  String get libraryLocationsDescription => 'ライブラリの本を読み込むフォルダを管理します。';
+
+  @override
+  String get locationSourceFolder => '読み込み元フォルダ';
+
+  @override
+  String get locationSourceDescription =>
+      'このフォルダとサブフォルダ内の EPUB と PDF がライブラリに自動で表示されます。ファイルは開くとき、または端末に保存するときだけ取得します。';
+
+  @override
+  String get locationChooseFolder => '読み込み元フォルダを変更';
+
+  @override
+  String get locationUseFolder => 'このフォルダを使用';
 
   @override
   String get locationAddFolder => 'フォルダを接続';
@@ -806,9 +818,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationFailed => 'フォルダにアクセスできません。権限と接続を確認して、もう一度お試しください。';
 
   @override
-  String get locationBookAdded => '本を追加しました。ライブラリに戻って開けます。';
-
-  @override
   String get locationBack => '戻る';
 
   @override
@@ -821,9 +830,6 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get locationNoFolders =>
       '端末のフォルダ、またはシステムのファイルプロバイダが提供するフォルダを接続してください。';
-
-  @override
-  String get locationAddBook => 'ライブラリに追加';
 
   @override
   String get locationNextPage => '次のページ';
