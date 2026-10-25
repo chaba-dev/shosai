@@ -144,7 +144,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     openBook: _openBook,
     drainReaderSaves: ReaderController.drainBookWrites,
     editSettings: _editSettings,
-    manageLocations: _manageLocations,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     localizations: () => AppLocalizations.of(context),
@@ -1049,8 +1048,29 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  Future<FlutterReaderSettings?> _editSettings(FlutterReaderSettings initial) =>
-      _settingsDialog(context, initial, showOwnedDialog: _showOwnedDialog);
+  Future<FlutterReaderSettings?> _editSettings(
+    FlutterReaderSettings initial,
+  ) async {
+    final bridge = _sessionBridge;
+    var value = initial;
+    while (true) {
+      if (!mounted || !identical(bridge, _sessionBridge)) return null;
+      final result = await _settingsDialog(
+        context,
+        value,
+        showOwnedDialog: _showOwnedDialog,
+        connectionsAvailable: _sessionBridge is LibraryFoldersHost,
+      );
+      if (result == null) return null;
+      value = result.settings;
+      if (!result.connections) return value;
+      if (!mounted || !identical(bridge, _sessionBridge)) return null;
+      await _manageLocations();
+      if (mounted && identical(bridge, _sessionBridge)) {
+        controller.dispatch(const LibraryRefreshed());
+      }
+    }
+  }
 
   Future<void> _manageLocations() async {
     final host = _sessionBridge;
@@ -1207,9 +1227,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             onFormatChanged: (format) =>
                 controller.dispatch(LibraryFormatChanged(format)),
             onSettingsRequested: settingsRequest,
-            onLocationsRequested: _sessionBridge is LibraryFoldersHost
-                ? () => controller.dispatch(const LibraryLocationsRequested())
-                : null,
           ),
           if (layout == ShellLayout.phone && _shell.model.openBooks.isNotEmpty)
             Padding(

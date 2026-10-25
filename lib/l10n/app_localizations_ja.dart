@@ -769,7 +769,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get libraryBookUnavailable => '利用できません';
 
   @override
-  String get libraryLocations => '保存場所';
+  String get libraryLocations => '接続';
+
+  @override
+  String get libraryConnections => 'ライブラリの接続';
+
+  @override
+  String get manageConnections => '接続を管理';
 
   @override
   String get libraryLocationsDescription =>
@@ -800,7 +806,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationFailed => 'フォルダにアクセスできません。権限と接続を確認して、もう一度お試しください。';
 
   @override
-  String get locationBookAdded => '本を追加しました。保存場所を閉じてライブラリから開けます。';
+  String get locationBookAdded => '本を追加しました。ライブラリに戻って開けます。';
 
   @override
   String get locationBack => '戻る';

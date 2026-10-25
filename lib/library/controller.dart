@@ -26,7 +26,6 @@ class LibraryController implements Listenable {
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
     required LibrarySettingsEditor editSettings,
-    Future<void> Function()? manageLocations,
     LibraryProviderCleanupRetrier retryProviderCleanup =
         _ignoreProviderCleanupRetry,
     LibraryImportAdapterCanceller cancelImportAdapter =
@@ -42,7 +41,6 @@ class LibraryController implements Listenable {
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
        _editSettings = editSettings,
-       _manageLocations = manageLocations,
        _retryProviderCleanup = retryProviderCleanup,
        _cancelImportAdapter = cancelImportAdapter,
        _evictCover = evictCover,
@@ -59,7 +57,6 @@ class LibraryController implements Listenable {
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
   final LibrarySettingsEditor _editSettings;
-  final Future<void> Function()? _manageLocations;
   final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
   final LibraryCoverEvicter _evictCover;
@@ -322,8 +319,6 @@ class LibraryController implements Listenable {
         _remove(message.book);
       case LibrarySettingsRequested():
         _settings();
-      case LibraryLocationsRequested():
-        _locations();
       case _LibraryDebounceElapsed():
         if (message.revision == _queryRevision) _load();
       case _LibraryLoaded():
@@ -860,30 +855,6 @@ class LibraryController implements Listenable {
         dispatch(const _LibraryReaderClosed(null));
       } catch (error) {
         dispatch(_LibraryReaderClosed(safeError(error)));
-      } finally {
-        dispatch(const _LibraryEffectFinished());
-      }
-    }());
-  }
-
-  void _locations() {
-    final manage = _manageLocations;
-    if (_closing || _model.busy || manage == null) return;
-    _beginEffect();
-    final revision = ++_adapterRevision;
-    unawaited(() async {
-      try {
-        await manage();
-        if (_ownsAdapter(revision)) dispatch(const LibraryRefreshed());
-      } catch (error) {
-        if (_ownsAdapter(revision)) {
-          dispatch(
-            _LibraryMutationCompleted(
-              failure: LibraryFailure.settings,
-              error: safeError(error),
-            ),
-          );
-        }
       } finally {
         dispatch(const _LibraryEffectFinished());
       }

@@ -1,15 +1,16 @@
 part of 'view.dart';
 
-Future<FlutterReaderSettings?> _settingsDialog(
+Future<({FlutterReaderSettings settings, bool connections})?> _settingsDialog(
   BuildContext context,
   FlutterReaderSettings initial, {
   required Future<T?> Function<T>(WidgetBuilder builder) showOwnedDialog,
+  required bool connectionsAvailable,
 }) async {
   var value = initial;
-  final result = await showOwnedDialog<FlutterReaderSettings>(
+  return showOwnedDialog<({FlutterReaderSettings settings, bool connections})>(
     (context) => StatefulBuilder(
       builder: (context, setState) => ShadDialog(
-        title: const Text('Reader settings'),
+        title: Text(AppLocalizations.of(context).filterSettings),
         actions: [
           ShadButton.outline(
             height: shosaiShadButtonHeight(context),
@@ -18,7 +19,8 @@ Future<FlutterReaderSettings?> _settingsDialog(
           ),
           ShadButton(
             height: shosaiShadButtonHeight(context),
-            onPressed: () => Navigator.pop(context, value),
+            onPressed: () =>
+                Navigator.pop(context, (settings: value, connections: false)),
             child: const Text('Save'),
           ),
         ],
@@ -29,6 +31,20 @@ Future<FlutterReaderSettings?> _settingsDialog(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (connectionsAvailable)
+                  _SettingField(
+                    label: AppLocalizations.of(context).libraryConnections,
+                    child: ShadButton.outline(
+                      height: shosaiShadButtonHeight(context),
+                      onPressed: () => Navigator.pop(context, (
+                        settings: value,
+                        connections: true,
+                      )),
+                      child: Text(
+                        AppLocalizations.of(context).manageConnections,
+                      ),
+                    ),
+                  ),
                 _SettingField(
                   label: 'Reader theme',
                   child: ShadSelect<String>(
@@ -131,7 +147,6 @@ Future<FlutterReaderSettings?> _settingsDialog(
       ),
     ),
   );
-  return result;
 }
 
 String _pdfZoomLabel(double pdfZoom) => switch (pdfZoom) {

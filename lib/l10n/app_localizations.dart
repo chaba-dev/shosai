@@ -1437,8 +1437,20 @@ abstract class AppLocalizations {
   /// No description provided for @libraryLocations.
   ///
   /// In en, this message translates to:
-  /// **'Locations'**
+  /// **'Connections'**
   String get libraryLocations;
+
+  /// No description provided for @libraryConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'Library connections'**
+  String get libraryConnections;
+
+  /// No description provided for @manageConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage connections'**
+  String get manageConnections;
 
   /// No description provided for @libraryLocationsDescription.
   ///
@@ -1497,7 +1509,7 @@ abstract class AppLocalizations {
   /// No description provided for @locationBookAdded.
   ///
   /// In en, this message translates to:
-  /// **'Book added. Close Locations to open it from your library.'**
+  /// **'Book added. Return to your library to open it.'**
   String get locationBookAdded;
 
   /// No description provided for @locationBack.

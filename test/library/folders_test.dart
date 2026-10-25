@@ -7,13 +7,108 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_core/shosai_core.dart' hide Row;
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/folders_controller.dart';
 import 'package:shosai_flutter/library/folders_view.dart';
+import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
+
+import '../support/production_shell_harness.dart';
 
 void main() {
+  testWidgets('settings manages multiple independent connections', (
+    tester,
+  ) async {
+    final (directory, core) = (await tester.runAsync(() async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-connections',
+      );
+      final core = await ShosaiCore.open(
+        directory.path,
+        pdfEngine: PdfrxPdfEngine(),
+      );
+      for (final id in ['one', 'two']) {
+        final source = Directory('${directory.path}/$id')..createSync();
+        await core.folders.add(
+          FolderGrant(id, 'Books $id', 'path', source.path),
+        );
+      }
+      return (directory, core);
+    }))!;
+    final bridge = ApplicationBridge(core);
+    addTearDown(() async {
+      await tester.runAsync(() async {
+        bridge.dispose();
+        await bridge.drain();
+        await core.close();
+        await directory.delete(recursive: true);
+      });
+    });
+    await tester.pumpWidget(
+      productionShell(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    Future<void> settle() async {
+      // The controller owns the settings effect until the dialog closes, so
+      // its activity indicator intentionally keeps scheduling frames.
+      for (var attempt = 0; attempt < 30; attempt++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
+    }
+
+    await settle();
+    expect(find.text('Connections'), findsNothing);
+    await tester.tap(find.text('Settings'));
+    await settle();
+    expect(find.text('Library connections'), findsOneWidget);
+    final continuous = find.byType(ShadSwitch).first;
+    final before = tester.widget<ShadSwitch>(continuous).value;
+    await tester.tap(continuous);
+    await tester.tap(find.text('Manage connections'));
+    await settle();
+    expect(find.text('Books one'), findsOneWidget);
+    expect(find.text('Books two'), findsOneWidget);
+    final first = find.ancestor(
+      of: find.text('Books one'),
+      matching: find.byType(ListTile),
+    );
+    await tester.tap(
+      find.descendant(of: first, matching: find.byIcon(Icons.link_off)),
+    );
+    await settle();
+    await tester.tap(find.widgetWithText(ShadButton, 'Disconnect folder').last);
+    await settle();
+    expect(find.text('Books one'), findsNothing);
+    expect(find.text('Books two'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await settle();
+    expect(find.text('Library connections'), findsOneWidget);
+    expect(
+      tester.widget<ShadSwitch>(continuous).value,
+      !before,
+      reason: 'connection management preserves unsaved reader settings',
+    );
+    await tester.tap(find.text('Save'));
+    await settle();
+    expect(
+      (await tester.runAsync(core.folders.list))!.map((grant) => grant.id),
+      ['two'],
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await settle();
+  });
+
   for (final locale in [const Locale('en'), const Locale('ja')]) {
     testWidgets(
       'folder selection imports one book and disconnect retains it (${locale.languageCode})',

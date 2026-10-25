@@ -815,7 +815,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get libraryBookUnavailable => 'Unavailable';
 
   @override
-  String get libraryLocations => 'Locations';
+  String get libraryLocations => 'Connections';
+
+  @override
+  String get libraryConnections => 'Library connections';
+
+  @override
+  String get manageConnections => 'Manage connections';
 
   @override
   String get libraryLocationsDescription =>
@@ -851,7 +857,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get locationBookAdded =>
-      'Book added. Close Locations to open it from your library.';
+      'Book added. Return to your library to open it.';
 
   @override
   String get locationBack => 'Back';
