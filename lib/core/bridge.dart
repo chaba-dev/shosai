@@ -921,16 +921,20 @@ class FlutterReadingState {
   /// library progress counts it as read. Not part of the restored position.
   final BigInt? lastUnit;
 
+  /// Book-wide progress from canonical EPUB offsets or a fixed PDF page range.
+  /// Stored with the position, but never used as a restore address.
+  final double? progress;
+
   const FlutterReadingState({
     required this.unit,
     this.offset,
     required this.zoom,
     this.lastUnit,
+    this.progress,
   });
 
   @override
-  int get hashCode =>
-      unit.hashCode ^ offset.hashCode ^ zoom.hashCode ^ lastUnit.hashCode;
+  int get hashCode => Object.hash(unit, offset, zoom, lastUnit, progress);
 
   @override
   bool operator ==(Object other) =>
@@ -940,7 +944,8 @@ class FlutterReadingState {
           unit == other.unit &&
           offset == other.offset &&
           zoom == other.zoom &&
-          lastUnit == other.lastUnit;
+          lastUnit == other.lastUnit &&
+          progress == other.progress;
 }
 
 /// Which words of a note matched a library search.

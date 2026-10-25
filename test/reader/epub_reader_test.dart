@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
+import 'package:shosai_flutter/reader/controller.dart' show ReaderPlace;
 import 'package:shosai_flutter/reader/epub/content.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/view.dart';
@@ -51,6 +52,8 @@ void main() {
     HarnessBridge harness, {
     bool failing = false,
     FlutterReaderSettings? settings,
+    ReaderPlace? place,
+    int? bookId,
   }) async {
     await renderHarnessState(
       tester,
@@ -58,6 +61,8 @@ void main() {
         home: ReaderScreen(
           bridge: harness,
           initialPath: '/books/conformance.epub',
+          initialBookId: bookId,
+          initialPlace: place,
           initialSettings: settings,
           epubImageDecoder: (bytes) async => null,
         ),
@@ -564,6 +569,82 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await _drainHarness(tester);
+  });
+
+  testWidgets('book-wide progress survives two layouts and a restore', (
+    tester,
+  ) async {
+    final bytes = buildTestEpub(
+      chapters: {
+        'OPS/Text/one.xhtml':
+            '<h1>Long opening</h1>${'<p>The river winds past the old library and into the hills.</p>' * 100}',
+        'OPS/Text/two.xhtml': '<h1>Short ending</h1><p>Home again.</p>',
+      },
+      nav:
+          '<ol><li><a href="../Text/one.xhtml">Long opening</a></li><li><a href="../Text/two.xhtml">Short ending</a></li></ol>',
+    );
+    final book = openEpubBytes(bytes);
+    final total = book.chapters.fold<int>(
+      0,
+      (sum, chapter) => sum + chapter.canonicalText.runes.length,
+    );
+    const offset = 2300;
+    final expectedPercent = (offset / total * 100).round();
+    final pageIndexes = <int>[];
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final size in [const Size(1280, 800), const Size(560, 600)]) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      final harness = bridge(
+        bytes: bytes,
+        unitCount: 2,
+        books: harnessLibraryBooks(),
+      );
+      await openReader(
+        tester,
+        harness,
+        bookId: 1,
+        place: const ReaderPlace(0, offset: offset),
+        settings: const FlutterReaderSettings(
+          continuous: false,
+          theme: 'light',
+          epubFontSize: 18,
+          epubLineSpacing: 1.5,
+          pdfZoom: 1,
+          twoPages: false,
+        ),
+      );
+      await settleEpubPage(tester);
+      final page = dartPage(tester)!.page;
+      pageIndexes.add(page.pageIndex);
+      expect(
+        page.pageIndex,
+        greaterThan(0),
+        reason: 'restoring deep in a chapter must not label its window page 1',
+      );
+      expect(
+        find.text('$expectedPercent% · page ${page.pageIndex + 1}'),
+        findsOneWidget,
+      );
+      expect(harness.savedReadingStates.last.offset, BigInt.from(offset));
+      expect(harness.savedReadingStates.last.progress, offset / total);
+      // A passive height change preserves the exact canonical address and
+      // percentage, but changes which visual page contains it.
+      tester.view.physicalSize = Size(size.width, size.height + 260);
+      await pumpHarnessFrames(tester, frames: 8);
+      await settleEpubPage(tester);
+      expect(harness.savedReadingStates.last.offset, BigInt.from(offset));
+      expect(harness.savedReadingStates.last.progress, offset / total);
+      expect(dartPage(tester)!.page.pageIndex, lessThan(page.pageIndex));
+      await tester.pumpWidget(const SizedBox());
+      await _drainHarness(tester);
+    }
+    expect(
+      pageIndexes[1],
+      greaterThan(pageIndexes[0]),
+      reason: 'narrower, shorter pages paginate the same location differently',
+    );
   });
 
   testWidgets('a font-size change re-paginates and keeps the position', (

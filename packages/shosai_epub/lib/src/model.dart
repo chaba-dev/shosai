@@ -734,6 +734,25 @@ class EpubBook {
   final Map<String, EpubResource> resources;
   final List<EpubChapter> chapters;
 
+  /// Layout-independent progress at a canonical (spine, scalar) position.
+  /// Opening a book counts its first scalar as started, even before a turn.
+  /// Empty/image-only chapters reserve one position each.
+  double progressAt(int spine, int scalar) {
+    if (chapters.isEmpty) return 0;
+    var total = 0;
+    var before = 0;
+    final unit = spine.clamp(0, chapters.length - 1);
+    for (var index = 0; index < chapters.length; index += 1) {
+      final count = chapters[index].scalarCount;
+      final extent = count > 0 ? count : 1;
+      if (index < unit) before += extent;
+      total += extent;
+    }
+    final count = chapters[unit].scalarCount;
+    final offset = scalar.clamp(0, count);
+    return ((before + offset).clamp(1, total)) / total;
+  }
+
   /// `@font-face` family name to admitted font resource path.
   final Map<String, String> embeddedFonts;
 

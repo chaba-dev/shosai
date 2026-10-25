@@ -233,6 +233,7 @@ final class ReaderController implements Listenable {
   /// The column region the continuous view last reported showing, for the
   /// location request it answers; null until the view reports one.
   ({double top, double bottom})? _continuousViewport;
+  bool _continuousPositionPending = false;
 
   /// The pending window step, if any, and the layout it was scheduled for: a
   /// step is one bounded batch per frame.
@@ -608,6 +609,41 @@ final class ReaderController implements Listenable {
         _pageTurned(() => _pageStepRequested(message.delta));
       case ReaderSearchRequested():
         _searchRequested(message.query);
+      case ReaderProgressRequested():
+        final document = _model.document;
+        if (document == null || !message.fraction.isFinite) return;
+        final fraction = message.fraction.clamp(0.0, 1.0);
+        final chapters = _epubSource?.book.chapters;
+        if (document.format == FlutterBookFormat.epub && chapters != null) {
+          final total = chapters.fold<int>(
+            0,
+            (sum, chapter) => sum + math.max(1, chapter.scalarCount),
+          );
+          var target = (fraction * total).floor();
+          for (var unit = 0; unit < chapters.length; unit += 1) {
+            final count = math.max(1, chapters[unit].scalarCount);
+            if (target < count || unit == chapters.length - 1) {
+              _jump(
+                () => _unitRequested(
+                  unit,
+                  offset: target.clamp(0, chapters[unit].scalarCount),
+                  replaceReadingOffset: true,
+                ),
+              );
+              break;
+            }
+            target -= count;
+          }
+        } else {
+          final total = document.logicalUnitCount.toInt();
+          if (total > 0) {
+            _jump(
+              () => _unitRequested(
+                (fraction * total).floor().clamp(0, total - 1),
+              ),
+            );
+          }
+        }
       case ReaderBookmarkToggled():
         _bookmarkToggled();
       case ReaderBookmarkDeleted():
@@ -2522,6 +2558,7 @@ final class ReaderController implements Listenable {
       // The view reveals the new location before it reports what it shows:
       // the region reported for the previous location is not this one's.
       _continuousViewport = null;
+      _continuousPositionPending = false;
     }
     final readingOffset = epubEdge == EpubPositionEdge.end
         ? page.canonicalStart
@@ -2603,6 +2640,7 @@ final class ReaderController implements Listenable {
           unit: BigInt.from(unit),
           offset: readingOffset == null ? null : BigInt.from(readingOffset),
           zoom: layout.scale,
+          progress: _bookProgress(_model),
         ),
       );
     }
@@ -3887,18 +3925,18 @@ final class ReaderController implements Listenable {
     var adopted = replacement == null;
     try {
       if (!active.started) active.layoutWindowAt(target);
-      // A spread's pairing is anchored at the chapter start. When entering at
-      // the end, finish the bounded progressive layout before choosing the
-      // final spread so its first page has the same even index as a forward
-      // walk. Paginated sessions are completed in the background anyway; this
-      // only completes that work before publishing this edge navigation.
-      if (epubEdge == EpubPositionEdge.end && key.spread) {
-        while (!active.complete) {
+      // Page ordinals are section-local, never window-local. Measure the
+      // prefix before publishing a paginated location: a restore deep in a
+      // chapter must name the same page as a forward walk. Yield between
+      // batches and reject superseded work as for the background fill.
+      if (!continuous) {
+        while (active.firstNodeIndex > 0 ||
+            (epubEdge == EpubPositionEdge.end && !active.complete)) {
           await Future<void>.delayed(const Duration(milliseconds: 1));
           if (!_isCurrentLayout(generation, revision)) return;
-          final progressed = active.lastNodeIndex + 1 < active.totalNodes
-              ? active.layoutForward(maxNodes: 24, maxMicros: 8000)
-              : active.layoutBackward(maxNodes: 24, maxMicros: 8000);
+          final progressed = active.firstNodeIndex > 0
+              ? active.layoutBackward(maxNodes: 24, maxMicros: 8000)
+              : active.layoutForward(maxNodes: 24, maxMicros: 8000);
           if (progressed == 0) break;
         }
       }
@@ -4167,6 +4205,7 @@ final class ReaderController implements Listenable {
       // The column is new, so the region the view reported is in the old
       // one's coordinates: the window waits for the view's next report.
       _continuousViewport = null;
+      _continuousPositionPending = false;
     }
     final cache = _continuousCaches[session] ??= ContinuousGeometryCache(
       session.chapter,
@@ -4307,7 +4346,10 @@ final class ReaderController implements Listenable {
       _emit(_model.copyWith(relayoutError: 'Layout failed: $error'));
       return false;
     }
-    if (reveal) _continuousViewport = null;
+    if (reveal) {
+      _continuousViewport = null;
+      _continuousPositionPending = false;
+    }
     _publish(
       _deriveModel(
         _model.copyWith(
@@ -4347,11 +4389,55 @@ final class ReaderController implements Listenable {
       window,
       message.top - kEpubPageMargin,
     );
+    final previous = _continuousViewport;
     _continuousViewport = (
       top: top,
       bottom: top + message.bottom - message.top,
     );
+    // The first report reveals a requested/restored scalar; it must not
+    // replace that address with the beginning of its visual line. Subsequent
+    // scrolling records the first visible line in the canonical stream.
+    if (previous != null &&
+        (previous.top - top).abs() > 1 &&
+        !_model.relayoutBusy &&
+        _continuousMovement == null) {
+      _continuousPositionPending = true;
+      _saveContinuousPosition();
+    }
     _scheduleContinuousTick();
+  }
+
+  /// A fast scroll can outrun the measured window. Keep its position pending
+  /// until a window tick has supplied the visible line, without overwriting
+  /// an exact restore address during passive layout corrections.
+  void _saveContinuousPosition() {
+    final page = _model.epubPage;
+    final viewport = _continuousViewport;
+    if (!_continuousPositionPending || page == null || viewport == null) return;
+    final top = viewport.top + kEpubPageMargin;
+    for (final line in page.surface.visualLines) {
+      if (line.carets.isEmpty || line.carets.first.bottom <= top) continue;
+      if (line.carets.first.top > viewport.bottom + kEpubPageMargin) return;
+      final offset = line.carets
+          .map((caret) => caret.offset.toInt())
+          .reduce(math.min);
+      _continuousPositionPending = false;
+      _emit(_model.copyWith(readingOffset: offset));
+      final document = _model.document!;
+      if (document.bookId != null) {
+        _queueReadingStateSave(
+          document.bookId!,
+          document.logicalUnitCount,
+          FlutterReadingState(
+            unit: BigInt.from(_model.unit),
+            offset: BigInt.from(offset),
+            zoom: _model.layout.scale,
+            progress: _bookProgress(_model),
+          ),
+        );
+      }
+      return;
+    }
   }
 
   /// Schedules one window step after the next frame, unless one is pending.
@@ -4453,6 +4539,7 @@ final class ReaderController implements Listenable {
       ),
     );
     _releaseDetachedEpubBlocks();
+    _saveContinuousPosition();
     debugContinuousStepObserver?.call((
       micros: stopwatch.elapsedMicroseconds,
       measured: session.measuredNodes - measured,
@@ -4780,6 +4867,7 @@ final class ReaderController implements Listenable {
           unit: BigInt.from(unit),
           offset: offset == null ? null : BigInt.from(offset),
           zoom: message.layout.scale,
+          progress: _bookProgress(_model),
           lastUnit: lastUnit != null && lastUnit > unit
               ? BigInt.from(lastUnit)
               : null,
@@ -6566,13 +6654,26 @@ final class ReaderController implements Listenable {
     }
   }
 
-  /// Applies the RD-05 wording precedence to [model].
-  ///
-  /// `loading` wins while an open is in flight, `none` when no document is
-  /// loaded, and only then is the supplied presentation source consulted. The
-  /// 4B default source is the retained logical-unit fallback: the document's
-  /// unit ordinal with the format's display kind. Real page ranges, spreads and
-  /// durable-location mapping are 5A/5G.
+  /// The same fraction is presented in the reader and saved for the shelf.
+  /// EPUB uses canonical scalars across the spine, never chapter ordinals or
+  /// layout page indexes. PDF retains fixed-page progress.
+  double _bookProgress(ReaderModel model) {
+    final document = model.document;
+    if (document == null) return 0;
+    final location = model.readingLocation;
+    if (document.format == FlutterBookFormat.epub) {
+      return _epubSource?.book.progressAt(
+            location.unit,
+            location.offset ?? 0,
+          ) ??
+          0;
+    }
+    final total = document.logicalUnitCount.toInt();
+    final last = (model.pdfSpread?.facingUnit ?? location.unit) + 1;
+    return total <= 0 ? 0 : (last / total).clamp(0.0, 1.0);
+  }
+
+  /// Loading and no-document wording take precedence over location data.
   ReaderProgressPresentation _deriveProgress(ReaderModel model) {
     if (model.busy) {
       return ReaderProgressPresentation(
@@ -6586,21 +6687,51 @@ final class ReaderController implements Listenable {
     }
     final supplied = _progressSource?.call(model);
     if (supplied != null) return supplied;
-    final total = document.logicalUnitCount.toInt();
-    final ordinal = model.unit + 1;
-    // A PDF spread names both of its pages and counts the second as read.
-    final last = (model.pdfSpread?.facingUnit ?? model.unit) + 1;
+    final epub = model.epubPage;
+    var ordinal = epub == null ? model.unit + 1 : epub.pageIndex + 1;
+    if (epub != null && epub.continuous) {
+      // A continuous page is a viewport-height screenful in the section's
+      // column. Unmeasured nodes use the same estimated extents as scrolling;
+      // no extra chapter layout or retained painters are needed.
+      var top = _continuousViewport?.top;
+      if (top == null) {
+        final scalar = model.readingOffset ?? epub.targetScalar;
+        for (final line in epub.surface.visualLines) {
+          if (line.carets.any((caret) => caret.offset.toInt() >= scalar)) {
+            top = line.carets.first.top - kEpubPageMargin;
+            break;
+          }
+        }
+      }
+      ordinal = (math.max(0, top ?? 0) / (_epubLayoutHeight ?? 1)).floor() + 1;
+    }
+    final last = epub == null
+        ? (model.pdfSpread?.facingUnit ?? model.unit) + 1
+        : ordinal + (epub.facing == null ? 0 : 1);
+    final fraction = _bookProgress(model);
     return ReaderProgressPresentation(
       kind: last > ordinal
           ? ReaderProgressKind.range
           : ReaderProgressKind.single,
       hasDocument: true,
-      displayUnit: document.format == FlutterBookFormat.epub
-          ? ReaderDisplayUnit.chapter
-          : ReaderDisplayUnit.page,
+      displayUnit: ReaderDisplayUnit.page,
       firstOrdinal: ordinal,
       lastOrdinal: last > ordinal ? last : null,
-      percentage: total <= 0 ? 0 : ((last / total) * 100).round().clamp(0, 100),
+      percentage: (fraction * 100).round().clamp(
+        fraction > 0 ? 1 : 0,
+        fraction < 1 ? 99 : 100,
+      ),
+      marks: [
+        for (final bookmark in model.bookmarks)
+          if (document.format == FlutterBookFormat.epub)
+            _epubSource?.book.progressAt(
+                  bookmark.unit.toInt(),
+                  bookmark.offset?.toInt() ?? 0,
+                ) ??
+                0
+          else
+            (bookmark.unit.toInt() + .5) / document.logicalUnitCount.toInt(),
+      ],
     );
   }
 
@@ -6743,6 +6874,7 @@ final class ReaderController implements Listenable {
     _continuousExtents = null;
     _continuousExtentsKey = null;
     _continuousViewport = null;
+    _continuousPositionPending = false;
     _epubLayoutHeight = null;
     _epubHeightPending = false;
     if (document != null) {

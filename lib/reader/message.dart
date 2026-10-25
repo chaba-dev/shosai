@@ -143,6 +143,12 @@ final class ReaderSearchRequested extends ReaderMessage {
   final String query;
 }
 
+/// Jumps along the book-wide progress track, not the chapter ordinal list.
+final class ReaderProgressRequested extends ReaderMessage {
+  const ReaderProgressRequested(this.fraction);
+  final double fraction;
+}
+
 final class ReaderBookmarkToggled extends ReaderMessage {
   const ReaderBookmarkToggled();
 }

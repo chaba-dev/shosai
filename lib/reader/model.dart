@@ -85,6 +85,7 @@ final class ReaderProgressPresentation {
     this.firstOrdinal,
     this.lastOrdinal,
     this.percentage = 0,
+    this.marks = const [],
   });
 
   final ReaderProgressKind kind;
@@ -97,6 +98,9 @@ final class ReaderProgressPresentation {
 
   /// Whole-percent progress, 0–100.
   final int percentage;
+
+  /// Bookmark ticks in the same book-wide coordinate as the progress track.
+  final List<double> marks;
 
   bool get showsRange =>
       kind == ReaderProgressKind.range &&
@@ -111,7 +115,8 @@ final class ReaderProgressPresentation {
       other.displayUnit == displayUnit &&
       other.firstOrdinal == firstOrdinal &&
       other.lastOrdinal == lastOrdinal &&
-      other.percentage == percentage;
+      other.percentage == percentage &&
+      listEquals(other.marks, marks);
 
   @override
   int get hashCode => Object.hash(
@@ -121,6 +126,7 @@ final class ReaderProgressPresentation {
     firstOrdinal,
     lastOrdinal,
     percentage,
+    Object.hashAll(marks),
   );
 }
 

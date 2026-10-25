@@ -515,9 +515,10 @@ void main() {
       'it leaves', (tester) async {
     final sessions = <ChapterLayoutSession>[];
     final steps = <({int micros, int measured})>[];
+    final harness = longBridge();
     await openReader(
       tester,
-      longBridge(),
+      harness,
       sessionObserver: (session) {
         session.debugObservePainters = true;
         sessions.add(session);
@@ -550,6 +551,20 @@ void main() {
       );
     }
     final window = dartPage(tester)!.window!;
+    final saved = harness.savedReadingStates.last;
+    expect(saved.unit, BigInt.zero);
+    expect(saved.offset!.toInt(), greaterThan(0));
+    expect(
+      saved.progress,
+      saved.offset!.toInt() /
+          longBook.chapters.fold<int>(
+            0,
+            (sum, chapter) => sum + chapter.scalarCount,
+          ),
+      reason: 'scrolling saves the same canonical fraction as the location',
+    );
+    final percentage = (saved.progress! * 100).round().clamp(1, 99);
+    expect(find.textContaining('$percentage% · page '), findsOneWidget);
     expect(window.firstNode, greaterThan(0), reason: 'the start was released');
     expect(
       session.debugCreatedPainters.where((painter) => painter.debugDisposed),
