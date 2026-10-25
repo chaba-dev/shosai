@@ -486,16 +486,22 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         DocumentImportManager.initialize(this)
         DocumentImportChannel.attach(this, flutterEngine)
+        FolderLocations.attach(this, flutterEngine)
     }
 
     @Deprecated("Deprecated by Android, retained for FlutterActivity result forwarding")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == FolderLocations.PICK_FOLDER) {
+            FolderLocations.onActivityResult(resultCode, data)
+            return
+        }
         if (requestCode != PICK_DOCUMENTS) return
         DocumentImportChannel.onActivityResult(this, resultCode, data)
     }
 
     override fun onDestroy() {
+        FolderLocations.detach(this, isChangingConfigurations)
         DocumentImportChannel.detach(this, isChangingConfigurations)
         super.onDestroy()
     }

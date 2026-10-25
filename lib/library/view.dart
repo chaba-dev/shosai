@@ -11,9 +11,13 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
+import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
+import 'package:shosai_flutter/library/folders_controller.dart';
+import 'package:shosai_flutter/library/folders_view.dart';
 import 'package:shosai_flutter/notices/library_notice_text.dart';
 import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/opened_documents.dart';
@@ -140,6 +144,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     openBook: _openBook,
     drainReaderSaves: ReaderController.drainBookWrites,
     editSettings: _editSettings,
+    manageLocations: _manageLocations,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     localizations: () => AppLocalizations.of(context),
@@ -1047,6 +1052,42 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   Future<FlutterReaderSettings?> _editSettings(FlutterReaderSettings initial) =>
       _settingsDialog(context, initial, showOwnedDialog: _showOwnedDialog);
 
+  Future<void> _manageLocations() async {
+    final host = _sessionBridge;
+    if (host is! LibraryFoldersHost) return;
+    final folders = FoldersController(
+      folders: (host as LibraryFoldersHost).folders,
+      pick: FolderGrant.pick,
+      confirmRemoval: (grant) async =>
+          await _showOwnedDialog<bool>((context) {
+            final l10n = AppLocalizations.of(context);
+            return ShadDialog.alert(
+              title: Text(l10n.locationRemove),
+              description: Text(l10n.locationRemoveDescription),
+              actions: [
+                ShadButton.outline(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(l10n.locationCancel),
+                ),
+                ShadButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text(l10n.locationRemove),
+                ),
+              ],
+            );
+          }) ??
+          false,
+    )..dispatch(const FoldersStarted());
+    try {
+      await _showOwnedDialog<void>(
+        (_) => LibraryFoldersDialog(controller: folders),
+      );
+    } finally {
+      folders.dispose();
+      await folders.drain();
+    }
+  }
+
   Future<T?> _showOwnedDialog<T>(WidgetBuilder builder) async {
     if (!mounted) return null;
     final navigator = Navigator.of(context);
@@ -1166,6 +1207,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             onFormatChanged: (format) =>
                 controller.dispatch(LibraryFormatChanged(format)),
             onSettingsRequested: settingsRequest,
+            onLocationsRequested: _sessionBridge is LibraryFoldersHost
+                ? () => controller.dispatch(const LibraryLocationsRequested())
+                : null,
           ),
           if (layout == ShellLayout.phone && _shell.model.openBooks.isNotEmpty)
             Padding(

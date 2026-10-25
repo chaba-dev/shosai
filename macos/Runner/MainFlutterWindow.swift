@@ -10,6 +10,7 @@ class MainFlutterWindow: NSWindow {
     self.titleVisibility = .hidden
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    _ = FolderLocations(messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

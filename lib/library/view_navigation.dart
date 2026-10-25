@@ -326,11 +326,13 @@ class LibraryFilterRow extends StatelessWidget {
     required this.model,
     required this.onFormatChanged,
     required this.onSettingsRequested,
+    this.onLocationsRequested,
   });
 
   final LibraryModel model;
   final ValueChanged<FlutterBookFormat?> onFormatChanged;
   final VoidCallback? onSettingsRequested;
+  final VoidCallback? onLocationsRequested;
 
   @override
   Widget build(BuildContext context) {
@@ -352,6 +354,13 @@ class LibraryFilterRow extends StatelessWidget {
             onPressed: onSettingsRequested,
             fillWidth: false,
           ),
+          if (onLocationsRequested != null)
+            LibraryNavigationButton(
+              label: l10n.libraryLocations,
+              selected: false,
+              onPressed: model.busy ? null : onLocationsRequested,
+              fillWidth: false,
+            ),
         ],
       ),
     );

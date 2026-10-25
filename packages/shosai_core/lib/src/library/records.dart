@@ -14,6 +14,7 @@ import '../store/store.dart';
 import 'book.dart';
 import 'files.dart';
 import 'inspection.dart';
+import 'location.dart';
 
 /// Library queries over the store.
 ///
@@ -290,7 +291,11 @@ String? privateCopyHash(String path) =>
 
 const bookColumns = '''id, title, author, format, file_path, storage_kind,
   original_path, content_hash, file_size, cover IS NOT NULL, progress,
-  date_added, last_read''';
+  date_added, last_read,
+  (SELECT CASE min(CASE coalesce(failure, '')
+      WHEN '' THEN 0 WHEN 'offline' THEN 1 WHEN 'revoked' THEN 2 ELSE 3 END)
+    WHEN 1 THEN 'offline' WHEN 2 THEN 'revoked' WHEN 3 THEN 'missing' END
+   FROM book_locators WHERE content_hash = books.content_hash)''';
 
 Book bookFromRow(Row row) => Book(
   id: row.columnAt(0) as int,
@@ -306,6 +311,10 @@ Book bookFromRow(Row row) => Book(
   progress: row.columnAt(10) as double,
   dateAdded: row.columnAt(11) as String,
   lastRead: row.columnAt(12) as String?,
+  locationFailure: switch (row.columnAt(13)) {
+    final String name => LocationFailure.values.byName(name),
+    _ => null,
+  },
 );
 
 Book? _bookById(Database db, int id) => db

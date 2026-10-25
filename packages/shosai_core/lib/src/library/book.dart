@@ -2,6 +2,7 @@
 library;
 
 import '../errors.dart';
+import 'location.dart';
 
 /// Formats the library admits.
 enum BookFormat {
@@ -63,6 +64,7 @@ final class Book {
     required this.progress,
     required this.dateAdded,
     required this.lastRead,
+    this.locationFailure,
   });
 
   final int id;
@@ -89,6 +91,10 @@ final class Book {
   final String dateAdded;
   final String? lastRead;
 
+  /// Null if at least one recorded location is available, or this is a legacy
+  /// path-only import whose availability has not been checked yet.
+  final LocationFailure? locationFailure;
+
   bool get managed => storageKind == StorageKind.managed;
 
   @override
@@ -106,7 +112,8 @@ final class Book {
       other.hasCover == hasCover &&
       other.progress == progress &&
       other.dateAdded == dateAdded &&
-      other.lastRead == lastRead;
+      other.lastRead == lastRead &&
+      other.locationFailure == locationFailure;
 
   @override
   int get hashCode => Object.hash(
@@ -123,6 +130,7 @@ final class Book {
     progress,
     dateAdded,
     lastRead,
+    locationFailure,
   );
 
   @override
