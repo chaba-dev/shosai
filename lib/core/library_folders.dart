@@ -205,7 +205,7 @@ final class LibraryFolders {
         // An explicit local import already owns this content. Adding the
         // same book from a folder is a duplicate, not permission to replace
         // its working local source with a dependency on that folder grant.
-        if (book.path != path &&
+        if (book.path != canonicalBookPath(path) &&
             (await _locations.copies(book.contentHash)).isEmpty &&
             await File(book.path).exists()) {
           return book;

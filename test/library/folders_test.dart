@@ -35,12 +35,21 @@ void main() {
           File(
             'packages/shosai_core/test/fixtures/sample.pdf',
           ).copySync('${source.path}/unopened.pdf');
+          final staging = Directory('${directory.path}/staging')..createSync();
+          var stagingPath = staging.path;
+          if (!Platform.isWindows) {
+            // Reproduce macOS's /var versus /private/var staging paths on
+            // every POSIX host, without mistaking one file for two copies.
+            final alias = Link('${directory.path}/staging-alias')
+              ..createSync(staging.path);
+            stagingPath = alias.path;
+          }
           var serial = 0;
           final folders = LibraryFolders(
             Preferences(store),
             library,
             LibraryLocations(store),
-            () async => '${directory.path}/stage-${serial++}',
+            () async => '$stagingPath/stage-${serial++}',
           );
           return (directory, store, library, folders, source);
         }))!;
