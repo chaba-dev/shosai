@@ -1571,6 +1571,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No text preview available. Go to the page to view this reference.'**
   String get readerReferenceNoPreview;
+
+  /// No description provided for @cardKeepOnDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep on this device'**
+  String get cardKeepOnDevice;
+
+  /// No description provided for @cardStopKeeping.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop keeping on this device'**
+  String get cardStopKeeping;
 }
 
 class _AppLocalizationsDelegate

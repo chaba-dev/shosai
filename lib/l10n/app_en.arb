@@ -1063,5 +1063,7 @@
   "readerReferenceGoTo": "Go to",
   "readerReferencePage": "Page {page}",
   "@readerReferencePage": {"placeholders": {"page": {"type": "int"}}},
-  "readerReferenceNoPreview": "No text preview available. Go to the page to view this reference."
+  "readerReferenceNoPreview": "No text preview available. Go to the page to view this reference.",
+  "cardKeepOnDevice": "Keep on this device",
+  "cardStopKeeping": "Stop keeping on this device"
 }

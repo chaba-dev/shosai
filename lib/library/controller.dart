@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
-import 'package:shosai_core/shosai_core.dart' show maxSelectedImportPaths;
+import 'package:shosai_core/shosai_core.dart'
+    show maxSelectedImportPaths, CancellationToken;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
+import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
@@ -103,13 +105,16 @@ class LibraryController implements Listenable {
   bool _settingsQueued = false;
   bool _settingsNotify = false;
   int? _stalledAppendOffset;
+  CancellationToken? _keepCancellation;
   bool _closing = false;
   bool _bridgeDisposed = false;
   bool _pendingImportAdapter = false;
 
   LibraryModel get model => _model;
   bool get canCancel =>
-      _pendingImportAdapter || _foregroundCancellations.isNotEmpty;
+      _pendingImportAdapter ||
+      _foregroundCancellations.isNotEmpty ||
+      _keepCancellation != null;
 
   bool requestCover(int bookId) {
     if (!_canLoadCover(bookId)) return false;
@@ -296,6 +301,7 @@ class LibraryController implements Listenable {
         _loadCover(message.bookId);
       case LibraryOperationCancelled():
         _adapterRevision += 1;
+        _keepCancellation?.cancel();
         _pendingImportAdapter = false;
         _cancelImportAdapter();
         for (final cancellation in _foregroundCancellations) {
@@ -306,6 +312,8 @@ class LibraryController implements Listenable {
         _open(message.book);
       case LibraryBookRemovalRequested():
         _requestRemoval(message.book);
+      case LibraryBookKeepRequested():
+        _keep(message.book);
       case _LibraryRemovalConfirmed():
         if (_closing) break;
         // The reference marks the card as removing once the removal is
@@ -567,6 +575,8 @@ class LibraryController implements Listenable {
         dateAdded: book.dateAdded,
         lastRead: book.lastRead,
         unavailable: book.unavailable,
+        located: book.located,
+        keptOnDevice: book.keptOnDevice,
       );
 
   void _load({bool append = false}) {
@@ -803,6 +813,43 @@ class LibraryController implements Listenable {
     }());
   }
 
+  void _keep(FlutterLibraryBook book) {
+    final host = _bridge;
+    if (_closing ||
+        _model.busy ||
+        !book.located ||
+        host is! LibraryFoldersHost) {
+      return;
+    }
+    _beginEffect();
+    final revision = ++_adapterRevision;
+    final cancellation = _keepCancellation = CancellationToken();
+    unawaited(() async {
+      try {
+        await (host as LibraryFoldersHost).folders.setKept(
+          book.bookId,
+          !book.keptOnDevice,
+          cancellation: cancellation,
+        );
+        if (_ownsAdapter(revision)) dispatch(const LibraryRefreshed());
+      } catch (error) {
+        if (_ownsAdapter(revision)) {
+          dispatch(
+            _LibraryMutationCompleted(
+              failure: LibraryFailure.load,
+              error: safeError(error),
+            ),
+          );
+        }
+      } finally {
+        if (identical(_keepCancellation, cancellation)) {
+          _keepCancellation = null;
+        }
+        dispatch(const _LibraryEffectFinished());
+      }
+    }());
+  }
+
   void _open(FlutterLibraryBook book) {
     if (_closing || _model.busy) return;
     _beginEffect();
@@ -1001,6 +1048,7 @@ class LibraryController implements Listenable {
   void dispose() {
     if (_closing) return;
     _closing = true;
+    _keepCancellation?.cancel();
     _openedDocuments?.cancel();
     final queued = List<String>.of(_openedPaths);
     _openedPaths.clear();

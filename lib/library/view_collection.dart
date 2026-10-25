@@ -281,6 +281,7 @@ class LibraryCollection extends StatelessWidget {
     required this.openBook,
     required this.openNotes,
     required this.removeBook,
+    this.keepBook,
     required this.loadMore,
     required this.retryPaging,
     required this.loadCover,
@@ -301,6 +302,7 @@ class LibraryCollection extends StatelessWidget {
   /// The hero's Notes action: the Notes place.
   final VoidCallback openNotes;
   final ValueChanged<FlutterLibraryBook> removeBook;
+  final ValueChanged<FlutterLibraryBook>? keepBook;
   final VoidCallback loadMore;
 
   /// The paging row's recovery: retry the page an appended load failed to add.
@@ -342,6 +344,7 @@ class LibraryCollection extends StatelessWidget {
       openBook: openBook,
       openNotes: openNotes,
       removeBook: removeBook,
+      keepBook: keepBook,
       loadMore: loadMore,
       retryPaging: retryPaging,
       loadCover: loadCover,
@@ -542,6 +545,7 @@ class _LibraryGrid extends StatefulWidget {
     required this.openBook,
     required this.openNotes,
     required this.removeBook,
+    required this.keepBook,
     required this.loadMore,
     required this.retryPaging,
     required this.loadCover,
@@ -554,6 +558,7 @@ class _LibraryGrid extends StatefulWidget {
   final ValueChanged<FlutterLibraryBook> openBook;
   final VoidCallback openNotes;
   final ValueChanged<FlutterLibraryBook> removeBook;
+  final ValueChanged<FlutterLibraryBook>? keepBook;
   final VoidCallback loadMore;
   final VoidCallback retryPaging;
   final bool Function(int) loadCover;
@@ -693,6 +698,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         loadCover: widget.loadCover,
                         openBook: widget.openBook,
                         removeBook: widget.removeBook,
+                        keepBook: widget.model.busy ? null : widget.keepBook,
                       );
                     },
                   ),
@@ -1262,6 +1268,7 @@ class LibraryBookCard extends StatelessWidget {
     required this.loadCover,
     required this.openBook,
     required this.removeBook,
+    this.keepBook,
   });
 
   final FlutterLibraryBook book;
@@ -1280,6 +1287,7 @@ class LibraryBookCard extends StatelessWidget {
   final bool Function(int) loadCover;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<FlutterLibraryBook> removeBook;
+  final ValueChanged<FlutterLibraryBook>? keepBook;
 
   @override
   Widget build(BuildContext context) {
@@ -1459,6 +1467,10 @@ class LibraryBookCard extends StatelessWidget {
             child: _BookActionsMenu(
               managed: book.managed,
               onRemove: () => removeBook(book),
+              kept: book.keptOnDevice,
+              onKeep: book.located && keepBook != null
+                  ? () => keepBook!(book)
+                  : null,
             ),
           ),
       ],
@@ -1549,10 +1561,17 @@ class _LibraryBookCoverState extends State<LibraryBookCover> {
 /// The popover controller is presentation state the card owns; the removal
 /// itself is dispatched through [onRemove], never awaited here.
 class _BookActionsMenu extends StatefulWidget {
-  const _BookActionsMenu({required this.managed, required this.onRemove});
+  const _BookActionsMenu({
+    required this.managed,
+    required this.onRemove,
+    this.onKeep,
+    this.kept = false,
+  });
 
   final bool managed;
   final VoidCallback onRemove;
+  final VoidCallback? onKeep;
+  final bool kept;
 
   @override
   State<_BookActionsMenu> createState() => _BookActionsMenuState();
@@ -1646,45 +1665,76 @@ class _BookActionsMenuState extends State<_BookActionsMenu> {
           padding: const EdgeInsets.all(
             ShosaiTokens.layoutLibraryCardMenuPadding,
           ),
-          child: ShadButton.raw(
-            variant: ShadButtonVariant.ghost,
-            // `height: 0` is the package's content-sized mode: without it the
-            // button pins its label inside the theme's single-line control
-            // height, which a scaled label overflows. The reference's 164 px is
-            // the menu's minimum (below), so a scaled label grows the menu
-            // instead of being cut.
-            height: 0,
-            padding: const EdgeInsets.symmetric(
-              vertical: ShosaiTokens.layoutLibraryCardMenuActionPaddingVertical,
-              horizontal:
-                  ShosaiTokens.layoutLibraryCardMenuActionPaddingHorizontal,
-            ),
-            mainAxisAlignment: MainAxisAlignment.start,
-            foregroundColor: danger,
-            hoverForegroundColor: danger,
-            hoverBackgroundColor: danger.withValues(
-              alpha: ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha,
-            ),
-            pressedBackgroundColor: danger.withValues(
-              alpha: ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha,
-            ),
-            onPressed: () {
-              _controller.hide();
-              widget.onRemove();
-            },
-            child: Flexible(
-              child: Text(
-                widget.managed
-                    ? l10n.cardRemoveManagedCopy
-                    : l10n.cardRemoveFromLibrary,
-                style: shosaiInterfaceStyleForText(
-                  shellInterfaceStyle(12, 16).copyWith(color: danger),
-                  widget.managed
-                      ? l10n.cardRemoveManagedCopy
-                      : l10n.cardRemoveFromLibrary,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (widget.onKeep != null)
+                ShadButton.ghost(
+                  height: 0,
+                  padding: const EdgeInsets.symmetric(
+                    vertical:
+                        ShosaiTokens.layoutLibraryCardMenuActionPaddingVertical,
+                    horizontal: ShosaiTokens
+                        .layoutLibraryCardMenuActionPaddingHorizontal,
+                  ),
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  onPressed: () {
+                    _controller.hide();
+                    widget.onKeep!();
+                  },
+                  child: Text(
+                    widget.kept ? l10n.cardStopKeeping : l10n.cardKeepOnDevice,
+                    style: shosaiInterfaceStyleForText(
+                      shellInterfaceStyle(12, 16),
+                      widget.kept
+                          ? l10n.cardStopKeeping
+                          : l10n.cardKeepOnDevice,
+                    ),
+                  ),
+                ),
+              ShadButton.raw(
+                variant: ShadButtonVariant.ghost,
+                // `height: 0` is the package's content-sized mode: without it the
+                // button pins its label inside the theme's single-line control
+                // height, which a scaled label overflows. The reference's 164 px is
+                // the menu's minimum (below), so a scaled label grows the menu
+                // instead of being cut.
+                height: 0,
+                padding: const EdgeInsets.symmetric(
+                  vertical:
+                      ShosaiTokens.layoutLibraryCardMenuActionPaddingVertical,
+                  horizontal:
+                      ShosaiTokens.layoutLibraryCardMenuActionPaddingHorizontal,
+                ),
+                mainAxisAlignment: MainAxisAlignment.start,
+                foregroundColor: danger,
+                hoverForegroundColor: danger,
+                hoverBackgroundColor: danger.withValues(
+                  alpha: ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha,
+                ),
+                pressedBackgroundColor: danger.withValues(
+                  alpha: ShosaiTokens.layoutLibraryCardMenuActionHoverAlpha,
+                ),
+                onPressed: () {
+                  _controller.hide();
+                  widget.onRemove();
+                },
+                child: Flexible(
+                  child: Text(
+                    widget.managed
+                        ? l10n.cardRemoveManagedCopy
+                        : l10n.cardRemoveFromLibrary,
+                    style: shosaiInterfaceStyleForText(
+                      shellInterfaceStyle(12, 16).copyWith(color: danger),
+                      widget.managed
+                          ? l10n.cardRemoveManagedCopy
+                          : l10n.cardRemoveFromLibrary,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),

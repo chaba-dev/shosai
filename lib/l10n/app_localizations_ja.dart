@@ -842,4 +842,10 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get readerReferenceNoPreview =>
       'プレビューできるテキストがありません。ページに移動して参照を確認できます。';
+
+  @override
+  String get cardKeepOnDevice => 'この端末に保存';
+
+  @override
+  String get cardStopKeeping => 'この端末への保存を解除';
 }

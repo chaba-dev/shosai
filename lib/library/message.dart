@@ -112,6 +112,11 @@ final class LibraryBookRemovalRequested extends LibraryMessage {
   final FlutterLibraryBook book;
 }
 
+final class LibraryBookKeepRequested extends LibraryMessage {
+  const LibraryBookKeepRequested(this.book);
+  final FlutterLibraryBook book;
+}
+
 final class LibrarySettingsRequested extends LibraryMessage {
   const LibrarySettingsRequested();
 }

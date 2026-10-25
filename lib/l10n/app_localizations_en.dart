@@ -893,4 +893,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get readerReferenceNoPreview =>
       'No text preview available. Go to the page to view this reference.';
+
+  @override
+  String get cardKeepOnDevice => 'Keep on this device';
+
+  @override
+  String get cardStopKeeping => 'Stop keeping on this device';
 }

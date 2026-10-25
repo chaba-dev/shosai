@@ -243,5 +243,7 @@
   "locationRemoveDescription": "本とノートはライブラリに残ります。他の保存場所がない本は利用できなくなります。元のファイルは削除されません。",
   "locationNoFolders": "端末のフォルダ、またはシステムのファイルプロバイダが提供するフォルダを接続してください。",
   "locationAddBook": "ライブラリに追加",
-  "locationNextPage": "次のページ"
+  "locationNextPage": "次のページ",
+  "cardKeepOnDevice": "この端末に保存",
+  "cardStopKeeping": "この端末への保存を解除"
 }
