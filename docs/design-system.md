@@ -167,6 +167,7 @@ The page is set like print, on a stage lit from the centre.
 - **EPUB page numbers** are Shōsai's own pagination at the current size and margins; the same numbers appear in the status line, notes and search results.
 - **The book's direction.** Right-to-left books turn leftward with the first page on the right; vertical Japanese keeps `vertical-rl`. Undeclared books read horizontally. There is no override.
 - **PDF stays the PDF.** Pages re-render at the current zoom so text is sharp on any screen; on phones they fit the width. Paper keeps the original raster. Sepia tints it between the page ink and ground; Night inverts luminance between those colours while retaining chroma, rather than making a colour negative. Saturated image colours may clip to the display gamut. These paint-only transforms never change layout or filter selection, search or saved-highlight overlays.
+- **The quiet page** (decided 2026-10-24). On phone and tablet nothing but the page is on screen while reading: no toolbar, no bottom bar, no page-turn arrows. The outer thirds of the page turn it, as does a horizontal swipe, in the book's direction, so a right-to-left or vertical book turns leftward and its left third is next; the middle third brings the chrome. The running head and folio carry the place, and a PDF on a phone shows its place in `ink-muted` under the page. Desktop keeps its toolbar, status line and margin chevrons. It is not a mode: there is nothing to switch on.
 
 Layout, pagination and durable anchors come from the Dart document engines and application core; Flutter renders the laid-out pages (see [flutter-architecture.md](flutter-architecture.md)).
 
@@ -205,7 +206,7 @@ Each component has a preview in `docs/design-system/components/` and its referen
 
 While reading the sidebar collapses to the **rail** (`sh-sidebar--rail`, `rail-width`): the mark, the four places as icon buttons with tooltips, then the open books as 30 px covers under a hairline, the current one outlined in `accent`. The rail never hides; the reader toolbar sits beside it. Width is `sidebar-width`; the sidebar does not resize.
 
-**BottomNav** (phone). The sidebar's four places as icons over 10 px labels in a `bottomnav-height` bar on `chrome`; the current place is `accent`. It shows on the library-side screens only; the reader keeps its own bottom bar and reaches the library through the toolbar's back chevron. On the phone's library the open books appear as **Reading now** cards above the grid instead of a hero.
+**BottomNav** (phone). The sidebar's four places as icons over 10 px labels in a `bottomnav-height` bar on `chrome`; the current place is `accent`. It shows on the library-side screens only; the reader's own bottom bar appears with its chrome, and the library is reached through the toolbar's back chevron. On the phone's library the open books appear as **Reading now** cards above the grid instead of a hero.
 
 **TabSwitcher** (phone). The open books, in the sidebar's order, as a grid of cards behind the tab-count button in the reader toolbar. Each card shows the title (`ed-title`, two lines), a miniature of the open page in the book's face (whole lines only, ending in an ellipsis), the format badge, the place and a progress bar; cards are `surface` lifted by `shadow-raised`, and the current one is outlined in `accent`. The library card comes last. **Done** returns to the current book.
 
@@ -217,9 +218,11 @@ While reading the sidebar collapses to the **rail** (`sh-sidebar--rail`, `rail-w
 | Centre | Book title in the editorial serif (17/24), then the current section in `ui-caption` `ink-muted` | Title, then the section |
 | Trailing | Display settings (**Aa**), Bookmark (`bookmark`), Notes toggle with count | Search, open-book count |
 
-On phones, Contents, Aa, Bookmark and Notes move to the bottom bar that appears with a tap on the page. Search lives in the rail on desktop and tablet, so the toolbar leads with Contents alone. The same controls appear for EPUB and PDF. The bookmark fills with `vermilion` when the page is bookmarked. The toolbar sits on `chrome`, is `toolbar-height` tall on every layout, and hides while reading on phone and tablet, returning with a tap.
+On phones, Contents, Aa, Bookmark and Notes move to the bottom bar. Search lives in the rail on desktop and tablet, so the toolbar leads with Contents alone. The same controls appear for EPUB and PDF. The bookmark fills with `vermilion` when the page is bookmarked. The toolbar sits on `chrome` and is `toolbar-height` tall on every layout. On phone and tablet it is hidden while reading and slides down over the page, with the bottom bar sliding up, after a tap in the page's middle third; a tap on the page, a page turn or a swipe up on the toolbar hides both. The page does not move or reflow under the chrome, and the chrome never hides on a timer. The system status bar shows and hides with it.
 
-**StatusBar.** Section title, progress track, then `percent · pages a–b of n` in tabular figures; one page in view reads `page 104 of 502`. The fill is `accent`; bookmarks are `vermilion` ticks. Clicking or dragging the track jumps, and the jump is recorded for Back. On phones it shrinks to the percentage and a page number.
+**StatusBar.** Section title, progress track, then `percent · pages a–b of n` in tabular figures; one page in view reads `page 104 of 502`. The fill is `accent`; bookmarks are `vermilion` ticks. Clicking or dragging the track jumps, and the jump is recorded for Back. On phones it is the bottom bar of the chrome that appears on tap: the track with its ticks runs along the top edge, over a `touch-target`-tall row of Contents, Aa, the place as `percent` then `page 104 of 502`, Bookmark and Notes with its count. While the chrome is hidden the place is the page's folio.
+
+**ZonesHint.** The first time a book opens on a phone or tablet, a `scrim`-dark overlay in three columns names the zones in `on-inverse`: **Previous page**, **Controls**, **Next page**, each over a ringed glyph (`chevron-left`, `list`, `chevron-right`), with one line under them (*Tap the sides to turn, the middle for controls. You can also swipe.*). For a right-to-left or vertical book the side labels swap, and the line says the book turns leftward. Any tap dismisses it and it does not return on that device. It is the only instruction the reader ever sees on the page.
 
 **BackPill.** After any jump (a reference, a contents entry, a search result, a note, the progress track) an `inverse` capsule floats bottom centre and names the origin in the reader's terms: **Back to page 61**, **Back to Chapter III**, or the book's title when a hit or note opened another book, never "Back" alone. It stays until you go back, close it, or turn three pages away. Jumps stack; each Back steps one level. Keyboard: Alt+← on Linux and Windows, ⌘[ on macOS.
 
@@ -274,8 +277,9 @@ Head, then scope and count, then the book note and groups per section in reading
 | Pages | One or Two; Two by default where the stage is wide enough | Same |
 | Font | **Book’s own** (default), Serif, Sans | Not shown: PDF pages keep their fonts |
 | Typeface | The current type set’s name, opening the TypefacePicker | Same |
+| Progress | **Page** (default), **Percent**, **Off**: what the folio shows while the chrome is hidden | Same, for the place under the page on phones |
 
-Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; theme, text size, line spacing and Pages are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; theme, text size, line spacing, Pages and Progress are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
 
 **TypefacePicker.** The six type sets as a radio list (`role="radiogroup"`), each row showing the set’s name in its sans, its faces in `ui-caption` and a one-line specimen in its serif, so the choice is made by looking rather than by name. The current set carries a check in `accent`. Choosing applies at once to the interface, the editorial text and the reader’s Serif and Sans fonts; a book’s own fonts are untouched. Rows never preview with system fallbacks: a set that is not bundled is not listed.
 
@@ -313,7 +317,7 @@ Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. 
 | `copy` | Copy text |
 | `arrow-right` | Go to a reference |
 | `undo-2` | Back to where a jump started |
-| `chevron-left`, `chevron-right` | Back to library on phone, previous page; next page |
+| `chevron-left`, `chevron-right` | Back to library on phone, previous page; next page (margin chevrons on desktop only; the ZonesHint glyphs) |
 | `columns-2`, `rectangle-vertical` | Two pages, one page |
 
 Add a glyph only from Lucide, at the same stroke, with a row here and its SVG in `docs/design-system/icons/`.

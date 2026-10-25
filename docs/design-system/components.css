@@ -138,6 +138,17 @@
 .sh-swatch--purple { background: var(--swatch-purple); }
 .sh-backpill { height: 36px; padding: 0 var(--space-4) 0 var(--space-3); }
 
+/* Zones hint: the one-time overlay that names the phone's tap zones. */
+.sh-zones { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; background: color-mix(in srgb, var(--inverse) 62%, transparent); color: var(--on-inverse); font-family: var(--font-ui); }
+.sh-zones__zone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); font-size: 13px; line-height: 18px; font-weight: 500; text-align: center; }
+.sh-zones__zone + .sh-zones__zone { border-left: 1px dashed color-mix(in srgb, var(--on-inverse) 45%, transparent); }
+.sh-zones__glyph { width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--on-inverse) 70%, transparent); display: grid; place-items: center; }
+.sh-zones__glyph svg.i { width: 22px; height: 22px; }
+.sh-zones__glyph--mid { border-style: dashed; }
+.sh-zones__sub { font-size: 11px; line-height: 14px; font-weight: 400; opacity: .75; }
+.sh-zones__cap { position: absolute; left: 0; right: 0; bottom: 56px; text-align: center; font-size: 12px; line-height: 16px; opacity: .85; }
+.sh-zones__cap b { display: block; font-size: 13px; line-height: 18px; font-weight: 600; opacity: 1; margin-bottom: 2px; }
+
 /* Peek */
 .sh-peek { width: 480px; max-width: 100%; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--space-4) var(--space-3); border-radius: var(--radius-md); background: var(--surface); border: 0; box-shadow: var(--shadow-modal); }
 .sh-peek__kicker { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
