@@ -27,7 +27,6 @@ on:
       - ".github/workflows/ci.yml"
       - ".github/workflows/release-pr.yml"
   pull_request:
-    branches: [main]
     paths:
       - "lib/**"
       - "test/**"
