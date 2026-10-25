@@ -170,6 +170,7 @@ All notable changes to this project will be documented in this file.
 - *(rfd)* Revise RFD 4 for a Dart-only application core (#151)
 - *(rfd)* Move RFDs to chaba-dev/rfds (#221)
 - *(design-system)* The quiet page on phone and tablet (#239)
+- *(design-system)* The quiet page on desktop too (#243)
 
 ### ⚡ Performance
 
