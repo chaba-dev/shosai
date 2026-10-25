@@ -229,8 +229,8 @@ final class FolderLocations: NSObject {
         var entries: [[String: Any]] = []
         var seen = 0
         for case let url as URL in enumerator {
-          if url.lastPathComponent.hasPrefix(".shosai-write-") ||
-            (try url.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink == true { continue }
+          if url.lastPathComponent.hasPrefix(".shosai-write-") { continue }
+          if (try url.resourceValues(forKeys: [.isSymbolicLinkKey])).isSymbolicLink == true { continue }
           seen += 1
           if seen <= offset { continue }
           if entries.count == limit { return ["entries": entries, "nextCursor": String(offset + limit)] }
