@@ -103,6 +103,34 @@ final class LibraryLocations {
     );
   });
 
+  /// Reconcile a complete metadata scan, without claiming to verify bytes.
+  /// Return identified keys so discovery never invents identities for files
+  /// that have not been read. Missing files retain their books and notes.
+  Future<Set<String>> reconcile(
+    String id,
+    int generation,
+    Set<String> present,
+  ) => _store.transaction((db) {
+    if (!_hasGeneration(db, id, generation)) {
+      throw const LocationException(LocationFailure.revoked);
+    }
+    final keys = <String>{};
+    for (final row in db.select(
+      'SELECT locator_key FROM book_locators WHERE location_id = ?',
+      [id],
+    )) {
+      final key = row.columnAt(0) as String;
+      keys.add(key);
+      if (!present.contains(key)) {
+        db.execute(
+          "UPDATE book_locators SET failure = 'missing' WHERE location_id = ? AND locator_key = ?",
+          [id, key],
+        );
+      }
+    }
+    return keys;
+  });
+
   /// A failed folder listing or grant acquisition affects the connection as a
   /// whole. A successful metadata listing does not validate any book's bytes.
   Future<void> unavailable(

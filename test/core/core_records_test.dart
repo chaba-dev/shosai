@@ -172,6 +172,89 @@ void main() {
     return report.items.single.book!;
   }
 
+  test(
+    'configured sources discover metadata, admit on open and preserve missing books',
+    () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      final selected = Directory('${source.path}/Reading')..createSync();
+      final nested = Directory('${selected.path}/History')..createSync();
+      final chosen = File(_epubFixture).copySync('${nested.path}/chosen.epub');
+      // An unopened file need not even be parseable: scanning must not admit it.
+      File('${selected.path}/unopened.pdf').writeAsStringSync('not a PDF');
+      File(
+        '${source.path}/excluded.epub',
+      ).writeAsStringSync('outside selected root');
+      for (var i = 0; i < 110; i++) {
+        File('${selected.path}/ignore-$i.txt').writeAsStringSync('ignored');
+      }
+      await core.folders.add(
+        FolderGrant('source', 'My books', 'path', source.path),
+      );
+      final root = (await core.folders.browse(
+        'source',
+      )).entries.singleWhere((entry) => entry.isDirectory);
+      await core.folders.configure(
+        'source',
+        directory: root.key,
+        label: 'Reading',
+      );
+      var files = await core.folders.discover();
+      expect(files.map((file) => file.entry.name).toSet(), {
+        'chosen.epub',
+        'unopened.pdf',
+      });
+      expect((await core.library.page()).bookCount, 0);
+      final admitted = await bridge.admitSourceFile(
+        files.singleWhere((file) => file.entry.name == 'chosen.epub'),
+      );
+      expect(admitted.located, isTrue);
+      await core.annotations.createNote(
+        admitted.bookId,
+        const BookAnchor(),
+        'Retain this note',
+      );
+      files = await core.folders.discover();
+      expect(files.single.entry.name, 'unopened.pdf');
+      final opened = await bridge.openLibraryBook(
+        bookId: admitted.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      bridge.releaseDocument(handle: opened.handle);
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      expect((await core.folders.list()).single.directory, root.key);
+      expect((await core.folders.discover()).single.entry.name, 'unopened.pdf');
+      // A valid cached copy remains readable even if its source disappears.
+      // Evict that automatic copy to exercise source-only unavailability.
+      final identified = (await core.library.get(admitted.bookId))!;
+      await core.fileCache.discardUnkept(
+        identified.contentHash,
+        identified.format,
+      );
+      chosen.deleteSync();
+      await core.folders.discover(refresh: true);
+      expect(
+        (await core.library.get(admitted.bookId))!.locationFailure?.name,
+        'missing',
+      );
+      expect(
+        (await core.annotations.summary(admitted.bookId)).latest,
+        'Retain this note',
+      );
+      await core.folders.remove('source');
+      expect(await core.folders.discover(), isEmpty);
+      expect(
+        (await core.library.get(admitted.bookId))!.locationFailure?.name,
+        'revoked',
+      );
+      expect(
+        (await core.annotations.summary(admitted.bookId)).latest,
+        'Retain this note',
+      );
+    },
+  );
+
   for (final managed in [false, true]) {
     test('duplicate folder import preserves a local book ($managed)', () async {
       final source = Directory('${directory.path}/source')..createSync();

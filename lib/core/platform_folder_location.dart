@@ -12,18 +12,29 @@ const _channel = MethodChannel('dev.shosai/library_folders');
 /// Nonsecret configuration. Apple bookmarks and SAF grants must never be
 /// synchronized to another device or included in exported book records.
 final class FolderGrant {
-  const FolderGrant(this.id, this.label, this.kind, this.grant);
+  const FolderGrant(
+    this.id,
+    this.label,
+    this.kind,
+    this.grant, {
+    this.directory,
+    this.directoryLabel,
+  });
 
   final String id;
   final String label;
   final String kind;
   final String grant;
+  final String? directory;
+  final String? directoryLabel;
 
-  Map<String, String> toJson() => {
+  Map<String, dynamic> toJson() => {
     'id': id,
     'label': label,
     'kind': kind,
     'grant': grant,
+    'directory': directory,
+    'directoryLabel': directoryLabel,
   };
 
   factory FolderGrant.fromJson(Map<String, dynamic> value) => FolderGrant(
@@ -31,6 +42,8 @@ final class FolderGrant {
     value['label'] as String,
     value['kind'] as String,
     value['grant'] as String,
+    directory: value['directory'] as String?,
+    directoryLabel: value['directoryLabel'] as String?,
   );
 
   static Future<FolderGrant?> pick(String id) async {
@@ -67,7 +80,14 @@ final class FolderGrant {
     final renewed = await _channel.invokeMethod<String>('refresh', {
       'grant': grant,
     });
-    return FolderGrant(id, label, kind, renewed!);
+    return FolderGrant(
+      id,
+      label,
+      kind,
+      renewed!,
+      directory: directory,
+      directoryLabel: directoryLabel,
+    );
   }
 
   Future<void> release() async {

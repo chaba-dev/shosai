@@ -996,6 +996,18 @@ final class ApplicationBridge
   @override
   LibraryFolders get folders => records._core.folders;
 
+  @override
+  Future<FlutterLibraryBook> admitSourceFile(
+    LibrarySourceFile file, {
+    CancellationToken? cancellation,
+  }) async => _libraryBook(
+    await folders.importEntry(
+      file.locationId,
+      file.entry,
+      cancellation: cancellation,
+    ),
+  );
+
   var _lastCancellation = BigInt.zero;
   final Set<BigInt> _cancellations = {};
   var _disposed = false;

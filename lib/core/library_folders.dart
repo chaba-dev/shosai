@@ -1,4 +1,4 @@
-/// Device folder configuration and one-file admission through location grants.
+/// Device source configuration, metadata discovery and lazy content admission.
 library;
 
 import 'dart:async';
@@ -8,10 +8,31 @@ import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:shosai_core/shosai_core.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 
 abstract interface class LibraryFoldersHost {
   LibraryFolders get folders;
+  Future<FlutterLibraryBook> admitSourceFile(
+    LibrarySourceFile file, {
+    CancellationToken? cancellation,
+  });
+}
+
+/// A discovered file is not yet an identified book. Only opening it reads its
+/// bytes and associates its content identity with this device-local locator.
+final class LibrarySourceFile {
+  const LibrarySourceFile(
+    this.locationId,
+    this.source,
+    this.entry, {
+    this.failure,
+  });
+  final String locationId;
+  final String source;
+  final LocationEntry entry;
+  final LocationFailure? failure;
+  String get title => entry.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
 }
 
 /// Shared by the application's bridges, not owned by a dialog or widget.
@@ -33,6 +54,9 @@ final class LibraryFolders {
   final BookFileCache _cache;
   final Map<String, int> _generations = {};
   List<FolderGrant> _grants = const [];
+  List<LibrarySourceFile> _catalog = const [];
+  bool _discovered = false;
+  bool _catalogLoaded = false;
   Future<void>? _loading;
   Future<void> _tail = Future.value();
   bool _closed = false;
@@ -95,6 +119,7 @@ final class LibraryFolders {
         existing.id,
         existing.label,
       );
+      _discovered = false;
       return;
     }
     final next = [..._grants.where((entry) => entry.id != grant.id), grant];
@@ -106,7 +131,155 @@ final class LibraryFolders {
     await _save(next);
     _generations[grant.id] = await _locations.connect(grant.id, grant.label);
     _grants = List.unmodifiable(next);
+    _discovered = false;
   });
+
+  Future<void> configure(String id, {String? directory, String? label}) =>
+      _serial(() async {
+        await _load();
+        final grant = _grant(id);
+        final next = FolderGrant(
+          id,
+          grant.label,
+          grant.kind,
+          grant.grant,
+          directory: directory,
+          directoryLabel: label,
+        );
+        await _save([for (final item in _grants) item.id == id ? next : item]);
+        _grants = List.unmodifiable([
+          for (final item in _grants) item.id == id ? next : item,
+        ]);
+        _catalog = List.unmodifiable(
+          _catalog.where((file) => file.locationId != id),
+        );
+        if (_catalogLoaded) await _saveCatalog(_catalog);
+        _discovered = false;
+      });
+
+  /// Scan metadata only. A bounded traversal follows provider directory keys,
+  /// not file paths, and never reads book bytes. Publish only complete scans:
+  /// an interrupted/offline listing must not mark its unseen files missing.
+  Future<List<LibrarySourceFile>> discover({
+    bool refresh = false,
+    CancellationToken? cancellation,
+  }) => _serial(() async {
+    await _load();
+    if (!_catalogLoaded) {
+      final raw = await _preferences.get('device.library.catalog');
+      if (raw != null) {
+        _catalog = [
+          for (final value in jsonDecode(raw) as List)
+            LibrarySourceFile(
+              value['id'] as String,
+              value['source'] as String,
+              LocationEntry(
+                key: value['key'] as String,
+                name: value['name'] as String,
+                isDirectory: false,
+                size: value['size'] as int?,
+                revision: value['revision'] as String?,
+              ),
+            ),
+        ];
+      }
+      _catalogLoaded = true;
+    }
+    if (_discovered && !refresh) return List.unmodifiable(_catalog);
+    final next = <LibrarySourceFile>[];
+    for (final grant in _grants) {
+      cancellation.throwIfCancelled();
+      final generation = _generations[grant.id]!;
+      try {
+        final location = await grant.open();
+        final entries = <LocationEntry>[];
+        final pending = <({String? key, int depth})>[
+          (key: grant.directory, depth: 0),
+        ];
+        final visited = <String?>{};
+        var count = 0;
+        while (pending.isNotEmpty) {
+          final directory = pending.removeLast();
+          if (!visited.add(directory.key)) continue;
+          String? cursor;
+          final cursors = <String?>{};
+          do {
+            cancellation.throwIfCancelled();
+            if (!cursors.add(cursor)) {
+              throw const CoreException.malformed('Repeated source page.');
+            }
+            final page = await location.list(
+              directory: directory.key,
+              cursor: cursor,
+              cancellation: cancellation,
+            );
+            for (final entry in page.entries) {
+              if (++count > maxDiscoveryEntries || directory.depth > 32) {
+                throw const CoreException.limitExceeded(
+                  'The source contains too many entries.',
+                );
+              }
+              if (entry.isDirectory) {
+                pending.add((key: entry.key, depth: directory.depth + 1));
+              } else if (BookFormat.fromExtension(entry.name.split('.').last) !=
+                  null) {
+                entries.add(entry);
+                if (entries.length > maxDiscoveredBooks) {
+                  throw const CoreException.limitExceeded(
+                    'The source contains too many books.',
+                  );
+                }
+              }
+            }
+            cursor = page.nextCursor;
+          } while (cursor != null);
+        }
+        cancellation.throwIfCancelled();
+        final known = await _locations.reconcile(
+          grant.id,
+          generation,
+          entries.map((entry) => entry.key).toSet(),
+        );
+        next.addAll([
+          for (final entry in entries)
+            if (!known.contains(entry.key))
+              LibrarySourceFile(grant.id, grant.label, entry),
+        ]);
+      } on LocationException catch (error) {
+        await _locations.unavailable(grant.id, generation, error.failure);
+        next.addAll([
+          for (final file in _catalog)
+            if (file.locationId == grant.id)
+              LibrarySourceFile(
+                file.locationId,
+                file.source,
+                file.entry,
+                failure: error.failure,
+              ),
+        ]);
+      }
+    }
+    cancellation.throwIfCancelled();
+    await _saveCatalog(next);
+    _catalog = List.unmodifiable(next);
+    _discovered = true;
+    return _catalog;
+  });
+
+  Future<void> _saveCatalog(List<LibrarySourceFile> files) => _preferences.set(
+    'device.library.catalog',
+    jsonEncode([
+      for (final file in files)
+        {
+          'id': file.locationId,
+          'source': file.source,
+          'key': file.entry.key,
+          'name': file.entry.name,
+          'size': file.entry.size,
+          'revision': file.entry.revision,
+        },
+    ]),
+  );
 
   Future<void> discard(FolderGrant grant) {
     // A picker can finish while the application is closing. Cleanup of a
@@ -142,6 +315,7 @@ final class LibraryFolders {
     await _save(_grants.where((entry) => entry.id != id).toList());
     _grants = List.unmodifiable(_grants.where((entry) => entry.id != id));
     _generations.remove(id);
+    _discovered = false;
     await grant.release();
   });
 
@@ -191,7 +365,7 @@ final class LibraryFolders {
     cancellation.throwIfCancelled();
     final location = await _grant(id).open();
     final generation = _generations[id]!;
-    return _stage(
+    final book = await _stage(
       location.read(entry.key, cancellation: cancellation),
       (path) async {
         final item = await _library.importFile(
@@ -219,11 +393,24 @@ final class LibraryFolders {
           locationId: id,
           key: entry.key,
         ), generation: generation);
-        return book;
+        await _cache.withFile(
+          book,
+          () => File(path).openRead(),
+          (_) async {},
+          cancellation: cancellation,
+        );
+        return (await _library.get(book.id))!;
       },
       name: entry.name,
       cancellation: cancellation,
     );
+    _catalog = List.unmodifiable(
+      _catalog.where(
+        (file) => file.locationId != id || file.entry.key != entry.key,
+      ),
+    );
+    if (_catalogLoaded) await _saveCatalog(_catalog);
+    return book;
   });
 
   /// Reader/search get the bytes from a recorded device locator. A path left
