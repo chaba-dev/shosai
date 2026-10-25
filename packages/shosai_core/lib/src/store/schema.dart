@@ -405,6 +405,24 @@ CREATE TABLE book_file_cache (
 ) STRICT;
 CREATE INDEX book_file_cache_lru_idx ON book_file_cache(kept, accessed);
 '''),
+  Migration(11, 'source discovery and admissions', '''
+CREATE TABLE library_source_files (
+    location_id TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    size INTEGER,
+    revision TEXT,
+    PRIMARY KEY (location_id, locator_key)
+) STRICT;
+CREATE TABLE library_source_admissions (
+    location_id TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key TEXT NOT NULL,
+    content_hash TEXT NOT NULL REFERENCES books(content_hash) ON DELETE CASCADE,
+    size INTEGER,
+    revision TEXT,
+    PRIMARY KEY (location_id, locator_key)
+) STRICT;
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

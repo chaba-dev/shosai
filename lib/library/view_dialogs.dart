@@ -55,22 +55,20 @@ class _SettingsPage extends StatelessWidget {
                           ),
                         ),
                       ),
+                    if (onConnections != null)
+                      _SettingField(
+                        label: AppLocalizations.of(context).libraryConnections,
+                        child: ShadButton.outline(
+                          height: shosaiShadButtonHeight(context),
+                          onPressed: model.busy ? null : onConnections,
+                          child: Text(
+                            AppLocalizations.of(context).manageConnections,
+                          ),
+                        ),
+                      ),
                     if (value == null)
                       const Center(child: CircularProgressIndicator())
                     else ...[
-                      if (onConnections != null)
-                        _SettingField(
-                          label: AppLocalizations.of(
-                            context,
-                          ).libraryConnections,
-                          child: ShadButton.outline(
-                            height: shosaiShadButtonHeight(context),
-                            onPressed: model.busy ? null : onConnections,
-                            child: Text(
-                              AppLocalizations.of(context).manageConnections,
-                            ),
-                          ),
-                        ),
                       _SettingField(
                         label: 'Reader theme',
                         child: ShadSelect<String>(

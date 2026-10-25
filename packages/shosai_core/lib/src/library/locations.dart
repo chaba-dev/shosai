@@ -4,6 +4,7 @@ library;
 import '../cancellation.dart';
 import '../errors.dart';
 import '../store/store.dart';
+import 'files.dart';
 import 'location.dart';
 
 typedef LocatedContent = ({BookLocator locator, LocationFailure? failure});
@@ -19,6 +20,119 @@ final class LibraryLocations {
   const LibraryLocations(this._store);
 
   final Store _store;
+
+  /// Metadata is stored per file, not in a size-limited preference value.
+  Future<List<({String locationId, LocationEntry entry})>>
+  catalog() => _store.read(
+    (db) => [
+      for (final row in db.select(
+        'SELECT location_id, locator_key, name, size, revision FROM library_source_files',
+      ))
+        (
+          locationId: row.columnAt(0) as String,
+          entry: LocationEntry(
+            key: row.columnAt(1) as String,
+            name: row.columnAt(2) as String,
+            isDirectory: false,
+            size: row.columnAt(3) as int?,
+            revision: row.columnAt(4) as String?,
+          ),
+        ),
+    ],
+  );
+
+  Future<void> clearCatalog(String id) => _store.transaction((db) {
+    db.execute('DELETE FROM library_source_files WHERE location_id = ?', [id]);
+    db.execute('DELETE FROM library_source_admissions WHERE location_id = ?', [
+      id,
+    ]);
+  });
+
+  /// Admission is separate from source ownership: a local duplicate keeps its
+  /// working local path while this mapping suppresses its source candidate.
+  Future<void> admit(
+    String id,
+    int generation,
+    LocationEntry entry,
+    String hash,
+  ) => _store.transaction((db) {
+    if (!_hasGeneration(db, id, generation)) {
+      throw const LocationException(LocationFailure.revoked);
+    }
+    db.execute(
+      '''INSERT INTO library_source_admissions
+          (location_id, locator_key, content_hash, size, revision) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(location_id, locator_key) DO UPDATE SET
+          content_hash = excluded.content_hash, size = excluded.size, revision = excluded.revision''',
+      [id, entry.key, hash, entry.size, entry.revision],
+    );
+    db.execute(
+      'DELETE FROM library_source_files WHERE location_id = ? AND locator_key = ?',
+      [id, entry.key],
+    );
+  });
+
+  /// Publish a complete bounded scan. Changed bytes at an admitted key become
+  /// candidates again, without changing the old book identity or its notes.
+  Future<Set<String>> scan(
+    String id,
+    int generation,
+    List<LocationEntry> entries,
+  ) => _store.transaction((db) {
+    if (!_hasGeneration(db, id, generation)) {
+      throw const LocationException(LocationFailure.revoked);
+    }
+    if (entries.length > maxDiscoveredBooks) {
+      throw const CoreException.limitExceeded(
+        'The source contains too many books.',
+      );
+    }
+    final admitted = {
+      for (final row in db.select(
+        'SELECT locator_key, size, revision FROM library_source_admissions WHERE location_id = ?',
+        [id],
+      ))
+        row.columnAt(0) as String: (
+          size: row.columnAt(1) as int?,
+          revision: row.columnAt(2) as String?,
+        ),
+    };
+    final known = <String>{};
+    final present = entries.map((entry) => entry.key).toSet();
+    db.execute('DELETE FROM library_source_files WHERE location_id = ?', [id]);
+    for (final entry in entries) {
+      final previous = admitted[entry.key];
+      if (previous != null &&
+          previous.size == entry.size &&
+          previous.revision == entry.revision) {
+        known.add(entry.key);
+      } else {
+        db.execute(
+          'INSERT INTO library_source_files (location_id, locator_key, name, size, revision) VALUES (?, ?, ?, ?, ?)',
+          [id, entry.key, entry.name, entry.size, entry.revision],
+        );
+      }
+    }
+    for (final row in db.select(
+      'SELECT locator_key FROM book_locators WHERE location_id = ?',
+      [id],
+    )) {
+      final key = row.columnAt(0) as String;
+      if (!present.contains(key)) {
+        db.execute(
+          "UPDATE book_locators SET failure = 'missing' WHERE location_id = ? AND locator_key = ?",
+          [id, key],
+        );
+      }
+    }
+    for (final key in admitted.keys.where((key) => !present.contains(key))) {
+      db.execute(
+        'DELETE FROM library_source_admissions WHERE location_id = ? AND locator_key = ?',
+        [id, key],
+      );
+    }
+    return known;
+  });
 
   Future<int> connect(String id, String label) {
     _checkText(id, 1024);

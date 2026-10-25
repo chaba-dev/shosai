@@ -173,6 +173,90 @@ void main() {
   }
 
   test(
+    'large source catalogs survive restart without preference-size limits',
+    () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      for (var i = 0; i < 600; i++) {
+        File('${source.path}/book-$i.epub').writeAsStringSync('metadata only');
+      }
+      await core.folders.add(
+        FolderGrant('large', 'Large', 'path', source.path),
+      );
+      expect(await core.folders.discover(), hasLength(600));
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      expect(await core.folders.discover(), hasLength(600));
+      await core.folders.remove('large');
+      expect(await core.folders.discover(), isEmpty);
+    },
+  );
+
+  test(
+    'an incomplete source scan preserves prior metadata and other sources',
+    () async {
+      final broken = Directory('${directory.path}/broken')..createSync();
+      final healthy = Directory('${directory.path}/healthy')..createSync();
+      File('${broken.path}/old.epub').writeAsStringSync('metadata only');
+      File('${healthy.path}/good.pdf').writeAsStringSync('metadata only');
+      await core.folders.add(
+        FolderGrant('broken', 'Broken', 'path', broken.path),
+      );
+      await core.folders.add(
+        FolderGrant('healthy', 'Healthy', 'path', healthy.path),
+      );
+      expect(await core.folders.discover(), hasLength(2));
+      var deep = broken;
+      for (var i = 0; i < 34; i++) {
+        deep = Directory('${deep.path}/nested')..createSync();
+      }
+      File('${deep.path}/too-deep.epub').writeAsStringSync('metadata only');
+      final files = await core.folders.discover(refresh: true);
+      expect(files.map((file) => file.entry.name).toSet(), {
+        'old.epub',
+        'good.pdf',
+      });
+      await core.folders.remove('broken');
+      expect((await core.folders.discover()).single.entry.name, 'good.pdf');
+    },
+  );
+
+  test(
+    'changed admitted files return as candidates without changing old notes',
+    () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      final file = File(_epubFixture).copySync('${source.path}/chosen.epub');
+      await core.folders.add(
+        FolderGrant('changed', 'Books', 'path', source.path),
+      );
+      final candidate = (await core.folders.discover()).single;
+      final original = await core.folders.importEntry(
+        'changed',
+        candidate.entry,
+      );
+      await core.annotations.createNote(
+        original.id,
+        const BookAnchor(),
+        'Old content note',
+      );
+      expect(await core.folders.discover(refresh: true), isEmpty);
+      file.writeAsBytesSync([1, 2, 3], mode: FileMode.append);
+      expect(
+        (await core.folders.discover(refresh: true)).single.entry.size,
+        original.fileSize + 3,
+      );
+      expect(
+        (await core.library.get(original.id))!.contentHash,
+        original.contentHash,
+      );
+      expect(
+        (await core.annotations.summary(original.id)).latest,
+        'Old content note',
+      );
+    },
+  );
+
+  test(
     'configured sources discover metadata, admit on open and preserve missing books',
     () async {
       final source = Directory('${directory.path}/source')..createSync();
@@ -273,6 +357,11 @@ void main() {
         page.entries.single,
       );
       expect(duplicate.id, original.id);
+      expect(await core.folders.discover(refresh: true), isEmpty);
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      expect(await core.folders.discover(), isEmpty);
       await core.folders.remove('duplicate');
       expect((await core.library.get(original.id))!.locationFailure, isNull);
       final opened = await bridge.openLibraryBook(

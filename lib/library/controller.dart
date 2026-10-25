@@ -332,6 +332,12 @@ class LibraryController implements Listenable {
         _connections();
       case _LibraryDebounceElapsed():
         if (message.revision == _queryRevision) _load();
+      case _LibrarySettingsLoaded():
+        if (!_closing &&
+            message.revision == _loadRevision &&
+            _model.settings == null) {
+          _emit(_model.copyWith(settings: message.settings));
+        }
       case _LibraryLoaded():
         _releaseCancellation(message.cancellation);
         // A closed controller drains its effects but owns no model state: a
@@ -364,9 +370,9 @@ class LibraryController implements Listenable {
               ),
               sourceFiles: message.sourceFiles,
               // An order chosen while the settings loaded is the one kept.
-              settings:
-                  message.settings?.copyWith(librarySort: message.sort) ??
-                  _model.settings,
+              settings: (_model.settings ?? message.settings)?.copyWith(
+                librarySort: message.sort,
+              ),
               sort: message.sort,
               bookCount: message.page.bookCount == null
                   ? null
@@ -379,7 +385,7 @@ class LibraryController implements Listenable {
               loaded: true,
               loading: false,
               loadingMore: false,
-              loadError: null,
+              loadError: message.discoveryError,
               pagingFailed: false,
               hasMore: message.page.hasMore,
             ),
@@ -633,30 +639,40 @@ class LibraryController implements Listenable {
         final settings = _model.settings == null
             ? await _records.loadReaderSettings(cancellationId: cancellation)
             : null;
+        if (settings != null) {
+          dispatch(_LibrarySettingsLoaded(revision, settings));
+        }
         // The first page lists the shelf in its saved order, unless an order
         // was chosen before the settings arrived.
         final pageSort = settings != null && !sortChosen
             ? settings.librarySort
             : sort;
         final host = _bridge;
-        final sourceFiles = host is LibraryFoldersHost
-            ? (await (host as LibraryFoldersHost).folders.discover(
-                    refresh: refreshSources,
-                    cancellation: discovery,
-                  ))
-                  .where(
-                    (file) =>
-                        (format == null ||
-                            file.entry.name.toLowerCase().endsWith(
-                              '.${format.name}',
-                            )) &&
-                        (query.isEmpty ||
-                            file.title.toLowerCase().contains(
-                              query.toLowerCase(),
-                            )),
-                  )
-                  .toList()
-            : <LibrarySourceFile>[];
+        var sourceFiles = <LibrarySourceFile>[];
+        String? discoveryError;
+        try {
+          sourceFiles = host is LibraryFoldersHost
+              ? (await (host as LibraryFoldersHost).folders.discover(
+                      refresh: refreshSources,
+                      cancellation: discovery,
+                    ))
+                    .where(
+                      (file) =>
+                          (format == null ||
+                              file.entry.name.toLowerCase().endsWith(
+                                '.${format.name}',
+                              )) &&
+                          (query.isEmpty ||
+                              file.title.toLowerCase().contains(
+                                query.toLowerCase(),
+                              )),
+                    )
+                    .toList()
+              : <LibrarySourceFile>[];
+        } catch (error) {
+          discovery.throwIfCancelled();
+          discoveryError = safeError(error);
+        }
         sourceFiles.sort(
           (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
         );
@@ -677,6 +693,7 @@ class LibraryController implements Listenable {
             cancellation,
             pageSort,
             List.unmodifiable(sourceFiles),
+            discoveryError: discoveryError,
           ),
         );
       } catch (error) {

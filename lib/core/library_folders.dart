@@ -153,7 +153,7 @@ final class LibraryFolders {
         _catalog = List.unmodifiable(
           _catalog.where((file) => file.locationId != id),
         );
-        if (_catalogLoaded) await _saveCatalog(_catalog);
+        await _locations.clearCatalog(id);
         _discovered = false;
       });
 
@@ -166,23 +166,15 @@ final class LibraryFolders {
   }) => _serial(() async {
     await _load();
     if (!_catalogLoaded) {
-      final raw = await _preferences.get('device.library.catalog');
-      if (raw != null) {
-        _catalog = [
-          for (final value in jsonDecode(raw) as List)
+      _catalog = [
+        for (final file in await _locations.catalog())
+          if (_grants.any((grant) => grant.id == file.locationId))
             LibrarySourceFile(
-              value['id'] as String,
-              value['source'] as String,
-              LocationEntry(
-                key: value['key'] as String,
-                name: value['name'] as String,
-                isDirectory: false,
-                size: value['size'] as int?,
-                revision: value['revision'] as String?,
-              ),
+              file.locationId,
+              _grant(file.locationId).label,
+              file.entry,
             ),
-        ];
-      }
+      ];
       _catalogLoaded = true;
     }
     if (_discovered && !refresh) return List.unmodifiable(_catalog);
@@ -235,11 +227,7 @@ final class LibraryFolders {
           } while (cursor != null);
         }
         cancellation.throwIfCancelled();
-        final known = await _locations.reconcile(
-          grant.id,
-          generation,
-          entries.map((entry) => entry.key).toSet(),
-        );
+        final known = await _locations.scan(grant.id, generation, entries);
         next.addAll([
           for (final entry in entries)
             if (!known.contains(entry.key))
@@ -257,29 +245,18 @@ final class LibraryFolders {
                 failure: error.failure,
               ),
         ]);
+      } on CoreException catch (error) {
+        if (error.kind == CoreErrorKind.cancelled) rethrow;
+        // An invalid or over-limit source must not hide other connections or
+        // local books, nor reconcile unseen files as missing.
+        next.addAll(_catalog.where((file) => file.locationId == grant.id));
       }
     }
     cancellation.throwIfCancelled();
-    await _saveCatalog(next);
     _catalog = List.unmodifiable(next);
     _discovered = true;
     return _catalog;
   });
-
-  Future<void> _saveCatalog(List<LibrarySourceFile> files) => _preferences.set(
-    'device.library.catalog',
-    jsonEncode([
-      for (final file in files)
-        {
-          'id': file.locationId,
-          'source': file.source,
-          'key': file.entry.key,
-          'name': file.entry.name,
-          'size': file.entry.size,
-          'revision': file.entry.revision,
-        },
-    ]),
-  );
 
   Future<void> discard(FolderGrant grant) {
     // A picker can finish while the application is closing. Cleanup of a
@@ -311,6 +288,7 @@ final class LibraryFolders {
     // Unavailable is durable before attempting platform cleanup. A failed
     // cleanup never deletes a book or makes its annotations inaccessible.
     await _locations.remove(id);
+    await _locations.clearCatalog(id);
     await _cache.discardLocation(id);
     await _save(_grants.where((entry) => entry.id != id).toList());
     _grants = List.unmodifiable(_grants.where((entry) => entry.id != id));
@@ -382,6 +360,7 @@ final class LibraryFolders {
         // An explicit local import already owns this content. Adding the
         // same book from a folder is a duplicate, not permission to replace
         // its working local source with a dependency on that folder grant.
+        await _locations.admit(id, generation, entry, book.contentHash);
         if (book.path != canonicalBookPath(path) &&
             (await _locations.copies(book.contentHash)).isEmpty &&
             await File(book.path).exists()) {
@@ -409,7 +388,6 @@ final class LibraryFolders {
         (file) => file.locationId != id || file.entry.key != entry.key,
       ),
     );
-    if (_catalogLoaded) await _saveCatalog(_catalog);
     return book;
   });
 

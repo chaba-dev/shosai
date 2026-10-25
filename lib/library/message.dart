@@ -140,8 +140,9 @@ final class _LibraryLoaded extends LibraryMessage {
     this.append,
     this.cancellation,
     this.sort,
-    this.sourceFiles,
-  );
+    this.sourceFiles, {
+    this.discoveryError,
+  });
   final int revision;
   final FlutterLibraryPage page;
   final FlutterReaderSettings? settings;
@@ -151,6 +152,13 @@ final class _LibraryLoaded extends LibraryMessage {
   /// The order [page] is listed in.
   final FlutterLibrarySort sort;
   final List<LibrarySourceFile> sourceFiles;
+  final String? discoveryError;
+}
+
+final class _LibrarySettingsLoaded extends LibraryMessage {
+  const _LibrarySettingsLoaded(this.revision, this.settings);
+  final int revision;
+  final FlutterReaderSettings settings;
 }
 
 /// A field on the settings page changed.

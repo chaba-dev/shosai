@@ -167,6 +167,11 @@ void main() {
     await _settle();
     expect(bridge.pages, hasLength(1));
     expect(controller.model.busy, isTrue);
+    expect(
+      controller.model.settings,
+      isNotNull,
+      reason: 'connection recovery does not wait for the shelf load',
+    );
 
     bridge.pages.single.complete(
       FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: true),
@@ -182,6 +187,23 @@ void main() {
     controller.dispose();
     await _settle();
   });
+
+  test(
+    'a shelf load failure leaves settings available for connection recovery',
+    () async {
+      final bridge = _StubLibraryBridge();
+      final controller = _controller(bridge);
+      controller.dispatch(const LibraryStarted());
+      await _settle();
+      bridge.pages.single.completeError(StateError('source scan failed'));
+      await _settle();
+      expect(controller.model.settings, isNotNull);
+      expect(controller.model.loading, isFalse);
+      expect(controller.model.loadError, isNotNull);
+      controller.dispose();
+      await _settle();
+    },
+  );
 
   test('a stale page cannot replace a newer query result', () async {
     final bridge = _StubLibraryBridge();
