@@ -125,9 +125,22 @@ void main() {
       done.complete();
       await first;
       await second;
-      await read(cache, a);
+      await read(cache, a, keep: true);
       File(path).writeAsBytesSync(List.filled(10, 0));
       expect(await read(cache, a), File(a.path).readAsBytesSync());
+      final noAutomaticCache = BookFileCache(
+        t.store,
+        cache.directory,
+        capacity: 0,
+      );
+      final source = File(a.path).readAsBytesSync();
+      File(a.path).deleteSync();
+      expect(
+        await read(noAutomaticCache, a),
+        source,
+        reason: 'repairing a kept copy must not silently unpin it',
+      );
+      File(a.path).writeAsBytesSync(source);
       File(path).deleteSync();
       expect(await read(cache, a), File(a.path).readAsBytesSync());
     },

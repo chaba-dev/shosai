@@ -80,19 +80,20 @@ final class BookFileCache {
     final hash = book.contentHash;
     final path = _path(hash, book.format);
     final state = await _state(hash);
+    final kept = keep || state?.kept == true;
     if (state != null) {
       final fingerprint = await fingerprintFile(
         path,
         cancellation: cancellation,
       );
       if (fingerprint.hash == hash) {
-        await _record(hash, book.format, fingerprint.size, keep || state.kept);
+        await _record(hash, book.format, fingerprint.size, kept);
         return consume(path);
       }
       await _drop(hash, book.format);
     }
-    final retain = keep || book.fileSize <= capacity;
-    if (retain && !keep) await _trim(reserve: book.fileSize, entries: 1);
+    final retain = kept || book.fileSize <= capacity;
+    if (retain && !kept) await _trim(reserve: book.fileSize, entries: 1);
     final incoming = File(uniqueTemporaryPath(directory, 'incoming'));
     try {
       final output = await incoming.open(mode: FileMode.writeOnly);
@@ -119,7 +120,7 @@ final class BookFileCache {
       cancellation.throwIfCancelled();
       if (!retain) return await consume(incoming.path);
       await incoming.rename(path);
-      await _record(hash, book.format, fingerprint.size, keep);
+      await _record(hash, book.format, fingerprint.size, kept);
       return await consume(path);
     } finally {
       if (await incoming.exists()) await incoming.delete();
