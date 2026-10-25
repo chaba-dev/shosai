@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ZonesHint · Shōsai design system</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components.css">
+<style>
+body { margin: 0; background: var(--canvas); }
+.demo { padding: 20px 24px; display: flex; gap: 24px; }
+.phone { position: relative; width: 270px; height: 560px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.phone .sh-page { position: absolute; inset: 0; padding: 40px 20px 0; }
+.phone .sh-page__body { font-size: 14px; line-height: 23px; }
+.phone .sh-page__body p { text-align: justify; }
+.phone .sh-page__folio { position: absolute; left: 0; right: 0; bottom: 18px; }
+.ja .sh-page__body { writing-mode: vertical-rl; line-break: strict; font-size: 15px; line-height: 28px; height: 440px; }
+.ja .sh-page__body p { text-align: start; }
+</style>
+</head>
+<body>
+<div class="sh demo">
+  <div class="phone">
+    <div class="sh-page">
+      <div class="sh-page__head"><span>Chapter I</span><span></span></div>
+      <div class="sh-page__body book-body" style="margin-top:14px"><p>It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.</p><p>However little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families, that he is considered as the rightful property of some one or other of their daughters.</p></div>
+      <div class="sh-page__folio">page 4 of 432</div>
+    </div>
+    <div class="sh-zones" role="dialog" aria-label="How to turn pages">
+      <div class="sh-zones__zone"><span class="sh-zones__glyph"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span>Previous page</div>
+      <div class="sh-zones__zone"><span class="sh-zones__glyph sh-zones__glyph--mid"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/></svg></span>Controls</div>
+      <div class="sh-zones__zone"><span class="sh-zones__glyph"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>Next page</div>
+      <div class="sh-zones__cap"><b>Tap the sides to turn, the middle for controls</b>You can also swipe. Tap anywhere to begin.</div>
+    </div>
+  </div>
+  <div class="phone ja" lang="ja">
+    <div class="sh-page sh-page--vertical">
+      <div class="sh-page__head"><span>吾輩は猫である</span><span></span></div>
+      <div class="sh-page__body book-body-ja" style="margin-top:14px"><p>吾輩は猫である。名前はまだ無い。</p><p>どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。吾輩はここで始めて人間というものを見た。</p></div>
+      <div class="sh-page__folio">3 / 412 ページ</div>
+    </div>
+    <div class="sh-zones" role="dialog" aria-label="ページのめくり方">
+      <div class="sh-zones__zone"><span class="sh-zones__glyph"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></span>次のページ<span class="sh-zones__sub">Next page</span></div>
+      <div class="sh-zones__zone"><span class="sh-zones__glyph sh-zones__glyph--mid"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/></svg></span>メニュー<span class="sh-zones__sub">Controls</span></div>
+      <div class="sh-zones__zone"><span class="sh-zones__glyph"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span>前のページ<span class="sh-zones__sub">Previous page</span></div>
+      <div class="sh-zones__cap"><b>縦書きの本は左へめくります</b>左右をタップでページ、中央でメニュー</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
