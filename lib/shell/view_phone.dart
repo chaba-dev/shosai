@@ -46,7 +46,7 @@ class ShellBottomNav extends StatelessWidget {
               child: _BottomNavButton(
                 icon: LucideIcons.settings,
                 label: l10n.filterSettings,
-                current: false,
+                current: place == ShellPlace.settings,
                 onPressed: onSettings,
               ),
             ),

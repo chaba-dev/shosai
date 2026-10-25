@@ -143,7 +143,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     pickImport: _pickImport,
     openBook: _openBook,
     drainReaderSaves: ReaderController.drainBookWrites,
-    editSettings: _editSettings,
+    manageConnections: _manageLocations,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     localizations: () => AppLocalizations.of(context),
@@ -710,14 +710,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         ? null
         : () => controller.dispatch(const LibraryImportRequested()),
     loadCover: controller.requestCover,
-    settings: _shell.model.reading
-        ? () {
-            _pendingLibraryAction = const LibrarySettingsRequested();
-            _shell.dispatch(ShellPlaceSelected(_shell.model.place));
-          }
-        : controller.model.settings == null || controller.model.busy
-        ? null
-        : () => controller.dispatch(const LibrarySettingsRequested()),
+    settings: () =>
+        _shell.dispatch(const ShellPlaceSelected(ShellPlace.settings)),
     closeSwitcher: () => _shell.dispatch(const ShellSwitcherClosed()),
   );
 
@@ -1057,30 +1051,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  Future<FlutterReaderSettings?> _editSettings(
-    FlutterReaderSettings initial,
-  ) async {
-    final bridge = _sessionBridge;
-    var value = initial;
-    while (true) {
-      if (!mounted || !identical(bridge, _sessionBridge)) return null;
-      final result = await _settingsDialog(
-        context,
-        value,
-        showOwnedDialog: _showOwnedDialog,
-        connectionsAvailable: _sessionBridge is LibraryFoldersHost,
-      );
-      if (result == null) return null;
-      value = result.settings;
-      if (!result.connections) return value;
-      if (!mounted || !identical(bridge, _sessionBridge)) return null;
-      await _manageLocations();
-      if (mounted && identical(bridge, _sessionBridge)) {
-        controller.dispatch(const LibraryRefreshed());
-      }
-    }
-  }
-
   Future<void> _manageLocations() async {
     final host = _sessionBridge;
     if (host is! LibraryFoldersHost) return;
@@ -1189,6 +1159,21 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                             _notes.dispatch(const ShellNotesRequested()),
                         onMore: () =>
                             _notes.dispatch(const ShellNotesMoreRequested()),
+                      ),
+                    )
+                  : shell.place == ShellPlace.settings
+                  ? _SettingsPage(
+                      layout: layout,
+                      model: controller.model,
+                      onChanged: (value) =>
+                          controller.dispatch(LibrarySettingsChanged(value)),
+                      onConnections: _sessionBridge is LibraryFoldersHost
+                          ? () => controller.dispatch(
+                              const LibraryConnectionsRequested(),
+                            )
+                          : null,
+                      onRetry: () => controller.dispatch(
+                        const LibrarySettingsSaveRetried(),
                       ),
                     )
                   : ShellPlacePage(layout: layout, place: shell.place),

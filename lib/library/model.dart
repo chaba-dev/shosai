@@ -10,8 +10,6 @@ typedef LibraryImportRunner =
     );
 typedef LibraryBookOpener = Future<void> Function(FlutterLibraryBook book);
 typedef LibraryReaderSaveDrainer = Future<void> Function(int bookId);
-typedef LibrarySettingsEditor =
-    Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
 typedef LibraryImportAdapterCanceller = void Function();
 typedef LibraryCoverEvicter = void Function(Uint8List bytes);
 typedef LibraryProviderCleanupRetrier = Future<bool> Function();

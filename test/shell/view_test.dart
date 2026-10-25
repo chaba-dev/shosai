@@ -119,8 +119,7 @@ void main() {
         expect(
           recorder.places,
           isEmpty,
-          reason:
-              'opening a settings dialog must not navigate away from the current place',
+          reason: 'settings navigation is routed through its dedicated action',
         );
       },
     );

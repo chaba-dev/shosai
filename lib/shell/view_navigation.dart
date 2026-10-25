@@ -14,6 +14,7 @@ String shellPlaceLabel(AppLocalizations l10n, ShellPlace place) =>
       ShellPlace.notes => l10n.shellPlaceNotes,
       ShellPlace.bookmarks => l10n.shellPlaceBookmarks,
       ShellPlace.search => l10n.shellPlaceSearch,
+      ShellPlace.settings => l10n.filterSettings,
     };
 
 /// The study's left wall on desktop and tablet: the mark and wordmark, a
@@ -91,7 +92,9 @@ class ShellSidebar extends StatelessWidget {
                         icon: LucideIcons.settings,
                         label: l10n.filterSettings,
                         touch: layout.touch,
-                        current: false,
+                        current:
+                            !model.reading &&
+                            model.place == ShellPlace.settings,
                         onPressed: actions.settings,
                       ),
                       if (open.isNotEmpty)

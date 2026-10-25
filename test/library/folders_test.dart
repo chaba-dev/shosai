@@ -78,8 +78,7 @@ void main() {
       ),
     );
     Future<void> settle() async {
-      // The controller owns the settings effect until the dialog closes, so
-      // its activity indicator intentionally keeps scheduling frames.
+      // Allow the real filesystem and database effects to complete.
       for (var attempt = 0; attempt < 30; attempt++) {
         await tester.pump(const Duration(milliseconds: 16));
         await tester.runAsync(
@@ -132,9 +131,9 @@ void main() {
     expect(
       tester.widget<ShadSwitch>(continuous).value,
       !before,
-      reason: 'connection management preserves unsaved reader settings',
+      reason: 'connection management preserves reader settings',
     );
-    await tester.tap(find.text('Save'));
+    await tester.tap(find.text('Library'));
     await settle();
     expect(
       (await tester.runAsync(core.folders.list))!.map((grant) => grant.id),

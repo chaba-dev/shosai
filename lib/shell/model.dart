@@ -19,7 +19,7 @@ typedef ShellReadingResumer = void Function(OpenBook book);
 
 /// The places of the sidebar, the rail and the phone's bottom bar, in their
 /// one order (`docs/design-system.md`, Sidebar).
-enum ShellPlace { library, notes, bookmarks, search }
+enum ShellPlace { library, notes, bookmarks, search, settings }
 
 /// One open book: the library entry it was opened from and the reader's last
 /// reported locator, so switching back reopens it where it was left.

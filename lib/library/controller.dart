@@ -25,7 +25,7 @@ class LibraryController implements Listenable {
     required LibraryImportPicker pickImport,
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
-    required LibrarySettingsEditor editSettings,
+    Future<void> Function()? manageConnections,
     LibraryProviderCleanupRetrier retryProviderCleanup =
         _ignoreProviderCleanupRetry,
     LibraryImportAdapterCanceller cancelImportAdapter =
@@ -40,7 +40,7 @@ class LibraryController implements Listenable {
        _pickImport = pickImport,
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
-       _editSettings = editSettings,
+       _manageConnections = manageConnections,
        _retryProviderCleanup = retryProviderCleanup,
        _cancelImportAdapter = cancelImportAdapter,
        _evictCover = evictCover,
@@ -56,7 +56,7 @@ class LibraryController implements Listenable {
   final LibraryImportPicker _pickImport;
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
-  final LibrarySettingsEditor _editSettings;
+  final Future<void> Function()? _manageConnections;
   final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
   final LibraryCoverEvicter _evictCover;
@@ -196,7 +196,7 @@ class LibraryController implements Listenable {
           case LibraryFailure.removal:
             _load();
           case LibraryFailure.settings:
-            _settings();
+            _saveSettings();
         }
       case LibraryCleanupRetryRequested():
         _retryCleanup();
@@ -241,9 +241,8 @@ class LibraryController implements Listenable {
         _emit(_model.copyWith(settings: changed));
         _saveSettings();
       case LibrarySettingsSaveRetried():
-        // Unlike the library alert's Retry, which reopens the dialog, this
-        // saves the settings already in place: a Display change made in the
-        // reader is retried where it was made.
+        // Retry the settings already in place, without leaving the page or
+        // the reader where the change was made.
         if (_model.failure == LibraryFailure.settings &&
             _model.settings != null) {
           _saveSettings();
@@ -252,9 +251,10 @@ class LibraryController implements Listenable {
         if (_model.failure == LibraryFailure.settings) {
           _emit(_model.copyWith(error: null, failure: LibraryFailure.none));
         }
-      case _LibrarySettingsEdited():
-        // The dialog edits the display settings; the order and the Pages
-        // setting it opened with may have changed since.
+      case LibrarySettingsChanged():
+        if (_model.settings == null) return;
+        // Preserve the shelf order and reader-only settings when applying
+        // the fields exposed by the settings page.
         final edited = message.settings;
         _emit(
           _model.copyWith(
@@ -328,8 +328,8 @@ class LibraryController implements Listenable {
         // confirmed and running; the mutation completion clears it again.
         _emit(_model.copyWith(removingBookId: message.book.bookId));
         _remove(message.book);
-      case LibrarySettingsRequested():
-        _settings();
+      case LibraryConnectionsRequested():
+        _connections();
       case _LibraryDebounceElapsed():
         if (message.revision == _queryRevision) _load();
       case _LibraryLoaded():
@@ -929,18 +929,16 @@ class LibraryController implements Listenable {
     }());
   }
 
-  void _settings() {
-    final initial = _model.settings;
-    if (_closing || _model.busy || initial == null) return;
+  void _connections() {
+    final manage = _manageConnections;
+    if (_closing || _model.busy || manage == null) return;
     _beginEffect();
     final adapterRevision = ++_adapterRevision;
     unawaited(() async {
       try {
-        final settings = await _editSettings(initial);
-        // Once the dialog has closed, a concurrent load's cancellation does
-        // not supersede its change: the write and its feedback stand.
-        if (settings != null && _ownsAdapter(adapterRevision)) {
-          dispatch(_LibrarySettingsEdited(settings));
+        await manage();
+        if (_ownsAdapter(adapterRevision)) {
+          dispatch(const LibraryRefreshed());
         }
       } catch (error) {
         dispatch(
@@ -958,7 +956,7 @@ class LibraryController implements Listenable {
   /// Saves the model's settings in the background, after the write already
   /// running if there is one. A change takes effect before it is saved; a
   /// failed write reports as a settings failure unless a newer one follows,
-  /// and [notify] reports the settings dialog's success.
+  /// and [notify] reports the settings page's success.
   void _saveSettings({bool notify = false}) {
     _settingsNotify = _settingsNotify || notify;
     if (_settingsWriting) {

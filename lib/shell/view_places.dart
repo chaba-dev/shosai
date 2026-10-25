@@ -28,7 +28,10 @@ class ShellPlacePage extends StatelessWidget {
         l10n.shellBookmarksEmptyHeading,
         l10n.shellBookmarksEmptyBody,
       ),
-      ShellPlace.library || ShellPlace.notes || ShellPlace.search => ('', ''),
+      ShellPlace.library ||
+      ShellPlace.notes ||
+      ShellPlace.search ||
+      ShellPlace.settings => ('', ''),
     };
     final gutter = layout == ShellLayout.phone ? 16.0 : 48.0;
     return ColoredBox(

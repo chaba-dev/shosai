@@ -360,8 +360,9 @@ void main() {
           await tester.pump(const Duration(milliseconds: 100));
         }
         expect(find.text('Reader theme'), findsOneWidget);
+        await tester.pumpAndSettle();
         expect(find.byType(ShellRail), findsNothing);
-        await tester.tap(find.text('Cancel'));
+        await tester.tap(find.text('Library'));
         await tester.pumpAndSettle();
         expect(
           find.descendant(
@@ -500,7 +501,7 @@ void main() {
       await tester.tap(navigationEntry('Settings'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Reader theme'), findsOneWidget);
-      await tester.tap(find.text('Cancel'));
+      await tester.tap(find.text('Library'));
       await tester.pump(const Duration(milliseconds: 300));
 
       await tester.tap(navigationEntry('PDF'));
@@ -1159,7 +1160,6 @@ void main() {
         ),
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
       );
       final notifications = <({bool busy, bool importing})>[];
       controller.addListener(

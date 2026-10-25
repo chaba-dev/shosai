@@ -127,7 +127,6 @@ LibraryController _controller(_StubLibraryBridge bridge) => LibraryController(
   pickImport: () async => null,
   openBook: (_) async {},
   drainReaderSaves: (_) async {},
-  editSettings: (_) async => null,
 );
 
 /// A controller that records whether a model notification arrived while a
@@ -143,7 +142,6 @@ class _ObservingController extends LibraryController {
     required super.pickImport,
     required super.openBook,
     required super.drainReaderSaves,
-    required super.editSettings,
   });
 
   bool inDispatch = false;
@@ -345,7 +343,6 @@ void main() {
       pickImport: () async => null,
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (initial) async => initial.copyWith(theme: 'dark'),
     );
 
     controller.dispatch(const LibraryStarted());
@@ -355,10 +352,14 @@ void main() {
     );
     await _settle();
 
-    // The dialog's write is still running when the order and the Pages
+    // The page's write is still running when the order and the Pages
     // setting change.
     bridge.saveGate = Completer<void>();
-    controller.dispatch(const LibrarySettingsRequested());
+    controller.dispatch(
+      LibrarySettingsChanged(
+        controller.model.settings!.copyWith(theme: 'dark'),
+      ),
+    );
     await _settle();
     controller.dispatch(const LibrarySortChanged(FlutterLibrarySort.title));
     controller.dispatch(const LibraryDisplayChanged(twoPages: false));
@@ -454,17 +455,12 @@ void main() {
 
   test('a failed settings write is retried in place, or dismissed', () async {
     final bridge = _StubLibraryBridge();
-    var dialogs = 0;
     final controller = LibraryController(
       bridge: bridge,
       confirmRemoval: (_) async => true,
       pickImport: () async => null,
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async {
-        dialogs += 1;
-        return null;
-      },
     );
 
     controller.dispatch(const LibraryStarted());
@@ -483,7 +479,6 @@ void main() {
     bridge.saveError = null;
     controller.dispatch(const LibrarySettingsSaveRetried());
     await _settle();
-    expect(dialogs, 0);
     expect(bridge.storedSettings.twoPages, isFalse);
     expect(controller.model.failure, LibraryFailure.none);
     expect(controller.model.error, isNull);
@@ -510,7 +505,6 @@ void main() {
       pickImport: () async => null,
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
     );
     controller.addListener(() {
       if (controller.inDispatch) {
@@ -722,7 +716,6 @@ void main() {
       },
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
     );
 
     // A partial import leaves its own persistent failure on the alert above the
@@ -1134,7 +1127,6 @@ void main() {
           const LibraryImportSelection(paths: ['/books/a.pdf'], managed: false),
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
     );
 
     controller.dispatch(const LibraryImportRequested());
@@ -1166,7 +1158,6 @@ void main() {
         ),
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
       );
 
       controller.dispatch(const LibraryImportRequested());
@@ -1208,7 +1199,6 @@ void main() {
           pickImport: () async => null,
           openBook: (_) => reader.future,
           drainReaderSaves: (_) async {},
-          editSettings: (_) async => null,
           openedDocuments: documents,
         );
         controller.dispatch(const LibraryStarted());
@@ -1264,7 +1254,6 @@ void main() {
         drained.add(bookId);
         await drainGate.future;
       },
-      editSettings: (_) async => null,
     );
 
     final firstResumable = FlutterLibraryBook(
