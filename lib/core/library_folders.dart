@@ -58,15 +58,18 @@ final class LibraryFolders {
   List<LibraryConnection> _grants = const [];
   List<LibrarySourceFile> _catalog = const [];
   Set<String> _scanFailures = const {};
+  Set<String> _refreshFailures = const {};
 
   /// At most one warning per configured connection, never raw provider errors.
   List<String> get scanWarnings => List.unmodifiable([
     for (final grant in _grants)
-      if (_scanFailures.contains(grant.id)) grant.label,
+      if (_scanFailures.contains(grant.id) ||
+          _refreshFailures.contains(grant.id))
+        grant.label,
   ]);
   bool _discovered = false;
   bool _catalogLoaded = false;
-  Future<void>? _loading;
+  bool _loaded = false;
   Future<void> _tail = Future.value();
   bool _closed = false;
 
@@ -84,9 +87,15 @@ final class LibraryFolders {
     return drain();
   }
 
-  Future<void> _load() => _loading ??= () async {
+  // All callers run inside _serial. Publish successful initialization only;
+  // configuration read/write failures must be retryable in this same service.
+  Future<void> _load({CancellationToken? cancellation}) async {
+    if (_loaded) return;
     final raw = await _preferences.get('device.library.folders');
-    if (raw == null) return;
+    if (raw == null) {
+      _loaded = true;
+      return;
+    }
     final grants = (jsonDecode(raw) as List)
         .map(
           (value) => value is Map
@@ -94,21 +103,41 @@ final class LibraryFolders {
               : LibraryConnection.fromJson(value as List),
         )
         .toList();
-    for (var index = 0; index < grants.length; index++) {
-      var grant = grants[index];
-      try {
-        grant = grants[index] = await _provider(grant.provider).refresh(grant);
-      } on LocationException {
-        // Keep offline/revoked configurations so their books and notes remain
-        // visible. Access attempts report failure through location state.
-      } on CoreException {
-        // Preserve configuration for a provider this version cannot resolve.
-      }
+    await _refresh(grants, cancellation: cancellation);
+    for (final grant in _grants) {
       _generations[grant.id] = await _locations.connect(grant.id, grant.label);
     }
-    await _save(grants);
-    _grants = List.unmodifiable(grants);
-  }();
+    _loaded = true;
+  }
+
+  Future<void> _refresh(
+    List<LibraryConnection> grants, {
+    CancellationToken? cancellation,
+  }) async {
+    final next = <LibraryConnection>[];
+    final failures = <String>{};
+    for (final grant in grants) {
+      cancellation.throwIfCancelled();
+      try {
+        next.add(await _provider(grant.provider).refresh(grant));
+      } catch (error) {
+        if (error is CoreException && error.kind == CoreErrorKind.cancelled) {
+          rethrow;
+        }
+        // Isolate provider failures, including unexpected adapter errors, but
+        // expose a warning instead of pretending refresh succeeded. The old
+        // grant may still work; only an access attempt changes availability.
+        next.add(grant);
+        failures.add(grant.id);
+      }
+    }
+    cancellation.throwIfCancelled();
+    // Persistence is an application failure, not a provider failure. Do not
+    // swallow it or publish configuration that was not saved successfully.
+    await _save(next);
+    _grants = List.unmodifiable(next);
+    _refreshFailures = Set.unmodifiable(failures);
+  }
 
   Future<List<LibraryConnection>> list() => _serial(() async {
     await _load();
@@ -182,7 +211,12 @@ final class LibraryFolders {
     bool refresh = false,
     CancellationToken? cancellation,
   }) => _serial(() async {
-    await _load();
+    cancellation.throwIfCancelled();
+    final wasLoaded = _loaded;
+    await _load(cancellation: cancellation);
+    if (refresh && wasLoaded) {
+      await _refresh(_grants, cancellation: cancellation);
+    }
     if (!_catalogLoaded) {
       _catalog = [
         for (final file in await _locations.catalog())
@@ -423,7 +457,6 @@ final class LibraryFolders {
     bool keep = false,
     CancellationToken? cancellation,
   }) => _serial(() async {
-    await _load();
     final copies = await _locations.copies(book.contentHash);
     if (copies.isEmpty) {
       if (book.locationFailure != null) {
@@ -435,19 +468,23 @@ final class LibraryFolders {
     for (final copy in copies) {
       cancellation.throwIfCancelled();
       final id = copy.locator.locationId;
-      final generation = _generations[id];
+      var generation = _generations[id];
       try {
         return await _cache.withFile(
           book,
           () async* {
-            if (generation == null) {
+            // A verified cached copy does not depend on provider refresh or
+            // readable connection preferences. Initialize only on a cache miss.
+            await _load();
+            final currentGeneration = generation = _generations[id];
+            if (currentGeneration == null) {
               throw const LocationException(LocationFailure.revoked);
             }
             final grant = _grant(id);
             final location = await _provider(grant.provider).open(grant);
             yield* _locations.read(
               location,
-              generation,
+              currentGeneration,
               book.contentHash,
               copy.locator.key,
               cancellation: cancellation,
@@ -458,11 +495,12 @@ final class LibraryFolders {
           cancellation: cancellation,
         );
       } on LocationException catch (error) {
-        if (generation != null) {
+        final failedGeneration = generation;
+        if (failedGeneration != null) {
           await _locations.failed(
             book.contentHash,
             copy.locator,
-            generation: generation,
+            generation: failedGeneration,
             failure: error.failure,
           );
         }
