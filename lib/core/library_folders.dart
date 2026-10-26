@@ -6,9 +6,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/services.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 
 abstract interface class LibraryFoldersHost {
@@ -44,27 +44,32 @@ final class LibraryFolders {
     this._library,
     this._locations,
     this._newPath,
-    this._cache,
-  );
+    this._cache, {
+    List<ConnectionProvider> providers = const [FolderConnectionProvider()],
+  }) : _providers = List.unmodifiable(providers);
 
   final Preferences _preferences;
   final Library _library;
   final LibraryLocations _locations;
   final Future<String> Function() _newPath;
   final BookFileCache _cache;
+  final List<ConnectionProvider> _providers;
   final Map<String, int> _generations = {};
-  List<FolderGrant> _grants = const [];
+  List<LibraryConnection> _grants = const [];
   List<LibrarySourceFile> _catalog = const [];
   Set<String> _scanFailures = const {};
+  Set<String> _refreshFailures = const {};
 
   /// At most one warning per configured connection, never raw provider errors.
   List<String> get scanWarnings => List.unmodifiable([
     for (final grant in _grants)
-      if (_scanFailures.contains(grant.id)) grant.label,
+      if (_scanFailures.contains(grant.id) ||
+          _refreshFailures.contains(grant.id))
+        grant.label,
   ]);
   bool _discovered = false;
   bool _catalogLoaded = false;
-  Future<void>? _loading;
+  bool _loaded = false;
   Future<void> _tail = Future.value();
   bool _closed = false;
 
@@ -82,44 +87,86 @@ final class LibraryFolders {
     return drain();
   }
 
-  Future<void> _load() => _loading ??= () async {
+  // All callers run inside _serial. Publish successful initialization only;
+  // configuration read/write failures must be retryable in this same service.
+  Future<void> _load({CancellationToken? cancellation}) async {
+    if (_loaded) return;
     final raw = await _preferences.get('device.library.folders');
-    if (raw == null) return;
+    if (raw == null) {
+      _loaded = true;
+      return;
+    }
     final grants = (jsonDecode(raw) as List)
         .map(
-          (value) =>
-              FolderGrant.fromJson((value as Map).cast<String, dynamic>()),
+          (value) => value is Map
+              ? FolderConnectionProvider.migrate(value.cast<String, dynamic>())
+              : LibraryConnection.fromJson(value as List),
         )
         .toList();
-    for (var index = 0; index < grants.length; index++) {
-      var grant = grants[index];
-      try {
-        grant = grants[index] = await grant.refreshed();
-      } on PlatformException {
-        // Keep an offline/revoked configuration so its books and notes remain
-        // visible. Access attempts report the failure through location state.
-      }
+    await _refresh(grants, cancellation: cancellation);
+    for (final grant in _grants) {
       _generations[grant.id] = await _locations.connect(grant.id, grant.label);
     }
-    await _save(grants);
-    _grants = List.unmodifiable(grants);
-  }();
+    _loaded = true;
+  }
 
-  Future<List<FolderGrant>> list() => _serial(() async {
+  Future<void> _refresh(
+    List<LibraryConnection> grants, {
+    CancellationToken? cancellation,
+  }) async {
+    final next = <LibraryConnection>[];
+    final failures = <String>{};
+    for (final grant in grants) {
+      cancellation.throwIfCancelled();
+      try {
+        next.add(await _provider(grant.provider).refresh(grant));
+      } catch (error) {
+        if (error is CoreException && error.kind == CoreErrorKind.cancelled) {
+          rethrow;
+        }
+        // Isolate provider failures, including unexpected adapter errors, but
+        // expose a warning instead of pretending refresh succeeded. The old
+        // grant may still work; only an access attempt changes availability.
+        next.add(grant);
+        failures.add(grant.id);
+      }
+    }
+    cancellation.throwIfCancelled();
+    // Persistence is an application failure, not a provider failure. Do not
+    // swallow it or publish configuration that was not saved successfully.
+    await _save(next);
+    _grants = List.unmodifiable(next);
+    _refreshFailures = Set.unmodifiable(failures);
+  }
+
+  Future<List<LibraryConnection>> list() => _serial(() async {
     await _load();
     return _grants;
   });
 
+  ConnectionProvider _provider(String id) => _providers.firstWhere(
+    (provider) => provider.id == id,
+    orElse: () => throw const CoreException(
+      CoreErrorKind.unsupported,
+      'Unknown connection provider.',
+    ),
+  );
+
+  Future<LibraryConnection?> setup(String provider, String id) =>
+      _provider(provider).setup(id);
+
+  bool _sameAccess(LibraryConnection first, LibraryConnection second) =>
+      first.provider == second.provider &&
+      _provider(first.provider).sameAccess(first, second);
+
   /// The picker is injected and awaited by the controller. Persist only grants,
   /// never access tokens, passwords, or the book bytes themselves.
-  Future<void> add(FolderGrant grant) => _serial(() async {
+  Future<void> add(LibraryConnection grant) => _serial(() async {
     await _load();
     // Picking the same SAF tree twice must not produce two independent owners
     // of one Android permission: removing either would revoke the other.
     final existing = _grants
-        .where(
-          (entry) => entry.kind == grant.kind && entry.grant == grant.grant,
-        )
+        .where((entry) => _sameAccess(entry, grant))
         .firstOrNull;
     if (existing != null) {
       _generations[existing.id] = await _locations.connect(
@@ -145,14 +192,7 @@ final class LibraryFolders {
       _serial(() async {
         await _load();
         final grant = _grant(id);
-        final next = FolderGrant(
-          id,
-          grant.label,
-          grant.kind,
-          grant.grant,
-          directory: directory,
-          directoryLabel: label,
-        );
+        final next = grant.withDirectory(directory, label);
         await _save([for (final item in _grants) item.id == id ? next : item]);
         _grants = List.unmodifiable([
           for (final item in _grants) item.id == id ? next : item,
@@ -171,7 +211,12 @@ final class LibraryFolders {
     bool refresh = false,
     CancellationToken? cancellation,
   }) => _serial(() async {
-    await _load();
+    cancellation.throwIfCancelled();
+    final wasLoaded = _loaded;
+    await _load(cancellation: cancellation);
+    if (refresh && wasLoaded) {
+      await _refresh(_grants, cancellation: cancellation);
+    }
     if (!_catalogLoaded) {
       _catalog = [
         for (final file in await _locations.catalog())
@@ -191,7 +236,7 @@ final class LibraryFolders {
       cancellation.throwIfCancelled();
       final generation = _generations[grant.id]!;
       try {
-        final location = await grant.open();
+        final location = await _provider(grant.provider).open(grant);
         final entries = <LocationEntry>[];
         final pending = <({String? key, int depth})>[
           (key: grant.directory, depth: 0),
@@ -269,14 +314,12 @@ final class LibraryFolders {
     return _catalog;
   });
 
-  Future<void> discard(FolderGrant grant) {
+  Future<void> discard(LibraryConnection grant) {
     // A picker can finish while the application is closing. Cleanup of a
     // never-adopted grant needs no new access to the already-closed store.
     Future<void> releaseUnused() async {
-      if (!_grants.any(
-        (entry) => entry.kind == grant.kind && entry.grant == grant.grant,
-      )) {
-        await grant.release();
+      if (!_grants.any((entry) => _sameAccess(entry, grant))) {
+        await _provider(grant.provider).release(grant);
       }
     }
 
@@ -290,7 +333,7 @@ final class LibraryFolders {
 
   static String newId() {
     final random = Random.secure();
-    return 'folder-${List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
+    return 'connection-${List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
   }
 
   Future<void> remove(String id) => _serial(() async {
@@ -305,15 +348,17 @@ final class LibraryFolders {
     _grants = List.unmodifiable(_grants.where((entry) => entry.id != id));
     _generations.remove(id);
     _discovered = false;
-    await grant.release();
+    await _provider(grant.provider).release(grant);
   });
 
-  Future<void> _save(List<FolderGrant> grants) => _preferences.set(
+  // Retain the historical key and replace its value atomically. Adding a row
+  // would lock out a valid legacy store at the preference row/total-byte limit.
+  Future<void> _save(List<LibraryConnection> grants) => _preferences.set(
     'device.library.folders',
     jsonEncode([for (final grant in grants) grant.toJson()]),
   );
 
-  FolderGrant _grant(String id) => _grants.firstWhere(
+  LibraryConnection _grant(String id) => _grants.firstWhere(
     (entry) => entry.id == id,
     orElse: () => throw const LocationException(LocationFailure.revoked),
   );
@@ -331,7 +376,8 @@ final class LibraryFolders {
       throw const LocationException(LocationFailure.revoked);
     }
     try {
-      final location = await _grant(id).open();
+      final grant = _grant(id);
+      final location = await _provider(grant.provider).open(grant);
       return await location.list(
         directory: directory,
         cursor: cursor,
@@ -352,7 +398,8 @@ final class LibraryFolders {
   }) => _serial(() async {
     await _load();
     cancellation.throwIfCancelled();
-    final location = await _grant(id).open();
+    final grant = _grant(id);
+    final location = await _provider(grant.provider).open(grant);
     final generation = _generations[id]!;
     final book = await _stage(
       location.read(entry.key, cancellation: cancellation),
@@ -410,7 +457,6 @@ final class LibraryFolders {
     bool keep = false,
     CancellationToken? cancellation,
   }) => _serial(() async {
-    await _load();
     final copies = await _locations.copies(book.contentHash);
     if (copies.isEmpty) {
       if (book.locationFailure != null) {
@@ -422,18 +468,23 @@ final class LibraryFolders {
     for (final copy in copies) {
       cancellation.throwIfCancelled();
       final id = copy.locator.locationId;
-      final generation = _generations[id];
+      var generation = _generations[id];
       try {
         return await _cache.withFile(
           book,
           () async* {
-            if (generation == null) {
+            // A verified cached copy does not depend on provider refresh or
+            // readable connection preferences. Initialize only on a cache miss.
+            await _load();
+            final currentGeneration = generation = _generations[id];
+            if (currentGeneration == null) {
               throw const LocationException(LocationFailure.revoked);
             }
-            final location = await _grant(id).open();
+            final grant = _grant(id);
+            final location = await _provider(grant.provider).open(grant);
             yield* _locations.read(
               location,
-              generation,
+              currentGeneration,
               book.contentHash,
               copy.locator.key,
               cancellation: cancellation,
@@ -444,11 +495,12 @@ final class LibraryFolders {
           cancellation: cancellation,
         );
       } on LocationException catch (error) {
-        if (generation != null) {
+        final failedGeneration = generation;
+        if (failedGeneration != null) {
           await _locations.failed(
             book.contentHash,
             copy.locator,
-            generation: generation,
+            generation: failedGeneration,
             failure: error.failure,
           );
         }
