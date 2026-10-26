@@ -12,8 +12,11 @@ import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/connection_credentials.dart';
+import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
+import 'package:shosai_flutter/library/dropbox_dialog.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/library/folders_controller.dart';
 import 'package:shosai_flutter/library/folders_view.dart';
@@ -25,6 +28,7 @@ import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 export 'package:shosai_flutter/library/controller.dart';
 
@@ -1056,6 +1060,39 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     final folders = FoldersController(
       folders: (host as LibraryFoldersHost).folders,
       setup: (id) => (host as LibraryFoldersHost).folders.setup('folder', id),
+      setupDropbox: (id) async {
+        const appKey = String.fromEnvironment('SHOSAI_DROPBOX_APP_KEY');
+        if (appKey.isEmpty) {
+          await _showOwnedDialog<void>(
+            (context) => ShadDialog.alert(
+              title: Text(AppLocalizations.of(context).dropboxConnect),
+              description: Text(
+                AppLocalizations.of(context).dropboxRegistrationRequired,
+              ),
+              actions: [
+                ShadButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(AppLocalizations.of(context).locationClose),
+                ),
+              ],
+            ),
+          );
+          return null;
+        }
+        return DropboxConnectionProvider(
+          credentials: const PlatformConnectionCredentialStore(),
+          authorize: (authorization) async {
+            if (!await launchUrl(
+              authorization,
+              mode: LaunchMode.externalApplication,
+            )) {
+              throw StateError('The system browser could not be opened.');
+            }
+            if (!mounted) return null;
+            return _showOwnedDialog<String>((_) => const DropboxCodeDialog());
+          },
+        ).setup(id);
+      },
       confirmRemoval: (grant) async =>
           await _showOwnedDialog<bool>((context) {
             final l10n = AppLocalizations.of(context);

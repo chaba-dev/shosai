@@ -8,8 +8,11 @@ import 'dart:typed_data';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/documents.dart';
+import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
@@ -75,6 +78,12 @@ final class ShosaiCore {
     locations,
     snapshots.newPath,
     fileCache,
+    providers: [
+      const FolderConnectionProvider(),
+      DropboxConnectionProvider(
+        credentials: const PlatformConnectionCredentialStore(),
+      ),
+    ],
   );
 
   /// Reads PDF metadata on import, and PDF text for the bridge's
