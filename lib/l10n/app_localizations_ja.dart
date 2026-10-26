@@ -810,6 +810,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationAddFolder => 'フォルダを接続';
 
   @override
+  String get locationAddGoogleDrive => 'Google Drive を接続';
+
+  @override
+  String get locationGoogleDriveRegistrationRequired =>
+      'このビルドでは Google Drive が設定されていません。アプリの配布元による Google OAuth の設定が必要です。';
+
+  @override
   String get dropboxConnect => 'Dropbox を接続';
 
   @override

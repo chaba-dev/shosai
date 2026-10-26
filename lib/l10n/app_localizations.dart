@@ -1506,6 +1506,18 @@ abstract class AppLocalizations {
   /// **'Connect folder'**
   String get locationAddFolder;
 
+  /// No description provided for @locationAddGoogleDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect Google Drive'**
+  String get locationAddGoogleDrive;
+
+  /// No description provided for @locationGoogleDriveRegistrationRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.'**
+  String get locationGoogleDriveRegistrationRequired;
+
   /// No description provided for @dropboxConnect.
   ///
   /// In en, this message translates to:

@@ -21,6 +21,10 @@ final class FoldersAddDropboxRequested extends FoldersMessage {
   const FoldersAddDropboxRequested();
 }
 
+final class FoldersAddGoogleDriveRequested extends FoldersMessage {
+  const FoldersAddGoogleDriveRequested();
+}
+
 final class FoldersSelected extends FoldersMessage {
   const FoldersSelected(this.id);
   final String id;
@@ -102,14 +106,18 @@ final class FoldersController extends ChangeNotifier {
     required Future<LibraryConnection?> Function(String id) setup,
     required Future<bool> Function(LibraryConnection connection) confirmRemoval,
     Future<LibraryConnection?> Function(String id)? setupDropbox,
+    Future<LibraryConnection?> Function(String id)? setupGoogleDrive,
   }) : _folders = folders,
        _setup = setup,
        _setupDropbox = setupDropbox,
+       _setupGoogleDrive = setupGoogleDrive,
        _confirmRemoval = confirmRemoval;
   final LibraryFolders _folders;
   final Future<LibraryConnection?> Function(String id) _setup;
   final Future<LibraryConnection?> Function(String id)? _setupDropbox;
   bool get supportsDropbox => _setupDropbox != null;
+  final Future<LibraryConnection?> Function(String id)? _setupGoogleDrive;
+  bool get canAddGoogleDrive => _setupGoogleDrive != null;
   final Future<bool> Function(LibraryConnection connection) _confirmRemoval;
   FoldersModel _model = const FoldersModel();
   FoldersModel get model => _model;
@@ -140,11 +148,15 @@ final class FoldersController extends ChangeNotifier {
           (revision, _) async =>
               _FoldersLoaded(revision, await _folders.list()),
         );
-      case FoldersAddRequested() || FoldersAddDropboxRequested():
+      case FoldersAddRequested() ||
+          FoldersAddDropboxRequested() ||
+          FoldersAddGoogleDriveRequested():
         if (_model.busy) return;
-        final setup = message is FoldersAddDropboxRequested
-            ? _setupDropbox
-            : _setup;
+        final setup = switch (message) {
+          FoldersAddDropboxRequested() => _setupDropbox,
+          FoldersAddGoogleDriveRequested() => _setupGoogleDrive,
+          _ => _setup,
+        };
         if (setup == null) return;
         _effect((revision, cancellation) async {
           final grant = await setup(LibraryFolders.newId());

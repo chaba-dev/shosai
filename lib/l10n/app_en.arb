@@ -1060,6 +1060,8 @@
   "locationChooseFolder": "Change source folder",
   "locationUseFolder": "Use this folder",
   "locationAddFolder": "Connect folder",
+  "locationAddGoogleDrive": "Connect Google Drive",
+  "locationGoogleDriveRegistrationRequired": "Google Drive is not configured in this build. The app distributor must configure Google OAuth first.",
   "dropboxConnect": "Connect Dropbox",
   "dropboxCodeDescription": "Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. You can select a subfolder after connecting. Books are fetched only when opened or kept on this device.",
   "dropboxAuthorizationCode": "Authorization code",

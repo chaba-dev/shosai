@@ -239,6 +239,8 @@
   "locationChooseFolder": "読み込み元フォルダを変更",
   "locationUseFolder": "このフォルダを使用",
   "locationAddFolder": "フォルダを接続",
+  "locationAddGoogleDrive": "Google Drive を接続",
+  "locationGoogleDriveRegistrationRequired": "このビルドでは Google Drive が設定されていません。アプリの配布元による Google OAuth の設定が必要です。",
   "dropboxConnect": "Dropbox を接続",
   "dropboxCodeDescription": "ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。接続後にサブフォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。",
   "dropboxAuthorizationCode": "認証コード",

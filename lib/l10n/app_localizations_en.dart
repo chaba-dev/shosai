@@ -863,6 +863,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locationAddFolder => 'Connect folder';
 
   @override
+  String get locationAddGoogleDrive => 'Connect Google Drive';
+
+  @override
+  String get locationGoogleDriveRegistrationRequired =>
+      'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.';
+
+  @override
   String get dropboxConnect => 'Connect Dropbox';
 
   @override

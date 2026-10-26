@@ -701,9 +701,13 @@ void main() {
     await settle();
   });
 
-  for (final locale in [const Locale('en'), const Locale('ja')]) {
+  for (final (locale, action) in [
+    for (final locale in [const Locale('en'), const Locale('ja')])
+      for (final action in ['folder', 'dropbox', 'google-drive'])
+        (locale, action),
+  ]) {
     testWidgets(
-      'connection configures a source directory without importing books (${locale.languageCode})',
+      '$action configures a source directory without importing books (${locale.languageCode})',
       (tester) async {
         final setup = (await tester.runAsync(() async {
           final directory = await Directory.systemTemp.createTemp(
@@ -751,9 +755,18 @@ void main() {
             await directory.delete(recursive: true);
           });
         });
+        Future<LibraryConnection?> connect(String id, String selected) async =>
+            LibraryConnection(id, 'Books', 'fixture', {
+              'root': source.path,
+              'setup': selected,
+            });
         final controller = FoldersController(
           folders: folders,
-          setup: (id) => folders.setup('fixture', id),
+          // Local metadata fixtures exercise all three independent setup
+          // intents together, not live cloud OAuth/device acceptance.
+          setup: (id) => connect(id, 'folder'),
+          setupDropbox: (id) => connect(id, 'dropbox'),
+          setupGoogleDrive: (id) => connect(id, 'google-drive'),
           confirmRemoval: (_) async => true,
         )..dispatch(const FoldersStarted());
         addTearDown(controller.dispose);
@@ -799,7 +812,15 @@ void main() {
         }
 
         await settle();
-        await tester.tap(find.text(l10n.locationAddFolder));
+        expect(find.text(l10n.dropboxConnect), findsOneWidget);
+        expect(find.text(l10n.locationAddGoogleDrive), findsOneWidget);
+        await tester.tap(
+          find.text(switch (action) {
+            'dropbox' => l10n.dropboxConnect,
+            'google-drive' => l10n.locationAddGoogleDrive,
+            _ => l10n.locationAddFolder,
+          }),
+        );
         await settle();
         await tester.tap(find.text('Books'));
         await settle();
@@ -820,7 +841,10 @@ void main() {
         expect(files.map((file) => file.entry.name), ['chosen.epub']);
         final connection = controller.model.grants.single;
         expect(connection.provider, 'fixture');
-        expect(connection.configuration, {'root': source.path});
+        expect(connection.configuration, {
+          'root': source.path,
+          'setup': action,
+        });
         await tester.tap(find.widgetWithText(ShadButton, l10n.locationRemove));
         await settle();
         expect(find.text('Books'), findsNothing);

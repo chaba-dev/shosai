@@ -3,6 +3,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_core/shosai_core.dart'
     show LocationException, LocationFailure;
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/core/google_drive_authorization.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/folders_controller.dart';
 
@@ -58,6 +59,8 @@ class LibraryFoldersDialog extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(switch (model.error) {
+                      GoogleDriveRegistrationRequired() =>
+                        l10n.locationGoogleDriveRegistrationRequired,
                       LocationException(failure: LocationFailure.offline) =>
                         l10n.locationOffline,
                       LocationException(failure: LocationFailure.revoked) =>
@@ -100,6 +103,17 @@ class LibraryFoldersDialog extends StatelessWidget {
                                 ? null
                                 : () => controller.dispatch(
                                     const FoldersAddDropboxRequested(),
+                                  ),
+                          ),
+                        if (controller.canAddGoogleDrive)
+                          ListTile(
+                            leading: const Icon(Icons.add_link),
+                            title: Text(l10n.locationAddGoogleDrive),
+                            enabled: !model.busy,
+                            onTap: model.busy
+                                ? null
+                                : () => controller.dispatch(
+                                    const FoldersAddGoogleDriveRequested(),
                                   ),
                           ),
                         if (model.grants.isEmpty && !model.busy)

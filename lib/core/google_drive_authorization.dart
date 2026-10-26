@@ -1,0 +1,275 @@
+/// Google-supported native authorization; never an embedded webview or secret.
+library;
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter_appauth/flutter_appauth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart';
+import 'package:shosai_core/shosai_core.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'google_drive_location.dart';
+
+const googleDriveScope = 'https://www.googleapis.com/auth/drive';
+
+final class GoogleDriveRegistrationRequired implements Exception {
+  const GoogleDriveRegistrationRequired();
+}
+
+/// Public registration identifiers supplied by the distributor, not invented
+/// defaults. Google Cloud consent, platform registrations and test users must
+/// be configured before a real account can connect.
+final class GoogleDriveAuthorization {
+  GoogleDriveAuthorization({
+    this.desktopClientId = const String.fromEnvironment(
+      'GOOGLE_DRIVE_DESKTOP_CLIENT_ID',
+    ),
+    this.iosClientId = const String.fromEnvironment(
+      'GOOGLE_DRIVE_IOS_CLIENT_ID',
+    ),
+    this.androidServerClientId = const String.fromEnvironment(
+      'GOOGLE_DRIVE_ANDROID_SERVER_CLIENT_ID',
+    ),
+    Future<bool> Function(Uri)? launch,
+  }) : _launch =
+           launch ??
+           ((uri) => launchUrl(uri, mode: LaunchMode.externalApplication));
+
+  final String desktopClientId;
+  final String iosClientId;
+  final String androidServerClientId;
+  final Future<bool> Function(Uri) _launch;
+  static Future<void>? _androidInitialization;
+
+  Future<void> _android() => _androidInitialization ??= GoogleSignIn.instance
+      .initialize(serverClientId: androidServerClientId);
+
+  static String nonce() => base64UrlEncode(
+    List.generate(32, (_) => Random.secure().nextInt(256)),
+  ).replaceAll('=', '');
+
+  static Never _unconfigured() => throw const GoogleDriveRegistrationRequired();
+
+  Future<Map<String, dynamic>?> authorize() async {
+    try {
+      if (Platform.isAndroid) {
+        if (androidServerClientId.isEmpty) _unconfigured();
+        await _android();
+        // Clear only the chooser's default identity, never revoke other Drive
+        // connections. Later renewal explicitly addresses each stored account.
+        await GoogleSignIn.instance.signOut();
+        final account = await GoogleSignIn.instance.authenticate();
+        final auth = await account.authorizationClient.authorizeScopes([
+          googleDriveScope,
+        ]);
+        return {
+          'kind': 'android',
+          'account': account.id,
+          'email': account.email,
+          'access_token': auth.accessToken,
+          'expires': 0,
+        };
+      }
+      if (Platform.isIOS) {
+        if (iosClientId.isEmpty) _unconfigured();
+        final redirect =
+            '${iosClientId.split('.').reversed.join('.')}:/oauthredirect';
+        final result = await const FlutterAppAuth().authorizeAndExchangeCode(
+          AuthorizationTokenRequest(
+            iosClientId,
+            redirect,
+            serviceConfiguration: const AuthorizationServiceConfiguration(
+              authorizationEndpoint:
+                  'https://accounts.google.com/o/oauth2/v2/auth',
+              tokenEndpoint: 'https://oauth2.googleapis.com/token',
+            ),
+            scopes: [googleDriveScope],
+            promptValues: ['consent', 'select_account'],
+          ),
+        );
+        if (result.accessToken == null ||
+            result.refreshToken == null ||
+            !(result.scopes ?? []).contains(googleDriveScope)) {
+          throw const LocationException(LocationFailure.revoked);
+        }
+        return {
+          'kind': 'oauth',
+          'client_id': iosClientId,
+          'refresh_token': result.refreshToken,
+          'access_token': result.accessToken,
+          'expires':
+              result.accessTokenExpirationDateTime?.millisecondsSinceEpoch ?? 0,
+        };
+      }
+      if (desktopClientId.isEmpty) _unconfigured();
+      return await _desktop();
+    } on FlutterAppAuthUserCancelledException {
+      return null;
+    } on GoogleSignInException catch (error) {
+      if (error.code == GoogleSignInExceptionCode.canceled) return null;
+      throw const LocationException(LocationFailure.revoked);
+    } on FlutterAppAuthPlatformException {
+      throw const LocationException(LocationFailure.revoked);
+    } on IOException {
+      throw const LocationException(LocationFailure.offline);
+    }
+  }
+
+  Future<Map<String, dynamic>?> _desktop() async {
+    final verifier = nonce();
+    final state = nonce();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final redirect = 'http://127.0.0.1:${server.port}/oauthredirect';
+    final completion = Completer<String?>();
+    final listener = server.listen((request) async {
+      final query = request.uri.queryParameters;
+      if (request.method != 'GET' ||
+          request.uri.path != '/oauthredirect' ||
+          query['state'] != state) {
+        request.response.statusCode = 400;
+        await request.response.close();
+        return;
+      }
+      request.response.headers.contentType = ContentType.text;
+      request.response.write(
+        'Return to Shōsai. You may close this browser tab.',
+      );
+      await request.response.close();
+      if (!completion.isCompleted) {
+        completion.complete(
+          query['error'] == 'access_denied' ? null : query['code'],
+        );
+      }
+    });
+    try {
+      final launched = await _launch(
+        Uri.https('accounts.google.com', '/o/oauth2/v2/auth', {
+          'client_id': desktopClientId,
+          'redirect_uri': redirect,
+          'response_type': 'code',
+          'scope': googleDriveScope,
+          'state': state,
+          'code_challenge_method': 'S256',
+          'code_challenge': base64UrlEncode(
+            sha256.convert(ascii.encode(verifier)).bytes,
+          ).replaceAll('=', ''),
+          'access_type': 'offline',
+          'prompt': 'consent select_account',
+        }),
+      );
+      if (!launched) throw const LocationException(LocationFailure.offline);
+      final code = await completion.future.timeout(const Duration(minutes: 5));
+      if (code == null) return null;
+      final result = await _token({
+        'client_id': desktopClientId,
+        'code': code,
+        'code_verifier': verifier,
+        'redirect_uri': redirect,
+        'grant_type': 'authorization_code',
+      });
+      if (result['refresh_token'] is! String ||
+          !(result['scope'] as String? ?? '')
+              .split(' ')
+              .contains(googleDriveScope)) {
+        throw const LocationException(LocationFailure.revoked);
+      }
+      return {...result, 'kind': 'oauth', 'client_id': desktopClientId};
+    } on TimeoutException {
+      return null;
+    } finally {
+      await listener.cancel();
+      await server.close(force: true);
+    }
+  }
+
+  Future<Map<String, dynamic>> renew(
+    Map<String, dynamic> credential, {
+    bool force = false,
+  }) async {
+    if (credential['kind'] == 'android') {
+      await _android();
+      if (force && credential['access_token'] is String) {
+        await GoogleSignInPlatform.instance.clearAuthorizationToken(
+          ClearAuthorizationTokenParams(
+            accessToken: credential['access_token'] as String,
+          ),
+        );
+      }
+      final auth = await GoogleSignInPlatform.instance
+          .clientAuthorizationTokensForScopes(
+            ClientAuthorizationTokensForScopesParameters(
+              request: AuthorizationRequestDetails(
+                scopes: [googleDriveScope],
+                userId: credential['account'] as String,
+                email: credential['email'] as String,
+                promptIfUnauthorized: false,
+              ),
+            ),
+          );
+      if (auth == null) throw const LocationException(LocationFailure.revoked);
+      return {...credential, 'access_token': auth.accessToken};
+    }
+    if (!force &&
+        (credential['expires'] as int? ?? 0) >
+            DateTime.now()
+                .add(const Duration(minutes: 1))
+                .millisecondsSinceEpoch) {
+      return credential;
+    }
+    final result = await _token({
+      'client_id': credential['client_id'] as String,
+      'refresh_token': credential['refresh_token'] as String,
+      'grant_type': 'refresh_token',
+    });
+    return {...credential, ...result};
+  }
+
+  Future<Map<String, dynamic>> _token(Map<String, String> fields) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 30);
+    final deadline = Timer(
+      const Duration(seconds: 30),
+      () => client.close(force: true),
+    );
+    try {
+      final request = await client.postUrl(
+        Uri.https('oauth2.googleapis.com', '/token'),
+      );
+      request.followRedirects = false;
+      request.headers.contentType = ContentType(
+        'application',
+        'x-www-form-urlencoded',
+      );
+      request.write(Uri(queryParameters: fields).query);
+      final response = await request.close();
+      final bytes = await DriveTransport.boundedBytes(response, 64 * 1024);
+      if (response.statusCode == 400 || response.statusCode == 401) {
+        throw const LocationException(LocationFailure.revoked);
+      }
+      if (response.statusCode != 200) {
+        throw const LocationException(LocationFailure.offline);
+      }
+      final value = (jsonDecode(utf8.decode(bytes)) as Map)
+          .cast<String, dynamic>();
+      if (value['access_token'] is! String || value['expires_in'] is! int) {
+        throw const CoreException.malformed('Invalid Google token response.');
+      }
+      return {
+        ...value,
+        'expires': DateTime.now()
+            .add(Duration(seconds: value['expires_in'] as int))
+            .millisecondsSinceEpoch,
+      };
+    } on IOException {
+      throw const LocationException(LocationFailure.offline);
+    } finally {
+      deadline.cancel();
+      client.close(force: true);
+    }
+  }
+}
