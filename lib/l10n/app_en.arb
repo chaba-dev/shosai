@@ -8,6 +8,20 @@
   "@librarySubtitle": {
     "description": "Iced reference key: library-subtitle."
   },
+  "libraryCheckingSource": "Checking {source}",
+  "@libraryCheckingSource": {
+    "placeholders": {"source": {"type": "String"}}
+  },
+  "libraryDiscoveryCount": "Source {index} of {total} · {books, plural, =1{1 book found} other{{books} books found}}",
+  "@libraryDiscoveryCount": {
+    "description": "Metadata candidates found in the current source; the total book count is unknown until the scan completes.",
+    "placeholders": {
+      "index": {"type": "int"},
+      "total": {"type": "int"},
+      "books": {"type": "int"}
+    }
+  },
+  "libraryCheckCancelled": "Library check cancelled.",
   "searchLibraryPlaceholder": "Search title or author",
   "@searchLibraryPlaceholder": {
     "description": "Iced reference key: search-library-placeholder. The retained Flutter string keeps the approved candidate wording."

@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_core/shosai_core.dart' hide Row;
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
@@ -29,6 +30,7 @@ final class _FixtureProvider implements ConnectionProvider {
   bool released = false;
   final refreshFailures = <String, Object>{};
   final refreshedConfiguration = <String, Map<String, String>>{};
+  final locations = <String, LibraryLocation>{};
 
   @override
   String get id => 'fixture';
@@ -54,6 +56,7 @@ final class _FixtureProvider implements ConnectionProvider {
   @override
   Future<LibraryLocation> open(LibraryConnection connection) async {
     if (released) throw const LocationException(LocationFailure.revoked);
+    if (locations[connection.id] case final location?) return location;
     return FolderLocation.open(
       connection.id,
       connection.configuration['root']!,
@@ -70,8 +73,303 @@ final class _FixtureProvider implements ConnectionProvider {
   }
 }
 
+class _PagedLocation implements LibraryLocation {
+  _PagedLocation(this.id);
+  @override
+  final String id;
+  final pages = <String?, List<LocationPage>>{};
+
+  @override
+  Future<LocationPage> list({
+    String? directory,
+    String? cursor,
+    int limit = 100,
+    CancellationToken? cancellation,
+  }) async {
+    cancellation.throwIfCancelled();
+    return pages[directory]![cursor == null ? 0 : int.parse(cursor)];
+  }
+
+  // Discovery must never use stat/read/write to identify a candidate.
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw StateError('Metadata listing only');
+}
+
+class _RecursiveLocation extends _PagedLocation
+    implements RecursiveLibraryLocation {
+  _RecursiveLocation(super.id);
+  List<List<LocationTreeEntry>> tree = [];
+  Object? failure;
+  Future<void> Function()? afterPage;
+  @override
+  Stream<List<LocationTreeEntry>> listRecursive({
+    String? directory,
+    CancellationToken? cancellation,
+  }) async* {
+    for (final page in tree) {
+      cancellation.throwIfCancelled();
+      yield page;
+      await afterPage?.call();
+    }
+    if (failure case final error?) throw error;
+  }
+}
+
+class _SourceBridge extends HarnessBridge implements LibraryFoldersHost {
+  _SourceBridge(this.folders);
+  @override
+  final LibraryFolders folders;
+  @override
+  Future<FlutterLibraryBook> admitSourceFile(
+    LibrarySourceFile file, {
+    CancellationToken? cancellation,
+  }) => throw StateError('No content reads');
+}
+
 void main() {
   setUpAll(loadHarnessFonts);
+  test(
+    'replaced, cancelled and disposed discovery cannot restore stale activity',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-progress',
+      );
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      final provider = _FixtureProvider(directory.path);
+      final location = _RecursiveLocation('one')
+        ..tree = [
+          [
+            (
+              entry: const LocationEntry(
+                key: 'one',
+                name: 'One.epub',
+                isDirectory: false,
+              ),
+              depth: 0,
+            ),
+          ],
+        ];
+      final gates = <Completer<void>>[];
+      location.afterPage = () {
+        final gate = Completer<void>();
+        gates.add(gate);
+        return gate.future;
+      };
+      provider.locations['one'] = location;
+      final folders = LibraryFolders(
+        Preferences(store),
+        Library(store, managedDirectory: '${directory.path}/books'),
+        LibraryLocations(store),
+        () async => '${directory.path}/unused',
+        BookFileCache(store, '${directory.path}/cache'),
+        providers: [provider],
+      );
+      await folders.add(LibraryConnection('one', 'Books', 'fixture', const {}));
+      final bridge = _SourceBridge(folders);
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => null,
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+      );
+      addTearDown(() async {
+        controller.dispose();
+        for (final gate in gates) {
+          if (!gate.isCompleted) gate.complete();
+        }
+        await folders.close();
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      Future<void> until(bool Function() ready) async {
+        for (var i = 0; i < 100 && !ready(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        expect(ready(), true);
+      }
+
+      controller.dispatch(const LibraryStarted());
+      await until(() => gates.length == 1);
+      expect(controller.model.discoveryProgress?.booksFound, 1);
+      controller.dispatch(const LibraryRefreshed());
+      expect(controller.model.discoveryProgress, null);
+      gates.first.complete();
+      await until(() => gates.length == 2);
+      expect(controller.model.discoveryProgress?.booksFound, 1);
+      expect(controller.model.loadError, null);
+      controller.dispatch(const LibraryOperationCancelled());
+      expect(controller.model.discoveryProgress, null);
+      gates[1].complete();
+      await until(() => !controller.model.loading);
+      expect(controller.model.discoveryProgress, null);
+      expect(controller.model.loadError, 'Library check cancelled.');
+      controller.dispatch(const LibraryRefreshed());
+      await until(() => gates.length == 3);
+      controller.dispose();
+      final disposed = controller.model;
+      gates[2].complete();
+      await until(() => bridge.isDisposed);
+      expect(identical(controller.model, disposed), true);
+    },
+  );
+
+  test(
+    'recursive scan progress deduplicates books and incomplete scans retain catalog per source',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-discovery',
+      );
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      final provider = _FixtureProvider(directory.path);
+      final recursive = _RecursiveLocation('recursive');
+      final fallback = _PagedLocation('fallback');
+      const book = LocationEntry(
+        key: 'book',
+        name: 'Book.epub',
+        isDirectory: false,
+      );
+      const pdf = LocationEntry(
+        key: 'pdf',
+        name: 'Second.PDF',
+        isDirectory: false,
+      );
+      const folder = LocationEntry(
+        key: 'subfolder',
+        name: 'Books',
+        isDirectory: true,
+      );
+      const ignored = LocationEntry(
+        key: 'text',
+        name: 'Notes.txt',
+        isDirectory: false,
+      );
+      recursive.tree = [
+        [(entry: book, depth: 32)],
+        [],
+        [
+          (entry: book, depth: 32),
+          (entry: pdf, depth: 0),
+          (entry: ignored, depth: 0),
+        ],
+      ];
+      // Empty filtered pages with continuation and cyclic folder references are valid.
+      fallback.pages[null] = [
+        LocationPage([], nextCursor: '1'),
+        LocationPage([folder]),
+      ];
+      fallback.pages['subfolder'] = [
+        LocationPage([folder, pdf]),
+      ];
+      provider.locations.addAll({'recursive': recursive, 'fallback': fallback});
+      final locations = LibraryLocations(store);
+      final folders = LibraryFolders(
+        Preferences(store),
+        Library(store, managedDirectory: '${directory.path}/books'),
+        locations,
+        () async => '${directory.path}/unused',
+        BookFileCache(store, '${directory.path}/cache'),
+        providers: [provider],
+      );
+      addTearDown(() async {
+        await folders.close();
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      for (final id in provider.locations.keys) {
+        await folders.add(LibraryConnection(id, id, 'fixture', {'root': id}));
+      }
+      final progress = <LibraryDiscoveryProgress>[];
+      expect(
+        (await folders.discover(
+          onProgress: progress.add,
+        )).map((f) => '${f.locationId}/${f.entry.key}'),
+        ['recursive/book', 'recursive/pdf', 'fallback/pdf'],
+      );
+      expect(
+        progress.where((p) => p.sourceIndex == 1).map((p) => p.booksFound),
+        [0, 1, 1, 2],
+      );
+      expect(progress.last.sourceCount, 2);
+      expect(progress.last.booksFound, 1);
+      final original = (await locations.catalog())
+          .map((f) => '${f.locationId}/${f.entry.key}')
+          .toSet();
+      // A partial failed source retains its unseen books while a healthy source updates.
+      recursive.tree = [
+        [(entry: pdf, depth: 0)],
+      ];
+      recursive.failure = const CoreException.malformed('Broken continuation');
+      fallback.pages['subfolder'] = [
+        LocationPage([book]),
+      ];
+      expect(
+        (await folders.discover(
+          refresh: true,
+        )).map((f) => '${f.locationId}/${f.entry.key}'),
+        ['recursive/book', 'recursive/pdf', 'fallback/book'],
+      );
+      expect(folders.scanWarnings, ['recursive']);
+      // Cancellation after a page never publishes that source's incomplete replacement.
+      final token = CancellationToken();
+      recursive.failure = null;
+      await expectLater(
+        folders.discover(
+          refresh: true,
+          cancellation: token,
+          onProgress: (p) {
+            if (p.booksFound == 1) token.cancel();
+          },
+        ),
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.cancelled,
+          ),
+        ),
+      );
+      expect(
+        (await locations.catalog())
+            .where((f) => f.locationId == 'recursive')
+            .map((f) => '${f.locationId}/${f.entry.key}')
+            .toSet(),
+        original.where((key) => key.startsWith('recursive/')).toSet(),
+      );
+      // Both entry and candidate limits, and just past the depth boundary, retain catalog.
+      for (final tree in <List<LocationTreeEntry>>[
+        [(entry: pdf, depth: 33)],
+        List.generate(
+          maxDiscoveryEntries + 1,
+          (_) => (entry: ignored, depth: 0),
+        ),
+        List.generate(
+          maxDiscoveredBooks + 1,
+          (i) => (
+            entry: LocationEntry(key: '$i', name: '$i.pdf', isDirectory: false),
+            depth: 0,
+          ),
+        ),
+      ]) {
+        recursive.tree = [tree];
+        await folders.discover(refresh: true);
+        expect(folders.scanWarnings, ['recursive']);
+        expect(
+          (await locations.catalog()).where((f) => f.locationId == 'recursive'),
+          hasLength(2),
+        );
+      }
+      recursive.tree = [];
+      await folders.discover(refresh: true);
+      expect(
+        (await locations.catalog()).where((f) => f.locationId == 'recursive'),
+        isEmpty,
+      );
+      expect(folders.scanWarnings, isEmpty);
+    },
+  );
+
   test(
     'refresh isolates provider failures and retries without losing access',
     () async {

@@ -309,7 +309,7 @@ class LibraryController implements Listenable {
         for (final cancellation in _foregroundCancellations) {
           _bridge.cancel(id: cancellation);
         }
-        _emit(_model);
+        _emit(_model.copyWith(discoveryProgress: null));
       case LibraryBookOpened():
         _open(message.book);
       case LibrarySourceFileOpened():
@@ -337,6 +337,12 @@ class LibraryController implements Listenable {
             message.revision == _loadRevision &&
             _model.settings == null) {
           _emit(_model.copyWith(settings: message.settings));
+        }
+      case _LibraryDiscoveryProgressed():
+        if (message.revision == _loadRevision &&
+            _model.loading &&
+            !(_discoveryCancellation?.isCancelled ?? true)) {
+          _emit(_model.copyWith(discoveryProgress: message.progress));
         }
       case _LibraryLoaded():
         _releaseCancellation(message.cancellation);
@@ -385,6 +391,7 @@ class LibraryController implements Listenable {
               loaded: true,
               loading: false,
               loadingMore: false,
+              discoveryProgress: null,
               loadError: message.discoveryError,
               sourceWarning: message.sourceWarning,
               pagingFailed: false,
@@ -405,6 +412,7 @@ class LibraryController implements Listenable {
             _model.copyWith(
               loading: false,
               loadingMore: false,
+              discoveryProgress: null,
               loadError: message.error,
               // A failed first page leaves the page state unknown; a failed
               // append does not, so its next page stays advertised until the
@@ -616,6 +624,7 @@ class LibraryController implements Listenable {
         _model.copyWith(
           loading: false,
           loadingMore: false,
+          discoveryProgress: null,
           loadError: safeError(error),
           // A first page that cannot start leaves the collection's length
           // unknown; an append keeps the next page it was advertising.
@@ -632,7 +641,13 @@ class LibraryController implements Listenable {
     // The load effect owns the collection's loading state: the skeleton shows
     // for a first-page load and the grid stays for an appended page, exactly as
     // the reference's `library_loading && library_offset == 0` branch does.
-    _emit(_model.copyWith(loading: true, loadingMore: append));
+    _emit(
+      _model.copyWith(
+        loading: true,
+        loadingMore: append,
+        discoveryProgress: null,
+      ),
+    );
     _discoveryCancellation?.cancel();
     final discovery = _discoveryCancellation = CancellationToken();
     unawaited(() async {
@@ -657,6 +672,9 @@ class LibraryController implements Listenable {
               ? (await (host as LibraryFoldersHost).folders.discover(
                       refresh: refreshSources,
                       cancellation: discovery,
+                      onProgress: (progress) => dispatch(
+                        _LibraryDiscoveryProgressed(revision, progress),
+                      ),
                     ))
                     .where(
                       (file) =>
@@ -711,7 +729,9 @@ class LibraryController implements Listenable {
         dispatch(
           _LibraryFailed(
             revision,
-            safeError(error),
+            discovery.isCancelled
+                ? _localizations().libraryCheckCancelled
+                : safeError(error),
             LibraryFailure.load,
             cancellation,
             append: append,

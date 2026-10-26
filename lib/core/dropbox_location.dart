@@ -167,12 +167,67 @@ final class DropboxClient {
   }
 }
 
-final class DropboxLocation implements LibraryLocation {
+final class DropboxLocation
+    implements LibraryLocation, RecursiveLibraryLocation {
   const DropboxLocation(this.id, this.client);
 
   @override
   final String id;
   final DropboxClient client;
+
+  @override
+  Stream<List<LocationTreeEntry>> listRecursive({
+    String? directory,
+    CancellationToken? cancellation,
+  }) async* {
+    cancellation.throwIfCancelled();
+    // Resolve an opaque selected folder once, not once per descendant/page.
+    var root = '';
+    if (directory != null && directory.isNotEmpty) {
+      final metadata = await client.rpc('files/get_metadata', {
+        'path': directory,
+      }, cancellation: cancellation);
+      if (metadata['.tag'] != 'folder' || metadata['path_lower'] is! String) {
+        throw const CoreException.malformed('Invalid Dropbox source folder.');
+      }
+      root = metadata['path_lower'] as String;
+    }
+    String? cursor;
+    final cursors = <String?>{};
+    do {
+      cancellation.throwIfCancelled();
+      if (!cursors.add(cursor)) {
+        throw const CoreException.malformed('Repeated source page.');
+      }
+      if (cursors.length > maxDiscoveryEntries) {
+        throw const CoreException.limitExceeded('Too many source pages.');
+      }
+      final result = await client.rpc(
+        cursor == null ? 'files/list_folder' : 'files/list_folder/continue',
+        cursor == null
+            ? {'path': directory ?? '', 'recursive': true, 'limit': 2000}
+            : {'cursor': cursor},
+        cancellation: cancellation,
+      );
+      cancellation.throwIfCancelled();
+      final page = <LocationTreeEntry>[];
+      for (final value
+          in (result['entries'] as List).cast<Map<String, dynamic>>()) {
+        final path = value['path_lower'];
+        if (path is! String ||
+            !path.startsWith('$root/') ||
+            path.length <= root.length + 1) {
+          throw const CoreException.malformed('Invalid Dropbox source path.');
+        }
+        page.add((
+          entry: _entry(value),
+          depth: path.substring(root.length + 1).split('/').length - 1,
+        ));
+      }
+      yield List.unmodifiable(page);
+      cursor = result['has_more'] == true ? result['cursor'] as String : null;
+    } while (cursor != null);
+  }
 
   @override
   Future<LocationPage> list({

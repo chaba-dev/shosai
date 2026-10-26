@@ -50,11 +50,28 @@ final class _Dropbox {
   Completer<void>? wait;
   Completer<void>? arrived;
   String? challenge;
+  List<List<Map<String, dynamic>>>? recursivePages;
+  List<List<Map<String, dynamic>>> _pages = [];
+  bool repeatCursor = false;
+
+  Map<String, dynamic> get folder => {
+    '.tag': 'folder',
+    'id': 'id:folder',
+    'name': 'Books',
+    'path_lower': '/books',
+  };
+
+  Map<String, dynamic> recursivePage(int index) => {
+    'entries': _pages[index],
+    'has_more': index + 1 < _pages.length,
+    'cursor': 'recursive-${repeatCursor ? 1 : index + 1}',
+  };
 
   Map<String, dynamic> get entry => {
     '.tag': 'file',
     'id': 'id:book',
     'name': 'Book.epub',
+    'path_lower': '/books/book.epub',
     'size': book.length,
     'rev': 'r1',
   };
@@ -118,7 +135,7 @@ final class _Dropbox {
         final path = args['path'];
         final allowed = request.uri.path == '/files/list_folder'
             ? const ['', 'id:folder']
-            : const ['id:book', '/Book.epub'];
+            : const ['id:book', 'id:folder', '/Book.epub'];
         if (path != null && !allowed.contains(path)) {
           request.response.statusCode = 409;
           request.response.write(
@@ -129,6 +146,21 @@ final class _Dropbox {
         }
         switch (request.uri.path) {
           case '/files/list_folder':
+            if (args['recursive'] == true) {
+              expect(args['limit'], 2000);
+              _pages =
+                  recursivePages ??
+                  (args['path'] == 'id:folder'
+                      ? [
+                          [entry],
+                        ]
+                      : [
+                          [folder],
+                          [entry],
+                        ]);
+              request.response.write(jsonEncode(recursivePage(0)));
+              break;
+            }
             expect(args['recursive'], false);
             request.response.write(
               jsonEncode({
@@ -142,6 +174,16 @@ final class _Dropbox {
               }),
             );
           case '/files/list_folder/continue':
+            if ((args['cursor'] as String).startsWith('recursive-')) {
+              request.response.write(
+                jsonEncode(
+                  recursivePage(
+                    int.parse((args['cursor'] as String).split('-').last),
+                  ),
+                ),
+              );
+              break;
+            }
             expect(args['cursor'], 'page-2');
             request.response.write(
               jsonEncode({
@@ -151,7 +193,9 @@ final class _Dropbox {
               }),
             );
           case '/files/get_metadata':
-            request.response.write(jsonEncode(entry));
+            request.response.write(
+              jsonEncode(path == 'id:folder' ? folder : entry),
+            );
           case '/files/download':
             if (arrived?.isCompleted == false) arrived!.complete();
             await wait?.future;
@@ -229,6 +273,101 @@ void main() {
     await fixture.start();
   });
   tearDown(() => fixture.close());
+
+  test(
+    'recursive metadata uses continuations and selected-root relative depth',
+    () async {
+      final location = DropboxLocation(
+        'one',
+        DropboxClient(
+          accessToken: ({bool renew = false}) async => 'fixture',
+          api: fixture.root,
+        ),
+      );
+      fixture.recursivePages = [
+        [],
+        [
+          fixture.folder,
+          fixture.entry,
+          {
+            ...fixture.entry,
+            'id': 'deep',
+            'path_lower': '/books/sub/deep.epub',
+          },
+        ],
+      ];
+      final pages = await location.listRecursive().toList();
+      expect(pages.first, isEmpty);
+      expect(pages.last.map((item) => item.depth), [0, 1, 2]);
+      expect(fixture.calls, [
+        '/files/list_folder',
+        '/files/list_folder/continue',
+      ]);
+      fixture.calls.clear();
+      fixture.recursivePages = [
+        [
+          fixture.entry,
+          {
+            ...fixture.entry,
+            'id': 'deep',
+            'path_lower': '/books/sub/deep.epub',
+          },
+        ],
+      ];
+      final selected = await location
+          .listRecursive(directory: 'id:folder')
+          .expand((page) => page)
+          .toList();
+      expect(selected.map((item) => item.depth), [0, 1]);
+      expect(fixture.calls, ['/files/get_metadata', '/files/list_folder']);
+      // Pickers retain the nonrecursive contract even on an optimized provider.
+      expect((await location.list()).entries.single.isDirectory, true);
+      fixture.recursivePages = [
+        [
+          {...fixture.entry, 'path_lower': '/books-other/book.epub'},
+        ],
+      ];
+      await expectLater(
+        location.listRecursive(directory: 'id:folder').drain<void>(),
+        throwsA(isA<CoreException>()),
+      );
+    },
+  );
+
+  test(
+    'recursive traversal rejects repeated cursors and stops before next page on cancel',
+    () async {
+      final location = DropboxLocation(
+        'one',
+        DropboxClient(
+          accessToken: ({bool renew = false}) async => 'fixture',
+          api: fixture.root,
+        ),
+      );
+      fixture.recursivePages = [
+        [],
+        [],
+        [fixture.entry],
+      ];
+      fixture.repeatCursor = true;
+      await expectLater(
+        location.listRecursive().drain<void>(),
+        throwsA(isA<CoreException>()),
+      );
+      expect(fixture.calls, hasLength(2));
+      fixture.calls.clear();
+      fixture.repeatCursor = false;
+      final cancellation = CancellationToken();
+      await expectLater(
+        location.listRecursive(cancellation: cancellation).map((page) {
+          cancellation.cancel();
+          return page;
+        }).drain<void>(),
+        throwsA(cancelled),
+      );
+      expect(fixture.calls, ['/files/list_folder']);
+    },
+  );
 
   test('build app key configures PKCE or explicitly disables setup', () async {
     final expected = const bool.hasEnvironment('SHOSAI_DROPBOX_APP_KEY')

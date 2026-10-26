@@ -132,6 +132,12 @@ final class LibraryConnectionsRequested extends LibraryMessage {
   const LibraryConnectionsRequested();
 }
 
+final class _LibraryDiscoveryProgressed extends LibraryMessage {
+  const _LibraryDiscoveryProgressed(this.revision, this.progress);
+  final int revision;
+  final LibraryDiscoveryProgress progress;
+}
+
 final class _LibraryLoaded extends LibraryMessage {
   const _LibraryLoaded(
     this.revision,
