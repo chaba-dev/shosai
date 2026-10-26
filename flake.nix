@@ -112,6 +112,8 @@
             # Flutter Linux desktop build deps
             gtk3
             ninja
+            # Platform credential storage (Secret Service)
+            libsecret
             # Restores the engine library's $ORIGIN RUNPATH in release bundles
             patchelf
 

@@ -17,6 +17,10 @@ final class FoldersAddRequested extends FoldersMessage {
   const FoldersAddRequested();
 }
 
+final class FoldersAddDropboxRequested extends FoldersMessage {
+  const FoldersAddDropboxRequested();
+}
+
 final class FoldersSelected extends FoldersMessage {
   const FoldersSelected(this.id);
   final String id;
@@ -97,11 +101,15 @@ final class FoldersController extends ChangeNotifier {
     required LibraryFolders folders,
     required Future<LibraryConnection?> Function(String id) setup,
     required Future<bool> Function(LibraryConnection connection) confirmRemoval,
+    Future<LibraryConnection?> Function(String id)? setupDropbox,
   }) : _folders = folders,
        _setup = setup,
+       _setupDropbox = setupDropbox,
        _confirmRemoval = confirmRemoval;
   final LibraryFolders _folders;
   final Future<LibraryConnection?> Function(String id) _setup;
+  final Future<LibraryConnection?> Function(String id)? _setupDropbox;
+  bool get supportsDropbox => _setupDropbox != null;
   final Future<bool> Function(LibraryConnection connection) _confirmRemoval;
   FoldersModel _model = const FoldersModel();
   FoldersModel get model => _model;
@@ -132,10 +140,14 @@ final class FoldersController extends ChangeNotifier {
           (revision, _) async =>
               _FoldersLoaded(revision, await _folders.list()),
         );
-      case FoldersAddRequested():
+      case FoldersAddRequested() || FoldersAddDropboxRequested():
         if (_model.busy) return;
+        final setup = message is FoldersAddDropboxRequested
+            ? _setupDropbox
+            : _setup;
+        if (setup == null) return;
         _effect((revision, cancellation) async {
-          final grant = await _setup(LibraryFolders.newId());
+          final grant = await setup(LibraryFolders.newId());
           if (grant != null) {
             if (_closed || revision != _revision) {
               await _folders.discard(grant);

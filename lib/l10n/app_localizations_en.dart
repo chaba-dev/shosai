@@ -844,6 +844,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locationAddFolder => 'Connect folder';
 
   @override
+  String get dropboxConnect => 'Connect Dropbox';
+
+  @override
+  String get dropboxCodeDescription =>
+      'Sign in and approve access in your browser, then paste the authorization code from Dropbox here. Choose a source folder after connecting. Books are fetched only when opened or kept on this device.';
+
+  @override
+  String get dropboxAuthorizationCode => 'Authorization code';
+
+  @override
+  String get dropboxRegistrationRequired =>
+      'Dropbox is not configured in this build. A registered Dropbox app key is required. Device folders remain available.';
+
+  @override
   String get locationClose => 'Close';
 
   @override

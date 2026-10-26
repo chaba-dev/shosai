@@ -1488,6 +1488,30 @@ abstract class AppLocalizations {
   /// **'Connect folder'**
   String get locationAddFolder;
 
+  /// No description provided for @dropboxConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect Dropbox'**
+  String get dropboxConnect;
+
+  /// No description provided for @dropboxCodeDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in and approve access in your browser, then paste the authorization code from Dropbox here. Choose a source folder after connecting. Books are fetched only when opened or kept on this device.'**
+  String get dropboxCodeDescription;
+
+  /// No description provided for @dropboxAuthorizationCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorization code'**
+  String get dropboxAuthorizationCode;
+
+  /// No description provided for @dropboxRegistrationRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Dropbox is not configured in this build. A registered Dropbox app key is required. Device folders remain available.'**
+  String get dropboxRegistrationRequired;
+
   /// No description provided for @locationClose.
   ///
   /// In en, this message translates to:
