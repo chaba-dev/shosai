@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Credentials and their device-bound wrapping keys must not migrate. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml"/>
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml"/>
+</full-backup-content>
