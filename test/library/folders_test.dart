@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_core/shosai_core.dart' hide Row;
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/core_records.dart';
+import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
@@ -220,6 +222,23 @@ void main() {
   testWidgets('settings manages multiple independent connections', (
     tester,
   ) async {
+    Uri? authorization;
+    const browserChannel = MethodChannel('plugins.flutter.io/url_launcher');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      browserChannel,
+      (call) async {
+        if (call.method == 'launch') {
+          authorization = Uri.parse((call.arguments as Map)['url'] as String);
+        }
+        return true;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        browserChannel,
+        null,
+      ),
+    );
     tester.view.physicalSize = const Size(1280, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -303,15 +322,26 @@ void main() {
     expect(find.text('Books one'), findsOneWidget);
     expect(find.text('Connect Dropbox'), findsOneWidget);
     await captureHarnessArtifact(tester, 'dropbox-connections');
-    if (const String.fromEnvironment('SHOSAI_DROPBOX_APP_KEY').isEmpty) {
-      await tester.tap(find.text('Connect Dropbox'));
-      await settle();
+    await tester.tap(find.text('Connect Dropbox'));
+    await settle();
+    if (DropboxConnectionProvider.defaultClientId.isEmpty) {
+      expect(authorization, null);
       expect(find.textContaining('Dropbox is not configured'), findsOneWidget);
       await captureHarnessArtifact(tester, 'dropbox-registration-required');
       await tester.tap(find.widgetWithText(ShadButton, 'Close').last);
-      await settle();
-      expect((await tester.runAsync(core.folders.list))!.length, 2);
+    } else {
+      expect(
+        authorization!.queryParameters['client_id'],
+        DropboxConnectionProvider.defaultClientId,
+      );
+      expect(authorization!.queryParameters['code_challenge_method'], 'S256');
+      expect(find.textContaining('Dropbox is not configured'), findsNothing);
+      expect(find.textContaining('Add your books to this app'), findsOneWidget);
+      await captureHarnessArtifact(tester, 'dropbox-default-configured');
+      await tester.tap(find.widgetWithText(ShadButton, 'Cancel').last);
     }
+    await settle();
+    expect((await tester.runAsync(core.folders.list))!.length, 2);
     expect(
       find.descendant(
         of: find.byType(LibraryFoldersDialog),

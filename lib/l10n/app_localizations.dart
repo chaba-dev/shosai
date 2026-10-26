@@ -1497,7 +1497,7 @@ abstract class AppLocalizations {
   /// No description provided for @dropboxCodeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Sign in and approve access in your browser, then paste the authorization code from Dropbox here. Choose a source folder after connecting. Books are fetched only when opened or kept on this device.'**
+  /// **'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. You can select a subfolder after connecting. Books are fetched only when opened or kept on this device.'**
   String get dropboxCodeDescription;
 
   /// No description provided for @dropboxAuthorizationCode.

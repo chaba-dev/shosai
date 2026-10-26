@@ -237,7 +237,7 @@
   "locationUseFolder": "このフォルダを使用",
   "locationAddFolder": "フォルダを接続",
   "dropboxConnect": "Dropbox を接続",
-  "dropboxCodeDescription": "ブラウザでサインインしてアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。接続後に読み込み元フォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。",
+  "dropboxCodeDescription": "ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。接続後にサブフォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。",
   "dropboxAuthorizationCode": "認証コード",
   "dropboxRegistrationRequired": "このビルドでは Dropbox が設定されていません。登録済みの Dropbox アプリキーが必要です。端末のフォルダは引き続き利用できます。",
   "locationClose": "閉じる",
