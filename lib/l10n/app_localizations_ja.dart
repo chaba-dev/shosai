@@ -797,6 +797,20 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationAddFolder => 'フォルダを接続';
 
   @override
+  String get dropboxConnect => 'Dropbox を接続';
+
+  @override
+  String get dropboxCodeDescription =>
+      'ブラウザでサインインしてアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。接続後に読み込み元フォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。';
+
+  @override
+  String get dropboxAuthorizationCode => '認証コード';
+
+  @override
+  String get dropboxRegistrationRequired =>
+      'このビルドでは Dropbox が設定されていません。登録済みの Dropbox アプリキーが必要です。端末のフォルダは引き続き利用できます。';
+
+  @override
   String get locationClose => '閉じる';
 
   @override

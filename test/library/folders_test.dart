@@ -69,6 +69,7 @@ final class _FixtureProvider implements ConnectionProvider {
 }
 
 void main() {
+  setUpAll(loadHarnessFonts);
   test(
     'refresh isolates provider failures and retries without losing access',
     () async {
@@ -219,7 +220,7 @@ void main() {
   testWidgets('settings manages multiple independent connections', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.physicalSize = const Size(1280, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -300,6 +301,17 @@ void main() {
     await tester.tap(find.text('Manage connections'));
     await settle();
     expect(find.text('Books one'), findsOneWidget);
+    expect(find.text('Connect Dropbox'), findsOneWidget);
+    await captureHarnessArtifact(tester, 'dropbox-connections');
+    if (const String.fromEnvironment('SHOSAI_DROPBOX_APP_KEY').isEmpty) {
+      await tester.tap(find.text('Connect Dropbox'));
+      await settle();
+      expect(find.textContaining('Dropbox is not configured'), findsOneWidget);
+      await captureHarnessArtifact(tester, 'dropbox-registration-required');
+      await tester.tap(find.widgetWithText(ShadButton, 'Close').last);
+      await settle();
+      expect((await tester.runAsync(core.folders.list))!.length, 2);
+    }
     expect(
       find.descendant(
         of: find.byType(LibraryFoldersDialog),

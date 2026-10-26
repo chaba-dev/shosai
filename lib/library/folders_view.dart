@@ -91,6 +91,17 @@ class LibraryFoldersDialog extends StatelessWidget {
                   child: ListView(
                     children: [
                       if (selected == null) ...[
+                        if (controller.supportsDropbox)
+                          ListTile(
+                            leading: const Icon(Icons.cloud_outlined),
+                            title: Text(l10n.dropboxConnect),
+                            enabled: !model.busy,
+                            onTap: model.busy
+                                ? null
+                                : () => controller.dispatch(
+                                    const FoldersAddDropboxRequested(),
+                                  ),
+                          ),
                         if (model.grants.isEmpty && !model.busy)
                           Padding(
                             padding: const EdgeInsets.all(16),
