@@ -7,92 +7,103 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
 import 'package:shosai_core/shosai_core.dart';
 
+import 'library_connection.dart';
+
 const _channel = MethodChannel('dev.shosai/library_folders');
 
-/// Nonsecret configuration. Apple bookmarks and SAF grants must never be
-/// synchronized to another device or included in exported book records.
-final class FolderGrant {
-  const FolderGrant(
-    this.id,
-    this.label,
-    this.kind,
-    this.grant, {
-    this.directory,
-    this.directoryLabel,
-  });
+/// Device grants are not cloud credentials. Native bookmarks and SAF grants
+/// stay on this device and must never be exported with book records.
+final class FolderConnectionProvider implements ConnectionProvider {
+  const FolderConnectionProvider();
 
-  final String id;
-  final String label;
-  final String kind;
-  final String grant;
-  final String? directory;
-  final String? directoryLabel;
+  @override
+  String get id => 'folder';
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'label': label,
-    'kind': kind,
-    'grant': grant,
-    'directory': directory,
-    'directoryLabel': directoryLabel,
-  };
+  /// Upgrade the original folder record without changing any locator key.
+  static LibraryConnection migrate(Map<String, dynamic> value) =>
+      LibraryConnection(
+        value['id'] as String,
+        value['label'] as String,
+        'folder',
+        {'kind': value['kind'] as String, 'grant': value['grant'] as String},
+        directory: value['directory'] as String?,
+        directoryLabel: value['directoryLabel'] as String?,
+      );
 
-  factory FolderGrant.fromJson(Map<String, dynamic> value) => FolderGrant(
-    value['id'] as String,
-    value['label'] as String,
-    value['kind'] as String,
-    value['grant'] as String,
-    directory: value['directory'] as String?,
-    directoryLabel: value['directoryLabel'] as String?,
-  );
-
-  static Future<FolderGrant?> pick(String id) async {
+  @override
+  Future<LibraryConnection?> setup(String connectionId) async {
     if (Platform.isLinux || Platform.isWindows) {
       final path = await getDirectoryPath();
       if (path == null) return null;
-      return FolderGrant(
-        id,
+      return LibraryConnection(
+        connectionId,
         path.split(Platform.pathSeparator).last,
-        'path',
-        path,
+        id,
+        {'kind': 'path', 'grant': path},
       );
     }
     final value = await _channel.invokeMapMethod<String, String>('pick');
     if (value == null) return null;
-    return FolderGrant(id, value['label']!, 'platform', value['grant']!);
+    return LibraryConnection(connectionId, value['label']!, id, {
+      'kind': 'platform',
+      'grant': value['grant']!,
+    });
   }
 
-  Future<LibraryLocation> open() async => switch (kind) {
-    'path' => FolderLocation.open(id, grant),
-    'platform' => PlatformFolderLocation(id, grant),
-    _ => throw const CoreException(
-      CoreErrorKind.unsupported,
-      'Unknown folder grant.',
-    ),
-  };
+  @override
+  Future<LibraryLocation> open(LibraryConnection connection) async =>
+      switch (connection.configuration['kind']) {
+        'path' => FolderLocation.open(
+          connection.id,
+          connection.configuration['grant']!,
+        ),
+        'platform' => PlatformFolderLocation(
+          connection.id,
+          connection.configuration['grant']!,
+        ),
+        _ => throw const CoreException(
+          CoreErrorKind.unsupported,
+          'Unknown folder grant.',
+        ),
+      };
 
   /// Renew resolved Apple bookmarks before saving their device configuration;
   /// an old absolute URL is not a replacement for a stale security bookmark.
-  Future<FolderGrant> refreshed() async {
-    if (kind != 'platform' || (!Platform.isIOS && !Platform.isMacOS)) {
-      return this;
+  @override
+  Future<LibraryConnection> refresh(LibraryConnection connection) async {
+    if (connection.configuration['kind'] != 'platform' ||
+        (!Platform.isIOS && !Platform.isMacOS)) {
+      return connection;
     }
-    final renewed = await _channel.invokeMethod<String>('refresh', {
-      'grant': grant,
-    });
-    return FolderGrant(
+    final String? renewed;
+    try {
+      renewed = await _channel.invokeMethod<String>('refresh', {
+        'grant': connection.configuration['grant'],
+      });
+    } on PlatformException catch (error) {
+      throw _folderError(error);
+    }
+    return LibraryConnection(
+      connection.id,
+      connection.label,
       id,
-      label,
-      kind,
-      renewed!,
-      directory: directory,
-      directoryLabel: directoryLabel,
+      {...connection.configuration, 'grant': renewed!},
+      directory: connection.directory,
+      directoryLabel: connection.directoryLabel,
     );
   }
 
-  Future<void> release() async {
-    if (kind == 'platform') {
-      await _channel.invokeMethod<void>('release', {'grant': grant});
+  @override
+  bool sameAccess(LibraryConnection first, LibraryConnection second) =>
+      first.configuration['kind'] == second.configuration['kind'] &&
+      first.configuration['grant'] == second.configuration['grant'];
+
+  @override
+  Future<void> release(LibraryConnection connection) async {
+    if (connection.configuration['kind'] == 'platform') {
+      await _channel.invokeMethod<void>('release', {
+        'grant': connection.configuration['grant'],
+      });
     }
   }
 }
@@ -114,19 +125,7 @@ final class PlatformFolderLocation implements LibraryLocation {
     try {
       return await _channel.invokeMethod<T>(method, {'grant': grant, ...args});
     } on PlatformException catch (error) {
-      throw switch (error.code) {
-        'offline' => const LocationException(LocationFailure.offline),
-        'revoked' => const LocationException(LocationFailure.revoked),
-        'missing' => const LocationException(LocationFailure.missing),
-        'unsupported' => const CoreException(
-          CoreErrorKind.unsupported,
-          'This folder provider does not support the operation.',
-        ),
-        _ => const CoreException(
-          CoreErrorKind.inaccessible,
-          'The folder could not be accessed.',
-        ),
-      };
+      throw _folderError(error);
     }
   }
 
@@ -258,3 +257,17 @@ LocationEntry _entry(Map value) => LocationEntry(
   size: value['size'] as int?,
   revision: value['revision'] as String?,
 );
+
+Exception _folderError(PlatformException error) => switch (error.code) {
+  'offline' => const LocationException(LocationFailure.offline),
+  'revoked' => const LocationException(LocationFailure.revoked),
+  'missing' => const LocationException(LocationFailure.missing),
+  'unsupported' => const CoreException(
+    CoreErrorKind.unsupported,
+    'This folder provider does not support the operation.',
+  ),
+  _ => const CoreException(
+    CoreErrorKind.inaccessible,
+    'The folder could not be accessed.',
+  ),
+};

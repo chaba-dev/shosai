@@ -12,7 +12,6 @@ import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
-import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
@@ -1056,7 +1055,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     if (host is! LibraryFoldersHost) return;
     final folders = FoldersController(
       folders: (host as LibraryFoldersHost).folders,
-      pick: FolderGrant.pick,
+      setup: (id) => (host as LibraryFoldersHost).folders.setup('folder', id),
       confirmRemoval: (grant) async =>
           await _showOwnedDialog<bool>((context) {
             final l10n = AppLocalizations.of(context);

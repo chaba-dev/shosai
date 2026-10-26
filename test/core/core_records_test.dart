@@ -1,10 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shosai_core/shosai_core.dart' show BookAnchor;
-import 'package:shosai_flutter/core/platform_folder_location.dart';
+import 'package:shosai_core/shosai_core.dart'
+    show
+        BookAnchor,
+        FolderLocation,
+        LocationFailure,
+        Preferences,
+        maxPreferenceRows,
+        maxPreferenceValueBytes,
+        maxPreferenceTotalBytes;
+import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -181,7 +191,10 @@ void main() {
         File('${source.path}/book-$i.epub').writeAsStringSync('metadata only');
       }
       await core.folders.add(
-        FolderGrant('large', 'Large', 'path', source.path),
+        LibraryConnection('large', 'Large', 'folder', {
+          'kind': 'path',
+          'grant': source.path,
+        }),
       );
       expect(await core.folders.discover(), hasLength(600));
       await core.close();
@@ -201,10 +214,16 @@ void main() {
       File('${broken.path}/old.epub').writeAsStringSync('metadata only');
       File('${healthy.path}/good.pdf').writeAsStringSync('metadata only');
       await core.folders.add(
-        FolderGrant('broken', 'Broken', 'path', broken.path),
+        LibraryConnection('broken', 'Broken', 'folder', {
+          'kind': 'path',
+          'grant': broken.path,
+        }),
       );
       await core.folders.add(
-        FolderGrant('healthy', 'Healthy', 'path', healthy.path),
+        LibraryConnection('healthy', 'Healthy', 'folder', {
+          'kind': 'path',
+          'grant': healthy.path,
+        }),
       );
       expect(await core.folders.discover(), hasLength(2));
       var deep = broken;
@@ -238,10 +257,16 @@ void main() {
       File('${deep.path}/hidden.epub').writeAsStringSync('metadata only');
       File('${healthy.path}/good.pdf').writeAsStringSync('metadata only');
       await core.folders.add(
-        FolderGrant('broken', 'Deep books', 'path', broken.path),
+        LibraryConnection('broken', 'Deep books', 'folder', {
+          'kind': 'path',
+          'grant': broken.path,
+        }),
       );
       await core.folders.add(
-        FolderGrant('healthy', 'Healthy', 'path', healthy.path),
+        LibraryConnection('healthy', 'Healthy', 'folder', {
+          'kind': 'path',
+          'grant': healthy.path,
+        }),
       );
       final controller = LibraryController(
         bridge: bridge,
@@ -290,7 +315,10 @@ void main() {
       final source = Directory('${directory.path}/source')..createSync();
       final file = File(_epubFixture).copySync('${source.path}/chosen.epub');
       await core.folders.add(
-        FolderGrant('changed', 'Books', 'path', source.path),
+        LibraryConnection('changed', 'Books', 'folder', {
+          'kind': 'path',
+          'grant': source.path,
+        }),
       );
       final candidate = (await core.folders.discover()).single;
       final original = await core.folders.importEntry(
@@ -335,7 +363,10 @@ void main() {
         File('${selected.path}/ignore-$i.txt').writeAsStringSync('ignored');
       }
       await core.folders.add(
-        FolderGrant('source', 'My books', 'path', source.path),
+        LibraryConnection('source', 'My books', 'folder', {
+          'kind': 'path',
+          'grant': source.path,
+        }),
       );
       final root = (await core.folders.browse(
         'source',
@@ -402,6 +433,244 @@ void main() {
     },
   );
 
+  for (final atCapacity in [false, true]) {
+    test(
+      'legacy folder connections migrate without reconnecting or losing content (at capacity: $atCapacity)',
+      () async {
+        TestWidgetsFlutterBinding.ensureInitialized();
+        var nativeGrant = 'opaque-device-grant';
+        const channel = MethodChannel('dev.shosai/library_folders');
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'refresh') return nativeGrant;
+          expect(call.method, 'release');
+          expect(call.arguments, {'grant': nativeGrant});
+          return null;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+        final source = Directory('${directory.path}/legacy')..createSync();
+        final selected = Directory('${source.path}/Reading')..createSync();
+        final chosen = File(
+          _epubFixture,
+        ).copySync('${selected.path}/chosen.epub');
+        File(
+          '${selected.path}/unopened.pdf',
+        ).writeAsStringSync('metadata only');
+        File(
+          '${source.path}/excluded.pdf',
+        ).writeAsStringSync('outside selection');
+        final adapter = await FolderLocation.open(
+          'folder-original',
+          source.path,
+        );
+        final root = (await adapter.list()).entries.singleWhere(
+          (entry) => entry.isDirectory,
+        );
+        final entries = (await adapter.list(directory: root.key)).entries;
+        final entry = entries.singleWhere(
+          (entry) => entry.name == 'chosen.epub',
+        );
+        final generation = await core.locations.connect(
+          'folder-original',
+          'Original',
+        );
+        await core.locations.scan('folder-original', generation, entries);
+        final book = (await core.library.importFile(
+          chosen.path,
+          managed: false,
+        )).book!;
+        await core.locations.admit(
+          'folder-original',
+          generation,
+          entry,
+          book.contentHash,
+        );
+        await core.locations.locate(book.contentHash, (
+          locationId: 'folder-original',
+          key: entry.key,
+        ), generation: generation);
+        await core.annotations.createNote(
+          book.id,
+          const BookAnchor(),
+          'Pre-upgrade note',
+        );
+        await core.fileCache.withFile(
+          book,
+          chosen.openRead,
+          (_) async {},
+          keep: true,
+        );
+        await core.locations.unavailable(
+          'folder-original',
+          generation,
+          LocationFailure.offline,
+        );
+        final catalog = [
+          for (final file in await core.locations.catalog())
+            (
+              file.locationId,
+              file.entry.key,
+              file.entry.name,
+              file.entry.size,
+              file.entry.revision,
+            ),
+        ];
+        final copies = await core.locations.copies(book.contentHash);
+        final legacy = [
+          {
+            'id': 'folder-original',
+            'label': 'Original',
+            'kind': 'path',
+            'grant': source.path,
+            'directory': root.key,
+            'directoryLabel': 'Reading',
+          },
+          {
+            'id': 'folder-native',
+            'label': 'Native',
+            'kind': 'platform',
+            'grant': nativeGrant,
+            'directory': 'opaque-directory',
+            'directoryLabel': 'Books/Reading',
+          },
+        ];
+        final preferences = Preferences(core.store);
+        var raw = jsonEncode(legacy);
+        if (atCapacity) {
+          nativeGrant +=
+              'x' * (maxPreferenceValueBytes - utf8.encode(raw).length);
+          legacy[1]['grant'] = nativeGrant;
+          raw = jsonEncode(legacy);
+          expect(utf8.encode(raw).length, maxPreferenceValueBytes);
+          final values = {
+            ...await preferences.getAll(),
+            'device.library.folders': raw,
+          };
+          for (var index = 0; values.length < maxPreferenceRows; index++) {
+            values['padding-$index'] = '';
+          }
+          var remaining =
+              maxPreferenceTotalBytes -
+              values.entries.fold<int>(
+                0,
+                (size, entry) =>
+                    size +
+                    utf8.encode(entry.key).length +
+                    utf8.encode(entry.value).length,
+              );
+          for (final key in values.keys.where(
+            (key) => key.startsWith('padding-'),
+          )) {
+            final length = remaining > maxPreferenceValueBytes
+                ? maxPreferenceValueBytes
+                : remaining;
+            values[key] = 'x' * length;
+            remaining -= length;
+          }
+          expect(remaining, 0);
+          await preferences.setAll(values);
+          expect((await preferences.getAll()).length, maxPreferenceRows);
+        } else {
+          await preferences.set('device.library.folders', raw);
+        }
+        bridge.dispose();
+        await bridge.drain();
+        await core.close();
+        core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+        bridge = ApplicationBridge(core);
+        final connections = await core.folders.list();
+        expect(connections.map((connection) => connection.id), [
+          'folder-original',
+          'folder-native',
+        ]);
+        for (var index = 0; index < legacy.length; index++) {
+          expect(connections[index].provider, 'folder');
+          expect(connections[index].configuration, {
+            'kind': legacy[index]['kind'],
+            'grant': legacy[index]['grant'],
+          });
+          expect(connections[index].directory, legacy[index]['directory']);
+          expect(
+            connections[index].directoryLabel,
+            legacy[index]['directoryLabel'],
+          );
+        }
+        expect([
+          for (final file in await core.locations.catalog())
+            (
+              file.locationId,
+              file.entry.key,
+              file.entry.name,
+              file.entry.size,
+              file.entry.revision,
+            ),
+        ], catalog);
+        expect(await core.locations.copies(book.contentHash), copies);
+        expect((await core.library.get(book.id))!.keptOnDevice, isTrue);
+        expect(
+          (await core.library.get(book.id))!.locationFailure,
+          isNull,
+          reason:
+              'a kept copy remains readable despite the retained offline locator',
+        );
+        expect(
+          (await core.annotations.summary(book.id)).latest,
+          'Pre-upgrade note',
+        );
+        final persisted =
+            jsonDecode(
+                  (await Preferences(
+                    core.store,
+                  ).get('device.library.folders'))!,
+                )
+                as List;
+        expect(persisted, [
+          for (final connection in connections) connection.toJson(),
+        ]);
+        if (atCapacity) {
+          expect(
+            (await Preferences(core.store).getAll()).length,
+            maxPreferenceRows,
+          );
+        }
+        // Native permission cleanup remains provider-owned, not a filesystem path.
+        await core.folders.remove('folder-native');
+        expect(
+          (await core.folders.discover()).single.entry.name,
+          'unopened.pdf',
+        );
+        await source.delete(recursive: true);
+        expect(
+          (await core.folders.discover(refresh: true)).single.entry.name,
+          'unopened.pdf',
+        );
+        final opened = await bridge.openLibraryBook(
+          bookId: book.id,
+          cancellationId: bridge.createCancellation(),
+        );
+        expect(opened.bookId, book.id);
+        bridge.releaseDocument(handle: opened.handle);
+        await core.folders.remove('folder-original');
+        bridge.dispose();
+        await bridge.drain();
+        await core.close();
+        core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+        bridge = ApplicationBridge(core);
+        expect(
+          await core.folders.list(),
+          isEmpty,
+          reason: 'removed legacy grants never resurrect',
+        );
+        expect((await core.library.get(book.id))!.keptOnDevice, isTrue);
+        expect(
+          (await core.annotations.summary(book.id)).latest,
+          'Pre-upgrade note',
+        );
+      },
+    );
+  }
+
   for (final managed in [false, true]) {
     test('duplicate folder import preserves a local book ($managed)', () async {
       final source = Directory('${directory.path}/source')..createSync();
@@ -412,7 +681,10 @@ void main() {
       );
       final original = imported.book!;
       await core.folders.add(
-        FolderGrant('duplicate', 'My books', 'path', source.path),
+        LibraryConnection('duplicate', 'My books', 'folder', {
+          'kind': 'path',
+          'grant': source.path,
+        }),
       );
       final page = await core.folders.browse('duplicate');
       final duplicate = await core.folders.importEntry(
@@ -445,7 +717,10 @@ void main() {
       File(_pdfFixture).copySync('${source.path}/unopened.pdf');
       final original = chosen.readAsBytesSync();
       await core.folders.add(
-        FolderGrant('device-folder', 'My books', 'path', source.path),
+        LibraryConnection('device-folder', 'My books', 'folder', {
+          'kind': 'path',
+          'grant': source.path,
+        }),
       );
       final entries = await core.folders.browse('device-folder');
       expect(
@@ -568,7 +843,10 @@ void main() {
         reason: 'disconnect never deletes a source book',
       );
       await core.folders.add(
-        FolderGrant('new-device-grant', 'Reconnected', 'path', source.path),
+        LibraryConnection('new-device-grant', 'Reconnected', 'folder', {
+          'kind': 'path',
+          'grant': source.path,
+        }),
       );
       final same = await core.folders.importEntry('new-device-grant', selected);
       expect(same.id, book.id);
