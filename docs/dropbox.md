@@ -9,8 +9,10 @@ book server.
 
 ## App registration and builds
 
-A distribution owner must register a **Scoped access → App folder** app in the
-[Dropbox App Console](https://www.dropbox.com/developers/apps), not Full Dropbox.
+Official builds use Shōsai's registered **Scoped access → App folder** app by
+default (public app key `3yy8xd4pncextkh`). No build define is needed. Forks
+using their own registration must choose **App folder**, not Full Dropbox, in
+the [Dropbox App Console](https://www.dropbox.com/developers/apps).
 Dropbox creates a dedicated folder under `Apps/<app folder name>` and
 enforces access to that folder only. Users add books by copying or moving them
 there; photos and other files elsewhere in their account are outside the app's
@@ -22,11 +24,19 @@ Enable:
 - `files.content.read`
 - `files.content.write`
 
-Supply its real public app key using the Flutter build define
-`SHOSAI_DROPBOX_APP_KEY` (or a local `--dart-define-from-file` configuration).
-There is deliberately no default app key. A build without registration shows
-an explanatory dialog and leaves device-folder connections usable. No client
-secret is used, and none should be included in build configuration.
+Override the public app key for a fork or test build using the Flutter build
+define `SHOSAI_DROPBOX_APP_KEY` (or `--dart-define-from-file`). An explicitly
+empty `--dart-define=SHOSAI_DROPBOX_APP_KEY=` disables new Dropbox connections,
+shows an explanatory dialog and leaves device-folder connections usable.
+Existing connections retain their registered public key for token renewal.
+The single build default lives in `DropboxConnectionProvider.defaultClientId`;
+the setup UI uses the same value. No client secret is used, and none should be
+included in build configuration. Public app keys are not credentials.
+
+The registered app was in Development status at acceptance: the owner's account
+can authorize it, but including its public key does not grant Dropbox production
+approval or access for all users. Manage development users and request production
+approval in the App Console before general distribution.
 
 The App folder restriction is a property of the registered app, not an OAuth
 scope or client-side path filter. Supplying a Full Dropbox app key would grant

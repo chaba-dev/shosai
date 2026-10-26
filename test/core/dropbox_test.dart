@@ -230,6 +230,48 @@ void main() {
   });
   tearDown(() => fixture.close());
 
+  test('build app key configures PKCE or explicitly disables setup', () async {
+    final expected = const bool.hasEnvironment('SHOSAI_DROPBOX_APP_KEY')
+        ? const String.fromEnvironment('SHOSAI_DROPBOX_APP_KEY')
+        : '3yy8xd4pncextkh';
+    Uri? authorization;
+    final provider = DropboxConnectionProvider(
+      credentials: fixture.credentials,
+      tokenEndpoint: fixture.root.resolve('oauth2/token'),
+      api: fixture.root,
+      content: fixture.root,
+      authorize: (uri) async {
+        authorization = uri;
+        fixture.challenge = uri.queryParameters['code_challenge'];
+        return 'test-code';
+      },
+    );
+    expect(provider.clientId, expected);
+    if (expected.isEmpty) {
+      await expectLater(
+        provider.setup('default'),
+        throwsA(
+          isA<CoreException>().having(
+            (error) => error.kind,
+            'kind',
+            CoreErrorKind.unsupported,
+          ),
+        ),
+      );
+      expect(authorization, null);
+      expect(fixture.tokenForms, isEmpty);
+      expect(fixture.credentials.values, isEmpty);
+    } else {
+      final connection = (await provider.setup('default'))!;
+      expect(authorization!.queryParameters['client_id'], expected);
+      expect(fixture.tokenForms.single['client_id'], expected);
+      expect(connection.configuration['clientId'], expected);
+      expect((await (await provider.open(connection)).stat('id:book')).size, 7);
+      await provider.release(connection);
+      expect(fixture.credentials.values, isEmpty);
+    }
+  });
+
   test(
     'S256 setup stores only refresh token, reopen renews and release isolates connections',
     () async {
@@ -239,11 +281,19 @@ void main() {
       expect(fixture.credentials.values.length, 2);
       expect(jsonEncode(first.toJson()), isNot(contains('refresh-')));
       expect(jsonEncode(first.toJson()), isNot(contains('access-')));
-      final reopened = fixture.provider();
+      // Disabling new setup must not change the key of an existing grant.
+      final reopened = DropboxConnectionProvider(
+        credentials: fixture.credentials,
+        clientId: '',
+        tokenEndpoint: fixture.root.resolve('oauth2/token'),
+        api: fixture.root,
+        content: fixture.root,
+      );
       final location = await reopened.open(
         LibraryConnection.fromJson(first.toJson()),
       );
       await Future.wait([location.stat('id:book'), location.stat('id:book')]);
+      expect(fixture.tokenForms.last['client_id'], 'fixture-app-key');
       expect(
         fixture.tokenForms
             .where((v) => v['grant_type'] == 'refresh_token')

@@ -21,12 +21,19 @@ final class DropboxConnectionProvider implements ConnectionProvider {
   DropboxConnectionProvider({
     required this.credentials,
     this.authorize,
-    this.clientId = const String.fromEnvironment('SHOSAI_DROPBOX_APP_KEY'),
+    this.clientId = defaultClientId,
     Uri? tokenEndpoint,
     this.api,
     this.content,
   }) : tokenEndpoint =
            tokenEndpoint ?? Uri.https('api.dropboxapi.com', '/oauth2/token');
+
+  /// Public identifier of Shōsai's registered App folder app, not a secret.
+  /// Forks can override it; an explicitly empty define disables new setup.
+  static const defaultClientId = String.fromEnvironment(
+    'SHOSAI_DROPBOX_APP_KEY',
+    defaultValue: '3yy8xd4pncextkh',
+  );
 
   final ConnectionCredentialStore credentials;
   final Future<String?> Function(Uri authorization)? authorize;
