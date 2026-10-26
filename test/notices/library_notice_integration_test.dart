@@ -102,7 +102,6 @@ LibraryController _controller(
   _StubBridge bridge, {
   NoticeReporter? noticeReporter,
   Future<LibraryImportSelection?> Function()? pickImport,
-  Future<FlutterReaderSettings?> Function(FlutterReaderSettings)? editSettings,
 }) => LibraryController(
   bridge: bridge,
   confirmRemoval: (_) async => true,
@@ -112,7 +111,6 @@ LibraryController _controller(
           const LibraryImportSelection(paths: ['/tmp/a.epub'], managed: false),
   openBook: (_) async {},
   drainReaderSaves: (_) async {},
-  editSettings: editSettings ?? (initial) async => initial,
   noticeReporter: noticeReporter ?? ignoreNotice,
 );
 
@@ -329,7 +327,7 @@ void main() {
     addTearDown(controller.dispose);
 
     await _start(controller);
-    controller.dispatch(const LibrarySettingsRequested());
+    controller.dispatch(LibrarySettingsChanged(controller.model.settings!));
     await _settle();
 
     expect(notices, hasLength(1));
@@ -344,7 +342,7 @@ void main() {
     addTearDown(controller.dispose);
 
     await _start(controller);
-    controller.dispatch(const LibrarySettingsRequested());
+    controller.dispatch(LibrarySettingsChanged(controller.model.settings!));
     await _settle();
 
     expect(notices, isEmpty);
@@ -356,21 +354,15 @@ void main() {
     () async {
       final bridge = _StubBridge()..saveCompleter = Completer<void>();
       final notices = <NoticeRequest>[];
-      final controller = _controller(
-        bridge,
-        noticeReporter: notices.add,
-        editSettings: (initial) async => FlutterReaderSettings(
-          continuous: initial.continuous,
-          theme: initial.theme,
-          epubFontSize: 20,
-          epubLineSpacing: initial.epubLineSpacing,
-          pdfZoom: initial.pdfZoom,
-        ),
-      );
+      final controller = _controller(bridge, noticeReporter: notices.add);
       addTearDown(controller.dispose);
 
       await _start(controller);
-      controller.dispatch(const LibrarySettingsRequested());
+      controller.dispatch(
+        LibrarySettingsChanged(
+          controller.model.settings!.copyWith(epubFontSize: 20),
+        ),
+      );
       await _settle();
       expect(bridge.saveCalls, 1);
 

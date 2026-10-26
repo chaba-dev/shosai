@@ -91,9 +91,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   late final FlutterBridge _sessionBridge = widget.bridgeFactory();
   late final ShosaiRecords _sessionRecords = recordsOf(_sessionBridge);
 
-  /// Add books chosen from the rail: the library opens the picker once the
-  /// reader has gone and the library is idle again.
-  bool _pendingImport = false;
+  /// Actions chosen from the rail run after reader saves finish and the
+  /// library becomes idle again. The book remains in Reading now.
+  LibraryMessage? _pendingLibraryAction;
 
   late final ShellController _shell = ShellController(
     presentReader: _presentReader,
@@ -143,8 +143,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     pickImport: _pickImport,
     openBook: _openBook,
     drainReaderSaves: ReaderController.drainBookWrites,
-    editSettings: _editSettings,
-    manageLocations: _manageLocations,
+    manageConnections: _manageLocations,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     localizations: () => AppLocalizations.of(context),
@@ -169,7 +168,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       _shell.dispatch(ShellLibraryBooksChanged(books));
     }
     _scheduleRestoredOpen();
-    _schedulePendingImport();
+    _schedulePendingLibraryAction();
   }
 
   void _shellChanged() {
@@ -447,16 +446,17 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
   }
 
-  void _schedulePendingImport() {
-    if (!_pendingImport ||
+  void _schedulePendingLibraryAction() {
+    final action = _pendingLibraryAction;
+    if (action == null ||
         _shell.model.reading ||
         !controller.model.loaded ||
         controller.model.busy) {
       return;
     }
-    _pendingImport = false;
+    _pendingLibraryAction = null;
     scheduleMicrotask(() {
-      if (mounted) controller.dispatch(const LibraryImportRequested());
+      if (mounted) controller.dispatch(action);
     });
   }
 
@@ -703,13 +703,15 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     moveBook: (from, to) => _shell.dispatch(ShellBookMoved(from, to)),
     addBooks: _shell.model.reading
         ? () {
-            _pendingImport = true;
+            _pendingLibraryAction = const LibraryImportRequested();
             _shell.dispatch(const ShellPlaceSelected(ShellPlace.library));
           }
         : controller.model.busy
         ? null
         : () => controller.dispatch(const LibraryImportRequested()),
     loadCover: controller.requestCover,
+    settings: () =>
+        _shell.dispatch(const ShellPlaceSelected(ShellPlace.settings)),
     closeSwitcher: () => _shell.dispatch(const ShellSwitcherClosed()),
   );
 
@@ -1049,9 +1051,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  Future<FlutterReaderSettings?> _editSettings(FlutterReaderSettings initial) =>
-      _settingsDialog(context, initial, showOwnedDialog: _showOwnedDialog);
-
   Future<void> _manageLocations() async {
     final host = _sessionBridge;
     if (host is! LibraryFoldersHost) return;
@@ -1162,6 +1161,21 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                             _notes.dispatch(const ShellNotesMoreRequested()),
                       ),
                     )
+                  : shell.place == ShellPlace.settings
+                  ? _SettingsPage(
+                      layout: layout,
+                      model: controller.model,
+                      onChanged: (value) =>
+                          controller.dispatch(LibrarySettingsChanged(value)),
+                      onConnections: _sessionBridge is LibraryFoldersHost
+                          ? () => controller.dispatch(
+                              const LibraryConnectionsRequested(),
+                            )
+                          : null,
+                      onRetry: () => controller.dispatch(
+                        const LibrarySettingsSaveRetried(),
+                      ),
+                    )
                   : ShellPlacePage(layout: layout, place: shell.place),
             );
           },
@@ -1170,13 +1184,10 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  /// The Library place: the header, the format filters and Settings, then the
+  /// The Library place: the header and format filters, then the
   /// collection; on a phone the open books lead as Reading now cards.
   Widget _libraryPlace(ShellLayout layout) {
     final model = controller.model;
-    final settingsRequest = model.settings == null
-        ? null
-        : () => controller.dispatch(const LibrarySettingsRequested());
     return LayoutBuilder(
       builder: (context, constraints) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1206,10 +1217,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             model: model,
             onFormatChanged: (format) =>
                 controller.dispatch(LibraryFormatChanged(format)),
-            onSettingsRequested: settingsRequest,
-            onLocationsRequested: _sessionBridge is LibraryFoldersHost
-                ? () => controller.dispatch(const LibraryLocationsRequested())
-                : null,
           ),
           if (layout == ShellLayout.phone && _shell.model.openBooks.isNotEmpty)
             Padding(
@@ -1258,10 +1265,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             openBookIds: {for (final open in _shell.model.openBooks) open.id},
             sortBooks: (sort) => controller.dispatch(LibrarySortChanged(sort)),
             openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
+            openSourceFile: (file) =>
+                controller.dispatch(LibrarySourceFileOpened(file)),
             openNotes: () =>
                 _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),
             removeBook: (book) =>
                 controller.dispatch(LibraryBookRemovalRequested(book)),
+            keepBook: (book) =>
+                controller.dispatch(LibraryBookKeepRequested(book)),
             loadMore: () => controller.dispatch(const LibraryMoreRequested()),
             retryPaging: () =>
                 controller.dispatch(const LibraryMoreRetryRequested()),

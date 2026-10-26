@@ -233,10 +233,17 @@ void main() {
   ///
   /// Scoped to the chrome above the collection: a card is a button too, and its
   /// format label carries the same text as a filter entry.
-  Finder navigationEntry(String label) => find.descendant(
-    of: navigationChrome,
-    matching: find.widgetWithText(ShadButton, label),
-  );
+  Finder navigationEntry(String label) => label == 'Settings' || label == '設定'
+      ? find.descendant(
+          of: find.byWidgetPredicate(
+            (widget) => widget is ShellSidebar || widget is ShellBottomNav,
+          ),
+          matching: find.text(label),
+        )
+      : find.descendant(
+          of: navigationChrome,
+          matching: find.widgetWithText(ShadButton, label),
+        );
 
   /// The label paragraph inside the chrome control labelled [label].
   Finder navigationLabel(String label) =>
@@ -337,31 +344,69 @@ void main() {
 
   group('wide layout', () {
     testWidgets(
-      'the shell sidebar leaves the filters and Settings to the row',
+      'reader rail Settings waits for the reader and retains its book',
       (tester) async {
-        await pumpLibrary(tester, const Size(1280, 800));
-
-        expect(find.byType(ShellSidebar), findsOneWidget);
-        expect(find.byType(LibraryFilterRow), findsOneWidget);
-        expect(find.byType(Drawer), findsNothing);
-
-        for (final label in ['All', ...formatLabels, 'Settings']) {
-          expect(
-            navigationEntry(label),
-            findsOneWidget,
-            reason: '$label is reachable from the filter row',
-          );
+        final bridge = await pumpLibrary(tester, const Size(1280, 800));
+        await tester.tap(find.byType(LibraryBookCard).first);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.byType(ShellRail), findsOneWidget);
+        await tester.tap(find.byTooltip('Settings'));
+        for (
+          var frame = 0;
+          frame < 10 && find.text('Reader theme').evaluate().isEmpty;
+          frame++
+        ) {
+          await tester.pump(const Duration(milliseconds: 100));
         }
-        final header = tester.getRect(find.byType(LibraryHeader));
-        final row = tester.getRect(find.byType(LibraryFilterRow));
-        expect(row.top, greaterThanOrEqualTo(header.bottom));
+        expect(find.text('Reader theme'), findsOneWidget);
+        await tester.pumpAndSettle();
+        expect(find.byType(ShellRail), findsNothing);
+        await tester.tap(find.text('Library'));
+        await tester.pumpAndSettle();
         expect(
-          row.left,
-          tester.getRect(find.byType(ShellSidebar)).right,
-          reason: 'the row starts where the sidebar ends',
+          find.descendant(
+            of: find.byType(ShellSidebar),
+            matching: find.text(bridge.books.first.title),
+          ),
+          findsOneWidget,
         );
       },
     );
+
+    testWidgets('the sidebar owns Settings and the row contains only filters', (
+      tester,
+    ) async {
+      await pumpLibrary(tester, const Size(1280, 800));
+
+      expect(find.byType(ShellSidebar), findsOneWidget);
+      expect(find.byType(LibraryFilterRow), findsOneWidget);
+      expect(find.byType(Drawer), findsNothing);
+
+      for (final label in ['All', ...formatLabels]) {
+        expect(
+          navigationEntry(label),
+          findsOneWidget,
+          reason: '$label is reachable from the filter row',
+        );
+      }
+      expect(navigationEntry('Settings'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(LibraryFilterRow),
+          matching: find.text('Settings'),
+        ),
+        findsNothing,
+      );
+      final header = tester.getRect(find.byType(LibraryHeader));
+      final row = tester.getRect(find.byType(LibraryFilterRow));
+      expect(row.top, greaterThanOrEqualTo(header.bottom));
+      expect(
+        row.left,
+        tester.getRect(find.byType(ShellSidebar)).right,
+        reason: 'the row starts where the sidebar ends',
+      );
+    });
 
     testWidgets('the header carries the title, subtitle, search and action', (
       tester,
@@ -420,7 +465,7 @@ void main() {
   });
 
   group('compact layout', () {
-    testWidgets('the filter row carries every entry and Settings', (
+    testWidgets('the filter row carries formats and the bottom bar Settings', (
       tester,
     ) async {
       await pumpLibrary(tester, const Size(390, 780));
@@ -430,13 +475,21 @@ void main() {
       expect(find.byType(ShellBottomNav), findsOneWidget);
       expect(find.byType(Drawer), findsNothing);
 
-      for (final label in ['All', ...formatLabels, 'Settings']) {
+      for (final label in ['All', ...formatLabels]) {
         expect(
           navigationEntry(label),
           findsOneWidget,
           reason: '$label is directly accessible in the filter row',
         );
       }
+      expect(navigationEntry('Settings'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(LibraryFilterRow),
+          matching: find.text('Settings'),
+        ),
+        findsNothing,
+      );
       // The collection's section title carries the same copy as the wide
       // sidebar entry, so the compact assertion is scoped to the chrome.
       expect(navigationEntry('All books'), findsNothing);
@@ -448,7 +501,7 @@ void main() {
       await tester.tap(navigationEntry('Settings'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Reader theme'), findsOneWidget);
-      await tester.tap(find.text('Cancel'));
+      await tester.tap(find.text('Library'));
       await tester.pump(const Duration(milliseconds: 300));
 
       await tester.tap(navigationEntry('PDF'));
@@ -692,7 +745,7 @@ void main() {
       await pumpLibrary(tester, const Size(1280, 800));
 
       expectSelected(tester, 'All');
-      for (final label in [...formatLabels, 'Settings']) {
+      for (final label in formatLabels) {
         expectUnselected(tester, label);
       }
 
@@ -748,7 +801,7 @@ void main() {
       // and the header come first in the traversal, so the order is asserted
       // over the sequence the traversal produces rather than over consecutive
       // Tabs.
-      final order = ['All', ...formatLabels, 'Settings'];
+      final order = ['All', ...formatLabels];
       final reached = <String>[];
       for (
         var step = 0;
@@ -819,7 +872,7 @@ void main() {
     ) async {
       await pumpLibrary(tester, const Size(390, 780), textScale: 2);
 
-      for (final label in ['All', ...formatLabels, 'Settings']) {
+      for (final label in ['All', ...formatLabels]) {
         final entry = navigationEntry(label);
         expect(entry, findsOneWidget);
         final button = tester.widget<ShadButton>(entry);
@@ -865,14 +918,12 @@ void main() {
         );
       }
 
-      // The row wraps instead of clipping or dropping an entry: Settings moves
-      // to a second line and stays directly reachable.
-      final all = tester.getRect(navigationEntry('All'));
+      // Settings stays reachable in the bottom navigation at large text,
+      // independently of the format row's layout.
       final settings = tester.getRect(navigationEntry('Settings'));
-      expect(settings.top, greaterThan(all.top));
       expect(
-        tester.getRect(find.byType(LibraryFilterRow)).height,
-        greaterThan(all.height),
+        tester.getRect(find.byType(ShellBottomNav)).contains(settings.center),
+        isTrue,
       );
 
       final defects = await findRenderDefects(tester);
@@ -1109,7 +1160,6 @@ void main() {
         ),
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
       );
       final notifications = <({bool busy, bool importing})>[];
       controller.addListener(

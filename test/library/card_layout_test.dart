@@ -942,6 +942,82 @@ void main() {
   });
 
   group('actions', () {
+    testWidgets(
+      'located books offer the matching offline action without opening or removing',
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        for (final kept in [false, true]) {
+          for (final locale in [const Locale('en'), const Locale('ja')]) {
+            final book = FlutterLibraryBook(
+              bookId: 7,
+              title: 'Walden',
+              format: FlutterBookFormat.epub,
+              pathKey: '/staged/walden.epub',
+              managed: false,
+              progress: 0,
+              dateAdded: '2026-10-25',
+              located: true,
+              keptOnDevice: kept,
+            );
+            final chosen = <FlutterLibraryBook>[];
+            final shelf = LibraryShelf.of(ShellLayout.phone, 358);
+            await tester.pumpWidget(
+              productionShell(
+                locale: locale,
+                home: Scaffold(
+                  body: Align(
+                    alignment: Alignment.topLeft,
+                    child: Builder(
+                      builder: (context) => SizedBox(
+                        width: shelf.columnWidth,
+                        height: libraryCardTileExtent(context, shelf),
+                        child: LibraryBookCard(
+                          book: book,
+                          cover: null,
+                          demandRevision: 0,
+                          shelf: shelf,
+                          removing: false,
+                          loadCover: (_) => false,
+                          openBook: (_) =>
+                              fail('offline action opened the book'),
+                          removeBook: (_) =>
+                              fail('offline action removed the book'),
+                          keepBook: chosen.add,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            final l10n = AppLocalizations.of(
+              tester.element(find.byType(LibraryBookCard)),
+            );
+            await tester.tap(find.byTooltip(l10n.cardActionsTooltip));
+            await tester.pumpAndSettle();
+            final action = find.text(
+              kept ? l10n.cardStopKeeping : l10n.cardKeepOnDevice,
+            );
+            expect(action, findsOneWidget);
+            expect(
+              tester.renderObject<RenderParagraph>(action).didExceedMaxLines,
+              isFalse,
+            );
+            await tester.tap(action);
+            await tester.pumpAndSettle();
+            expect(chosen, [book]);
+            expect(tester.takeException(), isNull);
+            await tester.pumpWidget(const SizedBox.shrink());
+          }
+        }
+      },
+    );
+
     testWidgets('a card opens by activation and by keyboard', (tester) async {
       final opened = <FlutterLibraryBook>[];
       await pumpLibrary(tester, onOpen: opened.add);

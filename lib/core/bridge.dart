@@ -606,6 +606,8 @@ class FlutterLibraryBook {
   final String dateAdded;
   final String? lastRead;
   final bool unavailable;
+  final bool located;
+  final bool keptOnDevice;
 
   const FlutterLibraryBook({
     required this.bookId,
@@ -619,6 +621,8 @@ class FlutterLibraryBook {
     required this.dateAdded,
     this.lastRead,
     this.unavailable = false,
+    this.located = false,
+    this.keptOnDevice = false,
   });
 
   @override
@@ -633,7 +637,9 @@ class FlutterLibraryBook {
       progress.hashCode ^
       dateAdded.hashCode ^
       lastRead.hashCode ^
-      unavailable.hashCode;
+      unavailable.hashCode ^
+      located.hashCode ^
+      keptOnDevice.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -650,7 +656,9 @@ class FlutterLibraryBook {
           progress == other.progress &&
           dateAdded == other.dateAdded &&
           lastRead == other.lastRead &&
-          unavailable == other.unavailable;
+          unavailable == other.unavailable &&
+          located == other.located &&
+          keptOnDevice == other.keptOnDevice;
 }
 
 /// The order a library page lists books in.

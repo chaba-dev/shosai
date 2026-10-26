@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
-import 'package:shosai_core/shosai_core.dart' show maxSelectedImportPaths;
+import 'package:shosai_core/shosai_core.dart'
+    show maxSelectedImportPaths, CancellationToken, CancellationCheck;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
+import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
@@ -23,8 +25,7 @@ class LibraryController implements Listenable {
     required LibraryImportPicker pickImport,
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
-    required LibrarySettingsEditor editSettings,
-    Future<void> Function()? manageLocations,
+    Future<void> Function()? manageConnections,
     LibraryProviderCleanupRetrier retryProviderCleanup =
         _ignoreProviderCleanupRetry,
     LibraryImportAdapterCanceller cancelImportAdapter =
@@ -39,8 +40,7 @@ class LibraryController implements Listenable {
        _pickImport = pickImport,
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
-       _editSettings = editSettings,
-       _manageLocations = manageLocations,
+       _manageConnections = manageConnections,
        _retryProviderCleanup = retryProviderCleanup,
        _cancelImportAdapter = cancelImportAdapter,
        _evictCover = evictCover,
@@ -56,8 +56,7 @@ class LibraryController implements Listenable {
   final LibraryImportPicker _pickImport;
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
-  final LibrarySettingsEditor _editSettings;
-  final Future<void> Function()? _manageLocations;
+  final Future<void> Function()? _manageConnections;
   final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
   final LibraryCoverEvicter _evictCover;
@@ -103,13 +102,19 @@ class LibraryController implements Listenable {
   bool _settingsQueued = false;
   bool _settingsNotify = false;
   int? _stalledAppendOffset;
+  CancellationToken? _keepCancellation;
+  CancellationToken? _sourceCancellation;
+  CancellationToken? _discoveryCancellation;
   bool _closing = false;
   bool _bridgeDisposed = false;
   bool _pendingImportAdapter = false;
 
   LibraryModel get model => _model;
   bool get canCancel =>
-      _pendingImportAdapter || _foregroundCancellations.isNotEmpty;
+      _pendingImportAdapter ||
+      _foregroundCancellations.isNotEmpty ||
+      _keepCancellation != null ||
+      _sourceCancellation != null;
 
   bool requestCover(int bookId) {
     if (!_canLoadCover(bookId)) return false;
@@ -152,7 +157,7 @@ class LibraryController implements Listenable {
       case LibraryRefreshed():
         _coverFailures.clear();
         _emit(_model.copyWith(coverRevision: _model.coverRevision + 1));
-        _load();
+        _load(refreshSources: true);
       case LibraryMoreRequested():
         // The scroll trigger can fire again before the model it was built with
         // is replaced, so the request is refused while a load is in flight:
@@ -185,13 +190,13 @@ class LibraryController implements Listenable {
       case LibraryRetryRequested():
         switch (_model.failure) {
           case LibraryFailure.load || LibraryFailure.none:
-            _load();
+            _load(refreshSources: true);
           case LibraryFailure.import:
             _import();
           case LibraryFailure.removal:
             _load();
           case LibraryFailure.settings:
-            _settings();
+            _saveSettings();
         }
       case LibraryCleanupRetryRequested():
         _retryCleanup();
@@ -236,9 +241,8 @@ class LibraryController implements Listenable {
         _emit(_model.copyWith(settings: changed));
         _saveSettings();
       case LibrarySettingsSaveRetried():
-        // Unlike the library alert's Retry, which reopens the dialog, this
-        // saves the settings already in place: a Display change made in the
-        // reader is retried where it was made.
+        // Retry the settings already in place, without leaving the page or
+        // the reader where the change was made.
         if (_model.failure == LibraryFailure.settings &&
             _model.settings != null) {
           _saveSettings();
@@ -247,9 +251,10 @@ class LibraryController implements Listenable {
         if (_model.failure == LibraryFailure.settings) {
           _emit(_model.copyWith(error: null, failure: LibraryFailure.none));
         }
-      case _LibrarySettingsEdited():
-        // The dialog edits the display settings; the order and the Pages
-        // setting it opened with may have changed since.
+      case LibrarySettingsChanged():
+        if (_model.settings == null) return;
+        // Preserve the shelf order and reader-only settings when applying
+        // the fields exposed by the settings page.
         final edited = message.settings;
         _emit(
           _model.copyWith(
@@ -296,6 +301,9 @@ class LibraryController implements Listenable {
         _loadCover(message.bookId);
       case LibraryOperationCancelled():
         _adapterRevision += 1;
+        _keepCancellation?.cancel();
+        _sourceCancellation?.cancel();
+        _discoveryCancellation?.cancel();
         _pendingImportAdapter = false;
         _cancelImportAdapter();
         for (final cancellation in _foregroundCancellations) {
@@ -304,20 +312,32 @@ class LibraryController implements Listenable {
         _emit(_model);
       case LibraryBookOpened():
         _open(message.book);
+      case LibrarySourceFileOpened():
+        _openSource(message.file);
+      case _LibrarySourceFileAdmitted():
+        if (!_closing && message.revision == _adapterRevision) {
+          _open(message.book);
+        }
       case LibraryBookRemovalRequested():
         _requestRemoval(message.book);
+      case LibraryBookKeepRequested():
+        _keep(message.book);
       case _LibraryRemovalConfirmed():
         if (_closing) break;
         // The reference marks the card as removing once the removal is
         // confirmed and running; the mutation completion clears it again.
         _emit(_model.copyWith(removingBookId: message.book.bookId));
         _remove(message.book);
-      case LibrarySettingsRequested():
-        _settings();
-      case LibraryLocationsRequested():
-        _locations();
+      case LibraryConnectionsRequested():
+        _connections();
       case _LibraryDebounceElapsed():
         if (message.revision == _queryRevision) _load();
+      case _LibrarySettingsLoaded():
+        if (!_closing &&
+            message.revision == _loadRevision &&
+            _model.settings == null) {
+          _emit(_model.copyWith(settings: message.settings));
+        }
       case _LibraryLoaded():
         _releaseCancellation(message.cancellation);
         // A closed controller drains its effects but owns no model state: a
@@ -348,12 +368,15 @@ class LibraryController implements Listenable {
                       ]
                     : message.page.books.map(_withoutCover).toList(),
               ),
+              sourceFiles: message.sourceFiles,
               // An order chosen while the settings loaded is the one kept.
-              settings:
-                  message.settings?.copyWith(librarySort: message.sort) ??
-                  _model.settings,
+              settings: (_model.settings ?? message.settings)?.copyWith(
+                librarySort: message.sort,
+              ),
               sort: message.sort,
-              bookCount: message.page.bookCount,
+              bookCount: message.page.bookCount == null
+                  ? null
+                  : message.page.bookCount! + message.sourceFiles.length,
               continueReading: switch (message.page.continueReading) {
                 final book? => _withoutCover(book),
                 null => null,
@@ -362,7 +385,8 @@ class LibraryController implements Listenable {
               loaded: true,
               loading: false,
               loadingMore: false,
-              loadError: null,
+              loadError: message.discoveryError,
+              sourceWarning: message.sourceWarning,
               pagingFailed: false,
               hasMore: message.page.hasMore,
             ),
@@ -567,9 +591,11 @@ class LibraryController implements Listenable {
         dateAdded: book.dateAdded,
         lastRead: book.lastRead,
         unavailable: book.unavailable,
+        located: book.located,
+        keptOnDevice: book.keptOnDevice,
       );
 
-  void _load({bool append = false}) {
+  void _load({bool append = false, bool refreshSources = false}) {
     if (_closing) return;
     for (final cancellation in _loadCancellations) {
       _bridge.cancel(id: cancellation);
@@ -607,16 +633,59 @@ class LibraryController implements Listenable {
     // for a first-page load and the grid stays for an appended page, exactly as
     // the reference's `library_loading && library_offset == 0` branch does.
     _emit(_model.copyWith(loading: true, loadingMore: append));
+    _discoveryCancellation?.cancel();
+    final discovery = _discoveryCancellation = CancellationToken();
     unawaited(() async {
       try {
         final settings = _model.settings == null
             ? await _records.loadReaderSettings(cancellationId: cancellation)
             : null;
+        if (settings != null) {
+          dispatch(_LibrarySettingsLoaded(revision, settings));
+        }
         // The first page lists the shelf in its saved order, unless an order
         // was chosen before the settings arrived.
         final pageSort = settings != null && !sortChosen
             ? settings.librarySort
             : sort;
+        final host = _bridge;
+        var sourceFiles = <LibrarySourceFile>[];
+        String? discoveryError;
+        String? sourceWarning;
+        try {
+          sourceFiles = host is LibraryFoldersHost
+              ? (await (host as LibraryFoldersHost).folders.discover(
+                      refresh: refreshSources,
+                      cancellation: discovery,
+                    ))
+                    .where(
+                      (file) =>
+                          (format == null ||
+                              file.entry.name.toLowerCase().endsWith(
+                                '.${format.name}',
+                              )) &&
+                          (query.isEmpty ||
+                              file.title.toLowerCase().contains(
+                                query.toLowerCase(),
+                              )),
+                    )
+                    .toList()
+              : <LibrarySourceFile>[];
+          if (host is LibraryFoldersHost) {
+            final warnings = (host as LibraryFoldersHost).folders.scanWarnings;
+            if (warnings.isNotEmpty) {
+              sourceWarning = warnings
+                  .map(_localizations().locationScanWarning)
+                  .join('\n');
+            }
+          }
+        } catch (error) {
+          discovery.throwIfCancelled();
+          discoveryError = safeError(error);
+        }
+        sourceFiles.sort(
+          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+        );
         final page = await _records.libraryPage(
           query: query,
           format: format,
@@ -633,6 +702,9 @@ class LibraryController implements Listenable {
             append,
             cancellation,
             pageSort,
+            List.unmodifiable(sourceFiles),
+            discoveryError: discoveryError,
+            sourceWarning: sourceWarning,
           ),
         );
       } catch (error) {
@@ -803,6 +875,43 @@ class LibraryController implements Listenable {
     }());
   }
 
+  void _keep(FlutterLibraryBook book) {
+    final host = _bridge;
+    if (_closing ||
+        _model.busy ||
+        !book.located ||
+        host is! LibraryFoldersHost) {
+      return;
+    }
+    _beginEffect();
+    final revision = ++_adapterRevision;
+    final cancellation = _keepCancellation = CancellationToken();
+    unawaited(() async {
+      try {
+        await (host as LibraryFoldersHost).folders.setKept(
+          book.bookId,
+          !book.keptOnDevice,
+          cancellation: cancellation,
+        );
+        if (_ownsAdapter(revision)) dispatch(const LibraryRefreshed());
+      } catch (error) {
+        if (_ownsAdapter(revision)) {
+          dispatch(
+            _LibraryMutationCompleted(
+              failure: LibraryFailure.load,
+              error: safeError(error),
+            ),
+          );
+        }
+      } finally {
+        if (identical(_keepCancellation, cancellation)) {
+          _keepCancellation = null;
+        }
+        dispatch(const _LibraryEffectFinished());
+      }
+    }());
+  }
+
   void _open(FlutterLibraryBook book) {
     if (_closing || _model.busy) return;
     _beginEffect();
@@ -819,42 +928,45 @@ class LibraryController implements Listenable {
     }());
   }
 
-  void _locations() {
-    final manage = _manageLocations;
-    if (_closing || _model.busy || manage == null) return;
-    _beginEffect();
+  void _openSource(LibrarySourceFile file) {
+    final host = _bridge;
+    if (_closing || _model.busy || host is! LibraryFoldersHost) return;
     final revision = ++_adapterRevision;
+    final cancellation = _sourceCancellation = CancellationToken();
+    _beginEffect();
     unawaited(() async {
+      FlutterLibraryBook? book;
       try {
-        await manage();
-        if (_ownsAdapter(revision)) dispatch(const LibraryRefreshed());
+        book = await (host as LibraryFoldersHost).admitSourceFile(
+          file,
+          cancellation: cancellation,
+        );
+        cancellation.throwIfCancelled();
       } catch (error) {
+        book = null;
         if (_ownsAdapter(revision)) {
-          dispatch(
-            _LibraryMutationCompleted(
-              failure: LibraryFailure.settings,
-              error: safeError(error),
-            ),
-          );
+          dispatch(_LibraryReaderClosed(safeError(error)));
         }
       } finally {
+        if (identical(_sourceCancellation, cancellation)) {
+          _sourceCancellation = null;
+        }
         dispatch(const _LibraryEffectFinished());
       }
+      if (book != null) dispatch(_LibrarySourceFileAdmitted(book, revision));
     }());
   }
 
-  void _settings() {
-    final initial = _model.settings;
-    if (_closing || _model.busy || initial == null) return;
+  void _connections() {
+    final manage = _manageConnections;
+    if (_closing || _model.busy || manage == null) return;
     _beginEffect();
     final adapterRevision = ++_adapterRevision;
     unawaited(() async {
       try {
-        final settings = await _editSettings(initial);
-        // Once the dialog has closed, a concurrent load's cancellation does
-        // not supersede its change: the write and its feedback stand.
-        if (settings != null && _ownsAdapter(adapterRevision)) {
-          dispatch(_LibrarySettingsEdited(settings));
+        await manage();
+        if (_ownsAdapter(adapterRevision)) {
+          dispatch(const LibraryRefreshed());
         }
       } catch (error) {
         dispatch(
@@ -872,7 +984,7 @@ class LibraryController implements Listenable {
   /// Saves the model's settings in the background, after the write already
   /// running if there is one. A change takes effect before it is saved; a
   /// failed write reports as a settings failure unless a newer one follows,
-  /// and [notify] reports the settings dialog's success.
+  /// and [notify] reports the settings page's success.
   void _saveSettings({bool notify = false}) {
     _settingsNotify = _settingsNotify || notify;
     if (_settingsWriting) {
@@ -1001,6 +1113,9 @@ class LibraryController implements Listenable {
   void dispose() {
     if (_closing) return;
     _closing = true;
+    _keepCancellation?.cancel();
+    _sourceCancellation?.cancel();
+    _discoveryCancellation?.cancel();
     _openedDocuments?.cancel();
     final queued = List<String>.of(_openedPaths);
     _openedPaths.clear();

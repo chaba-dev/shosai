@@ -18,6 +18,40 @@ void main() {
 
   OpenBooksStore store() => OpenBooksStore(t.store, t.library);
 
+  test(
+    'a located active book restores from a kept copy, not its staging path',
+    () async {
+      final locations = LibraryLocations(t.store);
+      final generation = await locations.connect('folder', 'Books');
+      await locations.locate(epub.contentHash, (
+        locationId: 'folder',
+        key: 'sample.epub',
+      ), generation: generation);
+      final cache = BookFileCache(t.store, t.path('cache'));
+      await cache.withFile(
+        epub,
+        () => File(epub.path).openRead(),
+        (_) async {},
+        keep: true,
+      );
+      await store().save(
+        OpenBooksSession(
+          books: [(bookId: epub.id, path: epub.path, openBookId: epub.id)],
+          current: epub.id,
+          reading: true,
+        ),
+      );
+      File(epub.path).deleteSync();
+      await locations.remove('folder');
+      expect((await store().load())!.reading, isTrue);
+      await cache.release(epub);
+      await cache.discardUnkept(epub.contentHash, epub.format);
+      final unavailable = (await store().load())!;
+      expect(unavailable.current, epub.id);
+      expect(unavailable.reading, isFalse);
+    },
+  );
+
   test('nothing is open until saved, then the books round-trip with the '
       "library's records", () async {
     expect(await store().load(), isNull);

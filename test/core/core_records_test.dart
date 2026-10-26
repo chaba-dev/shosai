@@ -10,6 +10,7 @@ import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/library/controller.dart';
 
 const _epubFixture = 'packages/shosai_core/test/fixtures/sample.epub';
 const _pdfFixture = 'packages/shosai_core/test/fixtures/sample.pdf';
@@ -172,6 +173,235 @@ void main() {
     return report.items.single.book!;
   }
 
+  test(
+    'large source catalogs survive restart without preference-size limits',
+    () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      for (var i = 0; i < 600; i++) {
+        File('${source.path}/book-$i.epub').writeAsStringSync('metadata only');
+      }
+      await core.folders.add(
+        FolderGrant('large', 'Large', 'path', source.path),
+      );
+      expect(await core.folders.discover(), hasLength(600));
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      expect(await core.folders.discover(), hasLength(600));
+      await core.folders.remove('large');
+      expect(await core.folders.discover(), isEmpty);
+    },
+  );
+
+  test(
+    'an incomplete source scan preserves prior metadata and other sources',
+    () async {
+      final broken = Directory('${directory.path}/broken')..createSync();
+      final healthy = Directory('${directory.path}/healthy')..createSync();
+      File('${broken.path}/old.epub').writeAsStringSync('metadata only');
+      File('${healthy.path}/good.pdf').writeAsStringSync('metadata only');
+      await core.folders.add(
+        FolderGrant('broken', 'Broken', 'path', broken.path),
+      );
+      await core.folders.add(
+        FolderGrant('healthy', 'Healthy', 'path', healthy.path),
+      );
+      expect(await core.folders.discover(), hasLength(2));
+      var deep = broken;
+      for (var i = 0; i < 34; i++) {
+        deep = Directory('${deep.path}/nested')..createSync();
+      }
+      File('${deep.path}/too-deep.epub').writeAsStringSync('metadata only');
+      final files = await core.folders.discover(refresh: true);
+      expect(files.map((file) => file.entry.name).toSet(), {
+        'old.epub',
+        'good.pdf',
+      });
+      expect(core.folders.scanWarnings, ['Broken']);
+      expect(await core.folders.discover(), hasLength(2));
+      expect(core.folders.scanWarnings, ['Broken']);
+      await core.folders.remove('broken');
+      expect((await core.folders.discover()).single.entry.name, 'good.pdf');
+      expect(core.folders.scanWarnings, isEmpty);
+    },
+  );
+
+  test(
+    'source warnings retain healthy results and retry a repaired source',
+    () async {
+      final broken = Directory('${directory.path}/broken')..createSync();
+      final healthy = Directory('${directory.path}/healthy')..createSync();
+      var deep = broken;
+      for (var i = 0; i < 34; i++) {
+        deep = Directory('${deep.path}/nested')..createSync();
+      }
+      File('${deep.path}/hidden.epub').writeAsStringSync('metadata only');
+      File('${healthy.path}/good.pdf').writeAsStringSync('metadata only');
+      await core.folders.add(
+        FolderGrant('broken', 'Deep books', 'path', broken.path),
+      );
+      await core.folders.add(
+        FolderGrant('healthy', 'Healthy', 'path', healthy.path),
+      );
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => null,
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+      );
+      addTearDown(controller.dispose);
+      Future<void> loaded() async {
+        for (
+          var i = 0;
+          i < 400 && (controller.model.loading || !controller.model.loaded);
+          i++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        expect(controller.model.loading, isFalse);
+        expect(controller.model.loaded, isTrue);
+      }
+
+      controller.dispatch(const LibraryStarted());
+      await loaded();
+      expect(controller.model.sourceFiles.single.entry.name, 'good.pdf');
+      expect(controller.model.sourceWarning, contains('Deep books'));
+      expect(controller.model.sourceWarning, contains('Settings'));
+      expect(controller.model.loadError, isNull);
+      expect(controller.model.error, isNull);
+      controller.dispatch(const LibraryFormatChanged(FlutterBookFormat.epub));
+      await loaded();
+      expect(controller.model.sourceFiles, isEmpty);
+      expect(controller.model.displayError, contains('Deep books'));
+      Directory('${broken.path}/nested').deleteSync(recursive: true);
+      File('${broken.path}/repaired.epub').writeAsStringSync('metadata only');
+      controller.dispatch(const LibraryRetryRequested());
+      await loaded();
+      expect(controller.model.sourceFiles.single.entry.name, 'repaired.epub');
+      expect(controller.model.sourceWarning, isNull);
+      expect(controller.model.loadError, isNull);
+    },
+  );
+
+  test(
+    'changed admitted files return as candidates without changing old notes',
+    () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      final file = File(_epubFixture).copySync('${source.path}/chosen.epub');
+      await core.folders.add(
+        FolderGrant('changed', 'Books', 'path', source.path),
+      );
+      final candidate = (await core.folders.discover()).single;
+      final original = await core.folders.importEntry(
+        'changed',
+        candidate.entry,
+      );
+      await core.annotations.createNote(
+        original.id,
+        const BookAnchor(),
+        'Old content note',
+      );
+      expect(await core.folders.discover(refresh: true), isEmpty);
+      file.writeAsBytesSync([1, 2, 3], mode: FileMode.append);
+      expect(
+        (await core.folders.discover(refresh: true)).single.entry.size,
+        original.fileSize + 3,
+      );
+      expect(
+        (await core.library.get(original.id))!.contentHash,
+        original.contentHash,
+      );
+      expect(
+        (await core.annotations.summary(original.id)).latest,
+        'Old content note',
+      );
+    },
+  );
+
+  test(
+    'configured sources discover metadata, admit on open and preserve missing books',
+    () async {
+      final source = Directory('${directory.path}/source')..createSync();
+      final selected = Directory('${source.path}/Reading')..createSync();
+      final nested = Directory('${selected.path}/History')..createSync();
+      final chosen = File(_epubFixture).copySync('${nested.path}/chosen.epub');
+      // An unopened file need not even be parseable: scanning must not admit it.
+      File('${selected.path}/unopened.pdf').writeAsStringSync('not a PDF');
+      File(
+        '${source.path}/excluded.epub',
+      ).writeAsStringSync('outside selected root');
+      for (var i = 0; i < 110; i++) {
+        File('${selected.path}/ignore-$i.txt').writeAsStringSync('ignored');
+      }
+      await core.folders.add(
+        FolderGrant('source', 'My books', 'path', source.path),
+      );
+      final root = (await core.folders.browse(
+        'source',
+      )).entries.singleWhere((entry) => entry.isDirectory);
+      await core.folders.configure(
+        'source',
+        directory: root.key,
+        label: 'Reading',
+      );
+      var files = await core.folders.discover();
+      expect(files.map((file) => file.entry.name).toSet(), {
+        'chosen.epub',
+        'unopened.pdf',
+      });
+      expect((await core.library.page()).bookCount, 0);
+      final admitted = await bridge.admitSourceFile(
+        files.singleWhere((file) => file.entry.name == 'chosen.epub'),
+      );
+      expect(admitted.located, isTrue);
+      await core.annotations.createNote(
+        admitted.bookId,
+        const BookAnchor(),
+        'Retain this note',
+      );
+      files = await core.folders.discover();
+      expect(files.single.entry.name, 'unopened.pdf');
+      final opened = await bridge.openLibraryBook(
+        bookId: admitted.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      bridge.releaseDocument(handle: opened.handle);
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      expect((await core.folders.list()).single.directory, root.key);
+      expect((await core.folders.discover()).single.entry.name, 'unopened.pdf');
+      // A valid cached copy remains readable even if its source disappears.
+      // Evict that automatic copy to exercise source-only unavailability.
+      final identified = (await core.library.get(admitted.bookId))!;
+      await core.fileCache.discardUnkept(
+        identified.contentHash,
+        identified.format,
+      );
+      chosen.deleteSync();
+      await core.folders.discover(refresh: true);
+      expect(
+        (await core.library.get(admitted.bookId))!.locationFailure?.name,
+        'missing',
+      );
+      expect(
+        (await core.annotations.summary(admitted.bookId)).latest,
+        'Retain this note',
+      );
+      await core.folders.remove('source');
+      expect(await core.folders.discover(), isEmpty);
+      expect(
+        (await core.library.get(admitted.bookId))!.locationFailure?.name,
+        'revoked',
+      );
+      expect(
+        (await core.annotations.summary(admitted.bookId)).latest,
+        'Retain this note',
+      );
+    },
+  );
+
   for (final managed in [false, true]) {
     test('duplicate folder import preserves a local book ($managed)', () async {
       final source = Directory('${directory.path}/source')..createSync();
@@ -190,6 +420,11 @@ void main() {
         page.entries.single,
       );
       expect(duplicate.id, original.id);
+      expect(await core.folders.discover(refresh: true), isEmpty);
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      expect(await core.folders.discover(), isEmpty);
       await core.folders.remove('duplicate');
       expect((await core.library.get(original.id))!.locationFailure, isNull);
       final opened = await bridge.openLibraryBook(
@@ -253,6 +488,17 @@ void main() {
       expect(bridge.releaseDocument(handle: opened.handle), isTrue);
 
       chosen.deleteSync();
+      final cached = await bridge.openLibraryBook(
+        bookId: book.id,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(
+        cached.bookId,
+        book.id,
+        reason: 'a cached book opens without its source',
+      );
+      bridge.releaseDocument(handle: cached.handle);
+      await core.fileCache.discardUnkept(book.contentHash, book.format);
       await expectLater(
         bridge.openLibraryBook(
           bookId: book.id,
@@ -290,6 +536,7 @@ void main() {
       );
 
       chosen.writeAsBytesSync([...original, 11]);
+      await core.fileCache.discardUnkept(book.contentHash, book.format);
       await expectLater(
         bridge.openLibraryBook(
           bookId: book.id,
@@ -330,6 +577,40 @@ void main() {
         'These notes follow content, not its grant.',
       );
       expect((await core.library.page()).bookCount, 1);
+
+      await core.folders.setKept(book.id, true);
+      expect((await core.library.get(book.id))!.keptOnDevice, isTrue);
+      await core.folders.remove('new-device-grant');
+      chosen.deleteSync();
+      bridge.dispose();
+      await bridge.drain();
+      await core.close();
+      core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+      bridge = ApplicationBridge(core);
+      final offline = await bridge.openLibraryBook(
+        bookId: book.id,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(
+        offline.bookId,
+        book.id,
+        reason: 'an explicitly kept copy survives disconnect and restart',
+      );
+      bridge.releaseDocument(handle: offline.handle);
+      await core.folders.setKept(book.id, false);
+      expect((await core.library.get(book.id))!.keptOnDevice, isFalse);
+      expect((await core.library.get(book.id))!.locationFailure, isNotNull);
+      await expectLater(
+        bridge.openLibraryBook(
+          bookId: book.id,
+          cancellationId: bridge.createCancellation(),
+        ),
+        throwsA(isA<FlutterBridgeError>()),
+      );
+      expect(
+        (await core.annotations.summary(book.id)).latest,
+        'These notes follow content, not its grant.',
+      );
     },
   );
 

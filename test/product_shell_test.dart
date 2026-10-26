@@ -104,7 +104,6 @@ void main() {
       pickImport: () async => null,
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
       retryProviderCleanup: () {
         final cleanup = Completer<bool>();
         cleanups.add(cleanup);
@@ -134,7 +133,6 @@ void main() {
       pickImport: () async => null,
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
       retryProviderCleanup: () async => true,
     );
     controller.dispatch(const LibraryStarted());
@@ -376,7 +374,6 @@ void main() {
       pickImport: () async => null,
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
       evictCover: evicted.add,
     );
     controller.dispatch(const LibraryStarted());
@@ -646,6 +643,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await _openReaderSettings(tester);
+    expect(find.byType(ShadDialog), findsNothing);
+    expect(find.text('Save'), findsNothing);
+    expect(find.text('Cancel'), findsNothing);
     expect(find.text('Reader theme'), findsOneWidget);
     expect(find.text('Continuous reading'), findsOneWidget);
     expect(find.text('Vertical books always turn pages.'), findsOneWidget);
@@ -665,12 +665,20 @@ void main() {
     await settlePopover();
     await tester.tap(find.text('Continuous reading'));
     await tester.pump();
-    await tester.tap(find.text('Save'));
-    await tester.pump();
     await settlePopover();
 
     expect(bridge.savedSettings?.theme, 'dark');
     expect(bridge.savedSettings?.continuous, isTrue);
+
+    await tester.tap(find.text('Library'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reader theme'), findsNothing);
+    await _openReaderSettings(tester);
+    expect(find.text('Dark'), findsOneWidget);
+    expect(
+      tester.widget<ShadSwitch>(find.byType(ShadSwitch).first).value,
+      isTrue,
+    );
   });
 
   testWidgets('reader settings accept a persisted custom PDF zoom', (
@@ -722,7 +730,18 @@ void main() {
       await tester.pumpAndSettle();
       await _openReaderSettings(tester);
 
-      expect(find.byType(SingleChildScrollView), findsWidgets);
+      expect(find.byType(ShadDialog), findsNothing);
+      await tester.ensureVisible(find.text('PDF zoom'));
+      await tester.pumpAndSettle();
+      expect(find.text('PDF zoom').hitTestable(), findsOneWidget);
+      await tester.ensureVisible(find.text('Continuous reading'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continuous reading'));
+      await tester.pumpAndSettle();
+      expect(bridge.savedSettings?.continuous, isTrue);
+      await tester.tap(find.text('Library'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reader theme'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -864,7 +883,6 @@ void main() {
         pickImport: () => selection.future,
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
       );
       controller.dispatch(const LibraryImportRequested());
       expect(controller.canCancel, isTrue);
@@ -895,7 +913,6 @@ void main() {
         ),
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
       );
       controller.dispatch(const LibraryImportRequested());
       await _waitUntil(() => !controller.model.busy);
@@ -920,7 +937,6 @@ void main() {
       ),
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
     );
     controller.dispatch(const LibraryImportRequested());
     await _waitUntil(() => !controller.model.busy);
@@ -947,7 +963,6 @@ void main() {
         ),
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
       );
       controller.dispatch(const LibraryImportRequested());
       await _waitUntil(() => bridge.importCalls == 1);
@@ -996,7 +1011,6 @@ void main() {
       ),
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
     );
 
     controller.dispatch(const LibraryImportRequested());
@@ -1034,7 +1048,6 @@ void main() {
         ),
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
       );
 
       controller.dispatch(const LibraryImportRequested());
@@ -1082,7 +1095,6 @@ void main() {
       pickImport: () async => null,
       openBook: (_) async {},
       drainReaderSaves: (_) => saveDrain.future,
-      editSettings: (_) async => null,
     );
     controller.dispatch(const LibraryStarted());
     await _waitUntil(() => !controller.model.busy);
@@ -1126,7 +1138,6 @@ void main() {
         ),
         openBook: (_) async {},
         drainReaderSaves: (_) async {},
-        editSettings: (_) async => null,
         cancelImportAdapter: () => adapterCancellations += 1,
       );
       controller.dispatch(const LibraryImportRequested());
@@ -1213,21 +1224,21 @@ void main() {
     await bridge.disposed.future;
   });
 
-  for (final adapter in ['picker', 'removal', 'settings']) {
+  for (final adapter in ['picker', 'removal', 'connections']) {
     test(
       '$adapter affirmative completion after dispose makes no bridge writes',
       () async {
         final bridge = _ControlledLibraryBridge();
         final picker = Completer<LibraryImportSelection?>();
         final removal = Completer<bool>();
-        final settings = Completer<FlutterReaderSettings?>();
+        final connections = Completer<void>();
         final controller = LibraryController(
           bridge: bridge,
           confirmRemoval: (_) => removal.future,
           pickImport: () => picker.future,
           openBook: (_) async {},
           drainReaderSaves: (_) async {},
-          editSettings: (_) => settings.future,
+          manageConnections: () => connections.future,
         );
         controller.dispatch(const LibraryStarted());
         await _waitUntil(() => !controller.model.busy);
@@ -1236,8 +1247,8 @@ void main() {
             controller.dispatch(const LibraryImportRequested());
           case 'removal':
             controller.dispatch(LibraryBookRemovalRequested(_book(1, 'Book')));
-          case 'settings':
-            controller.dispatch(const LibrarySettingsRequested());
+          case 'connections':
+            controller.dispatch(const LibraryConnectionsRequested());
         }
         await Future<void>.delayed(Duration.zero);
         controller.dispose();
@@ -1248,16 +1259,8 @@ void main() {
             );
           case 'removal':
             removal.complete(true);
-          case 'settings':
-            settings.complete(
-              const FlutterReaderSettings(
-                continuous: false,
-                theme: 'light',
-                epubFontSize: 20,
-                epubLineSpacing: 1.6,
-                pdfZoom: 0,
-              ),
-            );
+          case 'connections':
+            connections.complete();
         }
         await bridge.disposed.future;
         expect(bridge.importCalls, 0);
@@ -1456,7 +1459,6 @@ LibraryController _libraryController(_ControlledLibraryBridge bridge) =>
           const LibraryImportSelection(paths: ['/tmp/book.pdf'], managed: true),
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
-      editSettings: (_) async => null,
     );
 
 Future<void> _waitUntil(bool Function() predicate) async {
@@ -1772,12 +1774,8 @@ class _ControlledLibraryBridge
 Widget _libraryApp({required Widget home, Locale? locale}) =>
     productionShell(home: home, locale: locale);
 
-/// Opens the reader settings from the library's navigation.
-///
-/// Package 3A moved the entry from the application bar into the collection
-/// sidebar (wide) and the filter row (compact); both dispatch the same
-/// settings intent.
+/// Opens the settings page from the shell's navigation.
 Future<void> _openReaderSettings(WidgetTester tester) async {
-  await tester.tap(find.widgetWithText(ShadButton, 'Settings'));
+  await tester.tap(find.text('Settings'));
   await tester.pump(const Duration(milliseconds: 300));
 }

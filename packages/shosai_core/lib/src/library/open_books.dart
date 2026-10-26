@@ -82,7 +82,9 @@ final class OpenBooksStore {
       reading:
           saved.reading &&
           current != null &&
-          await File(current.book.path).exists(),
+          (current.book.located
+              ? current.book.locationFailure == null
+              : await File(current.book.path).exists()),
     );
   }
 

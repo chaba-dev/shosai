@@ -107,17 +107,29 @@ final class LibraryBookOpened extends LibraryMessage {
   final FlutterLibraryBook book;
 }
 
+final class LibrarySourceFileOpened extends LibraryMessage {
+  const LibrarySourceFileOpened(this.file);
+  final LibrarySourceFile file;
+}
+
+final class _LibrarySourceFileAdmitted extends LibraryMessage {
+  const _LibrarySourceFileAdmitted(this.book, this.revision);
+  final FlutterLibraryBook book;
+  final int revision;
+}
+
 final class LibraryBookRemovalRequested extends LibraryMessage {
   const LibraryBookRemovalRequested(this.book);
   final FlutterLibraryBook book;
 }
 
-final class LibrarySettingsRequested extends LibraryMessage {
-  const LibrarySettingsRequested();
+final class LibraryBookKeepRequested extends LibraryMessage {
+  const LibraryBookKeepRequested(this.book);
+  final FlutterLibraryBook book;
 }
 
-final class LibraryLocationsRequested extends LibraryMessage {
-  const LibraryLocationsRequested();
+final class LibraryConnectionsRequested extends LibraryMessage {
+  const LibraryConnectionsRequested();
 }
 
 final class _LibraryLoaded extends LibraryMessage {
@@ -128,7 +140,10 @@ final class _LibraryLoaded extends LibraryMessage {
     this.append,
     this.cancellation,
     this.sort,
-  );
+    this.sourceFiles, {
+    this.discoveryError,
+    this.sourceWarning,
+  });
   final int revision;
   final FlutterLibraryPage page;
   final FlutterReaderSettings? settings;
@@ -137,11 +152,20 @@ final class _LibraryLoaded extends LibraryMessage {
 
   /// The order [page] is listed in.
   final FlutterLibrarySort sort;
+  final List<LibrarySourceFile> sourceFiles;
+  final String? discoveryError;
+  final String? sourceWarning;
 }
 
-/// The settings dialog closed with [settings].
-final class _LibrarySettingsEdited extends LibraryMessage {
-  const _LibrarySettingsEdited(this.settings);
+final class _LibrarySettingsLoaded extends LibraryMessage {
+  const _LibrarySettingsLoaded(this.revision, this.settings);
+  final int revision;
+  final FlutterReaderSettings settings;
+}
+
+/// A field on the settings page changed.
+final class LibrarySettingsChanged extends LibraryMessage {
+  const LibrarySettingsChanged(this.settings);
   final FlutterReaderSettings settings;
 }
 
@@ -150,7 +174,7 @@ final class _LibrarySettingsSaved extends LibraryMessage {
   const _LibrarySettingsSaved(this.error, {required this.notify});
   final String? error;
 
-  /// Whether the write carried a change from the settings dialog, whose
+  /// Whether the write carried a change from the settings page, whose
   /// success is reported.
   final bool notify;
 }

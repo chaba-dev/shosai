@@ -1437,14 +1437,50 @@ abstract class AppLocalizations {
   /// No description provided for @libraryLocations.
   ///
   /// In en, this message translates to:
-  /// **'Locations'**
+  /// **'Connections'**
   String get libraryLocations;
+
+  /// No description provided for @libraryConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'Library connections'**
+  String get libraryConnections;
+
+  /// No description provided for @manageConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage connections'**
+  String get manageConnections;
 
   /// No description provided for @libraryLocationsDescription.
   ///
   /// In en, this message translates to:
-  /// **'Books stay in the folders you choose. Only a book you add or open is read.'**
+  /// **'Manage the folders that supply your library.'**
   String get libraryLocationsDescription;
+
+  /// No description provided for @locationSourceFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Source folder'**
+  String get locationSourceFolder;
+
+  /// No description provided for @locationSourceDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'EPUB and PDF files in this folder and its subfolders appear in your library automatically. Files are fetched only when opened or kept on this device.'**
+  String get locationSourceDescription;
+
+  /// No description provided for @locationChooseFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Change source folder'**
+  String get locationChooseFolder;
+
+  /// No description provided for @locationUseFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Use this folder'**
+  String get locationUseFolder;
 
   /// No description provided for @locationAddFolder.
   ///
@@ -1494,11 +1530,11 @@ abstract class AppLocalizations {
   /// **'The folder could not be accessed. Check its permission and connection, then try again.'**
   String get locationFailed;
 
-  /// No description provided for @locationBookAdded.
+  /// No description provided for @locationScanWarning.
   ///
   /// In en, this message translates to:
-  /// **'Book added. Close Locations to open it from your library.'**
-  String get locationBookAdded;
+  /// **'Could not refresh “{source}”. Check its connection and permissions, or choose a smaller source folder in Settings, then retry. Other books are still available.'**
+  String locationScanWarning(String source);
 
   /// No description provided for @locationBack.
   ///
@@ -1523,12 +1559,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connect a device folder or a folder offered by your system’s file provider.'**
   String get locationNoFolders;
-
-  /// No description provided for @locationAddBook.
-  ///
-  /// In en, this message translates to:
-  /// **'Add to library'**
-  String get locationAddBook;
 
   /// No description provided for @locationNextPage.
   ///
@@ -1571,6 +1601,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No text preview available. Go to the page to view this reference.'**
   String get readerReferenceNoPreview;
+
+  /// No description provided for @cardKeepOnDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep on this device'**
+  String get cardKeepOnDevice;
+
+  /// No description provided for @cardStopKeeping.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop keeping on this device'**
+  String get cardStopKeeping;
 }
 
 class _AppLocalizationsDelegate

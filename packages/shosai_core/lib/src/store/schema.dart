@@ -395,6 +395,34 @@ CREATE TABLE book_locators (
 ) STRICT;
 CREATE INDEX book_locators_location_idx ON book_locators(location_id);
 '''),
+  Migration(10, 'device book file cache', '''
+CREATE TABLE book_file_cache (
+    content_hash TEXT PRIMARY KEY NOT NULL REFERENCES books(content_hash) ON DELETE CASCADE,
+    format TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
+    size INTEGER NOT NULL CHECK (size BETWEEN 0 AND 536870912),
+    kept INTEGER NOT NULL CHECK (kept IN (0, 1)),
+    accessed INTEGER NOT NULL CHECK (accessed > 0)
+) STRICT;
+CREATE INDEX book_file_cache_lru_idx ON book_file_cache(kept, accessed);
+'''),
+  Migration(11, 'source discovery and admissions', '''
+CREATE TABLE library_source_files (
+    location_id TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    size INTEGER,
+    revision TEXT,
+    PRIMARY KEY (location_id, locator_key)
+) STRICT;
+CREATE TABLE library_source_admissions (
+    location_id TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key TEXT NOT NULL,
+    content_hash TEXT NOT NULL REFERENCES books(content_hash) ON DELETE CASCADE,
+    size INTEGER,
+    revision TEXT,
+    PRIMARY KEY (location_id, locator_key)
+) STRICT;
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

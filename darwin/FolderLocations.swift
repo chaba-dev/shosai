@@ -97,7 +97,10 @@ final class FolderLocations: NSObject {
     return url
   }
 
-  private func entry(_ url: URL, root: URL) throws -> [String: Any] {
+  private func entry(_ source: URL, root: URL) throws -> [String: Any] {
+    // Enumerated URLs may retain /private/var while the root resolves to /var.
+    // Compare canonical paths, as child() does for stat and open operations.
+    let url = source.resolvingSymlinksInPath()
     let values = try url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
     let base = root.resolvingSymlinksInPath().path + "/"
     guard url.path.hasPrefix(base) else { throw failure("revoked") }
