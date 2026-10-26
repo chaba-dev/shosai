@@ -45,6 +45,32 @@ LibraryCollection _collection(
 void main() {
   setUpAll(loadHarnessFonts);
 
+  testWidgets(
+    'source warnings keep Retry reachable with healthy or empty results',
+    (tester) async {
+      const warning =
+          'Could not refresh Reading archive. Check Settings, then retry.';
+      var retries = 0;
+      for (final books in [
+        <FlutterLibraryBook>[_book],
+        <FlutterLibraryBook>[],
+      ]) {
+        await tester.pumpWidget(
+          _app(
+            _collection(
+              LibraryModel(books: books, loaded: true, sourceWarning: warning),
+              retry: () => retries++,
+            ),
+          ),
+        );
+        expect(find.text(warning), findsOneWidget);
+        await tester.tap(find.text('Retry'));
+        await tester.pump();
+      }
+      expect(retries, 2);
+    },
+  );
+
   testWidgets('shows the reference skeleton grid while page one loads', (
     tester,
   ) async {

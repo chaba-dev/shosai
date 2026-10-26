@@ -10,8 +10,6 @@ typedef LibraryImportRunner =
     );
 typedef LibraryBookOpener = Future<void> Function(FlutterLibraryBook book);
 typedef LibraryReaderSaveDrainer = Future<void> Function(int bookId);
-typedef LibrarySettingsEditor =
-    Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
 typedef LibraryImportAdapterCanceller = void Function();
 typedef LibraryCoverEvicter = void Function(Uint8List bytes);
 typedef LibraryProviderCleanupRetrier = Future<bool> Function();
@@ -69,6 +67,7 @@ final class LibraryImportSelection {
 final class LibraryModel {
   const LibraryModel({
     this.books = const [],
+    this.sourceFiles = const [],
     this.covers = const {},
     this.coverRevision = 0,
     this.query = '',
@@ -85,6 +84,7 @@ final class LibraryModel {
     this.loaded = false,
     this.error,
     this.loadError,
+    this.sourceWarning,
     this.pagingFailed = false,
     this.hasMore = false,
     this.failure = LibraryFailure.none,
@@ -94,6 +94,7 @@ final class LibraryModel {
   });
 
   final List<FlutterLibraryBook> books;
+  final List<LibrarySourceFile> sourceFiles;
   final Map<int, Uint8List> covers;
   final int coverRevision;
   final String query;
@@ -140,6 +141,9 @@ final class LibraryModel {
   final String? error;
   final String? loadError;
 
+  /// A partial source scan failed; healthy books and paging remain available.
+  final String? sourceWarning;
+
   /// True when the last load failure was an appended page rather than page one.
   ///
   /// A paging failure keeps the loaded collection and its next page advertised,
@@ -147,7 +151,7 @@ final class LibraryModel {
   /// the page that failed instead of reloading the collection.
   final bool pagingFailed;
 
-  String? get displayError => error ?? loadError;
+  String? get displayError => error ?? loadError ?? sourceWarning;
   final bool hasMore;
   final LibraryFailure failure;
   final bool providerCleanupPending;
@@ -164,7 +168,9 @@ final class LibraryModel {
   /// Which composition the collection column shows.
   LibraryCollectionState get collectionState {
     if (loading && !loadingMore) return LibraryCollectionState.loading;
-    if (books.isNotEmpty) return LibraryCollectionState.ready;
+    if (books.isNotEmpty || sourceFiles.isNotEmpty) {
+      return LibraryCollectionState.ready;
+    }
     if (query.isEmpty && format == null) return LibraryCollectionState.empty;
     return LibraryCollectionState.noMatches;
   }
@@ -182,6 +188,7 @@ final class LibraryModel {
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
+    List<LibrarySourceFile>? sourceFiles,
     Map<int, Uint8List>? covers,
     int? coverRevision,
     String? query,
@@ -198,6 +205,7 @@ final class LibraryModel {
     bool? loaded,
     Object? error = _same,
     Object? loadError = _same,
+    Object? sourceWarning = _same,
     bool? pagingFailed,
     bool? hasMore,
     LibraryFailure? failure,
@@ -206,6 +214,7 @@ final class LibraryModel {
     Object? removingBookId = _same,
   }) => LibraryModel(
     books: books ?? this.books,
+    sourceFiles: sourceFiles ?? this.sourceFiles,
     covers: covers ?? this.covers,
     coverRevision: coverRevision ?? this.coverRevision,
     query: query ?? this.query,
@@ -232,6 +241,9 @@ final class LibraryModel {
     loadError: identical(loadError, _same)
         ? this.loadError
         : loadError as String?,
+    sourceWarning: identical(sourceWarning, _same)
+        ? this.sourceWarning
+        : sourceWarning as String?,
     pagingFailed: pagingFailed ?? this.pagingFailed,
     hasMore: hasMore ?? this.hasMore,
     failure: failure ?? this.failure,

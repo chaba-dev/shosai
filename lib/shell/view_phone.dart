@@ -1,6 +1,6 @@
 part of 'view.dart';
 
-/// The phone's bottom bar: the sidebar's four places as icons over 10 px
+/// The phone's bottom bar: the places and Settings as icons over 10 px
 /// labels on `chrome`; the current place is `accent`. It shows on the
 /// library-side screens only.
 class ShellBottomNav extends StatelessWidget {
@@ -8,10 +8,12 @@ class ShellBottomNav extends StatelessWidget {
     super.key,
     required this.place,
     required this.onSelected,
+    this.onSettings,
   });
 
   final ShellPlace place;
   final ValueChanged<ShellPlace> onSelected;
+  final VoidCallback? onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +42,14 @@ class ShellBottomNav extends StatelessWidget {
                   onPressed: () => onSelected(entry),
                 ),
               ),
+            Expanded(
+              child: _BottomNavButton(
+                icon: LucideIcons.settings,
+                label: l10n.filterSettings,
+                current: place == ShellPlace.settings,
+                onPressed: onSettings,
+              ),
+            ),
           ],
         ),
       ),
@@ -58,7 +68,7 @@ class _BottomNavButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool current;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -75,7 +85,7 @@ class _BottomNavButton extends StatelessWidget {
           spacing: 3,
           children: [
             Icon(icon, size: 20, color: color),
-            // Four places share a phone's width, so a label scaled past its
+            // Navigation entries share a phone's width, so a label scaled past its
             // slot shrinks to fit instead of losing its end.
             FittedBox(
               fit: BoxFit.scaleDown,

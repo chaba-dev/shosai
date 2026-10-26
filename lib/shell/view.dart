@@ -80,6 +80,7 @@ final class ShellActions {
     required this.moveBook,
     required this.addBooks,
     required this.loadCover,
+    this.settings,
     this.closeSwitcher,
   });
 
@@ -90,6 +91,9 @@ final class ShellActions {
 
   /// Opens the file picker; null while adding books is unavailable.
   final VoidCallback? addBooks;
+
+  /// Opens application settings; null while settings are unavailable.
+  final VoidCallback? settings;
 
   /// Asks for a book's cover; false when the request was not admitted.
   final bool Function(int bookId) loadCover;
@@ -182,7 +186,11 @@ class ShellFrame extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(child: child),
-            ShellBottomNav(place: model.place, onSelected: actions.selectPlace),
+            ShellBottomNav(
+              place: model.place,
+              onSelected: actions.selectPlace,
+              onSettings: actions.settings,
+            ),
           ],
         ),
       );

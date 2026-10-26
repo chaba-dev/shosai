@@ -1,4 +1,4 @@
-/// Device folder configuration and one-file admission through location grants.
+/// Device source configuration, metadata discovery and lazy content admission.
 library;
 
 import 'dart:async';
@@ -8,10 +8,31 @@ import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:shosai_core/shosai_core.dart';
+import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 
 abstract interface class LibraryFoldersHost {
   LibraryFolders get folders;
+  Future<FlutterLibraryBook> admitSourceFile(
+    LibrarySourceFile file, {
+    CancellationToken? cancellation,
+  });
+}
+
+/// A discovered file is not yet an identified book. Only opening it reads its
+/// bytes and associates its content identity with this device-local locator.
+final class LibrarySourceFile {
+  const LibrarySourceFile(
+    this.locationId,
+    this.source,
+    this.entry, {
+    this.failure,
+  });
+  final String locationId;
+  final String source;
+  final LocationEntry entry;
+  final LocationFailure? failure;
+  String get title => entry.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
 }
 
 /// Shared by the application's bridges, not owned by a dialog or widget.
@@ -23,14 +44,26 @@ final class LibraryFolders {
     this._library,
     this._locations,
     this._newPath,
+    this._cache,
   );
 
   final Preferences _preferences;
   final Library _library;
   final LibraryLocations _locations;
   final Future<String> Function() _newPath;
+  final BookFileCache _cache;
   final Map<String, int> _generations = {};
   List<FolderGrant> _grants = const [];
+  List<LibrarySourceFile> _catalog = const [];
+  Set<String> _scanFailures = const {};
+
+  /// At most one warning per configured connection, never raw provider errors.
+  List<String> get scanWarnings => List.unmodifiable([
+    for (final grant in _grants)
+      if (_scanFailures.contains(grant.id)) grant.label,
+  ]);
+  bool _discovered = false;
+  bool _catalogLoaded = false;
   Future<void>? _loading;
   Future<void> _tail = Future.value();
   bool _closed = false;
@@ -93,6 +126,7 @@ final class LibraryFolders {
         existing.id,
         existing.label,
       );
+      _discovered = false;
       return;
     }
     final next = [..._grants.where((entry) => entry.id != grant.id), grant];
@@ -104,6 +138,135 @@ final class LibraryFolders {
     await _save(next);
     _generations[grant.id] = await _locations.connect(grant.id, grant.label);
     _grants = List.unmodifiable(next);
+    _discovered = false;
+  });
+
+  Future<void> configure(String id, {String? directory, String? label}) =>
+      _serial(() async {
+        await _load();
+        final grant = _grant(id);
+        final next = FolderGrant(
+          id,
+          grant.label,
+          grant.kind,
+          grant.grant,
+          directory: directory,
+          directoryLabel: label,
+        );
+        await _save([for (final item in _grants) item.id == id ? next : item]);
+        _grants = List.unmodifiable([
+          for (final item in _grants) item.id == id ? next : item,
+        ]);
+        _catalog = List.unmodifiable(
+          _catalog.where((file) => file.locationId != id),
+        );
+        await _locations.clearCatalog(id);
+        _discovered = false;
+      });
+
+  /// Scan metadata only. A bounded traversal follows provider directory keys,
+  /// not file paths, and never reads book bytes. Publish only complete scans:
+  /// an interrupted/offline listing must not mark its unseen files missing.
+  Future<List<LibrarySourceFile>> discover({
+    bool refresh = false,
+    CancellationToken? cancellation,
+  }) => _serial(() async {
+    await _load();
+    if (!_catalogLoaded) {
+      _catalog = [
+        for (final file in await _locations.catalog())
+          if (_grants.any((grant) => grant.id == file.locationId))
+            LibrarySourceFile(
+              file.locationId,
+              _grant(file.locationId).label,
+              file.entry,
+            ),
+      ];
+      _catalogLoaded = true;
+    }
+    if (_discovered && !refresh) return List.unmodifiable(_catalog);
+    final next = <LibrarySourceFile>[];
+    final failures = <String>{};
+    for (final grant in _grants) {
+      cancellation.throwIfCancelled();
+      final generation = _generations[grant.id]!;
+      try {
+        final location = await grant.open();
+        final entries = <LocationEntry>[];
+        final pending = <({String? key, int depth})>[
+          (key: grant.directory, depth: 0),
+        ];
+        final visited = <String?>{};
+        var count = 0;
+        while (pending.isNotEmpty) {
+          final directory = pending.removeLast();
+          if (!visited.add(directory.key)) continue;
+          String? cursor;
+          final cursors = <String?>{};
+          do {
+            cancellation.throwIfCancelled();
+            if (!cursors.add(cursor)) {
+              throw const CoreException.malformed('Repeated source page.');
+            }
+            final page = await location.list(
+              directory: directory.key,
+              cursor: cursor,
+              cancellation: cancellation,
+            );
+            for (final entry in page.entries) {
+              if (++count > maxDiscoveryEntries || directory.depth > 32) {
+                throw const CoreException.limitExceeded(
+                  'The source contains too many entries.',
+                );
+              }
+              if (entry.isDirectory) {
+                pending.add((key: entry.key, depth: directory.depth + 1));
+              } else if (BookFormat.fromExtension(entry.name.split('.').last) !=
+                  null) {
+                entries.add(entry);
+                if (entries.length > maxDiscoveredBooks) {
+                  throw const CoreException.limitExceeded(
+                    'The source contains too many books.',
+                  );
+                }
+              }
+            }
+            cursor = page.nextCursor;
+          } while (cursor != null);
+        }
+        cancellation.throwIfCancelled();
+        final known = await _locations.scan(grant.id, generation, entries);
+        next.addAll([
+          for (final entry in entries)
+            if (!known.contains(entry.key))
+              LibrarySourceFile(grant.id, grant.label, entry),
+        ]);
+      } on LocationException catch (error) {
+        failures.add(grant.id);
+        await _locations.unavailable(grant.id, generation, error.failure);
+        next.addAll([
+          for (final file in _catalog)
+            if (file.locationId == grant.id)
+              LibrarySourceFile(
+                file.locationId,
+                file.source,
+                file.entry,
+                failure: error.failure,
+              ),
+        ]);
+      } on CoreException catch (error) {
+        if (error.kind == CoreErrorKind.cancelled) rethrow;
+        failures.add(grant.id);
+        // An invalid or over-limit source must not hide other connections or
+        // local books, nor reconcile unseen files as missing.
+        next.addAll(_catalog.where((file) => file.locationId == grant.id));
+      }
+    }
+    cancellation.throwIfCancelled();
+    _catalog = List.unmodifiable(next);
+    _scanFailures = Set.unmodifiable(failures);
+    _discovered = true;
+    return _catalog;
   });
 
   Future<void> discard(FolderGrant grant) {
@@ -136,9 +299,12 @@ final class LibraryFolders {
     // Unavailable is durable before attempting platform cleanup. A failed
     // cleanup never deletes a book or makes its annotations inaccessible.
     await _locations.remove(id);
+    await _locations.clearCatalog(id);
+    await _cache.discardLocation(id);
     await _save(_grants.where((entry) => entry.id != id).toList());
     _grants = List.unmodifiable(_grants.where((entry) => entry.id != id));
     _generations.remove(id);
+    _discovered = false;
     await grant.release();
   });
 
@@ -188,7 +354,7 @@ final class LibraryFolders {
     cancellation.throwIfCancelled();
     final location = await _grant(id).open();
     final generation = _generations[id]!;
-    return _stage(
+    final book = await _stage(
       location.read(entry.key, cancellation: cancellation),
       (path) async {
         final item = await _library.importFile(
@@ -205,6 +371,7 @@ final class LibraryFolders {
         // An explicit local import already owns this content. Adding the
         // same book from a folder is a duplicate, not permission to replace
         // its working local source with a dependency on that folder grant.
+        await _locations.admit(id, generation, entry, book.contentHash);
         if (book.path != canonicalBookPath(path) &&
             (await _locations.copies(book.contentHash)).isEmpty &&
             await File(book.path).exists()) {
@@ -216,11 +383,23 @@ final class LibraryFolders {
           locationId: id,
           key: entry.key,
         ), generation: generation);
-        return book;
+        await _cache.withFile(
+          book,
+          () => File(path).openRead(),
+          (_) async {},
+          cancellation: cancellation,
+        );
+        return (await _library.get(book.id))!;
       },
       name: entry.name,
       cancellation: cancellation,
     );
+    _catalog = List.unmodifiable(
+      _catalog.where(
+        (file) => file.locationId != id || file.entry.key != entry.key,
+      ),
+    );
+    return book;
   });
 
   /// Reader/search get the bytes from a recorded device locator. A path left
@@ -228,6 +407,7 @@ final class LibraryFolders {
   Future<T> withBookFile<T>(
     Book book,
     Future<T> Function(String path) read, {
+    bool keep = false,
     CancellationToken? cancellation,
   }) => _serial(() async {
     await _load();
@@ -243,45 +423,71 @@ final class LibraryFolders {
       cancellation.throwIfCancelled();
       final id = copy.locator.locationId;
       final generation = _generations[id];
-      if (generation == null) {
-        lastFailure = const LocationException(LocationFailure.revoked);
-        continue;
-      }
       try {
-        final location = await _grant(id).open();
-        return await _stage(
-          _locations.read(
-            location,
-            generation,
-            book.contentHash,
-            copy.locator.key,
-            cancellation: cancellation,
-          ),
-          (path) async {
-            final fingerprint = await fingerprintFile(
-              path,
+        return await _cache.withFile(
+          book,
+          () async* {
+            if (generation == null) {
+              throw const LocationException(LocationFailure.revoked);
+            }
+            final location = await _grant(id).open();
+            yield* _locations.read(
+              location,
+              generation,
+              book.contentHash,
+              copy.locator.key,
               cancellation: cancellation,
             );
-            if (fingerprint.hash != book.contentHash) {
-              throw const LocationException(LocationFailure.missing);
-            }
-            return read(path);
           },
-          name: 'book.${book.format.name}',
+          read,
+          keep: keep,
           cancellation: cancellation,
         );
       } on LocationException catch (error) {
-        await _locations.failed(
-          book.contentHash,
-          copy.locator,
-          generation: generation,
-          failure: error.failure,
-        );
+        if (generation != null) {
+          await _locations.failed(
+            book.contentHash,
+            copy.locator,
+            generation: generation,
+            failure: error.failure,
+          );
+        }
         lastFailure = error;
       }
     }
     throw lastFailure ?? const LocationException(LocationFailure.revoked);
   });
+
+  Future<void> setKept(
+    int bookId,
+    bool keep, {
+    CancellationToken? cancellation,
+  }) async {
+    final book = await _library.get(bookId);
+    if (book == null || !book.located) {
+      throw const CoreException.notFound('The book has no library location.');
+    }
+    if (keep) {
+      await withBookFile(
+        book,
+        (_) async {},
+        keep: true,
+        cancellation: cancellation,
+      );
+    } else {
+      await _serial(() async {
+        await _load();
+        cancellation.throwIfCancelled();
+        await _cache.release(book);
+        final copies = await _locations.copies(book.contentHash);
+        if (copies.every(
+          (copy) => !_generations.containsKey(copy.locator.locationId),
+        )) {
+          await _cache.discardUnkept(book.contentHash, book.format);
+        }
+      });
+    }
+  }
 
   Future<T> _stage<T>(
     Stream<List<int>> input,

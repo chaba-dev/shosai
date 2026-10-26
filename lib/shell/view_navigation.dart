@@ -14,6 +14,7 @@ String shellPlaceLabel(AppLocalizations l10n, ShellPlace place) =>
       ShellPlace.notes => l10n.shellPlaceNotes,
       ShellPlace.bookmarks => l10n.shellPlaceBookmarks,
       ShellPlace.search => l10n.shellPlaceSearch,
+      ShellPlace.settings => l10n.filterSettings,
     };
 
 /// The study's left wall on desktop and tablet: the mark and wordmark, a
@@ -87,6 +88,15 @@ class ShellSidebar extends StatelessWidget {
                           current: !model.reading && model.place == place,
                           onPressed: () => actions.selectPlace(place),
                         ),
+                      _PlaceRow(
+                        icon: LucideIcons.settings,
+                        label: l10n.filterSettings,
+                        touch: layout.touch,
+                        current:
+                            !model.reading &&
+                            model.place == ShellPlace.settings,
+                        onPressed: actions.settings,
+                      ),
                       if (open.isNotEmpty)
                         _SidebarHead(
                           label: l10n.shellReadingNow,
@@ -198,7 +208,7 @@ class ShellRail extends StatelessWidget {
               // that height, scroll the whole rail instead of starving its list.
               final scroll =
                   constraints.maxHeight <
-                  38 + 5 * (layout.touch ? 44 : 40) + 6 * 8 + 76;
+                  38 + 6 * (layout.touch ? 44 : 40) + 7 * 8 + 76;
               final books = Container(
                 margin: const EdgeInsets.only(top: 6),
                 padding: const EdgeInsets.only(top: 10),
@@ -241,6 +251,12 @@ class ShellRail extends StatelessWidget {
                       touch: layout.touch,
                       onPressed: () => actions.selectPlace(place),
                     ),
+                  _RailButton(
+                    icon: LucideIcons.settings,
+                    label: l10n.filterSettings,
+                    touch: layout.touch,
+                    onPressed: actions.settings,
+                  ),
                   if (scroll) books else Expanded(child: books),
                   _RailButton(
                     icon: LucideIcons.plus,

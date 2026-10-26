@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_core/shosai_core.dart'
-    show BookFormat, LocationException, LocationFailure;
+    show LocationException, LocationFailure;
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/folders_controller.dart';
@@ -23,6 +23,13 @@ class LibraryFoldersDialog extends StatelessWidget {
         title: Text(selected == null ? l10n.libraryLocations : selected.label),
         description: Text(l10n.libraryLocationsDescription),
         actions: [
+          if (model.choosingDirectory)
+            ShadButton(
+              onPressed: model.busy || model.error != null
+                  ? null
+                  : () => controller.dispatch(const FoldersDirectorySaved()),
+              child: Text(l10n.locationUseFolder),
+            ),
           if (model.selected == null)
             ShadButton.outline(
               height: shosaiShadButtonHeight(context),
@@ -60,7 +67,6 @@ class LibraryFoldersDialog extends StatelessWidget {
                       _ => l10n.locationFailed,
                     }),
                   ),
-                if (model.added) Text(l10n.locationBookAdded),
                 if (selected != null)
                   Row(
                     children: [
@@ -94,6 +100,9 @@ class LibraryFoldersDialog extends StatelessWidget {
                           ListTile(
                             leading: const Icon(Icons.folder_outlined),
                             title: Text(grant.label),
+                            subtitle: Text(
+                              '${l10n.locationSourceFolder}: ${grant.directoryLabel ?? grant.label}',
+                            ),
                             onTap: model.busy
                                 ? null
                                 : () => controller.dispatch(
@@ -109,25 +118,40 @@ class LibraryFoldersDialog extends StatelessWidget {
                               icon: const Icon(Icons.link_off),
                             ),
                           ),
+                      ] else if (!model.choosingDirectory) ...[
+                        ListTile(
+                          title: Text(l10n.locationSourceFolder),
+                          subtitle: Text(
+                            selected.directoryLabel ?? selected.label,
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(l10n.locationSourceDescription),
+                        ),
+                        ShadButton.outline(
+                          onPressed: model.busy
+                              ? null
+                              : () => controller.dispatch(
+                                  const FoldersChooseDirectoryRequested(),
+                                ),
+                          child: Text(l10n.locationChooseFolder),
+                        ),
+                        ShadButton.ghost(
+                          onPressed: model.busy
+                              ? null
+                              : () => controller.dispatch(
+                                  FoldersRemoveRequested(selected.id),
+                                ),
+                          child: Text(l10n.locationRemove),
+                        ),
                       ] else ...[
                         for (final entry in model.entries.where(
-                          (entry) =>
-                              entry.isDirectory ||
-                              BookFormat.fromExtension(
-                                    entry.name.split('.').last,
-                                  ) !=
-                                  null,
+                          (entry) => entry.isDirectory,
                         ))
                           ListTile(
-                            leading: Icon(
-                              entry.isDirectory
-                                  ? Icons.folder_outlined
-                                  : Icons.book_outlined,
-                            ),
+                            leading: const Icon(Icons.folder_outlined),
                             title: Text(entry.name),
-                            subtitle: entry.isDirectory
-                                ? null
-                                : Text(l10n.locationAddBook),
                             onTap: model.busy
                                 ? null
                                 : () => controller.dispatch(

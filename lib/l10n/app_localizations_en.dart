@@ -815,11 +815,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String get libraryBookUnavailable => 'Unavailable';
 
   @override
-  String get libraryLocations => 'Locations';
+  String get libraryLocations => 'Connections';
+
+  @override
+  String get libraryConnections => 'Library connections';
+
+  @override
+  String get manageConnections => 'Manage connections';
 
   @override
   String get libraryLocationsDescription =>
-      'Books stay in the folders you choose. Only a book you add or open is read.';
+      'Manage the folders that supply your library.';
+
+  @override
+  String get locationSourceFolder => 'Source folder';
+
+  @override
+  String get locationSourceDescription =>
+      'EPUB and PDF files in this folder and its subfolders appear in your library automatically. Files are fetched only when opened or kept on this device.';
+
+  @override
+  String get locationChooseFolder => 'Change source folder';
+
+  @override
+  String get locationUseFolder => 'Use this folder';
 
   @override
   String get locationAddFolder => 'Connect folder';
@@ -850,8 +869,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'The folder could not be accessed. Check its permission and connection, then try again.';
 
   @override
-  String get locationBookAdded =>
-      'Book added. Close Locations to open it from your library.';
+  String locationScanWarning(String source) {
+    return 'Could not refresh “$source”. Check its connection and permissions, or choose a smaller source folder in Settings, then retry. Other books are still available.';
+  }
 
   @override
   String get locationBack => 'Back';
@@ -866,9 +886,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get locationNoFolders =>
       'Connect a device folder or a folder offered by your system’s file provider.';
-
-  @override
-  String get locationAddBook => 'Add to library';
 
   @override
   String get locationNextPage => 'Next page';
@@ -893,4 +910,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get readerReferenceNoPreview =>
       'No text preview available. Go to the page to view this reference.';
+
+  @override
+  String get cardKeepOnDevice => 'Keep on this device';
+
+  @override
+  String get cardStopKeeping => 'Stop keeping on this device';
 }

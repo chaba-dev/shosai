@@ -1,137 +1,177 @@
 part of 'view.dart';
 
-Future<FlutterReaderSettings?> _settingsDialog(
-  BuildContext context,
-  FlutterReaderSettings initial, {
-  required Future<T?> Function<T>(WidgetBuilder builder) showOwnedDialog,
-}) async {
-  var value = initial;
-  final result = await showOwnedDialog<FlutterReaderSettings>(
-    (context) => StatefulBuilder(
-      builder: (context, setState) => ShadDialog(
-        title: const Text('Reader settings'),
-        actions: [
-          ShadButton.outline(
-            height: shosaiShadButtonHeight(context),
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ShadButton(
-            height: shosaiShadButtonHeight(context),
-            onPressed: () => Navigator.pop(context, value),
-            child: const Text('Save'),
-          ),
-        ],
-        child: SizedBox(
-          width: 360,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _SettingField(
-                  label: 'Reader theme',
-                  child: ShadSelect<String>(
-                    initialValue: value.theme,
-                    options: const [
-                      ShadOption(value: 'light', child: Text('Light')),
-                      ShadOption(value: 'sepia', child: Text('Sepia')),
-                      ShadOption(value: 'dark', child: Text('Dark')),
-                    ],
-                    selectedOptionBuilder: (context, theme) =>
-                        Text(switch (theme) {
-                          'light' => 'Light',
-                          'sepia' => 'Sepia',
-                          'dark' => 'Dark',
-                          _ => theme,
-                        }),
-                    onChanged: (theme) {
-                      if (theme != null) {
-                        setState(() => value = value.copyWith(theme: theme));
-                      }
-                    },
-                  ),
-                ),
-                _SettingSwitch(
-                  title: 'Continuous reading',
-                  // A vertical chapter's columns would scroll sideways, so it
-                  // reads in pages whatever this says.
-                  subtitle: 'Vertical books always turn pages.',
-                  value: value.continuous,
-                  onChanged: (continuous) => setState(
-                    () => value = value.copyWith(continuous: continuous),
-                  ),
-                ),
-                _SettingField(
-                  label: 'EPUB text size',
-                  child: ShadSlider(
-                    min: 12,
-                    max: 32,
-                    divisions: 10,
-                    initialValue: value.epubFontSize.clamp(12, 32),
-                    label: value.epubFontSize.round().toString(),
-                    onChanged: (fontSize) => setState(
-                      () => value = value.copyWith(epubFontSize: fontSize),
-                    ),
-                  ),
-                ),
-                _SettingField(
-                  label: 'EPUB line spacing',
-                  child: ShadSlider(
-                    min: 1,
-                    max: 3,
-                    divisions: 8,
-                    initialValue: value.epubLineSpacing.clamp(1, 3),
-                    label: value.epubLineSpacing.toStringAsFixed(2),
-                    onChanged: (lineSpacing) => setState(
-                      () =>
-                          value = value.copyWith(epubLineSpacing: lineSpacing),
-                    ),
-                  ),
-                ),
-                _SettingField(
-                  label: 'PDF zoom',
-                  child: ShadSelect<double>(
-                    initialValue: value.pdfZoom,
-                    options: [
-                      const ShadOption(value: 0, child: Text('Fit page')),
-                      const ShadOption(value: -1, child: Text('Fit width')),
-                      const ShadOption(value: 1, child: Text('100%')),
-                      const ShadOption(value: 1.5, child: Text('150%')),
-                      const ShadOption(value: 2, child: Text('200%')),
-                      if (!const [
-                        0.0,
-                        -1.0,
-                        1.0,
-                        1.5,
-                        2.0,
-                      ].contains(value.pdfZoom))
-                        ShadOption(
-                          value: value.pdfZoom,
+class _SettingsPage extends StatelessWidget {
+  const _SettingsPage({
+    required this.layout,
+    required this.model,
+    required this.onChanged,
+    required this.onConnections,
+    required this.onRetry,
+  });
+
+  final ShellLayout layout;
+  final LibraryModel model;
+  final ValueChanged<FlutterReaderSettings> onChanged;
+  final VoidCallback? onConnections;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = model.settings;
+    final palette = ShellPalette.of(context);
+    final gutter = layout == ShellLayout.phone ? 16.0 : 48.0;
+    return ColoredBox(
+      color: palette.canvas,
+      child: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(gutter, gutter * .75, gutter, gutter),
+          children: [
+            Semantics(
+              header: true,
+              child: Text(
+                AppLocalizations.of(context).filterSettings,
+                style: shellScreenTitleStyle(
+                  layout,
+                ).copyWith(color: palette.ink),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Align(
+              alignment: AlignmentDirectional.topStart,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (model.failure == LibraryFailure.settings)
+                      ShadAlert.destructive(
+                        title: Text(
+                          AppLocalizations.of(context).noticeSettingsSaveFailed,
+                        ),
+                        description: ShadButton.outline(
+                          onPressed: onRetry,
                           child: Text(
-                            '${(value.pdfZoom * 100).round()}% (custom)',
+                            AppLocalizations.of(context).libraryRetry,
                           ),
                         ),
+                      ),
+                    if (onConnections != null)
+                      _SettingField(
+                        label: AppLocalizations.of(context).libraryConnections,
+                        child: ShadButton.outline(
+                          height: shosaiShadButtonHeight(context),
+                          onPressed: model.busy ? null : onConnections,
+                          child: Text(
+                            AppLocalizations.of(context).manageConnections,
+                          ),
+                        ),
+                      ),
+                    if (value == null)
+                      const Center(child: CircularProgressIndicator())
+                    else ...[
+                      _SettingField(
+                        label: 'Reader theme',
+                        child: ShadSelect<String>(
+                          initialValue: value.theme,
+                          options: const [
+                            ShadOption(value: 'light', child: Text('Light')),
+                            ShadOption(value: 'sepia', child: Text('Sepia')),
+                            ShadOption(value: 'dark', child: Text('Dark')),
+                          ],
+                          selectedOptionBuilder: (context, theme) =>
+                              Text(switch (theme) {
+                                'light' => 'Light',
+                                'sepia' => 'Sepia',
+                                'dark' => 'Dark',
+                                _ => theme,
+                              }),
+                          onChanged: (theme) {
+                            if (theme != null) {
+                              onChanged(value.copyWith(theme: theme));
+                            }
+                          },
+                        ),
+                      ),
+                      _SettingSwitch(
+                        title: 'Continuous reading',
+                        // A vertical chapter's columns would scroll sideways, so it
+                        // reads in pages whatever this says.
+                        subtitle: 'Vertical books always turn pages.',
+                        value: value.continuous,
+                        onChanged: (continuous) =>
+                            onChanged(value.copyWith(continuous: continuous)),
+                      ),
+                      _SettingField(
+                        label: 'EPUB text size',
+                        child: ShadSlider(
+                          min: 12,
+                          max: 32,
+                          divisions: 10,
+                          initialValue: value.epubFontSize.clamp(12, 32),
+                          label: value.epubFontSize.round().toString(),
+                          onChanged: (fontSize) =>
+                              onChanged(value.copyWith(epubFontSize: fontSize)),
+                        ),
+                      ),
+                      _SettingField(
+                        label: 'EPUB line spacing',
+                        child: ShadSlider(
+                          min: 1,
+                          max: 3,
+                          divisions: 8,
+                          initialValue: value.epubLineSpacing.clamp(1, 3),
+                          label: value.epubLineSpacing.toStringAsFixed(2),
+                          onChanged: (lineSpacing) => onChanged(
+                            value.copyWith(epubLineSpacing: lineSpacing),
+                          ),
+                        ),
+                      ),
+                      _SettingField(
+                        label: 'PDF zoom',
+                        child: ShadSelect<double>(
+                          initialValue: value.pdfZoom,
+                          options: [
+                            const ShadOption(value: 0, child: Text('Fit page')),
+                            const ShadOption(
+                              value: -1,
+                              child: Text('Fit width'),
+                            ),
+                            const ShadOption(value: 1, child: Text('100%')),
+                            const ShadOption(value: 1.5, child: Text('150%')),
+                            const ShadOption(value: 2, child: Text('200%')),
+                            if (!const [
+                              0.0,
+                              -1.0,
+                              1.0,
+                              1.5,
+                              2.0,
+                            ].contains(value.pdfZoom))
+                              ShadOption(
+                                value: value.pdfZoom,
+                                child: Text(
+                                  '${(value.pdfZoom * 100).round()}% (custom)',
+                                ),
+                              ),
+                          ],
+                          selectedOptionBuilder: (context, pdfZoom) =>
+                              Text(_pdfZoomLabel(pdfZoom)),
+                          onChanged: (pdfZoom) {
+                            if (pdfZoom != null) {
+                              onChanged(value.copyWith(pdfZoom: pdfZoom));
+                            }
+                          },
+                        ),
+                      ),
                     ],
-                    selectedOptionBuilder: (context, pdfZoom) =>
-                        Text(_pdfZoomLabel(pdfZoom)),
-                    onChanged: (pdfZoom) {
-                      if (pdfZoom != null) {
-                        setState(
-                          () => value = value.copyWith(pdfZoom: pdfZoom),
-                        );
-                      }
-                    },
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
-    ),
-  );
-  return result;
+    );
+  }
 }
 
 String _pdfZoomLabel(double pdfZoom) => switch (pdfZoom) {

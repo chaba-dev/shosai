@@ -39,6 +39,7 @@ class _Recorder {
   final moves = <(int, int)>[];
   final covers = <int>[];
   var adds = 0;
+  var settings = 0;
   var switcherCloses = 0;
 
   /// Whether the library admits a cover request, as its four slots do.
@@ -50,6 +51,7 @@ class _Recorder {
     closeBook: (entry) => closed.add(entry.id),
     moveBook: (from, to) => moves.add((from, to)),
     addBooks: () => adds += 1,
+    settings: () => settings += 1,
     loadCover: (id) {
       if (!admitCover()) return false;
       covers.add(id);
@@ -90,6 +92,38 @@ Future<void> _pumpFrame(
 
 void main() {
   setUpAll(loadHarnessFonts);
+
+  for (final (width, reading) in [
+    (390.0, false),
+    (900.0, false),
+    (1280.0, false),
+    (1280.0, true),
+  ]) {
+    testWidgets(
+      'Settings opens from shell navigation ($width, reading=$reading)',
+      (tester) async {
+        final recorder = _Recorder();
+        await _pumpFrame(
+          tester,
+          size: Size(width, 900),
+          model: _model(reading: reading),
+          recorder: recorder,
+        );
+        final settings = reading
+            ? find.byTooltip('Settings')
+            : find.text('Settings');
+        expect(settings, findsOneWidget);
+        await tester.tap(settings);
+        await tester.pump();
+        expect(recorder.settings, 1);
+        expect(
+          recorder.places,
+          isEmpty,
+          reason: 'settings navigation is routed through its dedicated action',
+        );
+      },
+    );
+  }
 
   test('window classes follow the design system breakpoints', () {
     expect(ShellLayout.forWidth(390), ShellLayout.phone);
@@ -948,24 +982,23 @@ void main() {
       // Volume 01 dragged two rows down takes Volume 03's place.
       await drag(tester, 'Volume 01', row * 2);
       expect(ids().take(5), [2, 3, 1, 4, 5]);
-      expect(drawnTitles(tester).take(5), [
+      // Four rows fit below the places and Settings in this short window.
+      expect(drawnTitles(tester).take(4), [
         'Volume 02',
         'Volume 03',
         'Volume 01',
         'Volume 04',
-        'Volume 05',
       ]);
 
       // Volume 04, the last row in the window, dragged three rows up takes
       // the first place.
       await drag(tester, 'Volume 04', -row * 3);
       expect(ids().take(6), [4, 2, 3, 1, 5, 6]);
-      expect(drawnTitles(tester).take(5), [
+      expect(drawnTitles(tester).take(4), [
         'Volume 04',
         'Volume 02',
         'Volume 03',
         'Volume 01',
-        'Volume 05',
       ]);
       expect(ids()..sort(), [for (var id = 1; id <= 20; id += 1) id]);
     });
