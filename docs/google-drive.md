@@ -15,7 +15,7 @@ testing mode is not production authorization.
 
 | Target | Registration and build configuration |
 | --- | --- |
-| Linux / macOS | A **Desktop app** OAuth client. Pass its public ID as `--dart-define=GOOGLE_DRIVE_DESKTOP_CLIENT_ID=…`. System browser, random IPv4 loopback port, state, S256 PKCE. This build omits the client secret; see the acceptance blocker below. macOS requires outgoing client and loopback server entitlements (both are included). |
+| Linux / macOS | A **Desktop app** OAuth client. Supply `GOOGLE_DRIVE_DESKTOP_CLIENT_ID` and `GOOGLE_DRIVE_DESKTOP_CLIENT_SECRET` in the private distributor build configuration described below. System browser, random IPv4 loopback port, state, S256 PKCE. macOS requires outgoing client and loopback server entitlements (both are included). |
 | iPhone / iPad | An **iOS** client for bundle `dev.shosai.shosai-flutter`. Pass `--dart-define=GOOGLE_DRIVE_IOS_CLIENT_ID=…`. Set the Xcode build setting `GOOGLE_DRIVE_IOS_CALLBACK_SCHEME` to that client ID with its dot-separated components reversed. Info.plist registers this scheme. AppAuth uses the system authentication session and PKCE with `/oauthredirect`; no webview or loopback. |
 | Android | An **Android** registration for package `dev.shosai.shosai_flutter` and the actual signing certificate's SHA-1. Also create a **Web application** client in the same project and pass its public ID as `--dart-define=GOOGLE_DRIVE_ANDROID_SERVER_CLIENT_ID=…`. The installed Google Sign-In plugin needs this audience for native Credential Manager sign-in. No web client secret, JS origin, redirect URL, backend, or server auth-code exchange is used. GIS AuthorizationClient requests Drive access and silently renews for the explicitly stored account. |
 
@@ -31,32 +31,46 @@ client secrets, authorization codes, access tokens or refresh tokens into a chat
 For an iOS archive, both the Dart define and the Xcode callback build setting must
 be supplied; neither is inferred from a different platform's client.
 
-### Desktop registration acceptance blocker
+### Desktop distributor configuration
 
 Google's desktop documentation marks `client_secret` optional, but a direct
 token-endpoint probe with the owner's registered public Desktop client ID and a
 deliberately invalid synthetic code returned `invalid_request`, identifying
-`client_secret` as missing. The owner's actual consent attempt also returned
-`invalid_request`; the stage diagnostic does not yet establish its specific
-missing field. The app recognizes only fixed provider messages to display
+`client_secret` as missing. The owner's actual consent attempt subsequently
+confirmed the same missing parameter using the exact-message classifier.
+The app recognizes only fixed provider messages to display
 `missing_client_secret`, never arbitrary error descriptions.
 
 Do not assume PKCE makes Google's companion client parameter unnecessary for
-every registration. No desktop companion secret is embedded or provisioned by
-this build. Google's desktop documentation explicitly classifies these clients
-as public: their generated client secret cannot be kept confidential. It is
+every registration. Google's desktop documentation explicitly classifies these
+clients as public: their generated client secret cannot be kept confidential. It is
 application-registration material, not a user's password or refresh token.
 Google's `InstalledAppFlow.fetch_token` supplies the downloaded registration's
 `client_secret` alongside the PKCE verifier, and its credentials implementation
 also supplies the client secret during refresh.
 
-The proposed correction is distributor-supplied Desktop registration
-configuration used for both code exchange and refresh, retaining the existing
-system browser, loopback redirect, state and S256 PKCE. This does not require a
-web/server client, backend, or per-user secret-entry UI. Configuration packaging
-requires design approval before implementation; registered desktop acceptance
-is still blocked pending confirmation of the owner's exact rejection and that
-decision. Never paste registration values into chat, logs, or a launch command.
+The distributor supplies both settings from the **same Desktop registration**
+in a private JSON object. Use an approved private-entry mechanism to create
+`target/private/google-drive-desktop.json`, with file mode `0600` and a `0700`
+parent directory; `target/` is ignored by version control. Do not print or commit
+the file, upload it to this thread, or pass its values in command arguments.
+Build with `.agents/dev flutter build linux --release --dart-define-from-file=target/private/google-drive-desktop.json`.
+For macOS, substitute `macos` for `linux`.
+
+The resulting binary contains **extractable, nonconfidential registration
+material**. Private file handling avoids accidental disclosure in source,
+history and build logs; it does not make a distributed Desktop client
+confidential. Do not use a Web application client's confidential secret here.
+End users do not provide this configuration and no per-user secret prompt or
+backend is needed. User access/refresh tokens remain exclusively in platform
+credential storage, never in this file or connection records.
+
+The companion is sent only in desktop token POST bodies, for code exchange and
+refresh; never in the browser authorization URL or native mobile flows. Renewal
+rejects a stored client ID that differs from the configured Desktop client ID
+before sending any registration value. Reconnect using the intended build if
+changing registrations. Browser authorization, loopback, state and S256 PKCE are
+unchanged. Real account connection/renewal acceptance must still be verified.
 
 References: [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
 [official installed-app flow source](https://googleapis.dev/python/google-auth-oauthlib/latest/_modules/google_auth_oauthlib/flow.html),

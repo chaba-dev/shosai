@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/google_drive_authorization.dart';
@@ -16,6 +16,19 @@ import 'package:shosai_flutter/core/library_folders.dart';
 /// Real HTTP streaming with only the destination changed to a local Drive
 /// fixture. No Google account, registered client or production token is used.
 class _NativeHttp extends HttpOverrides {}
+
+class _NativeGoogleAuthorization extends GoogleSignInPlatform {
+  @override
+  Future<void> init(InitParameters params) async {}
+
+  @override
+  Future<ClientAuthorizationTokenData?> clientAuthorizationTokensForScopes(
+    ClientAuthorizationTokensForScopesParameters params,
+  ) async => const ClientAuthorizationTokenData(accessToken: 'native-token');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 class _RedirectClient extends Fake implements HttpClient {
   _RedirectClient(this.client, this.port);
@@ -353,6 +366,7 @@ void main() {
     () async {
       final oauth = GoogleDriveAuthorization(
         desktopClientId: 'fixture-only',
+        desktopClientSecret: 'fixture-companion',
         launch: (authorization) async {
           expect(authorization.host, 'accounts.google.com');
           final query = authorization.queryParameters;
@@ -446,7 +460,7 @@ void main() {
   );
 
   test(
-    'desktop code exchange verifies PKCE and refreshes without a client secret',
+    'desktop code exchange and refresh use matching registration with PKCE',
     () async {
       late String challenge;
       var calls = 0;
@@ -457,7 +471,8 @@ void main() {
         final fields = Uri.splitQueryString(
           await utf8.decoder.bind(request).join(),
         );
-        expect(fields.containsKey('client_secret'), false);
+        expect(fields['client_id'], 'fixture-only');
+        expect(fields['client_secret'], 'fixture-companion');
         if (rejection != null) {
           _json(request, {
             'error': rejection,
@@ -488,7 +503,9 @@ void main() {
       };
       final oauth = GoogleDriveAuthorization(
         desktopClientId: 'fixture-only',
+        desktopClientSecret: 'fixture-companion',
         launch: (uri) async {
+          expect(uri.queryParameters.containsKey('client_secret'), false);
           challenge = uri.queryParameters['code_challenge']!;
           final client = native.createHttpClient(null);
           try {
@@ -510,9 +527,31 @@ void main() {
       await HttpOverrides.runZoned(
         () async {
           final credential = (await oauth.authorize())!;
+          expect(credential.containsKey('client_secret'), false);
           final next = await oauth.renew(credential, force: true);
           expect(next['access_token'], 'next-token');
           expect(next['refresh_token'], 'refresh-only');
+          expect(next.containsKey('client_secret'), false);
+          for (final clientId in ['other-desktop', 'mobile-client']) {
+            for (final force in [false, true]) {
+              await expectLater(
+                oauth.renew({
+                  ...credential,
+                  'client_id': clientId,
+                  'expires': DateTime.now()
+                      .add(const Duration(hours: 1))
+                      .millisecondsSinceEpoch,
+                }, force: force),
+                throwsA(
+                  isA<LocationException>().having(
+                    (e) => e.failure,
+                    'registration mismatch even with unexpired access',
+                    LocationFailure.revoked,
+                  ),
+                ),
+              );
+            }
+          }
           for (final (error, detail, expected) in [
             ('invalid_client', 'fixture-private-code', 'invalid_client'),
             ('fixture-private-code', 'fixture-private-token', 'unknown_error'),
@@ -557,6 +596,56 @@ void main() {
             _RedirectClient(native.createHttpClient(context), server.port),
       );
       expect(calls, 2);
+    },
+  );
+
+  test('desktop setup requires complete distributor configuration', () async {
+    for (final (id, companion) in [('fixture-only', ''), ('', 'companion')]) {
+      final oauth = GoogleDriveAuthorization(
+        desktopClientId: id,
+        desktopClientSecret: companion,
+        launch: (_) async => fail('Incomplete registration opened the browser'),
+      );
+      await expectLater(
+        oauth.authorize(),
+        throwsA(isA<GoogleDriveRegistrationRequired>()),
+      );
+      await expectLater(
+        oauth.renew({
+          'kind': 'oauth',
+          'client_id': 'fixture-only',
+          'refresh_token': 'fixture-refresh',
+          'access_token': 'fixture-access',
+          'expires': DateTime.now()
+              .add(const Duration(hours: 1))
+              .millisecondsSinceEpoch,
+        }),
+        throwsA(isA<LocationException>()),
+      );
+    }
+  });
+
+  test(
+    'native Android renewal never uses desktop registration or HTTP',
+    () async {
+      final original = GoogleSignInPlatform.instance;
+      GoogleSignInPlatform.instance = _NativeGoogleAuthorization();
+      addTearDown(() => GoogleSignInPlatform.instance = original);
+      final oauth = GoogleDriveAuthorization(
+        desktopClientId: 'unrelated-desktop',
+        desktopClientSecret: 'desktop-companion',
+        androidServerClientId: 'native-audience',
+      );
+      final renewed = await HttpOverrides.runZoned(
+        () => oauth.renew({
+          'kind': 'android',
+          'account': 'native-account',
+          'email': 'fixture@example.invalid',
+        }),
+        createHttpClient: (_) => fail('Native renewal attempted token HTTP'),
+      );
+      expect(renewed['access_token'], 'native-token');
+      expect(renewed.containsKey('client_secret'), false);
     },
   );
 

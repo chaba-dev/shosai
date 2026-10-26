@@ -1,4 +1,4 @@
-/// Google-supported native authorization; never an embedded webview or secret.
+/// Google-supported native authorization; never an embedded webview.
 library;
 
 import 'dart:async';
@@ -71,6 +71,9 @@ final class GoogleDriveAuthorization {
     this.desktopClientId = const String.fromEnvironment(
       'GOOGLE_DRIVE_DESKTOP_CLIENT_ID',
     ),
+    this.desktopClientSecret = const String.fromEnvironment(
+      'GOOGLE_DRIVE_DESKTOP_CLIENT_SECRET',
+    ),
     this.iosClientId = const String.fromEnvironment(
       'GOOGLE_DRIVE_IOS_CLIENT_ID',
     ),
@@ -83,6 +86,9 @@ final class GoogleDriveAuthorization {
            ((uri) => launchUrl(uri, mode: LaunchMode.externalApplication));
 
   final String desktopClientId;
+  // Google Desktop clients are public clients: this distributor registration
+  // parameter is extractable from the binary, not a confidential user token.
+  final String desktopClientSecret;
   final String iosClientId;
   final String androidServerClientId;
   final Future<bool> Function(Uri) _launch;
@@ -148,7 +154,9 @@ final class GoogleDriveAuthorization {
               result.accessTokenExpirationDateTime?.millisecondsSinceEpoch ?? 0,
         };
       }
-      if (desktopClientId.isEmpty) _unconfigured();
+      if (desktopClientId.isEmpty || desktopClientSecret.isEmpty) {
+        _unconfigured();
+      }
       return await _desktop();
     } on FlutterAppAuthUserCancelledException {
       return null;
@@ -210,6 +218,7 @@ final class GoogleDriveAuthorization {
       if (code == null) return null;
       final result = await _token({
         'client_id': desktopClientId,
+        'client_secret': desktopClientSecret,
         'code': code,
         'code_verifier': verifier,
         'redirect_uri': redirect,
@@ -257,6 +266,14 @@ final class GoogleDriveAuthorization {
       if (auth == null) throw const LocationException(LocationFailure.revoked);
       return {...credential, 'access_token': auth.accessToken};
     }
+    final desktop = Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    if (desktop &&
+        (desktopClientId.isEmpty ||
+            desktopClientSecret.isEmpty ||
+            credential['client_id'] != desktopClientId)) {
+      // Never send a distributor's companion parameter for another client ID.
+      throw const LocationException(LocationFailure.revoked);
+    }
     if (!force &&
         (credential['expires'] as int? ?? 0) >
             DateTime.now()
@@ -267,6 +284,7 @@ final class GoogleDriveAuthorization {
     try {
       final result = await _token({
         'client_id': credential['client_id'] as String,
+        if (desktop) 'client_secret': desktopClientSecret,
         'refresh_token': credential['refresh_token'] as String,
         'grant_type': 'refresh_token',
       });
