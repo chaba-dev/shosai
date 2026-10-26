@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,8 +9,8 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_core/shosai_core.dart' hide Row;
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/core_records.dart';
+import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
-import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/folders_controller.dart';
 import 'package:shosai_flutter/library/folders_view.dart';
@@ -18,7 +19,203 @@ import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 import '../support/production_shell_harness.dart';
 
+/// A local test adapter whose configuration has no folder-grant fields. This
+/// exercises the Settings/service contract, not a pretend cloud integration.
+final class _FixtureProvider implements ConnectionProvider {
+  _FixtureProvider(this.root);
+  final String root;
+  bool released = false;
+  final refreshFailures = <String, Object>{};
+  final refreshedConfiguration = <String, Map<String, String>>{};
+
+  @override
+  String get id => 'fixture';
+
+  @override
+  Future<LibraryConnection?> setup(String connectionId) async =>
+      LibraryConnection(connectionId, 'Books', id, {'root': root});
+
+  @override
+  Future<LibraryConnection> refresh(LibraryConnection connection) async {
+    final failure = refreshFailures[connection.id];
+    if (failure != null) throw failure;
+    return LibraryConnection(
+      connection.id,
+      connection.label,
+      connection.provider,
+      refreshedConfiguration[connection.id] ?? connection.configuration,
+      directory: connection.directory,
+      directoryLabel: connection.directoryLabel,
+    );
+  }
+
+  @override
+  Future<LibraryLocation> open(LibraryConnection connection) async {
+    if (released) throw const LocationException(LocationFailure.revoked);
+    return FolderLocation.open(
+      connection.id,
+      connection.configuration['root']!,
+    );
+  }
+
+  @override
+  bool sameAccess(LibraryConnection first, LibraryConnection second) =>
+      first.configuration['root'] == second.configuration['root'];
+
+  @override
+  Future<void> release(LibraryConnection connection) async {
+    released = true;
+  }
+}
+
 void main() {
+  test(
+    'refresh isolates provider failures and retries without losing access',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('shosai-refresh');
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      addTearDown(() async {
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      final source = Directory('${directory.path}/source')..createSync();
+      File(
+        'packages/shosai_core/test/fixtures/sample.epub',
+      ).copySync('${source.path}/book.epub');
+      final preferences = Preferences(store);
+      final provider = _FixtureProvider(source.path);
+      final connections = [
+        for (final id in ['failing', 'healthy'])
+          LibraryConnection(id, 'Books $id', 'fixture', {'root': source.path}),
+      ];
+      await preferences.set('device.library.folders', jsonEncode(connections));
+      final folders = LibraryFolders(
+        preferences,
+        Library(store, managedDirectory: '${directory.path}/books'),
+        LibraryLocations(store),
+        () async => '${directory.path}/unused',
+        BookFileCache(store, '${directory.path}/cache'),
+        providers: [provider],
+      );
+      for (final failure in <Object>[
+        const LocationException(LocationFailure.offline),
+        const CoreException(CoreErrorKind.unsupported, 'Unavailable provider.'),
+        StateError('Private adapter details must not reach the warning.'),
+      ]) {
+        provider.refreshFailures['failing'] = failure;
+        final files = await folders.discover(refresh: true);
+        expect(files.map((file) => file.locationId), ['failing', 'healthy']);
+        expect(folders.scanWarnings, ['Books failing']);
+        expect((await folders.list()).first.configuration, {
+          'root': source.path,
+        });
+        expect(folders.scanWarnings, ['Books failing']);
+      }
+
+      // Cancellation aborts the operation, rather than becoming a source warning.
+      provider.refreshFailures['failing'] = const CoreException.cancelled();
+      await expectLater(
+        folders.discover(refresh: true),
+        throwsA(
+          isA<CoreException>().having(
+            (error) => error.kind,
+            'kind',
+            CoreErrorKind.cancelled,
+          ),
+        ),
+      );
+      provider.refreshFailures.clear();
+      await folders.discover(refresh: true);
+      expect(folders.scanWarnings, isEmpty);
+
+      // A save error belongs to the application boundary, not to an adapter.
+      final saved = await preferences.get('device.library.folders');
+      provider.refreshedConfiguration['healthy'] = {
+        'root': source.path,
+        'oversized': 'x' * maxPreferenceValueBytes,
+      };
+      await expectLater(
+        folders.discover(refresh: true),
+        throwsA(
+          isA<CoreException>().having(
+            (error) => error.kind,
+            'kind',
+            CoreErrorKind.limitExceeded,
+          ),
+        ),
+      );
+      expect(await preferences.get('device.library.folders'), saved);
+      expect((await folders.list()).last.configuration, {'root': source.path});
+      expect(folders.scanWarnings, isEmpty);
+      provider.refreshedConfiguration.clear();
+      expect(await folders.discover(refresh: true), hasLength(2));
+    },
+  );
+
+  test('failed initialization retries and does not block kept books', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'shosai-load-retry',
+    );
+    final store = await Store.open('${directory.path}/library.sqlite3');
+    addTearDown(() async {
+      await store.close();
+      await directory.delete(recursive: true);
+    });
+    final source = Directory('${directory.path}/source')..createSync();
+    final original = File(
+      'packages/shosai_core/test/fixtures/sample.epub',
+    ).copySync('${source.path}/book.epub');
+    final library = Library(
+      store,
+      managedDirectory: '${directory.path}/books',
+      inspectors: {BookFormat.epub: const EpubInspector()},
+    );
+    final preferences = Preferences(store);
+    final locations = LibraryLocations(store);
+    final cache = BookFileCache(store, '${directory.path}/cache');
+    final provider = _FixtureProvider(source.path);
+    LibraryFolders open() => LibraryFolders(
+      preferences,
+      library,
+      locations,
+      () async => '${directory.path}/staged.epub',
+      cache,
+      providers: [provider],
+    );
+    var folders = open();
+    await folders.add((await provider.setup('kept'))!);
+    final book = await folders.importEntry(
+      'kept',
+      (await folders.browse('kept')).entries.single,
+    );
+    await folders.setKept(book.id, true);
+    final saved = (await preferences.get('device.library.folders'))!;
+    final bytes = original.readAsBytesSync();
+    original.deleteSync();
+    folders = open();
+    await preferences.set('device.library.folders', 'not JSON');
+    await expectLater(folders.list(), throwsFormatException);
+    expect(
+      await folders.withBookFile(book, (path) => File(path).readAsBytes()),
+      bytes,
+    );
+    await preferences.set('device.library.folders', saved);
+    // Even a failure after decoding must not memoize a failed initialization.
+    provider.refreshedConfiguration['kept'] = {
+      'root': source.path,
+      'oversized': 'x' * maxPreferenceValueBytes,
+    };
+    await expectLater(folders.list(), throwsA(isA<CoreException>()));
+    expect(await preferences.get('device.library.folders'), saved);
+    provider.refreshedConfiguration.clear();
+    expect((await folders.list()).single.id, 'kept');
+    expect(
+      await folders.withBookFile(book, (path) => File(path).readAsBytes()),
+      bytes,
+    );
+    expect((await library.get(book.id))!.keptOnDevice, isTrue);
+  });
+
   testWidgets('settings manages multiple independent connections', (
     tester,
   ) async {
@@ -42,7 +239,10 @@ void main() {
           ).copySync('${source.path}/discovered.epub');
         }
         await core.folders.add(
-          FolderGrant(id, 'Books $id', 'path', source.path),
+          LibraryConnection(id, 'Books $id', 'folder', {
+            'kind': 'path',
+            'grant': source.path,
+          }),
         );
       }
       return (directory, core);
@@ -193,16 +393,18 @@ void main() {
             stagingPath = alias.path;
           }
           var serial = 0;
+          final provider = _FixtureProvider(source.path);
           final folders = LibraryFolders(
             Preferences(store),
             library,
             LibraryLocations(store),
             () async => '$stagingPath/stage-${serial++}',
             BookFileCache(store, '${directory.path}/cache'),
+            providers: [provider],
           );
-          return (directory, store, library, folders, source);
+          return (directory, store, library, folders, source, provider);
         }))!;
-        final (directory, store, library, folders, source) = setup;
+        final (directory, store, library, folders, source, provider) = setup;
         addTearDown(() async {
           await tester.runAsync(() async {
             await store.close();
@@ -211,7 +413,7 @@ void main() {
         });
         final controller = FoldersController(
           folders: folders,
-          pick: (id) async => FolderGrant(id, 'Books', 'path', source.path),
+          setup: (id) => folders.setup('fixture', id),
           confirmRemoval: (_) async => true,
         )..dispatch(const FoldersStarted());
         addTearDown(controller.dispose);
@@ -276,44 +478,64 @@ void main() {
         expect((await tester.runAsync(library.page))!.bookCount, 0);
         final files = (await tester.runAsync(folders.discover))!;
         expect(files.map((file) => file.entry.name), ['chosen.epub']);
+        final connection = controller.model.grants.single;
+        expect(connection.provider, 'fixture');
+        expect(connection.configuration, {'root': source.path});
         await tester.tap(find.widgetWithText(ShadButton, l10n.locationRemove));
         await settle();
         expect(find.text('Books'), findsNothing);
         expect((await tester.runAsync(library.page))!.bookCount, 0);
         expect(File('${source.path}/Reading/chosen.epub').existsSync(), isTrue);
+        await expectLater(
+          provider.open(connection),
+          throwsA(isA<LocationException>()),
+        );
       },
     );
   }
 
-  test('closing during a folder picker cannot persist a late grant', () async {
-    final directory = await Directory.systemTemp.createTemp(
-      'shosai-folder-dispose',
-    );
-    final store = await Store.open('${directory.path}/library.sqlite3');
-    final library = Library(store, managedDirectory: '${directory.path}/books');
-    final folders = LibraryFolders(
-      Preferences(store),
-      library,
-      LibraryLocations(store),
-      () async => '${directory.path}/unused',
-      BookFileCache(store, '${directory.path}/cache'),
-    );
-    addTearDown(() async {
-      await folders.drain();
-      await store.close();
-      await directory.delete(recursive: true);
-    });
-    final picker = Completer<FolderGrant?>();
-    final controller = FoldersController(
-      folders: folders,
-      pick: (_) => picker.future,
-      confirmRemoval: (_) async => true,
-    );
-    controller.dispatch(const FoldersAddRequested());
-    controller.dispose();
-    picker.complete(FolderGrant('late', 'Too late', 'path', directory.path));
-    await pumpEventQueue();
-    expect(await folders.list(), isEmpty);
-    expect((await library.page()).bookCount, 0);
-  });
+  test(
+    'closing during provider setup releases an unadopted connection',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-folder-dispose',
+      );
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      final library = Library(
+        store,
+        managedDirectory: '${directory.path}/books',
+      );
+      final provider = _FixtureProvider(directory.path);
+      final folders = LibraryFolders(
+        Preferences(store),
+        library,
+        LibraryLocations(store),
+        () async => '${directory.path}/unused',
+        BookFileCache(store, '${directory.path}/cache'),
+        providers: [provider],
+      );
+      addTearDown(() async {
+        await folders.drain();
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      final picker = Completer<LibraryConnection?>();
+      final controller = FoldersController(
+        folders: folders,
+        setup: (_) => picker.future,
+        confirmRemoval: (_) async => true,
+      );
+      controller.dispatch(const FoldersAddRequested());
+      controller.dispose();
+      final connection = (await provider.setup('late'))!;
+      picker.complete(connection);
+      await controller.drain();
+      expect(await folders.list(), isEmpty);
+      expect((await library.page()).bookCount, 0);
+      await expectLater(
+        provider.open(connection),
+        throwsA(isA<LocationException>()),
+      );
+    },
+  );
 }

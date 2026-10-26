@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:shosai_core/shosai_core.dart';
+import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
-import 'package:shosai_flutter/core/platform_folder_location.dart';
 
 sealed class FoldersMessage {
   const FoldersMessage();
@@ -51,7 +51,7 @@ final class FoldersRemoveRequested extends FoldersMessage {
 final class _FoldersLoaded extends FoldersMessage {
   const _FoldersLoaded(this.revision, this.grants, {this.selected});
   final int revision;
-  final List<FolderGrant> grants;
+  final List<LibraryConnection> grants;
   final String? selected;
 }
 
@@ -79,7 +79,7 @@ final class FoldersModel {
     this.error,
     this.choosingDirectory = false,
   });
-  final List<FolderGrant> grants;
+  final List<LibraryConnection> grants;
   final String? selected;
   final List<LocationEntry> parents;
   final List<LocationEntry> entries;
@@ -89,20 +89,20 @@ final class FoldersModel {
   final bool choosingDirectory;
 }
 
-/// Dialog-local navigation state. Folder grants and imported content belong to
+/// Dialog-local navigation state. Connections and imported content belong to
 /// the shared application service, so closing this controller cancels work but
 /// never destroys durable books or notes.
 final class FoldersController extends ChangeNotifier {
   FoldersController({
     required LibraryFolders folders,
-    required Future<FolderGrant?> Function(String id) pick,
-    required Future<bool> Function(FolderGrant grant) confirmRemoval,
+    required Future<LibraryConnection?> Function(String id) setup,
+    required Future<bool> Function(LibraryConnection connection) confirmRemoval,
   }) : _folders = folders,
-       _pick = pick,
+       _setup = setup,
        _confirmRemoval = confirmRemoval;
   final LibraryFolders _folders;
-  final Future<FolderGrant?> Function(String id) _pick;
-  final Future<bool> Function(FolderGrant grant) _confirmRemoval;
+  final Future<LibraryConnection?> Function(String id) _setup;
+  final Future<bool> Function(LibraryConnection connection) _confirmRemoval;
   FoldersModel _model = const FoldersModel();
   FoldersModel get model => _model;
   int _revision = 0;
@@ -135,7 +135,7 @@ final class FoldersController extends ChangeNotifier {
       case FoldersAddRequested():
         if (_model.busy) return;
         _effect((revision, cancellation) async {
-          final grant = await _pick(LibraryFolders.newId());
+          final grant = await _setup(LibraryFolders.newId());
           if (grant != null) {
             if (_closed || revision != _revision) {
               await _folders.discard(grant);
