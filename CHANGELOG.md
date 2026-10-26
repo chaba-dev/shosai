@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-25
+## [0.1.0] - 2026-10-26
 
 ### 🚀 Features
 
@@ -111,6 +111,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Peek at EPUB and PDF references before jumping (#240)
 - *(library)* Add content-linked locations and unavailable books (#236)
 - *(library)* Connect platform folders with persistent grants (#241)
+- *(library)* Cache source books and manage connections in Settings (#244)
 
 ### 🐛 Bug Fixes
 
