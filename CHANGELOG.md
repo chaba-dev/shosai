@@ -184,6 +184,7 @@ All notable changes to this project will be documented in this file.
 - Optimize library loading and page rendering (#11)
 - *(app)* Improve responsiveness across the app (#71)
 - *(epub)* Resolve named entities in linear time (#190)
+- *(dropbox)* Discover recursively with source progress (#249)
 
 ### 🧪 Testing
 
