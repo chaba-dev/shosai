@@ -10,6 +10,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
@@ -156,6 +157,80 @@ Future<void> _waitUntil(bool Function() predicate) async {
 
 void main() {
   setUpAll(loadHarnessFonts);
+
+  for (final locale in [const Locale('en'), const Locale('ja')]) {
+    testWidgets(
+      'discovery shows source and count without a false percentage (${locale.languageCode})',
+      (tester) async {
+        const HarnessView(size: Size(390, 844), textScale: 2).apply(tester);
+        var cancelled = 0;
+        Future<void> render(LibraryModel model) => tester.pumpWidget(
+          productionShell(
+            locale: locale,
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: LibraryHeader(
+                  compact: true,
+                  model: model,
+                  canCancelOperation: model.discoveryProgress != null,
+                  onQueryChanged: (_) {},
+                  onImportRequested: () {},
+                  onImportCancelled: () {},
+                  onOperationCancelled: () => cancelled++,
+                  onRefresh: () {},
+                ),
+              ),
+            ),
+          ),
+        );
+        const model = LibraryModel(
+          loading: true,
+          discoveryProgress: LibraryDiscoveryProgress(
+            source: 'Dropbox acceptance fixtures',
+            sourceIndex: 2,
+            sourceCount: 3,
+            booksFound: 17,
+          ),
+        );
+        await render(model);
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(
+          find.textContaining('Dropbox acceptance fixtures'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining(
+            locale.languageCode == 'en'
+                ? 'Source 2 of 3 · 17 books found'
+                : '接続先 2/3 · 17冊を検出',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<LinearProgressIndicator>(
+                find.byType(LinearProgressIndicator),
+              )
+              .value,
+          isNull,
+        );
+        final cancel = find.widgetWithText(
+          ShadButton,
+          locale.languageCode == 'en' ? 'Cancel' : 'キャンセル',
+        );
+        await tester.ensureVisible(cancel);
+        await tester.tap(cancel);
+        expect(cancelled, 1);
+        expect(tester.takeException(), isNull);
+        await render(model.copyWith(loading: false, discoveryProgress: null));
+        expect(
+          find.textContaining('Dropbox acceptance fixtures'),
+          findsNothing,
+        );
+        expect(cancel, findsNothing);
+      },
+    );
+  }
 
   /// Renders the library and returns the bridge behind it.
   Future<HarnessBridge> pumpLibrary(

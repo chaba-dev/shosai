@@ -35,6 +35,22 @@ final class LibrarySourceFile {
   String get title => entry.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
 }
 
+/// Scan activity, not an estimate of a provider's unknown total. Books are
+/// unique EPUB/PDF candidates seen in the current source, not admitted content.
+final class LibraryDiscoveryProgress {
+  const LibraryDiscoveryProgress({
+    required this.source,
+    required this.sourceIndex,
+    required this.sourceCount,
+    required this.booksFound,
+  });
+
+  final String source;
+  final int sourceIndex;
+  final int sourceCount;
+  final int booksFound;
+}
+
 /// Shared by the application's bridges, not owned by a dialog or widget.
 /// Mutations and staged admissions are serialized, so removing a grant cannot
 /// race a late import into publishing an unassociated, apparently local book.
@@ -210,6 +226,7 @@ final class LibraryFolders {
   Future<List<LibrarySourceFile>> discover({
     bool refresh = false,
     CancellationToken? cancellation,
+    void Function(LibraryDiscoveryProgress progress)? onProgress,
   }) => _serial(() async {
     cancellation.throwIfCancelled();
     final wasLoaded = _loaded;
@@ -235,54 +252,54 @@ final class LibraryFolders {
     for (final grant in _grants) {
       cancellation.throwIfCancelled();
       final generation = _generations[grant.id]!;
+      final entries = <String, LocationEntry>{};
+      void report() => onProgress?.call(
+        LibraryDiscoveryProgress(
+          source: grant.directoryLabel ?? grant.label,
+          sourceIndex: _grants.indexOf(grant) + 1,
+          sourceCount: _grants.length,
+          booksFound: entries.length,
+        ),
+      );
+      report();
       try {
         final location = await _provider(grant.provider).open(grant);
-        final entries = <LocationEntry>[];
-        final pending = <({String? key, int depth})>[
-          (key: grant.directory, depth: 0),
-        ];
-        final visited = <String?>{};
         var count = 0;
-        while (pending.isNotEmpty) {
-          final directory = pending.removeLast();
-          if (!visited.add(directory.key)) continue;
-          String? cursor;
-          final cursors = <String?>{};
-          do {
-            cancellation.throwIfCancelled();
-            if (!cursors.add(cursor)) {
-              throw const CoreException.malformed('Repeated source page.');
+        await for (final page in _discoveryPages(
+          location,
+          grant.directory,
+          cancellation,
+        )) {
+          cancellation.throwIfCancelled();
+          for (final item in page) {
+            final entry = item.entry;
+            if (++count > maxDiscoveryEntries ||
+                item.depth < 0 ||
+                item.depth > 32) {
+              throw const CoreException.limitExceeded(
+                'The source contains too many entries.',
+              );
             }
-            final page = await location.list(
-              directory: directory.key,
-              cursor: cursor,
-              cancellation: cancellation,
-            );
-            for (final entry in page.entries) {
-              if (++count > maxDiscoveryEntries || directory.depth > 32) {
+            if (!entry.isDirectory &&
+                BookFormat.fromExtension(entry.name.split('.').last) != null) {
+              entries[entry.key] = entry;
+              if (entries.length > maxDiscoveredBooks) {
                 throw const CoreException.limitExceeded(
-                  'The source contains too many entries.',
+                  'The source contains too many books.',
                 );
               }
-              if (entry.isDirectory) {
-                pending.add((key: entry.key, depth: directory.depth + 1));
-              } else if (BookFormat.fromExtension(entry.name.split('.').last) !=
-                  null) {
-                entries.add(entry);
-                if (entries.length > maxDiscoveredBooks) {
-                  throw const CoreException.limitExceeded(
-                    'The source contains too many books.',
-                  );
-                }
-              }
             }
-            cursor = page.nextCursor;
-          } while (cursor != null);
+          }
+          report();
         }
         cancellation.throwIfCancelled();
-        final known = await _locations.scan(grant.id, generation, entries);
+        final known = await _locations.scan(
+          grant.id,
+          generation,
+          entries.values.toList(),
+        );
         next.addAll([
-          for (final entry in entries)
+          for (final entry in entries.values)
             if (!known.contains(entry.key))
               LibrarySourceFile(grant.id, grant.label, entry),
         ]);
@@ -313,6 +330,52 @@ final class LibraryFolders {
     _discovered = true;
     return _catalog;
   });
+
+  /// Optimized providers own server pagination; others retain the bounded
+  /// directory-key traversal, including empty pages with a continuation.
+  Stream<List<LocationTreeEntry>> _discoveryPages(
+    LibraryLocation location,
+    String? root,
+    CancellationToken? cancellation,
+  ) async* {
+    if (location is RecursiveLibraryLocation) {
+      yield* (location as RecursiveLibraryLocation).listRecursive(
+        directory: root,
+        cancellation: cancellation,
+      );
+      return;
+    }
+    final pending = <({String? key, int depth})>[(key: root, depth: 0)];
+    final visited = <String?>{};
+    while (pending.isNotEmpty) {
+      final directory = pending.removeLast();
+      if (!visited.add(directory.key)) continue;
+      String? cursor;
+      final cursors = <String?>{};
+      do {
+        cancellation.throwIfCancelled();
+        if (!cursors.add(cursor)) {
+          throw const CoreException.malformed('Repeated source page.');
+        }
+        if (cursors.length > maxDiscoveryEntries) {
+          throw const CoreException.limitExceeded('Too many source pages.');
+        }
+        final page = await location.list(
+          directory: directory.key,
+          cursor: cursor,
+          cancellation: cancellation,
+        );
+        yield [
+          for (final entry in page.entries)
+            (entry: entry, depth: directory.depth),
+        ];
+        for (final entry in page.entries.where((e) => e.isDirectory)) {
+          pending.add((key: entry.key, depth: directory.depth + 1));
+        }
+        cursor = page.nextCursor;
+      } while (cursor != null);
+    }
+  }
 
   Future<void> discard(LibraryConnection grant) {
     // A picker can finish while the application is closing. Cleanup of a

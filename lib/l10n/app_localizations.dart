@@ -110,6 +110,24 @@ abstract class AppLocalizations {
   /// **'Your private reading room'**
   String get librarySubtitle;
 
+  /// No description provided for @libraryCheckingSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking {source}'**
+  String libraryCheckingSource(String source);
+
+  /// Metadata candidates found in the current source; the total book count is unknown until the scan completes.
+  ///
+  /// In en, this message translates to:
+  /// **'Source {index} of {total} · {books, plural, =1{1 book found} other{{books} books found}}'**
+  String libraryDiscoveryCount(int index, int total, int books);
+
+  /// No description provided for @libraryCheckCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Library check cancelled.'**
+  String get libraryCheckCancelled;
+
   /// Iced reference key: search-library-placeholder. The retained Flutter string keeps the approved candidate wording.
   ///
   /// In en, this message translates to:
