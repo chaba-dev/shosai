@@ -115,7 +115,7 @@ class LibraryHeader extends StatelessWidget {
       spacing: 12,
       runSpacing: 4,
       children: [
-        if (canCancelOperation)
+        if (canCancelOperation && model.discoveryProgress == null)
           ShadIconAction(
             tooltip: l10n.cancelOperationTooltip,
             onPressed: onOperationCancelled,
@@ -178,7 +178,47 @@ class LibraryHeader extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             child: content,
           ),
-          _LibraryActivityBar(active: model.busy),
+          if (model.discoveryProgress case final progress?)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 8,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Semantics(
+                          liveRegion: true,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(l10n.libraryCheckingSource(progress.source)),
+                              Text(
+                                l10n.libraryDiscoveryCount(
+                                  progress.sourceIndex,
+                                  progress.sourceCount,
+                                  progress.booksFound,
+                                ),
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (canCancelOperation)
+                        ShadButton.ghost(
+                          onPressed: onOperationCancelled,
+                          child: Text(l10n.cancelImportAction),
+                        ),
+                    ],
+                  ),
+                  const LinearProgressIndicator(),
+                ],
+              ),
+            )
+          else
+            _LibraryActivityBar(active: model.busy),
         ],
       ),
     );

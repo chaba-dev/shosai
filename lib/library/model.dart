@@ -81,6 +81,7 @@ final class LibraryModel {
     this.importing = false,
     this.loading = false,
     this.loadingMore = false,
+    this.discoveryProgress,
     this.loaded = false,
     this.error,
     this.loadError,
@@ -136,6 +137,8 @@ final class LibraryModel {
   /// The reference's skeleton branch is `library_loading && library_offset ==
   /// 0`: a later page keeps the grid and shows its loading-more state instead.
   final bool loadingMore;
+
+  final LibraryDiscoveryProgress? discoveryProgress;
 
   final bool loaded;
   final String? error;
@@ -202,6 +205,7 @@ final class LibraryModel {
     bool? importing,
     bool? loading,
     bool? loadingMore,
+    Object? discoveryProgress = _same,
     bool? loaded,
     Object? error = _same,
     Object? loadError = _same,
@@ -236,6 +240,9 @@ final class LibraryModel {
     importing: importing ?? this.importing,
     loading: loading ?? this.loading,
     loadingMore: loadingMore ?? this.loadingMore,
+    discoveryProgress: identical(discoveryProgress, _same)
+        ? this.discoveryProgress
+        : discoveryProgress as LibraryDiscoveryProgress?,
     loaded: loaded ?? this.loaded,
     error: identical(error, _same) ? this.error : error as String?,
     loadError: identical(loadError, _same)

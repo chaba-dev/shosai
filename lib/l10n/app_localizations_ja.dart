@@ -15,6 +15,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get librarySubtitle => '自分だけの読書室';
 
   @override
+  String libraryCheckingSource(String source) {
+    return '$sourceを確認中';
+  }
+
+  @override
+  String libraryDiscoveryCount(int index, int total, int books) {
+    return '接続先 $index/$total · $books冊を検出';
+  }
+
+  @override
+  String get libraryCheckCancelled => 'ライブラリの確認をキャンセルしました。';
+
+  @override
   String get searchLibraryPlaceholder => 'タイトル・著者を検索...';
 
   @override

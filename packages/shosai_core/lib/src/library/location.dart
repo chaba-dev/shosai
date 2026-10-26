@@ -47,6 +47,21 @@ final class LocationPage {
   final String? nextCursor;
 }
 
+/// Metadata in a recursive scan. Depth is the containing directory's depth
+/// relative to the selected root: immediate children have depth zero.
+typedef LocationTreeEntry = ({LocationEntry entry, int depth});
+
+/// Optional server-side recursive metadata discovery. Directory pickers still
+/// use [LibraryLocation.list], whose nonrecursive contract is unchanged.
+/// Implementations own pagination, reject repeated cursors, and check
+/// cancellation between pages. No file contents are read. Pages may be empty.
+abstract interface class RecursiveLibraryLocation {
+  Stream<List<LocationTreeEntry>> listRecursive({
+    String? directory,
+    CancellationToken? cancellation,
+  });
+}
+
 /// A folder grant or direct provider connection owned by this device.
 ///
 /// Implementations keep credentials outside records, in platform credential

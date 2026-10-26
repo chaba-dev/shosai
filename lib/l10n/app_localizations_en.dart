@@ -15,6 +15,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get librarySubtitle => 'Your private reading room';
 
   @override
+  String libraryCheckingSource(String source) {
+    return 'Checking $source';
+  }
+
+  @override
+  String libraryDiscoveryCount(int index, int total, int books) {
+    String _temp0 = intl.Intl.pluralLogic(
+      books,
+      locale: localeName,
+      other: '$books books found',
+      one: '1 book found',
+    );
+    return 'Source $index of $total · $_temp0';
+  }
+
+  @override
+  String get libraryCheckCancelled => 'Library check cancelled.';
+
+  @override
   String get searchLibraryPlaceholder => 'Search title or author';
 
   @override
