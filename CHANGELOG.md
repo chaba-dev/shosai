@@ -112,6 +112,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Add content-linked locations and unavailable books (#236)
 - *(library)* Connect platform folders with persistent grants (#241)
 - *(library)* Cache source books and manage connections in Settings (#244)
+- *(dropbox)* Add direct library connections (#246)
 
 ### 🐛 Bug Fixes
 
