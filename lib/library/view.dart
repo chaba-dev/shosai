@@ -1061,8 +1061,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       folders: (host as LibraryFoldersHost).folders,
       setup: (id) => (host as LibraryFoldersHost).folders.setup('folder', id),
       setupDropbox: (id) async {
-        const appKey = String.fromEnvironment('SHOSAI_DROPBOX_APP_KEY');
-        if (appKey.isEmpty) {
+        if (DropboxConnectionProvider.defaultClientId.isEmpty) {
           await _showOwnedDialog<void>(
             (context) => ShadDialog.alert(
               title: Text(AppLocalizations.of(context).dropboxConnect),

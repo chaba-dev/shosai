@@ -801,7 +801,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get dropboxCodeDescription =>
-      'ブラウザでサインインしてアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。接続後に読み込み元フォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。';
+      'ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。接続後にサブフォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。';
 
   @override
   String get dropboxAuthorizationCode => '認証コード';

@@ -111,16 +111,34 @@ final class _Dropbox {
                   request.headers.value('Dropbox-API-Arg') ?? utf8.decode(body),
                 )
                 as Map;
+        // Model an App folder token: paths are relative to its dedicated root,
+        // and account paths/IDs outside it cannot be resolved. This fixture is
+        // not evidence of the real provider's permission enforcement.
+        expect(request.headers.value('Dropbox-API-Path-Root'), null);
+        final path = args['path'];
+        final allowed = request.uri.path == '/files/list_folder'
+            ? const ['', 'id:folder']
+            : const ['id:book', '/Book.epub'];
+        if (path != null && !allowed.contains(path)) {
+          request.response.statusCode = 409;
+          request.response.write(
+            '{"error":{".tag":"path","path":{".tag":"not_found"}}}',
+          );
+          await request.response.close();
+          return;
+        }
         switch (request.uri.path) {
           case '/files/list_folder':
             expect(args['recursive'], false);
             request.response.write(
               jsonEncode({
-                'entries': [
-                  {'.tag': 'folder', 'id': 'id:folder', 'name': 'Books'},
-                ],
-                'has_more': true,
-                'cursor': 'page-2',
+                'entries': args['path'] == 'id:folder'
+                    ? [entry]
+                    : [
+                        {'.tag': 'folder', 'id': 'id:folder', 'name': 'Books'},
+                      ],
+                'has_more': args['path'] == '',
+                'cursor': args['path'] == '' ? 'page-2' : 'end',
               }),
             );
           case '/files/list_folder/continue':
@@ -212,6 +230,48 @@ void main() {
   });
   tearDown(() => fixture.close());
 
+  test('build app key configures PKCE or explicitly disables setup', () async {
+    final expected = const bool.hasEnvironment('SHOSAI_DROPBOX_APP_KEY')
+        ? const String.fromEnvironment('SHOSAI_DROPBOX_APP_KEY')
+        : '3yy8xd4pncextkh';
+    Uri? authorization;
+    final provider = DropboxConnectionProvider(
+      credentials: fixture.credentials,
+      tokenEndpoint: fixture.root.resolve('oauth2/token'),
+      api: fixture.root,
+      content: fixture.root,
+      authorize: (uri) async {
+        authorization = uri;
+        fixture.challenge = uri.queryParameters['code_challenge'];
+        return 'test-code';
+      },
+    );
+    expect(provider.clientId, expected);
+    if (expected.isEmpty) {
+      await expectLater(
+        provider.setup('default'),
+        throwsA(
+          isA<CoreException>().having(
+            (error) => error.kind,
+            'kind',
+            CoreErrorKind.unsupported,
+          ),
+        ),
+      );
+      expect(authorization, null);
+      expect(fixture.tokenForms, isEmpty);
+      expect(fixture.credentials.values, isEmpty);
+    } else {
+      final connection = (await provider.setup('default'))!;
+      expect(authorization!.queryParameters['client_id'], expected);
+      expect(fixture.tokenForms.single['client_id'], expected);
+      expect(connection.configuration['clientId'], expected);
+      expect((await (await provider.open(connection)).stat('id:book')).size, 7);
+      await provider.release(connection);
+      expect(fixture.credentials.values, isEmpty);
+    }
+  });
+
   test(
     'S256 setup stores only refresh token, reopen renews and release isolates connections',
     () async {
@@ -221,11 +281,19 @@ void main() {
       expect(fixture.credentials.values.length, 2);
       expect(jsonEncode(first.toJson()), isNot(contains('refresh-')));
       expect(jsonEncode(first.toJson()), isNot(contains('access-')));
-      final reopened = fixture.provider();
+      // Disabling new setup must not change the key of an existing grant.
+      final reopened = DropboxConnectionProvider(
+        credentials: fixture.credentials,
+        clientId: '',
+        tokenEndpoint: fixture.root.resolve('oauth2/token'),
+        api: fixture.root,
+        content: fixture.root,
+      );
       final location = await reopened.open(
         LibraryConnection.fromJson(first.toJson()),
       );
       await Future.wait([location.stat('id:book'), location.stat('id:book')]);
+      expect(fixture.tokenForms.last['client_id'], 'fixture-app-key');
       expect(
         fixture.tokenForms
             .where((v) => v['grant_type'] == 'refresh_token')
@@ -252,8 +320,26 @@ void main() {
       final next = await location.list(cursor: page.nextCursor, limit: 1);
       expect(next.entries.single.revision, 'r1');
       expect(next.nextCursor, null);
+      expect(
+        (await location.list(directory: 'id:folder')).entries.single.key,
+        'id:book',
+      );
+      for (final outside in ['/Photos/private.jpg', 'id:outside']) {
+        await expectLater(
+          location.list(directory: outside),
+          throwsA(failure(LocationFailure.missing)),
+        );
+        await expectLater(
+          location.stat(outside),
+          throwsA(failure(LocationFailure.missing)),
+        );
+      }
       await location.stat('id:book');
       expect(fixture.calls, isNot(contains('/files/download')));
+      await expectLater(
+        readAll(location.read('id:outside')),
+        throwsA(failure(LocationFailure.missing)),
+      );
       expect(await readAll(location.read('id:book')), fixture.book);
       expect(await readAll(location.read('id:book', start: 2, end: 5)), [
         29,
@@ -415,6 +501,9 @@ void main() {
         expect(fixture.uploaded.takeBytes(), data);
         expect(fixture.commit!['path'], 'id:folder/書.epub');
       }
+      await location.write('Root.epub', Stream.value([17, 31, 63]));
+      expect(fixture.commit!['path'], '/Root.epub');
+      expect(fixture.uploaded.takeBytes(), [17, 31, 63]);
       fixture.commit = null;
       final token = CancellationToken();
       final source = StreamController<List<int>>();
