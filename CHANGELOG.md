@@ -157,6 +157,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Keep imported books when iOS moves the app's files (#226)
 - *(reader)* Dismiss floating panels on system Back (#230)
 - *(reader)* Enlarge phone page-turn touch targets (#231)
+- *(dropbox)* Guide setup through restricted app folder (#248)
 
 ### 🚜 Refactor
 
