@@ -61,6 +61,19 @@ class LibraryFoldersDialog extends StatelessWidget {
                     child: Text(switch (model.error) {
                       GoogleDriveRegistrationRequired() =>
                         l10n.locationGoogleDriveRegistrationRequired,
+                      GoogleDriveSetupException(
+                        stage: GoogleDriveSetupStage.tokenExchange,
+                        oauthError: final error,
+                      ) =>
+                        l10n.locationGoogleDriveTokenRejected(error!),
+                      GoogleDriveSetupException(
+                        stage: GoogleDriveSetupStage.permissions,
+                      ) =>
+                        l10n.locationGoogleDrivePermissionsIncomplete,
+                      GoogleDriveSetupException(
+                        stage: GoogleDriveSetupStage.credentialStorage,
+                      ) =>
+                        l10n.locationGoogleDriveCredentialStorageFailed,
                       LocationException(failure: LocationFailure.offline) =>
                         l10n.locationOffline,
                       LocationException(failure: LocationFailure.revoked) =>

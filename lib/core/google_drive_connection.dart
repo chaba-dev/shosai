@@ -45,7 +45,11 @@ final class GoogleDriveConnectionProvider implements ConnectionProvider {
     if (credential == null) return null;
     final key =
         'shosai.google-drive.$connectionId.${GoogleDriveAuthorization.nonce()}';
-    await _credentials.write(key, jsonEncode(credential));
+    try {
+      await _credentials.write(key, jsonEncode(credential));
+    } on PlatformException {
+      throw const GoogleDriveSetupException.credentialStorage();
+    }
     return LibraryConnection(connectionId, 'Google Drive', id, {
       'credential': key,
     });

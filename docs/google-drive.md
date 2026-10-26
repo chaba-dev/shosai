@@ -15,7 +15,7 @@ testing mode is not production authorization.
 
 | Target | Registration and build configuration |
 | --- | --- |
-| Linux / macOS | A **Desktop app** OAuth client. Pass its public ID as `--dart-define=GOOGLE_DRIVE_DESKTOP_CLIENT_ID=…`. System browser, random IPv4 loopback port, state, S256 PKCE. No client secret. macOS requires outgoing client and loopback server entitlements (both are included). |
+| Linux / macOS | A **Desktop app** OAuth client. Pass its public ID as `--dart-define=GOOGLE_DRIVE_DESKTOP_CLIENT_ID=…`. System browser, random IPv4 loopback port, state, S256 PKCE. This build omits the client secret; see the acceptance blocker below. macOS requires outgoing client and loopback server entitlements (both are included). |
 | iPhone / iPad | An **iOS** client for bundle `dev.shosai.shosai-flutter`. Pass `--dart-define=GOOGLE_DRIVE_IOS_CLIENT_ID=…`. Set the Xcode build setting `GOOGLE_DRIVE_IOS_CALLBACK_SCHEME` to that client ID with its dot-separated components reversed. Info.plist registers this scheme. AppAuth uses the system authentication session and PKCE with `/oauthredirect`; no webview or loopback. |
 | Android | An **Android** registration for package `dev.shosai.shosai_flutter` and the actual signing certificate's SHA-1. Also create a **Web application** client in the same project and pass its public ID as `--dart-define=GOOGLE_DRIVE_ANDROID_SERVER_CLIENT_ID=…`. The installed Google Sign-In plugin needs this audience for native Credential Manager sign-in. No web client secret, JS origin, redirect URL, backend, or server auth-code exchange is used. GIS AuthorizationClient requests Drive access and silently renews for the explicitly stored account. |
 
@@ -30,6 +30,37 @@ in. Configure them in the approved build configuration/secret manager; never pas
 client secrets, authorization codes, access tokens or refresh tokens into a chat.
 For an iOS archive, both the Dart define and the Xcode callback build setting must
 be supplied; neither is inferred from a different platform's client.
+
+### Desktop registration acceptance blocker
+
+Google's desktop documentation marks `client_secret` optional, but a direct
+token-endpoint probe with the owner's registered public Desktop client ID and a
+deliberately invalid synthetic code returned `invalid_request`, identifying
+`client_secret` as missing. The owner's actual consent attempt also returned
+`invalid_request`; the stage diagnostic does not yet establish its specific
+missing field. The app recognizes only fixed provider messages to display
+`missing_client_secret`, never arbitrary error descriptions.
+
+Do not assume PKCE makes Google's companion client parameter unnecessary for
+every registration. No desktop companion secret is embedded or provisioned by
+this build. Google's desktop documentation explicitly classifies these clients
+as public: their generated client secret cannot be kept confidential. It is
+application-registration material, not a user's password or refresh token.
+Google's `InstalledAppFlow.fetch_token` supplies the downloaded registration's
+`client_secret` alongside the PKCE verifier, and its credentials implementation
+also supplies the client secret during refresh.
+
+The proposed correction is distributor-supplied Desktop registration
+configuration used for both code exchange and refresh, retaining the existing
+system browser, loopback redirect, state and S256 PKCE. This does not require a
+web/server client, backend, or per-user secret-entry UI. Configuration packaging
+requires design approval before implementation; registered desktop acceptance
+is still blocked pending confirmation of the owner's exact rejection and that
+decision. Never paste registration values into chat, logs, or a launch command.
+
+References: [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
+[official installed-app flow source](https://googleapis.dev/python/google-auth-oauthlib/latest/_modules/google_auth_oauthlib/flow.html),
+and [official credential refresh source](https://github.com/googleapis/google-auth-library-python/blob/main/google/oauth2/credentials.py).
 
 ## Scope and verification
 

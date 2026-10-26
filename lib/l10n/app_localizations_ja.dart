@@ -817,6 +817,19 @@ class AppLocalizationsJa extends AppLocalizations {
       'このビルドでは Google Drive が設定されていません。アプリの配布元による Google OAuth の設定が必要です。';
 
   @override
+  String locationGoogleDriveTokenRejected(String error) {
+    return 'Google がトークン交換を拒否しました（$error）。接続は保存されていません。OAuth の登録設定を確認し、もう一度お試しください。';
+  }
+
+  @override
+  String get locationGoogleDrivePermissionsIncomplete =>
+      'Google から継続的な Drive アクセス権限を取得できませんでした。接続は保存されていません。再試行し、Drive へのアクセスを許可してください。';
+
+  @override
+  String get locationGoogleDriveCredentialStorageFailed =>
+      'Google の認証は完了しましたが、端末の資格情報ストアに保存できませんでした。キーリングのロックを解除して再試行してください。接続は保存されていません。';
+
+  @override
   String get dropboxConnect => 'Dropbox を接続';
 
   @override

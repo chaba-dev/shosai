@@ -38,6 +38,7 @@ class _Credentials implements ConnectionCredentialStore {
   final values = <String, String>{};
   final readFailures = <String, Object>{};
   final writeFailures = <String, Object>{};
+  Object? writeFailure;
   @override
   Future<String?> read(String key) async {
     if (readFailures[key] case final failure?) throw failure;
@@ -46,6 +47,7 @@ class _Credentials implements ConnectionCredentialStore {
 
   @override
   Future<void> write(String key, String value) async {
+    if (writeFailure case final failure?) throw failure;
     if (writeFailures[key] case final failure?) throw failure;
     values[key] = value;
   }
@@ -448,12 +450,21 @@ void main() {
     () async {
       late String challenge;
       var calls = 0;
+      String? rejection;
+      var description = 'fixture-private-code-and-token';
       handler = (request) async {
         expect(request.uri.path, '/token');
         final fields = Uri.splitQueryString(
           await utf8.decoder.bind(request).join(),
         );
         expect(fields.containsKey('client_secret'), false);
+        if (rejection != null) {
+          _json(request, {
+            'error': rejection,
+            'error_description': description,
+          }, status: 400);
+          return;
+        }
         if (calls++ == 0) {
           expect(fields['grant_type'], 'authorization_code');
           expect(
@@ -502,11 +513,76 @@ void main() {
           final next = await oauth.renew(credential, force: true);
           expect(next['access_token'], 'next-token');
           expect(next['refresh_token'], 'refresh-only');
+          for (final (error, detail, expected) in [
+            ('invalid_client', 'fixture-private-code', 'invalid_client'),
+            ('fixture-private-code', 'fixture-private-token', 'unknown_error'),
+            (
+              'invalid_request',
+              'client_secret is missing.',
+              'missing_client_secret',
+            ),
+            (
+              'invalid_request',
+              'client_secret is missing. fixture-private-code',
+              'invalid_request',
+            ),
+          ]) {
+            rejection = error;
+            description = detail;
+            await expectLater(
+              oauth.authorize(),
+              throwsA(
+                isA<GoogleDriveSetupException>()
+                    .having(
+                      (e) => e.stage,
+                      'stage',
+                      GoogleDriveSetupStage.tokenExchange,
+                    )
+                    .having((e) => e.oauthError, 'safe OAuth code', expected),
+              ),
+            );
+          }
+          await expectLater(
+            oauth.renew(credential, force: true),
+            throwsA(
+              isA<LocationException>().having(
+                (e) => e.failure,
+                'renewal remains isolated',
+                LocationFailure.revoked,
+              ),
+            ),
+          );
         },
         createHttpClient: (context) =>
             _RedirectClient(native.createHttpClient(context), server.port),
       );
       expect(calls, 2);
+    },
+  );
+
+  test(
+    'setup distinguishes secure-store failure from authorization rejection',
+    () async {
+      final credentials = _Credentials()
+        ..writeFailure = PlatformException(
+          code: 'locked',
+          message: 'private-detail',
+        );
+      final provider = GoogleDriveConnectionProvider(
+        credentials: credentials,
+        authorize: () async => {'access_token': 'fixture-access'},
+      );
+      await expectLater(
+        provider.setup('new'),
+        throwsA(
+          isA<GoogleDriveSetupException>().having(
+            (e) => e.stage,
+            'stage',
+            GoogleDriveSetupStage.credentialStorage,
+          ),
+        ),
+      );
+      expect(credentials.values, isEmpty);
     },
   );
 

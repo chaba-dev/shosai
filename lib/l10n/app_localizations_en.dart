@@ -870,6 +870,19 @@ class AppLocalizationsEn extends AppLocalizations {
       'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.';
 
   @override
+  String locationGoogleDriveTokenRejected(String error) {
+    return 'Google rejected the token exchange ($error). The connection was not saved. Check the OAuth registration and try again.';
+  }
+
+  @override
+  String get locationGoogleDrivePermissionsIncomplete =>
+      'Google did not return persistent Drive authorization. The connection was not saved. Try again and allow Drive access.';
+
+  @override
+  String get locationGoogleDriveCredentialStorageFailed =>
+      'Google authorization completed, but the device credential store could not save it. Unlock your keyring and try again. The connection was not saved.';
+
+  @override
   String get dropboxConnect => 'Connect Dropbox';
 
   @override

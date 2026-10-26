@@ -1518,6 +1518,24 @@ abstract class AppLocalizations {
   /// **'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.'**
   String get locationGoogleDriveRegistrationRequired;
 
+  /// No description provided for @locationGoogleDriveTokenRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Google rejected the token exchange ({error}). The connection was not saved. Check the OAuth registration and try again.'**
+  String locationGoogleDriveTokenRejected(String error);
+
+  /// No description provided for @locationGoogleDrivePermissionsIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Google did not return persistent Drive authorization. The connection was not saved. Try again and allow Drive access.'**
+  String get locationGoogleDrivePermissionsIncomplete;
+
+  /// No description provided for @locationGoogleDriveCredentialStorageFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Google authorization completed, but the device credential store could not save it. Unlock your keyring and try again. The connection was not saved.'**
+  String get locationGoogleDriveCredentialStorageFailed;
+
   /// No description provided for @dropboxConnect.
   ///
   /// In en, this message translates to:

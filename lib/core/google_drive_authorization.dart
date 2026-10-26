@@ -21,6 +21,48 @@ final class GoogleDriveRegistrationRequired implements Exception {
   const GoogleDriveRegistrationRequired();
 }
 
+enum GoogleDriveSetupStage { tokenExchange, permissions, credentialStorage }
+
+/// Only fixed stage names and allowlisted OAuth codes cross into presentation.
+/// Never retain Google's raw response, which may contain sensitive details.
+final class GoogleDriveSetupException implements Exception {
+  const GoogleDriveSetupException.permissions()
+    : stage = GoogleDriveSetupStage.permissions,
+      oauthError = null;
+  const GoogleDriveSetupException.credentialStorage()
+    : stage = GoogleDriveSetupStage.credentialStorage,
+      oauthError = null;
+  const GoogleDriveSetupException._token(this.oauthError)
+    : stage = GoogleDriveSetupStage.tokenExchange;
+
+  factory GoogleDriveSetupException.tokenRejected(
+    Object? error, {
+    Object? description,
+  }) {
+    // Recognize only complete fixed provider messages. Never expose arbitrary
+    // descriptions, even ones that mention a known parameter among secrets.
+    if (error == 'invalid_request' &&
+        (description == 'client_secret is missing.' ||
+            description == 'client_secret is missing' ||
+            description == 'Missing required parameter: client_secret')) {
+      return const GoogleDriveSetupException._token('missing_client_secret');
+    }
+    return GoogleDriveSetupException._token(switch (error) {
+      'invalid_client' ||
+      'invalid_grant' ||
+      'invalid_request' ||
+      'unauthorized_client' ||
+      'unsupported_grant_type' ||
+      'invalid_scope' ||
+      'access_denied' => error as String,
+      _ => 'unknown_error',
+    });
+  }
+
+  final GoogleDriveSetupStage stage;
+  final String? oauthError;
+}
+
 /// Public registration identifiers supplied by the distributor, not invented
 /// defaults. Google Cloud consent, platform registrations and test users must
 /// be configured before a real account can connect.
@@ -95,7 +137,7 @@ final class GoogleDriveAuthorization {
         if (result.accessToken == null ||
             result.refreshToken == null ||
             !(result.scopes ?? []).contains(googleDriveScope)) {
-          throw const LocationException(LocationFailure.revoked);
+          throw const GoogleDriveSetupException.permissions();
         }
         return {
           'kind': 'oauth',
@@ -137,7 +179,8 @@ final class GoogleDriveAuthorization {
       }
       request.response.headers.contentType = ContentType.text;
       request.response.write(
-        'Return to Shōsai. You may close this browser tab.',
+        'Authorization response received. Return to Shōsai to check whether '
+        'the connection completed. You may close this browser tab.',
       );
       await request.response.close();
       if (!completion.isCompleted) {
@@ -176,7 +219,7 @@ final class GoogleDriveAuthorization {
           !(result['scope'] as String? ?? '')
               .split(' ')
               .contains(googleDriveScope)) {
-        throw const LocationException(LocationFailure.revoked);
+        throw const GoogleDriveSetupException.permissions();
       }
       return {...result, 'kind': 'oauth', 'client_id': desktopClientId};
     } on TimeoutException {
@@ -221,12 +264,17 @@ final class GoogleDriveAuthorization {
                 .millisecondsSinceEpoch) {
       return credential;
     }
-    final result = await _token({
-      'client_id': credential['client_id'] as String,
-      'refresh_token': credential['refresh_token'] as String,
-      'grant_type': 'refresh_token',
-    });
-    return {...credential, ...result};
+    try {
+      final result = await _token({
+        'client_id': credential['client_id'] as String,
+        'refresh_token': credential['refresh_token'] as String,
+        'grant_type': 'refresh_token',
+      });
+      return {...credential, ...result};
+    } on GoogleDriveSetupException {
+      // Existing connections retain the location failure/isolation contract.
+      throw const LocationException(LocationFailure.revoked);
+    }
   }
 
   Future<Map<String, dynamic>> _token(Map<String, String> fields) async {
@@ -249,7 +297,21 @@ final class GoogleDriveAuthorization {
       final response = await request.close();
       final bytes = await DriveTransport.boundedBytes(response, 64 * 1024);
       if (response.statusCode == 400 || response.statusCode == 401) {
-        throw const LocationException(LocationFailure.revoked);
+        Object? error;
+        Object? description;
+        try {
+          final value = jsonDecode(utf8.decode(bytes));
+          if (value is Map) {
+            error = value['error'];
+            description = value['error_description'];
+          }
+        } on FormatException {
+          // Malformed error bodies still produce a fixed, safe diagnostic.
+        }
+        throw GoogleDriveSetupException.tokenRejected(
+          error,
+          description: description,
+        );
       }
       if (response.statusCode != 200) {
         throw const LocationException(LocationFailure.offline);
