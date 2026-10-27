@@ -355,6 +355,11 @@ void main() {
         authorizeNative: const DropboxAuthorization().authorize,
       );
       expect(await provider.setup('cancelled'), null);
+      response = PlatformException(
+        code: 'timeout',
+        message: 'private callback',
+      );
+      expect(await provider.setup('expired'), null);
       for (final invalid in [
         {'access_token': 'short-lived', 'expires_in': 14400},
         {'access_token': '', 'refresh_token': 'refresh', 'expires_in': 14400},

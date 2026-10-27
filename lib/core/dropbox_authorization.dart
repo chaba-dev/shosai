@@ -19,6 +19,8 @@ final class DropboxAuthorization {
       });
     } on PlatformException catch (error) {
       // Never expose SDK errors, which can contain callback URLs or tokens.
+      // Expiring an unfinished setup does not revoke an existing grant.
+      if (error.code == 'timeout') return null;
       throw LocationException(
         error.code == 'offline'
             ? LocationFailure.offline
