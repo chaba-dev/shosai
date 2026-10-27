@@ -487,6 +487,7 @@ class MainActivity : FlutterActivity() {
         DocumentImportManager.initialize(this)
         DocumentImportChannel.attach(this, flutterEngine)
         FolderLocations.attach(this, flutterEngine)
+        DropboxAuthorization.attach(this, flutterEngine)
     }
 
     @Deprecated("Deprecated by Android, retained for FlutterActivity result forwarding")
@@ -501,6 +502,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        DropboxAuthorization.detach(this, isChangingConfigurations)
         FolderLocations.detach(this, isChangingConfigurations)
         DocumentImportChannel.detach(this, isChangingConfigurations)
         super.onDestroy()

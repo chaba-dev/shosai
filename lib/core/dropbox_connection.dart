@@ -14,13 +14,13 @@ import 'connection_credentials.dart';
 import 'dropbox_location.dart';
 import 'library_connection.dart';
 
-/// Dropbox's supported no-redirect code flow works in every native host:
-/// authorization happens in the system browser; the code is entered in-app.
-/// The verifier never leaves this effect except in the TLS token exchange.
+/// Desktop uses no-redirect PKCE; mobile adapters use Dropbox's native SDKs.
+/// Both hand renewable credentials to the same per-connection vault lifecycle.
 final class DropboxConnectionProvider implements ConnectionProvider {
   DropboxConnectionProvider({
     required this.credentials,
     this.authorize,
+    this.authorizeNative,
     this.clientId = defaultClientId,
     Uri? tokenEndpoint,
     this.api,
@@ -37,6 +37,8 @@ final class DropboxConnectionProvider implements ConnectionProvider {
 
   final ConnectionCredentialStore credentials;
   final Future<String?> Function(Uri authorization)? authorize;
+  final Future<Map<String, dynamic>?> Function(String clientId)?
+  authorizeNative;
   final String clientId;
   final Uri tokenEndpoint;
   final Uri? api;
@@ -48,12 +50,41 @@ final class DropboxConnectionProvider implements ConnectionProvider {
 
   @override
   Future<LibraryConnection?> setup(String connectionId) async {
-    if (clientId.isEmpty || authorize == null) {
+    if (clientId.isEmpty || (authorize == null && authorizeNative == null)) {
       throw const CoreException(
         CoreErrorKind.unsupported,
         'This build needs a registered Dropbox app key.',
       );
     }
+    final tokens = await (authorizeNative != null
+        ? authorizeNative!(clientId)
+        : _authorizeDesktop());
+    if (tokens == null) return null;
+    final refresh = tokens['refresh_token'];
+    final access = tokens['access_token'];
+    final expires = tokens['expires_in'];
+    if (refresh is! String ||
+        refresh.isEmpty ||
+        access is! String ||
+        access.isEmpty ||
+        expires is! num ||
+        !expires.isFinite ||
+        expires <= 0) {
+      throw const CoreException.malformed(
+        'Dropbox did not grant renewable access.',
+      );
+    }
+    final key = 'shosai.dropbox.$connectionId.${_random()}';
+    await credentials.write(key, refresh);
+    final connection = LibraryConnection(connectionId, 'Dropbox', id, {
+      'credential': key,
+      'clientId': clientId,
+    });
+    _sessions[key] = _DropboxSession(this, connection)..adopt(tokens);
+    return connection;
+  }
+
+  Future<Map<String, dynamic>?> _authorizeDesktop() async {
     final verifier = _random();
     final authorization = Uri.https('www.dropbox.com', '/oauth2/authorize', {
       'client_id': clientId,
@@ -67,25 +98,11 @@ final class DropboxConnectionProvider implements ConnectionProvider {
     });
     final code = await authorize!(authorization);
     if (code == null) return null;
-    final tokens = await _token({
+    return _token({
       'grant_type': 'authorization_code',
       'code': code.trim(),
       'code_verifier': verifier,
     });
-    final refresh = tokens['refresh_token'] as String?;
-    if (refresh == null || refresh.isEmpty) {
-      throw const CoreException.malformed(
-        'Dropbox did not grant offline access.',
-      );
-    }
-    final key = 'shosai.dropbox.$connectionId.${_random()}';
-    await credentials.write(key, refresh);
-    final connection = LibraryConnection(connectionId, 'Dropbox', id, {
-      'credential': key,
-      'clientId': clientId,
-    });
-    _sessions[key] = _DropboxSession(this, connection)..adopt(tokens);
-    return connection;
   }
 
   _DropboxSession _session(LibraryConnection connection) =>

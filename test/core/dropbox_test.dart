@@ -4,13 +4,19 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
+import 'package:shosai_flutter/core/dropbox_authorization.dart';
 import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/core/dropbox_location.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+
+// The binding supplies the native-channel seam; HTTP still uses real sockets
+// against the local protocol fixture, not Flutter's blanket HTTP-400 stub.
+class _NativeHttp extends HttpOverrides {}
 
 final class _Credentials implements ConnectionCredentialStore {
   final values = <String, String>{};
@@ -267,12 +273,119 @@ Future<List<int>> readAll(Stream<List<int>> stream) =>
     stream.fold<List<int>>([], (a, b) => a..addAll(b));
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = _NativeHttp();
   late _Dropbox fixture;
   setUp(() async {
     fixture = _Dropbox();
     await fixture.start();
   });
   tearDown(() => fixture.close());
+
+  test(
+    'native handshake uses isolated vault entries and existing renewal',
+    () async {
+      const channel = MethodChannel('dev.shosai/dropbox_authorization');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      var authorizations = 0;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'authorize');
+        expect(call.arguments, {'clientId': 'fixture-native-key'});
+        authorizations++;
+        return {
+          'access_token': 'native-access-$authorizations',
+          'refresh_token': 'native-refresh-$authorizations',
+          'expires_in': 14400,
+        };
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final provider = DropboxConnectionProvider(
+        credentials: fixture.credentials,
+        clientId: 'fixture-native-key',
+        authorizeNative: const DropboxAuthorization().authorize,
+        authorize: (_) =>
+            throw StateError('Mobile must not request code entry'),
+        tokenEndpoint: fixture.root.resolve('oauth2/token'),
+        api: fixture.root,
+        content: fixture.root,
+      );
+      final first = (await provider.setup('one'))!;
+      final second = (await provider.setup('two'))!;
+      expect(fixture.tokenForms, isEmpty); // SDK already exchanged the code.
+      expect(fixture.credentials.values.values.toSet(), {
+        'native-refresh-1',
+        'native-refresh-2',
+      });
+      expect(jsonEncode(first.toJson()), isNot(contains('native-refresh')));
+      expect(jsonEncode(first.toJson()), isNot(contains('native-access')));
+      final reopened = DropboxConnectionProvider(
+        credentials: fixture.credentials,
+        clientId: '', // Persisted mobile grants also renew without new setup.
+        tokenEndpoint: fixture.root.resolve('oauth2/token'),
+        api: fixture.root,
+      );
+      expect((await (await reopened.open(first)).stat('id:book')).size, 7);
+      expect(fixture.tokenForms.single, {
+        'client_id': 'fixture-native-key',
+        'grant_type': 'refresh_token',
+        'refresh_token': 'native-refresh-1',
+      });
+      await reopened.release(first);
+      expect(fixture.credentials.values.values.toList(), ['native-refresh-2']);
+      expect((await (await provider.open(second)).stat('id:book')).size, 7);
+    },
+  );
+
+  test(
+    'native cancel, incomplete grant and safe errors never persist access',
+    () async {
+      const channel = MethodChannel('dev.shosai/dropbox_authorization');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      Object? response;
+      messenger.setMockMethodCallHandler(channel, (_) async {
+        if (response is PlatformException) throw response;
+        return response;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final provider = DropboxConnectionProvider(
+        credentials: fixture.credentials,
+        clientId: 'fixture-native-key',
+        authorizeNative: const DropboxAuthorization().authorize,
+      );
+      expect(await provider.setup('cancelled'), null);
+      for (final invalid in [
+        {'access_token': 'short-lived', 'expires_in': 14400},
+        {'access_token': '', 'refresh_token': 'refresh', 'expires_in': 14400},
+        {'access_token': 'access', 'refresh_token': 'refresh', 'expires_in': 0},
+      ]) {
+        response = invalid;
+        await expectLater(
+          provider.setup('invalid'),
+          throwsA(isA<CoreException>()),
+        );
+      }
+      response = PlatformException(
+        code: 'authorization',
+        message: 'private callback',
+      );
+      await expectLater(
+        provider.setup('failed'),
+        throwsA(failure(LocationFailure.revoked)),
+      );
+      response = PlatformException(
+        code: 'offline',
+        details: 'private callback',
+      );
+      await expectLater(
+        provider.setup('offline'),
+        throwsA(failure(LocationFailure.offline)),
+      );
+      expect(fixture.credentials.values, isEmpty);
+      expect(fixture.tokenForms, isEmpty);
+    },
+  );
 
   test(
     'recursive metadata uses continuations and selected-root relative depth',
