@@ -797,6 +797,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationSourceFolder => '読み込み元フォルダ';
 
   @override
+  String get locationConfirmSource => '本を探すフォルダを選び、「このフォルダを使用」で接続を保存します。';
+
+  @override
+  String get locationMyDrive => 'マイドライブ';
+
+  @override
+  String get locationDropboxAppFolder => 'Dropbox アプリ専用フォルダ';
+
+  @override
   String get locationSourceDescription =>
       'このフォルダとサブフォルダ内の EPUB と PDF がライブラリに自動で表示されます。ファイルは開くとき、または端末に保存するときだけ取得します。';
 
@@ -834,7 +843,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get dropboxCodeDescription =>
-      'ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。接続後にサブフォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。';
+      'ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。続いて、そのフォルダかサブフォルダを確定してから接続を保存します。本は開くとき、または端末に保存するときだけ取得します。';
 
   @override
   String get dropboxAuthorizationCode => '認証コード';

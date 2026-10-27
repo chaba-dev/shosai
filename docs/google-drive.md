@@ -99,9 +99,14 @@ the distributor must confirm its complete application's verification obligations
 
 ## Connection and data lifetime
 
-In Settings → Connections, choose **Connect Google Drive**, authorize, then open
-the connection and **Change source folder**. Browse folders and choose **Use this
-folder**. Until changed, the source is My Drive; discovery is metadata-only and
+In Settings → Connections, choose **Connect Google Drive** and authorize. The
+source-folder picker opens before the connection is saved. Browse to a folder
+and choose **Use this folder** to save it and enable discovery. To use
+**My Drive**, select **Use this folder** while it is displayed.
+Cancelling or closing before confirmation discards the unused local
+credential, without revoking account-wide access, and never adopts or scans the
+pending source. Existing saved connections, including My Drive, are unchanged;
+use **Change source folder** to reconfigure them. Discovery is metadata-only and
 bounded by the existing library traversal limits. Subfolders are included; book
 bytes are fetched only when opened or kept. Each connection can select its own
 source folder. Folder IDs, page tokens and revisions never become book identities.

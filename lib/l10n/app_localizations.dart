@@ -1482,6 +1482,24 @@ abstract class AppLocalizations {
   /// **'Source folder'**
   String get locationSourceFolder;
 
+  /// No description provided for @locationConfirmSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose where to look for books, then select Use this folder to save the connection.'**
+  String get locationConfirmSource;
+
+  /// No description provided for @locationMyDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'My Drive'**
+  String get locationMyDrive;
+
+  /// No description provided for @locationDropboxAppFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Dropbox app folder'**
+  String get locationDropboxAppFolder;
+
   /// No description provided for @locationSourceDescription.
   ///
   /// In en, this message translates to:
@@ -1545,7 +1563,7 @@ abstract class AppLocalizations {
   /// No description provided for @dropboxCodeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. You can select a subfolder after connecting. Books are fetched only when opened or kept on this device.'**
+  /// **'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. Next, confirm that folder or choose a subfolder before the connection is saved. Books are fetched only when opened or kept on this device.'**
   String get dropboxCodeDescription;
 
   /// No description provided for @dropboxAuthorizationCode.

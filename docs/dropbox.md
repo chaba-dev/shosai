@@ -60,8 +60,12 @@ chat, fixtures or logs.
 In Settings → Library connections → Manage connections, choose **Connect
 Dropbox**, approve access in the browser, and enter the displayed code. Copy or
 move your books into `Apps/<app folder name>` in Dropbox. That app folder
-is the initial library source. Optionally select the connection, choose
-**Change source folder**, browse its subfolders, and select **Use this folder**.
+is shown as **Dropbox app folder**, not automatically saved as a source. Before
+a new connection is saved, select **Use this folder** there or browse to a
+subfolder and confirm it. Until confirmation, no connection is adopted or scanned.
+Cancel, Back from the app folder, or closing releases only the unused local
+credential, not the account-wide app authorization. Existing saved connections
+remain unchanged; use **Change source folder** to reconfigure them.
 The picker cannot browse the rest of the account with an App folder token.
 Different connections have independent configuration and credential keys,
 even when authorized with the same account.

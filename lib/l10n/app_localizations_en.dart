@@ -850,6 +850,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locationSourceFolder => 'Source folder';
 
   @override
+  String get locationConfirmSource =>
+      'Choose where to look for books, then select Use this folder to save the connection.';
+
+  @override
+  String get locationMyDrive => 'My Drive';
+
+  @override
+  String get locationDropboxAppFolder => 'Dropbox app folder';
+
+  @override
   String get locationSourceDescription =>
       'EPUB and PDF files in this folder and its subfolders appear in your library automatically. Files are fetched only when opened or kept on this device.';
 
@@ -887,7 +897,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get dropboxCodeDescription =>
-      'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. You can select a subfolder after connecting. Books are fetched only when opened or kept on this device.';
+      'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. Next, confirm that folder or choose a subfolder before the connection is saved. Books are fetched only when opened or kept on this device.';
 
   @override
   String get dropboxAuthorizationCode => 'Authorization code';
