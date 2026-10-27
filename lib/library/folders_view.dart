@@ -3,6 +3,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_core/shosai_core.dart'
     show LocationException, LocationFailure;
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/core/google_drive_authorization.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/folders_controller.dart';
 
@@ -16,12 +17,24 @@ class LibraryFoldersDialog extends StatelessWidget {
     builder: (context, _) {
       final model = controller.model;
       final l10n = AppLocalizations.of(context);
-      final selected = model.grants
-          .where((grant) => grant.id == model.selected)
-          .firstOrNull;
+      final selected =
+          model.pending ??
+          model.grants.where((grant) => grant.id == model.selected).firstOrNull;
+      final startingFolder = switch (selected?.provider) {
+        'google-drive' => l10n.locationMyDrive,
+        'dropbox' => l10n.locationDropboxAppFolder,
+        _ => selected?.label ?? '',
+      };
+      final directoryLabel = model.choosingDirectory
+          ? model.parents.lastOrNull?.name ?? startingFolder
+          : selected?.label ?? '';
       return ShadDialog(
         title: Text(selected == null ? l10n.libraryLocations : selected.label),
-        description: Text(l10n.libraryLocationsDescription),
+        description: Text(
+          model.pending != null
+              ? l10n.locationConfirmSource
+              : l10n.libraryLocationsDescription,
+        ),
         actions: [
           if (model.choosingDirectory)
             ShadButton(
@@ -38,11 +51,19 @@ class LibraryFoldersDialog extends StatelessWidget {
                   : () => controller.dispatch(const FoldersAddRequested()),
               child: Text(l10n.locationAddFolder),
             ),
-          ShadButton(
-            height: shosaiShadButtonHeight(context),
-            onPressed: () => Navigator.pop(context),
-            child: Text(l10n.locationClose),
-          ),
+          if (model.pending != null)
+            ShadButton.outline(
+              onPressed: model.saving
+                  ? null
+                  : () => controller.dispatch(const FoldersCancelRequested()),
+              child: Text(l10n.locationCancel),
+            )
+          else
+            ShadButton(
+              height: shosaiShadButtonHeight(context),
+              onPressed: () => Navigator.pop(context),
+              child: Text(l10n.locationClose),
+            ),
         ],
         child: Material(
           type: MaterialType.transparency,
@@ -58,6 +79,21 @@ class LibraryFoldersDialog extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(switch (model.error) {
+                      GoogleDriveRegistrationRequired() =>
+                        l10n.locationGoogleDriveRegistrationRequired,
+                      GoogleDriveSetupException(
+                        stage: GoogleDriveSetupStage.tokenExchange,
+                        oauthError: final error,
+                      ) =>
+                        l10n.locationGoogleDriveTokenRejected(error!),
+                      GoogleDriveSetupException(
+                        stage: GoogleDriveSetupStage.permissions,
+                      ) =>
+                        l10n.locationGoogleDrivePermissionsIncomplete,
+                      GoogleDriveSetupException(
+                        stage: GoogleDriveSetupStage.credentialStorage,
+                      ) =>
+                        l10n.locationGoogleDriveCredentialStorageFailed,
                       LocationException(failure: LocationFailure.offline) =>
                         l10n.locationOffline,
                       LocationException(failure: LocationFailure.revoked) =>
@@ -72,7 +108,9 @@ class LibraryFoldersDialog extends StatelessWidget {
                     children: [
                       IconButton(
                         tooltip: l10n.locationBack,
-                        onPressed: model.busy
+                        onPressed:
+                            model.saving ||
+                                (model.busy && model.pending == null)
                             ? null
                             : () => controller.dispatch(
                                 const FoldersBackRequested(),
@@ -81,7 +119,11 @@ class LibraryFoldersDialog extends StatelessWidget {
                       ),
                       Expanded(
                         child: Text(
-                          model.parents.lastOrNull?.name ?? selected.label,
+                          directoryLabel,
+                          style: shosaiInterfaceStyleForText(
+                            ShadTheme.of(context).textTheme.p,
+                            directoryLabel,
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -100,6 +142,17 @@ class LibraryFoldersDialog extends StatelessWidget {
                                 ? null
                                 : () => controller.dispatch(
                                     const FoldersAddDropboxRequested(),
+                                  ),
+                          ),
+                        if (controller.canAddGoogleDrive)
+                          ListTile(
+                            leading: const Icon(Icons.add_link),
+                            title: Text(l10n.locationAddGoogleDrive),
+                            enabled: !model.busy,
+                            onTap: model.busy
+                                ? null
+                                : () => controller.dispatch(
+                                    const FoldersAddGoogleDriveRequested(),
                                   ),
                           ),
                         if (model.grants.isEmpty && !model.busy)
@@ -157,6 +210,15 @@ class LibraryFoldersDialog extends StatelessWidget {
                           child: Text(l10n.locationRemove),
                         ),
                       ] else ...[
+                        if (model.error != null)
+                          ShadButton.outline(
+                            onPressed: model.busy
+                                ? null
+                                : () => controller.dispatch(
+                                    const FoldersRetryRequested(),
+                                  ),
+                            child: Text(l10n.libraryRetry),
+                          ),
                         for (final entry in model.entries.where(
                           (entry) => entry.isDirectory,
                         ))

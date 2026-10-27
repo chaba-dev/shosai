@@ -452,6 +452,24 @@ final class LibraryFolders {
     }
   });
 
+  /// Browse an authorized but unadopted cloud connection for explicit source
+  /// confirmation. No saved grant, location generation or catalog is created.
+  Future<LocationPage> browsePending(
+    LibraryConnection grant, {
+    String? directory,
+    String? cursor,
+    CancellationToken? cancellation,
+  }) => _serial(() async {
+    cancellation.throwIfCancelled();
+    final location = await _provider(grant.provider).open(grant);
+    cancellation.throwIfCancelled();
+    return location.list(
+      directory: directory,
+      cursor: cursor,
+      cancellation: cancellation,
+    );
+  });
+
   /// Only the selected book is read. Unopened folder entries are metadata,
   /// not fake book identities made from paths or provider IDs.
   Future<Book> importEntry(

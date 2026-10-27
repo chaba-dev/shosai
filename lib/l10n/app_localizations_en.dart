@@ -850,6 +850,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locationSourceFolder => 'Source folder';
 
   @override
+  String get locationConfirmSource =>
+      'Choose where to look for books, then select Use this folder to save the connection.';
+
+  @override
+  String get locationMyDrive => 'My Drive';
+
+  @override
+  String get locationDropboxAppFolder => 'Dropbox app folder';
+
+  @override
   String get locationSourceDescription =>
       'EPUB and PDF files in this folder and its subfolders appear in your library automatically. Files are fetched only when opened or kept on this device.';
 
@@ -863,11 +873,31 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locationAddFolder => 'Connect folder';
 
   @override
+  String get locationAddGoogleDrive => 'Connect Google Drive';
+
+  @override
+  String get locationGoogleDriveRegistrationRequired =>
+      'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.';
+
+  @override
+  String locationGoogleDriveTokenRejected(String error) {
+    return 'Google rejected the token exchange ($error). The connection was not saved. Check the OAuth registration and try again.';
+  }
+
+  @override
+  String get locationGoogleDrivePermissionsIncomplete =>
+      'Google did not return persistent Drive authorization. The connection was not saved. Try again and allow Drive access.';
+
+  @override
+  String get locationGoogleDriveCredentialStorageFailed =>
+      'Google authorization completed, but the device credential store could not save it. Unlock your keyring and try again. The connection was not saved.';
+
+  @override
   String get dropboxConnect => 'Connect Dropbox';
 
   @override
   String get dropboxCodeDescription =>
-      'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. You can select a subfolder after connecting. Books are fetched only when opened or kept on this device.';
+      'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. Next, confirm that folder or choose a subfolder before the connection is saved. Books are fetched only when opened or kept on this device.';
 
   @override
   String get dropboxAuthorizationCode => 'Authorization code';

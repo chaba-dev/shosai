@@ -11,6 +11,7 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/documents.dart';
 import 'package:shosai_flutter/core/dropbox_connection.dart';
+import 'package:shosai_flutter/core/google_drive_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
@@ -83,6 +84,7 @@ final class ShosaiCore {
       DropboxConnectionProvider(
         credentials: const PlatformConnectionCredentialStore(),
       ),
+      GoogleDriveConnectionProvider(),
     ],
   );
 

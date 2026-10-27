@@ -31,6 +31,9 @@ android {
         // Debug and profile builds (Flutter's profile type starts from debug)
         // are told apart from the released app on the launcher.
         manifestPlaceholders["appLabel"] = "Shōsai Dev"
+        // AppAuth is used only on iOS. Android Google authorization uses GIS,
+        // never this plugin's custom-scheme redirect receiver.
+        manifestPlaceholders["appAuthRedirectScheme"] = "dev.shosai.unused-appauth"
     }
 
     buildTypes {

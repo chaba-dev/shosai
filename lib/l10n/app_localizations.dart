@@ -1482,6 +1482,24 @@ abstract class AppLocalizations {
   /// **'Source folder'**
   String get locationSourceFolder;
 
+  /// No description provided for @locationConfirmSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose where to look for books, then select Use this folder to save the connection.'**
+  String get locationConfirmSource;
+
+  /// No description provided for @locationMyDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'My Drive'**
+  String get locationMyDrive;
+
+  /// No description provided for @locationDropboxAppFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Dropbox app folder'**
+  String get locationDropboxAppFolder;
+
   /// No description provided for @locationSourceDescription.
   ///
   /// In en, this message translates to:
@@ -1506,6 +1524,36 @@ abstract class AppLocalizations {
   /// **'Connect folder'**
   String get locationAddFolder;
 
+  /// No description provided for @locationAddGoogleDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect Google Drive'**
+  String get locationAddGoogleDrive;
+
+  /// No description provided for @locationGoogleDriveRegistrationRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.'**
+  String get locationGoogleDriveRegistrationRequired;
+
+  /// No description provided for @locationGoogleDriveTokenRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Google rejected the token exchange ({error}). The connection was not saved. Check the OAuth registration and try again.'**
+  String locationGoogleDriveTokenRejected(String error);
+
+  /// No description provided for @locationGoogleDrivePermissionsIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Google did not return persistent Drive authorization. The connection was not saved. Try again and allow Drive access.'**
+  String get locationGoogleDrivePermissionsIncomplete;
+
+  /// No description provided for @locationGoogleDriveCredentialStorageFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Google authorization completed, but the device credential store could not save it. Unlock your keyring and try again. The connection was not saved.'**
+  String get locationGoogleDriveCredentialStorageFailed;
+
   /// No description provided for @dropboxConnect.
   ///
   /// In en, this message translates to:
@@ -1515,7 +1563,7 @@ abstract class AppLocalizations {
   /// No description provided for @dropboxCodeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. You can select a subfolder after connecting. Books are fetched only when opened or kept on this device.'**
+  /// **'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. Next, confirm that folder or choose a subfolder before the connection is saved. Books are fetched only when opened or kept on this device.'**
   String get dropboxCodeDescription;
 
   /// No description provided for @dropboxAuthorizationCode.
