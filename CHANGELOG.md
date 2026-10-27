@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-26
+## [0.1.0] - 2026-10-27
 
 ### 🚀 Features
 
@@ -113,6 +113,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Connect platform folders with persistent grants (#241)
 - *(library)* Cache source books and manage connections in Settings (#244)
 - *(dropbox)* Add direct library connections (#246)
+- *(library)* Add native Google Drive connections (#247)
 
 ### 🐛 Bug Fixes
 
