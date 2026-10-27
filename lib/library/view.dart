@@ -1092,6 +1092,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           },
         ).setup(id);
       },
+      setupGoogleDrive: (id) =>
+          (host as LibraryFoldersHost).folders.setup('google-drive', id),
       confirmRemoval: (grant) async =>
           await _showOwnedDialog<bool>((context) {
             final l10n = AppLocalizations.of(context);

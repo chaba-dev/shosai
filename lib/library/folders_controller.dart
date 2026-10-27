@@ -21,6 +21,10 @@ final class FoldersAddDropboxRequested extends FoldersMessage {
   const FoldersAddDropboxRequested();
 }
 
+final class FoldersAddGoogleDriveRequested extends FoldersMessage {
+  const FoldersAddGoogleDriveRequested();
+}
+
 final class FoldersSelected extends FoldersMessage {
   const FoldersSelected(this.id);
   final String id;
@@ -32,6 +36,14 @@ final class FoldersChooseDirectoryRequested extends FoldersMessage {
 
 final class FoldersDirectorySaved extends FoldersMessage {
   const FoldersDirectorySaved();
+}
+
+final class FoldersCancelRequested extends FoldersMessage {
+  const FoldersCancelRequested();
+}
+
+final class FoldersRetryRequested extends FoldersMessage {
+  const FoldersRetryRequested();
 }
 
 final class FoldersEntryChosen extends FoldersMessage {
@@ -65,6 +77,12 @@ final class _FoldersListed extends FoldersMessage {
   final LocationPage page;
 }
 
+final class _FoldersAuthorized extends FoldersMessage {
+  const _FoldersAuthorized(this.revision, this.grant);
+  final int revision;
+  final LibraryConnection grant;
+}
+
 final class _FoldersFailed extends FoldersMessage {
   const _FoldersFailed(this.revision, this.error);
   final int revision;
@@ -82,6 +100,8 @@ final class FoldersModel {
     this.busy = false,
     this.error,
     this.choosingDirectory = false,
+    this.pending,
+    this.saving = false,
   });
   final List<LibraryConnection> grants;
   final String? selected;
@@ -91,6 +111,8 @@ final class FoldersModel {
   final bool busy;
   final Object? error;
   final bool choosingDirectory;
+  final LibraryConnection? pending;
+  final bool saving;
 }
 
 /// Dialog-local navigation state. Connections and imported content belong to
@@ -102,14 +124,18 @@ final class FoldersController extends ChangeNotifier {
     required Future<LibraryConnection?> Function(String id) setup,
     required Future<bool> Function(LibraryConnection connection) confirmRemoval,
     Future<LibraryConnection?> Function(String id)? setupDropbox,
+    Future<LibraryConnection?> Function(String id)? setupGoogleDrive,
   }) : _folders = folders,
        _setup = setup,
        _setupDropbox = setupDropbox,
+       _setupGoogleDrive = setupGoogleDrive,
        _confirmRemoval = confirmRemoval;
   final LibraryFolders _folders;
   final Future<LibraryConnection?> Function(String id) _setup;
   final Future<LibraryConnection?> Function(String id)? _setupDropbox;
   bool get supportsDropbox => _setupDropbox != null;
+  final Future<LibraryConnection?> Function(String id)? _setupGoogleDrive;
+  bool get canAddGoogleDrive => _setupGoogleDrive != null;
   final Future<bool> Function(LibraryConnection connection) _confirmRemoval;
   FoldersModel _model = const FoldersModel();
   FoldersModel get model => _model;
@@ -117,6 +143,7 @@ final class FoldersController extends ChangeNotifier {
   bool _closed = false;
   CancellationToken? _cancellation;
   final Set<Future<void>> _running = {};
+  final Map<LibraryConnection, Future<void>> _discards = {};
 
   Future<void> drain() async {
     while (_running.isNotEmpty) {
@@ -140,23 +167,30 @@ final class FoldersController extends ChangeNotifier {
           (revision, _) async =>
               _FoldersLoaded(revision, await _folders.list()),
         );
-      case FoldersAddRequested() || FoldersAddDropboxRequested():
+      case FoldersAddRequested() ||
+          FoldersAddDropboxRequested() ||
+          FoldersAddGoogleDriveRequested():
         if (_model.busy) return;
-        final setup = message is FoldersAddDropboxRequested
-            ? _setupDropbox
-            : _setup;
+        final setup = switch (message) {
+          FoldersAddDropboxRequested() => _setupDropbox,
+          FoldersAddGoogleDriveRequested() => _setupGoogleDrive,
+          _ => _setup,
+        };
         if (setup == null) return;
         _effect((revision, cancellation) async {
           final grant = await setup(LibraryFolders.newId());
           if (grant != null) {
             if (_closed || revision != _revision) {
-              await _folders.discard(grant);
+              await _discard(grant);
               cancellation.throwIfCancelled();
+            }
+            if (message is! FoldersAddRequested) {
+              return _FoldersAuthorized(revision, grant);
             }
             try {
               await _folders.add(grant);
             } catch (_) {
-              await _folders.discard(grant);
+              await _discard(grant);
               rethrow;
             }
           }
@@ -176,16 +210,39 @@ final class FoldersController extends ChangeNotifier {
         );
         _browse();
       case FoldersDirectorySaved():
-        if (_model.busy || !_model.choosingDirectory) return;
+        if (_model.busy || !_model.choosingDirectory || _model.error != null) {
+          return;
+        }
         final id = _model.selected!;
+        final pending = _model.pending;
         final directory = _model.parents.lastOrNull;
         final label = directory == null
             ? null
             : _model.parents.map((entry) => entry.name).join('/');
         _effect((revision, _) async {
-          await _folders.configure(id, directory: directory?.key, label: label);
+          if (pending != null) {
+            // Explicit confirmation is the adoption boundary, including root.
+            await _folders.add(pending.withDirectory(directory?.key, label));
+          } else {
+            await _folders.configure(
+              id,
+              directory: directory?.key,
+              label: label,
+            );
+          }
           return _FoldersLoaded(revision, await _folders.list(), selected: id);
-        });
+        }, saving: true);
+      case FoldersCancelRequested():
+        final pending = _model.pending;
+        if (pending == null || _model.saving) return;
+        _effect((revision, _) async {
+          await _discard(pending);
+          return _FoldersLoaded(revision, await _folders.list());
+        }, saving: true);
+      case FoldersRetryRequested():
+        if (!_model.busy && _model.choosingDirectory) {
+          _browse(cursor: _model.nextCursor);
+        }
       case FoldersEntryChosen():
         if (_model.busy || !_model.choosingDirectory) return;
         if (message.entry.isDirectory) {
@@ -194,23 +251,31 @@ final class FoldersController extends ChangeNotifier {
               grants: _model.grants,
               selected: _model.selected,
               choosingDirectory: true,
+              pending: _model.pending,
               parents: List.unmodifiable([..._model.parents, message.entry]),
             ),
           );
           _browse();
         }
       case FoldersBackRequested():
-        if (_model.busy) return;
+        if (_model.saving || (_model.busy && _model.pending == null)) return;
         if (!_model.choosingDirectory) {
           _emit(FoldersModel(grants: _model.grants));
         } else if (_model.parents.isEmpty) {
-          _emit(FoldersModel(grants: _model.grants, selected: _model.selected));
+          if (_model.pending != null) {
+            dispatch(const FoldersCancelRequested());
+          } else {
+            _emit(
+              FoldersModel(grants: _model.grants, selected: _model.selected),
+            );
+          }
         } else {
           _emit(
             FoldersModel(
               grants: _model.grants,
               selected: _model.selected,
               choosingDirectory: true,
+              pending: _model.pending,
               parents: List.unmodifiable(
                 _model.parents.take(_model.parents.length - 1),
               ),
@@ -242,6 +307,17 @@ final class FoldersController extends ChangeNotifier {
             selected: message.selected,
           ),
         );
+      case _FoldersAuthorized():
+        if (message.revision != _revision) return;
+        _emit(
+          FoldersModel(
+            grants: _model.grants,
+            selected: message.grant.id,
+            pending: message.grant,
+            choosingDirectory: true,
+          ),
+        );
+        _browse();
       case _FoldersListed():
         if (message.revision != _revision) return;
         _emit(
@@ -249,6 +325,7 @@ final class FoldersController extends ChangeNotifier {
             grants: _model.grants,
             selected: _model.selected,
             choosingDirectory: true,
+            pending: _model.pending,
             parents: _model.parents,
             entries: message.page.entries,
             nextCursor: message.page.nextCursor,
@@ -261,6 +338,7 @@ final class FoldersController extends ChangeNotifier {
             grants: _model.grants,
             selected: _model.selected,
             choosingDirectory: _model.choosingDirectory,
+            pending: _model.pending,
             parents: _model.parents,
             entries: _model.entries,
             nextCursor: _model.nextCursor,
@@ -270,23 +348,42 @@ final class FoldersController extends ChangeNotifier {
     }
   }
 
+  // Cancellation and disposal can overlap. Retain successful cleanup for this
+  // dialog's lifetime, but allow a failed credential-store deletion to retry.
+  Future<void> _discard(LibraryConnection grant) => _discards[grant] ??=
+      _folders.discard(grant).onError<Object>((error, stack) {
+        _discards.remove(grant);
+        Error.throwWithStackTrace(error, stack);
+      });
+
   void _browse({String? cursor}) {
     final id = _model.selected!;
+    final pending = _model.pending;
     final directory = _model.parents.lastOrNull?.key;
     _effect(
       (revision, cancellation) async => _FoldersListed(
         revision,
-        await _folders.browse(
-          id,
-          directory: directory,
-          cursor: cursor,
-          cancellation: cancellation,
-        ),
+        pending != null
+            ? await _folders.browsePending(
+                pending,
+                directory: directory,
+                cursor: cursor,
+                cancellation: cancellation,
+              )
+            : await _folders.browse(
+                id,
+                directory: directory,
+                cursor: cursor,
+                cancellation: cancellation,
+              ),
       ),
     );
   }
 
-  void _effect(Future<FoldersMessage> Function(int, CancellationToken) run) {
+  void _effect(
+    Future<FoldersMessage> Function(int, CancellationToken) run, {
+    bool saving = false,
+  }) {
     final revision = ++_revision;
     _cancellation?.cancel();
     final cancellation = _cancellation = CancellationToken();
@@ -295,6 +392,8 @@ final class FoldersController extends ChangeNotifier {
         grants: _model.grants,
         selected: _model.selected,
         choosingDirectory: _model.choosingDirectory,
+        pending: _model.pending,
+        saving: saving,
         parents: _model.parents,
         entries: _model.entries,
         nextCursor: _model.nextCursor,
@@ -318,6 +417,14 @@ final class FoldersController extends ChangeNotifier {
     _closed = true;
     _revision++;
     _cancellation?.cancel();
+    if (_model.pending case final pending?) {
+      // Serialized discard skips an already-adopted grant if confirmation was
+      // in flight; otherwise it releases only this unused local credential.
+      _effect((revision, _) async {
+        await _discard(pending);
+        return _FoldersLoaded(revision, const []);
+      });
+    }
     super.dispose();
   }
 }

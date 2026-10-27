@@ -797,6 +797,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationSourceFolder => '読み込み元フォルダ';
 
   @override
+  String get locationConfirmSource => '本を探すフォルダを選び、「このフォルダを使用」で接続を保存します。';
+
+  @override
+  String get locationMyDrive => 'マイドライブ';
+
+  @override
+  String get locationDropboxAppFolder => 'Dropbox アプリ専用フォルダ';
+
+  @override
   String get locationSourceDescription =>
       'このフォルダとサブフォルダ内の EPUB と PDF がライブラリに自動で表示されます。ファイルは開くとき、または端末に保存するときだけ取得します。';
 
@@ -810,11 +819,31 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationAddFolder => 'フォルダを接続';
 
   @override
+  String get locationAddGoogleDrive => 'Google Drive を接続';
+
+  @override
+  String get locationGoogleDriveRegistrationRequired =>
+      'このビルドでは Google Drive が設定されていません。アプリの配布元による Google OAuth の設定が必要です。';
+
+  @override
+  String locationGoogleDriveTokenRejected(String error) {
+    return 'Google がトークン交換を拒否しました（$error）。接続は保存されていません。OAuth の登録設定を確認し、もう一度お試しください。';
+  }
+
+  @override
+  String get locationGoogleDrivePermissionsIncomplete =>
+      'Google から継続的な Drive アクセス権限を取得できませんでした。接続は保存されていません。再試行し、Drive へのアクセスを許可してください。';
+
+  @override
+  String get locationGoogleDriveCredentialStorageFailed =>
+      'Google の認証は完了しましたが、端末の資格情報ストアに保存できませんでした。キーリングのロックを解除して再試行してください。接続は保存されていません。';
+
+  @override
   String get dropboxConnect => 'Dropbox を接続';
 
   @override
   String get dropboxCodeDescription =>
-      'ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。接続後にサブフォルダを選択できます。本は開くとき、または端末に保存するときだけ取得します。';
+      'ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。続いて、そのフォルダかサブフォルダを確定してから接続を保存します。本は開くとき、または端末に保存するときだけ取得します。';
 
   @override
   String get dropboxAuthorizationCode => '認証コード';
