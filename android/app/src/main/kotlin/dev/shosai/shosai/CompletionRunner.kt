@@ -1,4 +1,4 @@
-package dev.shosai.shosai_flutter
+package dev.shosai.shosai
 
 import java.util.concurrent.Executor
 

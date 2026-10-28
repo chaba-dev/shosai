@@ -1,4 +1,4 @@
-package dev.shosai.shosai_flutter
+package dev.shosai.shosai
 
 /** Publishes release debt before scheduling deletion and completes after the attempt. */
 internal class ResourceReleaser(

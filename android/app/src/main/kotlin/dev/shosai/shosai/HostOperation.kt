@@ -1,4 +1,4 @@
-package dev.shosai.shosai_flutter
+package dev.shosai.shosai
 
 /** Fences one retained operation across configuration recreation and independent host takeover. */
 internal class HostOperation<Result> {

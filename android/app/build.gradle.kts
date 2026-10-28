@@ -18,7 +18,7 @@ val dropboxKey = dartDefines["SHOSAI_DROPBOX_APP_KEY"] ?: "3yy8xd4pncextkh"
 require(dropboxKey.matches(Regex("[a-zA-Z0-9]*"))) { "Invalid Dropbox app key" }
 
 android {
-    namespace = "dev.shosai.shosai_flutter"
+    namespace = "dev.shosai.shosai"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -36,7 +36,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "dev.shosai.shosai_flutter"
+        applicationId = "dev.shosai.shosai"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
