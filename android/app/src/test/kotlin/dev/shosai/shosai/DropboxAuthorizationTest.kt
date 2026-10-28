@@ -1,4 +1,4 @@
-package dev.shosai.shosai_flutter
+package dev.shosai.shosai
 
 import android.content.Intent
 import android.net.Uri

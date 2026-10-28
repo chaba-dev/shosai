@@ -16,8 +16,16 @@ testing mode is not production authorization.
 | Target | Registration and build configuration |
 | --- | --- |
 | Linux / macOS | A **Desktop app** OAuth client. Supply `GOOGLE_DRIVE_DESKTOP_CLIENT_ID` and `GOOGLE_DRIVE_DESKTOP_CLIENT_SECRET` in the private distributor build configuration described below. System browser, random IPv4 loopback port, state, S256 PKCE. macOS requires outgoing client and loopback server entitlements (both are included). |
-| iPhone / iPad | An **iOS** client for bundle `dev.shosai.shosai-flutter`. Pass `--dart-define=GOOGLE_DRIVE_IOS_CLIENT_ID=…`. Set the Xcode build setting `GOOGLE_DRIVE_IOS_CALLBACK_SCHEME` to that client ID with its dot-separated components reversed. Info.plist registers this scheme. AppAuth uses the system authentication session and PKCE with `/oauthredirect`; no webview or loopback. |
-| Android | An **Android** registration for package `dev.shosai.shosai_flutter` and the actual signing certificate's SHA-1. Also create a **Web application** client in the same project and pass its public ID as `--dart-define=GOOGLE_DRIVE_ANDROID_SERVER_CLIENT_ID=…`. The installed Google Sign-In plugin needs this audience for native Credential Manager sign-in. No web client secret, JS origin, redirect URL, backend, or server auth-code exchange is used. GIS AuthorizationClient requests Drive access and silently renews for the explicitly stored account. |
+| iPhone / iPad | An **iOS** client for bundle `dev.shosai.shosai`. Pass `--dart-define=GOOGLE_DRIVE_IOS_CLIENT_ID=…`. Set the Xcode build setting `GOOGLE_DRIVE_IOS_CALLBACK_SCHEME` to that client ID with its dot-separated components reversed. Info.plist registers this scheme. AppAuth uses the system authentication session and PKCE with `/oauthredirect`; no webview or loopback. |
+| Android | An **Android** registration for package `dev.shosai.shosai` and the actual signing certificate's SHA-1. Also create a **Web application** client in the same project and pass its public ID as `--dart-define=GOOGLE_DRIVE_ANDROID_SERVER_CLIENT_ID=…`. The installed Google Sign-In plugin needs this audience for native Credential Manager sign-in. No web client secret, JS origin, redirect URL, backend, or server auth-code exchange is used. GIS AuthorizationClient requests Drive access and silently renews for the explicitly stored account. |
+
+Both mobile apps use `dev.shosai.shosai`. Builds installed under the former
+Flutter-suffixed identifiers are separate apps; this rename does not migrate
+their local libraries, notes or credentials. Keep those installations until any
+needed data has been preserved. Register OAuth clients and Apple provisioning
+for the new identifier. Desktop identifiers and callback mechanisms are unchanged;
+configure the iOS callback scheme from the new iOS client's reversed ID, not an
+old client's scheme.
 
 The Android release configuration currently uses the debug signing configuration
 (preexisting); register the actual certificate used by the build, not a guessed

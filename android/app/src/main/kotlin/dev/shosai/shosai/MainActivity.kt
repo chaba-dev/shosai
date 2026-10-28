@@ -1,4 +1,4 @@
-package dev.shosai.shosai_flutter
+package dev.shosai.shosai
 
 import android.app.Activity
 import android.content.ContentResolver
