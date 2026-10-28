@@ -146,6 +146,14 @@ internal object DropboxAuthorization {
                 credential.accessToken.isEmpty() || expires <= System.currentTimeMillis()) {
                 result?.error("incomplete", null, null)
             } else {
+                // Browser auth can finish in a separate task while Chrome
+                // remains foreground. Reveal the existing Flutter task before
+                // handing it the result; never resurrect an expired operation.
+                if (result != null) activity.startActivity(
+                    Intent(activity, MainActivity::class.java).addFlags(
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                    ),
+                )
                 result?.success(mapOf(
                     "access_token" to credential.accessToken,
                     "refresh_token" to refresh,
