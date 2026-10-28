@@ -1,4 +1,4 @@
-package dev.shosai.shosai_flutter
+package dev.shosai.shosai
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
