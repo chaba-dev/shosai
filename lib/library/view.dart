@@ -13,6 +13,7 @@ import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
+import 'package:shosai_flutter/core/dropbox_authorization.dart';
 import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
@@ -1080,6 +1081,19 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         }
         return DropboxConnectionProvider(
           credentials: const PlatformConnectionCredentialStore(),
+          authorizeNative: DropboxAuthorization.supported
+              ? DropboxAuthorization(
+                  cancellationTitle: AppLocalizations.of(
+                    context,
+                  ).dropboxCancelTitle,
+                  cancelAction: AppLocalizations.of(
+                    context,
+                  ).dropboxCancelConnection,
+                  keepWaitingAction: AppLocalizations.of(
+                    context,
+                  ).dropboxKeepWaiting,
+                ).authorize
+              : null,
           authorize: (authorization) async {
             if (!await launchUrl(
               authorization,

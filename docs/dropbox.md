@@ -29,8 +29,8 @@ define `SHOSAI_DROPBOX_APP_KEY` (or `--dart-define-from-file`). An explicitly
 empty `--dart-define=SHOSAI_DROPBOX_APP_KEY=` disables new Dropbox connections,
 shows an explanatory dialog and leaves device-folder connections usable.
 Existing connections retain their registered public key for token renewal.
-The single build default lives in `DropboxConnectionProvider.defaultClientId`;
-the setup UI uses the same value. No client secret is used, and none should be
+Dart setup uses `DropboxConnectionProvider.defaultClientId`; the native callback
+defaults match this public key. No client secret is used, and none should be
 included in build configuration. Public app keys are not credentials.
 
 The registered app was in Development status at acceptance: the owner's account
@@ -46,19 +46,62 @@ registration, replace the build key, and reconnect with that app. Disconnect
 the old connection and revoke its authorization in Dropbox's Connected apps
 settings to withdraw the old grant.
 
-Authorization uses the system browser, S256 PKCE and `token_access_type=offline`.
-Dropbox's documented
+Authorization uses S256 PKCE and offline access, without a client secret.
+On **iOS and Android**, Dropbox's native SDK tries the installed Dropbox app
+and otherwise uses browser authorization (Safari view controller on iOS).
+The callback returns to Shōsai automatically; there is no code to paste.
+The SDK handles the verifier, state validation and token exchange. Shōsai then
+passes the refresh token to its existing per-connection platform credential
+store. The iOS SDK's separate persistent token store is deliberately disabled;
+Android's transient SDK result is consumed and cleared. Neither SDK owns book
+access or ongoing token renewal.
+
+Android derives its `db-<app key>` callback from the same Flutter build define.
+For an **iOS fork**, also set the Xcode build setting `SHOSAI_DROPBOX_APP_KEY`
+to match the Dart define; the default in `ios/Flutter/{Debug,Release}.xcconfig`
+matches the official public key. Mismatched callback configuration fails setup
+instead of silently falling back to code entry. No separate mobile Dropbox
+registration or secret is required. Keep both the Dropbox callback scheme and
+the unrelated Google Drive callback scheme when configuring the iOS target.
+
+On **desktop**, Dropbox's documented
 [no-redirect authorization-code flow](https://docs.dropboxapi.com/dropbox-api/docs/get-started/authorization)
 displays a one-use code on dropbox.com; the reader pastes it into the masked
-in-app field. No callback URL, embedded browser, Shōsai service or client secret
-is required. The verifier stays in memory until the exchange completes. Do not
+in-app field. No desktop callback URL or Shōsai service is required. The
+verifier stays in memory until the exchange completes. Do not
 paste authorization codes, refresh tokens or access tokens into issue reports,
 chat, fixtures or logs.
+
+Mobile handshakes are serialized, including Activity recreation on Android,
+and expire after five minutes. Android's SDK does not distinguish cancellation
+from an invalid callback or exchange failure: an incomplete handshake saves no
+connection and can be retried. If the process is killed during authorization,
+start again; the in-memory PKCE session is not restored. None of these paths
+revoke existing connections or delete their credentials.
+State-bearing callbacks must match the current attempt. A state-less native
+iOS cancellation URL cannot identify its originating attempt. If a recognized
+cancel URL arrives, Shōsai asks **Cancel connecting to Dropbox?**.
+**Cancel connection** ends the current setup without waiting for its timeout;
+**Keep waiting** preserves the
+attempt and its original deadline. An old callback alone cannot cancel a newer
+attempt. Browser Cancel is handled directly by its own presentation, without
+this extra confirmation.
+
+On 2026-10-28, physical iPhone and iPad normal-consent Close delivered a
+stateless native `//1/cancel`; both displayed this confirmation and completed
+local cancellation before the deadline. iPhone provider-error Cancel followed
+the same route. Repeated synthetic stateless callbacks did not complete setup;
+mismatched, empty and duplicate state were rejected. Keep waiting preserved the
+original five-minute deadline. Forced-SDK-browser Cancel passed on both devices,
+but is not proof of fallback with Dropbox absent. Native success passed on both
+after restoring the uninstrumented candidate. Real prior-handshake callback
+replay and actual Dropbox-absent iOS fallback remain unverified.
 
 ## Use and recovery
 
 In Settings → Library connections → Manage connections, choose **Connect
-Dropbox**, approve access in the browser, and enter the displayed code. Copy or
+Dropbox**, approve access in Dropbox or the browser, and return to Shōsai
+(desktop only: enter the displayed code). Copy or
 move your books into `Apps/<app folder name>` in Dropbox. That app folder
 is shown as **Dropbox app folder**, not automatically saved as a source. Before
 a new connection is saved, select **Use this folder** there or browse to a
@@ -113,6 +156,18 @@ subfolder requests, root uploads, and missing failures for out-of-folder paths
 and IDs; it models App folder semantics but cannot prove Dropbox's enforcement.
 Dialog tests exercise English desktop and Japanese phone-width code entry,
 disabled/enabled actions and cancellation.
+Native-channel fixtures also cover credential handoff, incomplete/cancelled
+authorization without vault writes, safe error mapping, independent connections
+and renewal through the existing Dart provider. These mock the handshake result;
+they do not prove installed-app dispatch or native browser callbacks.
+Android host tests exercise stale native/browser callbacks against the actual
+SDK Activity entry point; they are not device or account authorization tests.
+
+Mobile acceptance must run on real **iPhone and Android** devices, both with
+and without the Dropbox app installed: app/browser dispatch, automatic callback,
+cancel/Back, interrupted/resumed authorization, folder confirmation/cancellation,
+vault persistence/renewal, and opening/Keep after restart offline. Existing Linux
+acceptance below does not validate either new mobile adapter.
 
 For live App folder acceptance, authorize the registered App folder app and
 confirm Dropbox's consent describes only its dedicated folder. Add a test EPUB

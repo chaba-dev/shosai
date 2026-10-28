@@ -842,6 +842,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dropboxConnect => 'Dropbox を接続';
 
   @override
+  String get dropboxCancelTitle => 'Dropbox の接続をキャンセルしますか？';
+
+  @override
+  String get dropboxCancelConnection => '接続をキャンセル';
+
+  @override
+  String get dropboxKeepWaiting => '待機を続ける';
+
+  @override
   String get dropboxCodeDescription =>
       'ブラウザでアクセスを許可し、Dropbox の認証コードをここに貼り付けてください。Dropbox の Apps 内にあるこのアプリ専用フォルダに本を追加してください。続いて、そのフォルダかサブフォルダを確定してから接続を保存します。本は開くとき、または端末に保存するときだけ取得します。';
 

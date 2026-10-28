@@ -1,2 +1,4 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 #include "Generated.xcconfig"
+// Forks must align this public callback key with SHOSAI_DROPBOX_APP_KEY in Dart.
+SHOSAI_DROPBOX_APP_KEY = 3yy8xd4pncextkh
