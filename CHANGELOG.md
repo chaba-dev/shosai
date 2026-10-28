@@ -231,6 +231,7 @@ All notable changes to this project will be documented in this file.
 - Give CI a slimmer Nix shell (#170)
 - *(pdf)* Pin PDFium checksums and ship its licence notices (#169)
 - *(android)* Package every ABI and run the packaged check on Android and iOS (#171)
+- *(mobile)* Use dev.shosai.shosai application identifiers (#251)
 
 ### 🛡️ Security
 
