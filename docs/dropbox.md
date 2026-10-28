@@ -78,10 +78,24 @@ from an invalid callback or exchange failure: an incomplete handshake saves no
 connection and can be retried. If the process is killed during authorization,
 start again; the in-memory PKCE session is not restored. None of these paths
 revoke existing connections or delete their credentials.
-Callbacks without the current attempt's state are ignored. In particular, a
-state-less cancellation from the iOS Dropbox app may remain pending until the
-five-minute timeout; browser Cancel is handled directly by its own presentation.
-Native cancellation behavior still needs real-device acceptance.
+State-bearing callbacks must match the current attempt. A state-less native
+iOS cancellation URL cannot identify its originating attempt. If a recognized
+cancel URL arrives, Shōsai asks **Cancel connecting to Dropbox?**.
+**Cancel connection** ends the current setup without waiting for its timeout;
+**Keep waiting** preserves the
+attempt and its original deadline. An old callback alone cannot cancel a newer
+attempt. Browser Cancel is handled directly by its own presentation, without
+this extra confirmation.
+
+On 2026-10-28, physical iPhone and iPad normal-consent Close delivered a
+stateless native `//1/cancel`; both displayed this confirmation and completed
+local cancellation before the deadline. iPhone provider-error Cancel followed
+the same route. Repeated synthetic stateless callbacks did not complete setup;
+mismatched, empty and duplicate state were rejected. Keep waiting preserved the
+original five-minute deadline. Forced-SDK-browser Cancel passed on both devices,
+but is not proof of fallback with Dropbox absent. Native success passed on both
+after restoring the uninstrumented candidate. Real prior-handshake callback
+replay and actual Dropbox-absent iOS fallback remain unverified.
 
 ## Use and recovery
 

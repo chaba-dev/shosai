@@ -275,6 +275,11 @@ Future<List<int>> readAll(Stream<List<int>> stream) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = _NativeHttp();
+  const nativeAuthorization = DropboxAuthorization(
+    cancellationTitle: 'Dropbox の接続をキャンセルしますか？',
+    cancelAction: '接続をキャンセル',
+    keepWaitingAction: '待機を続ける',
+  );
   late _Dropbox fixture;
   setUp(() async {
     fixture = _Dropbox();
@@ -291,7 +296,12 @@ void main() {
       var authorizations = 0;
       messenger.setMockMethodCallHandler(channel, (call) async {
         expect(call.method, 'authorize');
-        expect(call.arguments, {'clientId': 'fixture-native-key'});
+        expect(call.arguments, {
+          'clientId': 'fixture-native-key',
+          'cancellationTitle': 'Dropbox の接続をキャンセルしますか？',
+          'cancelAction': '接続をキャンセル',
+          'keepWaitingAction': '待機を続ける',
+        });
         authorizations++;
         return {
           'access_token': 'native-access-$authorizations',
@@ -303,7 +313,7 @@ void main() {
       final provider = DropboxConnectionProvider(
         credentials: fixture.credentials,
         clientId: 'fixture-native-key',
-        authorizeNative: const DropboxAuthorization().authorize,
+        authorizeNative: nativeAuthorization.authorize,
         authorize: (_) =>
             throw StateError('Mobile must not request code entry'),
         tokenEndpoint: fixture.root.resolve('oauth2/token'),
@@ -352,7 +362,7 @@ void main() {
       final provider = DropboxConnectionProvider(
         credentials: fixture.credentials,
         clientId: 'fixture-native-key',
-        authorizeNative: const DropboxAuthorization().authorize,
+        authorizeNative: nativeAuthorization.authorize,
       );
       expect(await provider.setup('cancelled'), null);
       response = PlatformException(

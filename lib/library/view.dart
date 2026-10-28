@@ -1082,7 +1082,17 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         return DropboxConnectionProvider(
           credentials: const PlatformConnectionCredentialStore(),
           authorizeNative: DropboxAuthorization.supported
-              ? const DropboxAuthorization().authorize
+              ? DropboxAuthorization(
+                  cancellationTitle: AppLocalizations.of(
+                    context,
+                  ).dropboxCancelTitle,
+                  cancelAction: AppLocalizations.of(
+                    context,
+                  ).dropboxCancelConnection,
+                  keepWaitingAction: AppLocalizations.of(
+                    context,
+                  ).dropboxKeepWaiting,
+                ).authorize
               : null,
           authorize: (authorization) async {
             if (!await launchUrl(

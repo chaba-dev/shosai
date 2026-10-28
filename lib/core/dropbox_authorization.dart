@@ -7,7 +7,15 @@ import 'package:flutter/services.dart';
 import 'package:shosai_core/shosai_core.dart';
 
 final class DropboxAuthorization {
-  const DropboxAuthorization();
+  const DropboxAuthorization({
+    required this.cancellationTitle,
+    required this.cancelAction,
+    required this.keepWaitingAction,
+  });
+
+  final String cancellationTitle;
+  final String cancelAction;
+  final String keepWaitingAction;
 
   static bool get supported => Platform.isIOS || Platform.isAndroid;
   static const _channel = MethodChannel('dev.shosai/dropbox_authorization');
@@ -16,6 +24,9 @@ final class DropboxAuthorization {
     try {
       return await _channel.invokeMapMethod<String, dynamic>('authorize', {
         'clientId': clientId,
+        'cancellationTitle': cancellationTitle,
+        'cancelAction': cancelAction,
+        'keepWaitingAction': keepWaitingAction,
       });
     } on PlatformException catch (error) {
       // Never expose SDK errors, which can contain callback URLs or tokens.

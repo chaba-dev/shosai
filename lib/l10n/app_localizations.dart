@@ -1560,6 +1560,24 @@ abstract class AppLocalizations {
   /// **'Connect Dropbox'**
   String get dropboxConnect;
 
+  /// No description provided for @dropboxCancelTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel connecting to Dropbox?'**
+  String get dropboxCancelTitle;
+
+  /// No description provided for @dropboxCancelConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel connection'**
+  String get dropboxCancelConnection;
+
+  /// No description provided for @dropboxKeepWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep waiting'**
+  String get dropboxKeepWaiting;
+
   /// No description provided for @dropboxCodeDescription.
   ///
   /// In en, this message translates to:

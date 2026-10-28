@@ -42,6 +42,7 @@ private final class DropboxTransientStorage: SecureStorageAccess {
 private final class DropboxAuthPresentation: SharedApplication {
   let mobile: MobileSharedApplication
   var state: String?
+  private(set) var native = false
   private let cancel: () -> Void
   private let failure: (String) -> Void
 
@@ -63,10 +64,14 @@ private final class DropboxAuthPresentation: SharedApplication {
   ) { failure("offline") }
   func presentPlatformSpecificAuth(_ authURL: URL) -> Bool {
     capture(authURL)
+    native = true
     return mobile.presentPlatformSpecificAuth(authURL)
   }
   func presentExternalApp(_ url: URL) {
-    if ["dbapi-2", "dbapi-8-emm"].contains(url.scheme ?? "") { capture(url) }
+    if ["dbapi-2", "dbapi-8-emm"].contains(url.scheme ?? "") {
+      capture(url)
+      native = true
+    }
     mobile.presentExternalApp(url)
   }
   func canPresentExternalApp(_ url: URL) -> Bool { mobile.canPresentExternalApp(url) }
@@ -74,6 +79,7 @@ private final class DropboxAuthPresentation: SharedApplication {
     _ authURL: URL, tryIntercept: @escaping (URL) -> Bool,
     cancelHandler: @escaping () -> Void
   ) {
+    native = false
     capture(authURL)
     mobile.presentAuthChannel(authURL, tryIntercept: tryIntercept, cancelHandler: cancel)
   }
@@ -89,6 +95,10 @@ private final class DropboxAuthorization: NSObject, FlutterSceneLifeCycleDelegat
   private var callbackScheme: String?
   private var operation: UUID?
   private var exchanging = false
+  private var cancellationPrompt: UIAlertController?
+  private var cancellationTitle = ""
+  private var cancelAction = ""
+  private var keepWaitingAction = ""
 
   static func register(with registrar: FlutterPluginRegistrar) {
     let instance = DropboxAuthorization()
@@ -109,6 +119,9 @@ private final class DropboxAuthorization: NSObject, FlutterSceneLifeCycleDelegat
     }
     guard let args = call.arguments as? [String: Any],
       let key = args["clientId"] as? String, !key.isEmpty,
+      let title = args["cancellationTitle"] as? String,
+      let cancel = args["cancelAction"] as? String,
+      let keepWaiting = args["keepWaitingAction"] as? String,
       key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }),
       let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]],
       types.contains(where: { ($0["CFBundleURLSchemes"] as? [String] ?? []).contains("db-\(key)") })
@@ -140,6 +153,9 @@ private final class DropboxAuthorization: NSObject, FlutterSceneLifeCycleDelegat
       dismissSharedAppAuthController: { [weak mobile] in mobile?.dismissAuthController() })
     pending = result
     operation = attempt
+    cancellationTitle = title
+    cancelAction = cancel
+    keepWaitingAction = keepWaiting
     callbackScheme = "db-\(key)"
     application = presentation
     manager = oauth
@@ -156,9 +172,9 @@ private final class DropboxAuthorization: NSObject, FlutterSceneLifeCycleDelegat
         includeGrantedScopes: false))
   }
 
-  private func receive(_ contexts: Set<UIOpenURLContext>) -> Bool {
-    guard let manager = manager, pending != nil, !exchanging,
-      let url = contexts.map(\.url).first(where: {
+  private func receive(_ contexts: Set<UIOpenURLContext>, in scene: UIScene) -> Bool {
+    guard let manager = manager, pending != nil, !exchanging else { return false }
+    let matching = contexts.map(\.url).first(where: {
         let states = URLComponents(url: $0, resolvingAgainstBaseURL: false)?
           .queryItems?.filter { $0.name == "state" } ?? []
         return $0.scheme == callbackScheme &&
@@ -167,7 +183,20 @@ private final class DropboxAuthorization: NSObject, FlutterSceneLifeCycleDelegat
           (($0.host == "1" && ["/connect", "/cancel"].contains($0.path)) ||
             ($0.host == "2" && ["/token", "/cancel"].contains($0.path)))
       })
-    else { return false }
+    guard let url = matching else {
+      // A stateless /cancel may belong to an older native attempt,
+      // so it can only request a local decision, never cancel the current one.
+      if application?.native == true, contexts.contains(where: {
+        let states = URLComponents(url: $0.url, resolvingAgainstBaseURL: false)?
+          .queryItems?.filter { $0.name == "state" } ?? []
+        return $0.url.scheme == callbackScheme &&
+          ["1", "2"].contains($0.url.host ?? "") && $0.url.path == "/cancel" && states.isEmpty
+      }) {
+        requestCancellation(in: scene)
+        return true
+      }
+      return false
+    }
     exchanging = true
     return manager.handleRedirectURL(url) { [weak self, weak manager] response in
       DispatchQueue.main.async {
@@ -196,29 +225,77 @@ private final class DropboxAuthorization: NSObject, FlutterSceneLifeCycleDelegat
     }
   }
 
+  private func requestCancellation(in scene: UIScene) {
+    guard let attempt = operation, pending != nil, !exchanging, cancellationPrompt == nil,
+      var presenter = (scene as? UIWindowScene)?.windows.first(where: { $0.isKeyWindow })?
+        .rootViewController else { return }
+    while let presented = presenter.presentedViewController { presenter = presented }
+    // URL delivery can overlap foreground or modal transitions. Recheck actual
+    // UIKit readiness without changing the authorization deadline.
+    if presenter.transitionCoordinator != nil || presenter.isBeingDismissed ||
+      presenter.isBeingPresented || presenter.viewIfLoaded?.window == nil {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        guard self?.operation == attempt else { return }
+        self?.requestCancellation(in: scene)
+      }
+      return
+    }
+    let prompt = UIAlertController(title: cancellationTitle, message: nil, preferredStyle: .alert)
+    prompt.addAction(UIAlertAction(title: cancelAction, style: .destructive) { [weak self, weak prompt] _ in
+      guard let self = self, self.operation == attempt, self.cancellationPrompt === prompt else { return }
+      self.finish(nil)
+    })
+    prompt.addAction(UIAlertAction(title: keepWaitingAction, style: .cancel) { [weak self, weak prompt] _ in
+      guard let self = self, self.operation == attempt, self.cancellationPrompt === prompt else { return }
+      // UIKit dismisses action alerts automatically. Keep ownership until that
+      // transition ends so duplicate callbacks cannot present over this alert.
+      DispatchQueue.main.async { [weak self, weak prompt] in
+        guard let prompt = prompt else { return }
+        self?.releaseDismissedPrompt(prompt, for: attempt)
+      }
+    })
+    cancellationPrompt = prompt
+    presenter.present(prompt, animated: true)
+  }
+
+  private func releaseDismissedPrompt(_ prompt: UIAlertController, for attempt: UUID) {
+    guard operation == attempt, cancellationPrompt === prompt else { return }
+    if prompt.presentingViewController == nil, !prompt.isBeingPresented,
+      prompt.viewIfLoaded?.window == nil {
+      cancellationPrompt = nil
+    } else {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        self?.releaseDismissedPrompt(prompt, for: attempt)
+      }
+    }
+  }
+
   private func finish(_ value: Any?) {
     let result = pending
     pending = nil
+    operation = nil
+    let prompt = cancellationPrompt
+    cancellationPrompt = nil
+    prompt?.dismiss(animated: false)
     deadline?.invalidate()
     deadline = nil
     application?.mobile.dismissAuthController()
     application = nil
     manager = nil
     callbackScheme = nil
-    operation = nil
     exchanging = false
     result?(value)
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
-    receive(URLContexts)
+    receive(URLContexts, in: scene)
   }
 
   func scene(
     _ scene: UIScene, willConnectTo session: UISceneSession,
     options connectionOptions: UIScene.ConnectionOptions?
   ) -> Bool {
-    receive(connectionOptions?.urlContexts ?? [])
+    receive(connectionOptions?.urlContexts ?? [], in: scene)
   }
 }
 
