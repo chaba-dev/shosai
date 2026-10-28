@@ -41,6 +41,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>$(GOOGLE_DRIVE_IOS_CALLBACK_SCHEME)</string>
+				<string>db-$(SHOSAI_DROPBOX_APP_KEY)</string>
 			</array>
 		</dict>
 	</array>
@@ -62,6 +63,11 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>dbapi-2</string>
+		<string>dbapi-8-emm</string>
+	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
 	<key>UIApplicationSceneManifest</key>

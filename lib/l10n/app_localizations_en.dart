@@ -896,6 +896,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dropboxConnect => 'Connect Dropbox';
 
   @override
+  String get dropboxCancelTitle => 'Cancel connecting to Dropbox?';
+
+  @override
+  String get dropboxCancelConnection => 'Cancel connection';
+
+  @override
+  String get dropboxKeepWaiting => 'Keep waiting';
+
+  @override
   String get dropboxCodeDescription =>
       'Approve access in your browser, then paste the Dropbox authorization code here. Add your books to this app’s folder under Apps in Dropbox. Next, confirm that folder or choose a subfolder before the connection is saved. Books are fetched only when opened or kept on this device.';
 
