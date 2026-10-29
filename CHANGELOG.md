@@ -115,6 +115,7 @@ All notable changes to this project will be documented in this file.
 - *(dropbox)* Add direct library connections (#246)
 - *(library)* Add native Google Drive connections (#247)
 - *(dropbox)* Authorize through native mobile SDKs (#250)
+- *(app)* Use dark icons for development builds (#253)
 
 ### 🐛 Bug Fixes
 
