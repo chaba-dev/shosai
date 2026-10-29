@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-28
+## [0.1.0] - 2026-10-29
 
 ### 🚀 Features
 
@@ -232,6 +232,7 @@ All notable changes to this project will be documented in this file.
 - *(pdf)* Pin PDFium checksums and ship its licence notices (#169)
 - *(android)* Package every ABI and run the packaged check on Android and iOS (#171)
 - *(mobile)* Use dev.shosai.shosai application identifiers (#251)
+- *(assets)* Update development app icon (#252)
 
 ### 🛡️ Security
 
