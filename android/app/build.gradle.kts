@@ -34,6 +34,12 @@ android {
     buildFeatures { buildConfig = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
 
+    sourceSets.configureEach {
+        if (name == "debug" || name == "profile") {
+            res.srcDir("src/dev/res")
+        }
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "dev.shosai.shosai"
