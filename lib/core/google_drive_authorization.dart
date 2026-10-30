@@ -244,6 +244,10 @@ final class GoogleDriveAuthorization {
     bool force = false,
   }) async {
     if (credential['kind'] == 'android') {
+      // Let Drive reject a stored token before asking GIS to renew it. Silent
+      // authorization can be unavailable offline; that is not revocation of
+      // the existing token. DriveTransport retries a 401 with force: true.
+      if (!force && credential['access_token'] is String) return credential;
       await _android();
       if (force && credential['access_token'] is String) {
         await GoogleSignInPlatform.instance.clearAuthorizationToken(
