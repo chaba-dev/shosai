@@ -212,6 +212,97 @@ void main() {
       LocationFailure.revoked,
     );
   });
+
+  test(
+    'a removed source book stays off the shelf until its file changes',
+    () async {
+      final t = await TempLibrary.create();
+      final book = await t.importBook(
+        t.copyFixture('sample.epub', 'book.epub'),
+      );
+      final locations = LibraryLocations(t.store);
+      final generation = await locations.connect('remote', 'Remote books');
+      const copy = LocationEntry(
+        key: 'books/copy.epub',
+        name: 'copy.epub',
+        isDirectory: false,
+        size: 1234,
+        revision: 'r1',
+      );
+      const spare = LocationEntry(
+        key: 'books/spare.epub',
+        name: 'spare.epub',
+        isDirectory: false,
+        size: 1234,
+        revision: 'r7',
+      );
+      await locations.admit('remote', generation, copy, book.contentHash);
+      await locations.admit('remote', generation, spare, book.contentHash);
+      await locations.locate(book.contentHash, (
+        locationId: 'remote',
+        key: copy.key,
+      ), generation: generation);
+      await Annotations(t.store).createNote(
+        book.id,
+        const BookAnchor(),
+        'Keep this note across a removal.',
+      );
+
+      expect((await t.library.remove(book.id)).removed, true);
+      expect((await t.library.page()).books, isEmpty);
+      // The next complete scan sees both files unchanged and offers neither.
+      expect(await locations.scan('remote', generation, [copy, spare]), {
+        copy.key,
+        spare.key,
+      });
+      expect(await locations.catalog(), isEmpty);
+      expect(
+        (await locations.hidden()).map((file) => file.entry.key),
+        unorderedEquals([copy.key, spare.key]),
+      );
+
+      // Changed bytes at a hidden key are a new candidate; a file that is
+      // gone is forgotten.
+      final replaced = LocationEntry(
+        key: copy.key,
+        name: copy.name,
+        isDirectory: false,
+        size: 2345,
+        revision: 'r2',
+      );
+      expect(await locations.scan('remote', generation, [replaced]), isEmpty);
+      expect((await locations.catalog()).single.entry.key, copy.key);
+      expect(await locations.hidden(), isEmpty);
+
+      // Admitting the content again from the candidate brings the notes back.
+      final again = await t.importBook(
+        t.copyFixture('sample.epub', 'again.epub'),
+      );
+      expect(again.contentHash, book.contentHash);
+      expect(
+        (await Annotations(t.store).summary(again.id)).latest,
+        'Keep this note across a removal.',
+      );
+      await locations.admit('remote', generation, replaced, again.contentHash);
+      expect(await locations.catalog(), isEmpty);
+
+      // Removing again hides the spare too once it is admitted, and unhiding
+      // puts it back on the shelf as a candidate.
+      await locations.admit('remote', generation, spare, again.contentHash);
+      await t.library.remove(again.id);
+      expect(await locations.scan('remote', generation, [replaced, spare]), {
+        replaced.key,
+        spare.key,
+      });
+      await locations.unhide((locationId: 'remote', key: spare.key));
+      expect((await locations.catalog()).single.entry.key, spare.key);
+      expect((await locations.hidden()).single.entry.key, copy.key);
+      expect(await locations.scan('remote', generation, [replaced, spare]), {
+        replaced.key,
+      });
+      expect((await locations.catalog()).single.entry.key, spare.key);
+    },
+  );
 }
 
 final class _Location implements LibraryLocation {

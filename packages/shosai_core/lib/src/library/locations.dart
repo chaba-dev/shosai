@@ -70,10 +70,84 @@ final class LibraryLocations {
       'DELETE FROM library_source_files WHERE location_id = ? AND locator_key = ?',
       [id, entry.key],
     );
+    // The content is in the library again: its other hidden copies are
+    // admitted copies once more, so they stay off the shelf as duplicates.
+    db.execute(
+      '''INSERT INTO library_source_admissions
+           (location_id, locator_key, content_hash, size, revision)
+         SELECT location_id, locator_key, content_hash, size, revision
+         FROM library_hidden_source_files WHERE content_hash = ?
+         ON CONFLICT(location_id, locator_key) DO NOTHING''',
+      [hash],
+    );
+    db.execute(
+      'DELETE FROM library_hidden_source_files WHERE content_hash = ?',
+      [hash],
+    );
+  });
+
+  /// Source files whose books were removed from the library, newest first.
+  /// Their files are untouched in their locations; a scan leaves them off the
+  /// shelf while their bytes are unchanged.
+  Future<List<({String locationId, LocationEntry entry, String contentHash})>>
+  hidden() => _store.read(
+    (db) => [
+      for (final row in db.select(
+        '''SELECT h.location_id, h.locator_key, h.content_hash, h.size, h.revision
+           FROM library_hidden_source_files h
+           JOIN library_locations l ON l.id = h.location_id AND l.removed = 0
+           ORDER BY h.hidden_at DESC, h.location_id, h.locator_key''',
+      ))
+        (
+          locationId: row.columnAt(0) as String,
+          entry: LocationEntry(
+            key: row.columnAt(1) as String,
+            name: (row.columnAt(1) as String).split('/').last,
+            isDirectory: false,
+            size: row.columnAt(3) as int?,
+            revision: row.columnAt(4) as String?,
+          ),
+          contentHash: row.columnAt(2) as String,
+        ),
+    ],
+  );
+
+  /// Offer a hidden file on the shelf again. It is a candidate like a newly
+  /// discovered file: opening it reads the bytes and brings the book, and the
+  /// notes its content kept, back.
+  Future<void> unhide(BookLocator locator) => _store.transaction((db) {
+    final row = db
+        .select(
+          '''SELECT content_hash, size, revision FROM library_hidden_source_files
+             WHERE location_id = ? AND locator_key = ?''',
+          [locator.locationId, locator.key],
+        )
+        .firstOrNull;
+    if (row == null) {
+      throw const CoreException.notFound('The file is not hidden.');
+    }
+    db.execute(
+      '''INSERT INTO library_source_files (location_id, locator_key, name, size, revision)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(location_id, locator_key) DO NOTHING''',
+      [
+        locator.locationId,
+        locator.key,
+        locator.key.split('/').last,
+        row.columnAt(1),
+        row.columnAt(2),
+      ],
+    );
+    db.execute(
+      'DELETE FROM library_hidden_source_files WHERE location_id = ? AND locator_key = ?',
+      [locator.locationId, locator.key],
+    );
   });
 
   /// Publish a complete bounded scan. Changed bytes at an admitted key become
   /// candidates again, without changing the old book identity or its notes.
+  /// A hidden file (its book removed from the library) stays off the shelf
+  /// while its bytes are unchanged; changed or gone, it is forgotten.
   Future<Set<String>> scan(
     String id,
     int generation,
@@ -97,11 +171,21 @@ final class LibraryLocations {
           revision: row.columnAt(2) as String?,
         ),
     };
+    final hidden = {
+      for (final row in db.select(
+        'SELECT locator_key, size, revision FROM library_hidden_source_files WHERE location_id = ?',
+        [id],
+      ))
+        row.columnAt(0) as String: (
+          size: row.columnAt(1) as int?,
+          revision: row.columnAt(2) as String?,
+        ),
+    };
     final known = <String>{};
     final present = entries.map((entry) => entry.key).toSet();
     db.execute('DELETE FROM library_source_files WHERE location_id = ?', [id]);
     for (final entry in entries) {
-      final previous = admitted[entry.key];
+      final previous = admitted[entry.key] ?? hidden[entry.key];
       if (previous != null &&
           previous.size == entry.size &&
           previous.revision == entry.revision) {
@@ -128,6 +212,12 @@ final class LibraryLocations {
     for (final key in admitted.keys.where((key) => !present.contains(key))) {
       db.execute(
         'DELETE FROM library_source_admissions WHERE location_id = ? AND locator_key = ?',
+        [id, key],
+      );
+    }
+    for (final key in hidden.keys.where((key) => !known.contains(key))) {
+      db.execute(
+        'DELETE FROM library_hidden_source_files WHERE location_id = ? AND locator_key = ?',
         [id, key],
       );
     }

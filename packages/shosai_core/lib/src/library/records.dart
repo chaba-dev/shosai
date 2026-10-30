@@ -538,6 +538,19 @@ Book _insertBook(
 Book? _removeBook(Database db, int id) {
   final book = _bookById(db, id);
   if (book == null) return null;
+  // Deleting the book cascades its source admissions, and a later scan would
+  // offer the same files again. Hide them instead; the files stay untouched.
+  db.execute(
+    '''INSERT INTO library_hidden_source_files
+         (location_id, locator_key, content_hash, size, revision)
+       SELECT location_id, locator_key, content_hash, size, revision
+       FROM library_source_admissions WHERE content_hash = ?
+       ON CONFLICT(location_id, locator_key) DO UPDATE SET
+         content_hash = excluded.content_hash, size = excluded.size,
+         revision = excluded.revision,
+         hidden_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')''',
+    [book.contentHash],
+  );
   db.execute('DELETE FROM books WHERE id = ?', [id]);
   // The copy's directory as recorded at import (its canonical path then),
   // never a fresh resolution of the configured directory.

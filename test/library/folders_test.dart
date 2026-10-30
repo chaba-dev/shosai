@@ -525,6 +525,73 @@ void main() {
     expect((await library.get(book.id))!.keptOnDevice, isTrue);
   });
 
+  test(
+    'a book removed from the library is not offered by the next scan',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-remove-source',
+      );
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      addTearDown(() async {
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      final source = Directory('${directory.path}/source')..createSync();
+      final file = File(
+        'packages/shosai_core/test/fixtures/sample.epub',
+      ).copySync('${source.path}/book.epub');
+      final library = Library(
+        store,
+        managedDirectory: '${directory.path}/books',
+        inspectors: {BookFormat.epub: const EpubInspector()},
+      );
+      final locations = LibraryLocations(store);
+      final folders = LibraryFolders(
+        Preferences(store),
+        library,
+        locations,
+        () async => '${directory.path}/staged.epub',
+        BookFileCache(store, '${directory.path}/cache'),
+        providers: [_FixtureProvider(source.path)],
+      );
+      addTearDown(folders.close);
+      await folders.add(
+        LibraryConnection('src', 'Books', 'fixture', {'root': source.path}),
+      );
+      final offered = await folders.discover();
+      expect(offered.map((f) => f.entry.name), ['book.epub']);
+      final book = await folders.importEntry('src', offered.single.entry);
+      expect(await folders.discover(refresh: true), isEmpty);
+
+      expect((await library.remove(book.id)).removed, true);
+      expect((await library.page()).books, isEmpty);
+      // The file is untouched, and the shelf does not offer it again.
+      expect(file.existsSync(), isTrue);
+      expect(await folders.discover(refresh: true), isEmpty);
+      expect((await locations.hidden()).single.entry.name, 'book.epub');
+
+      // Unhiding offers it again, and opening it brings the book back.
+      await locations.unhide((
+        locationId: 'src',
+        key: offered.single.entry.key,
+      ));
+      final again = await folders.discover(refresh: true);
+      expect(again.map((f) => f.entry.name), ['book.epub']);
+      final restored = await folders.importEntry('src', again.single.entry);
+      expect(restored.contentHash, book.contentHash);
+      expect(await locations.hidden(), isEmpty);
+      expect(await folders.discover(refresh: true), isEmpty);
+
+      // A file that changes after its book was removed is a new candidate.
+      await library.remove(restored.id);
+      file.writeAsBytesSync([...file.readAsBytesSync(), 0]);
+      expect((await folders.discover(refresh: true)).map((f) => f.entry.name), [
+        'book.epub',
+      ]);
+      expect(await locations.hidden(), isEmpty);
+    },
+  );
+
   testWidgets('settings manages multiple independent connections', (
     tester,
   ) async {
