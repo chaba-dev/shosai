@@ -130,6 +130,73 @@ void main() {
     }
   }
 
+  for (final width in [900.0, 1280.0]) {
+    for (final rtl in [false, true]) {
+      testWidgets('touch thirds turn whole PDF spreads ($width, RTL $rtl)', (
+        tester,
+      ) async {
+        await _open(
+          tester,
+          Size(width, 600),
+          rtl: rtl,
+          settings: _settings.copyWith(twoPages: true),
+        );
+        expect(_status(tester), '20% · page 1 of 5');
+        await _tap(tester, rtl ? .15 : .85);
+        expect(_status(tester), '60% · pages 2–3 of 5');
+        await _tap(tester, rtl ? .15 : .85);
+        expect(_status(tester), '100% · pages 4–5 of 5');
+        await _tap(tester, rtl ? .85 : .15);
+        expect(_status(tester), '60% · pages 2–3 of 5');
+        expect(_toolbar.hitTestable(), findsNothing);
+      });
+    }
+  }
+
+  testWidgets('a swipe on the phone PDF place turns the page', (tester) async {
+    await _open(tester, const Size(390, 844));
+    await tester.drag(_folio, const Offset(-160, 0));
+    await tester.pumpAndSettle();
+    expect(_place(tester), 'page 2 of 5');
+    await tester.drag(_folio, const Offset(160, 0));
+    await tester.pumpAndSettle();
+    expect(_place(tester), 'page 1 of 5');
+  });
+
+  testWidgets(
+    'keyboard closure restores current system bars after the cooldown',
+    (tester) async {
+      const channel = MethodChannel('dev.shosai/reader_system_bars');
+      final calls = <bool>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        expectSync(call.method, 'setShown');
+        calls.add(call.arguments as bool);
+        return null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await _open(tester, const Size(390, 844));
+      expect(calls.last, isFalse);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = FakeViewPadding.zero;
+      await tester.pump();
+      final before = calls.length;
+      await tester.pump(const Duration(seconds: 1));
+      expect(calls.length, before);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(calls.length, before + 1);
+      expect(calls.last, isFalse);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
   testWidgets(
     'desktop movement, idle boundary, chrome hover, panel, keys and exit',
     (tester) async {

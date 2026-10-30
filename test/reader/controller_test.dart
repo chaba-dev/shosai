@@ -63,6 +63,70 @@ ReaderController _controller({FlutterBridge? bridge}) => ReaderController(
 );
 
 void main() {
+  for (final action in ['keep', 'show', 'replace', 'suspend', 'dispose']) {
+    testWidgets(
+      'system bars restoration respects $action after keyboard close',
+      (tester) async {
+        final calls = <bool>[];
+        final controller = ReaderController(
+          bridge: HarnessBridge(),
+          systemBars: calls.add,
+          decoder: (pixels, {required width, required height}) async {
+            final recorder = ui.PictureRecorder();
+            ui.Canvas(recorder);
+            final picture = recorder.endRecording();
+            final image = await picture.toImage(1, 1);
+            picture.dispose();
+            return image;
+          },
+        );
+        addTearDown(controller.dispose);
+        controller.dispatch(const ReaderOpenRequested('/books/quiet.pdf'));
+        for (var i = 0; i < 30; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          if (controller.model.pageImage != null && !controller.model.busy) {
+            break;
+          }
+        }
+        expect(controller.model.chromeShown, isFalse);
+        controller.dispatch(const ReaderSystemBarsRestoreRequested());
+        await tester.pump(const Duration(milliseconds: 1000));
+        switch (action) {
+          case 'show':
+            controller.dispatch(const ReaderPageTapped(.5, touch: true));
+          case 'replace':
+            controller.dispatch(const ReaderOpenRequested('/books/other.pdf'));
+          case 'suspend':
+            controller.dispatch(const ReaderSuspended());
+          case 'dispose':
+            controller.dispose();
+        }
+        final beforeRetry = calls.length;
+        await tester.pump(const Duration(milliseconds: 100));
+        if (action == 'keep' || action == 'show') {
+          expect(calls.length, beforeRetry + 1);
+          expect(calls.last, action == 'show');
+        } else {
+          // Replacement may publish its own visibility transitions, but may not
+          // receive the old document's delayed restoration.
+          await tester.pumpAndSettle();
+          final afterReplacement = calls.length;
+          await tester.pump(const Duration(seconds: 2));
+          expect(calls.length, afterReplacement);
+          if (action == 'replace') {
+            // Only initial quiet, replacement loading, replacement quiet.
+            // A stale retry at 1100 ms would add a fourth call, even if it
+            // happened before the post-replacement baseline above.
+            expect(controller.model.busy, isFalse);
+            expect(calls, [false, true, false]);
+          } else {
+            expect(calls.length, beforeRetry);
+          }
+        }
+      },
+    );
+  }
+
   for (final action in ['keep', 'dismiss', 'navigate', 'suspend', 'replace']) {
     testWidgets('a delayed PDF preview respects $action', (tester) async {
       final bridge = _ReferenceBridge();

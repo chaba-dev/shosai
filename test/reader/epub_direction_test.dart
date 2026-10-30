@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -54,8 +52,9 @@ void main() {
     HarnessBridge harness, {
     FlutterReaderSettings? settings,
     ReaderPlaceRequests? placeRequests,
+    Size size = const Size(1280, 800),
   }) async {
-    tester.view.physicalSize = const ui.Size(1280, 800);
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await renderHarnessState(
@@ -99,6 +98,56 @@ void main() {
 
   double centreOf(WidgetTester tester, String key) =>
       tester.getCenter(find.byKey(ValueKey(key))).dx;
+
+  for (final direction in ['ltr', 'rtl', 'vertical']) {
+    testWidgets('swipes on EPUB furniture and margins turn $direction pages', (
+      tester,
+    ) async {
+      for (final size in [const Size(390, 844), const Size(900, 1000)]) {
+        await openReader(
+          tester,
+          bridge(
+            direction == 'rtl' ? 'rtl' : null,
+            epub: direction == 'vertical'
+                ? verticalJapaneseEpub(paragraphs: 120, pageProgression: null)
+                : null,
+          ),
+          size: size,
+          settings: harnessReaderSettings.copyWith(twoPages: false),
+        );
+        await tester.tapAt(
+          tester.getCenter(find.byKey(const ValueKey('reader-stage'))),
+        );
+        await tester.pumpAndSettle();
+        final movement = Offset(direction == 'ltr' ? -150 : 150, 0);
+        for (final key in ['reader-folio', 'reader-running-head']) {
+          final before = page(tester);
+          await tester.drag(find.byKey(ValueKey(key)), movement);
+          await settle(tester);
+          expect(
+            page(tester).canonicalStart,
+            // A vertical paragraph boundary may skip its newline separator.
+            inInclusiveRange(before.canonicalEnd, before.canonicalEnd + 1),
+            reason: key,
+          );
+        }
+        if (size.width > 600) {
+          final rect = tester.getRect(
+            find.byKey(const ValueKey('reader-page')),
+          );
+          final before = page(tester);
+          await tester.dragFrom(Offset(rect.center.dx, rect.top + 8), movement);
+          await settle(tester);
+          expect(
+            page(tester).canonicalStart,
+            inInclusiveRange(before.canonicalEnd, before.canonicalEnd + 1),
+            reason: 'paper margin',
+          );
+        }
+        await closeReader(tester);
+      }
+    });
+  }
 
   testWidgets('a right-to-left book reads right to left and turns leftward', (
     tester,

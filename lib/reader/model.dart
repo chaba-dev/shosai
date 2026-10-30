@@ -681,6 +681,11 @@ final class ReaderModel {
 
   bool get chromeShown => document == null || chromeVisible || chromePinned;
 
+  // A selection menu preserves existing chrome without revealing hidden chrome
+  // during keyboard-only selection.
+  bool get chromeIdleInhibited =>
+      chromePinned || selectionPhase == ReaderSelectionPhase.selected;
+
   /// Progress bar and status wording inputs (RD-05).
   final ReaderProgressPresentation progress;
 

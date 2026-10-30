@@ -469,10 +469,15 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         child: Transform.scale(
           scale: _previewScale,
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              dragDevices: {...ScrollConfiguration.of(context).dragDevices}
-                ..remove(ui.PointerDeviceKind.touch),
-            ),
+            // Only the inner PDF owner pans its scroll controllers itself.
+            // A furniture fallback must preserve descendant touch scrolling.
+            behavior: widget.fittedZoom == null
+                ? ScrollConfiguration.of(context)
+                : ScrollConfiguration.of(context).copyWith(
+                    dragDevices: {
+                      ...ScrollConfiguration.of(context).dragDevices,
+                    }..remove(ui.PointerDeviceKind.touch),
+                  ),
             child: widget.builder(_horizontal, _vertical),
           ),
         ),

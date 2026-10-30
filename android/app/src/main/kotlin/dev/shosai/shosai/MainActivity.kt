@@ -488,6 +488,12 @@ class MainActivity : FlutterActivity() {
         DocumentImportChannel.attach(this, flutterEngine)
         FolderLocations.attach(this, flutterEngine)
         DropboxAuthorization.attach(this, flutterEngine)
+        ReaderSystemBars.attach(this, flutterEngine)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) ReaderSystemBars.restore(this)
     }
 
     @Deprecated("Deprecated by Android, retained for FlutterActivity result forwarding")
@@ -502,6 +508,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        ReaderSystemBars.detach(this)
         DropboxAuthorization.detach(this, isChangingConfigurations)
         FolderLocations.detach(this, isChangingConfigurations)
         DocumentImportChannel.detach(this, isChangingConfigurations)

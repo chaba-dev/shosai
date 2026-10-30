@@ -566,11 +566,20 @@ void main() {
       );
     });
 
-    testWidgets('F10 moves focus to the actions and Escape dismisses them', (
+    testWidgets('selection menu pins visible chrome and retains F10 focus', (
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
       await _open(tester, _reader(bridge: _SelectionBridge()));
+      final mouse = await tester.createGesture(
+        kind: ui.PointerDeviceKind.mouse,
+      );
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('reader-stage'))),
+      );
+      await tester.pump(const Duration(milliseconds: 180));
       await dragFixtureSelection(tester, from: 4, to: 12);
       await settleReaderSelection(tester);
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
@@ -579,6 +588,14 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.f10);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await settleReaderSelection(tester);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      await mouse.moveTo(const Offset(-1, -1));
+      await tester.pump(const Duration(milliseconds: 180));
+      expect(
+        find.byKey(const ValueKey('reader-header-contents')).hitTestable(),
+        findsOneWidget,
+      );
       expect(
         FocusManager.instance.primaryFocus?.debugLabel,
         'selection actions',
@@ -592,6 +609,55 @@ void main() {
       expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
       expect(FocusManager.instance.primaryFocus?.debugLabel, 'reader surface');
     });
+
+    testWidgets('keyboard selection does not reveal hidden chrome', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(tester, _reader(bridge: _SelectionBridge()));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f10);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await settleReaderSelection(tester);
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reader-header-contents')).hitTestable(),
+        findsNothing,
+      );
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'selection actions',
+      );
+    });
+
+    testWidgets(
+      'height-constrained selection actions remain touch-scrollable',
+      (tester) async {
+        _setView(tester, const Size(320, 140));
+        await _open(tester, _reader(bridge: _SelectionBridge()));
+        await dragFixtureSelection(tester, from: 4, to: 12);
+        await settleReaderSelection(tester);
+        final menu = find.byKey(const ValueKey('selection-actions'));
+        final scroll = tester
+            .state<ScrollableState>(
+              find
+                  .descendant(of: menu, matching: find.byType(Scrollable))
+                  .first,
+            )
+            .position;
+        expect(scroll.maxScrollExtent, greaterThan(0));
+        expect(scroll.pixels, 0);
+        await tester.drag(menu, const Offset(0, -80));
+        await tester.pumpAndSettle();
+        expect(scroll.pixels, greaterThan(0));
+        await tester.drag(menu, const Offset(0, 120));
+        await tester.pumpAndSettle();
+        expect(scroll.pixels, 0);
+      },
+    );
 
     testWidgets('the context-menu key opens the actions', (tester) async {
       _setView(tester, const Size(1280, 800));

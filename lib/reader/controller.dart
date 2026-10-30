@@ -346,6 +346,8 @@ final class ReaderController implements Listenable {
   FlutterReaderProgress _typographyProgress;
   Timer? _chromeTimer;
   int _chromeRevision = 0;
+  Timer? _systemBarsTimer;
+  int _systemBarsRevision = 0;
   ReaderRasterFit _rasterFit;
   double _rasterZoom;
   final double _baseScale;
@@ -641,14 +643,27 @@ final class ReaderController implements Listenable {
         }
         _scheduleChromeHide();
       case ReaderPointerExited():
-        _hideChrome();
+        if (!_model.chromeIdleInhibited) _hideChrome();
       case ReaderChromeDismissed():
         _hideChrome();
+      case ReaderSystemBarsRestoreRequested():
+        _systemBarsTimer?.cancel();
+        final generation = _model.generation;
+        final revision = ++_systemBarsRevision;
+        _systemBarsTimer = Timer(const Duration(milliseconds: 1100), () {
+          dispatch(_ReaderSystemBarsRestoreReady(generation, revision));
+        });
+      case _ReaderSystemBarsRestoreReady():
+        if (_isCurrent(message.generation) &&
+            message.revision == _systemBarsRevision &&
+            !_suspended) {
+          _systemBars(_model.chromeShown);
+        }
       case _ReaderChromeIdle():
         if (_isCurrent(message.generation) &&
             message.revision == _chromeRevision &&
             !_model.chromeHovered &&
-            !_model.chromePinned) {
+            !_model.chromeIdleInhibited) {
           _hideChrome();
         }
       case ReaderPageTapped():
@@ -1464,6 +1479,7 @@ final class ReaderController implements Listenable {
         _annotationUpdateCompleted(message);
       case _ReaderDisposeRequested():
         _chromeTimer?.cancel();
+        _systemBarsTimer?.cancel();
         _systemBars(true);
         _disposeRequested();
     }
@@ -1479,7 +1495,8 @@ final class ReaderController implements Listenable {
       _frameScheduler(() {
         if (_isCurrent(generation) &&
             revision == _chromeRevision &&
-            !_model.chromeShown) {
+            !_model.chromeShown &&
+            _model.selectionPhase == ReaderSelectionPhase.idle) {
           _focusAdapter(ReaderFocusTarget.surface);
         }
       });
@@ -1493,7 +1510,7 @@ final class ReaderController implements Listenable {
         !_model.pointerChrome ||
         !_model.chromeVisible ||
         _model.chromeHovered ||
-        _model.chromePinned) {
+        _model.chromeIdleInhibited) {
       return;
     }
     final generation = _model.generation;
@@ -2517,8 +2534,12 @@ final class ReaderController implements Listenable {
     final session = _epubSession;
     final document = _model.document;
     if (page == null || session == null || document == null || delta == 0) {
-      // A PDF, or an EPUB with no page installed yet, steps by logical unit.
-      _unitRequested(_model.unit + delta);
+      // PDF touch zones turn the same whole spread as keys and swipes.
+      _unitRequested(
+        document?.format == FlutterBookFormat.pdf && _model.layout.spread
+            ? pdfSpreadStep(_model.unit, delta)
+            : _model.unit + delta,
+      );
       return;
     }
     if (_model.busy ||
@@ -6638,6 +6659,7 @@ final class ReaderController implements Listenable {
   void _suspendRequested() {
     if (_suspended || _closing) return;
     _suspended = true;
+    _systemBarsTimer?.cancel();
     _retireDocumentPicker();
     if (_model.document == null && !_model.busy) return;
     final placeNoteNotice = _activeNoteEditor == _ReaderNoteTarget.place
@@ -6704,6 +6726,7 @@ final class ReaderController implements Listenable {
   }
 
   void _resumeRequested() {
+    if (!_closing) _systemBars(_model.chromeShown);
     if (!_suspended || _closing) return;
     _suspended = false;
     _recoverIfIdle();
@@ -6807,10 +6830,15 @@ final class ReaderController implements Listenable {
             )) &&
         previous.selectionDescription != derived.selectionDescription;
     _model = derived;
+    if (previous.generation != derived.generation) {
+      _systemBarsTimer?.cancel();
+    }
     if (previous.chromeShown != derived.chromeShown) {
       _systemBars(derived.chromeShown);
     }
-    if (previous.chromePinned != derived.chromePinned) _scheduleChromeHide();
+    if (previous.chromeIdleInhibited != derived.chromeIdleInhibited) {
+      _scheduleChromeHide();
+    }
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
       unawaited(_announceSelection(derived.selectionDescription));
     }

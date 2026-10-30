@@ -224,6 +224,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   _ReaderMiniatureRenderBoundary? _stageBoundary;
   bool _stageFrameComplete = false;
   int _stageFrameRevision = 0;
+  bool _keyboardVisible = false;
 
   void _focusHeaderAction() {
     final focus = switch (_lastOpenPanel) {
@@ -356,8 +357,14 @@ class _ReaderScreenState extends State<ReaderScreen>
         baseScale: View.of(context).devicePixelRatio,
         zonesHintDismissed: widget.initialSettings?.zonesHintDismissed ?? false,
         systemBars: (shown) {
-          if (defaultTargetPlatform == TargetPlatform.android ||
-              defaultTargetPlatform == TargetPlatform.iOS) {
+          if (defaultTargetPlatform == TargetPlatform.android) {
+            // Optional for embedded Flutter hosts without the Android adapter.
+            unawaited(
+              const OptionalMethodChannel(
+                'dev.shosai/reader_system_bars',
+              ).invokeMethod<void>('setShown', shown),
+            );
+          } else if (defaultTargetPlatform == TargetPlatform.iOS) {
             unawaited(
               SystemChrome.setEnabledSystemUIMode(
                 SystemUiMode.manual,
@@ -595,7 +602,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   @override
-  void didChangeMetrics() => _stageChanged();
+  void didChangeMetrics() {
+    _stageChanged();
+    final visible = View.of(context).viewInsets.bottom > 0;
+    if (_keyboardVisible && !visible && _controllerInitialized) {
+      _controller.dispatch(const ReaderSystemBarsRestoreRequested());
+    }
+    _keyboardVisible = visible;
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {

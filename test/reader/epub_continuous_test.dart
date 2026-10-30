@@ -197,6 +197,33 @@ void main() {
     );
   }
 
+  for (final width in [390.0, 900.0]) {
+    testWidgets(
+      'continuous EPUB keeps touch scrolling in both directions at $width',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await openReader(
+          tester,
+          bridge(epub: longChapterEpub(paragraphs: 40), unitCount: 2),
+        );
+        await settle(tester);
+        final surface = find.byKey(
+          const ValueKey('reader-continuous-presentation'),
+        );
+        expect(chapterScroll(tester).pixels, 0);
+        await tester.drag(surface, const Offset(0, -260));
+        await settle(tester);
+        expect(chapterScroll(tester).pixels, greaterThan(100));
+        await tester.drag(surface, const Offset(0, 2000));
+        await settle(tester);
+        expect(chapterScroll(tester).pixels, 0);
+        await closeReader(tester);
+      },
+    );
+  }
+
   testWidgets('a chapter is one page that scrolls', (tester) async {
     await openReader(tester, bridge());
     await settle(tester);

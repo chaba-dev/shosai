@@ -191,7 +191,11 @@ class _ReaderStage extends StatelessWidget {
               : content,
         );
         if (phone || !paper) {
-          return _ReaderPageTapScope(dispatch: dispatch, child: scoped);
+          return _ReaderPageTapScope(
+            model: model,
+            dispatch: dispatch,
+            child: scoped,
+          );
         }
         // A spread is two pages of paper side by side, each as wide as a
         // single page may be, under one `shadow-page`.
@@ -205,6 +209,7 @@ class _ReaderStage extends StatelessWidget {
             width: width,
             height: constraints.maxHeight,
             child: _ReaderPageTapScope(
+              model: model,
               dispatch: dispatch,
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -380,7 +385,12 @@ class _ReaderSpreadGutter extends StatelessWidget {
 /// Shares page coordinates with the selectable surface. Links and long presses
 /// keep their own gestures; only a completed non-link tap reaches this scope.
 class _ReaderPageTapScope extends StatefulWidget {
-  const _ReaderPageTapScope({required this.dispatch, required this.child});
+  const _ReaderPageTapScope({
+    required this.model,
+    required this.dispatch,
+    required this.child,
+  });
+  final ReaderModel model;
   final void Function(ReaderMessage) dispatch;
   final Widget child;
 
@@ -429,15 +439,23 @@ class _ReaderPageTapScopeState extends State<_ReaderPageTapScope> {
 
       return _ReaderPageTapHost(
         tap: tap,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          excludeFromSemantics: true,
-          onTapUp: (details) {
-            if (tap(details.globalPosition, details.kind) case final message?) {
-              widget.dispatch(message);
-            }
-          },
-          child: widget.child,
+        // Content's recognizer wins within the document (including PDF
+        // pan/pinch and selection). This ancestor handles furniture/margins.
+        child: _ReaderPageGestures(
+          model: widget.model,
+          dispatch: widget.dispatch,
+          fittedZoom: null,
+          builder: (_, _) => GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            excludeFromSemantics: true,
+            onTapUp: (details) {
+              if (tap(details.globalPosition, details.kind)
+                  case final message?) {
+                widget.dispatch(message);
+              }
+            },
+            child: widget.child,
+          ),
         ),
       );
     },

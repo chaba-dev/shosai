@@ -28,6 +28,17 @@ final class ReaderChromeDismissed extends ReaderMessage {
   const ReaderChromeDismissed();
 }
 
+/// Android may keep system bars visible briefly after the keyboard closes.
+final class ReaderSystemBarsRestoreRequested extends ReaderMessage {
+  const ReaderSystemBarsRestoreRequested();
+}
+
+final class _ReaderSystemBarsRestoreReady extends ReaderMessage {
+  const _ReaderSystemBarsRestoreReady(this.generation, this.revision);
+  final int generation;
+  final int revision;
+}
+
 final class ReaderZonesHintDismissed extends ReaderMessage {
   const ReaderZonesHintDismissed({this.persist = true});
   final bool persist;
