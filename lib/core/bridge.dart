@@ -855,6 +855,8 @@ class FlutterOpenRequest {
 
 /// The settings the library loads and saves: the reader's, and the order the
 /// shelf lists books in.
+enum FlutterReaderProgress { page, percent, off }
+
 class FlutterReaderSettings {
   final bool continuous;
   final String theme;
@@ -865,6 +867,8 @@ class FlutterReaderSettings {
   /// The Pages setting: two pages side by side where there is room for them.
   final bool twoPages;
   final bool animations;
+  final FlutterReaderProgress progress;
+  final bool zonesHintDismissed;
   final FlutterLibrarySort librarySort;
 
   const FlutterReaderSettings({
@@ -875,6 +879,8 @@ class FlutterReaderSettings {
     required this.pdfZoom,
     this.twoPages = true,
     this.animations = true,
+    this.progress = FlutterReaderProgress.page,
+    this.zonesHintDismissed = false,
     this.librarySort = FlutterLibrarySort.recent,
   });
 
@@ -886,6 +892,8 @@ class FlutterReaderSettings {
     double? pdfZoom,
     bool? twoPages,
     bool? animations,
+    FlutterReaderProgress? progress,
+    bool? zonesHintDismissed,
     FlutterLibrarySort? librarySort,
   }) => FlutterReaderSettings(
     continuous: continuous ?? this.continuous,
@@ -895,6 +903,8 @@ class FlutterReaderSettings {
     pdfZoom: pdfZoom ?? this.pdfZoom,
     twoPages: twoPages ?? this.twoPages,
     animations: animations ?? this.animations,
+    progress: progress ?? this.progress,
+    zonesHintDismissed: zonesHintDismissed ?? this.zonesHintDismissed,
     librarySort: librarySort ?? this.librarySort,
   );
 
@@ -907,6 +917,8 @@ class FlutterReaderSettings {
       pdfZoom.hashCode ^
       twoPages.hashCode ^
       animations.hashCode ^
+      progress.hashCode ^
+      zonesHintDismissed.hashCode ^
       librarySort.hashCode;
 
   @override
@@ -921,6 +933,8 @@ class FlutterReaderSettings {
           pdfZoom == other.pdfZoom &&
           twoPages == other.twoPages &&
           animations == other.animations &&
+          progress == other.progress &&
+          zonesHintDismissed == other.zonesHintDismissed &&
           librarySort == other.librarySort;
 }
 

@@ -7,6 +7,8 @@ import '../store/store.dart';
 
 enum ReaderTheme { light, sepia, dark }
 
+enum ReaderProgress { page, percent, off }
+
 /// The reader's settings.
 ///
 /// [pdfZoom] is a scale from [minPdfZoom] to [maxPdfZoom], or one of the
@@ -20,6 +22,8 @@ final class ReaderSettings {
     this.pdfZoom = pdfZoomFitPage,
     this.twoPages = true,
     this.animations = true,
+    this.progress = ReaderProgress.page,
+    this.zonesHintDismissed = false,
   });
 
   static const pdfZoomFitPage = 0.0;
@@ -45,6 +49,11 @@ final class ReaderSettings {
   /// Animate page turns.
   final bool animations;
 
+  final ReaderProgress progress;
+
+  /// Local-device instruction, not a per-book preference.
+  final bool zonesHintDismissed;
+
   /// Whether every value is within its supported range.
   bool get isValid =>
       _within(epubFontSize, minEpubFontSize, maxEpubFontSize) &&
@@ -62,7 +71,9 @@ final class ReaderSettings {
       other.epubLineSpacing == epubLineSpacing &&
       other.pdfZoom == pdfZoom &&
       other.twoPages == twoPages &&
-      other.animations == animations;
+      other.animations == animations &&
+      other.progress == progress &&
+      other.zonesHintDismissed == zonesHintDismissed;
 
   @override
   int get hashCode => Object.hash(
@@ -73,6 +84,8 @@ final class ReaderSettings {
     pdfZoom,
     twoPages,
     animations,
+    progress,
+    zonesHintDismissed,
   );
 
   @override
@@ -92,6 +105,8 @@ const _epubLineSpacingKey = 'reader.epub_line_spacing';
 const _pdfZoomKey = 'reader.pdf_zoom';
 const _pagesKey = 'reader.pages';
 const _animationsKey = 'reader.animations';
+const _progressKey = 'reader.progress';
+const _zonesHintKey = 'reader.zones_hint_dismissed';
 
 /// Loads and saves [ReaderSettings].
 final class ReaderSettingsStore {
@@ -138,6 +153,10 @@ final class ReaderSettingsStore {
       ),
       twoPages: stored[_pagesKey] != 'one',
       animations: stored[_animationsKey] != 'off',
+      progress:
+          ReaderProgress.values.asNameMap()[stored[_progressKey]] ??
+          ReaderProgress.page,
+      zonesHintDismissed: stored[_zonesHintKey] == 'true',
     );
     return loaded;
   }
@@ -157,6 +176,8 @@ final class ReaderSettingsStore {
       _pdfZoomKey: '${settings.pdfZoom}',
       _pagesKey: settings.twoPages ? 'two' : 'one',
       _animationsKey: settings.animations ? 'on' : 'off',
+      _progressKey: settings.progress.name,
+      _zonesHintKey: '${settings.zonesHintDismissed}',
     });
   }
 }

@@ -268,5 +268,14 @@
   "locationNoFolders": "端末のフォルダ、またはシステムのファイルプロバイダが提供するフォルダを接続してください。",
   "locationNextPage": "次のページ",
   "cardKeepOnDevice": "この端末に保存",
-  "cardStopKeeping": "この端末への保存を解除"
+  "cardStopKeeping": "この端末への保存を解除",
+  "readerProgressLabel": "進捗",
+  "readerProgressPage": "ページ",
+  "readerProgressPercent": "割合",
+  "readerProgressOff": "非表示",
+  "readerQuietPageOf": "{total} ページ中 {page} ページ",
+  "readerControls": "メニュー",
+  "readerZonesTitle": "ページのめくり方",
+  "readerZonesInstruction": "左右をタップでページ、中央でメニュー\nスワイプでもめくれます。タップして始める。",
+  "readerZonesLeftward": "この本は左へめくります。\n左右をタップでページ、中央でメニュー。スワイプでもめくれます。タップして始める。"
 }

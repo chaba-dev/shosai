@@ -1113,6 +1113,8 @@ void main() {
       pdfZoom: -1,
       twoPages: false,
       animations: false,
+      progress: FlutterReaderProgress.percent,
+      zonesHintDismissed: true,
       librarySort: FlutterLibrarySort.title,
     );
     await bridge.saveReaderSettings(value: settings);

@@ -543,6 +543,18 @@ abstract final class ShosaiTokens {
   /// color.page*)
   static const readerPageNumberAlpha = 0.55;
 
+  /// `reader.folio.fontSize` — Design system page themes (references into
+  /// color.page*)
+  static const readerFolioFontSize = 11.0;
+
+  /// `reader.folio.lineHeight` — Design system page themes (references into
+  /// color.page*)
+  static const readerFolioLineHeight = 14.0;
+
+  /// `reader.folio.inkAlpha` — Design system page themes (references into
+  /// color.page*)
+  static const readerFolioInkAlpha = 0.6;
+
   /// `reader.light.background` — Design system page themes (references into
   /// color.page*)
   static const readerLightBackground = colorPagePaper;
