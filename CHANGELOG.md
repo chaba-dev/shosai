@@ -116,6 +116,8 @@ All notable changes to this project will be documented in this file.
 - *(library)* Add native Google Drive connections (#247)
 - *(dropbox)* Authorize through native mobile SDKs (#250)
 - *(app)* Use dark icons for development builds (#253)
+- *(reader)* Persist quiet-page preferences and add folio tokens (#256)
+- *(reader)* Make the quiet page the default reading surface (#257)
 
 ### 🐛 Bug Fixes
 
