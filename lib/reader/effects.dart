@@ -82,6 +82,8 @@ typedef ReaderDisplayChange = ({
   double? lineSpacing,
   bool? twoPages,
   bool? animations,
+  FlutterReaderProgress? progress,
+  bool? zonesHintDismissed,
 });
 
 /// Saves the Display settings the reader changes.

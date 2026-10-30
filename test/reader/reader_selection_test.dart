@@ -178,7 +178,7 @@ Widget _reader({
     bridge: bridge,
     decoder: (pixels, {required width, required height}) => _testImage(),
     initialPath: initialPath,
-    initialSettings: settings,
+    initialSettings: settings.copyWith(zonesHintDismissed: true),
     initialPlace: place,
     initialBookId: initialBookId,
   ),
@@ -205,6 +205,7 @@ Future<void> _openNotes(WidgetTester tester) async {
   if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isNotEmpty) {
     return;
   }
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
   await settleReaderSelection(tester);
 }
@@ -229,6 +230,7 @@ Future<void> _open(WidgetTester tester, Widget widget) async {
 /// Turns past the PDF's cover, which a spread shows alone, to the spread of
 /// its second and third pages.
 Future<void> _turnToSpread(WidgetTester tester) async {
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
   await tester.pump();
   for (var round = 0; round < 4; round += 1) {

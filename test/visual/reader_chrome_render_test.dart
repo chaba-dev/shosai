@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
@@ -111,6 +112,7 @@ const _settings = FlutterReaderSettings(
   epubFontSize: 18,
   epubLineSpacing: 1.6,
   pdfZoom: 0,
+  zonesHintDismissed: true,
 );
 
 Widget _reader({
@@ -157,6 +159,7 @@ void main() {
     addTearDown(recorder.dispose);
     view.apply(tester);
     await renderHarnessState(tester, widget, ready: ready);
+    await revealReaderChrome(tester);
     final defects = await findRenderDefects(tester);
     await captureHarnessArtifact(
       tester,
@@ -276,10 +279,10 @@ void main() {
       ready: () => _chromeReady(tester),
       metadata: const <String, Object?>{'state': 'layout-failure'},
     );
-    // Drive the failure through the rendered edge control and capture again, so
+    // Drive the failure through page navigation and capture again, so
     // the artifact shows the failure chrome itself.
     bridge.failNextSelectionSurface = true;
-    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 32));
     final defects = await findRenderDefects(tester);

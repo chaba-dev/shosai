@@ -530,22 +530,30 @@ class _ReaderPhoneBar extends StatelessWidget {
         color: palette.chrome,
         border: Border(top: BorderSide(color: palette.line)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _ReaderToolButton(
-            key: const ValueKey('reader-header-contents'),
-            icon: LucideIcons.list,
-            label: l10n.readerContentsAction,
-            selected: model.openPanel == ReaderPanel.contents,
-            touch: true,
-            focusNode: contentsFocus,
-            onPressed: enabled
-                ? () => dispatch(const ReaderPanelToggled(ReaderPanel.contents))
-                : null,
+          _readerBookProgressTrack(context, model, dispatch),
+          Row(
+            children: [
+              _ReaderToolButton(
+                key: const ValueKey('reader-header-contents'),
+                icon: LucideIcons.list,
+                label: l10n.readerContentsAction,
+                selected: model.openPanel == ReaderPanel.contents,
+                touch: true,
+                focusNode: contentsFocus,
+                onPressed: enabled
+                    ? () => dispatch(
+                        const ReaderPanelToggled(ReaderPanel.contents),
+                      )
+                    : null,
+              ),
+              actions.first,
+              Expanded(child: _ReaderPlaceLabel(model: model, short: true)),
+              ...actions.skip(1),
+            ],
           ),
-          actions.first,
-          Expanded(child: _ReaderPlaceLabel(model: model, short: true)),
-          ...actions.skip(1),
         ],
       ),
     );
@@ -563,9 +571,7 @@ class _ReaderStatusLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = ShellPalette.of(context);
-    final document = model.document;
     final section = _currentSectionTitle(model, AppLocalizations.of(context));
-    final total = document?.logicalUnitCount.toInt() ?? 0;
     final style = shellInterfaceStyle(12, 16).copyWith(
       color: palette.inkMuted,
       fontFeatures: const [FontFeature.tabularFigures()],
@@ -597,43 +603,50 @@ class _ReaderStatusLine extends StatelessWidget {
                   style: style,
                 ),
               ),
-            Expanded(
-              child: document != null && model.progress.hasDocument
-                  ? _ReaderProgressTrack(
-                      value: model.progress.percentage / 100,
-                      marks: model.progress.marks,
-                      valueLabel: _readerStatusLabel(
-                        AppLocalizations.of(context),
-                        model.progress,
-                        total: document.format == FlutterBookFormat.epub
-                            ? 0
-                            : total,
-                        short: false,
-                      ),
-                      onJump: total > 0 && !model.busy
-                          ? (fraction) =>
-                                dispatch(ReaderProgressRequested(fraction))
-                          : null,
-                      rightToLeft: model.rightToLeft,
-                      increasedValue: _unitStepValue(context, model, 1),
-                      decreasedValue: _unitStepValue(context, model, -1),
-                      onStep: total > 0 && !model.busy
-                          ? (delta) {
-                              final unit = _unitStep(model, delta);
-                              if (unit >= 0 && unit < total) {
-                                dispatch(ReaderUnitRequested(unit));
-                              }
-                            }
-                          : null,
-                    )
-                  : const SizedBox.shrink(),
-            ),
+            Expanded(child: _readerBookProgressTrack(context, model, dispatch)),
             _ReaderPlaceLabel(model: model, short: false),
           ],
         ),
       ),
     );
   }
+}
+
+Widget _readerBookProgressTrack(
+  BuildContext context,
+  ReaderModel model,
+  void Function(ReaderMessage) dispatch,
+) {
+  final document = model.document;
+  if (document == null || !model.progress.hasDocument) {
+    return const SizedBox.shrink();
+  }
+  final total = document.logicalUnitCount.toInt();
+  return _ReaderProgressTrack(
+    topEdge:
+        ShellLayout.forWidth(MediaQuery.sizeOf(context).width) ==
+        ShellLayout.phone,
+    value: model.progress.percentage / 100,
+    marks: model.progress.marks,
+    valueLabel: _readerStatusLabel(
+      AppLocalizations.of(context),
+      model.progress,
+      total: document.format == FlutterBookFormat.epub ? 0 : total,
+      short: false,
+    ),
+    onJump: total > 0 && !model.busy
+        ? (fraction) => dispatch(ReaderProgressRequested(fraction))
+        : null,
+    rightToLeft: model.rightToLeft,
+    increasedValue: _unitStepValue(context, model, 1),
+    decreasedValue: _unitStepValue(context, model, -1),
+    onStep: total > 0 && !model.busy
+        ? (delta) {
+            final unit = _unitStep(model, delta);
+            if (unit >= 0 && unit < total) dispatch(ReaderUnitRequested(unit));
+          }
+        : null,
+  );
 }
 
 /// What the progress track would read after a keyboard step of [delta] units,
@@ -692,7 +705,7 @@ class _ReaderPlaceLabel extends StatelessWidget {
       l10n,
       model.progress,
       total: total,
-      short: short,
+      short: false,
     );
     return Semantics(
       key: const ValueKey('reader-progress'),
@@ -701,8 +714,8 @@ class _ReaderPlaceLabel extends StatelessWidget {
       label: label,
       child: ExcludeSemantics(
         child: Text(
-          label,
-          maxLines: 1,
+          short ? label.replaceFirst(' · ', '\n') : label,
+          maxLines: short ? 2 : 1,
           overflow: TextOverflow.ellipsis,
           textAlign: short ? TextAlign.center : TextAlign.end,
           style: shellInterfaceStyle(12, 16).copyWith(
@@ -761,6 +774,7 @@ String _readerStatusLabel(
 /// increase and decrease actions step one unit through [onStep].
 class _ReaderProgressTrack extends StatefulWidget {
   const _ReaderProgressTrack({
+    this.topEdge = false,
     required this.value,
     required this.valueLabel,
     required this.rightToLeft,
@@ -773,6 +787,7 @@ class _ReaderProgressTrack extends StatefulWidget {
 
   final double value;
   final String valueLabel;
+  final bool topEdge;
 
   /// Whether the book reads right to left: the track then starts at its right
   /// end, so it fills, seeks and steps from there.
@@ -868,6 +883,7 @@ class _ReaderProgressTrackState extends State<_ReaderProgressTrack> {
                   height: 20,
                   child: CustomPaint(
                     painter: _ProgressTrackPainter(
+                      topEdge: widget.topEdge,
                       value: widget.value.clamp(0.0, 1.0),
                       rightToLeft: rightToLeft,
                       marks: widget.marks,
@@ -895,6 +911,7 @@ class _ReaderTrackStepIntent extends Intent {
 
 class _ProgressTrackPainter extends CustomPainter {
   const _ProgressTrackPainter({
+    required this.topEdge,
     required this.value,
     required this.rightToLeft,
     required this.marks,
@@ -904,6 +921,7 @@ class _ProgressTrackPainter extends CustomPainter {
   });
 
   final double value;
+  final bool topEdge;
   final bool rightToLeft;
   final List<double> marks;
   final Color track;
@@ -912,7 +930,7 @@ class _ProgressTrackPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final top = (size.height - 4) / 2;
+    final top = topEdge ? 0.0 : (size.height - 4) / 2;
     final radius = const Radius.circular(ShosaiTokens.radiusXs);
     canvas.drawRRect(
       RRect.fromLTRBR(0, top, size.width, top + 4, radius),
@@ -955,6 +973,7 @@ class _ProgressTrackPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ProgressTrackPainter oldDelegate) =>
+      oldDelegate.topEdge != topEdge ||
       oldDelegate.value != value ||
       oldDelegate.rightToLeft != rightToLeft ||
       !_sameMarks(oldDelegate.marks, marks) ||

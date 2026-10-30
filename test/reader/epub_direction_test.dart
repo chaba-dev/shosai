@@ -65,7 +65,9 @@ void main() {
           bridge: harness,
           initialPath: '/books/long.epub',
           initialBookId: 1,
-          initialSettings: settings,
+          initialSettings: (settings ?? harnessReaderSettings).copyWith(
+            zonesHintDismissed: true,
+          ),
           placeRequests: placeRequests,
           epubImageDecoder: (bytes) async => null,
         ),
@@ -74,6 +76,7 @@ void main() {
       maxRounds: 16,
     );
     await settle(tester);
+    await revealReaderChrome(tester);
   }
 
   Future<void> closeReader(WidgetTester tester) async {
@@ -124,6 +127,7 @@ void main() {
       reason: 'the left margin turns to the page after the spread',
     );
 
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
     await settle(tester);
     expect(

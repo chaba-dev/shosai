@@ -4,6 +4,41 @@ sealed class ReaderMessage {
   const ReaderMessage();
 }
 
+/// A non-link tap in the page, measured in physical left-to-right thirds.
+final class ReaderPageTapped extends ReaderMessage {
+  const ReaderPageTapped(this.fraction, {required this.touch});
+  final double fraction;
+  final bool touch;
+}
+
+final class ReaderPointerMoved extends ReaderMessage {
+  const ReaderPointerMoved();
+}
+
+final class ReaderPointerExited extends ReaderMessage {
+  const ReaderPointerExited();
+}
+
+final class ReaderChromeHovered extends ReaderMessage {
+  const ReaderChromeHovered(this.hovered);
+  final bool hovered;
+}
+
+final class ReaderChromeDismissed extends ReaderMessage {
+  const ReaderChromeDismissed();
+}
+
+final class ReaderZonesHintDismissed extends ReaderMessage {
+  const ReaderZonesHintDismissed({this.persist = true});
+  final bool persist;
+}
+
+final class _ReaderChromeIdle extends ReaderMessage {
+  const _ReaderChromeIdle(this.generation, this.revision);
+  final int generation;
+  final int revision;
+}
+
 final class ReaderOpenRequested extends ReaderMessage {
   const ReaderOpenRequested(this.path, {this.bookId, this.place});
 
@@ -297,9 +332,10 @@ final class ReaderLinkActivated extends ReaderMessage {
 
 /// A completed tap in the PDF selection surface (or textless raster) frame.
 final class ReaderPdfLinkTapped extends ReaderMessage {
-  const ReaderPdfLinkTapped(this.x, this.y);
+  const ReaderPdfLinkTapped(this.x, this.y, {this.pageTap});
   final double x;
   final double y;
+  final ReaderPageTapped? pageTap;
 }
 
 final class ReaderReferenceDismissed extends ReaderMessage {
@@ -350,6 +386,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
     this.zoom,
     this.twoPages,
     this.animations,
+    this.progress,
   });
 
   final double? fontSize;
@@ -361,6 +398,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
   /// The Pages setting: two pages where they fit, or always one.
   final bool? twoPages;
   final bool? animations;
+  final FlutterReaderProgress? progress;
 }
 
 /// Requests the Markdown export of the current book's bookmarks (RD-08).

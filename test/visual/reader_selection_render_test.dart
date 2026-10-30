@@ -63,6 +63,7 @@ FlutterReaderSettings _settings(String theme) => FlutterReaderSettings(
   epubFontSize: 18,
   epubLineSpacing: 1.6,
   pdfZoom: 0,
+  zonesHintDismissed: true,
 );
 
 FlutterAnnotation _annotation({
@@ -111,6 +112,7 @@ Future<ui.Image> _testImage() async {
 
 /// Opens the Notes panel, where the saved highlights are listed.
 Future<void> _openNotes(WidgetTester tester) async {
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
   await tester.pumpAndSettle();
 }

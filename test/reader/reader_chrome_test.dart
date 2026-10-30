@@ -323,6 +323,7 @@ const _epub = FlutterReaderSettings(
   epubFontSize: 18,
   epubLineSpacing: 1.6,
   pdfZoom: 0,
+  zonesHintDismissed: true,
 );
 
 const _continuous = FlutterReaderSettings(
@@ -331,6 +332,7 @@ const _continuous = FlutterReaderSettings(
   epubFontSize: 18,
   epubLineSpacing: 1.6,
   pdfZoom: 0,
+  zonesHintDismissed: true,
 );
 
 int _readerKeyCounter = 0;
@@ -356,7 +358,7 @@ Widget _reader({
     documentPicker: documentPicker,
     initialPath: initialPath,
     initialBookId: initialBookId,
-    initialSettings: settings,
+    initialSettings: settings?.copyWith(zonesHintDismissed: true),
     progressSource: progressSource,
     onDisplayChanged: onDisplayChanged,
     debugPathEntry: debugPathEntry,
@@ -369,6 +371,7 @@ Future<void> _open(WidgetTester tester, Widget widget) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 32));
   await tester.pump(const Duration(milliseconds: 32));
+  await revealReaderChrome(tester);
 }
 
 /// The document box between the reader's edge columns.
@@ -520,6 +523,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
+      await revealReaderChrome(tester);
       expect(find.byKey(const ValueKey('reader-header-back')), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('reader-header-back')));
@@ -718,7 +722,7 @@ void main() {
             }
             await stationary.up();
             await tester.pumpAndSettle();
-            expect(find.text('33% · page 1'), findsOneWidget);
+            expect(find.text('33%\npage 1 of 3'), findsOneWidget);
             await tester.tap(
               find.byKey(const ValueKey('reader-header-typography')),
             );
@@ -734,7 +738,8 @@ void main() {
               );
               if (!fitWidth) expect(find.text('100%'), findsOneWidget);
             } else {
-              expect(find.text(fitWidth ? '144%' : '200%'), findsOneWidget);
+              // Full-bleed 390px viewport / 420px source, pinched by 2×.
+              expect(find.text(fitWidth ? '186%' : '200%'), findsOneWidget);
             }
           },
         );
@@ -773,13 +778,13 @@ void main() {
         await right.up();
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('reader-fit-none')), findsOneWidget);
-        expect(find.text('33% · page 1'), findsOneWidget);
+        expect(find.text('33%\npage 1 of 3'), findsOneWidget);
         await tester.tap(
           find.byKey(const ValueKey('reader-header-typography')),
         );
         await tester.pumpAndSettle();
-        // A 420px PDF fitted into 302px, pinched to twice its displayed size.
-        expect(find.text('144%'), findsOneWidget);
+        // Touch pages have no chevron columns, so the fit uses the full width.
+        expect(find.text('186%'), findsOneWidget);
         await tester.tap(
           find.byKey(const ValueKey('reader-header-typography')),
         );
@@ -797,7 +802,7 @@ void main() {
               .first,
         );
         expect(scroll.position.pixels, greaterThan(0));
-        expect(find.text('33% · page 1'), findsOneWidget);
+        expect(find.text('33%\npage 1 of 3'), findsOneWidget);
         await tester.tap(surface);
         await tester.pump(const Duration(milliseconds: 50));
         await tester.tap(surface);
@@ -836,26 +841,23 @@ void main() {
         final surface = find.byKey(const ValueKey('reader-selection-surface'));
         final forward = Offset(rtl ? 180 : -180, 0);
         for (final key in ['reader-edge-previous', 'reader-edge-next']) {
-          expect(
-            tester.getSize(find.byKey(ValueKey(key))).width,
-            greaterThanOrEqualTo(44),
-          );
+          expect(find.byKey(ValueKey(key)), findsNothing);
         }
-        expect(find.text('33% · page 1'), findsOneWidget);
+        expect(find.text('33%\npage 1 of 3'), findsOneWidget);
         await tester.drag(surface, -forward);
         await tester.pumpAndSettle();
-        expect(find.text('33% · page 1'), findsOneWidget);
+        expect(find.text('33%\npage 1 of 3'), findsOneWidget);
         await tester.drag(surface, forward);
         await tester.pumpAndSettle();
-        expect(find.text('67% · page 2'), findsOneWidget);
+        expect(find.text('67%\npage 2 of 3'), findsOneWidget);
         await tester.drag(surface, -forward);
         await tester.pumpAndSettle();
-        expect(find.text('33% · page 1'), findsOneWidget);
+        expect(find.text('33%\npage 1 of 3'), findsOneWidget);
 
         await tester.drag(surface, forward * .2);
         await tester.pumpAndSettle();
         expect(
-          find.text('33% · page 1'),
+          find.text('33%\npage 1 of 3'),
           findsOneWidget,
           reason: 'small movements must not accidentally turn pages',
         );
@@ -864,7 +866,7 @@ void main() {
         await tester.pump();
         await gesture.cancel();
         await tester.pumpAndSettle();
-        expect(find.text('33% · page 1'), findsOneWidget);
+        expect(find.text('33%\npage 1 of 3'), findsOneWidget);
       });
     }
 
@@ -896,12 +898,18 @@ void main() {
           );
           final resting = tester.getTopLeft(surface).dx;
           for (final forward in [true, false]) {
-            await tester.tap(
-              find.byKey(
-                ValueKey(forward ? 'reader-edge-next' : 'reader-edge-previous'),
+            final rect = tester.getRect(
+              find.byKey(const ValueKey('reader-stage')),
+            );
+            final right = forward != rtl;
+            await tester.tapAt(
+              Offset(
+                rect.left + rect.width * (right ? .85 : .15),
+                rect.center.dy,
               ),
             );
-            final status = forward ? '67% · page 2' : '33% · page 1';
+            await tester.pump(const Duration(milliseconds: 350));
+            final status = forward ? '67%\npage 2 of 3' : '33%\npage 1 of 3';
             for (
               var frame = 0;
               frame < 20 && find.text(status).evaluate().isEmpty;
@@ -976,15 +984,19 @@ void main() {
         reason:
             'the white raster becomes Night paper even without selection geometry',
       );
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      final stage = tester.getRect(find.byKey(const ValueKey('reader-stage')));
+      await tester.tapAt(
+        Offset(stage.left + stage.width * .85, stage.center.dy),
+      );
+      await tester.pump(const Duration(milliseconds: 350));
       for (
         var frame = 0;
-        frame < 20 && find.text('67% · page 2').evaluate().isEmpty;
+        frame < 20 && find.text('67%\npage 2 of 3').evaluate().isEmpty;
         frame++
       ) {
         await tester.pump(const Duration(milliseconds: 10));
       }
-      expect(find.text('67% · page 2'), findsOneWidget);
+      expect(find.text('67%\npage 2 of 3'), findsOneWidget);
       expect(tester.getTopLeft(image).dx, greaterThan(resting + 1));
       await tester.pump(const Duration(milliseconds: 250));
       expect(tester.getTopLeft(image).dx, closeTo(resting, .01));
@@ -1008,7 +1020,7 @@ void main() {
         const Offset(-180, 0),
       );
       await tester.pumpAndSettle();
-      expect(find.text('33% · page 1'), findsOneWidget);
+      expect(find.text('33%\npage 1 of 3'), findsOneWidget);
     });
 
     testWidgets('enabled and disabled states dispatch unit navigation', (
@@ -1053,6 +1065,7 @@ void main() {
       expect(find.text('100% · pages 2–3 of 3'), findsOneWidget);
       expect(_button(tester, 'reader-edge-next').enabled, isFalse);
 
+      await revealReaderChrome(tester);
       await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
@@ -1343,6 +1356,8 @@ void main() {
               lineSpacing: null,
               twoPages: null,
               animations: !animations,
+              progress: null,
+              zonesHintDismissed: null,
             ),
           ]);
           expect(bridge.selectionLayouts, hasLength(layouts));
@@ -1379,6 +1394,8 @@ void main() {
         lineSpacing: null,
         twoPages: null,
         animations: null,
+        progress: null,
+        zonesHintDismissed: null,
       ));
       expect(saved[1].fontSize, greaterThan(18));
       expect((saved[1].theme, saved[1].lineSpacing), (null, null));
@@ -1840,6 +1857,7 @@ void main() {
 
       // The failure is transient: the committed content stays and a retry
       // clears it.
+      await revealReaderChrome(tester);
       await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));

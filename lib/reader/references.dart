@@ -76,17 +76,22 @@ extension on ReaderController {
     );
   }
 
-  void _pdfLinkTapped(double x, double y) {
+  void _pdfLinkTapped(double x, double y, ReaderPageTapped? pageTap) {
     if (!_canPeek ||
         _model.document?.format != FlutterBookFormat.pdf ||
         !x.isFinite ||
         !y.isFinite) {
       return;
     }
-    _startPdfReference(x: x, y: y);
+    _startPdfReference(x: x, y: y, pageTap: pageTap);
   }
 
-  void _startPdfReference({int? target, double? x, double? y}) {
+  void _startPdfReference({
+    int? target,
+    double? x,
+    double? y,
+    ReaderPageTapped? pageTap,
+  }) {
     final pdf = _pdfDocument;
     if (pdf == null) return;
     final generation = _model.generation;
@@ -119,6 +124,7 @@ extension on ReaderController {
       target: target,
       x: x,
       y: y,
+      pageTap: pageTap,
     );
     _referenceEffects.add(effect);
     unawaited(effect.then((_) => _referenceEffects.remove(effect)));
@@ -134,6 +140,7 @@ extension on ReaderController {
     int? target,
     double? x,
     double? y,
+    ReaderPageTapped? pageTap,
   }) async {
     bool current() => _isCurrent(generation) && revision == _referenceRevision;
     try {
@@ -170,13 +177,20 @@ extension on ReaderController {
                     EpubLinkKind.external) {
               await _openExternalLink(url.toString());
               return;
+            } else {
+              // A refused or empty link is still a link, not a page-zone tap.
+              return;
             }
             break;
           }
           if (target != null) break;
         }
       }
-      if (target == null || target < 0 || target >= pdf.pageCount) return;
+      if (target == null) {
+        if (current() && pageTap != null) dispatch(pageTap);
+        return;
+      }
+      if (target < 0 || target >= pdf.pageCount) return;
       String text;
       var offset = 0;
       try {

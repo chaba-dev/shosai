@@ -70,6 +70,7 @@ const _settings = FlutterReaderSettings(
   epubFontSize: 18,
   epubLineSpacing: 1.6,
   pdfZoom: 0,
+  zonesHintDismissed: true,
 );
 
 List<ReaderContentsEntry> _contentsEntries() => const [
@@ -123,6 +124,7 @@ bool _chromeReady(WidgetTester tester) {
 }
 
 Future<void> _openPanel(WidgetTester tester, String name) async {
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(ValueKey('reader-header-$name')));
   await pumpHarnessFrames(tester, frames: 4);
 }
@@ -142,6 +144,7 @@ void main() {
     addTearDown(recorder.dispose);
     view.apply(tester);
     await renderHarnessState(tester, widget, ready: ready);
+    await revealReaderChrome(tester);
     final defects = await findRenderDefects(tester);
     await captureHarnessArtifact(
       tester,

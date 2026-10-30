@@ -248,6 +248,11 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void didUpdateWidget(ReaderScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_controllerInitialized &&
+        widget.initialSettings?.zonesHintDismissed == true &&
+        !_controller.model.zonesHintDismissed) {
+      _controller.dispatch(const ReaderZonesHintDismissed(persist: false));
+    }
     if (!identical(oldWidget.placeRequests, widget.placeRequests)) {
       _releasePlaceRequests(oldWidget.placeRequests);
       widget.placeRequests
@@ -349,6 +354,18 @@ class _ReaderScreenState extends State<ReaderScreen>
           View.of(context).devicePixelRatio,
         ),
         baseScale: View.of(context).devicePixelRatio,
+        zonesHintDismissed: widget.initialSettings?.zonesHintDismissed ?? false,
+        systemBars: (shown) {
+          if (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS) {
+            unawaited(
+              SystemChrome.setEnabledSystemUIMode(
+                SystemUiMode.manual,
+                overlays: shown ? SystemUiOverlay.values : [],
+              ),
+            );
+          }
+        },
         librarySearchOpener: widget.placeRequests?.openSearch,
         noteEditor: _editNote,
         placeNoteEditor: _editPlaceNote,
@@ -647,6 +664,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       rasterZoom: fit == ReaderRasterFit.manual ? zoom : baseScale,
       twoPages: settings?.twoPages ?? true,
       animations: settings?.animations ?? true,
+      progress: settings?.progress ?? FlutterReaderProgress.page,
     );
   }
 
@@ -674,6 +692,8 @@ class _ReaderScreenState extends State<ReaderScreen>
           builder: (context) => Scaffold(
             backgroundColor: ShellPalette.of(context).chrome,
             body: SafeArea(
+              top: false,
+              bottom: false,
               // Back after a jump: Alt+← on Linux and Windows, ⌘[ on macOS.
               child: Focus(
                 canRequestFocus: false,
@@ -700,24 +720,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                         builder: (context, constraints) => Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Every fixed chrome row is bounded to a share of the
-                            // viewport and scrolls inside that bound, so a very
-                            // short viewport with a scaled interface cannot push
-                            // the document out of reach.
-                            _boundedChrome(
-                              viewportHeight: constraints.maxHeight,
-                              share: _readerHeaderBoundShare,
-                              child: _ReaderToolbar(
-                                model: model,
-                                layout: layout,
-                                dispatch: _controller.dispatch,
-                                backFocus: _backFocus,
-                                contentsFocus: _contentsFocus,
-                                typographyFocus: _typographyFocus,
-                                notesFocus: _notesFocus,
-                                openBooksAction: widget.openBooksAction,
-                              ),
-                            ),
                             // The search bar is its own row under the toolbar
                             // (RD-11); search is independent of the panels.
                             if (model.searchOpen &&
@@ -766,25 +768,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                                     _readerAlertBoundShare,
                               ),
                               child: _ReaderErrorSurfaces(model: model),
-                            ),
-                            // The place stays mounted while an open is in flight:
-                            // its `loading` wording is a live region, so the
-                            // opening state must not remove it.
-                            _boundedChrome(
-                              viewportHeight: constraints.maxHeight,
-                              share: _readerStatusBoundShare,
-                              child: phone
-                                  ? _ReaderPhoneBar(
-                                      model: model,
-                                      dispatch: _controller.dispatch,
-                                      contentsFocus: _contentsFocus,
-                                      typographyFocus: _typographyFocus,
-                                      notesFocus: _notesFocus,
-                                    )
-                                  : _ReaderStatusLine(
-                                      model: model,
-                                      dispatch: _controller.dispatch,
-                                    ),
                             ),
                             if (widget.debugPathEntry) ...[
                               const SizedBox(height: 12),
@@ -895,7 +878,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           ? viewportHeight * share
           : double.infinity,
     ),
-    child: SingleChildScrollView(child: child),
+    child: SingleChildScrollView(primary: false, child: child),
   );
 
   /// The stage with the open panel: floating panels over it, the docked Notes
@@ -915,87 +898,223 @@ class _ReaderScreenState extends State<ReaderScreen>
     // stay with the panel. The controller's requests for the document's focus
     // while it is covered (a note chosen in the panel) fail, so focus stays on
     // the chosen note; closing the panel returns it to the toolbar.
+    final hintShown =
+        layout != ShellLayout.desktop &&
+        !model.zonesHintDismissed &&
+        model.document != null &&
+        !model.busy;
     final covered =
+        hintShown ||
         model.referencePeek != null ||
         openPanel != null &&
             _readerPanelPresentation(openPanel, layout) !=
                 _ReaderPanelPresentation.docked;
     final stage = LayoutBuilder(
-      builder: (context, constraints) => Stack(
-        children: [
-          Positioned.fill(
-            child: ExcludeFocus(
-              excluding: covered,
-              child: ExcludeSemantics(
+      builder: (context, constraints) {
+        final bottomInset =
+            math.min(
+              constraints.maxHeight * _readerStatusBoundShare,
+              layout == ShellLayout.phone
+                  ? math.max(
+                          ShosaiTokens.sizeTouchTarget,
+                          MediaQuery.textScalerOf(context).scale(16) * 2,
+                        ) +
+                        20
+                  : ShosaiTokens.sizeStatusbarHeight,
+            ) +
+            MediaQuery.paddingOf(context).bottom;
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: ExcludeFocus(
                 excluding: covered,
-                // The phone's tab switcher shows the page from here.
-                child: _ReaderMiniatureBoundary(
-                  onPainted: (stage) => _stageBoundary = stage,
-                  child: _ReaderStage(
-                    model: model,
-                    layout: layout,
-                    dispatch: _controller.dispatch,
-                    content: content,
+                child: ExcludeSemantics(
+                  excluding: covered,
+                  // The phone's tab switcher shows the page from here.
+                  child: _ReaderMiniatureBoundary(
+                    onPainted: (stage) => _stageBoundary = stage,
+                    child: _ReaderStage(
+                      model: model,
+                      layout: layout,
+                      dispatch: _controller.dispatch,
+                      content: content,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          if (model.returnPoints.isNotEmpty && model.document != null)
+            if (model.returnPoints.isNotEmpty && model.document != null)
+              Positioned(
+                left: ShosaiTokens.space4,
+                right: ShosaiTokens.space4,
+                bottom:
+                    ShosaiTokens.space6 + (model.chromeShown ? bottomInset : 0),
+                child: Center(
+                  child: _ReaderBackPill(
+                    model: model,
+                    dispatch: _controller.dispatch,
+                  ),
+                ),
+              ),
             Positioned(
-              left: ShosaiTokens.space4,
-              right: ShosaiTokens.space4,
-              bottom: ShosaiTokens.space6,
-              child: Center(
-                child: _ReaderBackPill(
-                  model: model,
-                  dispatch: _controller.dispatch,
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _chromeOverlay(
+                model,
+                top: true,
+                child: _boundedChrome(
+                  viewportHeight: constraints.maxHeight,
+                  share: _readerHeaderBoundShare,
+                  child: _ReaderToolbar(
+                    model: model,
+                    layout: layout,
+                    dispatch: _controller.dispatch,
+                    backFocus: _backFocus,
+                    contentsFocus: _contentsFocus,
+                    typographyFocus: _typographyFocus,
+                    notesFocus: _notesFocus,
+                    openBooksAction: widget.openBooksAction,
+                  ),
                 ),
               ),
             ),
-          ..._readerPanelOverlay(
-            model: model,
-            layout: layout,
-            stage: constraints,
-            dispatch: _controller.dispatch,
-            focusNode: _panelFocus,
-            hostKeys: _panelKeys,
-          ),
-          if (model.referencePeek case final peek?)
-            Positioned.fill(
-              child: _ReaderReferenceOverlay(
-                peek: peek,
-                layout: layout,
-                dispatch: _controller.dispatch,
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _chromeOverlay(
+                model,
+                top: false,
+                child: _boundedChrome(
+                  viewportHeight: constraints.maxHeight,
+                  share: _readerStatusBoundShare,
+                  child: layout == ShellLayout.phone
+                      ? _ReaderPhoneBar(
+                          model: model,
+                          dispatch: _controller.dispatch,
+                          contentsFocus: _contentsFocus,
+                          typographyFocus: _typographyFocus,
+                          notesFocus: _notesFocus,
+                        )
+                      : _ReaderStatusLine(
+                          model: model,
+                          dispatch: _controller.dispatch,
+                        ),
+                ),
               ),
             ),
-        ],
-      ),
+            ..._readerPanelOverlay(
+              model: model,
+              layout: layout,
+              stage: constraints,
+              bottomInset: bottomInset,
+              dispatch: _controller.dispatch,
+              focusNode: _panelFocus,
+              hostKeys: _panelKeys,
+            ),
+            if (model.referencePeek case final peek?)
+              Positioned.fill(
+                child: _ReaderReferenceOverlay(
+                  peek: peek,
+                  layout: layout,
+                  dispatch: _controller.dispatch,
+                ),
+              ),
+            if (hintShown)
+              Positioned.fill(
+                child: _ReaderZonesHint(
+                  rightToLeft: model.rightToLeft,
+                  dismiss: () =>
+                      _controller.dispatch(const ReaderZonesHintDismissed()),
+                ),
+              ),
+          ],
+        );
+      },
     );
     final panel = openPanel;
     if (panel == null ||
         _readerPanelPresentation(panel, layout) !=
             _ReaderPanelPresentation.docked) {
-      return stage;
+      return _pointerReveal(layout, stage);
     }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(child: stage),
-        SizedBox(
-          width: ShosaiTokens.sizePanelWidth,
-          child: _ReaderPanelHost(
-            key: _panelKeys[panel],
-            panel: panel,
-            presentation: _ReaderPanelPresentation.docked,
-            model: model,
-            dispatch: _controller.dispatch,
-            focusNode: _panelFocus,
+    return _pointerReveal(
+      layout,
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: stage),
+          SizedBox(
+            width: ShosaiTokens.sizePanelWidth,
+            child: _ReaderPanelHost(
+              key: _panelKeys[panel],
+              panel: panel,
+              presentation: _ReaderPanelPresentation.docked,
+              model: model,
+              dispatch: _controller.dispatch,
+              focusNode: _panelFocus,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
+
+  Widget _pointerReveal(ShellLayout layout, Widget child) => MouseRegion(
+    onHover: layout != ShellLayout.desktop
+        ? null
+        : (_) => _controller.dispatch(const ReaderPointerMoved()),
+    onExit: layout != ShellLayout.desktop
+        ? null
+        : (_) => _controller.dispatch(const ReaderPointerExited()),
+    child: child,
+  );
+
+  Widget _chromeOverlay(
+    ReaderModel model, {
+    required bool top,
+    required Widget child,
+  }) => IgnorePointer(
+    ignoring: !model.chromeShown,
+    child: ExcludeFocus(
+      excluding: !model.chromeShown,
+      child: ExcludeSemantics(
+        excluding: !model.chromeShown,
+        child: AnimatedOpacity(
+          opacity: model.chromeShown ? 1 : 0,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
+          child: AnimatedSlide(
+            offset: model.chromeShown ? Offset.zero : Offset(0, top ? -1 : 1),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+            child: MouseRegion(
+              onEnter: (_) =>
+                  _controller.dispatch(const ReaderChromeHovered(true)),
+              onExit: (_) =>
+                  _controller.dispatch(const ReaderChromeHovered(false)),
+              child: GestureDetector(
+                onVerticalDragUpdate: top
+                    ? (details) {
+                        if (details.delta.dy < 0) {
+                          _controller.dispatch(const ReaderChromeDismissed());
+                        }
+                      }
+                    : null,
+                child: ColoredBox(
+                  color: ShellPalette.of(context).chrome,
+                  child: SafeArea(top: top, bottom: !top, child: child),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /// A repaint boundary that reports the exact render object only after its

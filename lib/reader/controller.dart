@@ -66,6 +66,7 @@ final class ReaderController implements Listenable {
     ReaderDocumentPickerAdapter? documentPickerAdapter,
     ReaderExportSink? exportSink,
     ReaderDisplaySink? displaySink,
+    void Function(bool shown)? systemBars,
     ReaderNoticeReporter? noticeReporter,
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
@@ -83,6 +84,7 @@ final class ReaderController implements Listenable {
           rasterZoom: 1,
         ),
     double? baseScale,
+    bool zonesHintDismissed = false,
   }) : _bridge = bridge,
        _records = recordsOf(bridge),
        _decoder = decoder,
@@ -114,6 +116,7 @@ final class ReaderController implements Listenable {
        _documentPickerAdapter = documentPickerAdapter ?? (() async => null),
        _exportSink = exportSink ?? ((_) async {}),
        _displaySink = displaySink ?? ((_) {}),
+       _systemBars = systemBars ?? ((_) {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
        _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
        _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
@@ -124,6 +127,7 @@ final class ReaderController implements Listenable {
        _typographyContinuous = initialTypography.continuous,
        _typographyTwoPages = initialTypography.twoPages,
        _typographyAnimations = initialTypography.animations,
+       _typographyProgress = initialTypography.progress,
        _rasterFit = initialTypography.rasterFit,
        _rasterZoom = initialTypography.rasterZoom,
        _baseScale = baseScale ?? initialTypography.rasterZoom,
@@ -131,7 +135,10 @@ final class ReaderController implements Listenable {
          scale: initialScale,
          lineSpacing: initialLineSpacing,
        ) {
-    _model = ReaderModel(typography: initialTypography);
+    _model = ReaderModel(
+      typography: initialTypography,
+      zonesHintDismissed: zonesHintDismissed,
+    );
   }
 
   final FlutterBridge _bridge;
@@ -172,6 +179,7 @@ final class ReaderController implements Listenable {
   final ReaderDocumentPickerAdapter _documentPickerAdapter;
   final ReaderExportSink _exportSink;
   final ReaderDisplaySink _displaySink;
+  final void Function(bool shown) _systemBars;
   final ReaderNoticeReporter _reportNotice;
   final EpubImageDecoder _epubImageDecoder;
   final EpubFontRegistrar _epubFontRegistrar;
@@ -335,6 +343,9 @@ final class ReaderController implements Listenable {
   final bool _typographyContinuous;
   bool _typographyTwoPages;
   bool _typographyAnimations;
+  FlutterReaderProgress _typographyProgress;
+  Timer? _chromeTimer;
+  int _chromeRevision = 0;
   ReaderRasterFit _rasterFit;
   double _rasterZoom;
   final double _baseScale;
@@ -619,7 +630,52 @@ final class ReaderController implements Listenable {
       default:
     }
     switch (message) {
+      case ReaderPointerMoved():
+        if (!_model.chromeVisible || !_model.pointerChrome) {
+          _emit(_model.copyWith(chromeVisible: true, pointerChrome: true));
+        }
+        _scheduleChromeHide();
+      case ReaderChromeHovered():
+        if (_model.chromeHovered != message.hovered) {
+          _emit(_model.copyWith(chromeHovered: message.hovered));
+        }
+        _scheduleChromeHide();
+      case ReaderPointerExited():
+        _hideChrome();
+      case ReaderChromeDismissed():
+        _hideChrome();
+      case _ReaderChromeIdle():
+        if (_isCurrent(message.generation) &&
+            message.revision == _chromeRevision &&
+            !_model.chromeHovered &&
+            !_model.chromePinned) {
+          _hideChrome();
+        }
+      case ReaderPageTapped():
+        _pageTapped(message);
+      case ReaderZonesHintDismissed():
+        if (!_model.zonesHintDismissed) {
+          _emit(_model.copyWith(zonesHintDismissed: true));
+          if (message.persist) {
+            _displaySink((
+              theme: null,
+              fontSize: null,
+              lineSpacing: null,
+              twoPages: null,
+              animations: null,
+              progress: null,
+              zonesHintDismissed: true,
+            ));
+          }
+          final generation = _model.generation;
+          _frameScheduler(() {
+            if (_isCurrent(generation)) {
+              _focusAdapter(ReaderFocusTarget.surface);
+            }
+          });
+        }
       case ReaderOpenRequested():
+        _hideChrome();
         _openRequested(message);
       case ReaderLayoutChanged():
         _layoutChanged(message.layout);
@@ -795,7 +851,7 @@ final class ReaderController implements Listenable {
       case ReaderLinkActivated():
         _linkActivated(message.href, message.label);
       case ReaderPdfLinkTapped():
-        _pdfLinkTapped(message.x, message.y);
+        _pdfLinkTapped(message.x, message.y, message.pageTap);
       case ReaderReferenceDismissed():
         _focusAdapter(ReaderFocusTarget.surface);
       case ReaderReferenceGoToRequested():
@@ -1124,6 +1180,7 @@ final class ReaderController implements Listenable {
         _recoverIfIdle();
         _disposeBridgeIfIdle();
       case ReaderSuspended():
+        _hideChrome();
         _suspendRequested();
       case ReaderResumed():
         _resumeRequested();
@@ -1406,8 +1463,71 @@ final class ReaderController implements Listenable {
         );
         _annotationUpdateCompleted(message);
       case _ReaderDisposeRequested():
+        _chromeTimer?.cancel();
+        _systemBars(true);
         _disposeRequested();
     }
+  }
+
+  void _hideChrome() {
+    _chromeTimer?.cancel();
+    _chromeRevision += 1;
+    if (_model.chromeVisible || _model.chromeHovered) {
+      _emit(_model.copyWith(chromeVisible: false, chromeHovered: false));
+      final generation = _model.generation;
+      final revision = _chromeRevision;
+      _frameScheduler(() {
+        if (_isCurrent(generation) &&
+            revision == _chromeRevision &&
+            !_model.chromeShown) {
+          _focusAdapter(ReaderFocusTarget.surface);
+        }
+      });
+    }
+  }
+
+  void _scheduleChromeHide() {
+    _chromeTimer?.cancel();
+    final revision = ++_chromeRevision;
+    if (_closing ||
+        !_model.pointerChrome ||
+        !_model.chromeVisible ||
+        _model.chromeHovered ||
+        _model.chromePinned) {
+      return;
+    }
+    final generation = _model.generation;
+    _chromeTimer = Timer(const Duration(seconds: 2), () {
+      dispatch(_ReaderChromeIdle(generation, revision));
+    });
+  }
+
+  void _pageTapped(ReaderPageTapped message) {
+    if (_closing ||
+        _model.document == null ||
+        _model.chromePinned ||
+        _model.selectionPhase != ReaderSelectionPhase.idle) {
+      return;
+    }
+    if (!message.touch) {
+      _hideChrome();
+      return;
+    }
+    _chromeTimer?.cancel();
+    _chromeRevision += 1;
+    final middle = message.fraction >= 1 / 3 && message.fraction < 2 / 3;
+    final shown = _model.chromeVisible;
+    _emit(
+      _model.copyWith(
+        pointerChrome: false,
+        chromeHovered: false,
+        chromeVisible: middle && !shown,
+      ),
+    );
+    if (middle || _model.continuousPresentation) return;
+    final delta =
+        (message.fraction < 1 / 3 ? -1 : 1) * (_model.rightToLeft ? -1 : 1);
+    dispatch(ReaderPageStepRequested(delta));
   }
 
   void _openRequested(ReaderOpenRequested message) {
@@ -2743,6 +2863,7 @@ final class ReaderController implements Listenable {
   /// Turns a page with [turn]; three turns the reader took away from a jump
   /// close the BackPill, and a turn it refused does not count.
   void _pageTurned(void Function() turn) {
+    _hideChrome();
     final intent = _activeRelayoutIntent;
     final page = _model.epubPage;
     turn();
@@ -3198,6 +3319,7 @@ final class ReaderController implements Listenable {
     final document = _model.document;
     final before = _model.typography;
     final animationsBefore = _typographyAnimations;
+    final progressBefore = _typographyProgress;
     final (fontBefore, spacingBefore, themeBefore, pagesBefore) = (
       _typographyFontSize,
       _typographyLineSpacing,
@@ -3219,6 +3341,7 @@ final class ReaderController implements Listenable {
     if (message.animations case final animations?) {
       _typographyAnimations = animations;
     }
+    if (message.progress case final progress?) _typographyProgress = progress;
     // The settings the library keeps are saved as they change, so the next
     // book opens with them too.
     final ReaderDisplayChange change = (
@@ -3231,12 +3354,17 @@ final class ReaderController implements Listenable {
       animations: _typographyAnimations == animationsBefore
           ? null
           : _typographyAnimations,
+      progress: _typographyProgress == progressBefore
+          ? null
+          : _typographyProgress,
+      zonesHintDismissed: null,
     );
     if (change.theme != null ||
         change.fontSize != null ||
         change.lineSpacing != null ||
         change.twoPages != null ||
-        change.animations != null) {
+        change.animations != null ||
+        change.progress != null) {
       _displaySink(change);
     }
     if (message.rasterFit case final fit?) {
@@ -6679,6 +6807,10 @@ final class ReaderController implements Listenable {
             )) &&
         previous.selectionDescription != derived.selectionDescription;
     _model = derived;
+    if (previous.chromeShown != derived.chromeShown) {
+      _systemBars(derived.chromeShown);
+    }
+    if (previous.chromePinned != derived.chromePinned) _scheduleChromeHide();
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
       unawaited(_announceSelection(derived.selectionDescription));
     }
@@ -6850,6 +6982,7 @@ final class ReaderController implements Listenable {
         rasterZoom: _rasterZoom,
         twoPages: _typographyTwoPages,
         animations: _typographyAnimations,
+        progress: _typographyProgress,
       );
 
   /// The search bar presentation for [model] (RD-11).

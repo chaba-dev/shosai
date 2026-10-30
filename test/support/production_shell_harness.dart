@@ -37,6 +37,51 @@ const harnessArtifactDirVariable = 'SHOSAI_HARNESS_ARTIFACTS';
 /// Environment variable that records the revision under test in artifacts.
 const harnessRevisionVariable = 'SHOSAI_HARNESS_REVISION';
 
+/// An established reader device; first-open onboarding has its own tests.
+const harnessReaderSettings = FlutterReaderSettings(
+  continuous: false,
+  theme: 'light',
+  epubFontSize: 18,
+  epubLineSpacing: 1.5,
+  pdfZoom: 0,
+  zonesHintDismissed: true,
+);
+
+int _readerChromeMouseDevice = 100;
+
+/// Reveals the reader through its public pointer/touch interaction, without
+/// changing the document or depending on controller internals.
+Future<void> revealReaderChrome(WidgetTester tester) async {
+  if (find
+      .byKey(const ValueKey('reader-header-contents'))
+      .hitTestable()
+      .evaluate()
+      .isNotEmpty) {
+    return;
+  }
+  final stage = find.byKey(const ValueKey('reader-stage'));
+  if (stage.evaluate().isEmpty) return;
+  final rect = tester.getRect(stage);
+  if (tester.view.physicalSize.width / tester.view.devicePixelRatio >= 1200) {
+    final mouse = TestGesture(
+      dispatcher: tester.sendEventToBinding,
+      kind: ui.PointerDeviceKind.mouse,
+      device: _readerChromeMouseDevice++,
+    );
+    await mouse.addPointer(location: const Offset(-1, -1));
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(rect.center);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await mouse.moveTo(Offset(rect.center.dx, rect.top + 16));
+  } else {
+    await tester.tapAt(rect.center);
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Platform metrics
 // ---------------------------------------------------------------------------

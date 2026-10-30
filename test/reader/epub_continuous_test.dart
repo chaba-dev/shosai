@@ -131,7 +131,7 @@ void main() {
           bridge: harness,
           initialPath: '/books/navigation.epub',
           initialBookId: 1,
-          initialSettings: _continuous,
+          initialSettings: _continuous.copyWith(zonesHintDismissed: true),
           epubImageDecoder: (bytes) async => null,
           noticeReporter: noticeReporter,
           debugEpubSessionObserver: sessionObserver,
@@ -307,6 +307,7 @@ void main() {
     await settle(tester);
     expect(chapterScroll(tester).pixels, 0);
 
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settle(tester);
@@ -340,6 +341,7 @@ void main() {
 
   /// Opens Contents and chooses [title]; choosing closes the panel.
   Future<void> openContentsEntry(WidgetTester tester, String title) async {
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settle(tester);
@@ -736,6 +738,7 @@ void main() {
     await openReader(tester, harness);
     await settle(tester);
 
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-search')));
     await tester.pump();
     await settle(tester);
@@ -772,6 +775,7 @@ void main() {
     await settle(tester);
 
     // Saved places are listed in the Contents panel.
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settle(tester);
@@ -1173,6 +1177,7 @@ void main() {
     final target = openEpubBytes(epub).chapters.first.anchors['tall']!;
     await openReader(tester, bridge(epub: epub, unitCount: 2));
     await settle(tester);
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settle(tester);
@@ -1432,6 +1437,11 @@ void main() {
 
   testWidgets('a line movement crosses a gap taller than the window keeps, '
       'both ways, and the window stays bounded', (tester) async {
+    // The regression depends on a bounded viewport, not on space previously
+    // reserved by persistent chrome.
+    tester.view.physicalSize = const ui.Size(800, 540);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final epub = buildTestEpub(
       chapters: {
         'OPS/Text/chapter-1.xhtml':

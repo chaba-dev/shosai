@@ -248,6 +248,7 @@ final class ReaderTypographyPresentation {
     required this.rasterZoom,
     this.twoPages = true,
     this.animations = true,
+    this.progress = FlutterReaderProgress.page,
   });
 
   final FlutterBookFormat format;
@@ -269,6 +270,7 @@ final class ReaderTypographyPresentation {
 
   /// Animate page turns without affecting document layout.
   final bool animations;
+  final FlutterReaderProgress progress;
 
   /// Whether the document is reflowable (EPUB), so the EPUB controls apply.
   bool get reflowable => format == FlutterBookFormat.epub;
@@ -289,6 +291,7 @@ final class ReaderTypographyPresentation {
     double? rasterZoom,
     bool? twoPages,
     bool? animations,
+    FlutterReaderProgress? progress,
   }) => ReaderTypographyPresentation(
     format: format ?? this.format,
     continuous: continuous ?? this.continuous,
@@ -299,6 +302,7 @@ final class ReaderTypographyPresentation {
     rasterZoom: rasterZoom ?? this.rasterZoom,
     twoPages: twoPages ?? this.twoPages,
     animations: animations ?? this.animations,
+    progress: progress ?? this.progress,
   );
 
   @override
@@ -312,7 +316,8 @@ final class ReaderTypographyPresentation {
       other.rasterFit == rasterFit &&
       other.rasterZoom == rasterZoom &&
       other.twoPages == twoPages &&
-      other.animations == animations;
+      other.animations == animations &&
+      other.progress == progress;
 
   @override
   int get hashCode => Object.hash(
@@ -325,6 +330,7 @@ final class ReaderTypographyPresentation {
     rasterZoom,
     twoPages,
     animations,
+    progress,
   );
 }
 
@@ -494,6 +500,10 @@ final class ReaderModel {
     this.persistenceError,
     this.openPanel,
     this.searchOpen = false,
+    this.chromeVisible = false,
+    this.pointerChrome = false,
+    this.chromeHovered = false,
+    this.zonesHintDismissed = false,
     this.progress = const ReaderProgressPresentation(
       kind: ReaderProgressKind.none,
     ),
@@ -658,6 +668,19 @@ final class ReaderModel {
   /// Whether the search bar is open. Search is independent of [openPanel].
   final bool searchOpen;
 
+  final bool chromeVisible;
+  final bool pointerChrome;
+  final bool chromeHovered;
+  final bool zonesHintDismissed;
+
+  bool get chromePinned =>
+      openPanel != null ||
+      searchOpen ||
+      modalEffect != null ||
+      referencePeek != null;
+
+  bool get chromeShown => document == null || chromeVisible || chromePinned;
+
   /// Progress bar and status wording inputs (RD-05).
   final ReaderProgressPresentation progress;
 
@@ -762,6 +785,10 @@ final class ReaderModel {
     Object? persistenceError = _unchanged,
     Object? openPanel = _unchanged,
     bool? searchOpen,
+    bool? chromeVisible,
+    bool? pointerChrome,
+    bool? chromeHovered,
+    bool? zonesHintDismissed,
     ReaderProgressPresentation? progress,
     ReaderContentsPresentation? contents,
     ReaderPageInputPresentation? pageInput,
@@ -874,6 +901,10 @@ final class ReaderModel {
           ? this.openPanel
           : openPanel as ReaderPanel?,
       searchOpen: searchOpen ?? this.searchOpen,
+      chromeVisible: chromeVisible ?? this.chromeVisible,
+      pointerChrome: pointerChrome ?? this.pointerChrome,
+      chromeHovered: chromeHovered ?? this.chromeHovered,
+      zonesHintDismissed: zonesHintDismissed ?? this.zonesHintDismissed,
       progress: progress ?? this.progress,
       contents: contents ?? this.contents,
       pageInput: pageInput ?? this.pageInput,
