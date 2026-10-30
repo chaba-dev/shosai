@@ -18,13 +18,22 @@ import 'package:shosai_flutter/core/library_folders.dart';
 class _NativeHttp extends HttpOverrides {}
 
 class _NativeGoogleAuthorization extends GoogleSignInPlatform {
+  String? accessToken = 'native-token';
+
   @override
   Future<void> init(InitParameters params) async {}
 
   @override
+  Future<void> clearAuthorizationToken(
+    ClearAuthorizationTokenParams params,
+  ) async {}
+
+  @override
   Future<ClientAuthorizationTokenData?> clientAuthorizationTokensForScopes(
     ClientAuthorizationTokensForScopesParameters params,
-  ) async => const ClientAuthorizationTokenData(accessToken: 'native-token');
+  ) async => accessToken == null
+      ? null
+      : ClientAuthorizationTokenData(accessToken: accessToken!);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -646,6 +655,107 @@ void main() {
       );
       expect(renewed['access_token'], 'native-token');
       expect(renewed.containsKey('client_secret'), false);
+    },
+  );
+
+  test(
+    'Android Drive retries offline in the same service and renews only after rejection',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('drive-recovery');
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      addTearDown(() async {
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      final original = GoogleSignInPlatform.instance;
+      final platform = _NativeGoogleAuthorization()
+        ..accessToken = 'existing-token';
+      GoogleSignInPlatform.instance = platform;
+      addTearDown(() => GoogleSignInPlatform.instance = original);
+      final oauth = GoogleDriveAuthorization(
+        androidServerClientId: 'native-audience',
+      );
+      final provider = GoogleDriveConnectionProvider(
+        authorization: oauth,
+        credentials: _Credentials(),
+        authorize: () async => {
+          'kind': 'android',
+          'account': 'native-account',
+          'email': 'fixture@example.invalid',
+          'access_token': 'existing-token',
+        },
+      );
+      final folders = LibraryFolders(
+        Preferences(store),
+        Library(store, managedDirectory: '${directory.path}/books'),
+        LibraryLocations(store),
+        () async => '${directory.path}/stage',
+        BookFileCache(store, '${directory.path}/cache'),
+        providers: [provider],
+      );
+      final grant = (await provider.setup('drive'))!;
+      var listedKey = 'before';
+      var rejectExisting = false;
+      handler = (request) async {
+        if (rejectExisting &&
+            request.headers.value(HttpHeaders.authorizationHeader) ==
+                'Bearer existing-token') {
+          _json(request, {}, status: 401);
+        } else if (request.uri.path == '/drive/v3/files') {
+          _json(request, {
+            'files': [_file(listedKey)],
+          });
+        } else {
+          _json(request, _file('book'));
+        }
+      };
+      var port = server.port;
+      await HttpOverrides.runZoned(
+        () async {
+          await folders.add(grant);
+          expect((await folders.discover()).single.entry.key, 'before');
+
+          // No HTTP service and no silent SDK authorization are available.
+          // The stored bearer must reach the transport, which reports offline,
+          // rather than permanently invalidating the location generation.
+          platform.accessToken = null;
+          await server.close(force: true);
+          final offline = (await folders.discover(refresh: true)).single;
+          expect(offline.entry.key, 'before');
+          expect(offline.failure, LocationFailure.offline);
+          expect(folders.scanWarnings, ['Google Drive']);
+
+          server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+          port = server.port;
+          server.listen((request) => unawaited(handler(request)));
+          listedKey = 'after';
+          // The same service must publish fresh metadata, not hide the warning
+          // while serving its old catalog, and must not need reconnection.
+          final recovered = (await folders.discover(refresh: true)).single;
+          expect(recovered.entry.key, 'after');
+          expect(recovered.failure, isNull);
+          expect(folders.scanWarnings, isEmpty);
+
+          // A real 401 still requires native authorization. Missing permission
+          // remains revoked; a replacement token retries the actual request.
+          rejectExisting = true;
+          final location = await provider.open(grant);
+          await expectLater(
+            location.stat('book'),
+            throwsA(
+              isA<LocationException>().having(
+                (error) => error.failure,
+                'rejected access needs authorization',
+                LocationFailure.revoked,
+              ),
+            ),
+          );
+          platform.accessToken = 'renewed-native-token';
+          expect((await location.stat('book')).key, 'book');
+        },
+        createHttpClient: (context) =>
+            _RedirectClient(native.createHttpClient(context), port),
+      );
     },
   );
 
