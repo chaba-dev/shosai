@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-29
+## [0.1.0] - 2026-10-30
 
 ### 🚀 Features
 
@@ -161,6 +161,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Dismiss floating panels on system Back (#230)
 - *(reader)* Enlarge phone page-turn touch targets (#231)
 - *(dropbox)* Guide setup through restricted app folder (#248)
+- *(drive)* Reuse Android bearer tokens until rejected (#254)
 
 ### 🚜 Refactor
 
