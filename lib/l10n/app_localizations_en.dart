@@ -988,4 +988,35 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cardStopKeeping => 'Stop keeping on this device';
+
+  @override
+  String get readerProgressLabel => 'Progress';
+
+  @override
+  String get readerProgressPage => 'Page';
+
+  @override
+  String get readerProgressPercent => 'Percent';
+
+  @override
+  String get readerProgressOff => 'Off';
+
+  @override
+  String readerQuietPageOf(int page, int total) {
+    return 'page $page of $total';
+  }
+
+  @override
+  String get readerControls => 'Controls';
+
+  @override
+  String get readerZonesTitle => 'How to turn pages';
+
+  @override
+  String get readerZonesInstruction =>
+      'Tap the sides to turn, the middle for controls.\nYou can also swipe. Tap anywhere to begin.';
+
+  @override
+  String get readerZonesLeftward =>
+      'This book turns leftward.\nTap the sides to turn, the middle for controls. You can also swipe. Tap anywhere to begin.';
 }

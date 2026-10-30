@@ -260,6 +260,8 @@ void main() {
         pdfZoom: ReaderSettings.pdfZoomFitWidth,
         twoPages: false,
         animations: false,
+        progress: ReaderProgress.percent,
+        zonesHintDismissed: true,
       );
       await settings.save(saved);
 

@@ -1721,6 +1721,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stop keeping on this device'**
   String get cardStopKeeping;
+
+  /// No description provided for @readerProgressLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Progress'**
+  String get readerProgressLabel;
+
+  /// No description provided for @readerProgressPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Page'**
+  String get readerProgressPage;
+
+  /// No description provided for @readerProgressPercent.
+  ///
+  /// In en, this message translates to:
+  /// **'Percent'**
+  String get readerProgressPercent;
+
+  /// No description provided for @readerProgressOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get readerProgressOff;
+
+  /// No description provided for @readerQuietPageOf.
+  ///
+  /// In en, this message translates to:
+  /// **'page {page} of {total}'**
+  String readerQuietPageOf(int page, int total);
+
+  /// No description provided for @readerControls.
+  ///
+  /// In en, this message translates to:
+  /// **'Controls'**
+  String get readerControls;
+
+  /// No description provided for @readerZonesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How to turn pages'**
+  String get readerZonesTitle;
+
+  /// No description provided for @readerZonesInstruction.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap the sides to turn, the middle for controls.\nYou can also swipe. Tap anywhere to begin.'**
+  String get readerZonesInstruction;
+
+  /// No description provided for @readerZonesLeftward.
+  ///
+  /// In en, this message translates to:
+  /// **'This book turns leftward.\nTap the sides to turn, the middle for controls. You can also swipe. Tap anywhere to begin.'**
+  String get readerZonesLeftward;
 }
 
 class _AppLocalizationsDelegate

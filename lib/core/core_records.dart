@@ -423,6 +423,8 @@ final class CoreRecords implements ShosaiRecords {
       pdfZoom: settings.pdfZoom,
       twoPages: settings.twoPages,
       animations: settings.animations,
+      progress: FlutterReaderProgress.values.byName(settings.progress.name),
+      zonesHintDismissed: settings.zonesHintDismissed,
       librarySort: FlutterLibrarySort.values.byName(sort.name),
     );
   });
@@ -447,6 +449,8 @@ final class CoreRecords implements ShosaiRecords {
             pdfZoom: value.pdfZoom,
             twoPages: value.twoPages,
             animations: value.animations,
+            progress: ReaderProgress.values.byName(value.progress.name),
+            zonesHintDismissed: value.zonesHintDismissed,
           ),
         );
         await _core.librarySettings.saveSort(
