@@ -65,12 +65,16 @@ final class LibraryDisplayChanged extends LibraryMessage {
     this.lineSpacing,
     this.twoPages,
     this.animations,
+    this.progress,
+    this.zonesHintDismissed,
   });
   final String? theme;
   final double? fontSize;
   final double? lineSpacing;
   final bool? twoPages;
   final bool? animations;
+  final FlutterReaderProgress? progress;
+  final bool? zonesHintDismissed;
 }
 
 /// Save the settings again after their last write failed.

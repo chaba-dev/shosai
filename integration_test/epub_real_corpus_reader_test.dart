@@ -20,6 +20,8 @@ import 'package:vm_service/vm_service.dart' as vms;
 import 'package:vm_service/vm_service_io.dart' as vms_io;
 
 import '../test/support/corpus_interactive_support.dart';
+import '../test/support/production_shell_harness.dart'
+    show dismissReaderZonesHint, revealReaderChrome;
 
 /// Opt-in real-book EPUB production-reader pass.
 ///
@@ -537,6 +539,7 @@ void main() {
               continue;
             }
             await settle();
+            await dismissReaderZonesHint(tester);
             await capture('$id-open.png');
             await mark(id, 'opened spines=${routedSessionSpines.length}');
             // Paint evidence from the live tree: the Dart layout engine paints
@@ -626,6 +629,7 @@ void main() {
             await mark(id, 'contents');
 
             // Contents panel: open, capture, navigate to a middle row.
+            await revealReaderChrome(tester);
             await tester.tap(
               find.byKey(const ValueKey('reader-header-contents')),
             );
@@ -1044,6 +1048,7 @@ Future<List<Map<String, Object?>>> fontChange(
   required Future<List<Map<String, Object?>>> Function(Future<void> Function())
   timed,
 }) async {
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
   await settle();
   final button = find.byKey(

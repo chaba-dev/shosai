@@ -10,6 +10,8 @@ import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/view.dart';
 
+import '../test/support/production_shell_harness.dart'
+    show dismissReaderZonesHint, revealReaderChrome;
 import '../test/support/reference_documents.dart';
 
 /// Real engines, application core, fonts, and reader composition; no bridge fake.
@@ -167,6 +169,7 @@ void main() {
               ? epub(tester)?.page.unit == unit
               : pdf(tester)?.currentUnit == unit;
           await until(tester, () => onPage(0));
+          await dismissReaderZonesHint(tester);
           final form = width == 390
               ? 'phone'
               : width == 800
@@ -232,7 +235,7 @@ void main() {
               reason:
                   'swiping over a link turns the page rather than opening it',
             );
-            await tester.tap(keyed('reader-edge-previous'));
+            await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
             await until(tester, () => onPage(0));
           }
           await tapAt(tester, linkPoint(0));
@@ -307,6 +310,7 @@ void main() {
 
           // Contents uses the same non-destructive preview contract.
           if (format == 'epub') {
+            await revealReaderChrome(tester);
             await tester.tap(keyed('reader-header-contents'));
             await until(
               tester,
@@ -326,7 +330,7 @@ void main() {
             expect(keyed('reader-back-pill'), findsNothing);
           }
           if (width == 1200 && format == 'pdf') {
-            await tester.tap(keyed('reader-edge-next'));
+            await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
             await until(tester, () => onPage(1));
             final spread = pdf(tester)!.spread!;
             final surface = pdf(tester)!.surface;
@@ -358,6 +362,7 @@ void main() {
             await until(tester, () => onPage(1));
           }
           if (width == 1200 && format == 'epub') {
+            await revealReaderChrome(tester);
             await tester.tap(keyed('reader-header-notes'));
             await tester.pumpAndSettle();
             final size = epub(tester)!.page.box.size;

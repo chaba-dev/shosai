@@ -930,4 +930,35 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get cardStopKeeping => 'この端末への保存を解除';
+
+  @override
+  String get readerProgressLabel => '進捗';
+
+  @override
+  String get readerProgressPage => 'ページ';
+
+  @override
+  String get readerProgressPercent => '割合';
+
+  @override
+  String get readerProgressOff => '非表示';
+
+  @override
+  String readerQuietPageOf(int page, int total) {
+    return '$total ページ中 $page ページ';
+  }
+
+  @override
+  String get readerControls => 'メニュー';
+
+  @override
+  String get readerZonesTitle => 'ページのめくり方';
+
+  @override
+  String get readerZonesInstruction =>
+      '左右をタップでページ、中央でメニュー\nスワイプでもめくれます。タップして始める。';
+
+  @override
+  String get readerZonesLeftward =>
+      'この本は左へめくります。\n左右をタップでページ、中央でメニュー。スワイプでもめくれます。タップして始める。';
 }

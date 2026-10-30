@@ -194,6 +194,25 @@ void main() {
           ShadTheme.of(context).brightness,
           dark ? Brightness.dark : Brightness.light,
         );
+        await revealReaderChrome(tester);
+        final chrome = tester.widget<ColoredBox>(
+          find
+              .ancestor(
+                of: find.byKey(const ValueKey('reader-header')),
+                matching: find.byType(ColoredBox),
+              )
+              .first,
+        );
+        expect(
+          chrome.color,
+          dark ? ShosaiTokens.colorDarkChrome : ShosaiTokens.colorLightChrome,
+          reason: 'overlay chrome follows the reader, not the outer app theme',
+        );
+        await captureHarnessArtifact(
+          tester,
+          '2c-reader-$format-${entry.key}-chrome-1280',
+          metadata: <String, Object?>{'palette': 'reader-${entry.key}'},
+        );
       });
     }
   });

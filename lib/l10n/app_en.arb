@@ -1101,5 +1101,15 @@
   "@readerReferencePage": {"placeholders": {"page": {"type": "int"}}},
   "readerReferenceNoPreview": "No text preview available. Go to the page to view this reference.",
   "cardKeepOnDevice": "Keep on this device",
-  "cardStopKeeping": "Stop keeping on this device"
+  "cardStopKeeping": "Stop keeping on this device",
+  "readerProgressLabel": "Progress",
+  "readerProgressPage": "Page",
+  "readerProgressPercent": "Percent",
+  "readerProgressOff": "Off",
+  "readerQuietPageOf": "page {page} of {total}",
+  "@readerQuietPageOf": {"placeholders": {"page": {"type": "int"}, "total": {"type": "int"}}},
+  "readerControls": "Controls",
+  "readerZonesTitle": "How to turn pages",
+  "readerZonesInstruction": "Tap the sides to turn, the middle for controls.\nYou can also swipe. Tap anywhere to begin.",
+  "readerZonesLeftward": "This book turns leftward.\nTap the sides to turn, the middle for controls. You can also swipe. Tap anywhere to begin."
 }
