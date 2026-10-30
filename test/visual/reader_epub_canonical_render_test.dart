@@ -125,6 +125,7 @@ void main() {
   );
 
   Future<void> openContents(WidgetTester tester) async {
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await pumpHarnessFrames(tester, frames: 4);
     await tester.runAsync(

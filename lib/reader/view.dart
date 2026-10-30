@@ -961,6 +961,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               left: 0,
               right: 0,
               child: _chromeOverlay(
+                context,
                 model,
                 top: true,
                 child: _boundedChrome(
@@ -984,6 +985,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               left: 0,
               right: 0,
               child: _chromeOverlay(
+                context,
                 model,
                 top: false,
                 child: _boundedChrome(
@@ -1072,6 +1074,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   );
 
   Widget _chromeOverlay(
+    BuildContext context,
     ReaderModel model, {
     required bool top,
     required Widget child,

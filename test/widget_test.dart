@@ -17,6 +17,8 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 import 'support/bridge_pdf_engine.dart';
 import 'support/bridge_records.dart';
+import 'support/production_shell_harness.dart'
+    show dismissReaderZonesHint, revealReaderChrome;
 
 final _documentHandle = FlutterDocumentHandle(
   registry: BigInt.one,
@@ -2651,6 +2653,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await dismissReaderZonesHint(tester);
 
       final pagePaint = find.byWidgetPredicate(
         (widget) => widget is CustomPaint && widget.painter is PagePainter,
@@ -2714,7 +2717,7 @@ void main() {
       bridge.selectionCompleters.add(
         Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(42)),
       );
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await tester.pumpAndSettle();
       final nextVerticalScroll = find.descendant(
         of: find.byKey(const ValueKey('reader-paginated-presentation')),
@@ -4578,6 +4581,7 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/a.pdf');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
+      await dismissReaderZonesHint(tester);
       if (failure == 'selection') {
         final paint = tester.widget<CustomPaint>(
           find.byWidgetPredicate(
@@ -4709,12 +4713,10 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
-      // The document box spans the stage between the two RD-06 edge columns;
-      // the columns are chrome and scale with the interface, so the box is
-      // measured against the rendered controls rather than hardcoded. The page
-      // is laid out at the display scale it was opened with.
+      // Page furniture stays inside the stage at every interface scale. The
+      // book is laid out at the display scale it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
-      _expectViewportBetweenEdges(tester);
+      _expectViewportInsideStage(tester);
       await _openNotesPanel(tester);
       expect(find.text('page 1 — recovered'), findsOneWidget);
       // Address the Notes panel's own scrollable: the reader chrome adds
@@ -4739,7 +4741,7 @@ void main() {
       tester.view.physicalSize = const Size(1400, 1000);
       await tester.pumpAndSettle();
       expect(bridge.selectionLayouts.last.scale, 2);
-      _expectViewportBetweenEdges(tester);
+      _expectViewportInsideStage(tester);
 
       final callsBeforeTheme = bridge.selectionCalls;
       await tester.pumpWidget(app(brightness: Brightness.dark));
@@ -4749,10 +4751,9 @@ void main() {
 
       await tester.pumpWidget(app(brightness: Brightness.dark, textScale: 2));
       await tester.pumpAndSettle();
-      // At `T200` the edge columns themselves are wider: only the chrome
-      // scales.
+      // Interface text scaling does not scale the book layout.
       expect(bridge.selectionLayouts.last.scale, 2);
-      _expectViewportBetweenEdges(tester);
+      _expectViewportInsideStage(tester);
 
       tester.view.devicePixelRatio = 3;
       tester.view.physicalSize = const Size(2100, 1500);
@@ -4760,7 +4761,7 @@ void main() {
       // A device pixel ratio change is not an interface text-scale change: the
       // scale of an already-open document stays the one it was opened with.
       expect(bridge.selectionLayouts.last.scale, 2);
-      _expectViewportBetweenEdges(tester);
+      _expectViewportInsideStage(tester);
       expect(find.text('page 1 — unavailable'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
@@ -4790,9 +4791,8 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
-    // The reported reader viewport spans the stage between the two RD-06 edge
-    // columns, at every device class and rotation; on a phone the stage is
-    // the whole window.
+    // The book viewport stays inside the stage through rotation and device
+    // class changes; on a phone the stage is the whole window.
     for (final size in const [
       Size(390, 844),
       Size(844, 390),
@@ -4802,7 +4802,7 @@ void main() {
     ]) {
       tester.view.physicalSize = size;
       await tester.pumpAndSettle();
-      _expectViewportBetweenEdges(tester, reason: 'reader viewport at $size');
+      _expectViewportInsideStage(tester, reason: 'reader viewport at $size');
       if (size.width < 600) {
         expect(
           tester.getSize(find.byKey(const ValueKey('reader-stage'))).width,
@@ -4843,18 +4843,13 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
-    // The safe area insets the reader; the edge columns then take their share
-    // of the content area and the document is laid out for what remains.
-    final previous = tester.getRect(
-      find.byKey(const ValueKey('reader-edge-previous')),
-    );
-    final next = tester.getRect(find.byKey(const ValueKey('reader-edge-next')));
-    expect(previous.left, 20);
-    expect(next.right, 360);
-    expect(
-      tester.getSize(_documentArea).width,
-      340 - previous.width - next.width,
-    );
+    // Phone pages fill the safe width without page-turn chevron columns.
+    final document = tester.getRect(_documentArea);
+    expect(document.left, 20);
+    expect(document.right, 360);
+    expect(document.width, 340);
+    expect(find.byKey(const ValueKey('reader-edge-previous')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-edge-next')), findsNothing);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
@@ -5085,6 +5080,7 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
+      await dismissReaderZonesHint(tester);
 
       final contentFinder = find.byKey(
         const ValueKey('reader-content-semantics'),
@@ -5240,6 +5236,7 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
+      await dismissReaderZonesHint(tester);
 
       final content = tester.getSemantics(
         find.byKey(const ValueKey('reader-content-semantics')),
@@ -5309,6 +5306,7 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/empty.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
+      await dismissReaderZonesHint(tester);
 
       final data = tester
           .getSemantics(find.byKey(const ValueKey('reader-content-semantics')))
@@ -5536,6 +5534,7 @@ void main() {
           await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
+          await dismissReaderZonesHint(tester);
 
           SemanticsNode selectAll() {
             final content = tester.getSemantics(
@@ -5623,6 +5622,7 @@ void main() {
           await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
+          await dismissReaderZonesHint(tester);
           final statusFinder = find.byKey(
             const ValueKey('reader-selection-status'),
           );
@@ -5702,6 +5702,7 @@ void main() {
           await tester.enterText(find.byType(ShadInput), '/tmp/book');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
+          await dismissReaderZonesHint(tester);
 
           final surface = find.byKey(
             const ValueKey('reader-selection-surface'),
@@ -5801,6 +5802,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final bounds = tester.getRect(surface);
     final side = bounds.shortestSide;
@@ -5856,6 +5858,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     await tester.tap(find.byKey(const ValueKey('reader-selection-surface')));
     await tester.pump();
 
@@ -5961,6 +5964,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final bounds = tester.getRect(surface);
     final side = bounds.shortestSide;
@@ -6021,6 +6025,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final bounds = tester.getRect(surface);
     final side = bounds.shortestSide;
@@ -6070,6 +6075,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final bounds = tester.getRect(surface);
     final side = bounds.shortestSide;
@@ -6115,6 +6121,15 @@ void main() {
             debugPathEntry: true,
             bridge: bridge,
             initialPath: '/tmp/book.pdf',
+            // Page-key ordinals below exercise single pages, not spreads.
+            initialSettings: const FlutterReaderSettings(
+              continuous: false,
+              theme: 'light',
+              epubFontSize: 18,
+              epubLineSpacing: 1.5,
+              pdfZoom: 0,
+              twoPages: false,
+            ),
             decoder: (pixels, {required width, required height}) =>
                 _testImage(),
           ),
@@ -6122,6 +6137,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     expect(find.text('33% · page 1 of 3'), findsOneWidget);
 
     Future<void> press(LogicalKeyboardKey key, String status) async {
@@ -6161,6 +6177,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final bounds = tester.getRect(surface);
     final side = bounds.shortestSide;
@@ -6199,6 +6216,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
 
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final rect = tester.getRect(surface);
@@ -6260,6 +6278,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final rect = tester.getRect(surface);
     final side = rect.shortestSide;
@@ -6305,6 +6324,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final rect = tester.getRect(
       find.byKey(const ValueKey('reader-selection-surface')),
     );
@@ -6432,6 +6452,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
     final rect = tester.getRect(surface);
     final side = rect.shortestSide;
@@ -6587,6 +6608,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
+    await revealReaderChrome(tester);
 
     await tester.tap(find.byKey(const ValueKey('reader-header-bookmark')));
     await tester.pump();
@@ -7095,11 +7118,21 @@ void main() {
           initialPath: '/books/book.pdf',
           initialBookId: 7,
           placeRequests: requests,
+          // Keep the single-page destinations independent of stage width.
+          initialSettings: const FlutterReaderSettings(
+            continuous: false,
+            theme: 'light',
+            epubFontSize: 18,
+            epubLineSpacing: 1.5,
+            pdfZoom: 0,
+            twoPages: false,
+          ),
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
       ),
     );
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
     final back = find.byKey(const ValueKey('reader-back-pill'));
 
     requests.go(const ReaderPlace(5));
@@ -7107,7 +7140,7 @@ void main() {
     expect(find.text('Back to page 1'), findsOneWidget);
     for (var turn = 0; turn < 3; turn += 1) {
       expect(back, findsOneWidget, reason: 'after $turn turns');
-      await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
       await tester.pumpAndSettle();
     }
     expect(back, findsNothing);
@@ -7117,14 +7150,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Back to page 3'), findsOneWidget);
     for (var turn = 0; turn < 2; turn += 1) {
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await tester.pumpAndSettle();
     }
     requests.go(const ReaderPlace(5));
     await tester.pumpAndSettle();
     for (var turn = 0; turn < 3; turn += 1) {
       expect(back, findsOneWidget, reason: 'after $turn turns');
-      await tester.tap(find.byKey(const ValueKey('reader-edge-previous')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
       await tester.pumpAndSettle();
     }
     expect(back, findsNothing);
@@ -7168,8 +7201,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
 
-    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await tester.pump();
     await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
     await tester.pumpAndSettle();
@@ -7242,6 +7276,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
+    await revealReaderChrome(tester);
     // The page field lives in the Contents sheet and must stay inside the
     // usable viewport above the keyboard (640 logical height minus the 280
     // inset), not merely inside the window.
@@ -7601,6 +7637,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await dismissReaderZonesHint(tester);
+    await revealReaderChrome(tester);
 
     await tester.tap(find.byKey(const ValueKey('reader-header-bookmark')));
     await tester.pump();
@@ -7685,15 +7723,16 @@ FlutterSelectionSurface _surface(
   visualLines: const [],
 );
 
-/// Expects the document box to fill the stage between the page-turn edges.
-void _expectViewportBetweenEdges(WidgetTester tester, {String? reason}) {
+/// Expects the usable document box to remain inside the reading stage.
+void _expectViewportInsideStage(WidgetTester tester, {String? reason}) {
   final document = tester.getRect(_documentArea);
-  final previous = tester.getRect(
-    find.byKey(const ValueKey('reader-edge-previous')),
-  );
-  final next = tester.getRect(find.byKey(const ValueKey('reader-edge-next')));
-  expect(document.left, previous.right, reason: reason);
-  expect(document.right, next.left, reason: reason);
+  final stage = tester.getRect(find.byKey(const ValueKey('reader-stage')));
+  expect(document.width, greaterThan(0), reason: reason);
+  expect(document.height, greaterThan(0), reason: reason);
+  expect(document.left, greaterThanOrEqualTo(stage.left), reason: reason);
+  expect(document.top, greaterThanOrEqualTo(stage.top), reason: reason);
+  expect(document.right, lessThanOrEqualTo(stage.right), reason: reason);
+  expect(document.bottom, lessThanOrEqualTo(stage.bottom), reason: reason);
 }
 
 /// Opens the reader's Notes panel, where the highlights and their recovery
@@ -7702,6 +7741,8 @@ Future<void> _openNotesPanel(WidgetTester tester) async {
   if (find.byKey(const ValueKey('reader-panel-notes')).evaluate().isNotEmpty) {
     return;
   }
+  await dismissReaderZonesHint(tester);
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
   await tester.pumpAndSettle();
 }
