@@ -469,10 +469,15 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         child: Transform.scale(
           scale: _previewScale,
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              dragDevices: {...ScrollConfiguration.of(context).dragDevices}
-                ..remove(ui.PointerDeviceKind.touch),
-            ),
+            // Only the inner PDF owner pans its scroll controllers itself.
+            // A furniture fallback must preserve descendant touch scrolling.
+            behavior: widget.fittedZoom == null
+                ? ScrollConfiguration.of(context)
+                : ScrollConfiguration.of(context).copyWith(
+                    dragDevices: {
+                      ...ScrollConfiguration.of(context).dragDevices,
+                    }..remove(ui.PointerDeviceKind.touch),
+                  ),
             child: widget.builder(_horizontal, _vertical),
           ),
         ),
@@ -783,7 +788,8 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
   ///
   /// EPUB uses its painted link geometry; PDF defers annotation lookup to the
   /// controller, which owns classification and destination resolution.
-  void _endTapCandidate(Offset position, SurfaceTransform transform) {
+  void _endTapCandidate(TapUpDetails details, SurfaceTransform transform) {
+    final position = details.localPosition;
     final origin = _tapOrigin;
     final isTap =
         _tapPointer != null &&
@@ -792,11 +798,18 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     _tapPointer = null;
     _tapOrigin = null;
     if (!isTap) return;
+    final pageTap = _ReaderPageTapScope.tap(
+      context,
+      details.globalPosition,
+      details.kind,
+    );
     final page = widget.epubPage;
     final source = transform.toSource(position);
     if (page == null) {
       if (widget.model.document?.format == FlutterBookFormat.pdf) {
-        widget.dispatch(ReaderPdfLinkTapped(source.dx, source.dy));
+        widget.dispatch(
+          ReaderPdfLinkTapped(source.dx, source.dy, pageTap: pageTap),
+        );
       }
       return;
     }
@@ -808,6 +821,8 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
         };
     if (link != null) {
       widget.dispatch(ReaderLinkActivated(link.href, label: link.label));
+    } else if (pageTap != null) {
+      widget.dispatch(pageTap);
     }
   }
 
@@ -949,8 +964,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             excludeFromSemantics: true,
             // Let the gesture arena distinguish a tap from PDF double-tap
             // zoom, a pinch, a page swipe, and a long-press selection first.
-            onTapUp: (details) =>
-                _endTapCandidate(details.localPosition, transform),
+            onTapUp: (details) => _endTapCandidate(details, transform),
             onTapCancel: _clearTapCandidate,
             onLongPressStart: (details) {
               // A long press is a selection gesture, never a link tap.

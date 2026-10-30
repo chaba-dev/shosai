@@ -51,6 +51,7 @@ List<Widget> _readerPanelOverlay({
   required ReaderModel model,
   required ShellLayout layout,
   required BoxConstraints stage,
+  required double bottomInset,
   required void Function(ReaderMessage) dispatch,
   required FocusNode focusNode,
   required Map<ReaderPanel, Key> hostKeys,
@@ -68,9 +69,18 @@ List<Widget> _readerPanelOverlay({
     focusNode: focusNode,
   );
   final inset = ShosaiTokens.space2;
-  final maxHeight = math.max(0.0, stage.maxHeight - 2 * inset);
+  final top = math.min(
+    ShosaiTokens.sizeToolbarHeight,
+    stage.maxHeight * _readerHeaderBoundShare,
+  );
+  final maxHeight = math.max(
+    0.0,
+    stage.maxHeight - top - bottomInset - 2 * inset,
+  );
   return [
     Positioned.fill(
+      top: top,
+      bottom: bottomInset,
       child: GestureDetector(
         key: const ValueKey('reader-panel-scrim'),
         behavior: HitTestBehavior.opaque,
@@ -85,6 +95,8 @@ List<Widget> _readerPanelOverlay({
     ),
     switch (presentation) {
       _ReaderPanelPresentation.sheet => Positioned.fill(
+        top: top,
+        bottom: bottomInset,
         child: _ReaderPanelSheet(
           key: ValueKey(panel),
           onDismiss: () => dispatch(ReaderPanelToggled(panel)),
@@ -92,14 +104,14 @@ List<Widget> _readerPanelOverlay({
         ),
       ),
       _ReaderPanelPresentation.side => Positioned(
-        top: 0,
+        top: top,
         right: 0,
-        bottom: 0,
+        bottom: bottomInset,
         width: math.min(ShosaiTokens.sizePanelWidth, stage.maxWidth),
         child: host,
       ),
       _ => Positioned(
-        top: inset,
+        top: top + inset,
         left: panel == ReaderPanel.contents ? inset : null,
         right: panel == ReaderPanel.contents ? null : inset,
         width: math.min(_readerPopoverWidth(panel), stage.maxWidth - 2 * inset),
@@ -945,6 +957,29 @@ class _ReaderDisplayPanel extends StatelessWidget {
                 ],
               ),
             ),
+          _ReaderField(
+            label: l10n.readerProgressLabel,
+            child: _ReaderSegmented(
+              segments: [
+                for (final value in FlutterReaderProgress.values)
+                  (
+                    key: ValueKey('reader-progress-${value.name}'),
+                    icon: null,
+                    label: switch (value) {
+                      FlutterReaderProgress.page => l10n.readerProgressPage,
+                      FlutterReaderProgress.percent =>
+                        l10n.readerProgressPercent,
+                      FlutterReaderProgress.off => l10n.readerProgressOff,
+                    },
+                    selected: typography.progress == value,
+                    onPressed: enabled
+                        ? () =>
+                              dispatch(ReaderTypographyChanged(progress: value))
+                        : null,
+                  ),
+              ],
+            ),
+          ),
           _ReaderField(
             label: l10n.readerPageAnimations,
             child: Align(

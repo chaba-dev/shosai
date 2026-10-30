@@ -156,6 +156,7 @@ void main() {
           bridge: harness,
           initialPath: '/books/page-anchor.epub',
           initialBookId: 1,
+          initialSettings: harnessReaderSettings,
           epubImageDecoder: (bytes) async => null,
           debugEpubSessionObserver: sessionObserver,
         ),
@@ -210,7 +211,7 @@ void main() {
     final starts = <int>[dartPage(tester)!.page.canonicalStart];
     final cap = maxSteps ?? 60;
     for (var step = 0; step < cap; step += 1) {
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await settleEpubPage(tester);
       final page = dartPage(tester)!;
       if (page.page.unit != chapterUnit) {
@@ -508,7 +509,7 @@ void main() {
     var current = dartPage(tester)!;
     var walked = 0;
     while (!_pageStartOwnedByEmptyRow(current.page.page)) {
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await settleEpubPage(tester);
       current = dartPage(tester)!;
       if (current.page.unit != chapterUnit || ++walked > 60) {
@@ -602,6 +603,7 @@ void main() {
             bridge: bridge(),
             initialPath: '/books/page-anchor.epub',
             initialBookId: 1,
+            initialSettings: harnessReaderSettings,
             initialPlace: ReaderPlace(
               book.chapters.first.spine,
               offset: 0,
@@ -624,7 +626,7 @@ void main() {
     testWidgets('is dropped by a page turn', (tester) async {
       await openAtMatch(tester);
       final first = dartPage(tester)!.page.canonicalStart;
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await tester.pump();
       await settleEpubPage(tester);
       expect(dartPage(tester)!.page.canonicalStart, greaterThan(first));

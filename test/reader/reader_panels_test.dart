@@ -215,7 +215,7 @@ Widget _reader({
     decoder: (pixels, {required width, required height}) => _testImage(),
     initialPath: initialPath,
     initialBookId: initialBookId,
-    initialSettings: settings,
+    initialSettings: settings?.copyWith(zonesHintDismissed: true),
     contentsLoader: contentsLoader,
     documentPicker: documentPicker,
     exportSink: exportSink,
@@ -229,6 +229,7 @@ Future<void> _open(WidgetTester tester, Widget widget) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 32));
   await tester.pump(const Duration(milliseconds: 32));
+  await revealReaderChrome(tester);
 }
 
 void _setView(WidgetTester tester, Size size) {
@@ -285,12 +286,14 @@ List<ReaderContentsEntry> _fixtureEntries() => const [
 ];
 
 Future<void> _openContents(WidgetTester tester) async {
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
   await tester.pump();
   await _settle(tester);
 }
 
 Future<void> _openNotes(WidgetTester tester) async {
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
   await tester.pump();
   await _settle(tester);
@@ -316,6 +319,7 @@ bool _chromeEnabled(WidgetTester tester) => tester
     .enabled;
 
 Future<void> _openTypography(WidgetTester tester) async {
+  await revealReaderChrome(tester);
   await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
   await tester.pump();
   await _settle(tester);

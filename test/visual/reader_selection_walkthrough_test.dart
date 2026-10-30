@@ -201,6 +201,7 @@ void main() {
     await settleReaderSelection(tester);
     expect(bridge.created.single.color, FlutterHighlightColor.green);
     expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
     await settleReaderSelection(tester);
     final card = find.byKey(const ValueKey('reader-annotation-walkthrough'));

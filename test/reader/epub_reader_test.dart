@@ -63,7 +63,9 @@ void main() {
           initialPath: '/books/conformance.epub',
           initialBookId: bookId,
           initialPlace: place,
-          initialSettings: settings,
+          initialSettings: (settings ?? harnessReaderSettings).copyWith(
+            zonesHintDismissed: true,
+          ),
           epubImageDecoder: (bytes) async => null,
         ),
       ),
@@ -75,6 +77,7 @@ void main() {
           : () => harnessReaderPageReady(tester),
       maxRounds: 16,
     );
+    await revealReaderChrome(tester);
   }
 
   ReaderEpubPageContentPainter? dartPage(WidgetTester tester) {
@@ -218,7 +221,7 @@ void main() {
     await settleEpubPage(tester);
     expect(dartPage(tester)!.page.unit, 0);
 
-    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await settleNative(tester);
 
     // The refusal is reported over the page the reader still shows.
@@ -236,6 +239,7 @@ void main() {
       'another chapter from Contents.',
     );
 
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settleNative(tester);
@@ -286,6 +290,7 @@ void main() {
         home: ReaderScreen(
           bridge: harness,
           initialPath: '/books/conformance.epub',
+          initialSettings: harnessReaderSettings,
           epubImageDecoder: (bytes) async => null,
           debugEpubSessionObserver: sessions.add,
         ),
@@ -451,7 +456,7 @@ void main() {
     await settleReaderSelection(tester);
     expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await pumpHarnessFrames(tester, frames: 8);
     await settleNative(tester);
 
@@ -499,6 +504,7 @@ void main() {
           bridge: harness,
           initialPath: '/books/umibe.epub',
           initialBookId: 2,
+          initialSettings: harnessReaderSettings,
           epubImageDecoder: (bytes) async => null,
         ),
       ),
@@ -517,7 +523,7 @@ void main() {
       reason: 'the fixture chapter spans several pages',
     );
 
-    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await pumpHarnessFrames(tester, frames: 8);
     await settleNative(tester);
 
@@ -626,7 +632,11 @@ void main() {
         reason: 'restoring deep in a chapter must not label its window page 1',
       );
       expect(
-        find.text('$expectedPercent% · page ${page.pageIndex + 1}'),
+        find.text(
+          size.width < 600
+              ? '$expectedPercent%\npage ${page.pageIndex + 1}'
+              : '$expectedPercent% · page ${page.pageIndex + 1}',
+        ),
         findsOneWidget,
       );
       expect(harness.savedReadingStates.last.offset, BigInt.from(offset));

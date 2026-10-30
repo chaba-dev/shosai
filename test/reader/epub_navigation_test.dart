@@ -166,6 +166,7 @@ void main() {
           bridge: harness,
           initialPath: '/books/navigation.epub',
           initialBookId: 1,
+          initialSettings: harnessReaderSettings,
           initialPlace: place,
           placeRequests: placeRequests,
           epubImageDecoder: (bytes) async => null,
@@ -176,6 +177,7 @@ void main() {
       ready: () => harnessReaderPageReady(tester),
       maxRounds: 16,
     );
+    await revealReaderChrome(tester);
   }
 
   ReaderEpubPageContentPainter? dartPage(WidgetTester tester) {
@@ -213,6 +215,7 @@ void main() {
   );
 
   Future<void> openContents(WidgetTester tester) async {
+    await revealReaderChrome(tester);
     await tester.tap(find.byKey(const ValueKey('reader-header-contents')));
     await tester.pump();
     await settleNative(tester);
@@ -363,6 +366,7 @@ void main() {
             bridge: harness,
             initialPath: '/books/navigation.epub',
             initialBookId: 1,
+            initialSettings: harnessReaderSettings,
             epubImageDecoder: (bytes) async => null,
           ),
         ),
@@ -619,6 +623,7 @@ void main() {
       });
 
       Future<void> openAllBooksNote(WidgetTester tester, String id) async {
+        await revealReaderChrome(tester);
         await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
         await settleNative(tester);
         await tester.tap(find.byKey(const ValueKey('reader-notes-all-books')));
@@ -626,6 +631,7 @@ void main() {
         await tester.tap(find.byKey(ValueKey('shell-note-$id-open')));
         await settleNative(tester, rounds: 8);
         await settleEpubPage(tester);
+        await revealReaderChrome(tester);
         await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
         await settleNative(tester);
       }
@@ -782,6 +788,7 @@ void main() {
             bridge: harness,
             initialPath: '/books/navigation.epub',
             initialBookId: 1,
+            initialSettings: harnessReaderSettings,
             placeRequests: requests,
             epubImageDecoder: (bytes) async => null,
           ),
@@ -1031,7 +1038,11 @@ void main() {
       // The book has three one-page chapters: forward to the last, then back.
       for (final edge in ['next', 'previous', 'previous']) {
         expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
-        await tester.tap(find.byKey(ValueKey('reader-edge-$edge')));
+        await tester.sendKeyEvent(
+          edge == 'next'
+              ? LogicalKeyboardKey.pageDown
+              : LogicalKeyboardKey.pageUp,
+        );
         await settleEpubPage(tester);
       }
       expect(find.byKey(const ValueKey('reader-back-pill')), findsNothing);
@@ -1126,7 +1137,7 @@ void main() {
       final harness = bridge();
       await openReader(tester, harness);
       await settleEpubPage(tester);
-      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await settleEpubPage(tester);
       final later = dartPage(tester)!;
       expect(
@@ -1286,6 +1297,11 @@ void main() {
     testWidgets('a fragment-less link opens the target chapter start', (
       tester,
     ) async {
+      // Keep the fixture's final link paragraph on the first page, including
+      // the running head and folio margins.
+      tester.view.physicalSize = const Size(800, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       final harness = bridge();
       await openReader(tester, harness);
       await settleEpubPage(tester);
@@ -1307,6 +1323,9 @@ void main() {
     });
 
     testWidgets('an unresolvable anchor navigates nowhere', (tester) async {
+      tester.view.physicalSize = const Size(800, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       final harness = bridge();
       await openReader(tester, harness);
       await settleEpubPage(tester);
@@ -1452,6 +1471,7 @@ void main() {
             bridge: harness,
             initialPath: '/books/navigation.epub',
             initialBookId: 1,
+            initialSettings: harnessReaderSettings,
             epubImageDecoder: (bytes) async => null,
             externalLinkOpener: (_) async => throw StateError('no handler'),
           ),
@@ -1479,6 +1499,7 @@ void main() {
           home: ReaderScreen(
             bridge: harness,
             initialPath: '/books/replacement.pdf',
+            initialSettings: harnessReaderSettings,
             externalLinkOpener: (url) async => opened.add(url),
           ),
         ),

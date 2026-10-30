@@ -141,6 +141,7 @@ Future<void> _readerSettles(WidgetTester tester, bool Function() done) async {
   }
   await pumpHarnessFrames(tester, frames: 4);
   expect(done(), isTrue, reason: 'the reader never settled');
+  await revealReaderChrome(tester);
 }
 
 /// The product's reader, over the harness bridge.
@@ -159,7 +160,9 @@ Widget _realReader(
   bridge: bridge,
   initialPath: path,
   initialBookId: bookId,
-  initialSettings: settings,
+  initialSettings: (settings ?? harnessReaderSettings).copyWith(
+    zonesHintDismissed: true,
+  ),
   placeRequests: placeRequests,
   onLocatorChanged: locatorChanged,
   noticeReporter: noticeReporter,
@@ -384,6 +387,8 @@ void main() {
                       lineSpacing: null,
                       twoPages: false,
                       animations: false,
+                      progress: null,
+                      zonesHintDismissed: null,
                     )),
                     child: const Text('One page'),
                   ),
@@ -1118,6 +1123,7 @@ void main() {
               bridge: bridge,
               initialPath: path,
               initialBookId: bookId,
+              initialSettings: harnessReaderSettings,
               placeRequests: placeRequests,
               onLocatorChanged: locatorChanged,
               noticeReporter: noticeReporter,
@@ -1130,6 +1136,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 32));
       }
 
+      await revealReaderChrome(tester);
       await tester.tap(find.byKey(const ValueKey('reader-header-search')));
       for (var frame = 0; frame < 8; frame += 1) {
         await tester.pump(const Duration(milliseconds: 32));
@@ -1444,7 +1451,7 @@ void main() {
     // The page-turn transition dirties the isolated stage. Open the switcher
     // before pumping that frame: capture waits for the resulting frame rather
     // than retaining the old layer's pixels under the new document state.
-    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     expect(capture(), isNull);
     await tester.tap(find.byTooltip('1 open book'));
     await tester.pumpAndSettle();
@@ -1495,6 +1502,7 @@ void main() {
       const ReaderPlace(4, offset: 12),
     );
     await tester.pumpAndSettle();
+    await revealReaderChrome(tester);
     await tester.tap(find.byTooltip('2 open books'));
     await tester.pumpAndSettle();
 
