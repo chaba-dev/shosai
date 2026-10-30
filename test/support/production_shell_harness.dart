@@ -49,6 +49,14 @@ const harnessReaderSettings = FlutterReaderSettings(
 
 int _readerChromeMouseDevice = 100;
 
+/// Clears first-open onboarding before exercising another reader contract.
+Future<void> dismissReaderZonesHint(WidgetTester tester) async {
+  final hint = find.byKey(const ValueKey('reader-zones-hint'));
+  if (hint.evaluate().isEmpty) return;
+  await tester.tap(hint);
+  await tester.pumpAndSettle();
+}
+
 /// Reveals the reader through its public pointer/touch interaction, without
 /// changing the document or depending on controller internals.
 Future<void> revealReaderChrome(WidgetTester tester) async {
@@ -62,7 +70,7 @@ Future<void> revealReaderChrome(WidgetTester tester) async {
   final stage = find.byKey(const ValueKey('reader-stage'));
   if (stage.evaluate().isEmpty) return;
   final rect = tester.getRect(stage);
-  if (tester.view.physicalSize.width / tester.view.devicePixelRatio >= 1200) {
+  if (MediaQuery.sizeOf(tester.element(stage)).width >= 1200) {
     final mouse = TestGesture(
       dispatcher: tester.sendEventToBinding,
       kind: ui.PointerDeviceKind.mouse,
