@@ -1041,6 +1041,11 @@ class _ReaderScreenState extends State<ReaderScreen>
               Positioned.fill(
                 child: _ReaderZonesHint(
                   rightToLeft: model.rightToLeft,
+                  pageWidth:
+                      constraints.maxWidth -
+                      (layout == ShellLayout.phone
+                          ? 0
+                          : 2 * ShosaiTokens.space5),
                   dismiss: () =>
                       _controller.dispatch(const ReaderZonesHintDismissed()),
                 ),
@@ -1077,14 +1082,31 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  Widget _pointerReveal(ShellLayout layout, Widget child) => MouseRegion(
-    onHover: layout != ShellLayout.desktop
-        ? null
-        : (_) => _controller.dispatch(const ReaderPointerMoved()),
-    onExit: layout != ShellLayout.desktop
-        ? null
-        : (_) => _controller.dispatch(const ReaderPointerExited()),
-    child: child,
+  Widget _pointerReveal(ShellLayout layout, Widget child) => Listener(
+    onPointerDown: (event) {
+      if (event.kind != ui.PointerDeviceKind.mouse) {
+        _controller.dispatch(ReaderTouchStarted(event.pointer));
+      }
+    },
+    onPointerUp: (event) {
+      if (event.kind != ui.PointerDeviceKind.mouse) {
+        _controller.dispatch(ReaderTouchEnded(event.pointer));
+      }
+    },
+    onPointerCancel: (event) {
+      if (event.kind != ui.PointerDeviceKind.mouse) {
+        _controller.dispatch(ReaderTouchEnded(event.pointer));
+      }
+    },
+    child: MouseRegion(
+      onHover: layout != ShellLayout.desktop
+          ? null
+          : (_) => _controller.dispatch(const ReaderPointerMoved()),
+      onExit: layout != ShellLayout.desktop
+          ? null
+          : (_) => _controller.dispatch(const ReaderPointerExited()),
+      child: child,
+    ),
   );
 
   Widget _chromeOverlay(

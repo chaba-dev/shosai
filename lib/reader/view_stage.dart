@@ -430,6 +430,7 @@ class _ReaderPageTapScopeState extends State<_ReaderPageTapScope> {
         final box = context.findRenderObject()! as RenderBox;
         return ReaderPageTapped(
           box.globalToLocal(global).dx / box.size.width,
+          width: box.size.width,
           touch:
               kind != ui.PointerDeviceKind.mouse ||
               ShellLayout.forWidth(MediaQuery.sizeOf(context).width) !=
@@ -446,6 +447,7 @@ class _ReaderPageTapScopeState extends State<_ReaderPageTapScope> {
           dispatch: widget.dispatch,
           fittedZoom: null,
           builder: (_, _) => GestureDetector(
+            key: const ValueKey('reader-page-tap-area'),
             behavior: HitTestBehavior.opaque,
             excludeFromSemantics: true,
             onTapUp: (details) {
@@ -580,8 +582,13 @@ class _ReaderPageFurniture extends StatelessWidget {
 }
 
 class _ReaderZonesHint extends StatelessWidget {
-  const _ReaderZonesHint({required this.rightToLeft, required this.dismiss});
+  const _ReaderZonesHint({
+    required this.rightToLeft,
+    required this.pageWidth,
+    required this.dismiss,
+  });
   final bool rightToLeft;
+  final double pageWidth;
   final VoidCallback dismiss;
 
   @override
@@ -607,57 +614,65 @@ class _ReaderZonesHint extends StatelessWidget {
           color: ShosaiTokens.colorLightInverse.withValues(alpha: .62),
           child: Stack(
             children: [
-              Row(
-                children: [
-                  for (var i = 0; i < 3; i++)
-                    Expanded(
-                      child: CustomPaint(
-                        painter: i == 0
-                            ? null
-                            : _ReaderZonesStroke(
-                                color: ink.withValues(alpha: .45),
-                              ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: CustomPaint(
-                                painter: _ReaderZonesStroke(
-                                  color: ink.withValues(alpha: .7),
-                                  ring: true,
-                                  dashed: i == 1,
+              LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  children: [
+                    for (var i = 0; i < 3; i++)
+                      SizedBox(
+                        width: i == 1
+                            ? readerControlsStripWidth(pageWidth)
+                            : (constraints.maxWidth -
+                                      readerControlsStripWidth(pageWidth)) /
+                                  2,
+                        child: CustomPaint(
+                          painter: i == 0
+                              ? null
+                              : _ReaderZonesStroke(
+                                  color: ink.withValues(alpha: .45),
                                 ),
-                                child: Icon(
-                                  [
-                                    LucideIcons.chevronLeft,
-                                    LucideIcons.list,
-                                    LucideIcons.chevronRight,
-                                  ][i],
-                                  size: 22,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: CustomPaint(
+                                  painter: _ReaderZonesStroke(
+                                    color: ink.withValues(alpha: .7),
+                                    ring: true,
+                                    dashed: i == 1,
+                                  ),
+                                  child: Icon(
+                                    [
+                                      LucideIcons.chevronLeft,
+                                      LucideIcons.list,
+                                      LucideIcons.chevronRight,
+                                    ][i],
+                                    size: 22,
+                                    color: ink,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: ShosaiTokens.space2),
+                              Text(
+                                labels[i],
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontFamily: shosaiInterfaceFontFamily,
+                                  fontFamilyFallback:
+                                      shosaiInterfaceFontFallback,
+                                  fontSize: 13,
+                                  height: 18 / 13,
+                                  fontWeight: FontWeight.w500,
                                   color: ink,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: ShosaiTokens.space2),
-                            Text(
-                              labels[i],
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontFamily: shosaiInterfaceFontFamily,
-                                fontFamilyFallback: shosaiInterfaceFontFallback,
-                                fontSize: 13,
-                                height: 18 / 13,
-                                fontWeight: FontWeight.w500,
-                                color: ink,
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
               Positioned(
                 left: 16,
