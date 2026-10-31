@@ -251,6 +251,69 @@ void main() {
     },
   );
 
+  for (final width in [390.0, 900.0, 1199.0, 1280.0]) {
+    testWidgets(
+      'desktop input is independent of shell width ($width)',
+      (tester) async {
+        await _open(
+          tester,
+          Size(width, 844),
+          settings: _settings.copyWith(zonesHintDismissed: false),
+        );
+        final hint = find.byKey(const ValueKey('reader-zones-hint'));
+        expect(hint, findsNothing, reason: 'desktop has no touch instruction');
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: const Offset(0, 0));
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(tester.getCenter(_stage));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(_toolbar.hitTestable(), findsOneWidget);
+        expect(hint, findsNothing);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(_toolbar.hitTestable(), findsNothing);
+
+        // A real touchscreen still uses zones, even on a desktop platform.
+        await _tap(tester, .85);
+        expect(_status(tester), '40% · page 2 of 5');
+        await _tap(tester, .5);
+        expect(_toolbar.hitTestable(), findsOneWidget);
+        expect(hint, findsNothing);
+        await _tap(tester, .5);
+        expect(_toolbar.hitTestable(), findsNothing);
+
+        // The mouse click must not reuse touch mode and pin chrome forever.
+        await tester.tapAt(
+          tester.getCenter(_stage),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pumpAndSettle();
+        expect(_toolbar.hitTestable(), findsNothing);
+        expect(_status(tester), '40% · page 2 of 5');
+        await mouse.moveBy(const Offset(12, 8));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(_toolbar.hitTestable(), findsOneWidget);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(_toolbar.hitTestable(), findsNothing);
+        await mouse.moveBy(const Offset(12, 8));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 180));
+        await mouse.moveTo(const Offset(-1, -1));
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(_toolbar.hitTestable(), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.macOS,
+        TargetPlatform.linux,
+        TargetPlatform.windows,
+      }),
+    );
+  }
+
   testWidgets('toolbar swipe up hides both overlays', (tester) async {
     await _open(tester, const Size(390, 844));
     await _tap(tester, .5);
