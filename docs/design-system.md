@@ -167,6 +167,7 @@ The page is set like print, on a stage lit from the centre.
 - **EPUB page numbers** are Shōsai's own pagination at the current size and margins; the same numbers appear in the status line, notes and search results.
 - **The book's direction.** Right-to-left books turn leftward with the first page on the right; vertical Japanese keeps `vertical-rl`. Undeclared books read horizontally. There is no override.
 - **PDF stays the PDF.** Pages re-render at the current zoom so text is sharp on any screen; on phones they fit the width. Paper keeps the original raster. Sepia tints it between the page ink and ground; Night inverts luminance between those colours while retaining chroma, rather than making a colour negative. Saturated image colours may clip to the display gamut. These paint-only transforms never change layout or filter selection, search or saved-highlight overlays.
+- **Pages turn with a curl** (decided 2026-10-31). The page lifts from the edge being turned and curls over to show the next page beneath, its back in `page` with the book's ink faintly mirrored through and a soft shadow under the fold; turning back curls the previous page down. On a two-page spread the leaf turns over the spine. A swipe drags the curl with the finger and, on release, completes past the middle of the page or with a flick and otherwise falls back. Taps, keys and chevrons play the whole curl. A leftward book curls from its left edge. With **Page animations** off, or when the system asks for reduced motion, the page changes at once; continuous scrolling never curls.
 - **The quiet page** (decided 2026-10-24, every device since 2026-10-25). Nothing but the page is on screen while reading: no toolbar, no status line or bottom bar, no page-turn arrows. On phone and tablet a tap either side of the middle strip turns it, as does a horizontal swipe, in the book's direction, so a right-to-left or vertical book turns leftward and its left side is next. The middle strip brings the chrome: a third of the page, never wider than 200 pt, centred on the spine of a spread, so on a spread one page goes back and the other forward. On desktop the page sits beside the rail, keys turn it, and moving the pointer brings the toolbar, status line and margin chevrons, which leave again once it has been still for two seconds, on a page turn or when it leaves the window. The running head and folio carry the place, and a PDF on a phone shows its place in `ink-muted` under the page. It is not a mode: there is nothing to switch on.
 
 Layout, pagination and durable anchors come from the Dart document engines and application core; Flutter renders the laid-out pages (see [flutter-architecture.md](flutter-architecture.md)).
@@ -278,8 +279,9 @@ Head, then scope and count, then the book note and groups per section in reading
 | Font | **Book’s own** (default), Serif, Sans | Not shown: PDF pages keep their fonts |
 | Typeface | The current type set’s name, opening the TypefacePicker | Same |
 | Progress | **Page** (default), **Percent**, **Off**: what the folio shows while the chrome is hidden | Same, for the place under the page on phones |
+| Page animations | A switch, on by default: pages curl over; off, the page changes at once | Same |
 
-Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; theme, text size, line spacing, Pages and Progress are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; theme, text size, line spacing, Pages, Progress and Page animations are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
 
 **TypefacePicker.** The six type sets as a radio list (`role="radiogroup"`), each row showing the set’s name in its sans, its faces in `ui-caption` and a one-line specimen in its serif, so the choice is made by looking rather than by name. The current set carries a check in `accent`. Choosing applies at once to the interface, the editorial text and the reader’s Serif and Sans fonts; a book’s own fonts are untouched. Rows never preview with system fallbacks: a set that is not bundled is not listed.
 
@@ -345,7 +347,7 @@ In the interface the mark is `sh-mark`: 30 px, the ring a 2 px border in `brand-
 
 ## Motion
 
-Short and functional: 150 ms for hover and toggles, 200 ms ease-out for popovers, peeks and sheets, page turns 250 ms or instant when the system asks for reduced motion. Nothing loops or bounces.
+Short and functional: 150 ms for hover and toggles, 200 ms ease-out for popovers, peeks and sheets, a page curl about 350 ms ease-in-out, or as long as the finger holds it, and instant when Page animations is off or the system asks for reduced motion. Nothing loops or bounces.
 
 ## Accessibility
 
