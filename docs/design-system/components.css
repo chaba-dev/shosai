@@ -138,8 +138,9 @@
 .sh-swatch--purple { background: var(--swatch-purple); }
 .sh-backpill { height: 36px; padding: 0 var(--space-4) 0 var(--space-3); }
 
-/* Zones hint: the one-time overlay that names the phone's tap zones. */
-.sh-zones { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; background: color-mix(in srgb, var(--inverse) 62%, transparent); color: var(--on-inverse); font-family: var(--font-ui); }
+/* Zones hint: the one-time overlay that names the tap zones. The middle
+   strip is a third of the page, never wider than 200 px. */
+.sh-zones { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr min(33.333%, 200px) 1fr; background: color-mix(in srgb, var(--inverse) 62%, transparent); color: var(--on-inverse); font-family: var(--font-ui); }
 .sh-zones__zone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); font-size: 13px; line-height: 18px; font-weight: 500; text-align: center; }
 .sh-zones__zone + .sh-zones__zone { border-left: 1px dashed color-mix(in srgb, var(--on-inverse) 45%, transparent); }
 .sh-zones__glyph { width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--on-inverse) 70%, transparent); display: grid; place-items: center; }
