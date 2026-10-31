@@ -1,0 +1,377 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:shosai_flutter/main.dart';
+
+/// Quiet-page verification on a real device (uncommitted helper).
+///
+/// Prints `SHOT <device>-NN-name` at each checkpoint and holds the screen for
+/// a few seconds so a host watcher can take a real device screenshot, and
+/// `QP <key>: <value>` lines with safe areas, rects and folio text.
+const _device = String.fromEnvironment('QP_DEVICE', defaultValue: 'device');
+const _english = Locale('en');
+int _step = 0;
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('quiet page', timeout: const Timeout(Duration(minutes: 25)), (
+    tester,
+  ) async {
+    final books = Directory.systemTemp.createTempSync('qp-books-');
+    for (final name in [
+      'pride.epub',
+      'attention.pdf',
+      'neko.epub',
+      'sample.pdf',
+    ]) {
+      final data = await rootBundle.load('qp-books/$name');
+      File(
+        '${books.path}/$name',
+      ).writeAsBytesSync(data.buffer.asUint8List(), flush: true);
+    }
+    final data = Directory.systemTemp.createTempSync('qp-data-');
+    _note('data-dir', data.path);
+    final owner = await applicationCoreOwner(
+      applicationSupportDirectory: () async => data,
+    );
+    final bridge = owner.bridge();
+    final imported = await bridge.importPaths(
+      pathKeys: [
+        for (final f in books.listSync()) f.path,
+      ],
+      managed: false,
+      cancellationId: bridge.createCancellation(),
+    );
+    _note('imported', imported.imported.toInt());
+
+    await tester.pumpWidget(
+      ShosaiApp(productBridgeFactory: owner.bridge, locale: _english),
+    );
+    await _settle(tester, seconds: 3);
+    _note(
+      'view',
+      'logical ${tester.view.physicalSize / tester.view.devicePixelRatio}'
+          ' dpr ${tester.view.devicePixelRatio}',
+    );
+    await _shot(tester, 'library-start');
+
+    // 1. First open of the EPUB: the zones hint, dismissed by one tap.
+    await _try('1-hint', () async {
+      await _open(tester, 'Pride');
+      _note(
+        '1-hint-shown',
+        find.byKey(const ValueKey('reader-zones-hint')).evaluate().isNotEmpty,
+      );
+      final before = _folio(tester);
+      await _shot(tester, 'epub-hint');
+      // The right third: a tap there must only dismiss, not turn.
+      await _tapThird(tester, .85);
+      _note(
+        '1-hint-after-tap',
+        find.byKey(const ValueKey('reader-zones-hint')).evaluate().isNotEmpty,
+      );
+      _note('1-folio-before-after', '$before -> ${_folio(tester)}');
+      _note('1-chrome-after-tap', _chrome(tester));
+      await _shot(tester, 'epub-hint-dismissed');
+    });
+
+    // 2. A quiet page after the chapter opening, so the running head shows.
+    await _try('2-quiet', () async {
+      for (var i = 0; i < 20; i++) {
+        await _tapThird(tester, .85);
+        if (_runningHead(tester).isNotEmpty && i >= 6) break;
+      }
+      await _shot(tester, 'epub-quiet');
+    });
+
+    // 3 and 4. Chrome shown and hidden over the same page.
+    await _try('3-chrome', () async {
+      final before = _geometry(tester);
+      await _tapThird(tester, .5);
+      _note('3-chrome-shown', _chrome(tester));
+      await _shot(tester, 'epub-chrome-shown');
+      final shown = _geometry(tester);
+      _note('3-same-folio', before['folio'] == shown['folio']);
+      _note('3-same-surface', before['surface'] == shown['surface']);
+      await _tapThird(tester, .5);
+      _note('4-chrome-after-tap', _chrome(tester));
+      await _shot(tester, 'epub-chrome-hidden');
+      final hidden = _geometry(tester);
+      _note('4-same-folio', before['folio'] == hidden['folio']);
+      _note('4-same-surface', before['surface'] == hidden['surface']);
+    });
+
+    // 5. Thirds and a swipe.
+    await _try('5-turns', () async {
+      final start = _folio(tester);
+      await _tapThird(tester, .85);
+      _note('5-right-third', '$start -> ${_folio(tester)}');
+      _note('5-chrome', _chrome(tester));
+      await _shot(tester, 'epub-right-third');
+      final mid = _folio(tester);
+      await _tapThird(tester, .15);
+      _note('5-left-third', '$mid -> ${_folio(tester)}');
+      await _shot(tester, 'epub-left-third');
+      final back = _folio(tester);
+      final surface = find.byKey(const ValueKey('reader-selection-surface'));
+      final rect = tester.getRect(
+        surface.evaluate().isNotEmpty ? surface.first : _stage.first,
+      );
+      await tester.timedDragFrom(
+        rect.center + const Offset(90, 0),
+        const Offset(-180, 0),
+        const Duration(milliseconds: 250),
+      );
+      await _settle(tester, seconds: 2);
+      _note('5-swipe-rtl', '$back -> ${_folio(tester)}');
+      _note('5-chrome-after-swipe', _chrome(tester));
+      await _shot(tester, 'epub-swiped');
+    });
+
+    // 6. Toolbar drag up hides the chrome.
+    await _try('6-drag-up', () async {
+      await _tapThird(tester, .5);
+      _note('6-chrome-shown', _chrome(tester));
+      await tester.timedDrag(
+        find.byKey(const ValueKey('reader-header-title')).first,
+        const Offset(0, -90),
+        const Duration(milliseconds: 600),
+      );
+      await _settle(tester, seconds: 2);
+      _note('6-chrome-after-drag', _chrome(tester));
+      await _shot(tester, 'epub-toolbar-dragged-up');
+    });
+
+    // 7. Display: Progress Percent, Off, Page.
+    await _try('7-progress', () async {
+      for (final choice in ['percent', 'off', 'page']) {
+        if (!_chrome(tester)) await _tapThird(tester, .5);
+        await _tapKey(tester, 'reader-header-typography');
+        await _settle(tester, seconds: 2);
+        final option = find.byKey(ValueKey('reader-progress-$choice'));
+        await tester.ensureVisible(option.first);
+        await _settle(tester, seconds: 1);
+        if (choice == 'percent') await _shot(tester, 'epub-display-panel');
+        await tester.tap(option.first, warnIfMissed: false);
+        await _settle(tester, seconds: 1);
+        await _dismissPanel(tester);
+        if (_chrome(tester)) await _tapThird(tester, .5);
+        _note('7-folio-$choice', '"${_folio(tester)}"');
+        await _shot(tester, 'epub-progress-$choice');
+      }
+    });
+
+    // 8. Multi-page PDF.
+    await _try('8-pdf', () async {
+      await _toLibrary(tester);
+      await _open(tester, 'ttention');
+      if (find
+          .byKey(const ValueKey('reader-zones-hint'))
+          .evaluate()
+          .isNotEmpty) {
+        _note('8-hint-shown-again', true);
+        await _tapThird(tester, .5);
+      }
+      await _shot(tester, 'pdf-quiet');
+      final start = _folio(tester);
+      await _tapThird(tester, .85);
+      _note('8-right-third', '$start -> ${_folio(tester)}');
+      await _shot(tester, 'pdf-right-third');
+      final mid = _folio(tester);
+      await _tapThird(tester, .15);
+      _note('8-left-third', '$mid -> ${_folio(tester)}');
+      await _tapThird(tester, .85);
+      final before = _geometry(tester);
+      await _tapThird(tester, .5);
+      _note('8-chrome-shown', _chrome(tester));
+      await _shot(tester, 'pdf-chrome-shown');
+      final shown = _geometry(tester);
+      _note('8-same-pdf-page', before['pdf-page'] == shown['pdf-page']);
+      _note('8-same-folio', before['folio'] == shown['folio']);
+      await _tapThird(tester, .5);
+      await _shot(tester, 'pdf-chrome-hidden');
+    });
+
+    // 9. Vertical Japanese: the left third turns forward.
+    await _try('9-neko', () async {
+      await _toLibrary(tester);
+      await _open(tester, '吾輩は猫である');
+      _note(
+        '9-hint-shown',
+        find.byKey(const ValueKey('reader-zones-hint')).evaluate().isNotEmpty,
+      );
+      await _shot(tester, 'neko-open');
+      final start = _folio(tester);
+      await _tapThird(tester, .15);
+      _note('9-left-third', '$start -> ${_folio(tester)}');
+      await _tapThird(tester, .15);
+      _note('9-left-third-2', _folio(tester));
+      await _shot(tester, 'neko-left-third');
+      final mid = _folio(tester);
+      await _tapThird(tester, .85);
+      _note('9-right-third', '$mid -> ${_folio(tester)}');
+      await _shot(tester, 'neko-right-third');
+    });
+
+    // 10. Back to the library through the revealed toolbar.
+    await _try('10-library', () async {
+      await _toLibrary(tester);
+      _note(
+        '10-in-library',
+        find.byKey(const ValueKey('reader-stage')).evaluate().isEmpty,
+      );
+      await _shot(tester, 'library-end');
+    });
+  });
+}
+
+final _stage = find.byKey(const ValueKey('reader-stage'));
+
+Future<void> _try(String name, Future<void> Function() body) async {
+  try {
+    await body();
+    _note('$name-ok', true);
+  } catch (error, stack) {
+    _note(
+      '$name-FAILED',
+      '$error ${stack.toString().split('\n').take(4).join(' | ')}',
+    );
+  }
+}
+
+void _note(String key, Object? value) {
+  // ignore: avoid_print
+  print('QP $key: $value');
+}
+
+Future<void> _settle(WidgetTester tester, {int seconds = 2}) async {
+  final end = DateTime.now().add(Duration(seconds: seconds));
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
+bool _chrome(WidgetTester tester) => find
+    .byKey(const ValueKey('reader-header-contents'))
+    .hitTestable()
+    .evaluate()
+    .isNotEmpty;
+
+String _folio(WidgetTester tester) => [
+  for (final e in find.byKey(const ValueKey('reader-folio')).evaluate())
+    (e.widget as Text).data ?? '',
+].join(' | ');
+
+String _runningHead(WidgetTester tester) => [
+  for (final e in find.byKey(const ValueKey('reader-running-head')).evaluate())
+    (e.widget as Text).data ?? '',
+].where((t) => t.isNotEmpty).join(' | ');
+
+String? _progress(WidgetTester tester) {
+  final f = find.byKey(const ValueKey('reader-progress'));
+  if (f.evaluate().isEmpty) return null;
+  return tester.widget<Semantics>(f.first).properties.label;
+}
+
+String _rects(WidgetTester tester, String key) => [
+  for (final e in find.byKey(ValueKey(key)).evaluate())
+    if (e.renderObject case final RenderBox box? when box.hasSize)
+      _rect(box.localToGlobal(Offset.zero) & box.size),
+].join(' ');
+
+String _rect(Rect r) =>
+    '(${r.left.toStringAsFixed(1)},${r.top.toStringAsFixed(1)} '
+    '${r.width.toStringAsFixed(1)}x${r.height.toStringAsFixed(1)})';
+
+Map<String, String> _geometry(WidgetTester tester) {
+  final context = _stage.evaluate().isNotEmpty
+      ? _stage.evaluate().first
+      : tester.element(find.byType(Scaffold).first);
+  final query = MediaQuery.of(context);
+  return {
+    'padding': '${query.padding}',
+    'viewPadding': '${query.viewPadding}',
+    'view.padding': '${tester.view.padding}',
+    'view.viewPadding': '${tester.view.viewPadding}',
+    'size': '${query.size}',
+    'stage': _rects(tester, 'reader-stage'),
+    'surface': _rects(tester, 'reader-selection-surface'),
+    'pdf-page': _rects(tester, 'reader-pdf-page-shadow'),
+    'running-head': _rects(tester, 'reader-running-head'),
+    'running-head-text': _runningHead(tester),
+    'folio': _rects(tester, 'reader-folio'),
+    'folio-text': _folio(tester),
+    'toolbar': _rects(tester, 'reader-header-title'),
+    'phone-bar': _rects(tester, 'reader-phone-bar'),
+    'progress': _progress(tester) ?? '',
+    'chrome': '${_chrome(tester)}',
+  };
+}
+
+Future<void> _shot(WidgetTester tester, String name) async {
+  final error = tester.takeException();
+  if (error != null) {
+    _note('EXCEPTION-before-$name', '$error'.split('\n').take(3).join(' '));
+  }
+  await _settle(tester, seconds: 1);
+  _step += 1;
+  final label = '$_device-${_step.toString().padLeft(2, '0')}-$name';
+  _geometry(tester).forEach((k, v) => _note('$label $k', v));
+  // ignore: avoid_print
+  print('SHOT $label');
+  await _settle(tester, seconds: 4);
+}
+
+Future<void> _tapThird(WidgetTester tester, double fraction) async {
+  final rect = tester.getRect(_stage.first);
+  await tester.tapAt(Offset(rect.left + rect.width * fraction, rect.center.dy));
+  await _settle(tester, seconds: 1);
+}
+
+Future<void> _tapKey(WidgetTester tester, String key) async {
+  final finder = find.byKey(ValueKey(key));
+  if (finder.evaluate().isEmpty) throw StateError('no $key on screen');
+  await tester.tap(finder.first, warnIfMissed: false);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
+}
+
+Future<void> _dismissPanel(WidgetTester tester) async {
+  final scrim = find.byKey(const ValueKey('reader-panel-scrim'));
+  if (scrim.evaluate().isNotEmpty) {
+    await tester.tapAt(
+      tester.getRect(scrim.first).topCenter + const Offset(0, 8),
+    );
+  } else {
+    await _tapKey(tester, 'reader-header-typography');
+  }
+  await _settle(tester, seconds: 1);
+}
+
+Future<void> _open(WidgetTester tester, String title) async {
+  final finder = find.textContaining(title, findRichText: true);
+  final scrollable = find.byType(Scrollable);
+  if (finder.evaluate().isEmpty && scrollable.evaluate().isNotEmpty) {
+    await tester.scrollUntilVisible(
+      finder,
+      300,
+      scrollable: scrollable.first,
+      maxScrolls: 30,
+    );
+  }
+  if (finder.evaluate().isEmpty) throw StateError('no "$title" on screen');
+  await tester.ensureVisible(finder.last);
+  await _settle(tester, seconds: 1);
+  await tester.tap(finder.last, warnIfMissed: false);
+  await _settle(tester, seconds: 5);
+}
+
+Future<void> _toLibrary(WidgetTester tester) async {
+  if (!_chrome(tester)) await _tapThird(tester, .5);
+  await _tapKey(tester, 'reader-header-back');
+  await _settle(tester, seconds: 3);
+}

@@ -1,0 +1,418 @@
+QP data-dir: /private/var/mobile/Containers/Data/Application/0FF3A527-6BBF-4D4F-A168-B4D017CB30CB/tmp/qp-data-5dlwg2
+QP imported: 4
+QP view: logical Size(430.0, 932.0) dpr 3.0
+QP iphone-01-library-start padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-01-library-start viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-01-library-start view.padding: Instance of 'FakeViewPadding'
+QP iphone-01-library-start view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-01-library-start size: Size(430.0, 932.0)
+QP iphone-01-library-start stage: 
+QP iphone-01-library-start surface: 
+QP iphone-01-library-start pdf-page: 
+QP iphone-01-library-start running-head: 
+QP iphone-01-library-start running-head-text: 
+QP iphone-01-library-start folio: 
+QP iphone-01-library-start folio-text: 
+QP iphone-01-library-start toolbar: 
+QP iphone-01-library-start phone-bar: 
+QP iphone-01-library-start progress: 
+QP iphone-01-library-start chrome: false
+SHOT iphone-01-library-start
+QP 1-hint-shown: true
+QP iphone-02-epub-hint padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-02-epub-hint viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-02-epub-hint view.padding: Instance of 'FakeViewPadding'
+QP iphone-02-epub-hint view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-02-epub-hint size: Size(430.0, 932.0)
+QP iphone-02-epub-hint stage: (0.0,0.0 430.0x932.0)
+QP iphone-02-epub-hint surface: (0.0,28.0 430.0x875.0)
+QP iphone-02-epub-hint pdf-page: 
+QP iphone-02-epub-hint running-head: (215.0,7.0 0.0x14.0)
+QP iphone-02-epub-hint running-head-text: 
+QP iphone-02-epub-hint folio: (197.4,911.0 35.2x14.0)
+QP iphone-02-epub-hint folio-text: page 1
+QP iphone-02-epub-hint toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-02-epub-hint phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-02-epub-hint progress: 1% · page 1
+QP iphone-02-epub-hint chrome: false
+SHOT iphone-02-epub-hint
+QP 1-hint-after-tap: false
+QP 1-folio-before-after: page 1 -> page 1
+QP 1-chrome-after-tap: false
+QP iphone-03-epub-hint-dismissed padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-03-epub-hint-dismissed viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-03-epub-hint-dismissed view.padding: Instance of 'FakeViewPadding'
+QP iphone-03-epub-hint-dismissed view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-03-epub-hint-dismissed size: Size(430.0, 932.0)
+QP iphone-03-epub-hint-dismissed stage: (0.0,0.0 430.0x932.0)
+QP iphone-03-epub-hint-dismissed surface: (0.0,28.0 430.0x875.0)
+QP iphone-03-epub-hint-dismissed pdf-page: 
+QP iphone-03-epub-hint-dismissed running-head: (215.0,7.0 0.0x14.0)
+QP iphone-03-epub-hint-dismissed running-head-text: 
+QP iphone-03-epub-hint-dismissed folio: (197.4,911.0 35.2x14.0)
+QP iphone-03-epub-hint-dismissed folio-text: page 1
+QP iphone-03-epub-hint-dismissed toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-03-epub-hint-dismissed phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-03-epub-hint-dismissed progress: 1% · page 1
+QP iphone-03-epub-hint-dismissed chrome: false
+SHOT iphone-03-epub-hint-dismissed
+QP 1-hint-ok: true
+QP iphone-04-epub-quiet padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-04-epub-quiet viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-04-epub-quiet view.padding: Instance of 'FakeViewPadding'
+QP iphone-04-epub-quiet view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-04-epub-quiet size: Size(430.0, 932.0)
+QP iphone-04-epub-quiet stage: (0.0,0.0 430.0x932.0)
+QP iphone-04-epub-quiet surface: (0.0,28.0 430.0x875.0)
+QP iphone-04-epub-quiet pdf-page: 
+QP iphone-04-epub-quiet running-head: (152.0,7.0 126.1x14.0)
+QP iphone-04-epub-quiet running-head-text: PRIDE. and PREJUDICE
+QP iphone-04-epub-quiet folio: (196.5,911.0 37.0x14.0)
+QP iphone-04-epub-quiet folio-text: page 7
+QP iphone-04-epub-quiet toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-04-epub-quiet phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-04-epub-quiet progress: 1% · page 7
+QP iphone-04-epub-quiet chrome: false
+SHOT iphone-04-epub-quiet
+QP 2-quiet-ok: true
+QP 3-chrome-shown: true
+QP iphone-05-epub-chrome-shown padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-05-epub-chrome-shown viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-05-epub-chrome-shown view.padding: Instance of 'FakeViewPadding'
+QP iphone-05-epub-chrome-shown view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-05-epub-chrome-shown size: Size(430.0, 932.0)
+QP iphone-05-epub-chrome-shown stage: (0.0,0.0 430.0x932.0)
+QP iphone-05-epub-chrome-shown surface: (0.0,28.0 430.0x875.0)
+QP iphone-05-epub-chrome-shown pdf-page: 
+QP iphone-05-epub-chrome-shown running-head: (152.0,7.0 126.1x14.0)
+QP iphone-05-epub-chrome-shown running-head-text: PRIDE. and PREJUDICE
+QP iphone-05-epub-chrome-shown folio: (196.5,911.0 37.0x14.0)
+QP iphone-05-epub-chrome-shown folio-text: page 7
+QP iphone-05-epub-chrome-shown toolbar: (64.0,66.5 254.0x40.0)
+QP iphone-05-epub-chrome-shown phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-05-epub-chrome-shown progress: 1% · page 7
+QP iphone-05-epub-chrome-shown chrome: true
+SHOT iphone-05-epub-chrome-shown
+QP 3-same-folio: true
+QP 3-same-surface: true
+QP 4-chrome-after-tap: false
+QP iphone-06-epub-chrome-hidden padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-06-epub-chrome-hidden viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-06-epub-chrome-hidden view.padding: Instance of 'FakeViewPadding'
+QP iphone-06-epub-chrome-hidden view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-06-epub-chrome-hidden size: Size(430.0, 932.0)
+QP iphone-06-epub-chrome-hidden stage: (0.0,0.0 430.0x932.0)
+QP iphone-06-epub-chrome-hidden surface: (0.0,28.0 430.0x875.0)
+QP iphone-06-epub-chrome-hidden pdf-page: 
+QP iphone-06-epub-chrome-hidden running-head: (152.0,7.0 126.1x14.0)
+QP iphone-06-epub-chrome-hidden running-head-text: PRIDE. and PREJUDICE
+QP iphone-06-epub-chrome-hidden folio: (196.5,911.0 37.0x14.0)
+QP iphone-06-epub-chrome-hidden folio-text: page 7
+QP iphone-06-epub-chrome-hidden toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-06-epub-chrome-hidden phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-06-epub-chrome-hidden progress: 1% · page 7
+QP iphone-06-epub-chrome-hidden chrome: false
+SHOT iphone-06-epub-chrome-hidden
+QP 4-same-folio: true
+QP 4-same-surface: true
+QP 3-chrome-ok: true
+QP 5-right-third: page 7 -> page 8
+QP 5-chrome: false
+QP iphone-07-epub-right-third padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-07-epub-right-third viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-07-epub-right-third view.padding: Instance of 'FakeViewPadding'
+QP iphone-07-epub-right-third view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-07-epub-right-third size: Size(430.0, 932.0)
+QP iphone-07-epub-right-third stage: (0.0,0.0 430.0x932.0)
+QP iphone-07-epub-right-third surface: (0.0,28.0 430.0x875.0)
+QP iphone-07-epub-right-third pdf-page: 
+QP iphone-07-epub-right-third running-head: (152.0,7.0 126.1x14.0)
+QP iphone-07-epub-right-third running-head-text: PRIDE. and PREJUDICE
+QP iphone-07-epub-right-third folio: (196.2,911.0 37.6x14.0)
+QP iphone-07-epub-right-third folio-text: page 8
+QP iphone-07-epub-right-third toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-07-epub-right-third phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-07-epub-right-third progress: 1% · page 8
+QP iphone-07-epub-right-third chrome: false
+SHOT iphone-07-epub-right-third
+QP 5-left-third: page 8 -> page 7
+QP iphone-08-epub-left-third padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-08-epub-left-third viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-08-epub-left-third view.padding: Instance of 'FakeViewPadding'
+QP iphone-08-epub-left-third view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-08-epub-left-third size: Size(430.0, 932.0)
+QP iphone-08-epub-left-third stage: (0.0,0.0 430.0x932.0)
+QP iphone-08-epub-left-third surface: (0.0,28.0 430.0x875.0)
+QP iphone-08-epub-left-third pdf-page: 
+QP iphone-08-epub-left-third running-head: (152.0,7.0 126.1x14.0)
+QP iphone-08-epub-left-third running-head-text: PRIDE. and PREJUDICE
+QP iphone-08-epub-left-third folio: (196.5,911.0 37.0x14.0)
+QP iphone-08-epub-left-third folio-text: page 7
+QP iphone-08-epub-left-third toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-08-epub-left-third phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-08-epub-left-third progress: 1% · page 7
+QP iphone-08-epub-left-third chrome: false
+SHOT iphone-08-epub-left-third
+QP 5-swipe-rtl: page 7 -> page 8
+QP 5-chrome-after-swipe: false
+QP iphone-09-epub-swiped padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-09-epub-swiped viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-09-epub-swiped view.padding: Instance of 'FakeViewPadding'
+QP iphone-09-epub-swiped view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-09-epub-swiped size: Size(430.0, 932.0)
+QP iphone-09-epub-swiped stage: (0.0,0.0 430.0x932.0)
+QP iphone-09-epub-swiped surface: (0.0,28.0 430.0x875.0)
+QP iphone-09-epub-swiped pdf-page: 
+QP iphone-09-epub-swiped running-head: (152.0,7.0 126.1x14.0)
+QP iphone-09-epub-swiped running-head-text: PRIDE. and PREJUDICE
+QP iphone-09-epub-swiped folio: (196.2,911.0 37.6x14.0)
+QP iphone-09-epub-swiped folio-text: page 8
+QP iphone-09-epub-swiped toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-09-epub-swiped phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-09-epub-swiped progress: 1% · page 8
+QP iphone-09-epub-swiped chrome: false
+SHOT iphone-09-epub-swiped
+QP 5-turns-ok: true
+QP 6-chrome-shown: true
+QP 6-chrome-after-drag: false
+QP iphone-10-epub-toolbar-dragged-up padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-10-epub-toolbar-dragged-up viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-10-epub-toolbar-dragged-up view.padding: Instance of 'FakeViewPadding'
+QP iphone-10-epub-toolbar-dragged-up view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-10-epub-toolbar-dragged-up size: Size(430.0, 932.0)
+QP iphone-10-epub-toolbar-dragged-up stage: (0.0,0.0 430.0x932.0)
+QP iphone-10-epub-toolbar-dragged-up surface: (0.0,28.0 430.0x875.0)
+QP iphone-10-epub-toolbar-dragged-up pdf-page: 
+QP iphone-10-epub-toolbar-dragged-up running-head: (152.0,7.0 126.1x14.0)
+QP iphone-10-epub-toolbar-dragged-up running-head-text: PRIDE. and PREJUDICE
+QP iphone-10-epub-toolbar-dragged-up folio: (196.2,911.0 37.6x14.0)
+QP iphone-10-epub-toolbar-dragged-up folio-text: page 8
+QP iphone-10-epub-toolbar-dragged-up toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-10-epub-toolbar-dragged-up phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-10-epub-toolbar-dragged-up progress: 1% · page 8
+QP iphone-10-epub-toolbar-dragged-up chrome: false
+SHOT iphone-10-epub-toolbar-dragged-up
+QP 6-drag-up-ok: true
+QP iphone-11-epub-display-panel padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-11-epub-display-panel viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-11-epub-display-panel view.padding: Instance of 'FakeViewPadding'
+QP iphone-11-epub-display-panel view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-11-epub-display-panel size: Size(430.0, 932.0)
+QP iphone-11-epub-display-panel stage: (0.0,0.0 430.0x932.0)
+QP iphone-11-epub-display-panel surface: (0.0,28.0 430.0x875.0)
+QP iphone-11-epub-display-panel pdf-page: 
+QP iphone-11-epub-display-panel running-head: (152.0,7.0 126.1x14.0)
+QP iphone-11-epub-display-panel running-head-text: PRIDE. and PREJUDICE
+QP iphone-11-epub-display-panel folio: (196.2,911.0 37.6x14.0)
+QP iphone-11-epub-display-panel folio-text: page 8
+QP iphone-11-epub-display-panel toolbar: (64.0,66.5 254.0x40.0)
+QP iphone-11-epub-display-panel phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-11-epub-display-panel progress: 1% · page 8
+QP iphone-11-epub-display-panel chrome: true
+SHOT iphone-11-epub-display-panel
+QP 7-folio-percent: "1%"
+QP iphone-12-epub-progress-percent padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-12-epub-progress-percent viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-12-epub-progress-percent view.padding: Instance of 'FakeViewPadding'
+QP iphone-12-epub-progress-percent view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-12-epub-progress-percent size: Size(430.0, 932.0)
+QP iphone-12-epub-progress-percent stage: (0.0,0.0 430.0x932.0)
+QP iphone-12-epub-progress-percent surface: (0.0,28.0 430.0x875.0)
+QP iphone-12-epub-progress-percent pdf-page: 
+QP iphone-12-epub-progress-percent running-head: (152.0,7.0 126.1x14.0)
+QP iphone-12-epub-progress-percent running-head-text: PRIDE. and PREJUDICE
+QP iphone-12-epub-progress-percent folio: (207.1,911.0 15.8x14.0)
+QP iphone-12-epub-progress-percent folio-text: 1%
+QP iphone-12-epub-progress-percent toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-12-epub-progress-percent phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-12-epub-progress-percent progress: 1% · page 8
+QP iphone-12-epub-progress-percent chrome: false
+SHOT iphone-12-epub-progress-percent
+QP 7-folio-off: ""
+QP iphone-13-epub-progress-off padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-13-epub-progress-off viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-13-epub-progress-off view.padding: Instance of 'FakeViewPadding'
+QP iphone-13-epub-progress-off view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-13-epub-progress-off size: Size(430.0, 932.0)
+QP iphone-13-epub-progress-off stage: (0.0,0.0 430.0x932.0)
+QP iphone-13-epub-progress-off surface: (0.0,28.0 430.0x875.0)
+QP iphone-13-epub-progress-off pdf-page: 
+QP iphone-13-epub-progress-off running-head: (152.0,7.0 126.1x14.0)
+QP iphone-13-epub-progress-off running-head-text: PRIDE. and PREJUDICE
+QP iphone-13-epub-progress-off folio: (215.0,911.0 0.0x14.0)
+QP iphone-13-epub-progress-off folio-text: 
+QP iphone-13-epub-progress-off toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-13-epub-progress-off phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-13-epub-progress-off progress: 1% · page 8
+QP iphone-13-epub-progress-off chrome: false
+SHOT iphone-13-epub-progress-off
+QP 7-folio-page: "page 8"
+QP iphone-14-epub-progress-page padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-14-epub-progress-page viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-14-epub-progress-page view.padding: Instance of 'FakeViewPadding'
+QP iphone-14-epub-progress-page view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-14-epub-progress-page size: Size(430.0, 932.0)
+QP iphone-14-epub-progress-page stage: (0.0,0.0 430.0x932.0)
+QP iphone-14-epub-progress-page surface: (0.0,28.0 430.0x875.0)
+QP iphone-14-epub-progress-page pdf-page: 
+QP iphone-14-epub-progress-page running-head: (152.0,7.0 126.1x14.0)
+QP iphone-14-epub-progress-page running-head-text: PRIDE. and PREJUDICE
+QP iphone-14-epub-progress-page folio: (196.2,911.0 37.6x14.0)
+QP iphone-14-epub-progress-page folio-text: page 8
+QP iphone-14-epub-progress-page toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-14-epub-progress-page phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-14-epub-progress-page progress: 1% · page 8
+QP iphone-14-epub-progress-page chrome: false
+SHOT iphone-14-epub-progress-page
+QP 7-progress-ok: true
+QP iphone-15-pdf-quiet padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-15-pdf-quiet viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-15-pdf-quiet view.padding: Instance of 'FakeViewPadding'
+QP iphone-15-pdf-quiet view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-15-pdf-quiet size: Size(430.0, 932.0)
+QP iphone-15-pdf-quiet stage: (0.0,0.0 430.0x932.0)
+QP iphone-15-pdf-quiet surface: (0.0,0.0 430.0x893.0)
+QP iphone-15-pdf-quiet pdf-page: 
+QP iphone-15-pdf-quiet running-head: 
+QP iphone-15-pdf-quiet running-head-text: 
+QP iphone-15-pdf-quiet folio: (182.7,906.0 64.6x14.0)
+QP iphone-15-pdf-quiet folio-text: page 1 of 15
+QP iphone-15-pdf-quiet toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-15-pdf-quiet phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-15-pdf-quiet progress: 7% · page 1 of 15
+QP iphone-15-pdf-quiet chrome: false
+SHOT iphone-15-pdf-quiet
+QP 8-right-third: page 1 of 15 -> page 2 of 15
+QP iphone-16-pdf-right-third padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-16-pdf-right-third viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-16-pdf-right-third view.padding: Instance of 'FakeViewPadding'
+QP iphone-16-pdf-right-third view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-16-pdf-right-third size: Size(430.0, 932.0)
+QP iphone-16-pdf-right-third stage: (0.0,0.0 430.0x932.0)
+QP iphone-16-pdf-right-third surface: (0.0,0.0 430.0x893.0)
+QP iphone-16-pdf-right-third pdf-page: 
+QP iphone-16-pdf-right-third running-head: 
+QP iphone-16-pdf-right-third running-head-text: 
+QP iphone-16-pdf-right-third folio: (181.6,906.0 66.8x14.0)
+QP iphone-16-pdf-right-third folio-text: page 2 of 15
+QP iphone-16-pdf-right-third toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-16-pdf-right-third phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-16-pdf-right-third progress: 13% · page 2 of 15
+QP iphone-16-pdf-right-third chrome: false
+SHOT iphone-16-pdf-right-third
+QP 8-left-third: page 2 of 15 -> page 1 of 15
+QP 8-chrome-shown: true
+QP iphone-17-pdf-chrome-shown padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-17-pdf-chrome-shown viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-17-pdf-chrome-shown view.padding: Instance of 'FakeViewPadding'
+QP iphone-17-pdf-chrome-shown view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-17-pdf-chrome-shown size: Size(430.0, 932.0)
+QP iphone-17-pdf-chrome-shown stage: (0.0,0.0 430.0x932.0)
+QP iphone-17-pdf-chrome-shown surface: (0.0,0.0 430.0x893.0)
+QP iphone-17-pdf-chrome-shown pdf-page: 
+QP iphone-17-pdf-chrome-shown running-head: 
+QP iphone-17-pdf-chrome-shown running-head-text: 
+QP iphone-17-pdf-chrome-shown folio: (181.6,906.0 66.8x14.0)
+QP iphone-17-pdf-chrome-shown folio-text: page 2 of 15
+QP iphone-17-pdf-chrome-shown toolbar: (64.0,66.5 254.0x40.0)
+QP iphone-17-pdf-chrome-shown phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-17-pdf-chrome-shown progress: 13% · page 2 of 15
+QP iphone-17-pdf-chrome-shown chrome: true
+SHOT iphone-17-pdf-chrome-shown
+QP 8-same-pdf-page: true
+QP 8-same-folio: true
+QP iphone-18-pdf-chrome-hidden padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-18-pdf-chrome-hidden viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-18-pdf-chrome-hidden view.padding: Instance of 'FakeViewPadding'
+QP iphone-18-pdf-chrome-hidden view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-18-pdf-chrome-hidden size: Size(430.0, 932.0)
+QP iphone-18-pdf-chrome-hidden stage: (0.0,0.0 430.0x932.0)
+QP iphone-18-pdf-chrome-hidden surface: (0.0,0.0 430.0x893.0)
+QP iphone-18-pdf-chrome-hidden pdf-page: 
+QP iphone-18-pdf-chrome-hidden running-head: 
+QP iphone-18-pdf-chrome-hidden running-head-text: 
+QP iphone-18-pdf-chrome-hidden folio: (181.6,906.0 66.8x14.0)
+QP iphone-18-pdf-chrome-hidden folio-text: page 2 of 15
+QP iphone-18-pdf-chrome-hidden toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-18-pdf-chrome-hidden phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-18-pdf-chrome-hidden progress: 13% · page 2 of 15
+QP iphone-18-pdf-chrome-hidden chrome: false
+SHOT iphone-18-pdf-chrome-hidden
+QP 8-pdf-ok: true
+QP 9-hint-shown: false
+QP iphone-19-neko-open padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-19-neko-open viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-19-neko-open view.padding: Instance of 'FakeViewPadding'
+QP iphone-19-neko-open view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-19-neko-open size: Size(430.0, 932.0)
+QP iphone-19-neko-open stage: (0.0,0.0 430.0x932.0)
+QP iphone-19-neko-open surface: (0.0,28.0 430.0x875.0)
+QP iphone-19-neko-open pdf-page: 
+QP iphone-19-neko-open running-head: (215.0,7.0 0.0x14.0)
+QP iphone-19-neko-open running-head-text: 
+QP iphone-19-neko-open folio: (197.4,911.0 35.2x14.0)
+QP iphone-19-neko-open folio-text: page 1
+QP iphone-19-neko-open toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-19-neko-open phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-19-neko-open progress: 1% · page 1
+QP iphone-19-neko-open chrome: false
+SHOT iphone-19-neko-open
+QP 9-left-third: page 1 -> page 2
+QP 9-left-third-2: page 3
+QP iphone-20-neko-left-third padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-20-neko-left-third viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-20-neko-left-third view.padding: Instance of 'FakeViewPadding'
+QP iphone-20-neko-left-third view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-20-neko-left-third size: Size(430.0, 932.0)
+QP iphone-20-neko-left-third stage: (0.0,0.0 430.0x932.0)
+QP iphone-20-neko-left-third surface: (0.0,28.0 430.0x875.0)
+QP iphone-20-neko-left-third pdf-page: 
+QP iphone-20-neko-left-third running-head: (209.4,7.0 11.3x14.0)
+QP iphone-20-neko-left-third running-head-text: 一
+QP iphone-20-neko-left-third folio: (196.2,911.0 37.6x14.0)
+QP iphone-20-neko-left-third folio-text: page 3
+QP iphone-20-neko-left-third toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-20-neko-left-third phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-20-neko-left-third progress: 1% · page 3
+QP iphone-20-neko-left-third chrome: false
+SHOT iphone-20-neko-left-third
+QP 9-right-third: page 3 -> page 2
+QP iphone-21-neko-right-third padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-21-neko-right-third viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-21-neko-right-third view.padding: Instance of 'FakeViewPadding'
+QP iphone-21-neko-right-third view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-21-neko-right-third size: Size(430.0, 932.0)
+QP iphone-21-neko-right-third stage: (0.0,0.0 430.0x932.0)
+QP iphone-21-neko-right-third surface: (0.0,28.0 430.0x875.0)
+QP iphone-21-neko-right-third pdf-page: 
+QP iphone-21-neko-right-third running-head: (209.4,7.0 11.3x14.0)
+QP iphone-21-neko-right-third running-head-text: 一
+QP iphone-21-neko-right-third folio: (196.3,911.0 37.5x14.0)
+QP iphone-21-neko-right-third folio-text: page 2
+QP iphone-21-neko-right-third toolbar: (64.0,-48.5 254.0x40.0)
+QP iphone-21-neko-right-third phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-21-neko-right-third progress: 1% · page 2
+QP iphone-21-neko-right-third chrome: false
+SHOT iphone-21-neko-right-third
+QP 9-neko-ok: true
+QP 10-in-library: true
+QP iphone-22-library-end padding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-22-library-end viewPadding: EdgeInsets(0.0, 59.0, 0.0, 34.0)
+QP iphone-22-library-end view.padding: Instance of 'FakeViewPadding'
+QP iphone-22-library-end view.viewPadding: Instance of 'FakeViewPadding'
+QP iphone-22-library-end size: Size(430.0, 932.0)
+QP iphone-22-library-end stage: 
+QP iphone-22-library-end surface: 
+QP iphone-22-library-end pdf-page: 
+QP iphone-22-library-end running-head: 
+QP iphone-22-library-end running-head-text: 
+QP iphone-22-library-end folio: 
+QP iphone-22-library-end folio-text: 
+QP iphone-22-library-end toolbar: 
+QP iphone-22-library-end phone-bar: 
+QP iphone-22-library-end progress: 
+QP iphone-22-library-end chrome: false
+SHOT iphone-22-library-end
+QP 10-library-ok: true
+03:22 +2: All tests passed!
+All tests passed.
