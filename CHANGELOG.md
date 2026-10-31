@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-30
+## [0.1.0] - 2026-10-31
 
 ### 🚀 Features
 
@@ -183,6 +183,7 @@ All notable changes to this project will be documented in this file.
 - *(rfd)* Move RFDs to chaba-dev/rfds (#221)
 - *(design-system)* The quiet page on phone and tablet (#239)
 - *(design-system)* The quiet page on desktop too (#243)
+- *(design-system)* Page curl, narrower middle strip and touch chrome timer (#261)
 
 ### ⚡ Performance
 
