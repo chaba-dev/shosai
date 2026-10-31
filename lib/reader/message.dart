@@ -28,6 +28,11 @@ final class ReaderChromeDismissed extends ReaderMessage {
   const ReaderChromeDismissed();
 }
 
+/// The route has popped, even though its exit animation still owns the view.
+final class ReaderRouteLeft extends ReaderMessage {
+  const ReaderRouteLeft();
+}
+
 /// Android may keep system bars visible briefly after the keyboard closes.
 final class ReaderSystemBarsRestoreRequested extends ReaderMessage {
   const ReaderSystemBarsRestoreRequested();

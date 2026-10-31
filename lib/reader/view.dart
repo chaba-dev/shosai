@@ -225,6 +225,49 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _stageFrameComplete = false;
   int _stageFrameRevision = 0;
   bool _keyboardVisible = false;
+  EdgeInsets? _systemInsets;
+  int _systemInsetsRevision = 0;
+
+  // Window geometry is presentation state, independent of the open document.
+  // Android's normal viewPadding shrinks when bars hide; ask for the system
+  // bars and cutout ignoring visibility instead. Rotation/density changes
+  // supersede an in-flight query, and disposal retires it with the view.
+  Future<void> _refreshSystemInsets() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    final revision = ++_systemInsetsRevision;
+    final ratio = View.of(context).devicePixelRatio;
+    final values = await const OptionalMethodChannel(
+      'dev.shosai/reader_system_bars',
+    ).invokeListMethod<num>('getStableInsets');
+    if (!mounted || revision != _systemInsetsRevision || values == null) return;
+    final insets = EdgeInsets.fromLTRB(
+      values[0] / ratio,
+      values[1] / ratio,
+      values[2] / ratio,
+      values[3] / ratio,
+    );
+    if (_systemInsets != insets) setState(() => _systemInsets = insets);
+  }
+
+  MediaQueryData _readerMediaQuery(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final insets = _systemInsets;
+    if (insets == null) return media;
+    final view = View.of(context);
+    // Honour padding already consumed by the shell (for example its rail).
+    final consumed =
+        EdgeInsets.fromViewPadding(view.viewPadding, view.devicePixelRatio) -
+        media.viewPadding;
+    final safe = (insets - consumed)
+        .clamp(EdgeInsets.zero, insets)
+        .resolve(TextDirection.ltr);
+    return media.copyWith(
+      viewPadding: safe,
+      padding: (safe - media.viewInsets)
+          .clamp(EdgeInsets.zero, safe)
+          .resolve(TextDirection.ltr),
+    );
+  }
 
   void _focusHeaderAction() {
     final focus = switch (_lastOpenPanel) {
@@ -342,6 +385,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void didChangeDependencies() {
     if (!_controllerInitialized) {
+      unawaited(_refreshSystemInsets());
       _controllerInitialized = true;
       _controller = ReaderController(
         bridge: widget.bridge ?? widget.bridgeFactory!(),
@@ -603,6 +647,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   @override
   void didChangeMetrics() {
+    unawaited(_refreshSystemInsets());
     _stageChanged();
     final visible = View.of(context).viewInsets.bottom > 0;
     if (_keyboardVisible && !visible && _controllerInitialized) {
@@ -833,13 +878,18 @@ class _ReaderScreenState extends State<ReaderScreen>
     return PopScope(
       canPop: !floatingPanel && model.referencePeek == null,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && model.referencePeek != null) {
+        if (didPop) {
+          _controller.dispatch(const ReaderRouteLeft());
+        } else if (model.referencePeek != null) {
           _controller.dispatch(const ReaderReferenceDismissed());
-        } else if (!didPop && floatingPanel) {
+        } else if (floatingPanel) {
           _controller.dispatch(ReaderPanelToggled(panel));
         }
       },
-      child: _withReaderLocalizations(context, reader),
+      child: MediaQuery(
+        data: _readerMediaQuery(context),
+        child: _withReaderLocalizations(context, reader),
+      ),
     );
   }
 
