@@ -170,6 +170,12 @@ class _ReaderStage extends StatelessWidget {
     final pageArea = LayoutBuilder(
       builder: (context, constraints) {
         final spread = _readerShowsSpread(model, layout, constraints);
+        Widget turns(Widget child) => _ReaderPageTurn(
+          model: model,
+          dispatch: dispatch,
+          spread: spread,
+          child: child,
+        );
         final scoped = _ReaderSpreadScope(
           spread: spread,
           child: paper
@@ -191,10 +197,12 @@ class _ReaderStage extends StatelessWidget {
               : content,
         );
         if (phone || !paper) {
-          return _ReaderPageTapScope(
-            model: model,
-            dispatch: dispatch,
-            child: scoped,
+          return turns(
+            _ReaderPageTapScope(
+              model: model,
+              dispatch: dispatch,
+              child: scoped,
+            ),
           );
         }
         // A spread is two pages of paper side by side, each as wide as a
@@ -208,39 +216,41 @@ class _ReaderStage extends StatelessWidget {
             key: const ValueKey('reader-page'),
             width: width,
             height: constraints.maxHeight,
-            child: _ReaderPageTapScope(
-              model: model,
-              dispatch: dispatch,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: colors.background,
-                  borderRadius: BorderRadius.circular(3),
-                  boxShadow: _readerPageShadow(palette),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // The page's own margins around the layout's: a page on
-                      // the stage reads with wider margins than a full-bleed
-                      // phone page.
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: ShosaiTokens.space5,
-                          vertical: ShosaiTokens.space4,
-                        ),
-                        child: scoped,
-                      ),
-                      if (spread)
-                        Center(
-                          child: _ReaderSpreadGutter(
-                            shade: palette.shadowBase,
-                            dark: palette.dark,
-                            rightToLeft: rightToLeft,
+            child: turns(
+              _ReaderPageTapScope(
+                model: model,
+                dispatch: dispatch,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colors.background,
+                    borderRadius: BorderRadius.circular(3),
+                    boxShadow: _readerPageShadow(palette),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // The page's own margins around the layout's: a page on
+                        // the stage reads with wider margins than a full-bleed
+                        // phone page.
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: ShosaiTokens.space5,
+                            vertical: ShosaiTokens.space4,
                           ),
+                          child: scoped,
                         ),
-                    ],
+                        if (spread)
+                          Center(
+                            child: _ReaderSpreadGutter(
+                              shade: palette.shadowBase,
+                              dark: palette.dark,
+                              rightToLeft: rightToLeft,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
