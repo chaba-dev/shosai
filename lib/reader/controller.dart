@@ -346,6 +346,7 @@ final class ReaderController implements Listenable {
   FlutterReaderProgress _typographyProgress;
   Timer? _chromeTimer;
   int _chromeRevision = 0;
+  final Set<int> _touchPointers = {};
   Timer? _systemBarsTimer;
   int _systemBarsRevision = 0;
   ReaderRasterFit _rasterFit;
@@ -632,6 +633,12 @@ final class ReaderController implements Listenable {
       default:
     }
     switch (message) {
+      case ReaderTouchStarted():
+        _touchPointers.add(message.pointer);
+        _scheduleChromeHide();
+      case ReaderTouchEnded():
+        _touchPointers.remove(message.pointer);
+        _scheduleChromeHide();
       case ReaderPointerMoved():
         if (!_model.chromeVisible || !_model.pointerChrome) {
           _emit(_model.copyWith(chromeVisible: true, pointerChrome: true));
@@ -662,7 +669,8 @@ final class ReaderController implements Listenable {
       case _ReaderChromeIdle():
         if (_isCurrent(message.generation) &&
             message.revision == _chromeRevision &&
-            !_model.chromeHovered &&
+            _touchPointers.isEmpty &&
+            !(_model.pointerChrome && _model.chromeHovered) &&
             !_model.chromeIdleInhibited) {
           _hideChrome();
         }
@@ -1507,14 +1515,15 @@ final class ReaderController implements Listenable {
     _chromeTimer?.cancel();
     final revision = ++_chromeRevision;
     if (_closing ||
-        !_model.pointerChrome ||
         !_model.chromeVisible ||
-        _model.chromeHovered ||
+        _touchPointers.isNotEmpty ||
+        (_model.pointerChrome && _model.chromeHovered) ||
         _model.chromeIdleInhibited) {
       return;
     }
     final generation = _model.generation;
-    _chromeTimer = Timer(const Duration(seconds: 2), () {
+    final delay = Duration(seconds: _model.pointerChrome ? 2 : 3);
+    _chromeTimer = Timer(delay, () {
       dispatch(_ReaderChromeIdle(generation, revision));
     });
   }
@@ -1532,7 +1541,10 @@ final class ReaderController implements Listenable {
     }
     _chromeTimer?.cancel();
     _chromeRevision += 1;
-    final middle = message.fraction >= 1 / 3 && message.fraction < 2 / 3;
+    final halfStrip =
+        readerControlsStripWidth(message.width) / message.width / 2;
+    final middle =
+        message.fraction >= .5 - halfStrip && message.fraction < .5 + halfStrip;
     final shown = _model.chromeVisible;
     _emit(
       _model.copyWith(
@@ -1541,9 +1553,10 @@ final class ReaderController implements Listenable {
         chromeVisible: middle && !shown,
       ),
     );
+    _scheduleChromeHide();
     if (middle || _model.continuousPresentation) return;
     final delta =
-        (message.fraction < 1 / 3 ? -1 : 1) * (_model.rightToLeft ? -1 : 1);
+        (message.fraction < .5 ? -1 : 1) * (_model.rightToLeft ? -1 : 1);
     dispatch(ReaderPageStepRequested(delta));
   }
 

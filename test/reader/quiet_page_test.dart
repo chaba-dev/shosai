@@ -92,7 +92,7 @@ void main() {
 
   for (final width in [390.0, 900.0, 1280.0]) {
     for (final rtl in [false, true]) {
-      testWidgets('touch thirds and chrome never reflow ($width, RTL $rtl)', (
+      testWidgets('touch zones and chrome never reflow ($width, RTL $rtl)', (
         tester,
       ) async {
         await _open(tester, Size(width, 844), rtl: rtl);
@@ -109,9 +109,11 @@ void main() {
         await tester.pump(const Duration(seconds: 8));
         expect(
           _toolbar.hitTestable(),
-          findsOneWidget,
-          reason: 'touch has no idle timer',
+          findsNothing,
+          reason: 'touch chrome leaves after three seconds',
         );
+        await _tap(tester, .5);
+        expect(_toolbar.hitTestable(), findsOneWidget);
         await _tap(tester, .5);
         expect(_toolbar.hitTestable(), findsNothing);
         await _tap(tester, rtl ? .15 : .85);
@@ -132,7 +134,7 @@ void main() {
 
   for (final width in [900.0, 1280.0]) {
     for (final rtl in [false, true]) {
-      testWidgets('touch thirds turn whole PDF spreads ($width, RTL $rtl)', (
+      testWidgets('touch zones turn whole PDF spreads ($width, RTL $rtl)', (
         tester,
       ) async {
         await _open(
@@ -151,6 +153,145 @@ void main() {
         expect(_toolbar.hitTestable(), findsNothing);
       });
     }
+  }
+
+  for (final width in [390.0, 600.0, 640.0, 900.0]) {
+    for (final rtl in [false, true]) {
+      testWidgets('strip boundaries and hint match ($width, RTL $rtl)', (
+        tester,
+      ) async {
+        await _open(
+          tester,
+          Size(width, 600),
+          rtl: rtl,
+          settings: _settings.copyWith(
+            twoPages: true,
+            zonesHintDismissed: false,
+          ),
+        );
+        final area = tester.getRect(
+          find.byKey(const ValueKey('reader-page-tap-area')),
+        );
+        // Independent expected geometry, including the sub-600 page area on
+        // a narrow tablet: always capping at 200 would be wrong there.
+        final stripWidth = area.width < 600 ? area.width / 3 : 200.0;
+        final hintColumn = tester.getRect(
+          find
+              .ancestor(
+                of: find.text('Controls'),
+                matching: find.byType(SizedBox),
+              )
+              .first,
+        );
+        expect(hintColumn.width, closeTo(stripWidth, .01));
+        expect(hintColumn.center.dx, closeTo(area.center.dx, .01));
+        await _tap(tester, .5); // Dismiss onboarding, not reveal or turn.
+        expect(_toolbar.hitTestable(), findsNothing);
+        final left = area.center.dx - stripWidth / 2;
+        final right = area.center.dx + stripWidth / 2;
+        Future<void> tapX(double x) async {
+          await tester.tapAt(Offset(x, area.center.dy));
+          await tester.pump(const Duration(milliseconds: 350));
+          await tester.pumpAndSettle();
+        }
+
+        await tapX(left + 1);
+        expect(_toolbar.hitTestable(), findsOneWidget);
+        await tapX(right - 1);
+        expect(_toolbar.hitTestable(), findsNothing);
+        await tapX(rtl ? left - 1 : right + 1);
+        expect(_toolbar.hitTestable(), findsNothing);
+        expect(
+          _status(tester),
+          width == 900 ? '60% · pages 2–3 of 5' : '40% · page 2 of 5',
+        );
+        await tapX(rtl ? right + 1 : left - 1);
+        expect(_status(tester), '20% · page 1 of 5');
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  for (final width in [390.0, 900.0]) {
+    testWidgets('touch idle waits for all fingers and cancellation ($width)', (
+      tester,
+    ) async {
+      await _open(tester, Size(width, 844));
+      await _tap(tester, .5);
+      // A non-actionable toolbar location exercises raw touch activity without
+      // a page tap, page turn, or panel opening hiding/pinning the chrome.
+      final title = tester.getCenter(
+        find.byKey(const ValueKey('reader-header-title')),
+      );
+      final first = await tester.startGesture(title, pointer: 11);
+      await tester.pump(const Duration(seconds: 4));
+      expect(_toolbar.hitTestable(), findsOneWidget);
+      final second = await tester.startGesture(title, pointer: 12);
+      await first.up();
+      await tester.pump(const Duration(seconds: 4));
+      expect(_toolbar.hitTestable(), findsOneWidget);
+      await second.cancel();
+      await tester.pump(const Duration(milliseconds: 2999));
+      expect(_toolbar.hitTestable(), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(_toolbar.hitTestable(), findsNothing);
+    });
+
+    for (final panel in ['contents', 'typography', 'notes']) {
+      testWidgets('touch $panel pins chrome then restarts idle ($width)', (
+        tester,
+      ) async {
+        await _open(tester, Size(width, 844));
+        await _tap(tester, .5);
+        await tester.tap(find.byKey(ValueKey('reader-header-$panel')));
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 5));
+        expect(_toolbar.hitTestable(), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 2999));
+        expect(_toolbar.hitTestable(), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 201));
+        expect(_toolbar.hitTestable(), findsNothing);
+      });
+    }
+
+    testWidgets('reference popover pins touch chrome ($width)', (tester) async {
+      final links = <PdfPageLink>[];
+      await _open(tester, Size(width, 844), links: links);
+      await _tap(tester, .5);
+      links.add(
+        const PdfPageLink(rects: [PdfLinkRect(0, 0, 612, 792)], page: 1),
+      );
+      await _tap(tester, .5);
+      expect(
+        find.byKey(const ValueKey('reader-reference-peek')),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(seconds: 5));
+      // The modal barrier covers the toolbar's hit targets, but must not
+      // allow its chrome to fade underneath the reference card.
+      expect(
+        tester
+            .widget<AnimatedOpacity>(
+              find
+                  .ancestor(
+                    of: _toolbar,
+                    matching: find.byType(AnimatedOpacity),
+                  )
+                  .first,
+            )
+            .opacity,
+        1,
+      );
+      await tester.tap(find.byKey(const ValueKey('reader-reference-close')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 2999));
+      expect(_toolbar.hitTestable(), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 201));
+      expect(_toolbar.hitTestable(), findsNothing);
+    });
   }
 
   testWidgets('a swipe on the phone PDF place turns the page', (tester) async {
