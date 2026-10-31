@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,6 +54,7 @@ void main() {
     FlutterReaderSettings? settings,
     ReaderPlaceRequests? placeRequests,
     Size size = const Size(1280, 800),
+    bool reveal = true,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -75,7 +77,7 @@ void main() {
       maxRounds: 16,
     );
     await settle(tester);
-    await revealReaderChrome(tester);
+    if (reveal) await revealReaderChrome(tester);
   }
 
   Future<void> closeReader(WidgetTester tester) async {
@@ -98,6 +100,85 @@ void main() {
 
   double centreOf(WidgetTester tester, String key) =>
       tester.getCenter(find.byKey(ValueKey(key))).dx;
+
+  for (final rtl in [false, true]) {
+    testWidgets(
+      'spread percent appears once and heads fade with chrome ($rtl)',
+      (tester) async {
+        await openReader(
+          tester,
+          bridge(rtl ? 'rtl' : null),
+          reveal: false,
+          settings: harnessReaderSettings.copyWith(
+            twoPages: true,
+            progress: FlutterReaderProgress.percent,
+          ),
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await settle(tester);
+        final folio = find.byKey(const ValueKey('reader-folio'));
+        final heads = find.byKey(const ValueKey('reader-running-head'));
+        expect(heads, findsNWidgets(2), reason: 'this is a two-page spread');
+        expect(
+          tester.widgetList<Text>(heads).every((head) => head.data!.isNotEmpty),
+          isTrue,
+          reason: 'test non-opening pages, where running heads carry text',
+        );
+        expect(folio, findsOneWidget);
+        expect(tester.widget<Text>(folio).data, matches(RegExp(r'^\d+%$')));
+        final paper = tester.getRect(find.byKey(const ValueKey('reader-page')));
+        expect(
+          tester.getCenter(folio).dx,
+          rtl ? lessThan(paper.center.dx) : greaterThan(paper.center.dx),
+        );
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final before = tester.getRect(surface.first);
+        final fade = find
+            .ancestor(of: heads.first, matching: find.byType(AnimatedOpacity))
+            .first;
+        expect(tester.widget<AnimatedOpacity>(fade).opacity, 1);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: const Offset(0, 0));
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(paper.center);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(
+          find.byKey(const ValueKey('reader-header-contents')).hitTestable(),
+          findsOneWidget,
+        );
+        expect(tester.widget<AnimatedOpacity>(fade).opacity, 0);
+        expect(tester.getRect(surface.first), before);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(tester.widget<AnimatedOpacity>(fade).opacity, 1);
+        expect(tester.getRect(surface.first), before);
+        expect(folio, findsOneWidget);
+        await closeReader(tester);
+
+        // A final leaf without a facing page must keep its percentage too.
+        await openReader(
+          tester,
+          bridge(
+            rtl ? 'rtl' : null,
+            epub: buildTestEpub(
+              chapters: const {'OPS/Text/end.xhtml': '<p>The end.</p>'},
+              nav: '<ol><li><a href="../Text/end.xhtml">End</a></li></ol>',
+              pageProgression: rtl ? 'rtl' : null,
+            ),
+          ),
+          reveal: false,
+          settings: harnessReaderSettings.copyWith(
+            twoPages: true,
+            progress: FlutterReaderProgress.percent,
+          ),
+        );
+        expect(folio, findsOneWidget);
+        expect(tester.widget<Text>(folio).data, matches(RegExp(r'^\d+%$')));
+        await closeReader(tester);
+      },
+    );
+  }
 
   for (final direction in ['ltr', 'rtl', 'vertical']) {
     testWidgets('swipes on EPUB furniture and margins turn $direction pages', (
