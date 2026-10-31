@@ -183,7 +183,15 @@ class _ReaderStage extends StatelessWidget {
                   children: [
                     Expanded(child: content),
                     Padding(
-                      padding: const EdgeInsets.all(ShosaiTokens.space3),
+                      // Keep the place above the home/gesture area even while
+                      // system bars are hidden, without refitting on reveal.
+                      padding: EdgeInsets.fromLTRB(
+                        ShosaiTokens.space3,
+                        ShosaiTokens.space3,
+                        ShosaiTokens.space3,
+                        ShosaiTokens.space3 +
+                            MediaQuery.viewPaddingOf(context).bottom,
+                      ),
                       child: _ReaderFolio(model: model, muted: true),
                     ),
                   ],
@@ -534,47 +542,56 @@ class _ReaderPageFurniture extends StatelessWidget {
         model.contents.entries.where((e) => e.current).firstOrNull?.title ??
         model.document?.title ??
         '';
-    return Column(
-      children: [
-        SizedBox(
-          height: 28,
-          child: Row(
-            children: [
-              for (final ordinal in physical)
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      // Chapter openings leave this space quiet, with the title below.
-                      ordinal == null || ordinal == 1 || model.document == null
-                          ? ''
-                          : heading,
-                      key: const ValueKey('reader-running-head'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _readerFolioStyle(model),
+    // The full-bleed page keeps its physical size. Only the furniture and
+    // content inside it clear the stable cutout/home insets, not the padding
+    // that changes as the system status bar follows the reader chrome.
+    final insets = MediaQuery.viewPaddingOf(context);
+    return Padding(
+      padding: EdgeInsets.only(top: insets.top, bottom: insets.bottom),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 28,
+            child: Row(
+              children: [
+                for (final ordinal in physical)
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        // Chapter openings leave this space quiet, with the title below.
+                        ordinal == null ||
+                                ordinal == 1 ||
+                                model.document == null
+                            ? ''
+                            : heading,
+                        key: const ValueKey('reader-running-head'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _readerFolioStyle(model),
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-        Expanded(child: child),
-        SizedBox(
-          height: 28,
-          child: Row(
-            children: [
-              for (final ordinal in physical)
-                Expanded(
-                  child: Center(
-                    child: ordinal == null
-                        ? const SizedBox.shrink()
-                        : _ReaderFolio(model: model, ordinal: ordinal),
+          Expanded(child: child),
+          SizedBox(
+            height: 28,
+            child: Row(
+              children: [
+                for (final ordinal in physical)
+                  Expanded(
+                    child: Center(
+                      child: ordinal == null
+                          ? const SizedBox.shrink()
+                          : _ReaderFolio(model: model, ordinal: ordinal),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
