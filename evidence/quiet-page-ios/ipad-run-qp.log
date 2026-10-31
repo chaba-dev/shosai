@@ -1,0 +1,375 @@
+QP data-dir: /private/var/mobile/Containers/Data/Application/ABEE9DC6-0AA0-4F30-9665-F60A2BA51686/tmp/qp-data-lpte8S
+QP imported: 4
+QP view: logical 1180.0x820.0 dpr 2.0
+QP ipad-01-library-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start size: 1180.0x820.0
+QP ipad-01-library-start stage: 
+QP ipad-01-library-start surface: 
+QP ipad-01-library-start pdf-page: 
+QP ipad-01-library-start running-head: 
+QP ipad-01-library-start running-head-text: 
+QP ipad-01-library-start folio: 
+QP ipad-01-library-start folio-text: 
+QP ipad-01-library-start toolbar: 
+QP ipad-01-library-start phone-bar: 
+QP ipad-01-library-start progress: 
+QP ipad-01-library-start chrome: false
+SHOT ipad-01-library-start
+QP 1-hint-shown: true
+QP ipad-02-epub-hint padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-02-epub-hint viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-02-epub-hint size: 1180.0x820.0
+QP ipad-02-epub-hint stage: (56.0,0.0 1124.0x820.0)
+QP ipad-02-epub-hint surface: (104.0,68.0 1028.0x683.0)
+QP ipad-02-epub-hint pdf-page: 
+QP ipad-02-epub-hint running-head: (361.0,48.5 0.0x11.0) (875.0,48.5 0.0x11.0)
+QP ipad-02-epub-hint running-head-text: 
+QP ipad-02-epub-hint folio: (346.4,760.0 29.3x12.0)
+QP ipad-02-epub-hint folio-text: page 1
+QP ipad-02-epub-hint toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-02-epub-hint phone-bar: 
+QP ipad-02-epub-hint progress: 1% · page 1
+QP ipad-02-epub-hint chrome: false
+SHOT ipad-02-epub-hint
+QP 1-hint-after-tap: false
+QP 1-folio-before-after: page 1 -> page 1
+QP 1-chrome-after-tap: false
+QP ipad-03-epub-hint-dismissed padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-03-epub-hint-dismissed viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-03-epub-hint-dismissed size: 1180.0x820.0
+QP ipad-03-epub-hint-dismissed stage: (56.0,0.0 1124.0x820.0)
+QP ipad-03-epub-hint-dismissed surface: (104.0,68.0 1028.0x683.0)
+QP ipad-03-epub-hint-dismissed pdf-page: 
+QP ipad-03-epub-hint-dismissed running-head: (361.0,48.5 0.0x11.0) (875.0,48.5 0.0x11.0)
+QP ipad-03-epub-hint-dismissed running-head-text: 
+QP ipad-03-epub-hint-dismissed folio: (346.4,760.0 29.3x12.0)
+QP ipad-03-epub-hint-dismissed folio-text: page 1
+QP ipad-03-epub-hint-dismissed toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-03-epub-hint-dismissed phone-bar: 
+QP ipad-03-epub-hint-dismissed progress: 1% · page 1
+QP ipad-03-epub-hint-dismissed chrome: false
+SHOT ipad-03-epub-hint-dismissed
+QP 1-hint-ok: true
+QP ipad-04-epub-quiet padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-04-epub-quiet viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-04-epub-quiet size: 1180.0x820.0
+QP ipad-04-epub-quiet stage: (56.0,0.0 1124.0x820.0)
+QP ipad-04-epub-quiet surface: (104.0,68.0 1028.0x683.0)
+QP ipad-04-epub-quiet pdf-page: 
+QP ipad-04-epub-quiet running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-04-epub-quiet running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-04-epub-quiet folio: (343.4,760.0 35.1x12.0) (857.3,760.0 35.4x12.0)
+QP ipad-04-epub-quiet folio-text: page 13 | page 14
+QP ipad-04-epub-quiet toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-04-epub-quiet phone-bar: 
+QP ipad-04-epub-quiet progress: 2% · pages 13–14
+QP ipad-04-epub-quiet chrome: false
+SHOT ipad-04-epub-quiet
+QP 2-quiet-ok: true
+QP 3-chrome-shown: true
+QP ipad-05-epub-chrome-shown padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-epub-chrome-shown viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-epub-chrome-shown size: 1180.0x820.0
+QP ipad-05-epub-chrome-shown stage: (56.0,0.0 1124.0x820.0)
+QP ipad-05-epub-chrome-shown surface: (104.0,68.0 1028.0x683.0)
+QP ipad-05-epub-chrome-shown pdf-page: 
+QP ipad-05-epub-chrome-shown running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-05-epub-chrome-shown running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-05-epub-chrome-shown folio: (343.4,760.0 35.1x12.0) (857.3,760.0 35.4x12.0)
+QP ipad-05-epub-chrome-shown folio-text: page 13 | page 14
+QP ipad-05-epub-chrome-shown toolbar: (168.0,43.0 837.1x33.0)
+QP ipad-05-epub-chrome-shown phone-bar: 
+QP ipad-05-epub-chrome-shown progress: 2% · pages 13–14
+QP ipad-05-epub-chrome-shown chrome: true
+SHOT ipad-05-epub-chrome-shown
+QP 3-same-folio: true
+QP 3-same-surface: true
+QP 4-chrome-after-tap: false
+QP ipad-06-epub-chrome-hidden padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-06-epub-chrome-hidden viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-06-epub-chrome-hidden size: 1180.0x820.0
+QP ipad-06-epub-chrome-hidden stage: (56.0,0.0 1124.0x820.0)
+QP ipad-06-epub-chrome-hidden surface: (104.0,68.0 1028.0x683.0)
+QP ipad-06-epub-chrome-hidden pdf-page: 
+QP ipad-06-epub-chrome-hidden running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-06-epub-chrome-hidden running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-06-epub-chrome-hidden folio: (343.4,760.0 35.1x12.0) (857.3,760.0 35.4x12.0)
+QP ipad-06-epub-chrome-hidden folio-text: page 13 | page 14
+QP ipad-06-epub-chrome-hidden toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-06-epub-chrome-hidden phone-bar: 
+QP ipad-06-epub-chrome-hidden progress: 2% · pages 13–14
+QP ipad-06-epub-chrome-hidden chrome: false
+SHOT ipad-06-epub-chrome-hidden
+QP 4-same-folio: true
+QP 4-same-surface: true
+QP 3-chrome-ok: true
+QP 5-right-third: page 13 | page 14 -> page 15 | page 16
+QP 5-chrome: false
+QP ipad-07-epub-right-third padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-07-epub-right-third viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-07-epub-right-third size: 1180.0x820.0
+QP ipad-07-epub-right-third stage: (56.0,0.0 1124.0x820.0)
+QP ipad-07-epub-right-third surface: (104.0,68.0 1028.0x683.0)
+QP ipad-07-epub-right-third pdf-page: 
+QP ipad-07-epub-right-third running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-07-epub-right-third running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-07-epub-right-third folio: (343.5,760.0 34.9x12.0) (857.4,760.0 35.2x12.0)
+QP ipad-07-epub-right-third folio-text: page 15 | page 16
+QP ipad-07-epub-right-third toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-07-epub-right-third phone-bar: 
+QP ipad-07-epub-right-third progress: 2% · pages 15–16
+QP ipad-07-epub-right-third chrome: false
+SHOT ipad-07-epub-right-third
+QP 5-left-third: page 15 | page 16 -> page 13 | page 14
+QP ipad-08-epub-left-third padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-08-epub-left-third viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-08-epub-left-third size: 1180.0x820.0
+QP ipad-08-epub-left-third stage: (56.0,0.0 1124.0x820.0)
+QP ipad-08-epub-left-third surface: (104.0,68.0 1028.0x683.0)
+QP ipad-08-epub-left-third pdf-page: 
+QP ipad-08-epub-left-third running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-08-epub-left-third running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-08-epub-left-third folio: (343.4,760.0 35.1x12.0) (857.3,760.0 35.4x12.0)
+QP ipad-08-epub-left-third folio-text: page 13 | page 14
+QP ipad-08-epub-left-third toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-08-epub-left-third phone-bar: 
+QP ipad-08-epub-left-third progress: 2% · pages 13–14
+QP ipad-08-epub-left-third chrome: false
+SHOT ipad-08-epub-left-third
+QP 5-swipe-rtl: page 13 | page 14 -> page 15 | page 16
+QP 5-chrome-after-swipe: false
+QP ipad-09-epub-swiped padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-09-epub-swiped viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-09-epub-swiped size: 1180.0x820.0
+QP ipad-09-epub-swiped stage: (56.0,0.0 1124.0x820.0)
+QP ipad-09-epub-swiped surface: (104.0,68.0 1028.0x683.0)
+QP ipad-09-epub-swiped pdf-page: 
+QP ipad-09-epub-swiped running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-09-epub-swiped running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-09-epub-swiped folio: (343.5,760.0 34.9x12.0) (857.4,760.0 35.2x12.0)
+QP ipad-09-epub-swiped folio-text: page 15 | page 16
+QP ipad-09-epub-swiped toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-09-epub-swiped phone-bar: 
+QP ipad-09-epub-swiped progress: 2% · pages 15–16
+QP ipad-09-epub-swiped chrome: false
+SHOT ipad-09-epub-swiped
+QP 5-turns-ok: true
+QP 6-chrome-shown: true
+QP 6-chrome-after-drag: false
+QP ipad-10-epub-toolbar-dragged-up padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-10-epub-toolbar-dragged-up viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-10-epub-toolbar-dragged-up size: 1180.0x820.0
+QP ipad-10-epub-toolbar-dragged-up stage: (56.0,0.0 1124.0x820.0)
+QP ipad-10-epub-toolbar-dragged-up surface: (104.0,68.0 1028.0x683.0)
+QP ipad-10-epub-toolbar-dragged-up pdf-page: 
+QP ipad-10-epub-toolbar-dragged-up running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-10-epub-toolbar-dragged-up running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-10-epub-toolbar-dragged-up folio: (343.5,760.0 34.9x12.0) (857.4,760.0 35.2x12.0)
+QP ipad-10-epub-toolbar-dragged-up folio-text: page 15 | page 16
+QP ipad-10-epub-toolbar-dragged-up toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-10-epub-toolbar-dragged-up phone-bar: 
+QP ipad-10-epub-toolbar-dragged-up progress: 2% · pages 15–16
+QP ipad-10-epub-toolbar-dragged-up chrome: false
+SHOT ipad-10-epub-toolbar-dragged-up
+QP 6-drag-up-ok: true
+QP ipad-11-epub-display-panel padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-epub-display-panel viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-epub-display-panel size: 1180.0x820.0
+QP ipad-11-epub-display-panel stage: (56.0,0.0 1124.0x820.0)
+QP ipad-11-epub-display-panel surface: (104.0,68.0 1028.0x683.0)
+QP ipad-11-epub-display-panel pdf-page: 
+QP ipad-11-epub-display-panel running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-11-epub-display-panel running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-11-epub-display-panel folio: (343.5,760.0 34.9x12.0) (857.4,760.0 35.2x12.0)
+QP ipad-11-epub-display-panel folio-text: page 15 | page 16
+QP ipad-11-epub-display-panel toolbar: (168.0,43.0 837.1x33.0)
+QP ipad-11-epub-display-panel phone-bar: 
+QP ipad-11-epub-display-panel progress: 2% · pages 15–16
+QP ipad-11-epub-display-panel chrome: false
+SHOT ipad-11-epub-display-panel
+QP 7-folio-percent: "2% | 2%"
+QP ipad-12-epub-progress-percent padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-12-epub-progress-percent viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-12-epub-progress-percent size: 1180.0x820.0
+QP ipad-12-epub-progress-percent stage: (56.0,0.0 1124.0x820.0)
+QP ipad-12-epub-progress-percent surface: (104.0,68.0 1028.0x683.0)
+QP ipad-12-epub-progress-percent pdf-page: 
+QP ipad-12-epub-progress-percent running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-12-epub-progress-percent running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-12-epub-progress-percent folio: (353.5,760.0 14.9x12.0) (867.5,760.0 14.9x12.0)
+QP ipad-12-epub-progress-percent folio-text: 2% | 2%
+QP ipad-12-epub-progress-percent toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-12-epub-progress-percent phone-bar: 
+QP ipad-12-epub-progress-percent progress: 2% · pages 15–16
+QP ipad-12-epub-progress-percent chrome: false
+SHOT ipad-12-epub-progress-percent
+QP 7-folio-off: " | "
+QP ipad-13-epub-progress-off padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-13-epub-progress-off viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-13-epub-progress-off size: 1180.0x820.0
+QP ipad-13-epub-progress-off stage: (56.0,0.0 1124.0x820.0)
+QP ipad-13-epub-progress-off surface: (104.0,68.0 1028.0x683.0)
+QP ipad-13-epub-progress-off pdf-page: 
+QP ipad-13-epub-progress-off running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-13-epub-progress-off running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-13-epub-progress-off folio: (361.0,760.5 0.0x11.0) (875.0,760.5 0.0x11.0)
+QP ipad-13-epub-progress-off folio-text:  | 
+QP ipad-13-epub-progress-off toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-13-epub-progress-off phone-bar: 
+QP ipad-13-epub-progress-off progress: 2% · pages 15–16
+QP ipad-13-epub-progress-off chrome: false
+SHOT ipad-13-epub-progress-off
+QP 7-folio-page: "page 15 | page 16"
+QP ipad-14-epub-progress-page padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-14-epub-progress-page viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-14-epub-progress-page size: 1180.0x820.0
+QP ipad-14-epub-progress-page stage: (56.0,0.0 1124.0x820.0)
+QP ipad-14-epub-progress-page surface: (104.0,68.0 1028.0x683.0)
+QP ipad-14-epub-progress-page pdf-page: 
+QP ipad-14-epub-progress-page running-head: (308.6,48.0 104.7x12.0) (822.6,48.0 104.7x12.0)
+QP ipad-14-epub-progress-page running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-14-epub-progress-page folio: (343.5,760.0 34.9x12.0) (857.4,760.0 35.2x12.0)
+QP ipad-14-epub-progress-page folio-text: page 15 | page 16
+QP ipad-14-epub-progress-page toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-14-epub-progress-page phone-bar: 
+QP ipad-14-epub-progress-page progress: 2% · pages 15–16
+QP ipad-14-epub-progress-page chrome: false
+SHOT ipad-14-epub-progress-page
+QP 7-progress-ok: true
+QP library-via: rail (56.0,0.0 1124.0x820.0)
+QP ipad-15-pdf-quiet padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-15-pdf-quiet viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-15-pdf-quiet size: 1180.0x820.0
+QP ipad-15-pdf-quiet stage: (56.0,0.0 1124.0x820.0)
+QP ipad-15-pdf-quiet surface: (80.0,24.0 1076.0x771.0)
+QP ipad-15-pdf-quiet pdf-page: (320.1,24.0 595.8x771.0)
+QP ipad-15-pdf-quiet running-head: 
+QP ipad-15-pdf-quiet running-head-text: 
+QP ipad-15-pdf-quiet folio: 
+QP ipad-15-pdf-quiet folio-text: 
+QP ipad-15-pdf-quiet toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-15-pdf-quiet phone-bar: 
+QP ipad-15-pdf-quiet progress: 7% · page 1 of 15
+QP ipad-15-pdf-quiet chrome: false
+SHOT ipad-15-pdf-quiet
+QP 8-right-third:  -> 
+QP ipad-16-pdf-right-third padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-16-pdf-right-third viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-16-pdf-right-third size: 1180.0x820.0
+QP ipad-16-pdf-right-third stage: (56.0,0.0 1124.0x820.0)
+QP ipad-16-pdf-right-third surface: (80.0,24.0 1076.0x771.0)
+QP ipad-16-pdf-right-third pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-16-pdf-right-third running-head: 
+QP ipad-16-pdf-right-third running-head-text: 
+QP ipad-16-pdf-right-third folio: 
+QP ipad-16-pdf-right-third folio-text: 
+QP ipad-16-pdf-right-third toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-16-pdf-right-third phone-bar: 
+QP ipad-16-pdf-right-third progress: 20% · pages 2–3 of 15
+QP ipad-16-pdf-right-third chrome: false
+SHOT ipad-16-pdf-right-third
+QP 8-left-third:  -> 
+QP 8-chrome-shown: true
+QP ipad-17-pdf-chrome-shown padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-17-pdf-chrome-shown viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-17-pdf-chrome-shown size: 1180.0x820.0
+QP ipad-17-pdf-chrome-shown stage: (56.0,0.0 1124.0x820.0)
+QP ipad-17-pdf-chrome-shown surface: (80.0,24.0 1076.0x771.0)
+QP ipad-17-pdf-chrome-shown pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-17-pdf-chrome-shown running-head: 
+QP ipad-17-pdf-chrome-shown running-head-text: 
+QP ipad-17-pdf-chrome-shown folio: 
+QP ipad-17-pdf-chrome-shown folio-text: 
+QP ipad-17-pdf-chrome-shown toolbar: (168.0,43.0 837.1x33.0)
+QP ipad-17-pdf-chrome-shown phone-bar: 
+QP ipad-17-pdf-chrome-shown progress: 20% · pages 2–3 of 15
+QP ipad-17-pdf-chrome-shown chrome: true
+SHOT ipad-17-pdf-chrome-shown
+QP 8-same-pdf-page: true
+QP 8-same-folio: true
+QP ipad-18-pdf-chrome-hidden padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-18-pdf-chrome-hidden viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-18-pdf-chrome-hidden size: 1180.0x820.0
+QP ipad-18-pdf-chrome-hidden stage: (56.0,0.0 1124.0x820.0)
+QP ipad-18-pdf-chrome-hidden surface: (80.0,24.0 1076.0x771.0)
+QP ipad-18-pdf-chrome-hidden pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-18-pdf-chrome-hidden running-head: 
+QP ipad-18-pdf-chrome-hidden running-head-text: 
+QP ipad-18-pdf-chrome-hidden folio: 
+QP ipad-18-pdf-chrome-hidden folio-text: 
+QP ipad-18-pdf-chrome-hidden toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-18-pdf-chrome-hidden phone-bar: 
+QP ipad-18-pdf-chrome-hidden progress: 20% · pages 2–3 of 15
+QP ipad-18-pdf-chrome-hidden chrome: false
+SHOT ipad-18-pdf-chrome-hidden
+QP 8-pdf-ok: true
+QP library-via: rail (56.0,0.0 1124.0x820.0)
+QP 9-hint-shown: false
+QP ipad-19-neko-open padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-19-neko-open viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-19-neko-open size: 1180.0x820.0
+QP ipad-19-neko-open stage: (56.0,0.0 1124.0x820.0)
+QP ipad-19-neko-open surface: (104.0,68.0 1028.0x683.0)
+QP ipad-19-neko-open pdf-page: 
+QP ipad-19-neko-open running-head: (356.3,48.0 9.3x12.0) (875.0,48.5 0.0x11.0)
+QP ipad-19-neko-open running-head-text: 一
+QP ipad-19-neko-open folio: (345.4,760.0 31.1x12.0) (860.4,760.0 29.3x12.0)
+QP ipad-19-neko-open folio-text: page 2 | page 1
+QP ipad-19-neko-open toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-19-neko-open phone-bar: 
+QP ipad-19-neko-open progress: 1% · pages 1–2
+QP ipad-19-neko-open chrome: false
+SHOT ipad-19-neko-open
+QP 9-left-third: page 2 | page 1 -> page 4 | page 3
+QP 9-left-third-2: page 6 | page 5
+QP ipad-20-neko-left-third padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-20-neko-left-third viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-20-neko-left-third size: 1180.0x820.0
+QP ipad-20-neko-left-third stage: (56.0,0.0 1124.0x820.0)
+QP ipad-20-neko-left-third surface: (104.0,68.0 1028.0x683.0)
+QP ipad-20-neko-left-third pdf-page: 
+QP ipad-20-neko-left-third running-head: (356.3,48.0 9.3x12.0) (870.3,48.0 9.3x12.0)
+QP ipad-20-neko-left-third running-head-text: 一 | 一
+QP ipad-20-neko-left-third folio: (345.4,760.0 31.2x12.0) (859.5,760.0 31.0x12.0)
+QP ipad-20-neko-left-third folio-text: page 6 | page 5
+QP ipad-20-neko-left-third toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-20-neko-left-third phone-bar: 
+QP ipad-20-neko-left-third progress: 3% · pages 5–6
+QP ipad-20-neko-left-third chrome: false
+SHOT ipad-20-neko-left-third
+QP 9-right-third: page 6 | page 5 -> page 4 | page 3
+QP ipad-21-neko-right-third padding: L0.0 T0.0 R0.0 B25.0
+QP ipad-21-neko-right-third viewPadding: L0.0 T0.0 R0.0 B25.0
+QP ipad-21-neko-right-third size: 1180.0x820.0
+QP ipad-21-neko-right-third stage: (56.0,0.0 1124.0x820.0)
+QP ipad-21-neko-right-third surface: (104.0,68.0 1028.0x683.0)
+QP ipad-21-neko-right-third pdf-page: 
+QP ipad-21-neko-right-third running-head: (356.3,48.0 9.3x12.0) (870.3,48.0 9.3x12.0)
+QP ipad-21-neko-right-third running-head-text: 一 | 一
+QP ipad-21-neko-right-third folio: (345.3,760.0 31.5x12.0) (859.4,760.0 31.2x12.0)
+QP ipad-21-neko-right-third folio-text: page 4 | page 3
+QP ipad-21-neko-right-third toolbar: (168.0,-45.0 837.1x33.0)
+QP ipad-21-neko-right-third phone-bar: 
+QP ipad-21-neko-right-third progress: 1% · pages 3–4
+QP ipad-21-neko-right-third chrome: false
+SHOT ipad-21-neko-right-third
+QP 9-neko-ok: true
+QP library-via: rail (56.0,0.0 1124.0x820.0)
+QP 10-in-library: true
+QP ipad-22-library-end padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-22-library-end viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-22-library-end size: 1180.0x820.0
+QP ipad-22-library-end stage: 
+QP ipad-22-library-end surface: 
+QP ipad-22-library-end pdf-page: 
+QP ipad-22-library-end running-head: 
+QP ipad-22-library-end running-head-text: 
+QP ipad-22-library-end folio: 
+QP ipad-22-library-end folio-text: 
+QP ipad-22-library-end toolbar: 
+QP ipad-22-library-end phone-bar: 
+QP ipad-22-library-end progress: 
+QP ipad-22-library-end chrome: false
+SHOT ipad-22-library-end
+QP 10-library-ok: true

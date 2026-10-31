@@ -54,7 +54,8 @@ void main() {
     await _settle(tester, seconds: 3);
     _note(
       'view',
-      'logical ${tester.view.physicalSize / tester.view.devicePixelRatio}'
+      'logical ${tester.view.physicalSize.width / tester.view.devicePixelRatio}'
+          'x${tester.view.physicalSize.height / tester.view.devicePixelRatio}'
           ' dpr ${tester.view.devicePixelRatio}',
     );
     await _shot(tester, 'library-start');
@@ -244,8 +245,15 @@ Future<void> _try(String name, Future<void> Function() body) async {
 }
 
 void _note(String key, Object? value) {
+  _out('QP $key: $value');
+}
+
+/// `print` reaches flutter drive in a debug build; a profile build launched
+/// with `devicectl --console` only shows the process's own stdout.
+void _out(String line) {
   // ignore: avoid_print
-  print('QP $key: $value');
+  print(line);
+  stdout.writeln(line);
 }
 
 Future<void> _settle(WidgetTester tester, {int seconds = 2}) async {
@@ -283,6 +291,8 @@ String _rects(WidgetTester tester, String key) => [
       _rect(box.localToGlobal(Offset.zero) & box.size),
 ].join(' ');
 
+String _insets(EdgeInsets e) => 'L${e.left} T${e.top} R${e.right} B${e.bottom}';
+
 String _rect(Rect r) =>
     '(${r.left.toStringAsFixed(1)},${r.top.toStringAsFixed(1)} '
     '${r.width.toStringAsFixed(1)}x${r.height.toStringAsFixed(1)})';
@@ -293,11 +303,10 @@ Map<String, String> _geometry(WidgetTester tester) {
       : tester.element(find.byType(Scaffold).first);
   final query = MediaQuery.of(context);
   return {
-    'padding': '${query.padding}',
-    'viewPadding': '${query.viewPadding}',
-    'view.padding': '${tester.view.padding}',
-    'view.viewPadding': '${tester.view.viewPadding}',
-    'size': '${query.size}',
+    // Profile builds strip dart:ui and painting toString, so spell them out.
+    'padding': _insets(query.padding),
+    'viewPadding': _insets(query.viewPadding),
+    'size': '${query.size.width}x${query.size.height}',
     'stage': _rects(tester, 'reader-stage'),
     'surface': _rects(tester, 'reader-selection-surface'),
     'pdf-page': _rects(tester, 'reader-pdf-page-shadow'),
@@ -321,8 +330,7 @@ Future<void> _shot(WidgetTester tester, String name) async {
   _step += 1;
   final label = '$_device-${_step.toString().padLeft(2, '0')}-$name';
   _geometry(tester).forEach((k, v) => _note('$label $k', v));
-  // ignore: avoid_print
-  print('SHOT $label');
+  _out('SHOT $label');
   await _settle(tester, seconds: 4);
 }
 
@@ -372,6 +380,15 @@ Future<void> _open(WidgetTester tester, String title) async {
 
 Future<void> _toLibrary(WidgetTester tester) async {
   if (!_chrome(tester)) await _tapThird(tester, .5);
-  await _tapKey(tester, 'reader-header-back');
+  if (find.byKey(const ValueKey('reader-header-back')).evaluate().isNotEmpty) {
+    await _tapKey(tester, 'reader-header-back');
+  } else {
+    // A tablet has no Back button; the rail's Library entry leaves the book.
+    var library = find.byTooltip('Library');
+    if (library.evaluate().isEmpty) library = find.text('Library');
+    if (library.evaluate().isEmpty) throw StateError('no way to the library');
+    _note('library-via', 'rail ${_rects(tester, 'reader-stage')}');
+    await tester.tap(library.first, warnIfMissed: false);
+  }
   await _settle(tester, seconds: 3);
 }

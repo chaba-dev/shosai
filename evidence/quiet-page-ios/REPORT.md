@@ -1,12 +1,12 @@
 # Quiet page on iOS: device verification
 
 Build under test: `main` at 7ddfda8 (PRs #256 and #257), run on
-2026-10-30 on Darwin's devices attached to the Mac:
+2026-10-30 and 2026-10-31 on Darwin's devices attached to the Mac:
 
 | Device | Model | iOS | Logical size | Safe area (top / bottom) |
 | --- | --- | --- | --- | --- |
 | iPhone | iPhone 15 Pro Max (iPhone16,2) | 27.2 | 430 × 932 pt @3x | 59 / 34 pt |
-| iPad | iPad Air 5th gen (iPad13,17) | 27.2 | not measured (see below) | not measured |
+| iPad | iPad Air 5th gen (iPad13,17), landscape | 27.2 | 1180 × 820 pt @2x | 0 / 25 pt with the status bar hidden, 32 / 25 pt with it shown |
 
 ## How it was run
 
@@ -68,26 +68,33 @@ Notes:
 - The display-panel screenshot shows the sheet scrolled so that Progress is
   visible; the test scrolled it with `ensureVisible`.
 
-## iPad Air 5: not verified
+## iPad Air 5 (landscape)
 
-None of the checkpoints ran on the iPad. Two things on the device blocked it,
-and I did not change either one:
+The iPad ran in landscape (1180 × 820 pt), in the tablet layout: the library
+rail stays on the left and the stage is x 56–1180. The EPUB and the PDF both
+show as two-page spreads. The first iPad attempt was blocked by low storage and
+an open system prompt; Darwin cleared both. After that, `flutter drive` never
+found the app's Dart VM service on the iPad, so the iPad run used a profile
+build with the test as its entry point, launched with
+`devicectl device process launch --console`. The markers went to stdout and the
+same watcher took the screenshots. The iPad had a VPN switched on, which may be
+why the VM service was never found. The first profile run stopped at
+checkpoint 8 because a tablet has no Back button; the test now leaves the book
+through the rail's Library entry, and the second run covered every checkpoint.
+The `ipad-*` screenshots and `ipad-run-qp.log` are from that second run.
 
-1. **No free storage.** Installing the profile build over the existing app
-   failed with `Insufficient storage` (`TotalDiskSpaceRequired = 100218801`,
-   about 100 MB). The debug test build failed the same way: flutter reported
-   `Could not run build/ios/iphoneos/Runner.app`, and on the second attempt the
-   Dart VM service never appeared. I deleted nothing on the iPad to make room.
-2. **A system prompt.** For the whole session (about 2.5 h, still there at
-   16:58 PDT) the iPad sat on the home screen in **landscape**, showing a
-   modal "Touch ID for 'iCloud Storage'" prompt. It needs a person to answer it.
-
-The iPad still has the Shōsai build it had before this session. The checks
-that matter most there are whether hiding the status bar changes the safe
-area (an iPad without a notch normally reports a 24 pt top inset only while
-the status bar shows) and where the head and folio sit. To run them, free
-about 200 MB, dismiss the prompt, unlock the iPad and run the same test
-again (steps below).
+| # | Checkpoint | Result | Evidence |
+| --- | --- | --- | --- |
+| 1 | First EPUB open shows the zones hint; one tap dismisses it without turning | **Pass.** The hint covers the stage, not the rail. A tap on the right third dismissed it; the folio stayed `page 1`. | `ipad-02`, `ipad-03` |
+| 2 | Quiet page: status bar hidden; running head and folio vs system UI | **Pass.** The status bar is hidden and the top safe area reads 0. The running heads (y 48–60) and folios (`page 13 · page 14`, y 760–772) sit inside each page's paper, well clear of the 25 pt home-indicator inset (which starts at y 795). The iPad Air has no camera cutout. | `ipad-04-epub-quiet.png` |
+| 3 | Middle third shows the chrome; does the page move? | **Pass for the page.** The status bar comes back (top inset 0 → 32 pt) and the toolbar and bottom bar overlay the page. The stage and selection-surface rects did not change, and every pixel of the page area (x 56–1180, y 92–755) is identical before and after. **Finding:** the **library rail's icons move down 32 pt** each time the chrome shows and back up when it hides. The rail follows the status-bar inset, so it jumps with every toggle. | `ipad-05-epub-chrome-shown.png` |
+| 4 | Tap hides the chrome and status bar; same page? | **Pass.** Pixel-identical to the screenshot before the chrome was shown. | `ipad-06` |
+| 5 | Right third, left third, right-to-left swipe | **Pass.** The spread went pages 13–14 → 15–16 → 13–14, then the swipe went 13–14 → 15–16. | `ipad-07…09` |
+| 6 | Toolbar drag up hides the chrome | **Pass.** | `ipad-10` |
+| 7 | Progress Percent, Off, Page | **Pass.** Both folios read `2%`, then are blank, then read `page 15 · page 16`. The Display settings open as a panel. | `ipad-11…14` |
+| 8 | Multi-page PDF | **Pass, with an open question.** The first page shows alone (7%, page 1 of 15); the right third goes to the spread of pages 2–3 (20%) and the left third comes back. Showing the chrome does not move the page (page area pixel-identical). **The tablet PDF has no folio or running head**, so while the page is quiet nothing shows the place; it appears only in the bottom bar once the chrome is shown. The phone PDF does show its place. The code does this on purpose (on a tablet the PDF is not drawn as paper), but check it is the design you want. | `ipad-15…18` |
+| 9 | neko.epub: left third forward, no hint | **Pass.** No hint. The left third went pages 1–2 → 3–4 → 5–6 and the right third went back to 3–4. The spread reads right to left (page 2 on the left, page 1 on the right), with the running head `一`. | `ipad-19…21` |
+| 10 | Back to the library | **Pass**, through the rail's Library entry; the library shows the status bar. In this run it followed the iPad's dark system appearance; the reader stays on its Paper theme. | `ipad-22` |
 
 ## What the code does (why the head and folio collide)
 
@@ -115,7 +122,14 @@ again (steps below).
   database dates from 2026-10-29). The real library was already empty before
   this session, so add a book to try the quiet page by hand. The test's books
   and settings were only in the app's `tmp/` folder.
-- **iPad:** unchanged. The install failed (above).
+- **iPad:** a profile build of `main` (the same build as the iPhone's) installed
+  over the app and launched; it shows the library. Its real data container is
+  unchanged (the database dates from 2026-10-29, and the library is empty).
+  The test runs left about 80 MB of copied books in the app's `tmp/` folder
+  (`qp-books-*`, `qp-data-*`). iOS clears an app's `tmp/` when it needs the
+  space; `devicectl` has no way to delete them from the Mac.
+- **iPhone, later:** by 2026-10-31 the iPhone's library had 18 books, added by
+  hand or synced from Google Drive. That was not this test.
 
 ## What could not be automated
 
@@ -132,8 +146,8 @@ again (steps below).
 
 ## Re-running
 
-`quiet_page_ios_test.dart.txt` is the test, and `iphone-run-qp.log` holds every
-`QP` and `SHOT` line from the iPhone run. To run it again, copy the test to
+`quiet_page_ios_test.dart.txt` is the test. `iphone-run-qp.log` and
+`ipad-run-qp.log` hold every `QP` and `SHOT` line from each device's run. To run it again, copy the test to
 `integration_test/quiet_page_ios_test.dart`. Put the four books in `qp-books/`
 and list that folder under `flutter: assets:` in `pubspec.yaml`. Apply the build
 workarounds above, then run:
@@ -141,3 +155,9 @@ workarounds above, then run:
 Pipe the output through a watcher that runs
 `pymobiledevice3 developer dvt screenshot --udid <udid> --userspace <label>.png`
 for each `SHOT <label>` line.
+If `flutter drive` cannot find the VM service (as on the iPad), build the test
+as the app with `flutter build ios --profile -t
+integration_test/quiet_page_ios_test.dart --dart-define=QP_DEVICE=ipad`,
+install it with `devicectl device install app`, and launch it with
+`devicectl device process launch --console`, piping the output through the same
+watcher.
