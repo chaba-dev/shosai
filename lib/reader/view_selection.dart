@@ -308,6 +308,8 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   final _vertical = ScrollController();
   final Map<int, Offset> _pointers = {};
   Offset _distance = Offset.zero;
+  Offset _origin = Offset.zero;
+  VelocityTracker? _velocity;
   (int, int, int?)? _startedPage;
   double _startZoom = 1;
   double _startSpan = 1;
@@ -348,8 +350,13 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     final model = widget.model;
     final scale = _previewScale;
     setState(() => _previewScale = 1);
-    if (started != _page || !_enabled || _cancelled) return;
+    final turn = _ReaderTurnScope.of(context);
+    if (started != _page || !_enabled || _cancelled) {
+      turn?.release(complete: false);
+      return;
+    }
     if (_multiTouch) {
+      turn?.release(complete: false);
       if (widget.fittedZoom != null && (scale - 1).abs() >= .03) {
         widget.dispatch(ReaderTypographyChanged(zoom: _startZoom * scale));
       }
@@ -357,14 +364,24 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     }
     if (model.continuousPresentation ||
         _readerFit(model.typography) != BoxFit.contain ||
-        _distance.dx.abs() < 48 ||
+        _distance.dx.abs() < 18 ||
         _distance.dx.abs() < _distance.dy.abs() * 1.5) {
+      turn?.release(complete: false);
       return;
     }
     final delta = (_distance.dx < 0 ? 1 : -1) * (model.rightToLeft ? -1 : 1);
     final total = model.document?.logicalUnitCount.toInt() ?? 0;
     if (_canStepPage(model, delta, total)) {
-      widget.dispatch(pageStepMessage(model, delta));
+      final velocity = _velocity?.getVelocity().pixelsPerSecond.dx ?? 0;
+      if (turn != null) {
+        turn.release(
+          complete:
+              turn.pastMidpoint ||
+              (velocity.abs() >= 600 && velocity * _distance.dx > 0),
+        );
+      } else {
+        widget.dispatch(pageStepMessage(model, delta));
+      }
     }
   }
 
@@ -376,6 +393,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         _cancelled = false;
         _multiTouch = false;
         _distance = Offset.zero;
+        _origin = event.position;
+        _velocity = VelocityTracker.withKind(event.kind)
+          ..addPosition(event.timeStamp, event.position);
       }
       _pointers[event.pointer] = event.localPosition;
       if (_pointers.length == 2) {
@@ -386,10 +406,15 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     onPointerMove: (event) {
       if (_pointers.containsKey(event.pointer)) {
         _pointers[event.pointer] = event.localPosition;
+        if (!_multiTouch) {
+          _distance = event.position - _origin;
+          _velocity?.addPosition(event.timeStamp, event.position);
+        }
       }
     },
     onPointerUp: (event) {
       if (_pointers.remove(event.pointer) != null && _pointers.isEmpty) {
+        _velocity?.addPosition(event.timeStamp, event.position);
         _finish();
       }
     },
@@ -397,6 +422,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       _pointers.remove(event.pointer);
       _cancelled = true;
       _startedPage = null;
+      _ReaderTurnScope.of(context)?.release(complete: false);
       setState(() => _previewScale = 1);
     },
     child: GestureDetector(
@@ -421,8 +447,18 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         _startedPage = _enabled && !_cancelled ? _page : null;
       },
       onScaleUpdate: (details) {
-        _distance += details.focalPointDelta;
         _multiTouch |= details.pointerCount > 1;
+        final turn = _ReaderTurnScope.of(context);
+        if (_multiTouch) {
+          turn?.release(complete: false);
+        } else if (_startedPage == _page &&
+            _enabled &&
+            !widget.model.continuousPresentation &&
+            _readerFit(widget.model.typography) == BoxFit.contain &&
+            _distance.dx.abs() >= 18 &&
+            _distance.dx.abs() >= _distance.dy.abs() * 1.5) {
+          turn?.drag(_distance.dx);
+        }
         if (!_multiTouch && widget.fittedZoom != null && _enabled) {
           for (final (controller, delta) in [
             (_horizontal, details.focalPointDelta.dx),

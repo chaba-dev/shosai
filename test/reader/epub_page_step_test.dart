@@ -230,6 +230,46 @@ void main() {
     );
   }
 
+  testWidgets('EPUB curl cancellation never saves a speculative position', (
+    tester,
+  ) async {
+    final harness = bridge();
+    await openReader(tester, harness, size: const ui.Size(390, 844));
+    await settleEpubPage(tester);
+    final original = dartPage(tester)!.page.canonicalStart;
+    final saves = harness.savedReadingStates.length;
+    final surface = find.byKey(const ValueKey('reader-selection-surface'));
+    final box = tester.getRect(surface);
+    final start = ui.Offset(box.right - 30, box.center.dy);
+    final gesture = await tester.startGesture(start);
+    await gesture.moveBy(
+      const ui.Offset(-30, 0),
+      timeStamp: const Duration(milliseconds: 100),
+    );
+    await gesture.moveBy(
+      const ui.Offset(-90, 0),
+      timeStamp: const Duration(milliseconds: 600),
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('reader-page-curl')), findsOneWidget);
+    expect(dartPage(tester)!.page.canonicalStart, original);
+    await gesture.up(timeStamp: const Duration(milliseconds: 1000));
+    await tester.pumpAndSettle();
+    expect(dartPage(tester)!.page.canonicalStart, original);
+    expect(harness.savedReadingStates.length, saves);
+
+    await tester.fling(surface, const ui.Offset(-100, 0), 1000);
+    await tester.pumpAndSettle();
+    final next = dartPage(tester)!.page.canonicalStart;
+    expect(next, greaterThan(original));
+    expect(harness.savedReadingStates.last.offset?.toInt(), next);
+    await tester.fling(surface, const ui.Offset(100, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(dartPage(tester)!.page.canonicalStart, original);
+    await closeReader(tester);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'page steps walk the table chapter forward without skipping or cycling',
     (tester) async {
@@ -275,7 +315,8 @@ void main() {
     ) {
       await tester.pump(const Duration(milliseconds: 10));
     }
-    expect(tester.getTopLeft(surface).dx, greaterThan(resting + 1));
+    expect(find.byKey(const ValueKey('reader-page-curl')), findsOneWidget);
+    expect(tester.getTopLeft(surface).dx, resting);
     await settleEpubPage(tester);
     final next = dartPage(tester)!.page;
     expect(next.unit, first.unit);
@@ -289,7 +330,8 @@ void main() {
     ) {
       await tester.pump(const Duration(milliseconds: 10));
     }
-    expect(tester.getTopLeft(surface).dx, lessThan(resting - 1));
+    expect(find.byKey(const ValueKey('reader-page-curl')), findsOneWidget);
+    expect(tester.getTopLeft(surface).dx, resting);
     await settleEpubPage(tester);
     expect(dartPage(tester)!.page.canonicalStart, first.canonicalStart);
     expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));

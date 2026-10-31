@@ -179,6 +179,75 @@ void main() {
     });
   }
 
+  for (final action in ['keep', 'cancel', 'replace', 'suspend', 'dispose']) {
+    testWidgets('a speculative PDF raster respects $action while decoding', (
+      tester,
+    ) async {
+      final bridge = HarnessBridge(unitCount: 3);
+      final gate = Completer<ui.Image>();
+      var hold = false;
+      var decoding = false;
+      ui.Image image() {
+        final recorder = ui.PictureRecorder();
+        ui.Canvas(recorder);
+        final picture = recorder.endRecording();
+        final result = picture.toImageSync(1, 1);
+        picture.dispose();
+        return result;
+      }
+
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) async {
+          if (hold) {
+            decoding = true;
+            return gate.future;
+          }
+          return image();
+        },
+      );
+      addTearDown(controller.dispose);
+      controller.dispatch(const ReaderOpenRequested('/books/curl.pdf'));
+      for (var i = 0; i < 30 && controller.model.pageImage == null; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(controller.model.pageImage, isNotNull);
+      final saves = bridge.savedReadingStates.length;
+      hold = true;
+      controller.dispatch(const ReaderTurnPreviewRequested(1));
+      await tester.pump();
+      expect(decoding, isTrue);
+      hold = false;
+      switch (action) {
+        case 'cancel':
+          controller.dispatch(const ReaderTurnPreviewRequested(0));
+        case 'replace':
+          controller.dispatch(const ReaderOpenRequested('/books/new.pdf'));
+        case 'suspend':
+          controller.dispatch(const ReaderSuspended());
+        case 'dispose':
+          controller.dispose();
+      }
+      final preview = image();
+      gate.complete(preview);
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(controller.model.unit, 0);
+      expect(bridge.savedReadingStates.length, saves);
+      if (action == 'keep') {
+        expect(controller.model.turnPreview?.image, same(preview));
+        controller.dispatch(const ReaderTurnPreviewRequested(0));
+      } else {
+        expect(controller.model.turnPreview, isNull);
+      }
+      expect(preview.debugDisposed, isTrue);
+      controller.dispose();
+      await tester.pump();
+      expect(bridge.isDisposed, isTrue);
+    });
+  }
+
   test('panels are mutually exclusive and search is independent', () {
     final controller = _controller();
     addTearDown(controller.dispose);

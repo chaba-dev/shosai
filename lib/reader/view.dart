@@ -4,8 +4,9 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, listEquals, setEquals;
-import 'package:flutter/gestures.dart' show GestureBinding, kSecondaryButton;
+    show defaultTargetPlatform, kDebugMode, listEquals, setEquals;
+import 'package:flutter/gestures.dart'
+    show GestureBinding, VelocityTracker, kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'
     show OffsetLayer, PaintingContext, RenderRepaintBoundary;
@@ -32,6 +33,7 @@ part 'view_dialogs.dart';
 part 'view_document.dart';
 part 'view_notes.dart';
 part 'view_panels.dart';
+part 'view_page_turn.dart';
 part 'view_references.dart';
 part 'view_selection.dart';
 part 'view_stage.dart';

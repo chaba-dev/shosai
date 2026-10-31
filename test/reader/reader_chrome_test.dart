@@ -844,13 +844,13 @@ void main() {
           expect(find.byKey(ValueKey(key)), findsNothing);
         }
         expect(find.text('33%\npage 1 of 3'), findsOneWidget);
-        await tester.drag(surface, -forward);
+        await tester.fling(surface, -forward, 1000);
         await tester.pumpAndSettle();
         expect(find.text('33%\npage 1 of 3'), findsOneWidget);
-        await tester.drag(surface, forward);
+        await tester.fling(surface, forward, 1000);
         await tester.pumpAndSettle();
         expect(find.text('67%\npage 2 of 3'), findsOneWidget);
-        await tester.drag(surface, -forward);
+        await tester.fling(surface, -forward, 1000);
         await tester.pumpAndSettle();
         expect(find.text('33%\npage 1 of 3'), findsOneWidget);
 
@@ -918,28 +918,28 @@ void main() {
               await tester.pump(const Duration(milliseconds: 10));
             }
             expect(find.text(status), findsOneWidget);
-            final start = tester.getTopLeft(surface).dx - resting;
+            final curl = find.byKey(const ValueKey('reader-page-curl'));
+            expect(tester.getTopLeft(surface).dx, resting);
             if (motion == 'on') {
-              expect(start.abs(), greaterThan(1));
-              expect(start.sign, (forward != rtl) ? 1 : -1);
+              expect(curl, findsOneWidget);
               await tester.pump(const Duration(milliseconds: 100));
-              final middle = tester.getTopLeft(surface).dx - resting;
-              expect(middle.abs(), lessThan(start.abs()));
-              expect(middle.sign, start.sign);
+              expect(curl, findsOneWidget);
               if (forward) {
                 // iOS changes reduceMotion without setting disableAnimations.
                 tester.platformDispatcher.accessibilityFeaturesTestValue =
                     const FakeAccessibilityFeatures(reduceMotion: true);
                 await tester.pump();
+                expect(curl, findsNothing);
                 expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
                 tester.platformDispatcher.accessibilityFeaturesTestValue =
                     const FakeAccessibilityFeatures();
                 await tester.pump();
               }
             } else {
-              expect(start, closeTo(0, .01));
+              expect(curl, findsNothing);
             }
-            await tester.pump(const Duration(milliseconds: 250));
+            await tester.pumpAndSettle();
+            expect(curl, findsNothing);
             expect(tester.getTopLeft(surface).dx, closeTo(resting, .01));
           }
           expect(tester.takeException(), isNull);
@@ -997,8 +997,10 @@ void main() {
         await tester.pump(const Duration(milliseconds: 10));
       }
       expect(find.text('67%\npage 2 of 3'), findsOneWidget);
-      expect(tester.getTopLeft(image).dx, greaterThan(resting + 1));
-      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.byKey(const ValueKey('reader-page-curl')), findsOneWidget);
+      expect(tester.getTopLeft(image).dx, resting);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('reader-page-curl')), findsNothing);
       expect(tester.getTopLeft(image).dx, closeTo(resting, .01));
       expect(tester.takeException(), isNull);
     });

@@ -122,7 +122,7 @@ void main() {
         final movement = Offset(direction == 'ltr' ? -150 : 150, 0);
         for (final key in ['reader-folio', 'reader-running-head']) {
           final before = page(tester);
-          await tester.drag(find.byKey(ValueKey(key)), movement);
+          await tester.fling(find.byKey(ValueKey(key)), movement, 1000);
           await settle(tester);
           expect(
             page(tester).canonicalStart,
@@ -136,7 +136,11 @@ void main() {
             find.byKey(const ValueKey('reader-page')),
           );
           final before = page(tester);
-          await tester.dragFrom(Offset(rect.center.dx, rect.top + 8), movement);
+          await tester.flingFrom(
+            Offset(rect.center.dx, rect.top + 8),
+            movement,
+            1000,
+          );
           await settle(tester);
           expect(
             page(tester).canonicalStart,
