@@ -4,11 +4,31 @@ sealed class ReaderMessage {
   const ReaderMessage();
 }
 
-/// A non-link tap in the page, measured in physical left-to-right thirds.
+/// The controls strip in the page's (or spread's) logical coordinate space.
+double readerControlsStripWidth(double pageWidth) =>
+    math.min(pageWidth / 3, 200);
+
+/// A non-link tap across the page or spread, measured from physical left.
 final class ReaderPageTapped extends ReaderMessage {
-  const ReaderPageTapped(this.fraction, {required this.touch});
+  const ReaderPageTapped(
+    this.fraction, {
+    required this.width,
+    required this.touch,
+  });
   final double fraction;
+  final double width;
   final bool touch;
+}
+
+/// Raw contact events include touches on chrome and panels, not just page taps.
+final class ReaderTouchStarted extends ReaderMessage {
+  const ReaderTouchStarted(this.pointer);
+  final int pointer;
+}
+
+final class ReaderTouchEnded extends ReaderMessage {
+  const ReaderTouchEnded(this.pointer);
+  final int pointer;
 }
 
 final class ReaderPointerMoved extends ReaderMessage {

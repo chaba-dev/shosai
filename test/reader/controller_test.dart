@@ -100,7 +100,9 @@ void main() {
         await tester.pump(const Duration(milliseconds: 1000));
         switch (action) {
           case 'show':
-            controller.dispatch(const ReaderPageTapped(.5, touch: true));
+            controller.dispatch(
+              const ReaderPageTapped(.5, width: 390, touch: true),
+            );
           case 'replace':
             controller.dispatch(const ReaderOpenRequested('/books/other.pdf'));
           case 'suspend':
@@ -145,6 +147,7 @@ void main() {
             );
           }
         }
+        controller.dispose();
       },
     );
   }

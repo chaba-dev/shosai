@@ -100,7 +100,7 @@ void main() {
       tester.getCenter(find.byKey(ValueKey(key))).dx;
 
   for (final direction in ['ltr', 'rtl', 'vertical']) {
-    testWidgets('swipes on EPUB furniture and margins turn $direction pages', (
+    testWidgets('taps and swipes on EPUB turn $direction pages', (
       tester,
     ) async {
       for (final size in [const Size(390, 844), const Size(900, 1000)]) {
@@ -119,6 +119,26 @@ void main() {
           tester.getCenter(find.byKey(const ValueKey('reader-stage'))),
         );
         await tester.pumpAndSettle();
+        final area = tester.getRect(
+          find.byKey(const ValueKey('reader-page-tap-area')),
+        );
+        final halfStrip = area.width < 600 ? area.width / 6 : 100.0;
+        final forward = Offset(
+          area.center.dx + (direction == 'ltr' ? 1 : -1) * (halfStrip + 1),
+          area.center.dy,
+        );
+        final back = Offset(2 * area.center.dx - forward.dx, forward.dy);
+        final first = page(tester);
+        await tester.tapAt(forward);
+        await settle(tester);
+        expect(
+          page(tester).canonicalStart,
+          inInclusiveRange(first.canonicalEnd, first.canonicalEnd + 1),
+          reason: 'tap just outside the strip turns in the book direction',
+        );
+        await tester.tapAt(back);
+        await settle(tester);
+        expect(page(tester).canonicalStart, first.canonicalStart);
         final movement = Offset(direction == 'ltr' ? -150 : 150, 0);
         for (final key in ['reader-folio', 'reader-running-head']) {
           final before = page(tester);
