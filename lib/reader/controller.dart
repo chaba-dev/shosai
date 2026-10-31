@@ -348,6 +348,7 @@ final class ReaderController implements Listenable {
   int _chromeRevision = 0;
   Timer? _systemBarsTimer;
   int _systemBarsRevision = 0;
+  bool _routeLeft = false;
   ReaderRasterFit _rasterFit;
   double _rasterZoom;
   final double _baseScale;
@@ -646,7 +647,13 @@ final class ReaderController implements Listenable {
         if (!_model.chromeIdleInhibited) _hideChrome();
       case ReaderChromeDismissed():
         _hideChrome();
+      case ReaderRouteLeft():
+        _routeLeft = true;
+        _chromeTimer?.cancel();
+        _systemBarsTimer?.cancel();
+        _systemBars(true);
       case ReaderSystemBarsRestoreRequested():
+        if (_routeLeft) return;
         _systemBarsTimer?.cancel();
         final generation = _model.generation;
         final revision = ++_systemBarsRevision;
@@ -656,7 +663,8 @@ final class ReaderController implements Listenable {
       case _ReaderSystemBarsRestoreReady():
         if (_isCurrent(message.generation) &&
             message.revision == _systemBarsRevision &&
-            !_suspended) {
+            !_suspended &&
+            !_routeLeft) {
           _systemBars(_model.chromeShown);
         }
       case _ReaderChromeIdle():
@@ -1480,7 +1488,7 @@ final class ReaderController implements Listenable {
       case _ReaderDisposeRequested():
         _chromeTimer?.cancel();
         _systemBarsTimer?.cancel();
-        _systemBars(true);
+        if (!_routeLeft) _systemBars(true);
         _disposeRequested();
     }
   }
@@ -6726,7 +6734,7 @@ final class ReaderController implements Listenable {
   }
 
   void _resumeRequested() {
-    if (!_closing) _systemBars(_model.chromeShown);
+    if (!_closing && !_routeLeft) _systemBars(_model.chromeShown);
     if (!_suspended || _closing) return;
     _suspended = false;
     _recoverIfIdle();
@@ -6833,7 +6841,7 @@ final class ReaderController implements Listenable {
     if (previous.generation != derived.generation) {
       _systemBarsTimer?.cancel();
     }
-    if (previous.chromeShown != derived.chromeShown) {
+    if (!_routeLeft && previous.chromeShown != derived.chromeShown) {
       _systemBars(derived.chromeShown);
     }
     if (previous.chromeIdleInhibited != derived.chromeIdleInhibited) {
