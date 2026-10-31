@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -49,13 +50,20 @@ Future<void> _open(
   bool pushRoute = false,
   bool shellFrame = false,
   double ratio = 1,
+  bool longChapter = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = ratio;
   addTearDown(tester.view.reset);
+  final bridge = _Book(rtl: rtl, links: links);
+  if (longChapter) {
+    bridge.epubBytes = File(
+      'fixtures/epub-layout/long-chapter.epub',
+    ).readAsBytesSync();
+  }
   final reader = ReaderScreen(
     key: UniqueKey(),
-    bridge: _Book(rtl: rtl, links: links),
+    bridge: bridge,
     initialPath: path,
     initialSettings: settings,
     onDisplayChanged: save,
@@ -536,6 +544,72 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
+
+  for (final (name, size, ratio, insets) in [
+    (
+      'iPhone 15 Pro Max',
+      const Size(1290, 2796),
+      3.0,
+      const FakeViewPadding(top: 177, bottom: 102),
+    ),
+    (
+      'Android gesture navigation',
+      const Size(1080, 2400),
+      3.0,
+      const FakeViewPadding(top: 72, bottom: 72),
+    ),
+    (
+      'Android three-button navigation',
+      const Size(1080, 2340),
+      3.0,
+      const FakeViewPadding(top: 84, bottom: 144),
+    ),
+  ]) {
+    for (final format in ['epub', 'pdf']) {
+      testWidgets('$name $format furniture stays safe across chrome toggles', (
+        tester,
+      ) async {
+        tester.view.viewPadding = insets;
+        // Immersive edge-to-edge geometry: system bars are hidden, but the
+        // physical cutout and gesture insets remain in viewPadding.
+        tester.view.padding = FakeViewPadding.zero;
+        await _open(
+          tester,
+          size,
+          ratio: ratio,
+          path: '/books/atlas.$format',
+          longChapter: format == 'epub',
+        );
+        await _tap(tester, .85);
+        expect(tester.widget<Text>(_folio).data, isNotEmpty);
+        final head = find.byKey(const ValueKey('reader-running-head'));
+        final surface = find.byKey(const ValueKey('reader-content-semantics'));
+        final stageRect = tester.getRect(_stage);
+        final folioRect = tester.getRect(_folio);
+        final headRect = format == 'epub' ? tester.getRect(head) : null;
+        final surfaceRect = tester.getRect(surface);
+        expect(
+          folioRect.bottom,
+          lessThanOrEqualTo(size.height / ratio - insets.bottom / ratio),
+        );
+        if (headRect != null) {
+          expect(tester.widget<Text>(head).data, isNotEmpty);
+          expect(headRect.top, greaterThanOrEqualTo(insets.top / ratio));
+        }
+        for (final shown in [true, false, true, false]) {
+          await _tap(tester, .5);
+          tester.view.padding = shown ? insets : FakeViewPadding.zero;
+          await tester.pumpAndSettle();
+          expect(_toolbar.hitTestable(), shown ? findsOneWidget : findsNothing);
+          expect(tester.getRect(_stage), stageRect);
+          expect(tester.getRect(_folio), folioRect);
+          if (headRect != null) expect(tester.getRect(head), headRect);
+          expect(tester.getRect(surface), surfaceRect);
+          expect(tester.takeException(), isNull);
+        }
+      });
+    }
+  }
 
   for (final width in [390.0, 900.0, 1280.0]) {
     for (final rtl in [false, true]) {
