@@ -118,6 +118,7 @@ All notable changes to this project will be documented in this file.
 - *(app)* Use dark icons for development builds (#253)
 - *(reader)* Persist quiet-page preferences and add folio tokens (#256)
 - *(reader)* Make the quiet page the default reading surface (#257)
+- *(reader)* Add interactive page curls (#266)
 
 ### 🐛 Bug Fixes
 
