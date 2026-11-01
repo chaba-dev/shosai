@@ -216,13 +216,32 @@ void main() {
           '<li><a href="../Text/chapter-3.xhtml">Closing</a></li>'
           '</ol>',
     );
-    final harness = bridge(bytes: bytes, unitCount: 3);
-    await openReader(tester, harness);
+    final harness = bridge(
+      bytes: bytes,
+      unitCount: 3,
+      books: harnessLibraryBooks(),
+    );
+    await openReader(tester, harness, bookId: 1);
     await settleEpubPage(tester);
     expect(dartPage(tester)!.page.unit, 0);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+    expect(harness.savedReadingStates, isNotEmpty);
+    final saved = harness.savedReadingStates.last;
+    await tester.fling(
+      find.byKey(const ValueKey('reader-selection-surface')),
+      const Offset(-200, 0),
+      1000,
+    );
     await settleNative(tester);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reader-page-curl')), findsNothing);
+    expect(
+      (
+        harness.savedReadingStates.last.unit,
+        harness.savedReadingStates.last.offset,
+      ),
+      (saved.unit, saved.offset),
+    );
 
     // The refusal is reported over the page the reader still shows.
     expect(dartPage(tester)!.page.unit, 0);
@@ -249,6 +268,7 @@ void main() {
     await settleNative(tester);
 
     expect(dartPage(tester)!.page.unit, 2);
+    expect(harness.savedReadingStates.last.unit.toInt(), 2);
     expect(find.byKey(const ValueKey('reader-layout-refusal')), findsNothing);
 
     await tester.pumpWidget(const SizedBox());

@@ -461,6 +461,7 @@ final class ReaderModel {
     this.openBookId,
     this.document,
     this.referencePeek,
+    this.turnPreview,
     this.unit = 0,
     this.readingOffset,
     this.pageImage,
@@ -545,6 +546,7 @@ final class ReaderModel {
   final String? openPath;
   final int? openBookId;
   final FlutterDocumentSummary? document;
+  final ReaderTurnPreview? turnPreview;
   final int unit;
 
   /// Durable document location. Selection endpoints are intentionally separate.
@@ -751,6 +753,7 @@ final class ReaderModel {
     Object? openBookId = _unchanged,
     Object? document = _unchanged,
     Object? referencePeek = _unchanged,
+    Object? turnPreview = _unchanged,
     int? unit,
     Object? readingOffset = _unchanged,
     Object? pageImage = _unchanged,
@@ -820,6 +823,9 @@ final class ReaderModel {
       document: identical(document, _unchanged)
           ? this.document
           : document as FlutterDocumentSummary?,
+      turnPreview: identical(turnPreview, _unchanged)
+          ? this.turnPreview
+          : turnPreview as ReaderTurnPreview?,
       unit: unit ?? this.unit,
       readingOffset: identical(readingOffset, _unchanged)
           ? this.readingOffset
