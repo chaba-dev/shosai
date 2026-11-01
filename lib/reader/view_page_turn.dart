@@ -162,10 +162,13 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
       _delta = delta;
       _dragging = _committing = false;
       _progress.value = from;
+      // The newly adopted page must paint before its snapshot is taken, even
+      // when a held preview or an interrupted turn already covers the stage.
+      _incoming?.dispose();
+      _incoming = null;
       final revision = ++_captureRevision;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || revision != _captureRevision) return;
-        _incoming?.dispose();
         _incoming = _capture();
         _settle(1);
       });
@@ -347,7 +350,14 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            RepaintBoundary(key: _boundaryKey, child: widget.child),
+            // Once both textures exist, the curl paints the entire stage.
+            // Do not also rasterize the covered live EPUB text on every
+            // animation frame. Keep its layout, input and semantics intact.
+            Opacity(
+              opacity: _outgoing != null && _incoming != null ? 0 : 1,
+              alwaysIncludeSemantics: true,
+              child: RepaintBoundary(key: _boundaryKey, child: widget.child),
+            ),
             if (_outgoing != null)
               Positioned.fill(
                 child: IgnorePointer(

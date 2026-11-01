@@ -181,6 +181,7 @@ void main() {
   testWidgets('keys curl for 350ms and both motion gates change immediately', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     for (final gate in ['on', 'setting', 'system']) {
       await _open(
         tester,
@@ -195,9 +196,19 @@ void main() {
       expect(curl, gate == 'on' ? findsOneWidget : findsNothing);
       await tester.pump(const Duration(milliseconds: 175));
       expect(curl, gate == 'on' ? findsOneWidget : findsNothing);
+      expect(
+        tester
+            .getSemantics(
+              find.byKey(const ValueKey('reader-document-semantics')),
+            )
+            .label,
+        contains('page 2 of 5'),
+        reason: 'the covered live page stays available to screen readers',
+      );
       await tester.pumpAndSettle();
       expect(curl, findsNothing);
     }
+    semantics.dispose();
   });
 
   for (final width in [390.0, 900.0, 1280.0]) {
