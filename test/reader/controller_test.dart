@@ -63,7 +63,14 @@ ReaderController _controller({FlutterBridge? bridge}) => ReaderController(
 );
 
 void main() {
-  for (final action in ['keep', 'show', 'replace', 'suspend', 'dispose']) {
+  for (final action in [
+    'keep',
+    'show',
+    'replace',
+    'suspend',
+    'leave',
+    'dispose',
+  ]) {
     testWidgets(
       'system bars restoration respects $action after keyboard close',
       (tester) async {
@@ -98,6 +105,8 @@ void main() {
             controller.dispatch(const ReaderOpenRequested('/books/other.pdf'));
           case 'suspend':
             controller.dispatch(const ReaderSuspended());
+          case 'leave':
+            controller.dispatch(const ReaderRouteLeft());
           case 'dispose':
             controller.dispose();
         }
@@ -121,6 +130,19 @@ void main() {
             expect(calls, [false, true, false]);
           } else {
             expect(calls.length, beforeRetry);
+          }
+          if (action == 'leave') {
+            expect(calls.last, isTrue);
+            controller.dispatch(const ReaderResumed());
+            controller.dispatch(const ReaderPageTapped(.5, touch: true));
+            controller.dispatch(const ReaderSystemBarsRestoreRequested());
+            await tester.pump(const Duration(seconds: 2));
+            controller.dispose();
+            expect(
+              calls.length,
+              beforeRetry,
+              reason: 'a departed reader no longer owns the window',
+            );
           }
         }
       },
