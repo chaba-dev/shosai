@@ -545,6 +545,75 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
 
+  for (final tablet in [false, true]) {
+    testWidgets(
+      'iOS status bar follows phone chrome but leaves tablet geometry fixed ($tablet)',
+      (tester) async {
+        final ratio = tablet ? 2.0 : 3.0;
+        final size = tablet ? const Size(2360, 1640) : const Size(1290, 2796);
+        var statusShown = true;
+        void metrics() {
+          final insets = FakeViewPadding(
+            top: tablet ? (statusShown ? 64 : 0) : 177,
+            bottom: tablet ? 50 : 102,
+          );
+          tester.view.viewPadding = insets;
+          tester.view.padding = insets;
+        }
+
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'SystemChrome.setEnabledSystemUIOverlays') {
+              statusShown = (call.arguments as List).contains(
+                'SystemUiOverlay.top',
+              );
+              metrics();
+            }
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          ),
+        );
+        metrics();
+        await _open(
+          tester,
+          size,
+          ratio: ratio,
+          path: '/books/atlas.epub',
+          longChapter: true,
+          shellFrame: true,
+        );
+        await _tap(tester, .85);
+        expect(statusShown, tablet);
+        final furniture = [
+          _stage,
+          _folio,
+          find.byKey(const ValueKey('reader-running-head')),
+          find.byKey(const ValueKey('reader-content-semantics')),
+          if (tablet) find.byType(ShellMark),
+          if (tablet) find.byTooltip('Library'),
+        ];
+        final before = furniture.map(tester.getRect).toList();
+        final place = _status(tester);
+        if (tablet) expect(before[4].top, greaterThanOrEqualTo(48));
+        for (final shown in [true, false, true, false, true, false]) {
+          await _tap(tester, .5);
+          expect(_toolbar.hitTestable(), shown ? findsOneWidget : findsNothing);
+          expect(statusShown, tablet || shown);
+          expect(furniture.map(tester.getRect).toList(), before);
+          expect(_status(tester), place);
+          expect(tester.takeException(), isNull);
+        }
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    );
+  }
+
   for (final (name, size, ratio, insets) in [
     (
       'iPhone 15 Pro Max',
