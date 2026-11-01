@@ -165,6 +165,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Enlarge phone page-turn touch targets (#231)
 - *(dropbox)* Guide setup through restricted app folder (#248)
 - *(drive)* Reuse Android bearer tokens until rejected (#254)
+- *(android)* Keep reader window geometry stable (#264)
 
 ### 🚜 Refactor
 
