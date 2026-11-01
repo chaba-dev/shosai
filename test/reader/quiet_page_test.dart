@@ -41,6 +41,7 @@ Future<void> _open(
   bool rtl = false,
   List<PdfPageLink> links = const [],
   FlutterReaderSettings settings = _settings,
+  bool reducedMotion = false,
   void Function(ReaderDisplayChange)? save,
 }) async {
   tester.view.physicalSize = size;
@@ -48,23 +49,26 @@ Future<void> _open(
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     productionShell(
-      home: ReaderScreen(
-        key: UniqueKey(),
-        bridge: _Book(rtl: rtl, links: links),
-        initialPath: '/books/atlas.pdf',
-        initialSettings: settings,
-        onDisplayChanged: save,
-        decoder: (pixels, {required width, required height}) async {
-          final recorder = ui.PictureRecorder();
-          ui.Canvas(recorder).drawRect(
-            const Rect.fromLTWH(0, 0, 420, 560),
-            ui.Paint()..color = const Color(0xFFFFFDF8),
-          );
-          final picture = recorder.endRecording();
-          final image = await picture.toImage(420, 560);
-          picture.dispose();
-          return image;
-        },
+      home: MediaQuery(
+        data: MediaQueryData(size: size, disableAnimations: reducedMotion),
+        child: ReaderScreen(
+          key: UniqueKey(),
+          bridge: _Book(rtl: rtl, links: links),
+          initialPath: '/books/atlas.pdf',
+          initialSettings: settings,
+          onDisplayChanged: save,
+          decoder: (pixels, {required width, required height}) async {
+            final recorder = ui.PictureRecorder();
+            ui.Canvas(recorder).drawRect(
+              const Rect.fromLTWH(0, 0, 420, 560),
+              ui.Paint()..color = const Color(0xFFFFFDF8),
+            );
+            final picture = recorder.endRecording();
+            final image = await picture.toImage(420, 560);
+            picture.dispose();
+            return image;
+          },
+        ),
       ),
     ),
   );
@@ -89,6 +93,184 @@ String? _status(WidgetTester tester) => tester
 
 void main() {
   setUpAll(loadHarnessFonts);
+
+  final curl = find.byKey(const ValueKey('reader-page-curl'));
+  for (final rtl in [false, true]) {
+    for (final last in [false, true]) {
+      testWidgets(
+        'furniture curl reverses at the book edge (RTL $rtl, last $last)',
+        (tester) async {
+          await _open(tester, const Size(390, 844), rtl: rtl);
+          if (last) {
+            for (var page = 0; page < 4; page++) {
+              await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+              await tester.pumpAndSettle();
+            }
+          }
+          final place = _status(tester);
+          final sign = (rtl ? 1.0 : -1.0) * (last ? -1 : 1);
+          final gesture = await tester.startGesture(tester.getCenter(_folio));
+          await gesture.moveBy(Offset(sign * 30, 0));
+          await gesture.moveBy(Offset(sign * 90, 0));
+          await tester.pump();
+          expect(curl, findsOneWidget);
+          await gesture.moveBy(Offset(-sign * 240, 0));
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(curl, findsNothing);
+          expect(_status(tester), place);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
+    testWidgets(
+      'curl follows a held drag, cancels, and commits past half (RTL $rtl)',
+      (tester) async {
+        await _open(tester, const Size(390, 844), rtl: rtl);
+        final rect = tester.getRect(
+          find.byKey(const ValueKey('reader-selection-surface')),
+        );
+        final start = Offset(
+          rect.left + rect.width * (rtl ? .1 : .9),
+          rect.center.dy,
+        );
+        final sign = rtl ? 1.0 : -1.0;
+        final gesture = await tester.startGesture(start);
+        await gesture.moveBy(
+          Offset(sign * 30, 0),
+          timeStamp: const Duration(milliseconds: 100),
+        );
+        await gesture.moveBy(
+          Offset(sign * 100, 0),
+          timeStamp: const Duration(milliseconds: 600),
+        );
+        await tester.pump();
+        expect(curl, findsOneWidget, reason: 'the page lifts before release');
+        expect(_status(tester), '20% · page 1 of 5');
+        await gesture.up(timeStamp: const Duration(milliseconds: 1000));
+        await tester.pumpAndSettle();
+        expect(curl, findsNothing);
+        expect(
+          _status(tester),
+          '20% · page 1 of 5',
+          reason: 'a slow short drag never turns',
+        );
+
+        final committed = await tester.startGesture(start);
+        await committed.moveBy(
+          Offset(sign * 30, 0),
+          timeStamp: const Duration(milliseconds: 100),
+        );
+        await committed.moveBy(
+          Offset(sign * 200, 0),
+          timeStamp: const Duration(milliseconds: 900),
+        );
+        await tester.pump();
+        expect(curl, findsOneWidget);
+        expect(_status(tester), '20% · page 1 of 5');
+        await committed.up(timeStamp: const Duration(milliseconds: 1400));
+        await tester.pumpAndSettle();
+        expect(_status(tester), '40% · page 2 of 5');
+        expect(curl, findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'PDF cover and paired leaf use their fitted midpoint (RTL $rtl)',
+      (tester) async {
+        await _open(
+          tester,
+          const Size(1280, 800),
+          rtl: rtl,
+          settings: _settings.copyWith(twoPages: true),
+        );
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final sign = rtl ? 1.0 : -1.0;
+        for (final paired in [false, true]) {
+          final origin = _status(tester);
+          expect(origin, contains(paired ? 'pages 2–3' : 'page 1 of 5'));
+          final painter = tester
+              .widgetList<CustomPaint>(find.byType(CustomPaint))
+              .map((p) => p.painter)
+              .whereType<PagePainter>()
+              .single;
+          final image = painter.image!;
+          final rect = tester.getRect(surface);
+          final fitted = Alignment.center.inscribe(
+            applyBoxFit(
+              BoxFit.contain,
+              Size(image.width.toDouble(), image.height.toDouble()),
+              rect.size,
+            ).destination,
+            rect,
+          );
+          final leafWidth = fitted.width / (paired ? 2 : 1);
+          for (final fraction in [.35, .6]) {
+            final gesture = await tester.startGesture(
+              Offset(
+                rtl ? fitted.left + 20 : fitted.right - 20,
+                fitted.center.dy,
+              ),
+            );
+            await gesture.moveBy(
+              Offset(sign * 30, 0),
+              timeStamp: const Duration(milliseconds: 100),
+            );
+            await gesture.moveBy(
+              Offset(sign * (leafWidth * fraction - 30), 0),
+              timeStamp: const Duration(milliseconds: 1200),
+            );
+            await tester.pump(const Duration(milliseconds: 800));
+            expect(curl, findsOneWidget);
+            expect(_status(tester), origin);
+            await gesture.up(timeStamp: const Duration(milliseconds: 2000));
+            await tester.pumpAndSettle();
+            expect(
+              _status(tester),
+              fraction < .5 ? origin : isNot(origin),
+              reason: '$fraction of the actual fitted leaf, not the viewport',
+            );
+          }
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets('keys curl for 350ms and both motion gates change immediately', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    for (final gate in ['on', 'setting', 'system']) {
+      await _open(
+        tester,
+        const Size(390, 844),
+        settings: _settings.copyWith(animations: gate != 'setting'),
+        reducedMotion: gate == 'system',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+      await tester.pump();
+      await tester.pump();
+      expect(_status(tester), '40% · page 2 of 5');
+      expect(curl, gate == 'on' ? findsOneWidget : findsNothing);
+      await tester.pump(const Duration(milliseconds: 175));
+      expect(curl, gate == 'on' ? findsOneWidget : findsNothing);
+      expect(
+        tester
+            .getSemantics(
+              find.byKey(const ValueKey('reader-document-semantics')),
+            )
+            .label,
+        contains('page 2 of 5'),
+        reason: 'the covered live page stays available to screen readers',
+      );
+      await tester.pumpAndSettle();
+      expect(curl, findsNothing);
+    }
+    semantics.dispose();
+  });
 
   for (final width in [390.0, 900.0, 1280.0]) {
     for (final rtl in [false, true]) {
@@ -121,7 +303,7 @@ void main() {
         await _tap(tester, rtl ? .85 : .15);
         expect(_status(tester), '20% · page 1 of 5');
         if (width < 600) expect(_place(tester), 'page 1 of 5');
-        await tester.drag(surface, Offset(rtl ? 180 : -180, 0));
+        await tester.fling(surface, Offset(rtl ? 180 : -180, 0), 1000);
         await tester.pumpAndSettle();
         expect(_status(tester), '40% · page 2 of 5');
         if (width < 600) expect(_place(tester), 'page 2 of 5');
@@ -155,10 +337,10 @@ void main() {
 
   testWidgets('a swipe on the phone PDF place turns the page', (tester) async {
     await _open(tester, const Size(390, 844));
-    await tester.drag(_folio, const Offset(-160, 0));
+    await tester.fling(_folio, const Offset(-160, 0), 1000);
     await tester.pumpAndSettle();
     expect(_place(tester), 'page 2 of 5');
-    await tester.drag(_folio, const Offset(160, 0));
+    await tester.fling(_folio, const Offset(160, 0), 1000);
     await tester.pumpAndSettle();
     expect(_place(tester), 'page 1 of 5');
   });

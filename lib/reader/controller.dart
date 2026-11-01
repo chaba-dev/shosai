@@ -36,6 +36,7 @@ import 'pdf/spread.dart';
 part 'effects.dart';
 part 'message.dart';
 part 'model.dart';
+part 'page_turn.dart';
 part 'references.dart';
 
 /// Most jumps Back remembers; the oldest is forgotten first.
@@ -154,6 +155,8 @@ final class ReaderController implements Listenable {
   /// resources.
   PdfEngineDocument? _pdfDocument;
   int _referenceRevision = 0;
+  int _turnPreviewRevision = 0;
+  ChapterLayoutSession? _turnPreviewSession;
   final Set<Future<void>> _referenceEffects = {};
   final NoteEditor _noteEditor;
   final PlaceNoteEditor _placeNoteEditor;
@@ -710,6 +713,21 @@ final class ReaderController implements Listenable {
         );
       case ReaderPageStepRequested():
         _pageTurned(() => _pageStepRequested(message.delta));
+      case ReaderTurnPreviewRequested():
+        _turnPreviewRequested(message.delta);
+      case _ReaderTurnPreviewLoaded():
+        if (_isCurrentLayout(message.generation, message.layoutRevision) &&
+            message.revision == _turnPreviewRevision) {
+          _turnPreviewSession = message.session;
+          _emit(_model.copyWith(turnPreview: message.preview));
+        } else {
+          message.preview.image?.dispose();
+          message.session?.dispose();
+        }
+      case _ReaderTurnPreviewFinished():
+        _activeBridgeOperations--;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
       case ReaderSearchRequested():
         _searchRequested(message.query);
       case ReaderProgressRequested():
@@ -6814,6 +6832,18 @@ final class ReaderController implements Listenable {
   }
 
   void _publish(ReaderModel derived, {bool notifyListeners = true}) {
+    if (_model.generation != derived.generation ||
+        _model.unit != derived.unit ||
+        _model.epubPage != derived.epubPage ||
+        _model.pageImage != derived.pageImage ||
+        _model.layout != derived.layout ||
+        _model.typography != derived.typography ||
+        derived.busy ||
+        derived.relayoutBusy ||
+        derived.selectionPhase != ReaderSelectionPhase.idle) {
+      _clearTurnPreview();
+      derived = derived.copyWith(turnPreview: null);
+    }
     // The description reads the selected text out of the surface's canonical
     // stream (a whole chapter): skip it when nothing it depends on changed,
     // as on a continuous window step.
@@ -7042,6 +7072,7 @@ final class ReaderController implements Listenable {
   }
 
   void _releaseModelResources({bool publish = false}) {
+    _clearTurnPreview();
     final pageImage = _model.pageImage;
     final document = _model.document;
     final released = _model.copyWith(
