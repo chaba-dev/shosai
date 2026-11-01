@@ -491,6 +491,11 @@ class MainActivity : FlutterActivity() {
         ReaderSystemBars.attach(this, flutterEngine)
     }
 
+    override fun onPostResume() {
+        super.onPostResume()
+        ReaderSystemBars.restore(this)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) ReaderSystemBars.restore(this)

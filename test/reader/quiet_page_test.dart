@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -8,6 +9,7 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/controller.dart' show ReaderDisplayChange;
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/view.dart';
+import 'package:shosai_flutter/shell/view.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -43,35 +45,85 @@ Future<void> _open(
   FlutterReaderSettings settings = _settings,
   bool reducedMotion = false,
   void Function(ReaderDisplayChange)? save,
+  String path = '/books/atlas.pdf',
+  bool pushRoute = false,
+  bool shellFrame = false,
+  double ratio = 1,
 }) async {
   tester.view.physicalSize = size;
-  tester.view.devicePixelRatio = 1;
+  tester.view.devicePixelRatio = ratio;
   addTearDown(tester.view.reset);
+  final reader = ReaderScreen(
+    key: UniqueKey(),
+    bridge: _Book(rtl: rtl, links: links),
+    initialPath: path,
+    initialSettings: settings,
+    onDisplayChanged: save,
+    decoder: (pixels, {required width, required height}) async {
+      final recorder = ui.PictureRecorder();
+      ui.Canvas(recorder).drawRect(
+        const Rect.fromLTWH(0, 0, 420, 560),
+        ui.Paint()..color = const Color(0xFFFFFDF8),
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(420, 560);
+      picture.dispose();
+      return image;
+    },
+  );
+  Widget home = reader;
+  if (shellFrame) {
+    final book = harnessLibraryBooks().firstWhere(
+      (book) => book.format == FlutterBookFormat.pdf,
+    );
+    home = Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        body: ShellFrame(
+          layout: ShellLayout.forWidth(size.width / ratio),
+          model: ShellModel(
+            openBooks: [OpenBook(book: book, path: path)],
+            currentBookId: book.bookId,
+            reading: true,
+          ),
+          covers: const {},
+          actions: ShellActions(
+            selectPlace: (_) {},
+            openBook: (_) {},
+            closeBook: (_) {},
+            moveBook: (_, _) {},
+            addBooks: null,
+            loadCover: (_) => false,
+          ),
+          child: reader,
+        ),
+      ),
+    );
+  }
   await tester.pumpWidget(
     productionShell(
-      home: MediaQuery(
-        data: MediaQueryData(size: size, disableAnimations: reducedMotion),
-        child: ReaderScreen(
-          key: UniqueKey(),
-          bridge: _Book(rtl: rtl, links: links),
-          initialPath: '/books/atlas.pdf',
-          initialSettings: settings,
-          onDisplayChanged: save,
-          decoder: (pixels, {required width, required height}) async {
-            final recorder = ui.PictureRecorder();
-            ui.Canvas(recorder).drawRect(
-              const Rect.fromLTWH(0, 0, 420, 560),
-              ui.Paint()..color = const Color(0xFFFFFDF8),
-            );
-            final picture = recorder.endRecording();
-            final image = await picture.toImage(420, 560);
-            picture.dispose();
-            return image;
-          },
+      home: Builder(
+        builder: (context) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(disableAnimations: reducedMotion),
+          child: pushRoute
+              ? Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => Navigator.of(
+                      context,
+                    ).push(MaterialPageRoute<void>(builder: (_) => reader)),
+                    child: const Text('Open reader'),
+                  ),
+                )
+              : home,
         ),
       ),
     ),
   );
+  if (pushRoute) {
+    await tester.tap(find.text('Open reader'));
+  }
   for (var i = 0; i < 12; i++) {
     await tester.pump(const Duration(milliseconds: 32));
   }
@@ -272,6 +324,219 @@ void main() {
     semantics.dispose();
   });
 
+  for (final format in ['pdf', 'epub']) {
+    testWidgets(
+      'Android stable insets keep $format geometry through chrome and rotation',
+      (tester) async {
+        const channel = MethodChannel('dev.shosai/reader_system_bars');
+        var stable = [0, 96, 0, 48];
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => call.method == 'getStableInsets' ? stable : null,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            null,
+          ),
+        );
+        await _open(
+          tester,
+          const Size(780, 1688),
+          path: '/books/atlas.$format',
+          ratio: 2,
+        );
+        await tester.pumpAndSettle();
+        await _tap(tester, .85);
+        await _tap(tester, .85);
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final before = tester.getRect(surface);
+        final place = _status(tester);
+        MediaQueryData media() => MediaQuery.of(tester.element(_stage));
+        expect(media().viewPadding, const EdgeInsets.only(top: 48, bottom: 24));
+        for (var i = 0; i < 3; i++) {
+          await _tap(tester, .5);
+          tester.view.viewPadding = const FakeViewPadding(top: 96, bottom: 48);
+          tester.view.padding = const FakeViewPadding(top: 96, bottom: 48);
+          await tester.pumpAndSettle();
+          expect(tester.getRect(surface), before);
+          expect(_status(tester), place);
+          await _tap(tester, .5);
+          tester.view.viewPadding = FakeViewPadding.zero;
+          tester.view.padding = FakeViewPadding.zero;
+          await tester.pumpAndSettle();
+          expect(tester.getRect(surface), before);
+          expect(_status(tester), place);
+          expect(media().padding, const EdgeInsets.only(top: 48, bottom: 24));
+        }
+        stable = [96, 0, 48, 0];
+        tester.view.physicalSize = const Size(1688, 780);
+        await tester.pumpAndSettle();
+        // The reader's horizontal SafeArea consumes these fixed insets.
+        expect(tester.getRect(_stage).left, 48);
+        expect(tester.getRect(_stage).right, 820);
+        final rotated = tester.getRect(surface);
+        await _tap(tester, .5);
+        tester.view.viewPadding = const FakeViewPadding(left: 96, right: 48);
+        tester.view.padding = const FakeViewPadding(left: 96, right: 48);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(surface), rotated);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+  }
+
+  testWidgets(
+    'Android ignores stale portrait insets after a newer landscape response',
+    (tester) async {
+      const channel = MethodChannel('dev.shosai/reader_system_bars');
+      final pending = <Completer<List<int>>>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) {
+        if (call.method != 'getStableInsets') return Future.value();
+        final response = Completer<List<int>>();
+        pending.add(response);
+        return response.future;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await _open(tester, const Size(780, 1688), ratio: 2);
+      tester.view.physicalSize = const Size(1688, 780);
+      await tester.pump();
+      // The newest request completes first; the portrait requests stay pending.
+      pending.removeLast().complete([96, 0, 48, 0]);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_stage).left, 48);
+      expect(tester.getRect(_stage).right, 820);
+      await _tap(tester, .85);
+      await _tap(tester, .85);
+      expect(_status(tester), '60% · page 3 of 5');
+      final surface = find.byKey(const ValueKey('reader-selection-surface'));
+      final before = tester.getRect(surface);
+      final stage = tester.getRect(_stage);
+      for (final response in pending.reversed) {
+        response.complete([0, 96, 0, 48]);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(_stage), stage);
+        expect(tester.getRect(surface), before);
+        expect(_status(tester), '60% · page 3 of 5');
+      }
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  for (final rtl in [false, true]) {
+    testWidgets(
+      'Android landscape insets compose with the real shell (RTL $rtl)',
+      (tester) async {
+        const channel = MethodChannel('dev.shosai/reader_system_bars');
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async =>
+              call.method == 'getStableInsets' ? [96, 20, 48, 40] : null,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            null,
+          ),
+        );
+        await _open(
+          tester,
+          const Size(1800, 1000),
+          ratio: 2,
+          rtl: rtl,
+          shellFrame: true,
+        );
+        await tester.pumpAndSettle();
+        await _tap(tester, rtl ? .15 : .85);
+        await _tap(tester, rtl ? .15 : .85);
+        expect(_status(tester), '60% · page 3 of 5');
+        // A 56px tablet rail plus 48px left / 24px right stable admission.
+        expect(tester.getRect(_stage).left, rtl ? 48 : 104);
+        expect(tester.getRect(_stage).right, rtl ? 820 : 876);
+        final stage = tester.getRect(_stage);
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final before = tester.getRect(surface);
+        for (var i = 0; i < 3; i++) {
+          await _tap(tester, .5);
+          expect(_toolbar.hitTestable(), findsOneWidget);
+          tester.view.viewPadding = const FakeViewPadding(
+            left: 96,
+            top: 20,
+            right: 48,
+            bottom: 40,
+          );
+          tester.view.padding = tester.view.viewPadding;
+          await tester.pumpAndSettle();
+          expect(tester.getRect(_stage), stage);
+          expect(tester.getRect(surface), before);
+          expect(_status(tester), '60% · page 3 of 5');
+          await _tap(tester, .5);
+          expect(_toolbar.hitTestable(), findsNothing);
+          tester.view.viewPadding = FakeViewPadding.zero;
+          tester.view.padding = FakeViewPadding.zero;
+          await tester.pumpAndSettle();
+          expect(tester.getRect(_stage), stage);
+          expect(tester.getRect(surface), before);
+          expect(_status(tester), '60% · page 3 of 5');
+        }
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+  }
+
+  testWidgets(
+    'system Back restores bars before the reader route is disposed',
+    (tester) async {
+      const channel = MethodChannel('dev.shosai/reader_system_bars');
+      final calls = <bool>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        if (call.method == 'setShown') calls.add(call.arguments as bool);
+        return null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await _open(tester, const Size(390, 844), pushRoute: true);
+      expect(calls.last, isFalse);
+      // A pending keyboard cooldown must not hide bars on the library later.
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = FakeViewPadding.zero;
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(
+        find.byType(ReaderScreen),
+        findsOneWidget,
+        reason: 'the outgoing route is still animating',
+      );
+      expect(calls.last, isTrue);
+      final restored = calls.length;
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        calls.length,
+        restored,
+        reason: 'neither cooldown nor disposal takes ownership again',
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
   for (final width in [390.0, 900.0, 1280.0]) {
     for (final rtl in [false, true]) {
       testWidgets('touch thirds and chrome never reflow ($width, RTL $rtl)', (
@@ -353,6 +618,7 @@ void main() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
         call,
       ) async {
+        if (call.method == 'getStableInsets') return null;
         expectSync(call.method, 'setShown');
         calls.add(call.arguments as bool);
         return null;
