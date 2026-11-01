@@ -21,6 +21,16 @@
           config = {
             allowUnfree = true;
             android_sdk.accept_license = true;
+
+            # The pinned bmake archive was removed upstream. Rewrite its URL
+            # even in Darwin bootstrap fetchers, keeping the original hash and
+            # cached outputs. Drop this when the nixpkgs pin no longer needs it.
+            rewriteURL =
+              url:
+              if url == "https://www.crufty.net/ftp/pub/sjg/bmake-20251111.tar.gz" then
+                "https://distfiles.alpinelinux.org/distfiles/v3.23/bmake-20251111.tar.gz"
+              else
+                url;
           };
         };
         inherit (pkgs) lib stdenv;
