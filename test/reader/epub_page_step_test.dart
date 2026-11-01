@@ -270,6 +270,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('height-only repagination never curls, including a held leaf', (
+    tester,
+  ) async {
+    final harness = bridge();
+    await openReader(tester, harness, size: const ui.Size(900, 800));
+    await settleEpubPage(tester);
+    await walkForward(tester, maxSteps: 3);
+    final saved = harness.savedReadingStates.last.offset;
+    final curl = find.byKey(const ValueKey('reader-page-curl'));
+    tester.view.physicalSize = const ui.Size(900, 640);
+    // Observe the actual repagination frame, not only the final settled page.
+    for (var i = 0; i < 16; i++) {
+      await tester.pump(const Duration(milliseconds: 32));
+      expect(curl, findsNothing);
+    }
+    await settleEpubPage(tester);
+    expect(harness.savedReadingStates.last.offset, saved);
+
+    final folio = find.byKey(const ValueKey('reader-folio')).first;
+    final gesture = await tester.startGesture(tester.getCenter(folio));
+    await gesture.moveBy(const ui.Offset(-30, 0));
+    await gesture.moveBy(const ui.Offset(-90, 0));
+    await tester.pump();
+    expect(curl, findsOneWidget);
+    tester.view.physicalSize = const ui.Size(900, 720);
+    await tester.pump();
+    expect(curl, findsNothing, reason: 'old-size snapshots are invalidated');
+    await gesture.cancel();
+    await settleEpubPage(tester);
+    expect(harness.savedReadingStates.last.offset, saved);
+    await closeReader(tester);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'page steps walk the table chapter forward without skipping or cycling',
     (tester) async {

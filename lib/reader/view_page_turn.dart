@@ -34,6 +34,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
   ui.Image? _outgoing;
   ui.Image? _incoming;
   Rect? _pageRect;
+  Size? _size;
   int _delta = 1;
   bool _dragging = false;
   bool _committing = false;
@@ -132,6 +133,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
     if (!_motion ||
         before.generation != after.generation ||
         before.layout != after.layout ||
+        before.epubPage?.box.size != after.epubPage?.box.size ||
         oldWidget.spread != widget.spread ||
         before.typography != after.typography ||
         after.selectionPhase != ReaderSelectionPhase.idle ||
@@ -167,10 +169,25 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
         _incoming = _capture();
         _settle(1);
       });
-    } else if (_dragging &&
-        after.turnPreview != null &&
-        after.turnPreview != before.turnPreview) {
-      _makePreview(after.turnPreview!);
+    } else {
+      _cancelUnchangedTurn();
+      if (_dragging &&
+          after.turnPreview != null &&
+          after.turnPreview != before.turnPreview) {
+        _makePreview(after.turnPreview!);
+      }
+    }
+  }
+
+  void _cancelUnchangedTurn() {
+    final model = widget.model;
+    if (_committing &&
+        !model.busy &&
+        !model.relayoutBusy &&
+        !model.relayoutPending) {
+      // Rejected steps and completed-but-refused layouts keep the old page.
+      _committing = false;
+      _settle(0);
     }
   }
 
@@ -249,6 +266,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
       delta,
       model.document?.logicalUnitCount.toInt() ?? 0,
     )) {
+      release(complete: false);
       return false;
     }
     if (!_dragging || _delta != delta) {
@@ -278,7 +296,12 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
     _dragging = false;
     if (complete) {
       _committing = true;
+      final revision = _captureRevision;
       widget.dispatch(pageStepMessage(widget.model, _delta));
+      // A controller can reject a step without emitting a new model at all.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && revision == _captureRevision) _cancelUnchangedTurn();
+      });
       if (!_motion) setState(_reset);
     } else {
       _settle(0);
@@ -313,39 +336,47 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
   }
 
   @override
-  Widget build(BuildContext context) => _ReaderTurnScope(
-    turn: this,
-    child: Stack(
-      fit: StackFit.expand,
-      children: [
-        RepaintBoundary(key: _boundaryKey, child: widget.child),
-        if (_outgoing != null)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ExcludeSemantics(
-                child: AnimatedBuilder(
-                  animation: _progress,
-                  builder: (context, _) => CustomPaint(
-                    key: const ValueKey('reader-page-curl'),
-                    painter: _PageCurlPainter(
-                      outgoing: _outgoing!,
-                      incoming: _incoming,
-                      pageRect: _pageRect,
-                      progress: _progress.value,
-                      backward: _delta < 0,
-                      rightToLeft: widget.model.rightToLeft,
-                      spread: widget.spread,
-                      paper: pageColors(
-                        widget.model.typography.theme,
-                      ).background,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (_size != constraints.biggest) {
+        _size = constraints.biggest;
+        _reset();
+      }
+      return _ReaderTurnScope(
+        turn: this,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            RepaintBoundary(key: _boundaryKey, child: widget.child),
+            if (_outgoing != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: AnimatedBuilder(
+                      animation: _progress,
+                      builder: (context, _) => CustomPaint(
+                        key: const ValueKey('reader-page-curl'),
+                        painter: _PageCurlPainter(
+                          outgoing: _outgoing!,
+                          incoming: _incoming,
+                          pageRect: _pageRect,
+                          progress: _progress.value,
+                          backward: _delta < 0,
+                          rightToLeft: widget.model.rightToLeft,
+                          spread: widget.spread,
+                          paper: pageColors(
+                            widget.model.typography.theme,
+                          ).background,
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
-      ],
-    ),
+          ],
+        ),
+      );
+    },
   );
 }
 

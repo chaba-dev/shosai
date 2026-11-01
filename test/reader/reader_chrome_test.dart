@@ -1926,6 +1926,59 @@ void main() {
     expect(sizes, {24});
   });
 
+  testWidgets('a pending annotation write cannot strand a swipe curl', (
+    tester,
+  ) async {
+    _setView(tester, const Size(1280, 800));
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+    final bridge = _GatedUpdateBridge(gate.future)
+      ..annotations = [
+        FlutterAnnotation(
+          id: 'one',
+          unit: BigInt.zero,
+          resolution: FlutterAnnotationResolution.exact,
+          color: FlutterHighlightColor.yellow,
+        ),
+      ];
+    await _open(
+      tester,
+      _reader(
+        bridge: bridge,
+        initialPath: '/books/atlas.pdf',
+        initialBookId: 3,
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('reader-header-notes')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('reader-annotation-one-actions')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Change color').last);
+    await tester.pumpAndSettle();
+    expect(bridge.updatedIds, ['one']);
+    final surface = find.byKey(const ValueKey('reader-selection-surface'));
+    expect(bridge.savedReadingStates, isNotEmpty);
+    final saves = bridge.savedReadingStates.length;
+    await tester.fling(surface, const Offset(-200, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(_pagePainter(tester).currentUnit, 0);
+    expect(find.byKey(const ValueKey('reader-page-curl')), findsNothing);
+    expect(bridge.savedReadingStates.length, saves);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    await tester.fling(surface, const Offset(-200, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(_pagePainter(tester).currentUnit, 1);
+    expect(bridge.savedReadingStates.last.unit.toInt(), 1);
+    expect(find.byKey(const ValueKey('reader-page-curl')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   test('a highlight save the reader turns down keeps the draft', () async {
     FlutterAnnotation highlight(String id) => FlutterAnnotation(
       id: id,

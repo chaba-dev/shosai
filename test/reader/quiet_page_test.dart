@@ -96,6 +96,34 @@ void main() {
 
   final curl = find.byKey(const ValueKey('reader-page-curl'));
   for (final rtl in [false, true]) {
+    for (final last in [false, true]) {
+      testWidgets(
+        'furniture curl reverses at the book edge (RTL $rtl, last $last)',
+        (tester) async {
+          await _open(tester, const Size(390, 844), rtl: rtl);
+          if (last) {
+            for (var page = 0; page < 4; page++) {
+              await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+              await tester.pumpAndSettle();
+            }
+          }
+          final place = _status(tester);
+          final sign = (rtl ? 1.0 : -1.0) * (last ? -1 : 1);
+          final gesture = await tester.startGesture(tester.getCenter(_folio));
+          await gesture.moveBy(Offset(sign * 30, 0));
+          await gesture.moveBy(Offset(sign * 90, 0));
+          await tester.pump();
+          expect(curl, findsOneWidget);
+          await gesture.moveBy(Offset(-sign * 240, 0));
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(curl, findsNothing);
+          expect(_status(tester), place);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
     testWidgets(
       'curl follows a held drag, cancels, and commits past half (RTL $rtl)',
       (tester) async {

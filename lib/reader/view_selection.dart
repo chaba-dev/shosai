@@ -333,6 +333,8 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   bool get _enabled =>
       !widget.model.busy &&
       !widget.model.relayoutBusy &&
+      !widget.model.relayoutPending &&
+      widget.model.annotationOperations.isEmpty &&
       widget.model.selectionPhase == ReaderSelectionPhase.idle;
 
   @override
@@ -382,6 +384,8 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       } else {
         widget.dispatch(pageStepMessage(model, delta));
       }
+    } else {
+      turn?.release(complete: false);
     }
   }
 
