@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -8,6 +9,7 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/controller.dart' show ReaderDisplayChange;
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/view.dart';
+import 'package:shosai_flutter/shell/view.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -45,6 +47,7 @@ Future<void> _open(
   void Function(ReaderDisplayChange)? save,
   String path = '/books/atlas.pdf',
   bool pushRoute = false,
+  bool shellFrame = false,
   double ratio = 1,
 }) async {
   tester.view.physicalSize = size;
@@ -68,6 +71,35 @@ Future<void> _open(
       return image;
     },
   );
+  Widget home = reader;
+  if (shellFrame) {
+    final book = harnessLibraryBooks().firstWhere(
+      (book) => book.format == FlutterBookFormat.pdf,
+    );
+    home = Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        body: ShellFrame(
+          layout: ShellLayout.forWidth(size.width / ratio),
+          model: ShellModel(
+            openBooks: [OpenBook(book: book, path: path)],
+            currentBookId: book.bookId,
+            reading: true,
+          ),
+          covers: const {},
+          actions: ShellActions(
+            selectPlace: (_) {},
+            openBook: (_) {},
+            closeBook: (_) {},
+            moveBook: (_, _) {},
+            addBooks: null,
+            loadCover: (_) => false,
+          ),
+          child: reader,
+        ),
+      ),
+    );
+  }
   await tester.pumpWidget(
     productionShell(
       home: Builder(
@@ -84,7 +116,7 @@ Future<void> _open(
                     child: const Text('Open reader'),
                   ),
                 )
-              : reader,
+              : home,
         ),
       ),
     ),
@@ -349,6 +381,112 @@ void main() {
         tester.view.padding = const FakeViewPadding(left: 96, right: 48);
         await tester.pumpAndSettle();
         expect(tester.getRect(surface), rotated);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+  }
+
+  testWidgets(
+    'Android ignores stale portrait insets after a newer landscape response',
+    (tester) async {
+      const channel = MethodChannel('dev.shosai/reader_system_bars');
+      final pending = <Completer<List<int>>>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) {
+        if (call.method != 'getStableInsets') return Future.value();
+        final response = Completer<List<int>>();
+        pending.add(response);
+        return response.future;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await _open(tester, const Size(780, 1688), ratio: 2);
+      tester.view.physicalSize = const Size(1688, 780);
+      await tester.pump();
+      // The newest request completes first; the portrait requests stay pending.
+      pending.removeLast().complete([96, 0, 48, 0]);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(_stage).left, 48);
+      expect(tester.getRect(_stage).right, 820);
+      await _tap(tester, .85);
+      await _tap(tester, .85);
+      expect(_status(tester), '60% · page 3 of 5');
+      final surface = find.byKey(const ValueKey('reader-selection-surface'));
+      final before = tester.getRect(surface);
+      final stage = tester.getRect(_stage);
+      for (final response in pending.reversed) {
+        response.complete([0, 96, 0, 48]);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(_stage), stage);
+        expect(tester.getRect(surface), before);
+        expect(_status(tester), '60% · page 3 of 5');
+      }
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  for (final rtl in [false, true]) {
+    testWidgets(
+      'Android landscape insets compose with the real shell (RTL $rtl)',
+      (tester) async {
+        const channel = MethodChannel('dev.shosai/reader_system_bars');
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async =>
+              call.method == 'getStableInsets' ? [96, 20, 48, 40] : null,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            null,
+          ),
+        );
+        await _open(
+          tester,
+          const Size(1800, 1000),
+          ratio: 2,
+          rtl: rtl,
+          shellFrame: true,
+        );
+        await tester.pumpAndSettle();
+        await _tap(tester, rtl ? .15 : .85);
+        await _tap(tester, rtl ? .15 : .85);
+        expect(_status(tester), '60% · page 3 of 5');
+        // A 56px tablet rail plus 48px left / 24px right stable admission.
+        expect(tester.getRect(_stage).left, rtl ? 48 : 104);
+        expect(tester.getRect(_stage).right, rtl ? 820 : 876);
+        final stage = tester.getRect(_stage);
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final before = tester.getRect(surface);
+        for (var i = 0; i < 3; i++) {
+          await _tap(tester, .5);
+          expect(_toolbar.hitTestable(), findsOneWidget);
+          tester.view.viewPadding = const FakeViewPadding(
+            left: 96,
+            top: 20,
+            right: 48,
+            bottom: 40,
+          );
+          tester.view.padding = tester.view.viewPadding;
+          await tester.pumpAndSettle();
+          expect(tester.getRect(_stage), stage);
+          expect(tester.getRect(surface), before);
+          expect(_status(tester), '60% · page 3 of 5');
+          await _tap(tester, .5);
+          expect(_toolbar.hitTestable(), findsNothing);
+          tester.view.viewPadding = FakeViewPadding.zero;
+          tester.view.padding = FakeViewPadding.zero;
+          await tester.pumpAndSettle();
+          expect(tester.getRect(_stage), stage);
+          expect(tester.getRect(surface), before);
+          expect(_status(tester), '60% · page 3 of 5');
+        }
         expect(tester.takeException(), isNull);
       },
       variant: TargetPlatformVariant.only(TargetPlatform.android),
