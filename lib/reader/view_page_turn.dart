@@ -502,8 +502,22 @@ class _PageCurlPainter extends CustomPainter {
         ..quadraticBezierTo(tip + lift * .4, h / 2, tip, h - lift)
         ..quadraticBezierTo((spine + tip) / 2, h + lift, spine, h)
         ..close();
+      // Keep the soft shadow convex so Impeller can draw a shadow mesh,
+      // rather than filtering an offscreen texture of the concave leaf.
+      // Only the shadow uses this envelope; the page keeps its lifted edges.
+      final shadow = Path()
+        ..moveTo(spine, 0)
+        ..lineTo(tip, 0)
+        ..quadraticBezierTo(
+          tip + lift * .4 * math.cos(math.pi * t),
+          h / 2,
+          tip,
+          h,
+        )
+        ..lineTo(spine, h)
+        ..close();
       canvas.drawShadow(
-        path,
+        shadow,
         ShosaiTokens.appShadowBase.withValues(alpha: .25),
         12,
         false,
@@ -554,8 +568,18 @@ class _PageCurlPainter extends CustomPainter {
         ..quadraticBezierTo((tip + fold) / 2, h - lift, fold, h)
         ..quadraticBezierTo(fold + lift, h / 2, fold, 0)
         ..close();
+      // Straight chords bridge the two inward-curved corners of the back.
+      // Bound the shadow's bow on short stages to keep its envelope convex.
+      final shadowLift = math.min(lift, h * .06);
+      final shadow = Path()
+        ..moveTo(fold, 0)
+        ..lineTo(tip, shadowLift)
+        ..quadraticBezierTo(tip - shadowLift, h / 2, tip, h - shadowLift)
+        ..lineTo(fold, h)
+        ..quadraticBezierTo(fold + shadowLift, h / 2, fold, 0)
+        ..close();
       canvas.drawShadow(
-        back,
+        shadow,
         ShosaiTokens.appShadowBase.withValues(alpha: .25),
         10,
         false,
