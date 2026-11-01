@@ -1567,10 +1567,7 @@ final class ReaderController implements Listenable {
     }
     _chromeTimer?.cancel();
     _chromeRevision += 1;
-    final halfStrip =
-        readerControlsStripWidth(message.width) / message.width / 2;
-    final middle =
-        message.fraction >= .5 - halfStrip && message.fraction < .5 + halfStrip;
+    final middle = message.fraction >= .25 && message.fraction < .75;
     final shown = _model.chromeVisible;
     _emit(
       _model.copyWith(

@@ -4,19 +4,10 @@ sealed class ReaderMessage {
   const ReaderMessage();
 }
 
-/// The controls strip in the page's (or spread's) logical coordinate space.
-double readerControlsStripWidth(double pageWidth) =>
-    math.min(pageWidth / 3, 200);
-
 /// A non-link tap across the page or spread, measured from physical left.
 final class ReaderPageTapped extends ReaderMessage {
-  const ReaderPageTapped(
-    this.fraction, {
-    required this.width,
-    required this.touch,
-  });
+  const ReaderPageTapped(this.fraction, {required this.touch});
   final double fraction;
-  final double width;
   final bool touch;
 }
 

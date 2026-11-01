@@ -1101,11 +1101,22 @@ class _ReaderScreenState extends State<ReaderScreen>
               Positioned.fill(
                 child: _ReaderZonesHint(
                   rightToLeft: model.rightToLeft,
-                  pageWidth:
-                      constraints.maxWidth -
-                      (layout == ShellLayout.phone
-                          ? 0
-                          : 2 * ShosaiTokens.space5),
+                  pageWidth: _readerPageWidth(
+                    model,
+                    layout,
+                    constraints.deflate(
+                      EdgeInsets.symmetric(
+                        horizontal: layout == ShellLayout.phone
+                            ? 0
+                            : ShosaiTokens.space5,
+                        vertical:
+                            layout == ShellLayout.phone ||
+                                model.continuousPresentation
+                            ? 0
+                            : ShosaiTokens.space5,
+                      ),
+                    ),
+                  ),
                   dismiss: () =>
                       _controller.dispatch(const ReaderZonesHintDismissed()),
                 ),

@@ -747,7 +747,7 @@ void main() {
 
   for (final width in [390.0, 600.0, 640.0, 900.0]) {
     for (final rtl in [false, true]) {
-      testWidgets('strip boundaries and hint match ($width, RTL $rtl)', (
+      testWidgets('quarter zones and hint match ($width, RTL $rtl)', (
         tester,
       ) async {
         await _open(
@@ -762,34 +762,41 @@ void main() {
         final area = tester.getRect(
           find.byKey(const ValueKey('reader-page-tap-area')),
         );
-        // Independent expected geometry, including the sub-600 page area on
-        // a narrow tablet: always capping at 200 would be wrong there.
-        final stripWidth = area.width < 600 ? area.width / 3 : 200.0;
-        final hintColumn = tester.getRect(
-          find
-              .ancestor(
-                of: find.text('Controls'),
-                matching: find.byType(SizedBox),
-              )
-              .first,
-        );
-        expect(hintColumn.width, closeTo(stripWidth, .01));
-        expect(hintColumn.center.dx, closeTo(area.center.dx, .01));
+        final labels = [
+          rtl ? 'Next page' : 'Previous page',
+          'Controls',
+          rtl ? 'Previous page' : 'Next page',
+        ];
+        for (var i = 0; i < labels.length; i++) {
+          final column = tester.getRect(
+            find
+                .ancestor(
+                  of: find.text(labels[i]),
+                  matching: find.byType(CustomPaint),
+                )
+                .first,
+          );
+          expect(column.width, closeTo(area.width * (i == 1 ? .5 : .25), .01));
+          expect(
+            column.center.dx,
+            closeTo(area.center.dx + (i - 1) * area.width * .375, .01),
+          );
+        }
         await _tap(tester, .5); // Dismiss onboarding, not reveal or turn.
         expect(_toolbar.hitTestable(), findsNothing);
-        final left = area.center.dx - stripWidth / 2;
-        final right = area.center.dx + stripWidth / 2;
+        final left = area.left + area.width * .25;
+        final right = area.left + area.width * .75;
         Future<void> tapX(double x) async {
           await tester.tapAt(Offset(x, area.center.dy));
           await tester.pump(const Duration(milliseconds: 350));
           await tester.pumpAndSettle();
         }
 
-        await tapX(left + 1);
+        await tapX(left);
         expect(_toolbar.hitTestable(), findsOneWidget);
         await tapX(right - 1);
         expect(_toolbar.hitTestable(), findsNothing);
-        await tapX(rtl ? left - 1 : right + 1);
+        await tapX(rtl ? left - 1 : right);
         expect(_toolbar.hitTestable(), findsNothing);
         expect(
           _status(tester),

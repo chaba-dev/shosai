@@ -76,6 +76,19 @@ bool _readerShowsSpread(
   return column >= _readerSpreadMinColumnEms * typography.epubFontSize;
 }
 
+/// The rendered paper width, also used to align the zones hint with its taps.
+double _readerPageWidth(
+  ReaderModel model,
+  ShellLayout layout,
+  BoxConstraints area,
+) => layout == ShellLayout.phone || !_readerShowsPaper(model)
+    ? area.maxWidth
+    : math.min(
+        area.maxWidth,
+        (_readerShowsSpread(model, layout, area) ? 2 : 1) *
+            _readerEpubPageMaxWidth,
+      );
+
 /// Tells the layout reporter under the stage whether the stage shows a
 /// spread, so the page is laid out for the slots the stage draws.
 class _ReaderSpreadScope extends InheritedWidget {
@@ -215,10 +228,7 @@ class _ReaderStage extends StatelessWidget {
         }
         // A spread is two pages of paper side by side, each as wide as a
         // single page may be, under one `shadow-page`.
-        final width = math.min(
-          constraints.maxWidth,
-          (spread ? 2 : 1) * _readerEpubPageMaxWidth,
-        );
+        final width = _readerPageWidth(model, layout, constraints);
         return Center(
           child: SizedBox(
             key: const ValueKey('reader-page'),
@@ -448,7 +458,6 @@ class _ReaderPageTapScopeState extends State<_ReaderPageTapScope> {
         final box = context.findRenderObject()! as RenderBox;
         return ReaderPageTapped(
           box.globalToLocal(global).dx / box.size.width,
-          width: box.size.width,
           touch:
               kind != ui.PointerDeviceKind.mouse ||
               ShellLayout.forWidth(MediaQuery.sizeOf(context).width) !=
@@ -641,64 +650,67 @@ class _ReaderZonesHint extends StatelessWidget {
           color: ShosaiTokens.colorLightInverse.withValues(alpha: .62),
           child: Stack(
             children: [
-              LayoutBuilder(
-                builder: (context, constraints) => Row(
-                  children: [
-                    for (var i = 0; i < 3; i++)
-                      SizedBox(
-                        width: i == 1
-                            ? readerControlsStripWidth(pageWidth)
-                            : (constraints.maxWidth -
-                                      readerControlsStripWidth(pageWidth)) /
-                                  2,
-                        child: CustomPaint(
-                          painter: i == 0
-                              ? null
-                              : _ReaderZonesStroke(
-                                  color: ink.withValues(alpha: .45),
-                                ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                width: 44,
-                                height: 44,
-                                child: CustomPaint(
-                                  painter: _ReaderZonesStroke(
-                                    color: ink.withValues(alpha: .7),
-                                    ring: true,
-                                    dashed: i == 1,
+              Center(
+                child: SizedBox(
+                  width: pageWidth,
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < 3; i++)
+                        Expanded(
+                          flex: i == 1 ? 2 : 1,
+                          child: CustomPaint(
+                            painter: i == 0
+                                ? null
+                                : _ReaderZonesStroke(
+                                    color: ink.withValues(alpha: .45),
                                   ),
-                                  child: Icon(
-                                    [
-                                      LucideIcons.chevronLeft,
-                                      LucideIcons.list,
-                                      LucideIcons.chevronRight,
-                                    ][i],
-                                    size: 22,
-                                    color: ink,
-                                  ),
+                            child: Center(
+                              child: SingleChildScrollView(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 44,
+                                      height: 44,
+                                      child: CustomPaint(
+                                        painter: _ReaderZonesStroke(
+                                          color: ink.withValues(alpha: .7),
+                                          ring: true,
+                                          dashed: i == 1,
+                                        ),
+                                        child: Icon(
+                                          [
+                                            LucideIcons.chevronLeft,
+                                            LucideIcons.list,
+                                            LucideIcons.chevronRight,
+                                          ][i],
+                                          size: 22,
+                                          color: ink,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: ShosaiTokens.space2),
+                                    Text(
+                                      labels[i],
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontFamily: shosaiInterfaceFontFamily,
+                                        fontFamilyFallback:
+                                            shosaiInterfaceFontFallback,
+                                        fontSize: 13,
+                                        height: 18 / 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: ink,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: ShosaiTokens.space2),
-                              Text(
-                                labels[i],
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontFamily: shosaiInterfaceFontFamily,
-                                  fontFamilyFallback:
-                                      shosaiInterfaceFontFallback,
-                                  fontSize: 13,
-                                  height: 18 / 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: ink,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               Positioned(
