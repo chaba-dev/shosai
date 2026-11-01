@@ -36,6 +36,8 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
   Rect? _pageRect;
   Size? _size;
   int _delta = 1;
+  // Source geometry stays fixed while navigation adopts the destination.
+  bool _turnSpread = false;
   bool _dragging = false;
   bool _committing = false;
   double _dragFraction = 0;
@@ -154,6 +156,10 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
     }
     if (delta != 0 && before.contentState == ReaderContentState.ready) {
       if (_outgoing == null) {
+        _turnSpread =
+            oldWidget.spread &&
+            (before.document?.format != FlutterBookFormat.pdf ||
+                before.pdfSpread != null);
         _pageRect = _pdfBounds(before);
         _outgoing = _capture();
       }
@@ -276,18 +282,24 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
       _reset();
       _dragging = true;
       _delta = delta;
+      _turnSpread =
+          widget.spread &&
+          (model.document?.format != FlutterBookFormat.pdf ||
+              model.pdfSpread != null);
       _pageRect = _pdfBounds(model);
       if (_motion) _outgoing = _capture();
       if (_motion) widget.dispatch(ReaderTurnPreviewRequested(delta));
     }
     final box = context.findRenderObject()! as RenderBox;
+    // A PDF cover or unpaired last page occupies a whole fitted leaf, even
+    // with Pages = two. Only an actual pair divides the raster at its spine.
     final width =
-        box.size.width * (_pageRect?.width ?? 1) / (widget.spread ? 2 : 1);
+        box.size.width * (_pageRect?.width ?? 1) / (_turnSpread ? 2 : 1);
     _dragFraction = dx.abs() / width;
     // Keep the lifted tip under the finger, rather than using an eased
     // animation fraction as a drag distance. Only the release is eased.
     setState(
-      () => _progress.value = widget.spread
+      () => _progress.value = _turnSpread
           ? math.acos((1 - _dragFraction).clamp(-1, 1)) / math.pi
           : (_dragFraction / (_delta < 0 ? 1 : 2)).clamp(0, 1),
     );
@@ -373,7 +385,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
                           progress: _progress.value,
                           backward: _delta < 0,
                           rightToLeft: widget.model.rightToLeft,
-                          spread: widget.spread,
+                          spread: _turnSpread,
                           paper: pageColors(
                             widget.model.typography.theme,
                           ).background,

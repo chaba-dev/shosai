@@ -176,6 +176,67 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+
+    testWidgets(
+      'PDF cover and paired leaf use their fitted midpoint (RTL $rtl)',
+      (tester) async {
+        await _open(
+          tester,
+          const Size(1280, 800),
+          rtl: rtl,
+          settings: _settings.copyWith(twoPages: true),
+        );
+        final surface = find.byKey(const ValueKey('reader-selection-surface'));
+        final sign = rtl ? 1.0 : -1.0;
+        for (final paired in [false, true]) {
+          final origin = _status(tester);
+          expect(origin, contains(paired ? 'pages 2–3' : 'page 1 of 5'));
+          final painter = tester
+              .widgetList<CustomPaint>(find.byType(CustomPaint))
+              .map((p) => p.painter)
+              .whereType<PagePainter>()
+              .single;
+          final image = painter.image!;
+          final rect = tester.getRect(surface);
+          final fitted = Alignment.center.inscribe(
+            applyBoxFit(
+              BoxFit.contain,
+              Size(image.width.toDouble(), image.height.toDouble()),
+              rect.size,
+            ).destination,
+            rect,
+          );
+          final leafWidth = fitted.width / (paired ? 2 : 1);
+          for (final fraction in [.35, .6]) {
+            final gesture = await tester.startGesture(
+              Offset(
+                rtl ? fitted.left + 20 : fitted.right - 20,
+                fitted.center.dy,
+              ),
+            );
+            await gesture.moveBy(
+              Offset(sign * 30, 0),
+              timeStamp: const Duration(milliseconds: 100),
+            );
+            await gesture.moveBy(
+              Offset(sign * (leafWidth * fraction - 30), 0),
+              timeStamp: const Duration(milliseconds: 1200),
+            );
+            await tester.pump(const Duration(milliseconds: 800));
+            expect(curl, findsOneWidget);
+            expect(_status(tester), origin);
+            await gesture.up(timeStamp: const Duration(milliseconds: 2000));
+            await tester.pumpAndSettle();
+            expect(
+              _status(tester),
+              fraction < .5 ? origin : isNot(origin),
+              reason: '$fraction of the actual fitted leaf, not the viewport',
+            );
+          }
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 
   testWidgets('keys curl for 350ms and both motion gates change immediately', (
