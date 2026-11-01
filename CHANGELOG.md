@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-10-31
+## [0.1.0] - 2026-11-01
 
 ### 🚀 Features
 
@@ -184,6 +184,7 @@ All notable changes to this project will be documented in this file.
 - *(design-system)* The quiet page on phone and tablet (#239)
 - *(design-system)* The quiet page on desktop too (#243)
 - *(design-system)* Page curl, narrower middle strip and touch chrome timer (#261)
+- *(design-system)* Widen the middle tap zone to half the page (#267)
 
 ### ⚡ Performance
 
