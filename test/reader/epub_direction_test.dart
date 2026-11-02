@@ -53,6 +53,7 @@ void main() {
     FlutterReaderSettings? settings,
     ReaderPlaceRequests? placeRequests,
     Size size = const Size(1280, 800),
+    bool showHint = false,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -65,7 +66,7 @@ void main() {
           initialPath: '/books/long.epub',
           initialBookId: 1,
           initialSettings: (settings ?? harnessReaderSettings).copyWith(
-            zonesHintDismissed: true,
+            zonesHintDismissed: !showHint,
           ),
           placeRequests: placeRequests,
           epubImageDecoder: (bytes) async => null,
@@ -75,7 +76,7 @@ void main() {
       maxRounds: 16,
     );
     await settle(tester);
-    await revealReaderChrome(tester);
+    if (!showHint) await revealReaderChrome(tester);
   }
 
   Future<void> closeReader(WidgetTester tester) async {
@@ -99,8 +100,35 @@ void main() {
   double centreOf(WidgetTester tester, String key) =>
       tester.getCenter(find.byKey(ValueKey(key))).dx;
 
+  testWidgets('single EPUB hint follows the paper, not the wider stage', (
+    tester,
+  ) async {
+    await openReader(
+      tester,
+      bridge(null),
+      size: const Size(900, 1000),
+      settings: harnessReaderSettings.copyWith(twoPages: false),
+      showHint: true,
+    );
+    final area = tester.getRect(
+      find.byKey(const ValueKey('reader-page-tap-area')),
+    );
+    final controls = tester.getRect(
+      find
+          .ancestor(
+            of: find.text('Controls'),
+            matching: find.byType(CustomPaint),
+          )
+          .first,
+    );
+    expect(area.width, lessThan(800));
+    expect(controls.width, closeTo(area.width / 2, .01));
+    expect(controls.center.dx, closeTo(area.center.dx, .01));
+    await closeReader(tester);
+  });
+
   for (final direction in ['ltr', 'rtl', 'vertical']) {
-    testWidgets('swipes on EPUB furniture and margins turn $direction pages', (
+    testWidgets('taps and swipes on EPUB turn $direction pages', (
       tester,
     ) async {
       for (final size in [const Size(390, 844), const Size(900, 1000)]) {
@@ -119,6 +147,25 @@ void main() {
           tester.getCenter(find.byKey(const ValueKey('reader-stage'))),
         );
         await tester.pumpAndSettle();
+        final area = tester.getRect(
+          find.byKey(const ValueKey('reader-page-tap-area')),
+        );
+        final forward = Offset(
+          area.center.dx + (direction == 'ltr' ? 1 : -1) * (area.width / 4 + 1),
+          area.center.dy,
+        );
+        final back = Offset(2 * area.center.dx - forward.dx, forward.dy);
+        final first = page(tester);
+        await tester.tapAt(forward);
+        await settle(tester);
+        expect(
+          page(tester).canonicalStart,
+          inInclusiveRange(first.canonicalEnd, first.canonicalEnd + 1),
+          reason: 'tap just outside the strip turns in the book direction',
+        );
+        await tester.tapAt(back);
+        await settle(tester);
+        expect(page(tester).canonicalStart, first.canonicalStart);
         final movement = Offset(direction == 'ltr' ? -150 : 150, 0);
         for (final key in ['reader-folio', 'reader-running-head']) {
           final before = page(tester);

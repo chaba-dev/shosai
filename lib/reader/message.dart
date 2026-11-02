@@ -4,11 +4,22 @@ sealed class ReaderMessage {
   const ReaderMessage();
 }
 
-/// A non-link tap in the page, measured in physical left-to-right thirds.
+/// A non-link tap across the page or spread, measured from physical left.
 final class ReaderPageTapped extends ReaderMessage {
   const ReaderPageTapped(this.fraction, {required this.touch});
   final double fraction;
   final bool touch;
+}
+
+/// Raw contact events include touches on chrome and panels, not just page taps.
+final class ReaderTouchStarted extends ReaderMessage {
+  const ReaderTouchStarted(this.pointer);
+  final int pointer;
+}
+
+final class ReaderTouchEnded extends ReaderMessage {
+  const ReaderTouchEnded(this.pointer);
+  final int pointer;
 }
 
 final class ReaderPointerMoved extends ReaderMessage {
