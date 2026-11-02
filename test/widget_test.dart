@@ -5560,6 +5560,7 @@ void main() {
             ('selection-swatch-pink', 'Pink highlight'),
             ('selection-swatch-purple', 'Purple highlight'),
             ('selection-note', 'Note'),
+            ('selection-search', 'Search'),
           ]) {
             final node = tester.getSemantics(find.byKey(ValueKey(key)));
             expect(node.getSemanticsData().label, label);
@@ -5765,6 +5766,7 @@ void main() {
             'selection-swatch-purple',
             'selection-note',
             'selection-copy',
+            'selection-search',
           ]) {
             expect(find.byKey(ValueKey(key)), findsOneWidget);
           }

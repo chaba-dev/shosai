@@ -1149,6 +1149,63 @@ void main() {
       );
     });
 
+    testWidgets('a reader’s selection opens it on the selected text', (
+      tester,
+    ) async {
+      ReaderPlaceRequests? requests;
+      await _pump(
+        tester,
+        const Size(1280, 800),
+        readerBuilder:
+            (
+              bridge,
+              book,
+              settings,
+              path,
+              bookId,
+              locatorChanged,
+              noticeReporter,
+              openBooksAction,
+              displayChanged,
+              placeRequests,
+            ) {
+              requests = placeRequests;
+              return ReaderScreen(
+                bridge: bridge,
+                initialPath: path,
+                initialBookId: bookId,
+                initialSettings: harnessReaderSettings,
+                placeRequests: placeRequests,
+                onLocatorChanged: locatorChanged,
+                noticeReporter: noticeReporter,
+                openBooksAction: openBooksAction,
+                onDisplayChanged: displayChanged,
+              );
+            },
+      );
+      await _open(tester, 1);
+      for (var frame = 0; frame < 8; frame += 1) {
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+
+      // The reader's Search action on a selection asks for this.
+      requests!.openSearch!(query: 'quiet page');
+      for (var frame = 0; frame < 8; frame += 1) {
+        await tester.pump(const Duration(milliseconds: 32));
+      }
+      expect(palette, findsOneWidget);
+      final field = find.descendant(
+        of: find.byKey(const ValueKey('shell-search-field')),
+        matching: find.byType(EditableText),
+      );
+      expect(tester.widget<EditableText>(field).controller.text, 'quiet page');
+      expect(
+        find.byKey(const ValueKey('shell-search-scope')),
+        findsOneWidget,
+        reason: 'it searches this book first',
+      );
+    });
+
     testWidgets('its last results scroll above a phone’s keyboard', (
       tester,
     ) async {

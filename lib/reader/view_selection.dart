@@ -2,7 +2,7 @@ part of 'view.dart';
 
 /// The selection capsule (`docs/design-system.md`, Highlight): an `inverse`
 /// capsule with five colour swatches that save at once, a hairline, then
-/// **Note** (saves yellow and opens the editor) and **Copy**.
+/// **Note** (saves yellow and opens the editor), **Copy** and **Search**.
 ///
 /// Controls are `control-height` with a pointer and `touch-target` on tablet
 /// and phone. The capsule keeps one row: when the labelled actions do not fit,
@@ -77,6 +77,15 @@ class _SelectionActions extends StatelessWidget {
             ? () => dispatch(const ReaderSelectionCopyRequested())
             : null,
         focus: copyFocus,
+      ),
+      (
+        key: const ValueKey('selection-search'),
+        icon: LucideIcons.search,
+        label: l10n.readerSearchAction,
+        onPressed: copyEnabled && model.typography.searchable
+            ? () => dispatch(const ReaderSelectionSearchRequested())
+            : null,
+        focus: false,
       ),
     ];
 
