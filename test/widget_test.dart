@@ -6026,8 +6026,6 @@ void main() {
     await gesture.moveBy(Offset(side * .5, side * .5));
     await gesture.up();
     await tester.pump();
-    await tester.tapAt(topLeft + Offset(side * .2, side * .2));
-    await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.f10);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);

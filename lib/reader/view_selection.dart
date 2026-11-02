@@ -1174,6 +1174,14 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     _tapPointer = null;
     _tapOrigin = null;
     if (!isTap) return;
+    // A touch tap anywhere on the page leaves a finished selection, as Esc
+    // does; the capsule has no Cancel. (A mouse press already cancels on
+    // pointer down.) It neither follows a link nor turns the page.
+    if (details.kind != ui.PointerDeviceKind.mouse &&
+        widget.model.selectionPhase == ReaderSelectionPhase.selected) {
+      widget.dispatch(const ReaderSelectionCancelled());
+      return;
+    }
     final pageTap = _ReaderPageTapScope.tap(
       context,
       details.globalPosition,

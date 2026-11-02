@@ -739,6 +739,29 @@ void main() {
       expect(bridge.created, isEmpty);
     });
 
+    testWidgets('a touch tap anywhere on the page dismisses the surface', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge();
+      await _open(tester, _reader(bridge: bridge));
+      // There is no Cancel: on touch a tap on the page, even on the selected
+      // text where a mouse press would start a new selection, leaves it.
+      for (final at in [
+        () => renderedFixtureOffset(tester, 8),
+        () => const Offset(30, 300),
+      ]) {
+        await dragFixtureSelection(tester, from: 4, to: 12);
+        await settleReaderSelection(tester);
+        expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+
+        await tester.tapAt(at(), kind: ui.PointerDeviceKind.touch);
+        await settleReaderSelection(tester);
+        expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+      }
+      expect(bridge.created, isEmpty);
+    });
+
     testWidgets('the action surface stays inside the viewport', (tester) async {
       _setView(tester, const Size(390, 844));
       await _open(tester, _reader(bridge: _SelectionBridge()));

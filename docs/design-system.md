@@ -236,7 +236,7 @@ On phones, Contents, Aa, Bookmark and Notes move to the bottom bar. Search lives
 - Selecting text raises an `inverse` capsule above the selection (below when there is no room): five colour swatches that save at once, a hairline, then **Note** (saves yellow and opens the editor), **Copy** and **Search**.
 - A swatch is a 24 px disc in its `swatch-*` colour, ringed in `on-inverse` so it reads on the dark capsule. It is a button named for its colour (*Yellow highlight*), with a tooltip of the same words. Colours are never written out as text buttons.
 - With a pointer each control is `control-height` (32 px); on tablet and phone every swatch and action is a `touch-target` (44 px). The capsule keeps one row: where the labelled actions do not fit (a phone), **Note**, **Copy** and **Search** become icons (`message-square-text`, `copy`, `search`) named and tooltipped with the same words. Only when even that does not fit (large text on a narrow screen) do the actions move to a second row under the swatches.
-- There is no **Cancel**: a tap outside the selection or Esc dismisses the capsule.
+- There is no **Cancel**: Esc, a click outside the selection or, on touch, a tap anywhere on the page dismisses the capsule and the selection (the tap neither turns the page nor follows a link).
 - Fills are `hl-*` at 40% with `radius-xs` corners that wrap per line. A highlight with a note gets a dotted underline (`sh-hl--noted`); the one open in the notes panel or just jumped to gets a 2 px `accent` ring (`sh-hl--focus`).
 - Tapping a highlight opens the swatches with **Edit note**, **Copy** and **Delete**. Never label colours ("Important").
 
