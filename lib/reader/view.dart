@@ -981,8 +981,16 @@ class _ReaderScreenState extends State<ReaderScreen>
     // stay with the panel. The controller's requests for the document's focus
     // while it is covered (a note chosen in the panel) fail, so focus stays on
     // the chosen note; closing the panel returns it to the toolbar.
+    final desktopPlatform = switch (defaultTargetPlatform) {
+      TargetPlatform.macOS ||
+      TargetPlatform.linux ||
+      TargetPlatform.windows => true,
+      _ => false,
+    };
     final hintShown =
         layout != ShellLayout.desktop &&
+        !desktopPlatform &&
+        !model.pointerChrome &&
         !model.zonesHintDismissed &&
         model.document != null &&
         !model.busy;
@@ -1144,10 +1152,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (panel == null ||
         _readerPanelPresentation(panel, layout) !=
             _ReaderPanelPresentation.docked) {
-      return _pointerReveal(layout, stage);
+      return _pointerReveal(stage);
     }
     return _pointerReveal(
-      layout,
       Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1168,7 +1175,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  Widget _pointerReveal(ShellLayout layout, Widget child) => Listener(
+  Widget _pointerReveal(Widget child) => Listener(
     onPointerDown: (event) {
       if (event.kind != ui.PointerDeviceKind.mouse) {
         _controller.dispatch(ReaderTouchStarted(event.pointer));
@@ -1185,12 +1192,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       }
     },
     child: MouseRegion(
-      onHover: layout != ShellLayout.desktop
-          ? null
-          : (_) => _controller.dispatch(const ReaderPointerMoved()),
-      onExit: layout != ShellLayout.desktop
-          ? null
-          : (_) => _controller.dispatch(const ReaderPointerExited()),
+      onHover: (_) => _controller.dispatch(const ReaderPointerMoved()),
+      onExit: (_) => _controller.dispatch(const ReaderPointerExited()),
       child: child,
     ),
   );

@@ -1563,6 +1563,9 @@ final class ReaderController implements Listenable {
     }
     if (!message.touch) {
       _hideChrome();
+      if (!_model.pointerChrome) {
+        _emit(_model.copyWith(pointerChrome: true));
+      }
       return;
     }
     _chromeTimer?.cancel();

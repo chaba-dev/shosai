@@ -459,9 +459,8 @@ class _ReaderPageTapScopeState extends State<_ReaderPageTapScope> {
         return ReaderPageTapped(
           box.globalToLocal(global).dx / box.size.width,
           touch:
-              kind != ui.PointerDeviceKind.mouse ||
-              ShellLayout.forWidth(MediaQuery.sizeOf(context).width) !=
-                  ShellLayout.desktop,
+              kind != ui.PointerDeviceKind.mouse &&
+              kind != ui.PointerDeviceKind.trackpad,
         );
       }
 
@@ -573,26 +572,35 @@ class _ReaderPageFurniture extends StatelessWidget {
         children: [
           SizedBox(
             height: 28,
-            child: Row(
-              children: [
-                for (final ordinal in physical)
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        // Chapter openings leave this space quiet, with the title below.
-                        ordinal == null ||
-                                ordinal == 1 ||
-                                model.document == null
-                            ? ''
-                            : heading,
-                        key: const ValueKey('reader-running-head'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _readerFolioStyle(model),
+            child: AnimatedOpacity(
+              opacity: model.chromeShown ? 0 : 1,
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              child: ExcludeSemantics(
+                excluding: model.chromeShown,
+                child: Row(
+                  children: [
+                    for (final ordinal in physical)
+                      Expanded(
+                        child: Center(
+                          child: Text(
+                            // Chapter openings leave this space quiet, with the title below.
+                            ordinal == null ||
+                                    ordinal == 1 ||
+                                    model.document == null
+                                ? ''
+                                : heading,
+                            key: const ValueKey('reader-running-head'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _readerFolioStyle(model),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
           Expanded(child: child),
@@ -603,7 +611,13 @@ class _ReaderPageFurniture extends StatelessWidget {
                 for (final ordinal in physical)
                   Expanded(
                     child: Center(
-                      child: ordinal == null
+                      child:
+                          ordinal == null ||
+                              model.typography.progress ==
+                                      FlutterReaderProgress.percent &&
+                                  spread &&
+                                  ordinal !=
+                                      (model.progress.lastOrdinal ?? first)
                           ? const SizedBox.shrink()
                           : _ReaderFolio(model: model, ordinal: ordinal),
                     ),
