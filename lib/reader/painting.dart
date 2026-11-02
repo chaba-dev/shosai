@@ -1,5 +1,74 @@
 part of 'view.dart';
 
+/// Merges per-character [rects], in reading order, into one band per line:
+/// a rect joins the band before it when it sits beside that band's last rect
+/// on the same line (horizontal text) or below it in the same column
+/// (vertical text), with at most a line's size between them (a space or
+/// justification). A band keeps the direction it first grew in, so the next
+/// line or column starts a new band.
+@visibleForTesting
+List<Rect> selectionBands(Iterable<Rect> rects) {
+  final bands = <Rect>[];
+  Rect? last;
+  Axis? axis;
+  for (final rect in rects) {
+    if (rect.width <= 0 && rect.height <= 0) continue;
+    final previous = last;
+    last = rect;
+    if (previous == null) {
+      bands.add(rect);
+      axis = null;
+      continue;
+    }
+    final grows = _continues(previous, rect, axis);
+    if (grows == null) {
+      bands.add(rect);
+      axis = null;
+    } else {
+      bands.last = bands.last.expandToInclude(rect);
+      axis = grows;
+    }
+  }
+  return bands;
+}
+
+/// The axis along which [next] continues the line through [previous], or
+/// null when it starts a new line. A band already growing along [axis] only
+/// grows that way.
+Axis? _continues(Rect previous, Rect next, Axis? axis) {
+  double overlap(double a0, double a1, double b0, double b1) =>
+      math.min(a1, b1) - math.max(a0, b0);
+  double gap(double a0, double a1, double b0, double b1) =>
+      math.max(b0 - a1, a0 - b1);
+  if (axis != Axis.vertical) {
+    final size = math.max(previous.height, next.height);
+    final shared = overlap(
+      previous.top,
+      previous.bottom,
+      next.top,
+      next.bottom,
+    );
+    if (shared >= math.min(previous.height, next.height) * .5 &&
+        gap(previous.left, previous.right, next.left, next.right) <= size) {
+      return Axis.horizontal;
+    }
+  }
+  if (axis != Axis.horizontal) {
+    final size = math.max(previous.width, next.width);
+    final shared = overlap(
+      previous.left,
+      previous.right,
+      next.left,
+      next.right,
+    );
+    if (shared >= math.min(previous.width, next.width) * .5 &&
+        gap(previous.top, previous.bottom, next.top, next.bottom) <= size) {
+      return Axis.vertical;
+    }
+  }
+  return null;
+}
+
 class PagePainter extends CustomPainter {
   const PagePainter({
     required this.image,
@@ -51,13 +120,7 @@ class PagePainter extends CustomPainter {
       );
     }
     for (final saved in savedSelections) {
-      _paintRange(
-        canvas,
-        saved.start,
-        saved.end,
-        _highlightColor(saved.color),
-        true,
-      );
+      _paintRange(canvas, saved.start, saved.end, _highlightColor(saved.color));
     }
     for (final annotation in annotations) {
       final unit = annotation.unit.toInt();
@@ -78,33 +141,30 @@ class PagePainter extends CustomPainter {
         anchor! < focus! ? anchor! : focus!,
         anchor! < focus! ? focus! : anchor!,
         ShosaiTokens.readerSelectionDragFill,
-        false,
+        outline: true,
       );
     }
     canvas.restore();
   }
 
-  void _paintRange(Canvas canvas, int start, int end, Color color, bool saved) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    final border = Paint()
-      ..color = color.withAlpha(220)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = saved ? 1.5 : 1;
-    for (final endpoint in surface.endpoints) {
-      final rangeStart = endpoint.rangeStart.toInt();
-      final rangeEnd = endpoint.rangeEnd.toInt();
-      if (rangeStart >= end || start >= rangeEnd) continue;
-      final rect = endpoint.rect;
-      final area = Rect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom);
-      canvas.drawRect(area, paint);
-      if (saved) {
-        canvas.drawLine(area.bottomLeft, area.bottomRight, border);
-      } else {
-        canvas.drawRect(area, border);
-      }
-    }
+  void _paintRange(
+    Canvas canvas,
+    int start,
+    int end,
+    Color color, {
+    bool outline = false,
+  }) {
+    _paintBands(canvas, outline: outline, [
+      for (final endpoint in surface.endpoints)
+        if (endpoint.rangeStart.toInt() < end &&
+            start < endpoint.rangeEnd.toInt())
+          Rect.fromLTRB(
+            endpoint.rect.left,
+            endpoint.rect.top,
+            endpoint.rect.right,
+            endpoint.rect.bottom,
+          ),
+    ], color);
   }
 
   /// Paints a page's [rectangles], moved right by [dx] to where the page
@@ -115,22 +175,40 @@ class PagePainter extends CustomPainter {
     Color color,
     double dx,
   ) {
-    final fill = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    final border = Paint()
-      ..color = color.withAlpha(220)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    for (final rect in rectangles) {
-      final area = Rect.fromLTRB(
-        rect.left + dx,
-        rect.top,
-        rect.right + dx,
-        rect.bottom,
+    _paintBands(canvas, [
+      for (final rect in rectangles)
+        Rect.fromLTRB(rect.left + dx, rect.top, rect.right + dx, rect.bottom),
+    ], color);
+  }
+
+  /// Fills [rects] as one band per line (or column), `radius-xs` corners,
+  /// in one pass so overlaps never paint twice. An [outline] (the live
+  /// selection's cue that does not rely on colour) traces the bands' outer
+  /// edge, never the seams between them.
+  void _paintBands(
+    Canvas canvas,
+    List<Rect> rects,
+    Color color, {
+    bool outline = false,
+  }) {
+    if (rects.isEmpty) return;
+    const radius = Radius.circular(ShosaiTokens.radiusXs);
+    Path? shape;
+    for (final band in selectionBands(rects)) {
+      final next = Path()..addRRect(RRect.fromRectAndRadius(band, radius));
+      shape = shape == null
+          ? next
+          : Path.combine(PathOperation.union, shape, next);
+    }
+    canvas.drawPath(shape!, Paint()..color = color);
+    if (outline) {
+      canvas.drawPath(
+        shape,
+        Paint()
+          ..color = color.withAlpha(220)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
       );
-      canvas.drawRect(area, fill);
-      canvas.drawLine(area.bottomLeft, area.bottomRight, border);
     }
   }
 
