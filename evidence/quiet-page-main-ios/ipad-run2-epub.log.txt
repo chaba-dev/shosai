@@ -1,0 +1,321 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/12389A8A-E502-4177-AEAD-20FAFD3D77E0/tmp/qp-frames-Ovq11R
+QP data-dir: /private/var/mobile/Containers/Data/Application/12389A8A-E502-4177-AEAD-20FAFD3D77E0/tmp/qp-data-kJStCl
+QP imported: 3
+QP view: logical 1180.0x820.0 dpr 2.0 refresh 60.0
+QP ipad-01-library-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start size: 1180.0x820.0
+QP ipad-01-library-start stage: 
+QP ipad-01-library-start tap-area: 
+QP ipad-01-library-start surface: 
+QP ipad-01-library-start pdf-page: 
+QP ipad-01-library-start running-head: 
+QP ipad-01-library-start running-head-text: 
+QP ipad-01-library-start folio: 
+QP ipad-01-library-start folio-text: 
+QP ipad-01-library-start location:  []
+QP ipad-01-library-start header: 
+QP ipad-01-library-start phone-bar: 
+QP ipad-01-library-start rail: 
+QP ipad-01-library-start chrome: false
+SHOT ipad-01-library-start
+QP tap-row: margin
+QP epub-hint-shown: true
+QP epub-hint-tap-area: (80.0,24.0 1076.0x772.0)
+QP epub-hint-column: (80.0,0.0 269.0x820.0) = 0.0% .. 25.0% of the tap area
+QP epub-hint-column: (349.0,0.0 538.0x820.0) = 25.0% .. 75.0% of the tap area
+QP epub-hint-column: (887.0,0.0 269.0x820.0) = 75.0% .. 100.0% of the tap area
+QP ipad-02-epub-hint padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-02-epub-hint viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-02-epub-hint size: 1180.0x820.0
+QP ipad-02-epub-hint stage: (56.0,0.0 1124.0x820.0)
+QP ipad-02-epub-hint tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-02-epub-hint surface: (104.0,100.0 1028.0x626.0)
+QP ipad-02-epub-hint pdf-page: 
+QP ipad-02-epub-hint running-head: (361.0,80.5 0.0x11.0) (875.0,80.5 0.0x11.0)
+QP ipad-02-epub-hint running-head-text: 
+QP ipad-02-epub-hint folio: (346.4,735.0 29.3x12.0)
+QP ipad-02-epub-hint folio-text: page 1
+QP ipad-02-epub-hint location: 0 [page 1]
+QP ipad-02-epub-hint header: (56.0,-56.0 1124.0x56.0)
+QP ipad-02-epub-hint phone-bar: 
+QP ipad-02-epub-hint rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-02-epub-hint chrome: false
+SHOT ipad-02-epub-hint
+QP epub-hint-after-tap: false
+QP epub-hint-place: 0 [page 1] -> 0 [page 1]
+QP epub-hint-chrome-after-tap: false
+QP epub-open-ok: true
+QP ipad-03-epub-quiet padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-03-epub-quiet viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-03-epub-quiet size: 1180.0x820.0
+QP ipad-03-epub-quiet stage: (56.0,0.0 1124.0x820.0)
+QP ipad-03-epub-quiet tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-03-epub-quiet surface: (104.0,100.0 1028.0x626.0)
+QP ipad-03-epub-quiet pdf-page: 
+QP ipad-03-epub-quiet running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-03-epub-quiet running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-03-epub-quiet folio: (343.4,735.0 35.1x12.0) (857.3,735.0 35.4x12.0)
+QP ipad-03-epub-quiet folio-text: page 13 | page 14
+QP ipad-03-epub-quiet location: 11005 [page 13 | page 14]
+QP ipad-03-epub-quiet header: (56.0,-56.0 1124.0x56.0)
+QP ipad-03-epub-quiet phone-bar: 
+QP ipad-03-epub-quiet rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-03-epub-quiet chrome: false
+SHOT ipad-03-epub-quiet
+QP epub-quiet-ok: true
+QP epub-chrome-shown: true
+QP ipad-04-epub-chrome-shown padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-04-epub-chrome-shown viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-04-epub-chrome-shown size: 1180.0x820.0
+QP ipad-04-epub-chrome-shown stage: (56.0,0.0 1124.0x820.0)
+QP ipad-04-epub-chrome-shown tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-04-epub-chrome-shown surface: (104.0,100.0 1028.0x626.0)
+QP ipad-04-epub-chrome-shown pdf-page: 
+QP ipad-04-epub-chrome-shown running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-04-epub-chrome-shown running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-04-epub-chrome-shown folio: (343.4,735.0 35.1x12.0) (857.3,735.0 35.4x12.0)
+QP ipad-04-epub-chrome-shown folio-text: page 13 | page 14
+QP ipad-04-epub-chrome-shown location: 11005 [page 13 | page 14]
+QP ipad-04-epub-chrome-shown header: (56.0,32.0 1124.0x56.0)
+QP ipad-04-epub-chrome-shown phone-bar: 
+QP ipad-04-epub-chrome-shown rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-04-epub-chrome-shown chrome: true
+SHOT ipad-04-epub-chrome-shown
+QP epub-shown-same-surface: true
+QP epub-shown-same-location: true
+QP epub-shown-same-folio-text: true
+QP epub-shown-same-rail: true
+QP epub-shown-same-stage: true
+QP ipad-05-epub-chrome-hidden padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-epub-chrome-hidden viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-epub-chrome-hidden size: 1180.0x820.0
+QP ipad-05-epub-chrome-hidden stage: (56.0,0.0 1124.0x820.0)
+QP ipad-05-epub-chrome-hidden tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-05-epub-chrome-hidden surface: (104.0,100.0 1028.0x626.0)
+QP ipad-05-epub-chrome-hidden pdf-page: 
+QP ipad-05-epub-chrome-hidden running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-05-epub-chrome-hidden running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-05-epub-chrome-hidden folio: (343.4,735.0 35.1x12.0) (857.3,735.0 35.4x12.0)
+QP ipad-05-epub-chrome-hidden folio-text: page 13 | page 14
+QP ipad-05-epub-chrome-hidden location: 11005 [page 13 | page 14]
+QP ipad-05-epub-chrome-hidden header: (56.0,-56.0 1124.0x56.0)
+QP ipad-05-epub-chrome-hidden phone-bar: 
+QP ipad-05-epub-chrome-hidden rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-05-epub-chrome-hidden chrome: false
+SHOT ipad-05-epub-chrome-hidden
+QP epub-hidden-same-surface: true
+QP epub-hidden-same-location: true
+QP epub-hidden-same-folio-text: true
+QP epub-hidden-same-rail: true
+QP epub-hidden-same-stage: true
+QP epub-chrome-ok: true
+QP epub-zone 15%: previous (11005 [page 13 | page 14] -> 8514 [page 11 | page 12])
+QP ipad-06-epub-zone-15 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-06-epub-zone-15 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-06-epub-zone-15 size: 1180.0x820.0
+QP ipad-06-epub-zone-15 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-06-epub-zone-15 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-06-epub-zone-15 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-06-epub-zone-15 pdf-page: 
+QP ipad-06-epub-zone-15 running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-06-epub-zone-15 running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-06-epub-zone-15 folio: (344.4,735.0 33.2x12.0) (857.5,735.0 35.1x12.0)
+QP ipad-06-epub-zone-15 folio-text: page 11 | page 12
+QP ipad-06-epub-zone-15 location: 8514 [page 11 | page 12]
+QP ipad-06-epub-zone-15 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-06-epub-zone-15 phone-bar: 
+QP ipad-06-epub-zone-15 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-06-epub-zone-15 chrome: false
+SHOT ipad-06-epub-zone-15
+QP epub-zone 30%: chrome-shown (8514 [page 11 | page 12] -> 8514 [page 11 | page 12])
+QP epub-zone 50%: chrome-shown (8514 [page 11 | page 12] -> 8514 [page 11 | page 12])
+QP ipad-07-epub-zone-50 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-07-epub-zone-50 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-07-epub-zone-50 size: 1180.0x820.0
+QP ipad-07-epub-zone-50 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-07-epub-zone-50 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-07-epub-zone-50 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-07-epub-zone-50 pdf-page: 
+QP ipad-07-epub-zone-50 running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-07-epub-zone-50 running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-07-epub-zone-50 folio: (344.4,735.0 33.2x12.0) (857.5,735.0 35.1x12.0)
+QP ipad-07-epub-zone-50 folio-text: page 11 | page 12
+QP ipad-07-epub-zone-50 location: 8514 [page 11 | page 12]
+QP ipad-07-epub-zone-50 header: (56.0,32.0 1124.0x56.0)
+QP ipad-07-epub-zone-50 phone-bar: 
+QP ipad-07-epub-zone-50 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-07-epub-zone-50 chrome: true
+SHOT ipad-07-epub-zone-50
+QP epub-zone 70%: chrome-shown (8514 [page 11 | page 12] -> 8514 [page 11 | page 12])
+QP epub-zone 85%: next (8514 [page 11 | page 12] -> 11005 [page 13 | page 14])
+QP ipad-08-epub-zone-85 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-08-epub-zone-85 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-08-epub-zone-85 size: 1180.0x820.0
+QP ipad-08-epub-zone-85 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-08-epub-zone-85 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-08-epub-zone-85 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-08-epub-zone-85 pdf-page: 
+QP ipad-08-epub-zone-85 running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-08-epub-zone-85 running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-08-epub-zone-85 folio: (343.4,735.0 35.1x12.0) (857.3,735.0 35.4x12.0)
+QP ipad-08-epub-zone-85 folio-text: page 13 | page 14
+QP ipad-08-epub-zone-85 location: 11005 [page 13 | page 14]
+QP ipad-08-epub-zone-85 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-08-epub-zone-85 phone-bar: 
+QP ipad-08-epub-zone-85 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-08-epub-zone-85 chrome: false
+SHOT ipad-08-epub-zone-85
+QP epub-zone 23%: previous (11005 [page 13 | page 14] -> 8514 [page 11 | page 12])
+QP epub-zone 27%: chrome-shown (8514 [page 11 | page 12] -> 8514 [page 11 | page 12])
+QP epub-zone 73%: chrome-shown (8514 [page 11 | page 12] -> 8514 [page 11 | page 12])
+QP epub-zone 77%: next (8514 [page 11 | page 12] -> 11005 [page 13 | page 14])
+QP epub-zones-ok: true
+QP epub-idle-shown: true
+QP epub-idle-hid-after-ms: 3057
+QP epub-idle-ok: true
+QP epub-panel-6s-chrome: false
+QP epub-panel-6s-panel: true
+QP epub-panel-6s-never-hid: true
+QP ipad-09-epub-display-panel-6s padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-09-epub-display-panel-6s viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-09-epub-display-panel-6s size: 1180.0x820.0
+QP ipad-09-epub-display-panel-6s stage: (56.0,0.0 1124.0x820.0)
+QP ipad-09-epub-display-panel-6s tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-09-epub-display-panel-6s surface: (104.0,100.0 1028.0x626.0)
+QP ipad-09-epub-display-panel-6s pdf-page: 
+QP ipad-09-epub-display-panel-6s running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-09-epub-display-panel-6s running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-09-epub-display-panel-6s folio: (343.4,735.0 35.1x12.0) (857.3,735.0 35.4x12.0)
+QP ipad-09-epub-display-panel-6s folio-text: page 13 | page 14
+QP ipad-09-epub-display-panel-6s location: 11005 [page 13 | page 14]
+QP ipad-09-epub-display-panel-6s header: (56.0,32.0 1124.0x56.0)
+QP ipad-09-epub-display-panel-6s phone-bar: 
+QP ipad-09-epub-display-panel-6s rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-09-epub-display-panel-6s chrome: false
+SHOT ipad-09-epub-display-panel-6s
+QP epub-panel-idle-ok: true
+QP epub-curl-tap-forward: 11005 [page 13 | page 14] -> 13400 [page 15 | page 16]; curl frames 4/20 (first 24ms, last 374ms)
+QP epub-curl-tap-back: 13400 [page 15 | page 16] -> 11005 [page 13 | page 14]; curl frames 5/18 (first 25ms, last 375ms)
+QP epub-curl-tap-ok: true
+QP epub-held-curl: true
+QP epub-held-place: 11005 [page 13 | page 14] -> 11005 [page 13 | page 14]
+QP ipad-10-epub-curl-held padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-10-epub-curl-held viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-10-epub-curl-held size: 1180.0x820.0
+QP ipad-10-epub-curl-held stage: (56.0,0.0 1124.0x820.0)
+QP ipad-10-epub-curl-held tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-10-epub-curl-held surface: (104.0,100.0 1028.0x626.0)
+QP ipad-10-epub-curl-held pdf-page: 
+QP ipad-10-epub-curl-held running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-10-epub-curl-held running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-10-epub-curl-held folio: (343.4,735.0 35.1x12.0) (857.3,735.0 35.4x12.0)
+QP ipad-10-epub-curl-held folio-text: page 13 | page 14
+QP ipad-10-epub-curl-held location: 11005 [page 13 | page 14]
+QP ipad-10-epub-curl-held header: (56.0,-56.0 1124.0x56.0)
+QP ipad-10-epub-curl-held phone-bar: 
+QP ipad-10-epub-curl-held rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-10-epub-curl-held chrome: false
+SHOT ipad-10-epub-curl-held
+QP epub-held-curl-after-shot: true
+QP epub-held-release: 11005 [page 13 | page 14] -> 11005 [page 13 | page 14]; curl false; chrome false
+QP ipad-11-epub-curl-fell-back padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-epub-curl-fell-back viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-epub-curl-fell-back size: 1180.0x820.0
+QP ipad-11-epub-curl-fell-back stage: (56.0,0.0 1124.0x820.0)
+QP ipad-11-epub-curl-fell-back tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-11-epub-curl-fell-back surface: (104.0,100.0 1028.0x626.0)
+QP ipad-11-epub-curl-fell-back pdf-page: 
+QP ipad-11-epub-curl-fell-back running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-11-epub-curl-fell-back running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-11-epub-curl-fell-back folio: (343.4,735.0 35.1x12.0) (857.3,735.0 35.4x12.0)
+QP ipad-11-epub-curl-fell-back folio-text: page 13 | page 14
+QP ipad-11-epub-curl-fell-back location: 11005 [page 13 | page 14]
+QP ipad-11-epub-curl-fell-back header: (56.0,-56.0 1124.0x56.0)
+QP ipad-11-epub-curl-fell-back phone-bar: 
+QP ipad-11-epub-curl-fell-back rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-11-epub-curl-fell-back chrome: false
+SHOT ipad-11-epub-curl-fell-back
+QP epub-past-curl: true
+QP epub-past-release: 11005 [page 13 | page 14] -> 13400 [page 15 | page 16]; curl false; chrome false
+QP ipad-12-epub-curl-turned padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-12-epub-curl-turned viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-12-epub-curl-turned size: 1180.0x820.0
+QP ipad-12-epub-curl-turned stage: (56.0,0.0 1124.0x820.0)
+QP ipad-12-epub-curl-turned tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-12-epub-curl-turned surface: (104.0,100.0 1028.0x626.0)
+QP ipad-12-epub-curl-turned pdf-page: 
+QP ipad-12-epub-curl-turned running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-12-epub-curl-turned running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-12-epub-curl-turned folio: (343.5,735.0 34.9x12.0) (857.4,735.0 35.2x12.0)
+QP ipad-12-epub-curl-turned folio-text: page 15 | page 16
+QP ipad-12-epub-curl-turned location: 13400 [page 15 | page 16]
+QP ipad-12-epub-curl-turned header: (56.0,-56.0 1124.0x56.0)
+QP ipad-12-epub-curl-turned phone-bar: 
+QP ipad-12-epub-curl-turned rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-12-epub-curl-turned chrome: false
+SHOT ipad-12-epub-curl-turned
+QP epub-curl-held-ok: true
+QP epub-frames: frames=331 refresh=60.0Hz budget=16.7ms build p50/p95/max=0.38/0.64/7.74 raster p50/p95/max=0.95/2.87/3.60 total p95=0.55 over-budget(build or raster)=0 over-16.7ms=0
+QP epub-curl-timing-ok: true
+QP epub-animations-switch: false
+QP ipad-13-epub-animations-off-panel padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-13-epub-animations-off-panel viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-13-epub-animations-off-panel size: 1180.0x820.0
+QP ipad-13-epub-animations-off-panel stage: (56.0,0.0 1124.0x820.0)
+QP ipad-13-epub-animations-off-panel tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-13-epub-animations-off-panel surface: (104.0,100.0 1028.0x626.0)
+QP ipad-13-epub-animations-off-panel pdf-page: 
+QP ipad-13-epub-animations-off-panel running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-13-epub-animations-off-panel running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-13-epub-animations-off-panel folio: (343.5,735.0 34.9x12.0) (857.4,735.0 35.2x12.0)
+QP ipad-13-epub-animations-off-panel folio-text: page 15 | page 16
+QP ipad-13-epub-animations-off-panel location: 13400 [page 15 | page 16]
+QP ipad-13-epub-animations-off-panel header: (56.0,32.0 1124.0x56.0)
+QP ipad-13-epub-animations-off-panel phone-bar: 
+QP ipad-13-epub-animations-off-panel rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-13-epub-animations-off-panel chrome: false
+SHOT ipad-13-epub-animations-off-panel
+QP epub-animations-off-turn: 13400 [page 15 | page 16] -> 15900 [page 17 | page 18]; curl frames 0/28 (first nullms, last nullms)
+QP epub-animations-switch: true
+QP ipad-14-epub-animations-on-panel padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-14-epub-animations-on-panel viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-14-epub-animations-on-panel size: 1180.0x820.0
+QP ipad-14-epub-animations-on-panel stage: (56.0,0.0 1124.0x820.0)
+QP ipad-14-epub-animations-on-panel tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-14-epub-animations-on-panel surface: (104.0,100.0 1028.0x626.0)
+QP ipad-14-epub-animations-on-panel pdf-page: 
+QP ipad-14-epub-animations-on-panel running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-14-epub-animations-on-panel running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-14-epub-animations-on-panel folio: (343.5,735.0 34.9x12.0) (857.4,735.0 35.2x12.0)
+QP ipad-14-epub-animations-on-panel folio-text: page 15 | page 16
+QP ipad-14-epub-animations-on-panel location: 13400 [page 15 | page 16]
+QP ipad-14-epub-animations-on-panel header: (56.0,32.0 1124.0x56.0)
+QP ipad-14-epub-animations-on-panel phone-bar: 
+QP ipad-14-epub-animations-on-panel rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-14-epub-animations-on-panel chrome: false
+SHOT ipad-14-epub-animations-on-panel
+QP epub-animations-on-turn: 13400 [page 15 | page 16] -> 15900 [page 17 | page 18]; curl frames 4/20 (first 19ms, last 368ms)
+QP epub-animations-ok: true
+QP end-in-library: true
+QP ipad-15-library-end padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-15-library-end viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-15-library-end size: 1180.0x820.0
+QP ipad-15-library-end stage: 
+QP ipad-15-library-end tap-area: 
+QP ipad-15-library-end surface: 
+QP ipad-15-library-end pdf-page: 
+QP ipad-15-library-end running-head: 
+QP ipad-15-library-end running-head-text: 
+QP ipad-15-library-end folio: 
+QP ipad-15-library-end folio-text: 
+QP ipad-15-library-end location:  []
+QP ipad-15-library-end header: 
+QP ipad-15-library-end phone-bar: 
+QP ipad-15-library-end rail: 
+QP ipad-15-library-end chrome: false
+SHOT ipad-15-library-end
+QP end-library-ok: true
+App terminated due to signal 9.

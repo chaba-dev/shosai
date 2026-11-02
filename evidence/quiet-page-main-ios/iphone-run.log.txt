@@ -1,0 +1,706 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/8778202E-D054-4075-A866-CC10C911EBA8/tmp/qp-frames-ua6E9x
+QP data-dir: /private/var/mobile/Containers/Data/Application/8778202E-D054-4075-A866-CC10C911EBA8/tmp/qp-data-kh5W7c
+QP imported: 3
+QP view: logical 430.0x932.0 dpr 3.0 refresh 120.0
+QP iphone-01-library-start padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-01-library-start viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-01-library-start size: 430.0x932.0
+QP iphone-01-library-start stage: 
+QP iphone-01-library-start tap-area: 
+QP iphone-01-library-start surface: 
+QP iphone-01-library-start pdf-page: 
+QP iphone-01-library-start running-head: 
+QP iphone-01-library-start running-head-text: 
+QP iphone-01-library-start folio: 
+QP iphone-01-library-start folio-text: 
+QP iphone-01-library-start location:  []
+QP iphone-01-library-start header: 
+QP iphone-01-library-start phone-bar: 
+QP iphone-01-library-start rail: 
+QP iphone-01-library-start chrome: false
+SHOT iphone-01-library-start
+QP epub-hint-shown: true
+QP epub-hint-tap-area: (0.0,0.0 430.0x932.0)
+QP epub-hint-column: (0.0,0.0 107.5x932.0) = 0.0% .. 25.0% of the tap area
+QP epub-hint-column: (107.5,0.0 215.0x932.0) = 25.0% .. 75.0% of the tap area
+QP epub-hint-column: (322.5,0.0 107.5x932.0) = 75.0% .. 100.0% of the tap area
+QP iphone-02-epub-hint padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-02-epub-hint viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-02-epub-hint size: 430.0x932.0
+QP iphone-02-epub-hint stage: (0.0,0.0 430.0x932.0)
+QP iphone-02-epub-hint tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-02-epub-hint surface: (0.0,87.0 430.0x782.0)
+QP iphone-02-epub-hint pdf-page: 
+QP iphone-02-epub-hint running-head: (215.0,66.0 0.0x14.0)
+QP iphone-02-epub-hint running-head-text: 
+QP iphone-02-epub-hint folio: (197.4,877.0 35.2x14.0)
+QP iphone-02-epub-hint folio-text: page 1
+QP iphone-02-epub-hint location: 0 [page 1]
+QP iphone-02-epub-hint header: (0.0,-56.0 430.0x56.0)
+QP iphone-02-epub-hint phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-02-epub-hint rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-02-epub-hint chrome: false
+SHOT iphone-02-epub-hint
+QP epub-hint-after-tap: false
+QP epub-hint-place: 0 [page 1] -> 0 [page 1]
+QP epub-hint-chrome-after-tap: false
+QP epub-open-ok: true
+QP iphone-03-epub-quiet padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-03-epub-quiet viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-03-epub-quiet size: 430.0x932.0
+QP iphone-03-epub-quiet stage: (0.0,0.0 430.0x932.0)
+QP iphone-03-epub-quiet tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-03-epub-quiet surface: (0.0,87.0 430.0x782.0)
+QP iphone-03-epub-quiet pdf-page: 
+QP iphone-03-epub-quiet running-head: (152.0,66.0 126.1x14.0)
+QP iphone-03-epub-quiet running-head-text: PRIDE. and PREJUDICE
+QP iphone-03-epub-quiet folio: (196.5,877.0 37.0x14.0)
+QP iphone-03-epub-quiet folio-text: page 7
+QP iphone-03-epub-quiet location: 5472 [page 7]
+QP iphone-03-epub-quiet header: (0.0,-56.0 430.0x56.0)
+QP iphone-03-epub-quiet phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-03-epub-quiet rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-03-epub-quiet chrome: false
+SHOT iphone-03-epub-quiet
+QP epub-quiet-ok: true
+QP epub-chrome-shown: true
+QP iphone-04-epub-chrome-shown padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-04-epub-chrome-shown viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-04-epub-chrome-shown size: 430.0x932.0
+QP iphone-04-epub-chrome-shown stage: (0.0,0.0 430.0x932.0)
+QP iphone-04-epub-chrome-shown tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-04-epub-chrome-shown surface: (0.0,87.0 430.0x782.0)
+QP iphone-04-epub-chrome-shown pdf-page: 
+QP iphone-04-epub-chrome-shown running-head: (152.0,66.0 126.1x14.0)
+QP iphone-04-epub-chrome-shown running-head-text: PRIDE. and PREJUDICE
+QP iphone-04-epub-chrome-shown folio: (196.5,877.0 37.0x14.0)
+QP iphone-04-epub-chrome-shown folio-text: page 7
+QP iphone-04-epub-chrome-shown location: 5472 [page 7]
+QP iphone-04-epub-chrome-shown header: (0.0,59.0 430.0x56.0)
+QP iphone-04-epub-chrome-shown phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-04-epub-chrome-shown rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-04-epub-chrome-shown chrome: true
+SHOT iphone-04-epub-chrome-shown
+QP epub-shown-same-surface: true
+QP epub-shown-same-location: true
+QP epub-shown-same-folio-text: true
+QP epub-shown-same-rail: false
+QP epub-shown-same-stage: true
+QP iphone-05-epub-chrome-hidden padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-05-epub-chrome-hidden viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-05-epub-chrome-hidden size: 430.0x932.0
+QP iphone-05-epub-chrome-hidden stage: (0.0,0.0 430.0x932.0)
+QP iphone-05-epub-chrome-hidden tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-05-epub-chrome-hidden surface: (0.0,87.0 430.0x782.0)
+QP iphone-05-epub-chrome-hidden pdf-page: 
+QP iphone-05-epub-chrome-hidden running-head: (152.0,66.0 126.1x14.0)
+QP iphone-05-epub-chrome-hidden running-head-text: PRIDE. and PREJUDICE
+QP iphone-05-epub-chrome-hidden folio: (196.5,877.0 37.0x14.0)
+QP iphone-05-epub-chrome-hidden folio-text: page 7
+QP iphone-05-epub-chrome-hidden location: 5472 [page 7]
+QP iphone-05-epub-chrome-hidden header: (0.0,-56.0 430.0x56.0)
+QP iphone-05-epub-chrome-hidden phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-05-epub-chrome-hidden rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-05-epub-chrome-hidden chrome: false
+SHOT iphone-05-epub-chrome-hidden
+QP epub-hidden-same-surface: true
+QP epub-hidden-same-location: true
+QP epub-hidden-same-folio-text: true
+QP epub-hidden-same-rail: true
+QP epub-hidden-same-stage: true
+QP epub-chrome-ok: true
+QP epub-zone 15%: previous (5472 [page 7] -> 4135 [page 6])
+QP iphone-06-epub-zone-15 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-06-epub-zone-15 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-06-epub-zone-15 size: 430.0x932.0
+QP iphone-06-epub-zone-15 stage: (0.0,0.0 430.0x932.0)
+QP iphone-06-epub-zone-15 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-06-epub-zone-15 surface: (0.0,87.0 430.0x782.0)
+QP iphone-06-epub-zone-15 pdf-page: 
+QP iphone-06-epub-zone-15 running-head: (152.0,66.0 126.1x14.0)
+QP iphone-06-epub-zone-15 running-head-text: PRIDE. and PREJUDICE
+QP iphone-06-epub-zone-15 folio: (196.2,877.0 37.6x14.0)
+QP iphone-06-epub-zone-15 folio-text: page 6
+QP iphone-06-epub-zone-15 location: 4135 [page 6]
+QP iphone-06-epub-zone-15 header: (0.0,-56.0 430.0x56.0)
+QP iphone-06-epub-zone-15 phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-06-epub-zone-15 rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-06-epub-zone-15 chrome: false
+SHOT iphone-06-epub-zone-15
+QP epub-zone 30%: chrome-shown (4135 [page 6] -> 4135 [page 6])
+QP epub-zone 50%: chrome-shown (4135 [page 6] -> 4135 [page 6])
+QP iphone-07-epub-zone-50 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-07-epub-zone-50 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-07-epub-zone-50 size: 430.0x932.0
+QP iphone-07-epub-zone-50 stage: (0.0,0.0 430.0x932.0)
+QP iphone-07-epub-zone-50 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-07-epub-zone-50 surface: (0.0,87.0 430.0x782.0)
+QP iphone-07-epub-zone-50 pdf-page: 
+QP iphone-07-epub-zone-50 running-head: (152.0,66.0 126.1x14.0)
+QP iphone-07-epub-zone-50 running-head-text: PRIDE. and PREJUDICE
+QP iphone-07-epub-zone-50 folio: (196.2,877.0 37.6x14.0)
+QP iphone-07-epub-zone-50 folio-text: page 6
+QP iphone-07-epub-zone-50 location: 4135 [page 6]
+QP iphone-07-epub-zone-50 header: (0.0,59.0 430.0x56.0)
+QP iphone-07-epub-zone-50 phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-07-epub-zone-50 rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-07-epub-zone-50 chrome: true
+SHOT iphone-07-epub-zone-50
+QP epub-zone 70%: chrome-shown (4135 [page 6] -> 4135 [page 6])
+QP epub-zone 85%: next (4135 [page 6] -> 5472 [page 7])
+QP iphone-08-epub-zone-85 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-08-epub-zone-85 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-08-epub-zone-85 size: 430.0x932.0
+QP iphone-08-epub-zone-85 stage: (0.0,0.0 430.0x932.0)
+QP iphone-08-epub-zone-85 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-08-epub-zone-85 surface: (0.0,87.0 430.0x782.0)
+QP iphone-08-epub-zone-85 pdf-page: 
+QP iphone-08-epub-zone-85 running-head: (152.0,66.0 126.1x14.0)
+QP iphone-08-epub-zone-85 running-head-text: PRIDE. and PREJUDICE
+QP iphone-08-epub-zone-85 folio: (196.5,877.0 37.0x14.0)
+QP iphone-08-epub-zone-85 folio-text: page 7
+QP iphone-08-epub-zone-85 location: 5472 [page 7]
+QP iphone-08-epub-zone-85 header: (0.0,-56.0 430.0x56.0)
+QP iphone-08-epub-zone-85 phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-08-epub-zone-85 rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-08-epub-zone-85 chrome: false
+SHOT iphone-08-epub-zone-85
+QP epub-zone 23%: previous (5472 [page 7] -> 4135 [page 6])
+QP epub-zone 27%: chrome-shown (4135 [page 6] -> 4135 [page 6])
+QP epub-zone 73%: chrome-shown (4135 [page 6] -> 4135 [page 6])
+QP epub-zone 77%: next (4135 [page 6] -> 5472 [page 7])
+QP epub-zones-ok: true
+QP epub-idle-shown: true
+QP epub-idle-hid-after-ms: 3037
+QP epub-idle-ok: true
+QP epub-panel-6s-chrome: true
+QP epub-panel-6s-panel: true
+QP epub-panel-6s-never-hid: true
+QP iphone-09-epub-display-panel-6s padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-09-epub-display-panel-6s viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-09-epub-display-panel-6s size: 430.0x932.0
+QP iphone-09-epub-display-panel-6s stage: (0.0,0.0 430.0x932.0)
+QP iphone-09-epub-display-panel-6s tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-09-epub-display-panel-6s surface: (0.0,87.0 430.0x782.0)
+QP iphone-09-epub-display-panel-6s pdf-page: 
+QP iphone-09-epub-display-panel-6s running-head: (152.0,66.0 126.1x14.0)
+QP iphone-09-epub-display-panel-6s running-head-text: PRIDE. and PREJUDICE
+QP iphone-09-epub-display-panel-6s folio: (196.5,877.0 37.0x14.0)
+QP iphone-09-epub-display-panel-6s folio-text: page 7
+QP iphone-09-epub-display-panel-6s location: 5472 [page 7]
+QP iphone-09-epub-display-panel-6s header: (0.0,59.0 430.0x56.0)
+QP iphone-09-epub-display-panel-6s phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-09-epub-display-panel-6s rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-09-epub-display-panel-6s chrome: true
+SHOT iphone-09-epub-display-panel-6s
+QP epub-panel-idle-ok: true
+QP epub-curl-tap-forward: 5472 [page 7] -> 6768 [page 8]; curl frames 7/29 (first 26ms, last 334ms)
+QP epub-curl-tap-back: 6768 [page 8] -> 5472 [page 7]; curl frames 7/29 (first 26ms, last 325ms)
+QP epub-curl-tap-ok: true
+QP epub-held-curl: true
+QP epub-held-place: 5472 [page 7] -> 5472 [page 7]
+QP iphone-10-epub-curl-held padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-10-epub-curl-held viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-10-epub-curl-held size: 430.0x932.0
+QP iphone-10-epub-curl-held stage: (0.0,0.0 430.0x932.0)
+QP iphone-10-epub-curl-held tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-10-epub-curl-held surface: (0.0,87.0 430.0x782.0)
+QP iphone-10-epub-curl-held pdf-page: 
+QP iphone-10-epub-curl-held running-head: (152.0,66.0 126.1x14.0)
+QP iphone-10-epub-curl-held running-head-text: PRIDE. and PREJUDICE
+QP iphone-10-epub-curl-held folio: (196.5,877.0 37.0x14.0)
+QP iphone-10-epub-curl-held folio-text: page 7
+QP iphone-10-epub-curl-held location: 5472 [page 7]
+QP iphone-10-epub-curl-held header: (0.0,-56.0 430.0x56.0)
+QP iphone-10-epub-curl-held phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-10-epub-curl-held rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-10-epub-curl-held chrome: false
+SHOT iphone-10-epub-curl-held
+QP epub-held-curl-after-shot: true
+QP epub-held-release: 5472 [page 7] -> 5472 [page 7]; curl false; chrome false
+QP iphone-11-epub-curl-fell-back padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-11-epub-curl-fell-back viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-11-epub-curl-fell-back size: 430.0x932.0
+QP iphone-11-epub-curl-fell-back stage: (0.0,0.0 430.0x932.0)
+QP iphone-11-epub-curl-fell-back tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-11-epub-curl-fell-back surface: (0.0,87.0 430.0x782.0)
+QP iphone-11-epub-curl-fell-back pdf-page: 
+QP iphone-11-epub-curl-fell-back running-head: (152.0,66.0 126.1x14.0)
+QP iphone-11-epub-curl-fell-back running-head-text: PRIDE. and PREJUDICE
+QP iphone-11-epub-curl-fell-back folio: (196.5,877.0 37.0x14.0)
+QP iphone-11-epub-curl-fell-back folio-text: page 7
+QP iphone-11-epub-curl-fell-back location: 5472 [page 7]
+QP iphone-11-epub-curl-fell-back header: (0.0,-56.0 430.0x56.0)
+QP iphone-11-epub-curl-fell-back phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-11-epub-curl-fell-back rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-11-epub-curl-fell-back chrome: false
+SHOT iphone-11-epub-curl-fell-back
+QP epub-past-curl: true
+QP epub-past-release: 5472 [page 7] -> 6768 [page 8]; curl false; chrome false
+QP iphone-12-epub-curl-turned padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-12-epub-curl-turned viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-12-epub-curl-turned size: 430.0x932.0
+QP iphone-12-epub-curl-turned stage: (0.0,0.0 430.0x932.0)
+QP iphone-12-epub-curl-turned tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-12-epub-curl-turned surface: (0.0,87.0 430.0x782.0)
+QP iphone-12-epub-curl-turned pdf-page: 
+QP iphone-12-epub-curl-turned running-head: (152.0,66.0 126.1x14.0)
+QP iphone-12-epub-curl-turned running-head-text: PRIDE. and PREJUDICE
+QP iphone-12-epub-curl-turned folio: (196.2,877.0 37.6x14.0)
+QP iphone-12-epub-curl-turned folio-text: page 8
+QP iphone-12-epub-curl-turned location: 6768 [page 8]
+QP iphone-12-epub-curl-turned header: (0.0,-56.0 430.0x56.0)
+QP iphone-12-epub-curl-turned phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-12-epub-curl-turned rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-12-epub-curl-turned chrome: false
+SHOT iphone-12-epub-curl-turned
+QP epub-curl-held-ok: true
+QP epub-frames: frames=552 refresh=120.0Hz budget=8.3ms build p50/p95/max=0.30/0.40/11.19 raster p50/p95/max=0.48/1.12/2.23 total p95=0.78 over-budget(build or raster)=2 over-16.7ms=0
+QP epub-curl-timing-ok: true
+QP epub-animations-switch: false
+QP iphone-13-epub-animations-off-panel padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-13-epub-animations-off-panel viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-13-epub-animations-off-panel size: 430.0x932.0
+QP iphone-13-epub-animations-off-panel stage: (0.0,0.0 430.0x932.0)
+QP iphone-13-epub-animations-off-panel tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-13-epub-animations-off-panel surface: (0.0,87.0 430.0x782.0)
+QP iphone-13-epub-animations-off-panel pdf-page: 
+QP iphone-13-epub-animations-off-panel running-head: (152.0,66.0 126.1x14.0)
+QP iphone-13-epub-animations-off-panel running-head-text: PRIDE. and PREJUDICE
+QP iphone-13-epub-animations-off-panel folio: (196.2,877.0 37.6x14.0)
+QP iphone-13-epub-animations-off-panel folio-text: page 8
+QP iphone-13-epub-animations-off-panel location: 6768 [page 8]
+QP iphone-13-epub-animations-off-panel header: (0.0,59.0 430.0x56.0)
+QP iphone-13-epub-animations-off-panel phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-13-epub-animations-off-panel rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-13-epub-animations-off-panel chrome: true
+SHOT iphone-13-epub-animations-off-panel
+QP epub-animations-off-turn: 6768 [page 8] -> 8089 [page 9]; curl frames 0/36 (first nullms, last nullms)
+QP epub-animations-switch: true
+QP iphone-14-epub-animations-on-panel padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-14-epub-animations-on-panel viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-14-epub-animations-on-panel size: 430.0x932.0
+QP iphone-14-epub-animations-on-panel stage: (0.0,0.0 430.0x932.0)
+QP iphone-14-epub-animations-on-panel tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-14-epub-animations-on-panel surface: (0.0,87.0 430.0x782.0)
+QP iphone-14-epub-animations-on-panel pdf-page: 
+QP iphone-14-epub-animations-on-panel running-head: (152.0,66.0 126.1x14.0)
+QP iphone-14-epub-animations-on-panel running-head-text: PRIDE. and PREJUDICE
+QP iphone-14-epub-animations-on-panel folio: (196.2,877.0 37.6x14.0)
+QP iphone-14-epub-animations-on-panel folio-text: page 8
+QP iphone-14-epub-animations-on-panel location: 6768 [page 8]
+QP iphone-14-epub-animations-on-panel header: (0.0,59.0 430.0x56.0)
+QP iphone-14-epub-animations-on-panel phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-14-epub-animations-on-panel rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-14-epub-animations-on-panel chrome: true
+SHOT iphone-14-epub-animations-on-panel
+QP epub-animations-on-turn: 6768 [page 8] -> 8089 [page 9]; curl frames 7/29 (first 27ms, last 326ms)
+QP epub-animations-ok: true
+QP pdf-hint-shown: false
+QP pdf-open-ok: true
+QP iphone-15-pdf-quiet padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-15-pdf-quiet viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-15-pdf-quiet size: 430.0x932.0
+QP iphone-15-pdf-quiet stage: (0.0,0.0 430.0x932.0)
+QP iphone-15-pdf-quiet tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-15-pdf-quiet surface: (0.0,0.0 430.0x859.0)
+QP iphone-15-pdf-quiet pdf-page: 
+QP iphone-15-pdf-quiet running-head: 
+QP iphone-15-pdf-quiet running-head-text: 
+QP iphone-15-pdf-quiet folio: (181.5,872.0 66.9x14.0)
+QP iphone-15-pdf-quiet folio-text: page 3 of 15
+QP iphone-15-pdf-quiet location: 2 [page 3 of 15]
+QP iphone-15-pdf-quiet header: (0.0,-56.0 430.0x56.0)
+QP iphone-15-pdf-quiet phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-15-pdf-quiet rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-15-pdf-quiet chrome: false
+SHOT iphone-15-pdf-quiet
+QP pdf-quiet-ok: true
+QP pdf-chrome-shown: true
+QP iphone-16-pdf-chrome-shown padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-16-pdf-chrome-shown viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-16-pdf-chrome-shown size: 430.0x932.0
+QP iphone-16-pdf-chrome-shown stage: (0.0,0.0 430.0x932.0)
+QP iphone-16-pdf-chrome-shown tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-16-pdf-chrome-shown surface: (0.0,0.0 430.0x859.0)
+QP iphone-16-pdf-chrome-shown pdf-page: 
+QP iphone-16-pdf-chrome-shown running-head: 
+QP iphone-16-pdf-chrome-shown running-head-text: 
+QP iphone-16-pdf-chrome-shown folio: (181.5,872.0 66.9x14.0)
+QP iphone-16-pdf-chrome-shown folio-text: page 3 of 15
+QP iphone-16-pdf-chrome-shown location: 2 [page 3 of 15]
+QP iphone-16-pdf-chrome-shown header: (0.0,59.0 430.0x56.0)
+QP iphone-16-pdf-chrome-shown phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-16-pdf-chrome-shown rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-16-pdf-chrome-shown chrome: true
+SHOT iphone-16-pdf-chrome-shown
+QP pdf-shown-same-surface: true
+QP pdf-shown-same-location: true
+QP pdf-shown-same-folio-text: true
+QP pdf-shown-same-rail: false
+QP pdf-shown-same-stage: true
+QP iphone-17-pdf-chrome-hidden padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-17-pdf-chrome-hidden viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-17-pdf-chrome-hidden size: 430.0x932.0
+QP iphone-17-pdf-chrome-hidden stage: (0.0,0.0 430.0x932.0)
+QP iphone-17-pdf-chrome-hidden tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-17-pdf-chrome-hidden surface: (0.0,0.0 430.0x859.0)
+QP iphone-17-pdf-chrome-hidden pdf-page: 
+QP iphone-17-pdf-chrome-hidden running-head: 
+QP iphone-17-pdf-chrome-hidden running-head-text: 
+QP iphone-17-pdf-chrome-hidden folio: (181.5,872.0 66.9x14.0)
+QP iphone-17-pdf-chrome-hidden folio-text: page 3 of 15
+QP iphone-17-pdf-chrome-hidden location: 2 [page 3 of 15]
+QP iphone-17-pdf-chrome-hidden header: (0.0,-56.0 430.0x56.0)
+QP iphone-17-pdf-chrome-hidden phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-17-pdf-chrome-hidden rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-17-pdf-chrome-hidden chrome: false
+SHOT iphone-17-pdf-chrome-hidden
+QP pdf-hidden-same-surface: true
+QP pdf-hidden-same-location: true
+QP pdf-hidden-same-folio-text: true
+QP pdf-hidden-same-rail: true
+QP pdf-hidden-same-stage: true
+QP pdf-chrome-ok: true
+QP pdf-zone 15%: previous (2 [page 3 of 15] -> 1 [page 2 of 15])
+QP iphone-18-pdf-zone-15 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-18-pdf-zone-15 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-18-pdf-zone-15 size: 430.0x932.0
+QP iphone-18-pdf-zone-15 stage: (0.0,0.0 430.0x932.0)
+QP iphone-18-pdf-zone-15 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-18-pdf-zone-15 surface: (0.0,0.0 430.0x859.0)
+QP iphone-18-pdf-zone-15 pdf-page: 
+QP iphone-18-pdf-zone-15 running-head: 
+QP iphone-18-pdf-zone-15 running-head-text: 
+QP iphone-18-pdf-zone-15 folio: (181.6,872.0 66.8x14.0)
+QP iphone-18-pdf-zone-15 folio-text: page 2 of 15
+QP iphone-18-pdf-zone-15 location: 1 [page 2 of 15]
+QP iphone-18-pdf-zone-15 header: (0.0,-56.0 430.0x56.0)
+QP iphone-18-pdf-zone-15 phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-18-pdf-zone-15 rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-18-pdf-zone-15 chrome: false
+SHOT iphone-18-pdf-zone-15
+QP pdf-zone 30%: chrome-shown (1 [page 2 of 15] -> 1 [page 2 of 15])
+QP pdf-zone 50%: chrome-shown (1 [page 2 of 15] -> 1 [page 2 of 15])
+QP iphone-19-pdf-zone-50 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-19-pdf-zone-50 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-19-pdf-zone-50 size: 430.0x932.0
+QP iphone-19-pdf-zone-50 stage: (0.0,0.0 430.0x932.0)
+QP iphone-19-pdf-zone-50 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-19-pdf-zone-50 surface: (0.0,0.0 430.0x859.0)
+QP iphone-19-pdf-zone-50 pdf-page: 
+QP iphone-19-pdf-zone-50 running-head: 
+QP iphone-19-pdf-zone-50 running-head-text: 
+QP iphone-19-pdf-zone-50 folio: (181.6,872.0 66.8x14.0)
+QP iphone-19-pdf-zone-50 folio-text: page 2 of 15
+QP iphone-19-pdf-zone-50 location: 1 [page 2 of 15]
+QP iphone-19-pdf-zone-50 header: (0.0,59.0 430.0x56.0)
+QP iphone-19-pdf-zone-50 phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-19-pdf-zone-50 rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-19-pdf-zone-50 chrome: true
+SHOT iphone-19-pdf-zone-50
+QP pdf-zone 70%: chrome-shown (1 [page 2 of 15] -> 1 [page 2 of 15])
+QP pdf-zone 85%: next (1 [page 2 of 15] -> 2 [page 3 of 15])
+QP iphone-20-pdf-zone-85 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-20-pdf-zone-85 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-20-pdf-zone-85 size: 430.0x932.0
+QP iphone-20-pdf-zone-85 stage: (0.0,0.0 430.0x932.0)
+QP iphone-20-pdf-zone-85 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-20-pdf-zone-85 surface: (0.0,0.0 430.0x859.0)
+QP iphone-20-pdf-zone-85 pdf-page: 
+QP iphone-20-pdf-zone-85 running-head: 
+QP iphone-20-pdf-zone-85 running-head-text: 
+QP iphone-20-pdf-zone-85 folio: (181.5,872.0 66.9x14.0)
+QP iphone-20-pdf-zone-85 folio-text: page 3 of 15
+QP iphone-20-pdf-zone-85 location: 2 [page 3 of 15]
+QP iphone-20-pdf-zone-85 header: (0.0,-56.0 430.0x56.0)
+QP iphone-20-pdf-zone-85 phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-20-pdf-zone-85 rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-20-pdf-zone-85 chrome: false
+SHOT iphone-20-pdf-zone-85
+QP pdf-zone 23%: previous (2 [page 3 of 15] -> 1 [page 2 of 15])
+QP pdf-zone 27%: chrome-shown (1 [page 2 of 15] -> 1 [page 2 of 15])
+QP pdf-zone 73%: chrome-shown (1 [page 2 of 15] -> 1 [page 2 of 15])
+QP pdf-zone 77%: next (1 [page 2 of 15] -> 2 [page 3 of 15])
+QP pdf-zones-ok: true
+QP pdf-idle-shown: true
+QP pdf-idle-hid-after-ms: 3335
+QP pdf-idle-ok: true
+QP pdf-curl-tap-forward: 2 [page 3 of 15] -> 3 [page 4 of 15]; curl frames 9/31 (first 373ms, last 697ms)
+QP pdf-curl-tap-back: 3 [page 4 of 15] -> 2 [page 3 of 15]; curl frames 9/31 (first 395ms, last 703ms)
+QP pdf-curl-tap-ok: true
+QP pdf-held-curl: true
+QP pdf-held-place: 2 [page 3 of 15] -> 2 [page 3 of 15]
+QP iphone-21-pdf-curl-held padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-21-pdf-curl-held viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-21-pdf-curl-held size: 430.0x932.0
+QP iphone-21-pdf-curl-held stage: (0.0,0.0 430.0x932.0)
+QP iphone-21-pdf-curl-held tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-21-pdf-curl-held surface: (0.0,0.0 430.0x859.0)
+QP iphone-21-pdf-curl-held pdf-page: 
+QP iphone-21-pdf-curl-held running-head: 
+QP iphone-21-pdf-curl-held running-head-text: 
+QP iphone-21-pdf-curl-held folio: (181.5,872.0 66.9x14.0)
+QP iphone-21-pdf-curl-held folio-text: page 3 of 15
+QP iphone-21-pdf-curl-held location: 2 [page 3 of 15]
+QP iphone-21-pdf-curl-held header: (0.0,-56.0 430.0x56.0)
+QP iphone-21-pdf-curl-held phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-21-pdf-curl-held rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-21-pdf-curl-held chrome: false
+SHOT iphone-21-pdf-curl-held
+QP pdf-held-curl-after-shot: true
+QP pdf-held-release: 2 [page 3 of 15] -> 2 [page 3 of 15]; curl false; chrome false
+QP iphone-22-pdf-curl-fell-back padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-22-pdf-curl-fell-back viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-22-pdf-curl-fell-back size: 430.0x932.0
+QP iphone-22-pdf-curl-fell-back stage: (0.0,0.0 430.0x932.0)
+QP iphone-22-pdf-curl-fell-back tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-22-pdf-curl-fell-back surface: (0.0,0.0 430.0x859.0)
+QP iphone-22-pdf-curl-fell-back pdf-page: 
+QP iphone-22-pdf-curl-fell-back running-head: 
+QP iphone-22-pdf-curl-fell-back running-head-text: 
+QP iphone-22-pdf-curl-fell-back folio: (181.5,872.0 66.9x14.0)
+QP iphone-22-pdf-curl-fell-back folio-text: page 3 of 15
+QP iphone-22-pdf-curl-fell-back location: 2 [page 3 of 15]
+QP iphone-22-pdf-curl-fell-back header: (0.0,-56.0 430.0x56.0)
+QP iphone-22-pdf-curl-fell-back phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-22-pdf-curl-fell-back rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-22-pdf-curl-fell-back chrome: false
+SHOT iphone-22-pdf-curl-fell-back
+QP pdf-past-curl: true
+QP pdf-past-release: 2 [page 3 of 15] -> 3 [page 4 of 15]; curl false; chrome false
+QP iphone-23-pdf-curl-turned padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-23-pdf-curl-turned viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-23-pdf-curl-turned size: 430.0x932.0
+QP iphone-23-pdf-curl-turned stage: (0.0,0.0 430.0x932.0)
+QP iphone-23-pdf-curl-turned tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-23-pdf-curl-turned surface: (0.0,0.0 430.0x859.0)
+QP iphone-23-pdf-curl-turned pdf-page: 
+QP iphone-23-pdf-curl-turned running-head: 
+QP iphone-23-pdf-curl-turned running-head-text: 
+QP iphone-23-pdf-curl-turned folio: (181.4,872.0 67.2x14.0)
+QP iphone-23-pdf-curl-turned folio-text: page 4 of 15
+QP iphone-23-pdf-curl-turned location: 3 [page 4 of 15]
+QP iphone-23-pdf-curl-turned header: (0.0,-56.0 430.0x56.0)
+QP iphone-23-pdf-curl-turned phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-23-pdf-curl-turned rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-23-pdf-curl-turned chrome: false
+SHOT iphone-23-pdf-curl-turned
+QP pdf-curl-held-ok: true
+QP pdf-frames: frames=572 refresh=120.0Hz budget=8.3ms build p50/p95/max=0.20/0.45/3.89 raster p50/p95/max=0.40/0.54/1.16 total p95=0.57 over-budget(build or raster)=0 over-16.7ms=0
+QP pdf-curl-timing-ok: true
+QP neko-hint-shown: false
+QP neko-open-ok: true
+QP iphone-24-neko-quiet padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-24-neko-quiet viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-24-neko-quiet size: 430.0x932.0
+QP iphone-24-neko-quiet stage: (0.0,0.0 430.0x932.0)
+QP iphone-24-neko-quiet tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-24-neko-quiet surface: (0.0,87.0 430.0x782.0)
+QP iphone-24-neko-quiet pdf-page: 
+QP iphone-24-neko-quiet running-head: (209.4,66.0 11.3x14.0)
+QP iphone-24-neko-quiet running-head-text: 一
+QP iphone-24-neko-quiet folio: (196.2,877.0 37.6x14.0)
+QP iphone-24-neko-quiet folio-text: page 3
+QP iphone-24-neko-quiet location: 973 [page 3]
+QP iphone-24-neko-quiet header: (0.0,-56.0 430.0x56.0)
+QP iphone-24-neko-quiet phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-24-neko-quiet rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-24-neko-quiet chrome: false
+SHOT iphone-24-neko-quiet
+QP neko-quiet-ok: true
+QP neko-chrome-shown: true
+QP iphone-25-neko-chrome-shown padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-25-neko-chrome-shown viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-25-neko-chrome-shown size: 430.0x932.0
+QP iphone-25-neko-chrome-shown stage: (0.0,0.0 430.0x932.0)
+QP iphone-25-neko-chrome-shown tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-25-neko-chrome-shown surface: (0.0,87.0 430.0x782.0)
+QP iphone-25-neko-chrome-shown pdf-page: 
+QP iphone-25-neko-chrome-shown running-head: (209.4,66.0 11.3x14.0)
+QP iphone-25-neko-chrome-shown running-head-text: 一
+QP iphone-25-neko-chrome-shown folio: (196.2,877.0 37.6x14.0)
+QP iphone-25-neko-chrome-shown folio-text: page 3
+QP iphone-25-neko-chrome-shown location: 973 [page 3]
+QP iphone-25-neko-chrome-shown header: (0.0,59.0 430.0x56.0)
+QP iphone-25-neko-chrome-shown phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-25-neko-chrome-shown rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-25-neko-chrome-shown chrome: true
+SHOT iphone-25-neko-chrome-shown
+QP neko-shown-same-surface: true
+QP neko-shown-same-location: true
+QP neko-shown-same-folio-text: true
+QP neko-shown-same-rail: false
+QP neko-shown-same-stage: true
+QP iphone-26-neko-chrome-hidden padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-26-neko-chrome-hidden viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-26-neko-chrome-hidden size: 430.0x932.0
+QP iphone-26-neko-chrome-hidden stage: (0.0,0.0 430.0x932.0)
+QP iphone-26-neko-chrome-hidden tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-26-neko-chrome-hidden surface: (0.0,87.0 430.0x782.0)
+QP iphone-26-neko-chrome-hidden pdf-page: 
+QP iphone-26-neko-chrome-hidden running-head: (209.4,66.0 11.3x14.0)
+QP iphone-26-neko-chrome-hidden running-head-text: 一
+QP iphone-26-neko-chrome-hidden folio: (196.2,877.0 37.6x14.0)
+QP iphone-26-neko-chrome-hidden folio-text: page 3
+QP iphone-26-neko-chrome-hidden location: 973 [page 3]
+QP iphone-26-neko-chrome-hidden header: (0.0,-56.0 430.0x56.0)
+QP iphone-26-neko-chrome-hidden phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-26-neko-chrome-hidden rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-26-neko-chrome-hidden chrome: false
+SHOT iphone-26-neko-chrome-hidden
+QP neko-hidden-same-surface: true
+QP neko-hidden-same-location: true
+QP neko-hidden-same-folio-text: true
+QP neko-hidden-same-rail: true
+QP neko-hidden-same-stage: true
+QP neko-chrome-ok: true
+QP neko-zone 15%: next (973 [page 3] -> 1556 [page 4])
+QP iphone-27-neko-zone-15 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-27-neko-zone-15 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-27-neko-zone-15 size: 430.0x932.0
+QP iphone-27-neko-zone-15 stage: (0.0,0.0 430.0x932.0)
+QP iphone-27-neko-zone-15 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-27-neko-zone-15 surface: (0.0,87.0 430.0x782.0)
+QP iphone-27-neko-zone-15 pdf-page: 
+QP iphone-27-neko-zone-15 running-head: (209.4,66.0 11.3x14.0)
+QP iphone-27-neko-zone-15 running-head-text: 一
+QP iphone-27-neko-zone-15 folio: (196.1,877.0 37.9x14.0)
+QP iphone-27-neko-zone-15 folio-text: page 4
+QP iphone-27-neko-zone-15 location: 1556 [page 4]
+QP iphone-27-neko-zone-15 header: (0.0,-56.0 430.0x56.0)
+QP iphone-27-neko-zone-15 phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-27-neko-zone-15 rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-27-neko-zone-15 chrome: false
+SHOT iphone-27-neko-zone-15
+QP neko-zone 30%: chrome-shown (1556 [page 4] -> 1556 [page 4])
+QP neko-zone 50%: chrome-shown (1556 [page 4] -> 1556 [page 4])
+QP iphone-28-neko-zone-50 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-28-neko-zone-50 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-28-neko-zone-50 size: 430.0x932.0
+QP iphone-28-neko-zone-50 stage: (0.0,0.0 430.0x932.0)
+QP iphone-28-neko-zone-50 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-28-neko-zone-50 surface: (0.0,87.0 430.0x782.0)
+QP iphone-28-neko-zone-50 pdf-page: 
+QP iphone-28-neko-zone-50 running-head: (209.4,66.0 11.3x14.0)
+QP iphone-28-neko-zone-50 running-head-text: 一
+QP iphone-28-neko-zone-50 folio: (196.1,877.0 37.9x14.0)
+QP iphone-28-neko-zone-50 folio-text: page 4
+QP iphone-28-neko-zone-50 location: 1556 [page 4]
+QP iphone-28-neko-zone-50 header: (0.0,59.0 430.0x56.0)
+QP iphone-28-neko-zone-50 phone-bar: (0.0,833.0 430.0x65.0)
+QP iphone-28-neko-zone-50 rail: Search (326.0,64.5 44.0x44.0); Notes (378.0,854.0 44.0x44.0)
+QP iphone-28-neko-zone-50 chrome: true
+SHOT iphone-28-neko-zone-50
+QP neko-zone 70%: chrome-shown (1556 [page 4] -> 1556 [page 4])
+QP neko-zone 85%: previous (1556 [page 4] -> 973 [page 3])
+QP iphone-29-neko-zone-85 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-29-neko-zone-85 viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-29-neko-zone-85 size: 430.0x932.0
+QP iphone-29-neko-zone-85 stage: (0.0,0.0 430.0x932.0)
+QP iphone-29-neko-zone-85 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-29-neko-zone-85 surface: (0.0,87.0 430.0x782.0)
+QP iphone-29-neko-zone-85 pdf-page: 
+QP iphone-29-neko-zone-85 running-head: (209.4,66.0 11.3x14.0)
+QP iphone-29-neko-zone-85 running-head-text: 一
+QP iphone-29-neko-zone-85 folio: (196.2,877.0 37.6x14.0)
+QP iphone-29-neko-zone-85 folio-text: page 3
+QP iphone-29-neko-zone-85 location: 973 [page 3]
+QP iphone-29-neko-zone-85 header: (0.0,-56.0 430.0x56.0)
+QP iphone-29-neko-zone-85 phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-29-neko-zone-85 rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-29-neko-zone-85 chrome: false
+SHOT iphone-29-neko-zone-85
+QP neko-zone 23%: next (973 [page 3] -> 1556 [page 4])
+QP neko-zone 27%: chrome-shown (1556 [page 4] -> 1556 [page 4])
+QP neko-zone 73%: chrome-shown (1556 [page 4] -> 1556 [page 4])
+QP neko-zone 77%: previous (1556 [page 4] -> 973 [page 3])
+QP neko-zones-ok: true
+QP neko-idle-shown: true
+QP neko-idle-hid-after-ms: 3036
+QP neko-idle-ok: true
+QP neko-curl-tap-forward: 973 [page 3] -> 1556 [page 4]; curl frames 7/30 (first 22ms, last 313ms)
+QP neko-curl-tap-back: 1556 [page 4] -> 973 [page 3]; curl frames 7/29 (first 20ms, last 319ms)
+QP neko-curl-tap-ok: true
+QP neko-held-curl: true
+QP neko-held-place: 973 [page 3] -> 973 [page 3]
+QP iphone-30-neko-curl-held padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-30-neko-curl-held viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-30-neko-curl-held size: 430.0x932.0
+QP iphone-30-neko-curl-held stage: (0.0,0.0 430.0x932.0)
+QP iphone-30-neko-curl-held tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-30-neko-curl-held surface: (0.0,87.0 430.0x782.0)
+QP iphone-30-neko-curl-held pdf-page: 
+QP iphone-30-neko-curl-held running-head: (209.4,66.0 11.3x14.0)
+QP iphone-30-neko-curl-held running-head-text: 一
+QP iphone-30-neko-curl-held folio: (196.2,877.0 37.6x14.0)
+QP iphone-30-neko-curl-held folio-text: page 3
+QP iphone-30-neko-curl-held location: 973 [page 3]
+QP iphone-30-neko-curl-held header: (0.0,-56.0 430.0x56.0)
+QP iphone-30-neko-curl-held phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-30-neko-curl-held rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-30-neko-curl-held chrome: false
+SHOT iphone-30-neko-curl-held
+QP neko-held-curl-after-shot: true
+QP neko-held-release: 973 [page 3] -> 973 [page 3]; curl false; chrome false
+QP iphone-31-neko-curl-fell-back padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-31-neko-curl-fell-back viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-31-neko-curl-fell-back size: 430.0x932.0
+QP iphone-31-neko-curl-fell-back stage: (0.0,0.0 430.0x932.0)
+QP iphone-31-neko-curl-fell-back tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-31-neko-curl-fell-back surface: (0.0,87.0 430.0x782.0)
+QP iphone-31-neko-curl-fell-back pdf-page: 
+QP iphone-31-neko-curl-fell-back running-head: (209.4,66.0 11.3x14.0)
+QP iphone-31-neko-curl-fell-back running-head-text: 一
+QP iphone-31-neko-curl-fell-back folio: (196.2,877.0 37.6x14.0)
+QP iphone-31-neko-curl-fell-back folio-text: page 3
+QP iphone-31-neko-curl-fell-back location: 973 [page 3]
+QP iphone-31-neko-curl-fell-back header: (0.0,-56.0 430.0x56.0)
+QP iphone-31-neko-curl-fell-back phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-31-neko-curl-fell-back rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-31-neko-curl-fell-back chrome: false
+SHOT iphone-31-neko-curl-fell-back
+QP neko-past-curl: true
+QP neko-past-release: 973 [page 3] -> 1556 [page 4]; curl false; chrome false
+QP iphone-32-neko-curl-turned padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-32-neko-curl-turned viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-32-neko-curl-turned size: 430.0x932.0
+QP iphone-32-neko-curl-turned stage: (0.0,0.0 430.0x932.0)
+QP iphone-32-neko-curl-turned tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-32-neko-curl-turned surface: (0.0,87.0 430.0x782.0)
+QP iphone-32-neko-curl-turned pdf-page: 
+QP iphone-32-neko-curl-turned running-head: (209.4,66.0 11.3x14.0)
+QP iphone-32-neko-curl-turned running-head-text: 一
+QP iphone-32-neko-curl-turned folio: (196.1,877.0 37.9x14.0)
+QP iphone-32-neko-curl-turned folio-text: page 4
+QP iphone-32-neko-curl-turned location: 1556 [page 4]
+QP iphone-32-neko-curl-turned header: (0.0,-56.0 430.0x56.0)
+QP iphone-32-neko-curl-turned phone-bar: (0.0,932.0 430.0x65.0)
+QP iphone-32-neko-curl-turned rail: Search (326.0,-50.5 44.0x44.0); Notes (378.0,953.0 44.0x44.0)
+QP iphone-32-neko-curl-turned chrome: false
+SHOT iphone-32-neko-curl-turned
+QP neko-curl-held-ok: true
+QP neko-frames: frames=552 refresh=120.0Hz budget=8.3ms build p50/p95/max=0.30/0.41/7.51 raster p50/p95/max=0.52/3.92/4.16 total p95=3.58 over-budget(build or raster)=0 over-16.7ms=0
+QP neko-curl-timing-ok: true
+QP end-in-library: true
+QP iphone-33-library-end padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-33-library-end viewPadding: L0.0 T59.0 R0.0 B34.0
+QP iphone-33-library-end size: 430.0x932.0
+QP iphone-33-library-end stage: 
+QP iphone-33-library-end tap-area: 
+QP iphone-33-library-end surface: 
+QP iphone-33-library-end pdf-page: 
+QP iphone-33-library-end running-head: 
+QP iphone-33-library-end running-head-text: 
+QP iphone-33-library-end folio: 
+QP iphone-33-library-end folio-text: 
+QP iphone-33-library-end location:  []
+QP iphone-33-library-end header: 
+QP iphone-33-library-end phone-bar: 
+QP iphone-33-library-end rail: 
+QP iphone-33-library-end chrome: false
+SHOT iphone-33-library-end
+QP end-library-ok: true
+App terminated due to signal 9.

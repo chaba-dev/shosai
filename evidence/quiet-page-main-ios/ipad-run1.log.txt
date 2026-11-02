@@ -1,0 +1,706 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/75763140-DA14-421B-99DA-B1897206D02C/tmp/qp-frames-iZh6S3
+QP data-dir: /private/var/mobile/Containers/Data/Application/75763140-DA14-421B-99DA-B1897206D02C/tmp/qp-data-N7KLDm
+QP imported: 3
+QP view: logical 1180.0x820.0 dpr 2.0 refresh 60.0
+QP ipad-01-library-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start size: 1180.0x820.0
+QP ipad-01-library-start stage: 
+QP ipad-01-library-start tap-area: 
+QP ipad-01-library-start surface: 
+QP ipad-01-library-start pdf-page: 
+QP ipad-01-library-start running-head: 
+QP ipad-01-library-start running-head-text: 
+QP ipad-01-library-start folio: 
+QP ipad-01-library-start folio-text: 
+QP ipad-01-library-start location:  []
+QP ipad-01-library-start header: 
+QP ipad-01-library-start phone-bar: 
+QP ipad-01-library-start rail: 
+QP ipad-01-library-start chrome: false
+SHOT ipad-01-library-start
+QP epub-hint-shown: true
+QP epub-hint-tap-area: (80.0,24.0 1076.0x772.0)
+QP epub-hint-column: (80.0,0.0 269.0x820.0) = 0.0% .. 25.0% of the tap area
+QP epub-hint-column: (349.0,0.0 538.0x820.0) = 25.0% .. 75.0% of the tap area
+QP epub-hint-column: (887.0,0.0 269.0x820.0) = 75.0% .. 100.0% of the tap area
+QP ipad-02-epub-hint padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-02-epub-hint viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-02-epub-hint size: 1180.0x820.0
+QP ipad-02-epub-hint stage: (56.0,0.0 1124.0x820.0)
+QP ipad-02-epub-hint tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-02-epub-hint surface: (104.0,100.0 1028.0x626.0)
+QP ipad-02-epub-hint pdf-page: 
+QP ipad-02-epub-hint running-head: (361.0,80.5 0.0x11.0) (875.0,80.5 0.0x11.0)
+QP ipad-02-epub-hint running-head-text: 
+QP ipad-02-epub-hint folio: (346.4,735.0 29.3x12.0)
+QP ipad-02-epub-hint folio-text: page 1
+QP ipad-02-epub-hint location: 0 [page 1]
+QP ipad-02-epub-hint header: (56.0,-56.0 1124.0x56.0)
+QP ipad-02-epub-hint phone-bar: 
+QP ipad-02-epub-hint rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-02-epub-hint chrome: false
+SHOT ipad-02-epub-hint
+QP epub-hint-after-tap: false
+QP epub-hint-place: 0 [page 1] -> 0 [page 1]
+QP epub-hint-chrome-after-tap: false
+QP epub-open-ok: true
+QP ipad-03-epub-quiet padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-03-epub-quiet viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-03-epub-quiet size: 1180.0x820.0
+QP ipad-03-epub-quiet stage: (56.0,0.0 1124.0x820.0)
+QP ipad-03-epub-quiet tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-03-epub-quiet surface: (104.0,100.0 1028.0x626.0)
+QP ipad-03-epub-quiet pdf-page: 
+QP ipad-03-epub-quiet running-head: (361.0,80.5 0.0x11.0) (822.6,80.0 104.7x12.0)
+QP ipad-03-epub-quiet running-head-text: PRIDE. and PREJUDICE
+QP ipad-03-epub-quiet folio: (346.4,735.0 29.3x12.0) (859.4,735.0 31.1x12.0)
+QP ipad-03-epub-quiet folio-text: page 1 | page 2
+QP ipad-03-epub-quiet location: 0 [page 1 | page 2]
+QP ipad-03-epub-quiet header: (56.0,-56.0 1124.0x56.0)
+QP ipad-03-epub-quiet phone-bar: 
+QP ipad-03-epub-quiet rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-03-epub-quiet chrome: false
+SHOT ipad-03-epub-quiet
+QP epub-quiet-ok: true
+QP epub-chrome-shown: true
+QP ipad-04-epub-chrome-shown padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-04-epub-chrome-shown viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-04-epub-chrome-shown size: 1180.0x820.0
+QP ipad-04-epub-chrome-shown stage: (56.0,0.0 1124.0x820.0)
+QP ipad-04-epub-chrome-shown tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-04-epub-chrome-shown surface: (104.0,100.0 1028.0x626.0)
+QP ipad-04-epub-chrome-shown pdf-page: 
+QP ipad-04-epub-chrome-shown running-head: (361.0,80.5 0.0x11.0) (822.6,80.0 104.7x12.0)
+QP ipad-04-epub-chrome-shown running-head-text: PRIDE. and PREJUDICE
+QP ipad-04-epub-chrome-shown folio: (346.4,735.0 29.3x12.0) (859.4,735.0 31.1x12.0)
+QP ipad-04-epub-chrome-shown folio-text: page 1 | page 2
+QP ipad-04-epub-chrome-shown location: 0 [page 1 | page 2]
+QP ipad-04-epub-chrome-shown header: (56.0,32.0 1124.0x56.0)
+QP ipad-04-epub-chrome-shown phone-bar: 
+QP ipad-04-epub-chrome-shown rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-04-epub-chrome-shown chrome: true
+SHOT ipad-04-epub-chrome-shown
+QP epub-shown-same-surface: true
+QP epub-shown-same-location: true
+QP epub-shown-same-folio-text: true
+QP epub-shown-same-rail: true
+QP epub-shown-same-stage: true
+QP ipad-05-epub-chrome-hidden padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-epub-chrome-hidden viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-epub-chrome-hidden size: 1180.0x820.0
+QP ipad-05-epub-chrome-hidden stage: (56.0,0.0 1124.0x820.0)
+QP ipad-05-epub-chrome-hidden tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-05-epub-chrome-hidden surface: (104.0,100.0 1028.0x626.0)
+QP ipad-05-epub-chrome-hidden pdf-page: 
+QP ipad-05-epub-chrome-hidden running-head: (361.0,80.5 0.0x11.0) (822.6,80.0 104.7x12.0)
+QP ipad-05-epub-chrome-hidden running-head-text: PRIDE. and PREJUDICE
+QP ipad-05-epub-chrome-hidden folio: (346.4,735.0 29.3x12.0) (859.4,735.0 31.1x12.0)
+QP ipad-05-epub-chrome-hidden folio-text: page 1 | page 2
+QP ipad-05-epub-chrome-hidden location: 0 [page 1 | page 2]
+QP ipad-05-epub-chrome-hidden header: (56.0,-56.0 1124.0x56.0)
+QP ipad-05-epub-chrome-hidden phone-bar: 
+QP ipad-05-epub-chrome-hidden rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-05-epub-chrome-hidden chrome: false
+SHOT ipad-05-epub-chrome-hidden
+QP epub-hidden-same-surface: true
+QP epub-hidden-same-location: true
+QP epub-hidden-same-folio-text: true
+QP epub-hidden-same-rail: true
+QP epub-hidden-same-stage: true
+QP epub-chrome-ok: true
+QP epub-zone 15%: previous (0 [page 1 | page 2] -> 0 [page 1])
+QP ipad-06-epub-zone-15 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-06-epub-zone-15 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-06-epub-zone-15 size: 1180.0x820.0
+QP ipad-06-epub-zone-15 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-06-epub-zone-15 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-06-epub-zone-15 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-06-epub-zone-15 pdf-page: 
+QP ipad-06-epub-zone-15 running-head: (361.0,80.5 0.0x11.0) (875.0,80.5 0.0x11.0)
+QP ipad-06-epub-zone-15 running-head-text: 
+QP ipad-06-epub-zone-15 folio: (346.4,735.0 29.3x12.0)
+QP ipad-06-epub-zone-15 folio-text: page 1
+QP ipad-06-epub-zone-15 location: 0 [page 1]
+QP ipad-06-epub-zone-15 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-06-epub-zone-15 phone-bar: 
+QP ipad-06-epub-zone-15 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-06-epub-zone-15 chrome: false
+SHOT ipad-06-epub-zone-15
+QP epub-zone 30%: chrome-shown (0 [page 1] -> 0 [page 1])
+QP epub-zone 50%: chrome-shown (0 [page 1] -> 0 [page 1])
+QP ipad-07-epub-zone-50 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-07-epub-zone-50 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-07-epub-zone-50 size: 1180.0x820.0
+QP ipad-07-epub-zone-50 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-07-epub-zone-50 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-07-epub-zone-50 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-07-epub-zone-50 pdf-page: 
+QP ipad-07-epub-zone-50 running-head: (361.0,80.5 0.0x11.0) (875.0,80.5 0.0x11.0)
+QP ipad-07-epub-zone-50 running-head-text: 
+QP ipad-07-epub-zone-50 folio: (346.4,735.0 29.3x12.0)
+QP ipad-07-epub-zone-50 folio-text: page 1
+QP ipad-07-epub-zone-50 location: 0 [page 1]
+QP ipad-07-epub-zone-50 header: (56.0,32.0 1124.0x56.0)
+QP ipad-07-epub-zone-50 phone-bar: 
+QP ipad-07-epub-zone-50 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-07-epub-zone-50 chrome: true
+SHOT ipad-07-epub-zone-50
+QP epub-zone 70%: chrome-shown (0 [page 1] -> 0 [page 1])
+QP epub-zone 85%: previous (0 [page 1] -> 0 [page 1 | page 2])
+QP ipad-08-epub-zone-85 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-08-epub-zone-85 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-08-epub-zone-85 size: 1180.0x820.0
+QP ipad-08-epub-zone-85 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-08-epub-zone-85 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-08-epub-zone-85 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-08-epub-zone-85 pdf-page: 
+QP ipad-08-epub-zone-85 running-head: (361.0,80.5 0.0x11.0) (822.6,80.0 104.7x12.0)
+QP ipad-08-epub-zone-85 running-head-text: PRIDE. and PREJUDICE
+QP ipad-08-epub-zone-85 folio: (346.4,735.0 29.3x12.0) (859.4,735.0 31.1x12.0)
+QP ipad-08-epub-zone-85 folio-text: page 1 | page 2
+QP ipad-08-epub-zone-85 location: 0 [page 1 | page 2]
+QP ipad-08-epub-zone-85 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-08-epub-zone-85 phone-bar: 
+QP ipad-08-epub-zone-85 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-08-epub-zone-85 chrome: false
+SHOT ipad-08-epub-zone-85
+QP epub-zone 23%: previous (0 [page 1 | page 2] -> 0 [page 1])
+QP epub-zone 27%: chrome-shown (0 [page 1] -> 0 [page 1])
+QP epub-zone 73%: chrome-shown (0 [page 1] -> 0 [page 1])
+QP epub-zone 77%: previous (0 [page 1] -> 0 [page 1 | page 2])
+QP epub-zones-ok: true
+QP epub-idle-shown: true
+QP epub-idle-hid-after-ms: 3060
+QP epub-idle-ok: true
+QP epub-panel-6s-chrome: false
+QP epub-panel-6s-panel: true
+QP epub-panel-6s-never-hid: true
+QP ipad-09-epub-display-panel-6s padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-09-epub-display-panel-6s viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-09-epub-display-panel-6s size: 1180.0x820.0
+QP ipad-09-epub-display-panel-6s stage: (56.0,0.0 1124.0x820.0)
+QP ipad-09-epub-display-panel-6s tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-09-epub-display-panel-6s surface: (104.0,100.0 1028.0x626.0)
+QP ipad-09-epub-display-panel-6s pdf-page: 
+QP ipad-09-epub-display-panel-6s running-head: (361.0,80.5 0.0x11.0) (822.6,80.0 104.7x12.0)
+QP ipad-09-epub-display-panel-6s running-head-text: PRIDE. and PREJUDICE
+QP ipad-09-epub-display-panel-6s folio: (346.4,735.0 29.3x12.0) (859.4,735.0 31.1x12.0)
+QP ipad-09-epub-display-panel-6s folio-text: page 1 | page 2
+QP ipad-09-epub-display-panel-6s location: 0 [page 1 | page 2]
+QP ipad-09-epub-display-panel-6s header: (56.0,32.0 1124.0x56.0)
+QP ipad-09-epub-display-panel-6s phone-bar: 
+QP ipad-09-epub-display-panel-6s rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-09-epub-display-panel-6s chrome: false
+SHOT ipad-09-epub-display-panel-6s
+QP epub-panel-idle-ok: true
+QP epub-curl-tap-forward: 0 [page 1 | page 2] -> 0 [page 1 | page 2]; curl frames 0/28 (first nullms, last nullms)
+QP epub-curl-tap-back: 0 [page 1 | page 2] -> 0 [page 1 | page 2]; curl frames 0/28 (first nullms, last nullms)
+QP epub-curl-tap-ok: true
+QP epub-held-curl: true
+QP epub-held-place: 0 [page 1 | page 2] -> 0 [page 1 | page 2]
+QP ipad-10-epub-curl-held padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-10-epub-curl-held viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-10-epub-curl-held size: 1180.0x820.0
+QP ipad-10-epub-curl-held stage: (56.0,0.0 1124.0x820.0)
+QP ipad-10-epub-curl-held tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-10-epub-curl-held surface: (104.0,100.0 1028.0x626.0)
+QP ipad-10-epub-curl-held pdf-page: 
+QP ipad-10-epub-curl-held running-head: (361.0,80.5 0.0x11.0) (822.6,80.0 104.7x12.0)
+QP ipad-10-epub-curl-held running-head-text: PRIDE. and PREJUDICE
+QP ipad-10-epub-curl-held folio: (346.4,735.0 29.3x12.0) (859.4,735.0 31.1x12.0)
+QP ipad-10-epub-curl-held folio-text: page 1 | page 2
+QP ipad-10-epub-curl-held location: 0 [page 1 | page 2]
+QP ipad-10-epub-curl-held header: (56.0,-56.0 1124.0x56.0)
+QP ipad-10-epub-curl-held phone-bar: 
+QP ipad-10-epub-curl-held rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-10-epub-curl-held chrome: false
+SHOT ipad-10-epub-curl-held
+QP epub-held-curl-after-shot: true
+QP epub-held-release: 0 [page 1 | page 2] -> 0 [page 1 | page 2]; curl false; chrome false
+QP ipad-11-epub-curl-fell-back padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-epub-curl-fell-back viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-epub-curl-fell-back size: 1180.0x820.0
+QP ipad-11-epub-curl-fell-back stage: (56.0,0.0 1124.0x820.0)
+QP ipad-11-epub-curl-fell-back tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-11-epub-curl-fell-back surface: (104.0,100.0 1028.0x626.0)
+QP ipad-11-epub-curl-fell-back pdf-page: 
+QP ipad-11-epub-curl-fell-back running-head: (361.0,80.5 0.0x11.0) (822.6,80.0 104.7x12.0)
+QP ipad-11-epub-curl-fell-back running-head-text: PRIDE. and PREJUDICE
+QP ipad-11-epub-curl-fell-back folio: (346.4,735.0 29.3x12.0) (859.4,735.0 31.1x12.0)
+QP ipad-11-epub-curl-fell-back folio-text: page 1 | page 2
+QP ipad-11-epub-curl-fell-back location: 0 [page 1 | page 2]
+QP ipad-11-epub-curl-fell-back header: (56.0,-56.0 1124.0x56.0)
+QP ipad-11-epub-curl-fell-back phone-bar: 
+QP ipad-11-epub-curl-fell-back rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-11-epub-curl-fell-back chrome: false
+SHOT ipad-11-epub-curl-fell-back
+QP epub-past-curl: true
+QP epub-past-release: 0 [page 1 | page 2] -> 1368 [page 3 | page 4]; curl false; chrome false
+QP ipad-12-epub-curl-turned padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-12-epub-curl-turned viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-12-epub-curl-turned size: 1180.0x820.0
+QP ipad-12-epub-curl-turned stage: (56.0,0.0 1124.0x820.0)
+QP ipad-12-epub-curl-turned tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-12-epub-curl-turned surface: (104.0,100.0 1028.0x626.0)
+QP ipad-12-epub-curl-turned pdf-page: 
+QP ipad-12-epub-curl-turned running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-12-epub-curl-turned running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-12-epub-curl-turned folio: (345.4,735.0 31.2x12.0) (859.3,735.0 31.5x12.0)
+QP ipad-12-epub-curl-turned folio-text: page 3 | page 4
+QP ipad-12-epub-curl-turned location: 1368 [page 3 | page 4]
+QP ipad-12-epub-curl-turned header: (56.0,-56.0 1124.0x56.0)
+QP ipad-12-epub-curl-turned phone-bar: 
+QP ipad-12-epub-curl-turned rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-12-epub-curl-turned chrome: false
+SHOT ipad-12-epub-curl-turned
+QP epub-curl-held-ok: true
+QP epub-frames: frames=335 refresh=60.0Hz budget=16.7ms build p50/p95/max=0.43/0.73/6.50 raster p50/p95/max=0.84/2.97/6.17 total p95=-0.04 over-budget(build or raster)=0 over-16.7ms=0
+QP epub-curl-timing-ok: true
+QP epub-animations-switch: false
+QP ipad-13-epub-animations-off-panel padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-13-epub-animations-off-panel viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-13-epub-animations-off-panel size: 1180.0x820.0
+QP ipad-13-epub-animations-off-panel stage: (56.0,0.0 1124.0x820.0)
+QP ipad-13-epub-animations-off-panel tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-13-epub-animations-off-panel surface: (104.0,100.0 1028.0x626.0)
+QP ipad-13-epub-animations-off-panel pdf-page: 
+QP ipad-13-epub-animations-off-panel running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-13-epub-animations-off-panel running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-13-epub-animations-off-panel folio: (345.4,735.0 31.2x12.0) (859.3,735.0 31.5x12.0)
+QP ipad-13-epub-animations-off-panel folio-text: page 3 | page 4
+QP ipad-13-epub-animations-off-panel location: 1368 [page 3 | page 4]
+QP ipad-13-epub-animations-off-panel header: (56.0,32.0 1124.0x56.0)
+QP ipad-13-epub-animations-off-panel phone-bar: 
+QP ipad-13-epub-animations-off-panel rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-13-epub-animations-off-panel chrome: false
+SHOT ipad-13-epub-animations-off-panel
+QP epub-animations-off-turn: 1368 [page 3 | page 4] -> 1472 [page 5 | page 6]; curl frames 0/28 (first nullms, last nullms)
+QP epub-animations-switch: true
+QP ipad-14-epub-animations-on-panel padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-14-epub-animations-on-panel viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-14-epub-animations-on-panel size: 1180.0x820.0
+QP ipad-14-epub-animations-on-panel stage: (56.0,0.0 1124.0x820.0)
+QP ipad-14-epub-animations-on-panel tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-14-epub-animations-on-panel surface: (104.0,100.0 1028.0x626.0)
+QP ipad-14-epub-animations-on-panel pdf-page: 
+QP ipad-14-epub-animations-on-panel running-head: (308.6,80.0 104.7x12.0) (822.6,80.0 104.7x12.0)
+QP ipad-14-epub-animations-on-panel running-head-text: PRIDE. and PREJUDICE | PRIDE. and PREJUDICE
+QP ipad-14-epub-animations-on-panel folio: (345.4,735.0 31.2x12.0) (859.3,735.0 31.5x12.0)
+QP ipad-14-epub-animations-on-panel folio-text: page 3 | page 4
+QP ipad-14-epub-animations-on-panel location: 1368 [page 3 | page 4]
+QP ipad-14-epub-animations-on-panel header: (56.0,32.0 1124.0x56.0)
+QP ipad-14-epub-animations-on-panel phone-bar: 
+QP ipad-14-epub-animations-on-panel rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-14-epub-animations-on-panel chrome: false
+SHOT ipad-14-epub-animations-on-panel
+QP epub-animations-on-turn: 1368 [page 3 | page 4] -> 1472 [page 5 | page 6]; curl frames 4/20 (first 27ms, last 376ms)
+QP epub-animations-ok: true
+QP pdf-hint-shown: false
+QP pdf-open-ok: true
+QP ipad-15-pdf-quiet padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-15-pdf-quiet viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-15-pdf-quiet size: 1180.0x820.0
+QP ipad-15-pdf-quiet stage: (56.0,0.0 1124.0x820.0)
+QP ipad-15-pdf-quiet tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-15-pdf-quiet surface: (80.0,24.0 1076.0x771.0)
+QP ipad-15-pdf-quiet pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-15-pdf-quiet running-head: 
+QP ipad-15-pdf-quiet running-head-text: 
+QP ipad-15-pdf-quiet folio: 
+QP ipad-15-pdf-quiet folio-text: 
+QP ipad-15-pdf-quiet location: 3 []
+QP ipad-15-pdf-quiet header: (56.0,-56.0 1124.0x56.0)
+QP ipad-15-pdf-quiet phone-bar: 
+QP ipad-15-pdf-quiet rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-15-pdf-quiet chrome: false
+SHOT ipad-15-pdf-quiet
+QP pdf-quiet-ok: true
+QP pdf-chrome-shown: true
+QP ipad-16-pdf-chrome-shown padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-16-pdf-chrome-shown viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-16-pdf-chrome-shown size: 1180.0x820.0
+QP ipad-16-pdf-chrome-shown stage: (56.0,0.0 1124.0x820.0)
+QP ipad-16-pdf-chrome-shown tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-16-pdf-chrome-shown surface: (80.0,24.0 1076.0x771.0)
+QP ipad-16-pdf-chrome-shown pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-16-pdf-chrome-shown running-head: 
+QP ipad-16-pdf-chrome-shown running-head-text: 
+QP ipad-16-pdf-chrome-shown folio: 
+QP ipad-16-pdf-chrome-shown folio-text: 
+QP ipad-16-pdf-chrome-shown location: 3 []
+QP ipad-16-pdf-chrome-shown header: (56.0,32.0 1124.0x56.0)
+QP ipad-16-pdf-chrome-shown phone-bar: 
+QP ipad-16-pdf-chrome-shown rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-16-pdf-chrome-shown chrome: true
+SHOT ipad-16-pdf-chrome-shown
+QP pdf-shown-same-surface: true
+QP pdf-shown-same-location: true
+QP pdf-shown-same-folio-text: true
+QP pdf-shown-same-rail: true
+QP pdf-shown-same-stage: true
+QP ipad-17-pdf-chrome-hidden padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-17-pdf-chrome-hidden viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-17-pdf-chrome-hidden size: 1180.0x820.0
+QP ipad-17-pdf-chrome-hidden stage: (56.0,0.0 1124.0x820.0)
+QP ipad-17-pdf-chrome-hidden tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-17-pdf-chrome-hidden surface: (80.0,24.0 1076.0x771.0)
+QP ipad-17-pdf-chrome-hidden pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-17-pdf-chrome-hidden running-head: 
+QP ipad-17-pdf-chrome-hidden running-head-text: 
+QP ipad-17-pdf-chrome-hidden folio: 
+QP ipad-17-pdf-chrome-hidden folio-text: 
+QP ipad-17-pdf-chrome-hidden location: 3 []
+QP ipad-17-pdf-chrome-hidden header: (56.0,-56.0 1124.0x56.0)
+QP ipad-17-pdf-chrome-hidden phone-bar: 
+QP ipad-17-pdf-chrome-hidden rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-17-pdf-chrome-hidden chrome: false
+SHOT ipad-17-pdf-chrome-hidden
+QP pdf-hidden-same-surface: true
+QP pdf-hidden-same-location: true
+QP pdf-hidden-same-folio-text: true
+QP pdf-hidden-same-rail: true
+QP pdf-hidden-same-stage: true
+QP pdf-chrome-ok: true
+QP pdf-zone 15%: previous (3 [] -> 1 [])
+QP ipad-18-pdf-zone-15 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-18-pdf-zone-15 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-18-pdf-zone-15 size: 1180.0x820.0
+QP ipad-18-pdf-zone-15 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-18-pdf-zone-15 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-18-pdf-zone-15 surface: (80.0,24.0 1076.0x771.0)
+QP ipad-18-pdf-zone-15 pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-18-pdf-zone-15 running-head: 
+QP ipad-18-pdf-zone-15 running-head-text: 
+QP ipad-18-pdf-zone-15 folio: 
+QP ipad-18-pdf-zone-15 folio-text: 
+QP ipad-18-pdf-zone-15 location: 1 []
+QP ipad-18-pdf-zone-15 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-18-pdf-zone-15 phone-bar: 
+QP ipad-18-pdf-zone-15 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-18-pdf-zone-15 chrome: false
+SHOT ipad-18-pdf-zone-15
+QP pdf-zone 30%: chrome-shown (1 [] -> 1 [])
+QP pdf-zone 50%: chrome-shown (1 [] -> 1 [])
+QP ipad-19-pdf-zone-50 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-19-pdf-zone-50 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-19-pdf-zone-50 size: 1180.0x820.0
+QP ipad-19-pdf-zone-50 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-19-pdf-zone-50 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-19-pdf-zone-50 surface: (80.0,24.0 1076.0x771.0)
+QP ipad-19-pdf-zone-50 pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-19-pdf-zone-50 running-head: 
+QP ipad-19-pdf-zone-50 running-head-text: 
+QP ipad-19-pdf-zone-50 folio: 
+QP ipad-19-pdf-zone-50 folio-text: 
+QP ipad-19-pdf-zone-50 location: 1 []
+QP ipad-19-pdf-zone-50 header: (56.0,32.0 1124.0x56.0)
+QP ipad-19-pdf-zone-50 phone-bar: 
+QP ipad-19-pdf-zone-50 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-19-pdf-zone-50 chrome: true
+SHOT ipad-19-pdf-zone-50
+QP pdf-zone 70%: chrome-shown (1 [] -> 1 [])
+QP pdf-zone 85%: next (1 [] -> 3 [])
+QP ipad-20-pdf-zone-85 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-20-pdf-zone-85 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-20-pdf-zone-85 size: 1180.0x820.0
+QP ipad-20-pdf-zone-85 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-20-pdf-zone-85 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-20-pdf-zone-85 surface: (80.0,24.0 1076.0x771.0)
+QP ipad-20-pdf-zone-85 pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-20-pdf-zone-85 running-head: 
+QP ipad-20-pdf-zone-85 running-head-text: 
+QP ipad-20-pdf-zone-85 folio: 
+QP ipad-20-pdf-zone-85 folio-text: 
+QP ipad-20-pdf-zone-85 location: 3 []
+QP ipad-20-pdf-zone-85 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-20-pdf-zone-85 phone-bar: 
+QP ipad-20-pdf-zone-85 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-20-pdf-zone-85 chrome: false
+SHOT ipad-20-pdf-zone-85
+QP pdf-zone 23%: previous (3 [] -> 1 [])
+QP pdf-zone 27%: chrome-shown (1 [] -> 1 [])
+QP pdf-zone 73%: chrome-shown (1 [] -> 1 [])
+QP pdf-zone 77%: next (1 [] -> 3 [])
+QP pdf-zones-ok: true
+QP pdf-idle-shown: true
+QP pdf-idle-hid-after-ms: 3331
+QP pdf-idle-ok: true
+QP pdf-curl-tap-forward: 3 [] -> 5 []; curl frames 4/20 (first 406ms, last 755ms)
+QP pdf-curl-tap-back: 5 [] -> 3 []; curl frames 5/17 (first 396ms, last 760ms)
+QP pdf-curl-tap-ok: true
+QP pdf-held-curl: true
+QP pdf-held-place: 3 [] -> 3 []
+QP ipad-21-pdf-curl-held padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-21-pdf-curl-held viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-21-pdf-curl-held size: 1180.0x820.0
+QP ipad-21-pdf-curl-held stage: (56.0,0.0 1124.0x820.0)
+QP ipad-21-pdf-curl-held tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-21-pdf-curl-held surface: (80.0,24.0 1076.0x771.0)
+QP ipad-21-pdf-curl-held pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-21-pdf-curl-held running-head: 
+QP ipad-21-pdf-curl-held running-head-text: 
+QP ipad-21-pdf-curl-held folio: 
+QP ipad-21-pdf-curl-held folio-text: 
+QP ipad-21-pdf-curl-held location: 3 []
+QP ipad-21-pdf-curl-held header: (56.0,-56.0 1124.0x56.0)
+QP ipad-21-pdf-curl-held phone-bar: 
+QP ipad-21-pdf-curl-held rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-21-pdf-curl-held chrome: false
+SHOT ipad-21-pdf-curl-held
+QP pdf-held-curl-after-shot: true
+QP pdf-held-release: 3 [] -> 3 []; curl false; chrome false
+QP ipad-22-pdf-curl-fell-back padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-22-pdf-curl-fell-back viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-22-pdf-curl-fell-back size: 1180.0x820.0
+QP ipad-22-pdf-curl-fell-back stage: (56.0,0.0 1124.0x820.0)
+QP ipad-22-pdf-curl-fell-back tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-22-pdf-curl-fell-back surface: (80.0,24.0 1076.0x771.0)
+QP ipad-22-pdf-curl-fell-back pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-22-pdf-curl-fell-back running-head: 
+QP ipad-22-pdf-curl-fell-back running-head-text: 
+QP ipad-22-pdf-curl-fell-back folio: 
+QP ipad-22-pdf-curl-fell-back folio-text: 
+QP ipad-22-pdf-curl-fell-back location: 3 []
+QP ipad-22-pdf-curl-fell-back header: (56.0,-56.0 1124.0x56.0)
+QP ipad-22-pdf-curl-fell-back phone-bar: 
+QP ipad-22-pdf-curl-fell-back rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-22-pdf-curl-fell-back chrome: false
+SHOT ipad-22-pdf-curl-fell-back
+QP pdf-past-curl: true
+QP pdf-past-release: 3 [] -> 5 []; curl false; chrome false
+QP ipad-23-pdf-curl-turned padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-23-pdf-curl-turned viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-23-pdf-curl-turned size: 1180.0x820.0
+QP ipad-23-pdf-curl-turned stage: (56.0,0.0 1124.0x820.0)
+QP ipad-23-pdf-curl-turned tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-23-pdf-curl-turned surface: (80.0,24.0 1076.0x771.0)
+QP ipad-23-pdf-curl-turned pdf-page: (80.0,61.4 1076.0x696.2)
+QP ipad-23-pdf-curl-turned running-head: 
+QP ipad-23-pdf-curl-turned running-head-text: 
+QP ipad-23-pdf-curl-turned folio: 
+QP ipad-23-pdf-curl-turned folio-text: 
+QP ipad-23-pdf-curl-turned location: 5 []
+QP ipad-23-pdf-curl-turned header: (56.0,-56.0 1124.0x56.0)
+QP ipad-23-pdf-curl-turned phone-bar: 
+QP ipad-23-pdf-curl-turned rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-23-pdf-curl-turned chrome: false
+SHOT ipad-23-pdf-curl-turned
+QP pdf-curl-held-ok: true
+QP pdf-frames: frames=334 refresh=60.0Hz budget=16.7ms build p50/p95/max=0.27/0.91/5.37 raster p50/p95/max=0.95/1.57/2.42 total p95=0.13 over-budget(build or raster)=0 over-16.7ms=0
+QP pdf-curl-timing-ok: true
+QP neko-hint-shown: false
+QP neko-open-ok: true
+QP ipad-24-neko-quiet padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-24-neko-quiet viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-24-neko-quiet size: 1180.0x820.0
+QP ipad-24-neko-quiet stage: (56.0,0.0 1124.0x820.0)
+QP ipad-24-neko-quiet tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-24-neko-quiet surface: (104.0,100.0 1028.0x626.0)
+QP ipad-24-neko-quiet pdf-page: 
+QP ipad-24-neko-quiet running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-24-neko-quiet running-head-text: 一 | 一
+QP ipad-24-neko-quiet folio: (345.4,735.0 31.2x12.0) (859.5,735.0 31.0x12.0)
+QP ipad-24-neko-quiet folio-text: page 6 | page 5
+QP ipad-24-neko-quiet location: 1977 [page 6 | page 5]
+QP ipad-24-neko-quiet header: (56.0,-56.0 1124.0x56.0)
+QP ipad-24-neko-quiet phone-bar: 
+QP ipad-24-neko-quiet rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-24-neko-quiet chrome: false
+SHOT ipad-24-neko-quiet
+QP neko-quiet-ok: true
+QP neko-chrome-shown: true
+QP ipad-25-neko-chrome-shown padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-25-neko-chrome-shown viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-25-neko-chrome-shown size: 1180.0x820.0
+QP ipad-25-neko-chrome-shown stage: (56.0,0.0 1124.0x820.0)
+QP ipad-25-neko-chrome-shown tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-25-neko-chrome-shown surface: (104.0,100.0 1028.0x626.0)
+QP ipad-25-neko-chrome-shown pdf-page: 
+QP ipad-25-neko-chrome-shown running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-25-neko-chrome-shown running-head-text: 一 | 一
+QP ipad-25-neko-chrome-shown folio: (345.4,735.0 31.2x12.0) (859.5,735.0 31.0x12.0)
+QP ipad-25-neko-chrome-shown folio-text: page 6 | page 5
+QP ipad-25-neko-chrome-shown location: 1977 [page 6 | page 5]
+QP ipad-25-neko-chrome-shown header: (56.0,32.0 1124.0x56.0)
+QP ipad-25-neko-chrome-shown phone-bar: 
+QP ipad-25-neko-chrome-shown rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-25-neko-chrome-shown chrome: true
+SHOT ipad-25-neko-chrome-shown
+QP neko-shown-same-surface: true
+QP neko-shown-same-location: true
+QP neko-shown-same-folio-text: true
+QP neko-shown-same-rail: true
+QP neko-shown-same-stage: true
+QP ipad-26-neko-chrome-hidden padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-26-neko-chrome-hidden viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-26-neko-chrome-hidden size: 1180.0x820.0
+QP ipad-26-neko-chrome-hidden stage: (56.0,0.0 1124.0x820.0)
+QP ipad-26-neko-chrome-hidden tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-26-neko-chrome-hidden surface: (104.0,100.0 1028.0x626.0)
+QP ipad-26-neko-chrome-hidden pdf-page: 
+QP ipad-26-neko-chrome-hidden running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-26-neko-chrome-hidden running-head-text: 一 | 一
+QP ipad-26-neko-chrome-hidden folio: (345.4,735.0 31.2x12.0) (859.5,735.0 31.0x12.0)
+QP ipad-26-neko-chrome-hidden folio-text: page 6 | page 5
+QP ipad-26-neko-chrome-hidden location: 1977 [page 6 | page 5]
+QP ipad-26-neko-chrome-hidden header: (56.0,-56.0 1124.0x56.0)
+QP ipad-26-neko-chrome-hidden phone-bar: 
+QP ipad-26-neko-chrome-hidden rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-26-neko-chrome-hidden chrome: false
+SHOT ipad-26-neko-chrome-hidden
+QP neko-hidden-same-surface: true
+QP neko-hidden-same-location: true
+QP neko-hidden-same-folio-text: true
+QP neko-hidden-same-rail: true
+QP neko-hidden-same-stage: true
+QP neko-chrome-ok: true
+QP neko-zone 15%: next (1977 [page 6 | page 5] -> 2991 [page 8 | page 7])
+QP ipad-27-neko-zone-15 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-27-neko-zone-15 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-27-neko-zone-15 size: 1180.0x820.0
+QP ipad-27-neko-zone-15 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-27-neko-zone-15 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-27-neko-zone-15 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-27-neko-zone-15 pdf-page: 
+QP ipad-27-neko-zone-15 running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-27-neko-zone-15 running-head-text: 一 | 一
+QP ipad-27-neko-zone-15 folio: (345.4,735.0 31.2x12.0) (859.6,735.0 30.7x12.0)
+QP ipad-27-neko-zone-15 folio-text: page 8 | page 7
+QP ipad-27-neko-zone-15 location: 2991 [page 8 | page 7]
+QP ipad-27-neko-zone-15 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-27-neko-zone-15 phone-bar: 
+QP ipad-27-neko-zone-15 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-27-neko-zone-15 chrome: false
+SHOT ipad-27-neko-zone-15
+QP neko-zone 30%: chrome-shown (2991 [page 8 | page 7] -> 2991 [page 8 | page 7])
+QP neko-zone 50%: chrome-shown (2991 [page 8 | page 7] -> 2991 [page 8 | page 7])
+QP ipad-28-neko-zone-50 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-28-neko-zone-50 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-28-neko-zone-50 size: 1180.0x820.0
+QP ipad-28-neko-zone-50 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-28-neko-zone-50 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-28-neko-zone-50 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-28-neko-zone-50 pdf-page: 
+QP ipad-28-neko-zone-50 running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-28-neko-zone-50 running-head-text: 一 | 一
+QP ipad-28-neko-zone-50 folio: (345.4,735.0 31.2x12.0) (859.6,735.0 30.7x12.0)
+QP ipad-28-neko-zone-50 folio-text: page 8 | page 7
+QP ipad-28-neko-zone-50 location: 2991 [page 8 | page 7]
+QP ipad-28-neko-zone-50 header: (56.0,32.0 1124.0x56.0)
+QP ipad-28-neko-zone-50 phone-bar: 
+QP ipad-28-neko-zone-50 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-28-neko-zone-50 chrome: true
+SHOT ipad-28-neko-zone-50
+QP neko-zone 70%: chrome-shown (2991 [page 8 | page 7] -> 2991 [page 8 | page 7])
+QP neko-zone 85%: previous (2991 [page 8 | page 7] -> 1977 [page 6 | page 5])
+QP ipad-29-neko-zone-85 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-29-neko-zone-85 viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-29-neko-zone-85 size: 1180.0x820.0
+QP ipad-29-neko-zone-85 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-29-neko-zone-85 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-29-neko-zone-85 surface: (104.0,100.0 1028.0x626.0)
+QP ipad-29-neko-zone-85 pdf-page: 
+QP ipad-29-neko-zone-85 running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-29-neko-zone-85 running-head-text: 一 | 一
+QP ipad-29-neko-zone-85 folio: (345.4,735.0 31.2x12.0) (859.5,735.0 31.0x12.0)
+QP ipad-29-neko-zone-85 folio-text: page 6 | page 5
+QP ipad-29-neko-zone-85 location: 1977 [page 6 | page 5]
+QP ipad-29-neko-zone-85 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-29-neko-zone-85 phone-bar: 
+QP ipad-29-neko-zone-85 rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-29-neko-zone-85 chrome: false
+SHOT ipad-29-neko-zone-85
+QP neko-zone 23%: next (1977 [page 6 | page 5] -> 2991 [page 8 | page 7])
+QP neko-zone 27%: chrome-shown (2991 [page 8 | page 7] -> 2991 [page 8 | page 7])
+QP neko-zone 73%: chrome-shown (2991 [page 8 | page 7] -> 2991 [page 8 | page 7])
+QP neko-zone 77%: previous (2991 [page 8 | page 7] -> 1977 [page 6 | page 5])
+QP neko-zones-ok: true
+QP neko-idle-shown: true
+QP neko-idle-hid-after-ms: 3060
+QP neko-idle-ok: true
+QP neko-curl-tap-forward: 1977 [page 6 | page 5] -> 2991 [page 8 | page 7]; curl frames 3/19 (first 32ms, last 232ms)
+QP neko-curl-tap-back: 2991 [page 8 | page 7] -> 1977 [page 6 | page 5]; curl frames 4/20 (first 24ms, last 374ms)
+QP neko-curl-tap-ok: true
+QP neko-held-curl: true
+QP neko-held-place: 1977 [page 6 | page 5] -> 1977 [page 6 | page 5]
+QP ipad-30-neko-curl-held padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-30-neko-curl-held viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-30-neko-curl-held size: 1180.0x820.0
+QP ipad-30-neko-curl-held stage: (56.0,0.0 1124.0x820.0)
+QP ipad-30-neko-curl-held tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-30-neko-curl-held surface: (104.0,100.0 1028.0x626.0)
+QP ipad-30-neko-curl-held pdf-page: 
+QP ipad-30-neko-curl-held running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-30-neko-curl-held running-head-text: 一 | 一
+QP ipad-30-neko-curl-held folio: (345.4,735.0 31.2x12.0) (859.5,735.0 31.0x12.0)
+QP ipad-30-neko-curl-held folio-text: page 6 | page 5
+QP ipad-30-neko-curl-held location: 1977 [page 6 | page 5]
+QP ipad-30-neko-curl-held header: (56.0,-56.0 1124.0x56.0)
+QP ipad-30-neko-curl-held phone-bar: 
+QP ipad-30-neko-curl-held rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-30-neko-curl-held chrome: false
+SHOT ipad-30-neko-curl-held
+QP neko-held-curl-after-shot: true
+QP neko-held-release: 1977 [page 6 | page 5] -> 1977 [page 6 | page 5]; curl false; chrome false
+QP ipad-31-neko-curl-fell-back padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-31-neko-curl-fell-back viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-31-neko-curl-fell-back size: 1180.0x820.0
+QP ipad-31-neko-curl-fell-back stage: (56.0,0.0 1124.0x820.0)
+QP ipad-31-neko-curl-fell-back tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-31-neko-curl-fell-back surface: (104.0,100.0 1028.0x626.0)
+QP ipad-31-neko-curl-fell-back pdf-page: 
+QP ipad-31-neko-curl-fell-back running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-31-neko-curl-fell-back running-head-text: 一 | 一
+QP ipad-31-neko-curl-fell-back folio: (345.4,735.0 31.2x12.0) (859.5,735.0 31.0x12.0)
+QP ipad-31-neko-curl-fell-back folio-text: page 6 | page 5
+QP ipad-31-neko-curl-fell-back location: 1977 [page 6 | page 5]
+QP ipad-31-neko-curl-fell-back header: (56.0,-56.0 1124.0x56.0)
+QP ipad-31-neko-curl-fell-back phone-bar: 
+QP ipad-31-neko-curl-fell-back rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-31-neko-curl-fell-back chrome: false
+SHOT ipad-31-neko-curl-fell-back
+QP neko-past-curl: true
+QP neko-past-release: 1977 [page 6 | page 5] -> 2991 [page 8 | page 7]; curl false; chrome false
+QP ipad-32-neko-curl-turned padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-32-neko-curl-turned viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-32-neko-curl-turned size: 1180.0x820.0
+QP ipad-32-neko-curl-turned stage: (56.0,0.0 1124.0x820.0)
+QP ipad-32-neko-curl-turned tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-32-neko-curl-turned surface: (104.0,100.0 1028.0x626.0)
+QP ipad-32-neko-curl-turned pdf-page: 
+QP ipad-32-neko-curl-turned running-head: (356.3,80.0 9.3x12.0) (870.3,80.0 9.3x12.0)
+QP ipad-32-neko-curl-turned running-head-text: 一 | 一
+QP ipad-32-neko-curl-turned folio: (345.4,735.0 31.2x12.0) (859.6,735.0 30.7x12.0)
+QP ipad-32-neko-curl-turned folio-text: page 8 | page 7
+QP ipad-32-neko-curl-turned location: 2991 [page 8 | page 7]
+QP ipad-32-neko-curl-turned header: (56.0,-56.0 1124.0x56.0)
+QP ipad-32-neko-curl-turned phone-bar: 
+QP ipad-32-neko-curl-turned rail: Library (6.0,94.0 44.0x44.0); Search (6.0,250.0 44.0x44.0); Add books (6.0,735.0 44.0x44.0); Notes (6.0,146.0 44.0x44.0); Settings (6.0,302.0 44.0x44.0)
+QP ipad-32-neko-curl-turned chrome: false
+SHOT ipad-32-neko-curl-turned
+QP neko-curl-held-ok: true
+QP neko-frames: frames=335 refresh=60.0Hz budget=16.7ms build p50/p95/max=0.35/0.62/14.66 raster p50/p95/max=1.39/7.41/9.13 total p95=4.47 over-budget(build or raster)=0 over-16.7ms=0
+QP neko-curl-timing-ok: true
+QP end-in-library: true
+QP ipad-33-library-end padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-33-library-end viewPadding: L0.0 T32.0 R0.0 B25.0
+QP ipad-33-library-end size: 1180.0x820.0
+QP ipad-33-library-end stage: 
+QP ipad-33-library-end tap-area: 
+QP ipad-33-library-end surface: 
+QP ipad-33-library-end pdf-page: 
+QP ipad-33-library-end running-head: 
+QP ipad-33-library-end running-head-text: 
+QP ipad-33-library-end folio: 
+QP ipad-33-library-end folio-text: 
+QP ipad-33-library-end location:  []
+QP ipad-33-library-end header: 
+QP ipad-33-library-end phone-bar: 
+QP ipad-33-library-end rail: 
+QP ipad-33-library-end chrome: false
+SHOT ipad-33-library-end
+QP end-library-ok: true
+App terminated due to signal 9.

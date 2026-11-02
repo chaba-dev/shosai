@@ -1,0 +1,648 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:shosai_flutter/main.dart';
+import 'package:shosai_flutter/reader/view.dart';
+
+/// Quiet-page, tap-zone, idle-hide and page-curl verification on a real
+/// device (uncommitted helper, 2026-11-02 run against main 42a03fc).
+///
+/// Prints `SHOT <device>-NN-name` at each checkpoint and holds the screen for
+/// a few seconds so a host watcher can take a real device screenshot, and
+/// `QP <key>: <value>` lines with safe areas, rects, places and timings.
+/// `FRAMES <dir>` names the in-app frame captures (RepaintBoundary.toImage)
+/// of page curls, copied off the device afterwards.
+const _device = String.fromEnvironment('QP_DEVICE', defaultValue: 'device');
+const _english = Locale('en');
+// `all`, or one book tag (`epub`, `pdf`, `neko`) for a partial re-run.
+const _books = String.fromEnvironment('QP_BOOKS', defaultValue: 'all');
+// `center` taps the vertical middle of the page; `margin` taps just below the
+// text, clear of links (the iPad's first EPUB spread is a table of contents).
+const _tapRow = String.fromEnvironment('QP_TAP_Y', defaultValue: 'center');
+final _captureKey = GlobalKey();
+late Directory _frames;
+int _step = 0;
+
+void main() {
+  final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  // Let the app draw every frame it asks for, as in normal use, so curls
+  // animate on the device and frame timings are real.
+  binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+
+  testWidgets('quiet page on main', timeout: const Timeout(Duration(minutes: 45)), (
+    tester,
+  ) async {
+    final books = Directory.systemTemp.createTempSync('qp-books-');
+    for (final name in ['pride.epub', 'attention.pdf', 'neko.epub']) {
+      final data = await rootBundle.load('qp-books/$name');
+      File(
+        '${books.path}/$name',
+      ).writeAsBytesSync(data.buffer.asUint8List(), flush: true);
+    }
+    _frames = Directory.systemTemp.createTempSync('qp-frames-');
+    _out('FRAMES ${_frames.path}');
+    final data = Directory.systemTemp.createTempSync('qp-data-');
+    _note('data-dir', data.path);
+    final owner = await applicationCoreOwner(
+      applicationSupportDirectory: () async => data,
+    );
+    final bridge = owner.bridge();
+    final imported = await bridge.importPaths(
+      pathKeys: [for (final f in books.listSync()) f.path],
+      managed: false,
+      cancellationId: bridge.createCancellation(),
+    );
+    _note('imported', imported.imported.toInt());
+
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: _captureKey,
+        child: ShosaiApp(productBridgeFactory: owner.bridge, locale: _english),
+      ),
+    );
+    await _settle(tester, seconds: 3);
+    _note(
+      'view',
+      'logical ${tester.view.physicalSize.width / tester.view.devicePixelRatio}'
+          'x${tester.view.physicalSize.height / tester.view.devicePixelRatio}'
+          ' dpr ${tester.view.devicePixelRatio}'
+          ' refresh ${tester.view.display.refreshRate}',
+    );
+    await _shot(tester, 'library-start');
+
+    _note('tap-row', _tapRow);
+    if (_books == 'all' || _books == 'epub') {
+      await _book(tester, binding, 'epub', 'Pride', rtl: false, full: true);
+    }
+    if (_books == 'all' || _books == 'pdf') {
+      await _book(tester, binding, 'pdf', 'ttention', rtl: false);
+    }
+    if (_books == 'all' || _books == 'neko') {
+      await _book(tester, binding, 'neko', '吾輩は猫である', rtl: true);
+    }
+
+    await _try('end-library', () async {
+      await _toLibrary(tester);
+      _note('end-in-library', _stage.evaluate().isEmpty);
+      await _shot(tester, 'library-end');
+    });
+  });
+}
+
+Future<void> _book(
+  WidgetTester tester,
+  IntegrationTestWidgetsFlutterBinding binding,
+  String tag,
+  String title,
+  {required bool rtl, bool full = false}
+) async {
+  final forward = rtl ? .15 : .85;
+  final back = rtl ? .85 : .15;
+
+  await _try('$tag-open', () async {
+    if (_stage.evaluate().isNotEmpty) await _toLibrary(tester);
+    await _open(tester, title);
+    final hint = find.byKey(const ValueKey('reader-zones-hint'));
+    _note('$tag-hint-shown', hint.evaluate().isNotEmpty);
+    if (hint.evaluate().isNotEmpty) {
+      final columns = find.descendant(of: hint, matching: find.byType(Expanded));
+      final area = _tapArea(tester);
+      _note('$tag-hint-tap-area', _rect(area));
+      for (final e in columns.evaluate()) {
+        final r = _elementRect(e)!;
+        _note(
+          '$tag-hint-column',
+          '${_rect(r)} = ${(r.left - area.left) / area.width * 100}% .. '
+              '${(r.right - area.left) / area.width * 100}% of the tap area',
+        );
+      }
+      await _shot(tester, '$tag-hint');
+      final before = _location(tester);
+      await _tapAt(tester, .5);
+      _note('$tag-hint-after-tap', hint.evaluate().isNotEmpty);
+      _note('$tag-hint-place', '$before -> ${_location(tester)}');
+      _note('$tag-hint-chrome-after-tap', _chrome(tester));
+    }
+  });
+
+  // 1. A quiet page past the opening, so the running head shows.
+  await _try('$tag-quiet', () async {
+    await _hideChrome(tester);
+    for (var i = 0; i < 20; i++) {
+      await _tapAt(tester, forward);
+      if (tag != 'epub' && i >= 1) break;
+      if (_runningHead(tester).isNotEmpty && i >= 6) break;
+    }
+    await _hideChrome(tester);
+    await _shot(tester, '$tag-quiet');
+  });
+
+  // 2 and 3. Chrome shown (held so the idle timer cannot hide it during the
+  // screenshot) and hidden again over the same page.
+  await _try('$tag-chrome', () async {
+    final before = _geometry(tester);
+    await _tapAt(tester, .5);
+    _note('$tag-chrome-shown', _chrome(tester));
+    final hold = await _holdChrome(tester);
+    await _shot(tester, '$tag-chrome-shown');
+    final shown = _geometry(tester);
+    await hold?.cancel();
+    for (final k in ['surface', 'location', 'folio-text', 'rail', 'stage']) {
+      _note('$tag-shown-same-$k', '${before[k] == shown[k]}');
+    }
+    await _hideChrome(tester);
+    await _shot(tester, '$tag-chrome-hidden');
+    final hidden = _geometry(tester);
+    for (final k in ['surface', 'location', 'folio-text', 'rail', 'stage']) {
+      _note('$tag-hidden-same-$k', '${before[k] == hidden[k]}');
+    }
+  });
+
+  // 4. Tap zones: outer quarters turn, the middle half toggles the chrome.
+  await _try('$tag-zones', () async {
+    for (final f in [.15, .30, .50, .70, .85, .23, .27, .73, .77]) {
+      await _hideChrome(tester);
+      final before = _location(tester);
+      await _tapAt(tester, f, settleMs: 900);
+      final after = _location(tester);
+      final chrome = _chrome(tester);
+      final result = after == before
+          ? (chrome ? 'chrome-shown' : 'nothing')
+          : (_first(after) > _first(before) ? 'next' : 'previous');
+      _note('$tag-zone ${(f * 100).round()}%', '$result ($before -> $after)');
+      if ([.15, .50, .85].contains(f)) {
+        final hold = chrome ? await _holdChrome(tester) : null;
+        await _shot(tester, '$tag-zone-${(f * 100).round()}');
+        await hold?.cancel();
+      }
+    }
+    await _hideChrome(tester);
+  });
+
+  // 5. Idle hide after a middle tap, about three seconds.
+  await _try('$tag-idle', () async {
+    await _hideChrome(tester);
+    await _tapAt(tester, .5, settleMs: 0);
+    final start = DateTime.now();
+    var shown = false;
+    Duration? hidden;
+    while (DateTime.now().difference(start) < const Duration(seconds: 7)) {
+      await tester.pump(const Duration(milliseconds: 50));
+      final c = _chrome(tester);
+      if (c) shown = true;
+      if (shown && !c) {
+        hidden = DateTime.now().difference(start);
+        break;
+      }
+    }
+    _note('$tag-idle-shown', shown);
+    _note('$tag-idle-hid-after-ms', hidden?.inMilliseconds);
+  });
+
+  if (full) {
+    await _try('$tag-panel-idle', () async {
+      await _hideChrome(tester);
+      await _tapAt(tester, .5);
+      await _tapKey(tester, 'reader-header-typography');
+      final start = DateTime.now();
+      var always = true;
+      while (DateTime.now().difference(start) < const Duration(seconds: 6)) {
+        await tester.pump(const Duration(milliseconds: 100));
+        if (!_chrome(tester) && !_panelOpen(tester)) always = false;
+      }
+      _note('$tag-panel-6s-chrome', _chrome(tester));
+      _note('$tag-panel-6s-panel', _panelOpen(tester));
+      _note('$tag-panel-6s-never-hid', always);
+      await _shot(tester, '$tag-display-panel-6s');
+      await _dismissPanel(tester);
+      await _hideChrome(tester);
+    });
+  }
+
+  // 6. Page curl: tap turns, held drags and frame timings.
+  await _try('$tag-curl-tap', () async {
+    await _hideChrome(tester);
+    for (final (name, f) in [('forward', forward), ('back', back)]) {
+      final before = _location(tester);
+      final curl = await _tapAndWatch(tester, f, '$tag-tap-$name');
+      _note(
+        '$tag-curl-tap-$name',
+        '$before -> ${_location(tester)}; curl frames $curl',
+      );
+    }
+  });
+
+  await _try('$tag-curl-held', () async {
+    await _hideChrome(tester);
+    final area = _tapArea(tester);
+    final spread = _spread(tester);
+    final start = rtl ? .05 : .95;
+    // Held: phone ~70% (a quarter of the leaf); spread 75% (40% of a leaf).
+    final held = rtl ? (spread ? .25 : .30) : (spread ? .75 : .70);
+    final past = rtl ? (spread ? .45 : .65) : (spread ? .55 : .35);
+    final y = area.center.dy;
+    Offset at(double f) => Offset(area.left + area.width * f, y);
+
+    final before = _location(tester);
+    var gesture = await tester.startGesture(at(start));
+    await _glide(tester, gesture, at(start), at(held), 'held-fall-back', tag);
+    _note('$tag-held-curl', _curl());
+    _note('$tag-held-place', '$before -> ${_location(tester)}');
+    await _capture(tester, '$tag-held');
+    await _shot(tester, '$tag-curl-held');
+    _note('$tag-held-curl-after-shot', _curl());
+    await gesture.up();
+    await _settle(tester, seconds: 1);
+    _note('$tag-held-release', '$before -> ${_location(tester)}; '
+        'curl ${_curl()}; chrome ${_chrome(tester)}');
+    await _shot(tester, '$tag-curl-fell-back');
+
+    final again = _location(tester);
+    gesture = await tester.startGesture(at(start));
+    await _glide(tester, gesture, at(start), at(past), 'past-middle', tag);
+    _note('$tag-past-curl', _curl());
+    await _capture(tester, '$tag-past-middle-held');
+    await _settle(tester, ms: 300);
+    await gesture.up();
+    await _settle(tester, seconds: 1);
+    _note('$tag-past-release', '$again -> ${_location(tester)}; '
+        'curl ${_curl()}; chrome ${_chrome(tester)}');
+    await _shot(tester, '$tag-curl-turned');
+  });
+
+  await _try('$tag-curl-timing', () async {
+    await _hideChrome(tester);
+    final timings = <ui.FrameTiming>[];
+    void collect(List<ui.FrameTiming> batch) => timings.addAll(batch);
+    // Warm up once, then measure eight tap turns back and forth.
+    await _tapAt(tester, forward);
+    await _tapAt(tester, back);
+    binding.addTimingsCallback(collect);
+    for (var i = 0; i < 8; i++) {
+      await _tapAt(tester, i.isEven ? forward : back, settleMs: 700);
+    }
+    await _settle(tester, seconds: 2);
+    binding.removeTimingsCallback(collect);
+    _note('$tag-frames', _timingSummary(timings, tester));
+  });
+
+  // 7. Page animations off: the page changes at once; then back on.
+  if (full) {
+    await _try('$tag-animations', () async {
+      for (final on in [false, true]) {
+        await _hideChrome(tester);
+        await _tapAt(tester, .5);
+        await _tapKey(tester, 'reader-header-typography');
+        await _settle(tester, seconds: 1);
+        final toggle = find.byKey(const ValueKey('reader-typography-animations'));
+        await tester.ensureVisible(toggle.first);
+        await _settle(tester, seconds: 1);
+        await tester.tap(toggle.first, warnIfMissed: false);
+        await _settle(tester, seconds: 1);
+        _note('$tag-animations-switch', '${_switchValue(tester)}');
+        await _shot(tester, '$tag-animations-${on ? 'on' : 'off'}-panel');
+        await _dismissPanel(tester);
+        await _hideChrome(tester);
+        final before = _location(tester);
+        final curl = await _tapAndWatch(
+          tester,
+          forward,
+          '$tag-animations-${on ? 'on' : 'off'}',
+        );
+        _note(
+          '$tag-animations-${on ? 'on' : 'off'}-turn',
+          '$before -> ${_location(tester)}; curl frames $curl',
+        );
+        await _tapAt(tester, back);
+      }
+    });
+  }
+}
+
+final _stage = find.byKey(const ValueKey('reader-stage'));
+
+Future<void> _try(String name, Future<void> Function() body) async {
+  try {
+    await body();
+    _note('$name-ok', true);
+  } catch (error, stack) {
+    _note(
+      '$name-FAILED',
+      '$error ${stack.toString().split('\n').take(4).join(' | ')}',
+    );
+  }
+}
+
+void _note(String key, Object? value) => _out('QP $key: $value');
+
+/// `print` reaches flutter drive in a debug build; a profile build launched
+/// with `devicectl --console` only shows the process's own stdout.
+void _out(String line) {
+  // ignore: avoid_print
+  print(line);
+  stdout.writeln(line);
+}
+
+Future<void> _settle(WidgetTester tester, {int seconds = 0, int ms = 0}) async {
+  final end = DateTime.now().add(Duration(seconds: seconds, milliseconds: ms));
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+}
+
+bool _chrome(WidgetTester tester) => find
+    .byKey(const ValueKey('reader-header-contents'))
+    .hitTestable()
+    .evaluate()
+    .isNotEmpty;
+
+bool _panelOpen(WidgetTester tester) =>
+    find.byKey(const ValueKey('reader-typography-animations')).evaluate().isNotEmpty;
+
+bool _curl() =>
+    find.byKey(const ValueKey('reader-page-curl')).evaluate().isNotEmpty;
+
+bool _spread(WidgetTester tester) =>
+    find.byKey(const ValueKey('reader-spread-gutter')).evaluate().isNotEmpty ||
+    find.byKey(const ValueKey('reader-folio')).evaluate().length > 1;
+
+Object? _switchValue(WidgetTester tester) {
+  final f = find.byKey(const ValueKey('reader-typography-animations'));
+  if (f.evaluate().isEmpty) return null;
+  try {
+    return (f.evaluate().first.widget as dynamic).value;
+  } catch (_) {
+    return '?';
+  }
+}
+
+/// The places on screen: EPUB canonical starts or PDF units, low first.
+String _location(WidgetTester tester) {
+  final places = <int>[];
+  for (final p in tester.widgetList<CustomPaint>(find.byType(CustomPaint))) {
+    final painter = p.painter;
+    if (painter is ReaderEpubPageContentPainter) {
+      places.add(painter.page.page.canonicalStart);
+    } else if (painter is PagePainter && painter.image != null) {
+      places.add(painter.currentUnit);
+    }
+  }
+  places.sort();
+  return '${places.toSet().join(',')} [${_folio(tester)}]';
+}
+
+int _first(String location) =>
+    int.tryParse(location.split(RegExp('[ ,]')).first) ?? -1;
+
+String _folio(WidgetTester tester) => [
+  for (final e in find.byKey(const ValueKey('reader-folio')).evaluate())
+    if (e.widget is Text) (e.widget as Text).data ?? '',
+].join(' | ');
+
+String _runningHead(WidgetTester tester) => [
+  for (final e in find.byKey(const ValueKey('reader-running-head')).evaluate())
+    if (e.widget is Text) (e.widget as Text).data ?? '',
+].where((t) => t.isNotEmpty).join(' | ');
+
+String _rects(WidgetTester tester, Finder finder) => [
+  for (final e in finder.evaluate())
+    if (e.renderObject case final RenderBox box? when box.hasSize && box.attached)
+      _rect(box.localToGlobal(Offset.zero) & box.size),
+].join(' ');
+
+String _keyRects(WidgetTester tester, String key) =>
+    _rects(tester, find.byKey(ValueKey(key)));
+
+String _insets(EdgeInsets e) => 'L${e.left} T${e.top} R${e.right} B${e.bottom}';
+
+String _rect(Rect r) =>
+    '(${r.left.toStringAsFixed(1)},${r.top.toStringAsFixed(1)} '
+    '${r.width.toStringAsFixed(1)}x${r.height.toStringAsFixed(1)})';
+
+Rect _tapArea(WidgetTester tester) {
+  final area = find.byKey(const ValueKey('reader-page-tap-area'));
+  final rects = [
+    for (final e in area.evaluate())
+      if (_elementRect(e) case final r?) r,
+  ];
+  if (rects.isEmpty) return tester.getRect(_stage.first);
+  return rects.reduce((a, b) => a.expandToInclude(b));
+}
+
+Rect? _elementRect(Element e) {
+  final box = e.renderObject;
+  if (box is! RenderBox || !box.hasSize || !box.attached) return null;
+  return box.localToGlobal(Offset.zero) & box.size;
+}
+
+Map<String, String> _geometry(WidgetTester tester) {
+  final context = _stage.evaluate().isNotEmpty
+      ? _stage.evaluate().first
+      : tester.element(find.byType(Scaffold).first);
+  final query = MediaQuery.of(context);
+  final rail = [
+    for (final tip in ['Library', 'Search', 'Add books', 'Notes', 'Settings'])
+      if (find.byTooltip(tip).evaluate().isNotEmpty)
+        '$tip ${_rects(tester, find.byTooltip(tip).first)}',
+  ].join('; ');
+  return {
+    // Profile builds strip dart:ui and painting toString, so spell them out.
+    'padding': _insets(query.padding),
+    'viewPadding': _insets(query.viewPadding),
+    'size': '${query.size.width}x${query.size.height}',
+    'stage': _keyRects(tester, 'reader-stage'),
+    'tap-area': _keyRects(tester, 'reader-page-tap-area'),
+    'surface': _keyRects(tester, 'reader-selection-surface'),
+    'pdf-page': _keyRects(tester, 'reader-pdf-page-shadow'),
+    'running-head': _keyRects(tester, 'reader-running-head'),
+    'running-head-text': _runningHead(tester),
+    'folio': _keyRects(tester, 'reader-folio'),
+    'folio-text': _folio(tester),
+    'location': _location(tester),
+    'header': _keyRects(tester, 'reader-header'),
+    'phone-bar': _keyRects(tester, 'reader-phone-bar'),
+    'rail': rail,
+    'chrome': '${_chrome(tester)}',
+  };
+}
+
+Future<void> _shot(WidgetTester tester, String name) async {
+  final error = tester.takeException();
+  if (error != null) {
+    _note('EXCEPTION-before-$name', '$error'.split('\n').take(3).join(' '));
+  }
+  await _settle(tester, ms: 600);
+  _step += 1;
+  final label = '$_device-${_step.toString().padLeft(2, '0')}-$name';
+  _geometry(tester).forEach((k, v) => _note('$label $k', v));
+  _out('SHOT $label');
+  await _settle(tester, seconds: 4);
+}
+
+/// A finger resting on the toolbar keeps the chrome up, as in normal use.
+Future<TestGesture?> _holdChrome(WidgetTester tester) async {
+  final title = find.byKey(const ValueKey('reader-header-title'));
+  if (title.evaluate().isEmpty || !_chrome(tester)) return null;
+  final gesture = await tester.startGesture(tester.getCenter(title.first));
+  await tester.pump(const Duration(milliseconds: 16));
+  return gesture;
+}
+
+Future<void> _hideChrome(WidgetTester tester) async {
+  if (_chrome(tester)) await _tapAt(tester, .5);
+  if (_chrome(tester)) await _settle(tester, seconds: 4);
+}
+
+double _tapY(WidgetTester tester, Rect area) {
+  if (_tapRow != 'margin') return area.center.dy;
+  final surface = find.byKey(const ValueKey('reader-selection-surface'));
+  final rects = [
+    for (final e in surface.evaluate())
+      if (_elementRect(e) case final r?) r,
+  ];
+  if (rects.isEmpty) return area.center.dy;
+  final y = rects.map((r) => r.bottom).reduce((a, b) => a > b ? a : b) + 6;
+  return y < area.bottom - 2 ? y : area.center.dy;
+}
+
+Future<void> _tapAt(WidgetTester tester, double fraction, {int settleMs = 1000}) async {
+  final rect = _tapArea(tester);
+  await tester.tapAt(Offset(rect.left + rect.width * fraction, _tapY(tester, rect)));
+  if (settleMs > 0) await _settle(tester, ms: settleMs);
+}
+
+/// Taps and records, frame by frame, whether the curl is drawn; captures a
+/// few in-app frames of it. Returns the frame count with a curl.
+Future<String> _tapAndWatch(WidgetTester tester, double f, String name) async {
+  final rect = _tapArea(tester);
+  await tester.tapAt(Offset(rect.left + rect.width * f, _tapY(tester, rect)));
+  final start = DateTime.now();
+  var curlFrames = 0;
+  var frames = 0;
+  int? firstMs;
+  int? lastMs;
+  var captured = 0;
+  while (DateTime.now().difference(start) < const Duration(milliseconds: 900)) {
+    await tester.pump(const Duration(milliseconds: 16));
+    frames++;
+    if (_curl()) {
+      final ms = DateTime.now().difference(start).inMilliseconds;
+      firstMs ??= ms;
+      lastMs = ms;
+      curlFrames++;
+      if (captured < 6 && curlFrames.isOdd) {
+        await _capture(tester, '$name-${captured++}', ratio: 1);
+      }
+    }
+  }
+  await _settle(tester, ms: 300);
+  return '$curlFrames/$frames (first ${firstMs}ms, last ${lastMs}ms)';
+}
+
+/// Moves a held finger in small steps, as a slow drag, capturing frames.
+Future<void> _glide(
+  WidgetTester tester,
+  TestGesture gesture,
+  Offset from,
+  Offset to,
+  String name,
+  String tag,
+) async {
+  const steps = 24;
+  // Cross the touch slop first, as a finger does.
+  for (var i = 1; i <= steps; i++) {
+    final p = Offset.lerp(from, to, i / steps)!;
+    await gesture.moveTo(p);
+    await tester.pump(const Duration(milliseconds: 25));
+    if (i % 4 == 0) await _capture(tester, '$tag-$name-${i ~/ 4}', ratio: 1);
+  }
+  await _settle(tester, ms: 400);
+}
+
+Future<void> _capture(WidgetTester tester, String name, {double ratio = 2}) async {
+  try {
+    final boundary =
+        _captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: ratio);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    File('${_frames.path}/$_device-$name.png')
+        .writeAsBytesSync(bytes!.buffer.asUint8List());
+  } catch (error) {
+    _note('capture-$name-failed', error);
+  }
+}
+
+String _timingSummary(List<ui.FrameTiming> frames, WidgetTester tester) {
+  if (frames.isEmpty) return 'no frames';
+  double ms(Duration d) => d.inMicroseconds / 1000;
+  final build = frames.map((f) => ms(f.buildDuration)).toList()..sort();
+  final raster = frames.map((f) => ms(f.rasterDuration)).toList()..sort();
+  final total = frames.map((f) => ms(f.totalSpan)).toList()..sort();
+  final hz = tester.view.display.refreshRate;
+  final budget = 1000 / (hz > 0 ? hz : 60);
+  String p(List<double> v, double q) =>
+      v[((v.length - 1) * q).round()].toStringAsFixed(2);
+  return 'frames=${frames.length} refresh=${hz}Hz budget=${budget.toStringAsFixed(1)}ms '
+      'build p50/p95/max=${p(build, .5)}/${p(build, .95)}/${build.last.toStringAsFixed(2)} '
+      'raster p50/p95/max=${p(raster, .5)}/${p(raster, .95)}/${raster.last.toStringAsFixed(2)} '
+      'total p95=${p(total, .95)} '
+      'over-budget(build or raster)=${frames.where((f) => ms(f.buildDuration) > budget || ms(f.rasterDuration) > budget).length} '
+      'over-16.7ms=${frames.where((f) => ms(f.buildDuration) > 16.7 || ms(f.rasterDuration) > 16.7).length}';
+}
+
+Future<void> _tapKey(WidgetTester tester, String key) async {
+  final finder = find.byKey(ValueKey(key));
+  if (finder.evaluate().isEmpty) throw StateError('no $key on screen');
+  await tester.tap(finder.first, warnIfMissed: false);
+  await _settle(tester, ms: 500);
+}
+
+Future<void> _dismissPanel(WidgetTester tester) async {
+  final scrim = find.byKey(const ValueKey('reader-panel-scrim'));
+  if (scrim.evaluate().isNotEmpty) {
+    await tester.tapAt(
+      tester.getRect(scrim.first).topCenter + const Offset(0, 8),
+    );
+  } else {
+    await _tapKey(tester, 'reader-header-typography');
+  }
+  await _settle(tester, seconds: 1);
+}
+
+Future<void> _open(WidgetTester tester, String title) async {
+  final finder = find.textContaining(title, findRichText: true);
+  final scrollable = find.byType(Scrollable);
+  if (finder.evaluate().isEmpty && scrollable.evaluate().isNotEmpty) {
+    await tester.scrollUntilVisible(
+      finder,
+      300,
+      scrollable: scrollable.first,
+      maxScrolls: 30,
+    );
+  }
+  if (finder.evaluate().isEmpty) throw StateError('no "$title" on screen');
+  await tester.ensureVisible(finder.last);
+  await _settle(tester, seconds: 1);
+  await tester.tap(finder.last, warnIfMissed: false);
+  await _settle(tester, seconds: 5);
+}
+
+Future<void> _toLibrary(WidgetTester tester) async {
+  if (!_chrome(tester)) await _tapAt(tester, .5);
+  if (find.byKey(const ValueKey('reader-header-back')).evaluate().isNotEmpty) {
+    await _tapKey(tester, 'reader-header-back');
+  } else {
+    // A tablet has no Back button; the rail's Library entry leaves the book.
+    var library = find.byTooltip('Library');
+    if (library.evaluate().isEmpty) library = find.text('Library');
+    if (library.evaluate().isEmpty) throw StateError('no way to the library');
+    await tester.tap(library.first, warnIfMissed: false);
+  }
+  await _settle(tester, seconds: 3);
+}
