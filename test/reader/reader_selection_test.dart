@@ -6,7 +6,8 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:shosai_flutter/reader/controller.dart' show ReaderPlace;
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderPlace, ReaderPlaceRequests;
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -171,6 +172,7 @@ Widget _reader({
   FlutterReaderSettings settings = _pdfFitPage,
   ReaderPlace? place,
   int? initialBookId,
+  ReaderPlaceRequests? placeRequests,
 }) => productionShell(
   locale: const Locale('en'),
   home: ReaderScreen(
@@ -181,6 +183,7 @@ Widget _reader({
     initialSettings: settings.copyWith(zonesHintDismissed: true),
     initialPlace: place,
     initialBookId: initialBookId,
+    placeRequests: placeRequests,
   ),
 );
 
@@ -288,6 +291,7 @@ void main() {
       }
       expect(find.text('Note'), findsOneWidget);
       expect(find.text('Copy'), findsOneWidget);
+      expect(_action('selection-search'), findsOneWidget);
       expect(find.text('Cancel'), findsNothing);
       // With a pointer every control is control-height (32 px).
       expect(tester.getSize(_action('selection-swatch-yellow')).height, 32);
@@ -370,6 +374,51 @@ void main() {
       await tester.tap(_action('selection-copy'));
       await settleReaderSelection(tester);
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+    });
+
+    testWidgets('Search opens the shell palette on the selected text', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final queries = <String?>[];
+      final requests = ReaderPlaceRequests(
+        openSearch: ({query}) => queries.add(query),
+      );
+      addTearDown(requests.dispose);
+      await _open(
+        tester,
+        _reader(bridge: _SelectionBridge(), placeRequests: requests),
+      );
+      await dragFixtureSelection(tester, from: 4, to: 12);
+      await settleReaderSelection(tester);
+      await tester.tap(_action('selection-search'));
+      await settleReaderSelection(tester);
+
+      expect(queries, ['river ru']);
+      expect(
+        find.byKey(const ValueKey('selection-actions')),
+        findsNothing,
+        reason: 'searching leaves the selection',
+      );
+    });
+
+    testWidgets('Search without the shell opens the in-book search on it', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(tester, _reader(bridge: _SelectionBridge()));
+      await dragFixtureSelection(tester, from: 4, to: 12);
+      await settleReaderSelection(tester);
+      await tester.tap(_action('selection-search'));
+      await settleReaderSelection(tester);
+
+      expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+      final input = find.descendant(
+        of: find.byKey(const ValueKey('reader-search-input')),
+        matching: find.byType(EditableText),
+      );
+      expect(input, findsOneWidget);
+      expect(tester.widget<EditableText>(input).controller.text, 'river ru');
     });
 
     testWidgets('Copy delivers the selected text through the copier', (

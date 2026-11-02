@@ -46,10 +46,12 @@ class ShellSearchController extends ChangeNotifier {
   void dispatch(ShellSearchMessage message) {
     if (_disposed) return;
     switch (message) {
-      case ShellSearchOpened(:final book):
+      case ShellSearchOpened(:final book, :final query):
         // The palette opens on the book being read, when there is one; the
-        // query and filter carry over from the last search.
+        // query and filter carry over from the last search unless it opens
+        // to search for given text (a reader's selection).
         final next = _model.copyWith(
+          query: query,
           book: () => book,
           scope: book == null
               ? ShellSearchScope.allBooks
@@ -270,10 +272,12 @@ sealed class ShellSearchMessage {
   const ShellSearchMessage();
 }
 
-/// The palette opened; [book] is the book being read, if any.
+/// The palette opened; [book] is the book being read, if any, and [query]
+/// the text to search for, if it opened for some.
 final class ShellSearchOpened extends ShellSearchMessage {
-  const ShellSearchOpened({this.book});
+  const ShellSearchOpened({this.book, this.query});
   final FlutterLibraryBook? book;
+  final String? query;
 }
 
 final class ShellSearchQueryChanged extends ShellSearchMessage {

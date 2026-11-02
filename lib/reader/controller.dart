@@ -59,7 +59,7 @@ final class ReaderController implements Listenable {
     SelectionCopier? selectionCopier,
     ReaderSelectionAnnouncer? selectionAnnouncer,
     ReaderNavigationAdapter? navigationAdapter,
-    VoidCallback? librarySearchOpener,
+    ReaderSearchOpener? librarySearchOpener,
     ReaderProgressSource? progressSource,
     ReaderContentsLoader? contentsLoader,
     ReaderExternalLinkOpener? externalLinkOpener,
@@ -172,7 +172,7 @@ final class ReaderController implements Listenable {
 
   /// The shell's search palette, which the Search action opens instead of
   /// the in-book search when the reader is in the shell.
-  final VoidCallback? _librarySearchOpener;
+  final ReaderSearchOpener? _librarySearchOpener;
   final ReaderProgressSource? _progressSource;
   final ReaderContentsLoader? _contentsLoader;
   final ReaderExternalLinkOpener _externalLinkOpener;
@@ -554,6 +554,7 @@ final class ReaderController implements Listenable {
           ReaderSelectionCommitted() ||
           ReaderSelectionNoteRequested() ||
           ReaderSelectionCopyRequested() ||
+          ReaderSelectionSearchRequested() ||
           ReaderSelectionCancelled() ||
           ReaderAnnotationUpdated() ||
           ReaderAnnotationNoteRequested() ||
@@ -604,6 +605,7 @@ final class ReaderController implements Listenable {
           ReaderSelectionPointerStarted() ||
           ReaderSelectionKeyboardExtended() ||
           ReaderSelectionAllRequested() ||
+          ReaderSelectionSearchRequested() ||
           ReaderSelectionCancelled():
         _openMatch = null;
       default:
@@ -1306,6 +1308,8 @@ final class ReaderController implements Listenable {
         _selectionNoteRequested();
       case ReaderSelectionCopyRequested():
         _selectionCopyRequested();
+      case ReaderSelectionSearchRequested():
+        _selectionSearchRequested();
       case _ReaderSelectionNoteCompleted():
         if (_isCurrent(message.generation) &&
             message.revision == _noteRevision) {
@@ -5613,6 +5617,26 @@ final class ReaderController implements Listenable {
         dispatch(_ReaderNoteEditorFinished(token));
       }
     }());
+  }
+
+  /// Searches for the selected text and leaves the selection: the shell's
+  /// palette opens on this book when there is one, else the in-book search
+  /// bar opens with the text as its query.
+  void _selectionSearchRequested() {
+    final text = _model.selectedText?.trim();
+    if (_model.selectionPhase != ReaderSelectionPhase.selected ||
+        text == null ||
+        text.isEmpty ||
+        !_model.typography.searchable) {
+      return;
+    }
+    _selectionCancelled(requestSurfaceFocus: false);
+    if (_librarySearchOpener case final open?) {
+      open(query: text);
+      return;
+    }
+    _searchRequested(text);
+    _emit(_model.copyWith(searchOpen: true));
   }
 
   void _selectionCopyRequested() {
