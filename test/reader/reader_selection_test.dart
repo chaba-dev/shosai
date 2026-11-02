@@ -458,7 +458,8 @@ void main() {
         final bridge = _SelectionBridge(unitCount: 3);
         await _open(tester, _reader(bridge: bridge));
         await _turnToSpread(tester);
-        expect(find.textContaining('pages 2–3 of 3'), findsOneWidget);
+        // In the status line, and on the quiet line under the spread.
+        expect(find.textContaining('pages 2–3 of 3'), findsNWidgets(2));
 
         // The second page's text follows the first page's and a line break.
         final shift = selectionFixtureText.runes.length + 1;

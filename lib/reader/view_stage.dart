@@ -197,7 +197,11 @@ class _ReaderStage extends StatelessWidget {
                   spread: spread,
                   child: content,
                 )
-              : phone && document != null
+              // A PDF has no folio of its own: its place is a muted line
+              // under the page or spread, on every device. The line's row is
+              // there while the book opens too, so the first page is
+              // rendered for the box it is then shown in.
+              : document != null || model.busy
               ? Column(
                   children: [
                     Expanded(child: content),
@@ -526,9 +530,20 @@ class _ReaderFolio extends StatelessWidget {
         ? ''
         : model.typography.progress == FlutterReaderProgress.percent
         ? '${progress.percentage}%'
-        : model.document?.format == FlutterBookFormat.pdf
-        ? l10n.readerQuietPageOf(page, model.document!.logicalUnitCount.toInt())
-        : l10n.readerPageNumber(page);
+        : model.document?.format != FlutterBookFormat.pdf
+        ? l10n.readerPageNumber(page)
+        // One line under a PDF spread names both of its pages.
+        : switch ((ordinal, progress.lastOrdinal)) {
+            (null, final int last) => l10n.readerQuietPagesOf(
+              page,
+              last,
+              model.document!.logicalUnitCount.toInt(),
+            ),
+            _ => l10n.readerQuietPageOf(
+              page,
+              model.document!.logicalUnitCount.toInt(),
+            ),
+          };
     return Text(
       text,
       key: const ValueKey('reader-folio'),

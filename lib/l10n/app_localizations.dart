@@ -1752,6 +1752,12 @@ abstract class AppLocalizations {
   /// **'page {page} of {total}'**
   String readerQuietPageOf(int page, int total);
 
+  /// No description provided for @readerQuietPagesOf.
+  ///
+  /// In en, this message translates to:
+  /// **'pages {first}–{last} of {total}'**
+  String readerQuietPagesOf(int first, int last, int total);
+
   /// No description provided for @readerControls.
   ///
   /// In en, this message translates to:
