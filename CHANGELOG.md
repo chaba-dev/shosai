@@ -168,6 +168,7 @@ All notable changes to this project will be documented in this file.
 - *(android)* Keep reader window geometry stable (#264)
 - *(reader)* Respect safe areas for page furniture and rail (#262)
 - *(reader)* Use quarter-page turn zones and hide idle chrome (#265)
+- *(reader)* Separate pointer interaction from layout and quiet page furniture (#263)
 
 ### 🚜 Refactor
 
