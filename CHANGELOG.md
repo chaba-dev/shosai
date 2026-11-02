@@ -119,6 +119,8 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Persist quiet-page preferences and add folio tokens (#256)
 - *(reader)* Make the quiet page the default reading surface (#257)
 - *(reader)* Add interactive page curls (#266)
+- *(reader)* Show highlight colours as swatches in the selection capsule (#268)
+- *(reader)* Search for the selected text from the selection capsule (#269)
 
 ### 🐛 Bug Fixes
 
@@ -169,6 +171,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Respect safe areas for page furniture and rail (#262)
 - *(reader)* Use quarter-page turn zones and hide idle chrome (#265)
 - *(reader)* Separate pointer interaction from layout and quiet page furniture (#263)
+- *(reader)* Paint selections and highlights as one band per line (#270)
 
 ### 🚜 Refactor
 
