@@ -452,6 +452,12 @@ abstract class AppLocalizations {
   /// **'No book open'**
   String get readerNoBookOpen;
 
+  /// The reader place while the page's number is still being counted: percent read only.
+  ///
+  /// In en, this message translates to:
+  /// **'{percentage}%'**
+  String readerPercentStatus(int percentage);
+
   /// The reader place under the page: percent read, then the page.
   ///
   /// In en, this message translates to:

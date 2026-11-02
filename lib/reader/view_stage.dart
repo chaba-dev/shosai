@@ -511,24 +511,39 @@ TextStyle _readerFolioStyle(ReaderModel model, {Color? color}) => TextStyle(
 );
 
 class _ReaderFolio extends StatelessWidget {
-  const _ReaderFolio({required this.model, this.ordinal, this.muted = false});
+  const _ReaderFolio({
+    required this.model,
+    this.ordinal,
+    this.numbered = false,
+    this.muted = false,
+  });
   final ReaderModel model;
+
+  /// The page this folio numbers. With [numbered] it is the slot's own
+  /// number, null while it is still being counted; otherwise null means the
+  /// first page in view.
   final int? ordinal;
+  final bool numbered;
   final bool muted;
 
   @override
   Widget build(BuildContext context) {
     final progress = model.progress;
     final l10n = AppLocalizations.of(context);
-    final page = ordinal ?? progress.firstOrdinal;
-    final text =
-        model.typography.progress == FlutterReaderProgress.off || page == null
-        ? ''
-        : model.typography.progress == FlutterReaderProgress.percent
-        ? '${progress.percentage}%'
-        : model.document?.format == FlutterBookFormat.pdf
-        ? l10n.readerQuietPageOf(page, model.document!.logicalUnitCount.toInt())
-        : l10n.readerPageNumber(page);
+    final page = numbered ? ordinal : ordinal ?? progress.firstOrdinal;
+    final text = switch (model.typography.progress) {
+      FlutterReaderProgress.off => '',
+      // The percentage is known before the page numbers are counted.
+      FlutterReaderProgress.percent =>
+        progress.kind == ReaderProgressKind.single ||
+                progress.kind == ReaderProgressKind.range
+            ? '${progress.percentage}%'
+            : '',
+      _ when page == null => '',
+      _ when model.document?.format == FlutterBookFormat.pdf =>
+        l10n.readerQuietPageOf(page, model.document!.logicalUnitCount.toInt()),
+      _ => l10n.readerPageNumber(page),
+    };
     return Text(
       text,
       key: const ValueKey('reader-folio'),
@@ -543,6 +558,10 @@ class _ReaderFolio extends StatelessWidget {
   }
 }
 
+/// One page slot of the furniture: whether a page sits in it, its number
+/// from the start of the book once known, and whether it opens a chapter.
+typedef _ReaderFurnitureSlot = ({bool page, int? ordinal, bool opening});
+
 class _ReaderPageFurniture extends StatelessWidget {
   const _ReaderPageFurniture({
     required this.model,
@@ -556,8 +575,29 @@ class _ReaderPageFurniture extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final first = model.progress.firstOrdinal;
-    final ordinals = <int?>[first, if (spread) model.progress.lastOrdinal];
-    final physical = model.rightToLeft ? ordinals.reversed : ordinals;
+    final page = model.epubPage;
+    final paginated = page != null && !page.continuous;
+    // A slot holds a page, even one not numbered yet while the chapters
+    // before it are counted; the second slot is blank paper at a chapter's
+    // end. A chapter opening is told by the page, not its number, which runs
+    // through the book.
+    final slots = <_ReaderFurnitureSlot>[
+      (
+        page: paginated || first != null,
+        ordinal: first,
+        opening: paginated ? page.pageIndex == 0 : first == 1,
+      ),
+      if (spread)
+        (
+          page: paginated
+              ? page.facing != null
+              : model.progress.lastOrdinal != null,
+          ordinal: model.progress.lastOrdinal,
+          opening: false,
+        ),
+    ];
+    final lastPage = slots.where((slot) => slot.page).lastOrNull;
+    final physical = model.rightToLeft ? slots.reversed : slots;
     final heading =
         model.contents.entries.where((e) => e.current).firstOrNull?.title ??
         model.document?.title ??
@@ -581,14 +621,12 @@ class _ReaderPageFurniture extends StatelessWidget {
                 excluding: model.chromeShown,
                 child: Row(
                   children: [
-                    for (final ordinal in physical)
+                    for (final slot in physical)
                       Expanded(
                         child: Center(
                           child: Text(
                             // Chapter openings leave this space quiet, with the title below.
-                            ordinal == null ||
-                                    ordinal == 1 ||
-                                    model.document == null
+                            !slot.page || slot.opening || model.document == null
                                 ? ''
                                 : heading,
                             key: const ValueKey('reader-running-head'),
@@ -608,18 +646,20 @@ class _ReaderPageFurniture extends StatelessWidget {
             height: 28,
             child: Row(
               children: [
-                for (final ordinal in physical)
+                for (final slot in physical)
                   Expanded(
                     child: Center(
                       child:
-                          ordinal == null ||
+                          !slot.page ||
                               model.typography.progress ==
                                       FlutterReaderProgress.percent &&
-                                  spread &&
-                                  ordinal !=
-                                      (model.progress.lastOrdinal ?? first)
+                                  !identical(slot, lastPage)
                           ? const SizedBox.shrink()
-                          : _ReaderFolio(model: model, ordinal: ordinal),
+                          : _ReaderFolio(
+                              model: model,
+                              ordinal: slot.ordinal,
+                              numbered: true,
+                            ),
                     ),
                   ),
               ],
