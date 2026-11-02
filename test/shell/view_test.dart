@@ -482,6 +482,7 @@ void main() {
   ) async {
     // An iPad in landscape: the clock above, the home indicator below.
     tester.view.padding = const FakeViewPadding(top: 24, bottom: 20);
+    tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 20);
     for (final reading in [false, true]) {
       await _pumpFrame(
         tester,
@@ -500,6 +501,33 @@ void main() {
         tester.element(find.byKey(const Key('content'))),
       );
       expect(content, const EdgeInsets.only(top: 24, bottom: 20));
+    }
+  });
+
+  testWidgets('the reading rail stays put when the iPad status bar toggles', (
+    tester,
+  ) async {
+    tester.view.viewPadding = const FakeViewPadding(top: 32, bottom: 20);
+    tester.view.padding = const FakeViewPadding(bottom: 20);
+    await _pumpFrame(
+      tester,
+      size: const Size(1180, 820),
+      model: _model(reading: true),
+      recorder: _Recorder(),
+    );
+    final controls = [
+      find.byType(ShellMark),
+      find.byTooltip('Library'),
+      find.byTooltip('Search'),
+      find.byTooltip('Add books'),
+    ];
+    final rects = controls.map(tester.getRect).toList();
+    expect(rects.first.top, greaterThanOrEqualTo(32 + 16));
+    for (final top in [32.0, 0.0, 32.0, 0.0]) {
+      tester.view.padding = FakeViewPadding(top: top, bottom: 20);
+      await tester.pumpAndSettle();
+      expect(controls.map(tester.getRect).toList(), rects);
+      expect(tester.takeException(), isNull);
     }
   });
 

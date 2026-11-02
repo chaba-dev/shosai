@@ -269,6 +269,7 @@ class ShellRail extends StatelessWidget {
               return scroll ? SingleChildScrollView(child: column) : column;
             },
           ),
+          stableTop: true,
         ),
       ),
     );
@@ -279,9 +280,24 @@ class ShellRail extends StatelessWidget {
 /// clear of the status bar above (an iPad's clock), the home indicator below
 /// and a landscape iPhone's notch at the side. The end edge belongs to the
 /// content beside them, which [ShellFrame] gives the rest of the safe area.
-Widget _startSafeArea(BuildContext context, Widget child) {
+Widget _startSafeArea(
+  BuildContext context,
+  Widget child, {
+  bool stableTop = false,
+}) {
   final rtl = Directionality.of(context) == TextDirection.rtl;
-  return SafeArea(left: !rtl, right: rtl, child: child);
+  return SafeArea(
+    left: !rtl,
+    right: rtl,
+    top: !stableTop,
+    // The reading rail must not follow the status bar in and out of view.
+    child: Padding(
+      padding: EdgeInsets.only(
+        top: stableTop ? MediaQuery.viewPaddingOf(context).top : 0,
+      ),
+      child: child,
+    ),
+  );
 }
 
 /// The safe area's inset on the start edge: the sidebar and rail grow by it,

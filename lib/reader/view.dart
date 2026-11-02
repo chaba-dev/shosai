@@ -411,10 +411,18 @@ class _ReaderScreenState extends State<ReaderScreen>
               ).invokeMethod<void>('setShown', shown),
             );
           } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+            // Only phones hide the system status bar with reader chrome.
+            // Hiding it on iPad removes its top safe inset and moves both the
+            // reading rail and the page. Keep it visible in either orientation.
             unawaited(
               SystemChrome.setEnabledSystemUIMode(
                 SystemUiMode.manual,
-                overlays: shown ? SystemUiOverlay.values : [],
+                overlays:
+                    shown ||
+                        MediaQuery.sizeOf(context).shortestSide >=
+                            ShellLayout.tabletMinWidth
+                    ? SystemUiOverlay.values
+                    : [],
               ),
             );
           }
