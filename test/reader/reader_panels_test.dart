@@ -444,8 +444,9 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
       await _settle(tester);
-      // The status wording follows the navigated unit.
-      expect(find.text('25% · page 1'), findsOneWidget);
+      // The status wording follows the navigated unit; its page counts on
+      // from the one-page chapter before it.
+      expect(find.text('25% · page 2'), findsOneWidget);
     });
 
     testWidgets('a short window at 200% text scrolls the whole panel and '
@@ -1934,7 +1935,7 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.go);
     await tester.pump();
     await _settle(tester, frames: 8);
-    expect(find.text('67% · page 1'), findsOneWidget);
+    expect(find.text('67% · page 3'), findsOneWidget);
   });
 
   group('panel modality', () {
@@ -2106,7 +2107,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.go);
       await tester.pump();
       await _settle(tester);
-      expect(find.text('33% · page 1'), findsOneWidget);
+      expect(find.text('33% · page 2'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('reader-page-input-error')),
         findsNothing,
@@ -2128,7 +2129,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Enter a chapter between 1 and 3.'), findsOneWidget);
-      expect(find.text('33% · page 1'), findsOneWidget);
+      expect(find.text('33% · page 2'), findsOneWidget);
 
       // A non-numeric draft is rejected the same way.
       await tester.enterText(
@@ -2261,13 +2262,13 @@ void main() {
       await _settle(tester);
       expect(find.text('1 / 2'), findsOneWidget);
       // The pinned reference navigates to the first result on completion.
-      expect(find.text('36% · page 1'), findsOneWidget);
+      expect(find.text('36% · page 2'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('reader-search-next')));
       await tester.pump();
       await _settle(tester);
       expect(find.text('2 / 2'), findsOneWidget);
-      expect(find.text('72% · page 1'), findsOneWidget);
+      expect(find.text('72% · page 3'), findsOneWidget);
 
       // Stepping wraps.
       await tester.tap(find.byKey(const ValueKey('reader-search-next')));

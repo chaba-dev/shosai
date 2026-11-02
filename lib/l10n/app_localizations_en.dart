@@ -215,6 +215,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerNoBookOpen => 'No book open';
 
   @override
+  String readerPercentStatus(int percentage) {
+    return '$percentage%';
+  }
+
+  @override
   String readerPageStatus(int percentage, int page) {
     return '$percentage% · page $page';
   }

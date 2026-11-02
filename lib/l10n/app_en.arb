@@ -266,6 +266,15 @@
   "@readerNoBookOpen": {
     "description": "Iced reference key: no-book-open."
   },
+  "readerPercentStatus": "{percentage}%",
+  "@readerPercentStatus": {
+    "description": "The reader place while the page's number is still being counted: percent read only.",
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
   "readerPageStatus": "{percentage}% · page {page}",
   "@readerPageStatus": {
     "description": "The reader place under the page: percent read, then the page.",
