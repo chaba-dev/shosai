@@ -167,6 +167,7 @@ All notable changes to this project will be documented in this file.
 - *(drive)* Reuse Android bearer tokens until rejected (#254)
 - *(android)* Keep reader window geometry stable (#264)
 - *(reader)* Respect safe areas for page furniture and rail (#262)
+- *(reader)* Use quarter-page turn zones and hide idle chrome (#265)
 
 ### 🚜 Refactor
 
