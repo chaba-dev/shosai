@@ -88,7 +88,8 @@ extension on ReaderController {
   void _prefetchPdfLeaves() {
     final pdf = _pdfDocument;
     final document = _model.document;
-    if (pdf == null ||
+    if (!renderPdfAhead ||
+        pdf == null ||
         document == null ||
         document.format != FlutterBookFormat.pdf ||
         _model.contentState != ReaderContentState.ready ||
