@@ -522,22 +522,22 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerCopy => 'コピー';
 
   @override
-  String get readerSelectionCancel => 'キャンセル';
+  String get readerSelectionNote => 'メモ';
 
   @override
-  String get readerHighlightYellow => '黄';
+  String get readerHighlightYellow => '黄色でハイライト';
 
   @override
-  String get readerHighlightGreen => '緑';
+  String get readerHighlightGreen => '緑でハイライト';
 
   @override
-  String get readerHighlightBlue => '青';
+  String get readerHighlightBlue => '青でハイライト';
 
   @override
-  String get readerHighlightPink => 'ピンク';
+  String get readerHighlightPink => 'ピンクでハイライト';
 
   @override
-  String get readerHighlightPurple => '紫';
+  String get readerHighlightPurple => '紫でハイライト';
 
   @override
   String get readerAnnotationRecovered => '復元';

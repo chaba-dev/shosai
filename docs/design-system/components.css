@@ -136,6 +136,9 @@
 .sh-swatch--blue { background: var(--swatch-blue); }
 .sh-swatch--pink { background: var(--swatch-pink); }
 .sh-swatch--purple { background: var(--swatch-purple); }
+.sh-capsule--touch .sh-swatch { margin: 10px; }
+.sh-capsule--touch .sh-btn { height: var(--touch-target); min-width: var(--touch-target); padding: 0; }
+.sh-capsule--touch svg.i { width: 20px; height: 20px; }
 .sh-backpill { height: 36px; padding: 0 var(--space-4) 0 var(--space-3); }
 
 /* Zones hint: the one-time overlay that names the tap zones: the outer

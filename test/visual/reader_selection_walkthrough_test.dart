@@ -197,7 +197,7 @@ void main() {
       assertion: 'Shift+F10 focused the selection action surface',
     );
 
-    await tester.tap(find.text('Green'));
+    await tester.tap(find.byKey(const ValueKey('selection-swatch-green')));
     await settleReaderSelection(tester);
     expect(bridge.created.single.color, FlutterHighlightColor.green);
     expect(find.byKey(const ValueKey('selection-actions')), findsNothing);

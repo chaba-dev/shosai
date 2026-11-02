@@ -11,6 +11,8 @@ body { margin: 0; background: var(--canvas); }
 .pg { width: 640px; padding: 48px 64px 40px; box-shadow: var(--shadow-page); }
 .body { overflow: visible; }
 .tools { position: absolute; }
+.phone { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 0 40px; background: var(--surface-sunken); }
+.phone__label { font: 500 11px/14px var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
 </style>
 </head>
 <body>
@@ -22,15 +24,29 @@ body { margin: 0; background: var(--canvas); }
     </div>
   </div>
   <div class="sh-capsule tools" id="tools" role="toolbar" aria-label="Selection">
-    <button class="sh-swatch sh-swatch--yellow" aria-label="Yellow highlight"></button>
-    <button class="sh-swatch sh-swatch--green" aria-label="Green highlight"></button>
-    <button class="sh-swatch sh-swatch--blue" aria-label="Blue highlight"></button>
-    <button class="sh-swatch sh-swatch--pink" aria-label="Pink highlight"></button>
-    <button class="sh-swatch sh-swatch--purple" aria-label="Purple highlight"></button>
+    <button class="sh-swatch sh-swatch--yellow" aria-label="Yellow highlight" title="Yellow highlight"></button>
+    <button class="sh-swatch sh-swatch--green" aria-label="Green highlight" title="Green highlight"></button>
+    <button class="sh-swatch sh-swatch--blue" aria-label="Blue highlight" title="Blue highlight"></button>
+    <button class="sh-swatch sh-swatch--pink" aria-label="Pink highlight" title="Pink highlight"></button>
+    <button class="sh-swatch sh-swatch--purple" aria-label="Purple highlight" title="Purple highlight"></button>
     <span class="sh-capsule__sep"></span>
     <button class="sh-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg>Note</button>
     <button class="sh-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>Copy</button>
     <button class="sh-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search</button>
+  </div>
+</div>
+<div class="sh phone">
+  <span class="phone__label">Phone and tablet: 44 px targets, icon actions when labels do not fit</span>
+  <div class="sh-capsule sh-capsule--touch" role="toolbar" aria-label="Selection">
+    <button class="sh-swatch sh-swatch--yellow" aria-label="Yellow highlight" title="Yellow highlight"></button>
+    <button class="sh-swatch sh-swatch--green" aria-label="Green highlight" title="Green highlight"></button>
+    <button class="sh-swatch sh-swatch--blue" aria-label="Blue highlight" title="Blue highlight"></button>
+    <button class="sh-swatch sh-swatch--pink" aria-label="Pink highlight" title="Pink highlight"></button>
+    <button class="sh-swatch sh-swatch--purple" aria-label="Purple highlight" title="Purple highlight"></button>
+    <span class="sh-capsule__sep"></span>
+    <button class="sh-btn" aria-label="Note" title="Note"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg></button>
+    <button class="sh-btn" aria-label="Copy" title="Copy"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button>
+    <button class="sh-btn" aria-label="Search" title="Search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
   </div>
 </div>
 <script>

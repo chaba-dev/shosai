@@ -772,29 +772,29 @@
   "@readerCopy": {
     "description": "NEW: no Iced string (RFD 16 authority). The selection copy action, enabled only for a copy-eligible surface (RD-12)."
   },
-  "readerSelectionCancel": "Cancel",
-  "@readerSelectionCancel": {
-    "description": "NEW: no Iced string (RFD 16 authority). The selection cancel action (RD-12)."
+  "readerSelectionNote": "Note",
+  "@readerSelectionNote": {
+    "description": "The selection capsule action that saves a yellow highlight and opens its note editor (design system, Highlight)."
   },
-  "readerHighlightYellow": "Yellow",
+  "readerHighlightYellow": "Yellow highlight",
   "@readerHighlightYellow": {
-    "description": "NEW: no Iced string (RFD 16 authority). The yellow highlight color action (RD-12)."
+    "description": "The yellow swatch in the selection capsule: its accessible name and tooltip (design system, Highlight)."
   },
-  "readerHighlightGreen": "Green",
+  "readerHighlightGreen": "Green highlight",
   "@readerHighlightGreen": {
-    "description": "NEW: no Iced string (RFD 16 authority). The green highlight color action (RD-12)."
+    "description": "The green swatch in the selection capsule: its accessible name and tooltip (design system, Highlight)."
   },
-  "readerHighlightBlue": "Blue",
+  "readerHighlightBlue": "Blue highlight",
   "@readerHighlightBlue": {
-    "description": "NEW: no Iced string (RFD 16 authority). The blue highlight color action (RD-12)."
+    "description": "The blue swatch in the selection capsule: its accessible name and tooltip (design system, Highlight)."
   },
-  "readerHighlightPink": "Pink",
+  "readerHighlightPink": "Pink highlight",
   "@readerHighlightPink": {
-    "description": "NEW: no Iced string (RFD 16 authority). The pink highlight color action (RD-12)."
+    "description": "The pink swatch in the selection capsule: its accessible name and tooltip (design system, Highlight)."
   },
-  "readerHighlightPurple": "Purple",
+  "readerHighlightPurple": "Purple highlight",
   "@readerHighlightPurple": {
-    "description": "NEW: no Iced string (RFD 16 authority). The purple highlight color action (RD-12)."
+    "description": "The purple swatch in the selection capsule: its accessible name and tooltip (design system, Highlight)."
   },
   "readerAnnotationRecovered": "recovered",
   "@readerAnnotationRecovered": {
