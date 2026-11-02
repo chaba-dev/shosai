@@ -1150,4 +1150,28 @@ void main() {
     expect(_place(tester), isEmpty);
     expect(saved.last.progress, FlutterReaderProgress.off);
   });
+
+  testWidgets(
+    'the Aa sheet dims the page between the toolbar and the bottom bar',
+    (tester) async {
+      await _open(tester, const Size(390, 844));
+      tester.view.viewPadding = const FakeViewPadding(top: 52, bottom: 24);
+      tester.view.padding = tester.view.viewPadding;
+      await tester.pumpAndSettle();
+      await _tap(tester, .5);
+      await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+      await tester.pumpAndSettle();
+      final header = tester.getRect(
+        find.byKey(const ValueKey('reader-header')),
+      );
+      final scrim = tester.getRect(
+        find.byKey(const ValueKey('reader-panel-scrim')),
+      );
+      // The toolbar sits under the status bar; none of it is left half dimmed.
+      expect(header.top, 52);
+      expect(scrim.top, header.bottom);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
 }

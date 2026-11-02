@@ -51,6 +51,7 @@ List<Widget> _readerPanelOverlay({
   required ReaderModel model,
   required ShellLayout layout,
   required BoxConstraints stage,
+  required double topInset,
   required double bottomInset,
   required void Function(ReaderMessage) dispatch,
   required FocusNode focusNode,
@@ -69,10 +70,14 @@ List<Widget> _readerPanelOverlay({
     focusNode: focusNode,
   );
   final inset = ShosaiTokens.space2;
-  final top = math.min(
-    ShosaiTokens.sizeToolbarHeight,
-    stage.maxHeight * _readerHeaderBoundShare,
-  );
+  // Below the toolbar, which sits under the status bar: the scrim dims the
+  // page, not the chrome around it.
+  final top =
+      math.min(
+        ShosaiTokens.sizeToolbarHeight,
+        stage.maxHeight * _readerHeaderBoundShare,
+      ) +
+      topInset;
   final maxHeight = math.max(
     0.0,
     stage.maxHeight - top - bottomInset - 2 * inset,
