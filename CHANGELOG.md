@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-01
+## [0.1.0] - 2026-11-02
 
 ### 🚀 Features
 
@@ -166,6 +166,7 @@ All notable changes to this project will be documented in this file.
 - *(dropbox)* Guide setup through restricted app folder (#248)
 - *(drive)* Reuse Android bearer tokens until rejected (#254)
 - *(android)* Keep reader window geometry stable (#264)
+- *(reader)* Respect safe areas for page furniture and rail (#262)
 
 ### 🚜 Refactor
 
