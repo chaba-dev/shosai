@@ -758,6 +758,61 @@ void main() {
       expect(rect.bottom, lessThanOrEqualTo(document.bottom + 0.5));
     });
 
+    testWidgets(
+      'a phone PDF selection stays below the visible safe-area header',
+      (tester) async {
+        _setView(tester, const Size(430, 932));
+        tester.view.padding = const FakeViewPadding(top: 62, bottom: 34);
+        await _open(
+          tester,
+          _reader(
+            bridge: _SelectionBridge(pageWidth: 336, pageHeight: 1200),
+            initialPath: '/books/atlas.pdf',
+            settings: _pdfFitWidth,
+          ),
+        );
+        await revealReaderChrome(tester);
+        final pointer = TestPointer(1, ui.PointerDeviceKind.mouse);
+        pointer.hover(renderedFixtureOffset(tester, 4));
+        await tester.sendEventToBinding(
+          pointer.scroll(Offset(0, renderedFixtureOffset(tester, 4).dy - 180)),
+        );
+        await settleReaderSelection(tester);
+        await dragFixtureSelection(tester, from: 4, to: 14);
+        await settleReaderSelection(tester);
+
+        final menu = find.byKey(const ValueKey('selection-actions'));
+        final header = find.byKey(const ValueKey('reader-header'));
+        expect(
+          tester.getRect(menu).top,
+          greaterThanOrEqualTo(tester.getRect(header).bottom + 8),
+        );
+        expect(
+          tester.getRect(menu).top,
+          greaterThan(renderedFixtureOffset(tester, 4).dy),
+        );
+        expect(find.text('Copy').hitTestable(), findsOneWidget);
+        // A safe-area change must update an already-open menu, not only the
+        // geometry captured when the selection was first made.
+        tester.view.padding = const FakeViewPadding(top: 180, bottom: 34);
+        await settleReaderSelection(tester);
+        expect(
+          tester.getRect(menu).top,
+          greaterThanOrEqualTo(tester.getRect(header).bottom + 8),
+        );
+        expect(
+          tester.getRect(menu).bottom,
+          lessThanOrEqualTo(
+            tester.getRect(find.byKey(const ValueKey('reader-phone-bar'))).top -
+                8,
+          ),
+        );
+        await tester.tap(find.text('Cancel'));
+        await settleReaderSelection(tester);
+        expect(menu, findsNothing);
+      },
+    );
+
     testWidgets('the surface follows the range in a PDF fit-width view', (
       tester,
     ) async {

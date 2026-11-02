@@ -199,6 +199,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   final RestorableIntN _openDocumentBookId = RestorableIntN(null);
   final GlobalKey _pathFieldKey = GlobalKey(debugLabel: 'document path');
   final GlobalKey _contentKey = GlobalKey(debugLabel: 'reader content');
+  final GlobalKey _headerBoundsKey = GlobalKey(
+    debugLabel: 'reader header bounds',
+  );
+  final GlobalKey _footerBoundsKey = GlobalKey(
+    debugLabel: 'reader footer bounds',
+  );
+  final ValueNotifier<int> _chromeGeometry = ValueNotifier(0);
+  bool _chromeGeometryPending = false;
 
   /// One key per panel, so an open panel keeps its scroll position and focus
   /// when a resize moves it between floating and docked.
@@ -702,6 +710,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _typographyFocus.dispose();
     _notesFocus.dispose();
     _panelFocus.dispose();
+    _chromeGeometry.dispose();
     super.dispose();
   }
 
@@ -1011,7 +1020,13 @@ class _ReaderScreenState extends State<ReaderScreen>
                       model: model,
                       layout: layout,
                       dispatch: _controller.dispatch,
-                      content: content,
+                      content: _ReaderChromeBounds(
+                        notifier: _chromeGeometry,
+                        header: _headerBoundsKey,
+                        footer: _footerBoundsKey,
+                        visible: model.chromeShown,
+                        child: content,
+                      ),
                     ),
                   ),
                 ),
@@ -1185,38 +1200,57 @@ class _ReaderScreenState extends State<ReaderScreen>
     ReaderModel model, {
     required bool top,
     required Widget child,
-  }) => IgnorePointer(
-    ignoring: !model.chromeShown,
-    child: ExcludeFocus(
-      excluding: !model.chromeShown,
-      child: ExcludeSemantics(
-        excluding: !model.chromeShown,
-        child: AnimatedOpacity(
-          opacity: model.chromeShown ? 1 : 0,
-          duration: MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : const Duration(milliseconds: 180),
-          child: AnimatedSlide(
-            offset: model.chromeShown ? Offset.zero : Offset(0, top ? -1 : 1),
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 180),
-            child: MouseRegion(
-              onEnter: (_) =>
-                  _controller.dispatch(const ReaderChromeHovered(true)),
-              onExit: (_) =>
-                  _controller.dispatch(const ReaderChromeHovered(false)),
-              child: GestureDetector(
-                onVerticalDragUpdate: top
-                    ? (details) {
-                        if (details.delta.dy < 0) {
-                          _controller.dispatch(const ReaderChromeDismissed());
-                        }
-                      }
-                    : null,
-                child: ColoredBox(
-                  color: ShellPalette.of(context).chrome,
-                  child: SafeArea(top: top, bottom: !top, child: child),
+  }) => NotificationListener<SizeChangedLayoutNotification>(
+    onNotification: (_) {
+      if (!_chromeGeometryPending) {
+        _chromeGeometryPending = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _chromeGeometryPending = false;
+          if (mounted) _chromeGeometry.value += 1;
+        });
+      }
+      return true;
+    },
+    child: SizeChangedLayoutNotifier(
+      key: top ? _headerBoundsKey : _footerBoundsKey,
+      child: IgnorePointer(
+        ignoring: !model.chromeShown,
+        child: ExcludeFocus(
+          excluding: !model.chromeShown,
+          child: ExcludeSemantics(
+            excluding: !model.chromeShown,
+            child: AnimatedOpacity(
+              opacity: model.chromeShown ? 1 : 0,
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              child: AnimatedSlide(
+                offset: model.chromeShown
+                    ? Offset.zero
+                    : Offset(0, top ? -1 : 1),
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180),
+                child: MouseRegion(
+                  onEnter: (_) =>
+                      _controller.dispatch(const ReaderChromeHovered(true)),
+                  onExit: (_) =>
+                      _controller.dispatch(const ReaderChromeHovered(false)),
+                  child: GestureDetector(
+                    onVerticalDragUpdate: top
+                        ? (details) {
+                            if (details.delta.dy < 0) {
+                              _controller.dispatch(
+                                const ReaderChromeDismissed(),
+                              );
+                            }
+                          }
+                        : null,
+                    child: ColoredBox(
+                      color: ShellPalette.of(context).chrome,
+                      child: SafeArea(top: top, bottom: !top, child: child),
+                    ),
+                  ),
                 ),
               ),
             ),
