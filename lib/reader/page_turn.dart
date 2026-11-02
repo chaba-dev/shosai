@@ -95,18 +95,29 @@ extension on ReaderController {
             ? pdfSpreadStep(origin.unit, delta)
             : origin.unit + delta;
         if (unit < 0 || unit >= pdf.pageCount) return;
-        final (raster, _) = await _renderPdfPage(
-          pdf,
-          unit,
-          origin.layout,
-          facing: _pdfFacingUnit(pdf, unit, origin.layout),
-        );
-        if (!current()) return;
-        image = await _decoder(
-          raster.pixels,
-          width: raster.width,
-          height: raster.height,
-        );
+        final start = origin.layout.spread ? pdfSpreadStart(unit) : unit;
+        final facing = _pdfFacingUnit(pdf, start, origin.layout);
+        // The leaf rendered ahead for a turn shows at once; the turn that
+        // follows still adopts its own copy.
+        final leaf = _pdfLeafFor(pdf, generation, start, facing, origin.layout);
+        if (leaf != null && await leaf.content != null) {
+          if (!current()) return;
+          image = leaf._image?.clone();
+        }
+        if (image == null) {
+          final (raster, _) = await _renderPdfPage(
+            pdf,
+            unit,
+            origin.layout,
+            facing: _pdfFacingUnit(pdf, unit, origin.layout),
+          );
+          if (!current()) return;
+          image = await _decoder(
+            raster.pixels,
+            width: raster.width,
+            height: raster.height,
+          );
+        }
       } else {
         final page = origin.epubPage;
         final source = _epubSource;

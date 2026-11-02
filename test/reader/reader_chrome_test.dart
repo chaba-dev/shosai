@@ -109,9 +109,9 @@ class _ChromeBridge extends HarnessBridge {
   /// real in-flight search.
   final List<Completer<List<FlutterSearchMatch>>> searchCompletions = [];
 
-  /// When set, page renders fail with a bridge error, so a layout failure can
-  /// be driven through the rendered chrome.
-  bool failRender = false;
+  /// When set, that page's renders fail with a bridge error, so a layout
+  /// failure can be driven through the rendered chrome.
+  int? failRenderPage;
 
   /// Saved places the contents panel renders (fixture-backed; persistence is
   /// live in production).
@@ -172,7 +172,7 @@ class _ChromeBridge extends HarnessBridge {
     required double scale,
     required BigInt cancellationId,
   }) {
-    if (failRender) {
+    if (page.toInt() == failRenderPage) {
       throw const FlutterBridgeError(
         kind: FlutterBridgeErrorKind.invalidRequest,
         message: 'page render rejected',
@@ -1110,8 +1110,9 @@ void main() {
 
       // Page 3 (unit 2, 200 wide) is drawn on the left and page 2 (unit 1,
       // 300 wide) on the right, in the raster and the selection surface alike.
-      final raster = rasters.last;
-      expect(raster.width, 500);
+      // The spread is rendered ahead of the turn, and the cover behind it
+      // once the turn lands.
+      final raster = rasters.singleWhere((raster) => raster.width == 500);
       int unitAt(int x) => raster.pixels[x * 4];
       expect([unitAt(5), unitAt(195), unitAt(205), unitAt(495)], [2, 2, 1, 1]);
       final painter = _pagePainter(tester);
@@ -1834,17 +1835,18 @@ void main() {
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
-      final bridge = _ChromeBridge();
+      // The next page fails while it is rendered ahead too, so the turn
+      // renders it again itself.
+      final bridge = _ChromeBridge()..failRenderPage = 1;
       await _open(
         tester,
         _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
       );
 
-      bridge.failRender = true;
       await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
-      bridge.failRender = false;
+      bridge.failRenderPage = null;
 
       // The bridge reason is visible (kind and message, not
       // "Instance of 'FlutterBridgeError'") and the entry is not labelled as a
