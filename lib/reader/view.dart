@@ -1112,6 +1112,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               model: model,
               layout: layout,
               stage: constraints,
+              topInset: MediaQuery.paddingOf(context).top,
               bottomInset: bottomInset,
               dispatch: _controller.dispatch,
               focusNode: _panelFocus,
