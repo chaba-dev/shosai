@@ -423,6 +423,26 @@ CREATE TABLE library_source_admissions (
     PRIMARY KEY (location_id, locator_key)
 ) STRICT;
 '''),
+  Migration(12, 'hidden source files', '''
+-- A source file whose book was removed from the library. Removing deletes the
+-- book and, with it, the file's admission, so a scan would offer the file
+-- again; this row keeps it off the shelf while its bytes are unchanged. No
+-- foreign key to books: the row outlives the book, and the file's bytes are
+-- never deleted (RFD 12, outcome 6). Cleared when the file changes or goes,
+-- or when its content is admitted again.
+CREATE TABLE library_hidden_source_files (
+    location_id  TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key  TEXT NOT NULL,
+    content_hash TEXT NOT NULL
+                 CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+    size         INTEGER,
+    revision     TEXT,
+    hidden_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (location_id, locator_key)
+) STRICT;
+CREATE INDEX library_hidden_source_files_content_idx
+    ON library_hidden_source_files(content_hash);
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.
