@@ -236,11 +236,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
 
   /// Opens the search palette over whatever shows, on the book being read
   /// when there is one, and reads the hit chosen in it.
-  Future<void> _openSearch() async {
+  Future<void> _openSearch({String? query}) async {
     if (!mounted || _searchRoute != null) return;
     final shell = _shell.model;
     _search.dispatch(
-      ShellSearchOpened(book: shell.reading ? shell.currentBook?.book : null),
+      ShellSearchOpened(
+        book: shell.reading ? shell.currentBook?.book : null,
+        query: query,
+      ),
     );
     final navigator = Navigator.of(context);
     final route = RawDialogRoute<ShellSearchChoice>(
@@ -628,7 +631,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     _shownBooks.add(open.id);
     // A note in the reader's All books opens its own book here.
     final requests = ReaderPlaceRequests(
-      openSearch: () => unawaited(_openSearch()),
+      openSearch: ({query}) => unawaited(_openSearch(query: query)),
       openBook: (book, place) {
         // The reader can report twice before Flutter replaces it, or report
         // after it has become stale. Only the reader still current may move

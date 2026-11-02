@@ -257,4 +257,122 @@ void main() {
       [false, true, true, false],
     );
   });
+
+  group('selectionBands', () {
+    test('merges a line of characters into one band', () {
+      // "ab cd" with a space gap, per-character rects that slightly overlap.
+      final rects = [
+        const Rect.fromLTRB(10, 10, 18, 30),
+        const Rect.fromLTRB(17.5, 11, 26, 29),
+        const Rect.fromLTRB(32, 10, 40, 30),
+        const Rect.fromLTRB(40, 10, 48, 30),
+      ];
+      expect(selectionBands(rects), [const Rect.fromLTRB(10, 10, 48, 30)]);
+    });
+
+    test('starts a band on each wrapped line', () {
+      final rects = [
+        for (var x = 100.0; x < 180; x += 10) Rect.fromLTRB(x, 10, x + 10, 30),
+        for (var x = 10.0; x < 60; x += 10) Rect.fromLTRB(x, 34, x + 10, 54),
+      ];
+      expect(selectionBands(rects), [
+        const Rect.fromLTRB(100, 10, 180, 30),
+        const Rect.fromLTRB(10, 34, 60, 54),
+      ]);
+    });
+
+    test('runs down a vertical column, then the next column to its left', () {
+      final rects = [
+        for (var y = 10.0; y < 90; y += 20) Rect.fromLTRB(160, y, 180, y + 20),
+        for (var y = 10.0; y < 50; y += 20) Rect.fromLTRB(130, y, 150, y + 20),
+      ];
+      expect(selectionBands(rects), [
+        const Rect.fromLTRB(160, 10, 180, 90),
+        const Rect.fromLTRB(130, 10, 150, 50),
+      ]);
+    });
+
+    test('a one-character line under a line starts its own band', () {
+      final rects = [
+        const Rect.fromLTRB(10, 10, 20, 30),
+        const Rect.fromLTRB(20, 10, 30, 30),
+        const Rect.fromLTRB(20, 32, 30, 52),
+      ];
+      expect(selectionBands(rects), [
+        const Rect.fromLTRB(10, 10, 30, 30),
+        const Rect.fromLTRB(20, 32, 30, 52),
+      ]);
+    });
+  });
+
+  test(
+    'a selection paints as one even band, not a box per character',
+    () async {
+      final surface = FlutterSelectionSurface(
+        width: 200,
+        height: 100,
+        text: 'abcdef',
+        copyEligible: true,
+        endpoints: [
+          // Neighbouring glyph boxes overlap by a pixel, as shaped text does.
+          for (var i = 0; i < 6; i += 1)
+            FlutterSelectionEndpoint(
+              offset: BigInt.from(i),
+              rangeStart: BigInt.from(i),
+              rangeEnd: BigInt.from(i + 1),
+              rect: FlutterSelectionRect(
+                left: 20.0 + i * 20,
+                top: 10,
+                right: 41.0 + i * 20,
+                bottom: 40,
+              ),
+            ),
+        ],
+        graphemeBoundaries: Uint32List.fromList([0, 1, 2, 3, 4, 5, 6]),
+        wordBoundaries: Uint32List.fromList([0, 6]),
+        visualLines: const [],
+      );
+      PagePainter painter({
+        int? anchor,
+        List<ReaderSelection> saved = const [],
+      }) => PagePainter(
+        image: null,
+        surface: surface,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        recolorImage: false,
+        anchor: anchor,
+        focus: anchor == null ? null : 6,
+        savedSelections: saved,
+        annotations: const [],
+        paintContent: false,
+      );
+      for (final p in [
+        painter(anchor: 0),
+        painter(
+          saved: [const ReaderSelection(0, 6, FlutterHighlightColor.green)],
+        ),
+      ]) {
+        // Inside glyphs, at the seams where boxes overlap or meet, and on the
+        // inside the band's top and bottom edges: one fill, no seams.
+        final alphas = {
+          for (final (x, y) in [
+            (30, 25),
+            (40, 25),
+            (41, 25),
+            (60, 25),
+            (61, 25),
+            (100, 25),
+            (50, 11),
+            (50, 38),
+            (100, 38),
+          ])
+            await _alphaAt(p, x, y),
+        };
+        expect(alphas, hasLength(1));
+        expect(alphas.single, greaterThan(0));
+        expect(await _alphaAt(p, 50, 45), 0);
+      }
+    },
+  );
 }

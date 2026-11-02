@@ -5249,9 +5249,15 @@ void main() {
       await tester.pump();
 
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      // Focus lands on the capsule's first control, the yellow swatch.
       expect(
         tester
-            .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
+            .widget<InkWell>(
+              find.descendant(
+                of: find.byKey(const ValueKey('selection-swatch-yellow')),
+                matching: find.byType(InkWell),
+              ),
+            )
             .focusNode!
             .hasFocus,
         isTrue,
@@ -5546,17 +5552,17 @@ void main() {
 
           selectAll();
           await tester.pump();
-          for (final label in [
-            'Copy',
-            'Yellow',
-            'Green',
-            'Blue',
-            'Pink',
-            'Purple',
-            'Add note',
-            'Cancel',
+          for (final (key, label) in const [
+            ('selection-copy', 'Copy'),
+            ('selection-swatch-yellow', 'Yellow highlight'),
+            ('selection-swatch-green', 'Green highlight'),
+            ('selection-swatch-blue', 'Blue highlight'),
+            ('selection-swatch-pink', 'Pink highlight'),
+            ('selection-swatch-purple', 'Purple highlight'),
+            ('selection-note', 'Note'),
+            ('selection-search', 'Search'),
           ]) {
-            final node = tester.getSemantics(find.text(label));
+            final node = tester.getSemantics(find.byKey(ValueKey(key)));
             expect(node.getSemanticsData().label, label);
             expect(
               node.getSemanticsData().hasAction(ui.SemanticsAction.tap),
@@ -5564,27 +5570,41 @@ void main() {
             );
           }
 
-          final copy = tester.getSemantics(find.text('Copy'));
+          final copy = tester.getSemantics(
+            find.byKey(const ValueKey('selection-copy')),
+          );
           copy.owner!.performAction(copy.id, ui.SemanticsAction.tap);
           await tester.pump();
           expect(clipboardCall?.arguments, {'text': 'Selectable fixture text'});
 
-          final addNote = tester.getSemantics(find.text('Add note'));
+          final addNote = tester.getSemantics(
+            find.byKey(const ValueKey('selection-note')),
+          );
           addNote.owner!.performAction(addNote.id, ui.SemanticsAction.tap);
           await tester.pumpAndSettle();
           expect(find.byType(ShadDialog), findsOneWidget);
           Navigator.of(tester.element(find.byType(ShadDialog))).pop();
           await tester.pumpAndSettle();
 
-          final yellow = tester.getSemantics(find.text('Yellow'));
+          final yellow = tester.getSemantics(
+            find.byKey(const ValueKey('selection-swatch-yellow')),
+          );
           yellow.owner!.performAction(yellow.id, ui.SemanticsAction.tap);
           await tester.pumpAndSettle();
           expect(bridge.createCalls, 1);
 
+          // There is no Cancel button: the capsule's dismiss action (the
+          // screen reader's escape gesture) clears the selection.
           selectAll();
           await tester.pump();
-          final cancel = tester.getSemantics(find.text('Cancel'));
-          cancel.owner!.performAction(cancel.id, ui.SemanticsAction.tap);
+          final capsule = tester.getSemantics(
+            find.byKey(const ValueKey('selection-actions')),
+          );
+          expect(
+            capsule.getSemanticsData().hasAction(ui.SemanticsAction.dismiss),
+            isTrue,
+          );
+          capsule.owner!.performAction(capsule.id, ui.SemanticsAction.dismiss);
           await tester.pump();
           expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
         } finally {
@@ -5738,21 +5758,27 @@ void main() {
           await gesture.up();
           await tester.pump();
 
-          expect(find.text('Yellow'), findsOneWidget);
-          expect(find.text('Copy'), findsOneWidget);
-          expect(find.text('Green'), findsOneWidget);
-          expect(find.text('Blue'), findsOneWidget);
-          expect(find.text('Pink'), findsOneWidget);
-          expect(find.text('Purple'), findsOneWidget);
-          expect(find.text('Add note'), findsOneWidget);
-          expect(find.text('Cancel'), findsOneWidget);
+          for (final key in const [
+            'selection-swatch-yellow',
+            'selection-swatch-green',
+            'selection-swatch-blue',
+            'selection-swatch-pink',
+            'selection-swatch-purple',
+            'selection-note',
+            'selection-copy',
+            'selection-search',
+          ]) {
+            expect(find.byKey(ValueKey(key)), findsOneWidget);
+          }
           expect(bridge.selectionCalls, beforeSelectionCalls);
           expect(bridge.renderCalls, beforeRenderCalls);
           expect(bridge.createCalls, 0);
           expect(painter().anchor, 1);
           expect(painter().focus, 8);
 
-          await tester.tap(find.text('Yellow'));
+          await tester.tap(
+            find.byKey(const ValueKey('selection-swatch-yellow')),
+          );
           await tester.pumpAndSettle();
           expect(bridge.createCalls, 1);
           expect(bridge.createdRanges.single, (BigInt.one, BigInt.from(8)));
@@ -5866,18 +5892,24 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
-    expect(find.text('Yellow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('selection-swatch-yellow')),
+      findsOneWidget,
+    );
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.home);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
-    expect(find.text('Yellow'), findsNothing);
+    expect(find.byKey(const ValueKey('selection-swatch-yellow')), findsNothing);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.end);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
-    expect(find.text('Yellow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('selection-swatch-yellow')),
+      findsOneWidget,
+    );
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.home);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
@@ -5890,14 +5922,28 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.f10);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
-    expect(find.text('Yellow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('selection-swatch-yellow')),
+      findsOneWidget,
+    );
+    // The keyboard lands on the capsule's first control, the yellow swatch;
+    // Tab walks the other swatches and Note to Copy.
     expect(
       tester
-          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
+          .widget<InkWell>(
+            find.descendant(
+              of: find.byKey(const ValueKey('selection-swatch-yellow')),
+              matching: find.byType(InkWell),
+            ),
+          )
           .focusNode!
           .hasFocus,
       isTrue,
     );
+    for (var step = 0; step < 6; step += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    }
+    await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(clipboardCall?.method, 'Clipboard.setData');
@@ -5905,19 +5951,25 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
-    expect(find.text('Yellow'), findsNothing);
+    expect(find.byKey(const ValueKey('selection-swatch-yellow')), findsNothing);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.end);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
-    expect(find.text('Yellow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('selection-swatch-yellow')),
+      findsOneWidget,
+    );
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.home);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
-    expect(find.text('Yellow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('selection-swatch-yellow')),
+      findsOneWidget,
+    );
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
 
@@ -5976,34 +6028,22 @@ void main() {
     await gesture.moveBy(Offset(side * .5, side * .5));
     await gesture.up();
     await tester.pump();
-    await tester.tapAt(topLeft + Offset(side * .2, side * .2));
-    await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.f10);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
 
-    final cancel = tester.widget<ShadButton>(
-      find.widgetWithText(ShadButton, 'Cancel'),
+    // Neither Copy nor the colours work here, so the keyboard lands on the
+    // capsule itself, where Esc still dismisses it.
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'selection actions');
+    InkWell inkOf(String key) => tester.widget<InkWell>(
+      find.descendant(
+        of: find.byKey(ValueKey(key)),
+        matching: find.byType(InkWell),
+      ),
     );
-    expect(
-      cancel.focusNode!.hasFocus,
-      isTrue,
-      reason:
-          'primary=${FocusManager.instance.primaryFocus}, cancel=${cancel.focusNode}',
-    );
-    expect(
-      tester
-          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Yellow'))
-          .onPressed,
-      isNull,
-    );
+    expect(inkOf('selection-copy').onTap, isNull);
+    expect(inkOf('selection-swatch-yellow').onTap, isNull);
 
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
@@ -6053,7 +6093,10 @@ void main() {
     await second.up();
     await owner.up();
     await tester.pump();
-    expect(find.text('Yellow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('selection-swatch-yellow')),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
@@ -6098,7 +6141,10 @@ void main() {
     await replacement.moveBy(Offset(side * .5, side * .5));
     await replacement.up();
     await tester.pump();
-    expect(find.text('Yellow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('selection-swatch-yellow')),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
@@ -6257,7 +6303,7 @@ void main() {
                 .painter!
             as PagePainter;
     expect(painter.anchor, isNull);
-    expect(find.text('Yellow'), findsNothing);
+    expect(find.byKey(const ValueKey('selection-swatch-yellow')), findsNothing);
     expect(bridge.createCalls, 0);
 
     await tester.pumpWidget(const SizedBox());
@@ -6291,7 +6337,7 @@ void main() {
     await gesture.up();
     await tester.pump();
 
-    await tester.tap(find.text('Add note'));
+    await tester.tap(find.byKey(const ValueKey('selection-note')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(ShadInput).last, 'Remember this');
     await tester.tap(find.text('Save'));
@@ -6337,7 +6383,7 @@ void main() {
     await gesture.moveBy(Offset(side * .5, side * .5));
     await gesture.up();
     await tester.pump();
-    await tester.tap(find.text('Add note'));
+    await tester.tap(find.byKey(const ValueKey('selection-note')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(ShadInput).last, 'Remember this');
     await tester.tap(find.text('Save'));
@@ -6464,7 +6510,7 @@ void main() {
     await gesture.moveBy(Offset(side * .5, side * .5));
     await gesture.up();
     await tester.pump();
-    await tester.tap(find.text('Add note'));
+    await tester.tap(find.byKey(const ValueKey('selection-note')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(ShadInput).last, 'Unsaved draft');
 

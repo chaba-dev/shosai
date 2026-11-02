@@ -278,12 +278,16 @@ typedef ReaderBookOpener =
 ///
 /// The other way, [openBook] is how the reader asks the shell to open another
 /// book, such as one a note in All books sits in.
+/// Opens the shell's search palette, filled with [query] when given.
+typedef ReaderSearchOpener = void Function({String? query});
+
 final class ReaderPlaceRequests extends ChangeNotifier {
   ReaderPlaceRequests({this.openSearch, this.openBook});
 
   /// Opens the shell's search palette, which the reader's Search action
-  /// opens in its in-book search's stead.
-  final VoidCallback? openSearch;
+  /// opens in its in-book search's stead, with [query] when the search starts
+  /// from selected text.
+  final ReaderSearchOpener? openSearch;
 
   /// Opens another book at a place, such as one a note in All books sits in.
   final ReaderBookOpener? openBook;
