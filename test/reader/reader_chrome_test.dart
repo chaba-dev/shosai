@@ -1374,17 +1374,37 @@ void main() {
           expect(semantics().value, predicted ?? shown);
         }
 
-        expect(find.textContaining('page 1 of 5'), findsOneWidget);
+        // The status line, and the quiet line under the spread with it.
+        Finder place(String text) => find.descendant(
+          of: find.byKey(const ValueKey('reader-status-line')),
+          matching: find.textContaining(text),
+        );
+        String folio() => tester
+            .widget<Text>(find.byKey(const ValueKey('reader-folio')))
+            .data!;
+
+        expect(place('page 1 of 5'), findsOneWidget);
+        expect(folio(), 'page 1 of 5');
+        // On the desktop stage too, the line sits under the page.
+        expect(
+          tester.getRect(find.byKey(const ValueKey('reader-folio'))).top,
+          greaterThanOrEqualTo(
+            tester
+                .getRect(find.byKey(const ValueKey('reader-page-paint')))
+                .bottom,
+          ),
+        );
         await step(forward);
-        expect(find.textContaining('pages 2–3 of 5'), findsOneWidget);
+        expect(folio(), 'pages 2–3 of 5');
+        expect(place('pages 2–3 of 5'), findsOneWidget);
         await step(forward);
-        expect(find.textContaining('pages 4–5 of 5'), findsOneWidget);
+        expect(place('pages 4–5 of 5'), findsOneWidget);
         await step(forward);
-        expect(find.textContaining('pages 4–5 of 5'), findsOneWidget);
+        expect(place('pages 4–5 of 5'), findsOneWidget);
         await step(backward);
-        expect(find.textContaining('pages 2–3 of 5'), findsOneWidget);
+        expect(place('pages 2–3 of 5'), findsOneWidget);
         await step(backward);
-        expect(find.textContaining('page 1 of 5'), findsOneWidget);
+        expect(place('page 1 of 5'), findsOneWidget);
       });
     }
 
