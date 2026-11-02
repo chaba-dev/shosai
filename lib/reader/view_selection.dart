@@ -112,33 +112,79 @@ Rect? _selectionRangeRect(FlutterSelectionSurface surface, ReaderModel model) {
   return selected;
 }
 
+/// Chrome is painted over the page, without changing its geometry. Selection
+/// actions use its measured bounds rather than placing buttons underneath it.
+class _ReaderChromeBounds extends InheritedNotifier<ValueNotifier<int>> {
+  const _ReaderChromeBounds({
+    required super.notifier,
+    required this.header,
+    required this.footer,
+    required this.visible,
+    required super.child,
+  });
+
+  final GlobalKey header;
+  final GlobalKey footer;
+  final bool visible;
+
+  static _ReaderChromeBounds? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_ReaderChromeBounds>();
+
+  Rect availableRect(RenderBox overlay, Size size) {
+    final viewport = Offset.zero & size;
+    if (!visible) return viewport;
+    Rect? bounds(GlobalKey key) {
+      final box = key.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) return null;
+      return MatrixUtils.transformRect(
+        box.getTransformTo(overlay),
+        Offset.zero & box.size,
+      );
+    }
+
+    final top = (bounds(header)?.bottom ?? 0).clamp(0.0, size.height);
+    final bottom = (bounds(footer)?.top ?? size.height).clamp(top, size.height);
+    return Rect.fromLTRB(0, top, size.width, bottom);
+  }
+
+  @override
+  bool updateShouldNotify(_ReaderChromeBounds oldWidget) =>
+      visible != oldWidget.visible || super.updateShouldNotify(oldWidget);
+}
+
 class _SelectionActionsLayout extends SingleChildLayoutDelegate {
-  const _SelectionActionsLayout({required this.target});
+  const _SelectionActionsLayout({required this.target, required this.bounds});
 
   static const _gap = 8.0;
   final Rect target;
+  final Rect bounds;
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
       BoxConstraints(
-        maxWidth: math.max(0, constraints.maxWidth - _gap * 2),
-        maxHeight: math.max(0, constraints.maxHeight - _gap * 2),
+        maxWidth: math.max(0, bounds.width - _gap * 2),
+        maxHeight: math.max(0, bounds.height - _gap * 2),
       );
 
   @override
   Offset getPositionForChild(Size size, Size childSize) {
-    final maxLeft = math.max(_gap, size.width - childSize.width - _gap);
-    final left = (target.center.dx - childSize.width / 2).clamp(_gap, maxLeft);
+    final minLeft = bounds.left + _gap;
+    final maxLeft = math.max(minLeft, bounds.right - childSize.width - _gap);
+    final left = (target.center.dx - childSize.width / 2).clamp(
+      minLeft,
+      maxLeft,
+    );
     final above = target.top - childSize.height - _gap;
     final below = target.bottom + _gap;
-    final maxTop = math.max(_gap, size.height - childSize.height - _gap);
-    final top = (above >= _gap ? above : below).clamp(_gap, maxTop);
+    final minTop = bounds.top + _gap;
+    final maxTop = math.max(minTop, bounds.bottom - childSize.height - _gap);
+    final top = (above >= minTop ? above : below).clamp(minTop, maxTop);
     return Offset(left, top);
   }
 
   @override
   bool shouldRelayout(_SelectionActionsLayout oldDelegate) =>
-      target != oldDelegate.target;
+      target != oldDelegate.target || bounds != oldDelegate.bounds;
 }
 
 class _ReachableSelectableSurface extends StatelessWidget {

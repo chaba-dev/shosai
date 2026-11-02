@@ -32,6 +32,7 @@ class _DocumentViewState extends State<_DocumentView> {
   /// The overlay's own coordinate space: the action surface is positioned in
   /// the same space the [CustomSingleChildLayout] delegate receives.
   final GlobalKey _overlayKey = GlobalKey(debugLabel: 'reader overlay');
+  Rect? _selectionBounds;
 
   /// Bumped whenever the rendered content geometry changes — a scroll or a
   /// content resize — so the action overlay re-reads the transform that
@@ -80,6 +81,7 @@ class _DocumentViewState extends State<_DocumentView> {
 
   @override
   Widget build(BuildContext context) {
+    _measureSelectionBounds(_ReaderChromeBounds.of(context));
     final document = widget.document;
     final image = widget.image;
     final model = widget.model;
@@ -410,6 +412,13 @@ class _DocumentViewState extends State<_DocumentView> {
                                       model,
                                       constraints.biggest,
                                     ),
+                                    bounds:
+                                        (_selectionBounds ??
+                                                (Offset.zero &
+                                                    constraints.biggest))
+                                            .intersect(
+                                              Offset.zero & constraints.biggest,
+                                            ),
                                   ),
                                   child: child,
                                 ),
@@ -429,6 +438,23 @@ class _DocumentViewState extends State<_DocumentView> {
         ),
       ],
     );
+  }
+
+  void _measureSelectionBounds(_ReaderChromeBounds? chrome) {
+    // A resize can replace ancestors while laying out the document before its
+    // sibling chrome. Read their transforms only after the whole frame's layout.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final overlay = _overlayKey.currentContext?.findRenderObject();
+      if (overlay is! RenderBox || !overlay.hasSize) return;
+      final bounds =
+          chrome?.availableRect(overlay, overlay.size) ??
+          (Offset.zero & overlay.size);
+      if (_selectionBounds != bounds) {
+        _selectionBounds = bounds;
+        _bumpContentGeometry();
+      }
+    });
   }
 
   /// The selected range's rect in the overlay's own coordinate space.

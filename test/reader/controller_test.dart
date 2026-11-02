@@ -145,6 +145,7 @@ void main() {
             );
           }
         }
+        controller.dispose();
       },
     );
   }
