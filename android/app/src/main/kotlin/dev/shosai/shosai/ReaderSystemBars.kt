@@ -1,6 +1,8 @@
 package dev.shosai.shosai
 
+import android.graphics.Rect
 import android.os.Build
+import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import androidx.core.view.ViewCompat
@@ -18,6 +20,10 @@ import java.lang.ref.WeakReference
 internal object ReaderSystemBars {
     private var host = WeakReference<MainActivity>(null)
     private var shown = true
+    private var turnEdges = false
+    private val relayout = View.OnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+        applyTurnEdges(view, turnEdges)
+    }
 
     fun attach(activity: MainActivity, engine: FlutterEngine) {
         host = WeakReference(activity)
@@ -39,6 +45,11 @@ internal object ReaderSystemBars {
                         host.get()?.let(::restore)
                         result.success(null)
                     }
+                    call.method == "setTurnEdges" && call.arguments is Boolean -> {
+                        turnEdges = call.arguments as Boolean
+                        host.get()?.let(::restore)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -48,6 +59,49 @@ internal object ReaderSystemBars {
     fun restore(activity: MainActivity) {
         if (host.get() !== activity) return
         apply(activity.window, shown)
+        val view = activity.window.decorView
+        view.removeOnLayoutChangeListener(relayout)
+        view.addOnLayoutChangeListener(relayout)
+        applyTurnEdges(view, turnEdges)
+    }
+
+    /** A drag that turns the page may start at the very edge of the screen,
+     * inside the back gesture's zone. While the page is quiet, the middle of
+     * each side edge belongs to the page instead. Android honours at most
+     * 200 dp of each edge, so the rest of it still goes back.
+     */
+    internal fun applyTurnEdges(view: View, enabled: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val gestures = ViewCompat.getRootWindowInsets(view)
+            ?.getInsets(WindowInsetsCompat.Type.systemGestures())
+        view.systemGestureExclusionRects = if (enabled && gestures != null) {
+            turnEdgeRects(
+                view.width,
+                view.height,
+                view.resources.displayMetrics.density,
+                gestures.left,
+                gestures.right,
+            )
+        } else {
+            emptyList()
+        }
+    }
+
+    /** The middle 200 dp of each side's gesture zone, in [width] × [height]. */
+    internal fun turnEdgeRects(
+        width: Int,
+        height: Int,
+        density: Float,
+        left: Int,
+        right: Int,
+    ): List<Rect> {
+        if (width <= 0 || height <= 0) return emptyList()
+        val band = minOf(height, (200 * density).toInt())
+        val top = (height - band) / 2
+        return listOfNotNull(
+            Rect(0, top, left, top + band).takeIf { left > 0 },
+            Rect(width - right, top, width, top + band).takeIf { right > 0 },
+        )
     }
 
     /** Visibility must never change the Flutter surface's bounds, including
@@ -75,6 +129,7 @@ internal object ReaderSystemBars {
     }
 
     fun detach(activity: MainActivity) {
+        activity.window.decorView.removeOnLayoutChangeListener(relayout)
         if (host.get() === activity) host.clear()
     }
 }

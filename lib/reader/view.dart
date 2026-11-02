@@ -413,10 +413,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         systemBars: (shown) {
           if (defaultTargetPlatform == TargetPlatform.android) {
             // Optional for embedded Flutter hosts without the Android adapter.
+            const bars = OptionalMethodChannel('dev.shosai/reader_system_bars');
+            unawaited(bars.invokeMethod<void>('setShown', shown));
+            // A quiet page turns with a drag from its very edge, so the middle
+            // of each side edge is the page's, not the back gesture's.
             unawaited(
-              const OptionalMethodChannel(
-                'dev.shosai/reader_system_bars',
-              ).invokeMethod<void>('setShown', shown),
+              bars.invokeMethod<void>(
+                'setTurnEdges',
+                !shown && !_controller.model.continuousPresentation,
+              ),
             );
           } else if (defaultTargetPlatform == TargetPlatform.iOS) {
             // Only phones hide the system status bar with reader chrome.
