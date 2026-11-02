@@ -87,6 +87,7 @@ final class ReaderController implements Listenable {
         ),
     double? baseScale,
     bool zonesHintDismissed = false,
+    this.renderPdfAhead = true,
   }) : _bridge = bridge,
        _records = recordsOf(bridge),
        _decoder = decoder,
@@ -160,6 +161,10 @@ final class ReaderController implements Listenable {
   ChapterLayoutSession? _turnPreviewSession;
   final Set<Future<void>> _referenceEffects = {};
   final List<_PdfLeaf> _pdfLeaves = [];
+
+  /// Whether a settled PDF page renders its neighbours ahead of a turn.
+  /// Tests that script each engine call in order turn it off.
+  final bool renderPdfAhead;
   final NoteEditor _noteEditor;
   final PlaceNoteEditor _placeNoteEditor;
   final NoteEditorCanceller _noteEditorCanceller;
@@ -4904,7 +4909,7 @@ final class ReaderController implements Listenable {
       String? selectionError;
       // A turn to a leaf rendered ahead adopts it instead of rendering again.
       final leaf = _pdfLeafFor(pdf, generation, unit, facing, layout);
-      final leafContent = await leaf?.content;
+      final leafContent = leaf == null ? null : await leaf.content;
       if (!_isCurrentLayout(generation, revision)) {
         return;
       }
