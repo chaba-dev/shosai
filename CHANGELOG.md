@@ -172,6 +172,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Use quarter-page turn zones and hide idle chrome (#265)
 - *(reader)* Separate pointer interaction from layout and quiet page furniture (#263)
 - *(reader)* Paint selections and highlights as one band per line (#270)
+- *(library)* Keep a removed source book off the shelf (#255)
 
 ### 🚜 Refactor
 
