@@ -1,5 +1,14 @@
 part of 'view.dart';
 
+/// The selection capsule (`docs/design-system.md`, Highlight): an `inverse`
+/// capsule with five colour swatches that save at once, a hairline, then
+/// **Note** (saves yellow and opens the editor) and **Copy**.
+///
+/// Controls are `control-height` with a pointer and `touch-target` on tablet
+/// and phone. The capsule keeps one row: when the labelled actions do not fit,
+/// they become icons named and tooltipped with the same words, and only when
+/// even that does not fit do they move to a second row under the swatches.
+/// There is no Cancel: a press outside the selection or Esc dismisses it.
 class _SelectionActions extends StatelessWidget {
   const _SelectionActions({
     required this.model,
@@ -11,80 +20,361 @@ class _SelectionActions extends StatelessWidget {
   final void Function(ReaderMessage) dispatch;
   final FocusNode focusNode;
 
+  static const _gap = ShosaiTokens.space1;
+  static const _separatorWidth = 1.0 + ShosaiTokens.space1 * 2;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final palette = ShellPalette.of(context);
+    final touch = ShellLayout.forWidth(MediaQuery.sizeOf(context).width).touch;
     final copyEnabled = model.selectedText != null;
     final persistenceEnabled =
         !model.busy &&
         !model.relayoutBusy &&
         model.annotationsReady &&
         model.annotationOperations.isEmpty;
+    final background = palette.dark
+        ? ShosaiTokens.colorDarkInverse
+        : ShosaiTokens.colorLightInverse;
+    final foreground = palette.dark
+        ? ShosaiTokens.colorDarkOnInverse
+        : ShosaiTokens.colorLightOnInverse;
+    final target = touch
+        ? ShosaiTokens.sizeTouchTarget
+        : ShosaiTokens.sizeControlHeight;
+    final iconSize = touch ? 20.0 : 16.0;
+    // Touch targets abut: the 44 px squares already space the discs and
+    // icons, and the narrowest phones need every point for one row.
+    final spacing = touch ? 0.0 : _gap;
+    final labelStyle = shellInterfaceStyle(
+      13,
+      18,
+      weight: FontWeight.w500,
+    ).copyWith(color: foreground);
+
+    // The keyboard lands on the first action that works: the first swatch,
+    // else Copy, else the capsule itself so Esc still reaches the reader.
+    final swatchFocus = persistenceEnabled;
+    final copyFocus = !swatchFocus && copyEnabled;
+    final capsuleFocus = !swatchFocus && !copyFocus;
+
+    final actions = [
+      (
+        key: const ValueKey('selection-note'),
+        icon: LucideIcons.messageSquareText,
+        label: l10n.readerSelectionNote,
+        onPressed: persistenceEnabled
+            ? () => dispatch(const ReaderSelectionNoteRequested())
+            : null,
+        focus: false,
+      ),
+      (
+        key: const ValueKey('selection-copy'),
+        icon: LucideIcons.copy,
+        label: l10n.readerCopy,
+        onPressed: copyEnabled
+            ? () => dispatch(const ReaderSelectionCopyRequested())
+            : null,
+        focus: copyFocus,
+      ),
+    ];
+
     return Semantics(
       key: const ValueKey('selection-actions'),
       label: l10n.readerSelectionActions,
       container: true,
-      child: ShadCard(
-        padding: const EdgeInsets.all(8),
-        child: SingleChildScrollView(
-          child: Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ShadButton.ghost(
-                height: shosaiShadButtonHeight(context),
-                focusNode: copyEnabled ? focusNode : null,
-                onPressed: !copyEnabled
-                    ? null
-                    : () => dispatch(const ReaderSelectionCopyRequested()),
-                // A Shad button lays its content out in a Row whose
-                // non-flexible children get an unbounded width; a flexible
-                // label ellipsizes instead of overflowing when the selection
-                // surface is narrower than the label's natural width (a
-                // compact viewport at a scaled interface, where the RD-06 edge
-                // columns also scale with the interface).
-                child: Flexible(child: Text(l10n.readerCopy)),
+      explicitChildNodes: true,
+      onDismiss: () => dispatch(const ReaderSelectionCancelled()),
+      child: Focus(
+        focusNode: capsuleFocus ? focusNode : null,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final scaler = MediaQuery.textScalerOf(context);
+            double labelled(String label) {
+              final painter = TextPainter(
+                text: TextSpan(
+                  text: label,
+                  style: shosaiInterfaceStyleForText(labelStyle, label),
+                ),
+                textDirection: Directionality.of(context),
+                textScaler: scaler,
+                maxLines: 1,
+              )..layout();
+              final width = painter.width;
+              painter.dispose();
+              return ShosaiTokens.space3 * 2 + iconSize + 6 + width;
+            }
+
+            const inset = _gap * 2;
+            final available = constraints.maxWidth - inset;
+            final swatches =
+                FlutterHighlightColor.values.length * target +
+                (FlutterHighlightColor.values.length - 1) * spacing;
+            final labelledActions = [
+              for (final action in actions) labelled(action.label),
+            ];
+            double row(List<double> widths) =>
+                widths.fold(0.0, (sum, width) => sum + width) +
+                (widths.length - 1) * spacing;
+            final labelledRow = row(labelledActions);
+            final iconRow = row([for (final _ in actions) target]);
+            final separated = spacing + _separatorWidth + spacing;
+            final oneRow = swatches + separated + labelledRow <= available;
+            final iconsOneRow =
+                !oneRow && swatches + separated + iconRow <= available;
+            final wrapped = !oneRow && !iconsOneRow;
+            final showLabels = oneRow || (wrapped && labelledRow <= available);
+
+            Widget swatch(FlutterHighlightColor color) => _CapsuleSwatch(
+              key: ValueKey('selection-swatch-${color.name}'),
+              color: color,
+              label: _colorName(l10n, color),
+              target: target,
+              ring: foreground,
+              background: background,
+              focusNode: swatchFocus && color == FlutterHighlightColor.yellow
+                  ? focusNode
+                  : null,
+              onPressed: persistenceEnabled
+                  ? () => dispatch(ReaderSelectionCommitted(color: color))
+                  : null,
+            );
+            Widget action(
+              ({
+                ValueKey<String> key,
+                IconData icon,
+                String label,
+                VoidCallback? onPressed,
+                bool focus,
+              })
+              action,
+            ) => _CapsuleAction(
+              key: action.key,
+              icon: action.icon,
+              label: action.label,
+              showLabel: showLabels,
+              target: target,
+              iconSize: iconSize,
+              foreground: foreground,
+              style: labelStyle,
+              focusNode: action.focus ? focusNode : null,
+              onPressed: action.onPressed,
+            );
+
+            final swatchRow = Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: spacing,
+              children: [
+                for (final color in FlutterHighlightColor.values) swatch(color),
+              ],
+            );
+            final actionRow = Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: spacing,
+              children: [for (final entry in actions) action(entry)],
+            );
+            final separator = Padding(
+              padding: const EdgeInsets.symmetric(horizontal: _gap),
+              child: Container(
+                width: 1,
+                height: 20,
+                color: foreground.withValues(alpha: .28),
               ),
-              for (final color in FlutterHighlightColor.values)
-                ShadButton(
-                  height: shosaiShadButtonHeight(context),
-                  focusNode:
-                      !copyEnabled &&
-                          persistenceEnabled &&
-                          color == FlutterHighlightColor.yellow
-                      ? focusNode
-                      : null,
-                  onPressed: !persistenceEnabled
-                      ? null
-                      : () => dispatch(ReaderSelectionCommitted(color: color)),
-                  child: Flexible(
-                    child: Text(
-                      _colorName(l10n, color),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+            );
+            final content = wrapped
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: _gap,
+                    children: [
+                      FittedBox(fit: BoxFit.scaleDown, child: swatchRow),
+                      FittedBox(fit: BoxFit.scaleDown, child: actionRow),
+                    ],
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: spacing,
+                    children: [swatchRow, separator, actionRow],
+                  );
+            final radius = target / 2 + _gap;
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.circular(radius),
+                boxShadow: palette.menu,
+              ),
+              child: Material(
+                type: MaterialType.transparency,
+                // A short window (a phone in landscape at large text) can
+                // be lower than the wrapped capsule; it then scrolls.
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(_gap),
+                  child: content,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// A colour swatch in the selection capsule: a 24 px disc in its `swatch-*`
+/// colour, ringed in `on-inverse`, centred in a [target]-sized button named
+/// for its colour.
+class _CapsuleSwatch extends StatelessWidget {
+  const _CapsuleSwatch({
+    super.key,
+    required this.color,
+    required this.label,
+    required this.target,
+    required this.ring,
+    required this.background,
+    required this.focusNode,
+    required this.onPressed,
+  });
+
+  final FlutterHighlightColor color;
+  final String label;
+  final double target;
+  final Color ring;
+  final Color background;
+  final FocusNode? focusNode;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = switch (color) {
+      FlutterHighlightColor.yellow => ShosaiTokens.colorSwatchYellow,
+      FlutterHighlightColor.green => ShosaiTokens.colorSwatchGreen,
+      FlutterHighlightColor.blue => ShosaiTokens.colorSwatchBlue,
+      FlutterHighlightColor.pink => ShosaiTokens.colorSwatchPink,
+      FlutterHighlightColor.purple => ShosaiTokens.colorSwatchPurple,
+    };
+    // The semantics node is outermost so the swatch's own key finds it.
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: label,
+      excludeSemantics: true,
+      onTap: onPressed,
+      child: Tooltip(
+        message: label,
+        excludeFromSemantics: true,
+        child: InkWell(
+          focusNode: focusNode,
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          hoverColor: ring.withValues(alpha: .14),
+          focusColor: ring.withValues(alpha: .24),
+          highlightColor: ring.withValues(alpha: .2),
+          splashColor: ring.withValues(alpha: .2),
+          child: SizedBox.square(
+            dimension: target,
+            child: Center(
+              child: Opacity(
+                opacity: onPressed == null ? .45 : 1,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: fill,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: background, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: ring.withValues(alpha: .55),
+                        spreadRadius: 1.5,
+                      ),
+                    ],
                   ),
                 ),
-              ShadButton.ghost(
-                height: shosaiShadButtonHeight(context),
-                onPressed: !persistenceEnabled
-                    ? null
-                    : () => dispatch(const ReaderSelectionNoteRequested()),
-                child: Flexible(child: Text(l10n.readerAddNote)),
               ),
-              ShadButton.ghost(
-                height: shosaiShadButtonHeight(context),
-                focusNode: !copyEnabled && !persistenceEnabled
-                    ? focusNode
-                    : null,
-                onPressed: () => dispatch(const ReaderSelectionCancelled()),
-                child: Flexible(child: Text(l10n.readerSelectionCancel)),
-              ),
-            ],
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// An action in the selection capsule: an icon and a label, or the icon alone
+/// (named and tooltipped with the label) when the labels do not fit.
+class _CapsuleAction extends StatelessWidget {
+  const _CapsuleAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.showLabel,
+    required this.target,
+    required this.iconSize,
+    required this.foreground,
+    required this.style,
+    required this.focusNode,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool showLabel;
+  final double target;
+  final double iconSize;
+  final Color foreground;
+  final TextStyle style;
+  final FocusNode? focusNode;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final button = InkWell(
+      focusNode: focusNode,
+      customBorder: const StadiumBorder(),
+      onTap: onPressed,
+      hoverColor: foreground.withValues(alpha: .14),
+      focusColor: foreground.withValues(alpha: .24),
+      highlightColor: foreground.withValues(alpha: .2),
+      splashColor: foreground.withValues(alpha: .2),
+      child: Opacity(
+        opacity: onPressed == null ? .45 : 1,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: target, minHeight: target),
+          child: showLabel
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: ShosaiTokens.space3,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: 6,
+                    children: [
+                      Icon(icon, size: iconSize, color: foreground),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        style: shosaiInterfaceStyleForText(style, label),
+                      ),
+                    ],
+                  ),
+                )
+              : Center(
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Icon(icon, size: iconSize, color: foreground),
+                ),
+        ),
+      ),
+    );
+    // The semantics node is outermost so the action's own key finds it.
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: label,
+      excludeSemantics: true,
+      onTap: onPressed,
+      child: showLabel
+          ? button
+          : Tooltip(message: label, excludeFromSemantics: true, child: button),
     );
   }
 }

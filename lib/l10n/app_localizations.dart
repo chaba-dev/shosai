@@ -978,40 +978,40 @@ abstract class AppLocalizations {
   /// **'Copy'**
   String get readerCopy;
 
-  /// NEW: no Iced string (RFD 16 authority). The selection cancel action (RD-12).
+  /// The selection capsule action that saves a yellow highlight and opens its note editor (design system, Highlight).
   ///
   /// In en, this message translates to:
-  /// **'Cancel'**
-  String get readerSelectionCancel;
+  /// **'Note'**
+  String get readerSelectionNote;
 
-  /// NEW: no Iced string (RFD 16 authority). The yellow highlight color action (RD-12).
+  /// The yellow swatch in the selection capsule: its accessible name and tooltip (design system, Highlight).
   ///
   /// In en, this message translates to:
-  /// **'Yellow'**
+  /// **'Yellow highlight'**
   String get readerHighlightYellow;
 
-  /// NEW: no Iced string (RFD 16 authority). The green highlight color action (RD-12).
+  /// The green swatch in the selection capsule: its accessible name and tooltip (design system, Highlight).
   ///
   /// In en, this message translates to:
-  /// **'Green'**
+  /// **'Green highlight'**
   String get readerHighlightGreen;
 
-  /// NEW: no Iced string (RFD 16 authority). The blue highlight color action (RD-12).
+  /// The blue swatch in the selection capsule: its accessible name and tooltip (design system, Highlight).
   ///
   /// In en, this message translates to:
-  /// **'Blue'**
+  /// **'Blue highlight'**
   String get readerHighlightBlue;
 
-  /// NEW: no Iced string (RFD 16 authority). The pink highlight color action (RD-12).
+  /// The pink swatch in the selection capsule: its accessible name and tooltip (design system, Highlight).
   ///
   /// In en, this message translates to:
-  /// **'Pink'**
+  /// **'Pink highlight'**
   String get readerHighlightPink;
 
-  /// NEW: no Iced string (RFD 16 authority). The purple highlight color action (RD-12).
+  /// The purple swatch in the selection capsule: its accessible name and tooltip (design system, Highlight).
   ///
   /// In en, this message translates to:
-  /// **'Purple'**
+  /// **'Purple highlight'**
   String get readerHighlightPurple;
 
   /// NEW: no Iced string (RFD 16 authority). The resolution suffix of a highlight recovered by quote context (RD-12).
