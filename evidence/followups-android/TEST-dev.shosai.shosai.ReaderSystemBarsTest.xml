@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="dev.shosai.shosai.ReaderSystemBarsTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-02T23:35:23.510Z" hostname="framework16" time="13.949">
+  <properties/>
+  <testcase name="turn edges are the middle 200 dp of each gesture zone[24]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="2.226"/>
+  <testcase name="turn edges are the middle 200 dp of each gesture zone[28]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="0.767"/>
+  <testcase name="turn edges are the middle 200 dp of each gesture zone[29]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="2.608"/>
+  <testcase name="turn edges are the middle 200 dp of each gesture zone[30]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="1.875"/>
+  <testcase name="turn edges are the middle 200 dp of each gesture zone[34]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="2.267"/>
+  <testcase name="turn edges are the middle 200 dp of each gesture zone" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="1.742"/>
+  <testcase name="both bar states draw behind the cutout and system bars[24]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="0.451"/>
+  <testcase name="both bar states draw behind the cutout and system bars[28]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="0.403"/>
+  <testcase name="both bar states draw behind the cutout and system bars[29]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="0.348"/>
+  <testcase name="both bar states draw behind the cutout and system bars[30]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="0.353"/>
+  <testcase name="both bar states draw behind the cutout and system bars[34]" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="0.465"/>
+  <testcase name="both bar states draw behind the cutout and system bars" classname="dev.shosai.shosai.ReaderSystemBarsTest" time="0.443"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
