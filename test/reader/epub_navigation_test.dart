@@ -158,6 +158,7 @@ void main() {
     ReaderPickedDocument? picked,
     ReaderPlace? place,
     ReaderPlaceRequests? placeRequests,
+    bool reveal = true,
   }) async {
     await renderHarnessState(
       tester,
@@ -177,7 +178,7 @@ void main() {
       ready: () => harnessReaderPageReady(tester),
       maxRounds: 16,
     );
-    await revealReaderChrome(tester);
+    if (reveal) await revealReaderChrome(tester);
   }
 
   ReaderEpubPageContentPainter? dartPage(WidgetTester tester) {
@@ -1007,10 +1008,12 @@ void main() {
       tester,
     ) async {
       final harness = bridge();
+      // No tap to reveal the chrome: on touch a tap leaves the selection.
       await openReader(
         tester,
         harness,
         place: const ReaderPlace(1, offset: 0, length: 6),
+        reveal: false,
       );
       await settleEpubPage(tester);
 

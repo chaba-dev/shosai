@@ -539,22 +539,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerCopy => 'Copy';
 
   @override
-  String get readerSelectionCancel => 'Cancel';
+  String get readerSelectionNote => 'Note';
 
   @override
-  String get readerHighlightYellow => 'Yellow';
+  String get readerHighlightYellow => 'Yellow highlight';
 
   @override
-  String get readerHighlightGreen => 'Green';
+  String get readerHighlightGreen => 'Green highlight';
 
   @override
-  String get readerHighlightBlue => 'Blue';
+  String get readerHighlightBlue => 'Blue highlight';
 
   @override
-  String get readerHighlightPink => 'Pink';
+  String get readerHighlightPink => 'Pink highlight';
 
   @override
-  String get readerHighlightPurple => 'Purple';
+  String get readerHighlightPurple => 'Purple highlight';
 
   @override
   String get readerAnnotationRecovered => 'recovered';

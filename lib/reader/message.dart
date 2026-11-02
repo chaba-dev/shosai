@@ -709,6 +709,12 @@ final class ReaderSelectionCommitted extends ReaderMessage {
   final String? body;
 }
 
+/// Searches for the selected text: the shell's search palette on this book
+/// when the reader is in the shell, else the in-book search.
+final class ReaderSelectionSearchRequested extends ReaderMessage {
+  const ReaderSelectionSearchRequested();
+}
+
 final class ReaderSelectionNoteRequested extends ReaderMessage {
   const ReaderSelectionNoteRequested();
 }

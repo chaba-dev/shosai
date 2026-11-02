@@ -6,7 +6,8 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:shosai_flutter/reader/controller.dart' show ReaderPlace;
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderPlace, ReaderPlaceRequests;
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
@@ -171,6 +172,7 @@ Widget _reader({
   FlutterReaderSettings settings = _pdfFitPage,
   ReaderPlace? place,
   int? initialBookId,
+  ReaderPlaceRequests? placeRequests,
 }) => productionShell(
   locale: const Locale('en'),
   home: ReaderScreen(
@@ -181,6 +183,7 @@ Widget _reader({
     initialSettings: settings.copyWith(zonesHintDismissed: true),
     initialPlace: place,
     initialBookId: initialBookId,
+    placeRequests: placeRequests,
   ),
 );
 
@@ -244,16 +247,18 @@ void _setView(WidgetTester tester, Size size) {
   addTearDown(tester.view.reset);
 }
 
-/// The rendered button behind a label.
-ShadButton _button(WidgetTester tester, Finder label) {
-  final button = find.ancestor(of: label, matching: find.byType(ShadButton));
-  expect(button, findsWidgets, reason: 'the label is inside a button');
-  return tester.widget<ShadButton>(button.first);
-}
+/// A selection capsule control by its key: `selection-swatch-<color>`,
+/// `selection-note` or `selection-copy`.
+Finder _action(String key) => find.byKey(ValueKey(key));
 
-/// Whether the button behind [label] is gated off (no activation callback).
-bool _disabled(WidgetTester tester, Finder label) =>
-    _button(tester, label).onPressed == null;
+/// Whether the capsule control [key] is gated off (no activation callback).
+bool _disabled(WidgetTester tester, String key) =>
+    tester
+        .widget<InkWell>(
+          find.descendant(of: _action(key), matching: find.byType(InkWell)),
+        )
+        .onTap ==
+    null;
 
 void main() {
   setUpAll(loadHarnessFonts);
@@ -262,6 +267,7 @@ void main() {
     testWidgets('a mouse drag selects text and opens the action surface', (
       tester,
     ) async {
+      final semantics = tester.ensureSemantics();
       _setView(tester, const Size(1280, 800));
       await _open(tester, _reader(bridge: _SelectionBridge()));
 
@@ -270,24 +276,26 @@ void main() {
       await settleReaderSelection(tester);
 
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
-      // Every retained action is rendered: Copy, the five RFD 16 colors,
-      // Add note and Cancel.
-      for (final label in const [
-        'Copy',
-        'Yellow',
-        'Green',
-        'Blue',
-        'Pink',
-        'Purple',
-        'Add note',
-        'Cancel',
-      ]) {
+      // The design system's capsule: five colour swatches, then Note and
+      // Copy. Colours are swatches named for their colour, never text
+      // buttons, and there is no Cancel (a press outside or Esc dismisses).
+      for (final color in FlutterHighlightColor.values) {
+        expect(_action('selection-swatch-${color.name}'), findsOneWidget);
+        final name = '${color.name[0].toUpperCase()}${color.name.substring(1)}';
+        expect(find.text(name), findsNothing);
         expect(
-          find.text(label),
+          find.bySemanticsLabel('$name highlight'),
           findsOneWidget,
-          reason: 'the selection surface renders the $label action',
+          reason: 'the $name swatch is named for its colour',
         );
       }
+      expect(find.text('Note'), findsOneWidget);
+      expect(find.text('Copy'), findsOneWidget);
+      expect(_action('selection-search'), findsOneWidget);
+      expect(find.text('Cancel'), findsNothing);
+      // With a pointer every control is control-height (32 px).
+      expect(tester.getSize(_action('selection-swatch-yellow')).height, 32);
+      expect(tester.getSize(_action('selection-copy')).height, 32);
       // The surface's accessible name is localized, not hardcoded.
       expect(
         tester
@@ -296,6 +304,7 @@ void main() {
             .label,
         'Selection actions',
       );
+      semantics.dispose();
     });
 
     testWidgets('a highlight made while All books shows lists it again', (
@@ -318,7 +327,7 @@ void main() {
 
       await dragFixtureSelection(tester, from: 4, to: 12);
       await settleReaderSelection(tester);
-      await tester.tap(find.text('Yellow'));
+      await tester.tap(_action('selection-swatch-yellow'));
       await settleReaderSelection(tester);
       expect(bridge.created, hasLength(1));
       expect(bridge.libraryNotesCalls, 2);
@@ -354,17 +363,62 @@ void main() {
 
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
       expect(
-        _disabled(tester, find.text('Copy')),
+        _disabled(tester, 'selection-copy'),
         isTrue,
         reason: 'a geometry-only surface cannot copy (RFD 16)',
       );
       // The persistence actions stay enabled: the highlight is still available.
-      expect(_disabled(tester, find.text('Yellow')), isFalse);
-      expect(_disabled(tester, find.text('Add note')), isFalse);
+      expect(_disabled(tester, 'selection-swatch-yellow'), isFalse);
+      expect(_disabled(tester, 'selection-note'), isFalse);
       // A disabled Copy action is inert.
-      await tester.tap(find.text('Copy'));
+      await tester.tap(_action('selection-copy'));
       await settleReaderSelection(tester);
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+    });
+
+    testWidgets('Search opens the shell palette on the selected text', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final queries = <String?>[];
+      final requests = ReaderPlaceRequests(
+        openSearch: ({query}) => queries.add(query),
+      );
+      addTearDown(requests.dispose);
+      await _open(
+        tester,
+        _reader(bridge: _SelectionBridge(), placeRequests: requests),
+      );
+      await dragFixtureSelection(tester, from: 4, to: 12);
+      await settleReaderSelection(tester);
+      await tester.tap(_action('selection-search'));
+      await settleReaderSelection(tester);
+
+      expect(queries, ['river ru']);
+      expect(
+        find.byKey(const ValueKey('selection-actions')),
+        findsNothing,
+        reason: 'searching leaves the selection',
+      );
+    });
+
+    testWidgets('Search without the shell opens the in-book search on it', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(tester, _reader(bridge: _SelectionBridge()));
+      await dragFixtureSelection(tester, from: 4, to: 12);
+      await settleReaderSelection(tester);
+      await tester.tap(_action('selection-search'));
+      await settleReaderSelection(tester);
+
+      expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+      final input = find.descendant(
+        of: find.byKey(const ValueKey('reader-search-input')),
+        matching: find.byType(EditableText),
+      );
+      expect(input, findsOneWidget);
+      expect(tester.widget<EditableText>(input).controller.text, 'river ru');
     });
 
     testWidgets('Copy delivers the selected text through the copier', (
@@ -391,7 +445,7 @@ void main() {
       await _open(tester, _reader(bridge: _SelectionBridge()));
       await dragFixtureSelection(tester, from: 4, to: 12);
       await settleReaderSelection(tester);
-      await tester.tap(find.text('Copy'));
+      await tester.tap(_action('selection-copy'));
       await settleReaderSelection(tester);
 
       expect(copied, ['river ru']);
@@ -414,7 +468,7 @@ void main() {
           renderedEndpointCenter(tester, shift + 12),
         );
         await settleReaderSelection(tester);
-        await tester.tap(find.text('Yellow'));
+        await tester.tap(_action('selection-swatch-yellow'));
         await settleReaderSelection(tester);
 
         final created = bridge.created.single;
@@ -439,7 +493,7 @@ void main() {
         renderedEndpointCenter(tester, shift + 12),
       );
       await settleReaderSelection(tester);
-      await tester.tap(find.text('Yellow'));
+      await tester.tap(_action('selection-swatch-yellow'));
       await settleReaderSelection(tester);
 
       final created = bridge.created.single;
@@ -456,18 +510,13 @@ void main() {
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
-      for (final (label, color) in const [
-        ('Yellow', FlutterHighlightColor.yellow),
-        ('Green', FlutterHighlightColor.green),
-        ('Blue', FlutterHighlightColor.blue),
-        ('Pink', FlutterHighlightColor.pink),
-        ('Purple', FlutterHighlightColor.purple),
-      ]) {
+      for (final color in FlutterHighlightColor.values) {
+        final label = color.name;
         final bridge = _SelectionBridge();
         await _open(tester, _reader(bridge: bridge));
         await dragFixtureSelection(tester, from: 4, to: 12);
         await settleReaderSelection(tester);
-        await tester.tap(find.text(label));
+        await tester.tap(_action('selection-swatch-$label'));
         await settleReaderSelection(tester);
 
         expect(
@@ -739,6 +788,29 @@ void main() {
       expect(bridge.created, isEmpty);
     });
 
+    testWidgets('a touch tap anywhere on the page dismisses the surface', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _SelectionBridge();
+      await _open(tester, _reader(bridge: bridge));
+      // There is no Cancel: on touch a tap on the page, even on the selected
+      // text where a mouse press would start a new selection, leaves it.
+      for (final at in [
+        () => renderedFixtureOffset(tester, 8),
+        () => const Offset(30, 300),
+      ]) {
+        await dragFixtureSelection(tester, from: 4, to: 12);
+        await settleReaderSelection(tester);
+        expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+
+        await tester.tapAt(at(), kind: ui.PointerDeviceKind.touch);
+        await settleReaderSelection(tester);
+        expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+      }
+      expect(bridge.created, isEmpty);
+    });
+
     testWidgets('the action surface stays inside the viewport', (tester) async {
       _setView(tester, const Size(390, 844));
       await _open(tester, _reader(bridge: _SelectionBridge()));
@@ -791,7 +863,7 @@ void main() {
           tester.getRect(menu).top,
           greaterThan(renderedFixtureOffset(tester, 4).dy),
         );
-        expect(find.text('Copy').hitTestable(), findsOneWidget);
+        expect(_action('selection-copy').hitTestable(), findsOneWidget);
         // A safe-area change must update an already-open menu, not only the
         // geometry captured when the selection was first made.
         tester.view.padding = const FakeViewPadding(top: 180, bottom: 34);
@@ -807,7 +879,8 @@ void main() {
                 8,
           ),
         );
-        await tester.tap(find.text('Cancel'));
+        // There is no Cancel: Esc dismisses the capsule.
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await settleReaderSelection(tester);
         expect(menu, findsNothing);
       },
@@ -946,9 +1019,15 @@ void main() {
         greaterThan(20),
         reason: 'the resize clamped the scroll offset and moved the range',
       );
+      // The one-row capsule is short enough to flip above the range once
+      // the range moves down, so it is held to the range by its distance
+      // from the nearer edge rather than by its top.
+      double gap(Rect surface, Offset range) => surface.top > range.dy
+          ? surface.top - range.dy
+          : range.dy - surface.bottom;
       expect(
-        surfaceAfter.top - surfaceBefore.top,
-        closeTo(rangeAfter.dy - rangeBefore.dy, 8),
+        gap(surfaceAfter, rangeAfter),
+        closeTo(gap(surfaceBefore, rangeBefore), 8),
         reason: 'the action surface followed the range across the resize',
       );
       final viewport = tester.getRect(
@@ -968,7 +1047,7 @@ void main() {
         await _open(tester, _reader(bridge: bridge));
         await dragFixtureSelection(tester, from: 4, to: 12);
         await settleReaderSelection(tester);
-        await tester.tap(find.text('Add note'));
+        await tester.tap(_action('selection-note'));
         await tester.pumpAndSettle();
 
         expect(find.byType(ShadDialog), findsOneWidget);
@@ -998,7 +1077,7 @@ void main() {
       await _open(tester, _reader(bridge: bridge));
       await dragFixtureSelection(tester, from: 4, to: 12);
       await settleReaderSelection(tester);
-      await tester.tap(find.text('Add note'));
+      await tester.tap(_action('selection-note'));
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -1027,7 +1106,7 @@ void main() {
       await _open(tester, _reader(bridge: bridge));
       await dragFixtureSelection(tester, from: 4, to: 12);
       await settleReaderSelection(tester);
-      await tester.tap(find.text('Yellow'));
+      await tester.tap(_action('selection-swatch-yellow'));
       await settleReaderSelection(tester);
 
       expect(bridge.created, isEmpty);

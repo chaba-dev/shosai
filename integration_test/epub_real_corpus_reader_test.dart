@@ -1017,7 +1017,7 @@ Future<Map<String, Object?>> copyHighlightFromActions(
   Future<void> Function([int rounds]) settle,
   Map<String, Object?> result,
 ) async {
-  final copyButton = find.text('Copy');
+  final copyButton = find.byKey(const ValueKey('selection-copy'));
   result['copyOffered'] = copyButton.evaluate().isNotEmpty;
   if (result['copyOffered'] as bool) {
     await tester.tap(copyButton.first);
@@ -1025,7 +1025,7 @@ Future<Map<String, Object?>> copyHighlightFromActions(
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     result['copyNonEmpty'] = data?.text != null && data!.text!.isNotEmpty;
   }
-  final highlight = find.text('Yellow');
+  final highlight = find.byKey(const ValueKey('selection-swatch-yellow'));
   result['highlightOffered'] = highlight.evaluate().isNotEmpty;
   if (result['highlightOffered'] as bool) {
     await tester.tap(highlight.first);
