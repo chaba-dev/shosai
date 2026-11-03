@@ -59,6 +59,7 @@
   "readerRemoveBookmark": "ブックマークを外す",
   "readerOpeningDocument": "ドキュメントを開いています…",
   "readerNoBookOpen": "本が開かれていません",
+  "readerPercentStatus": "{percentage}%",
   "readerPageStatus": "{percentage}% · {page}ページ",
   "readerPageRangeStatus": "{percentage}% · {first}～{last}ページ",
   "readerChapterStatus": "{percentage}% · 第{chapter}章",
