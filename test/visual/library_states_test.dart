@@ -359,7 +359,12 @@ void main() {
       bridge.failNextPage = true;
       await tester.tap(find.byTooltip('Refresh library'));
       await tester.pumpAndSettle();
-      expect(find.text('Library query failed'), findsOneWidget);
+      expect(
+        find.text(
+          'The document engine is unavailable. Restart the app and try again.',
+        ),
+        findsOneWidget,
+      );
       expect(find.byType(LibraryBookCard), findsWidgets);
       await captureState(tester, '3c-library-load-error-1280', view, {
         'state': 'load-error',
@@ -430,7 +435,12 @@ void main() {
           ),
         ),
         ready: () =>
-            find.text('Library query failed').evaluate().isNotEmpty &&
+            find
+                .text(
+                  'The document engine is unavailable. Restart the app and try again.',
+                )
+                .evaluate()
+                .isNotEmpty &&
             harnessImagesReady(tester),
       );
       expect(find.text('Retry'), findsOneWidget);
@@ -461,7 +471,12 @@ void main() {
       bridge.failNextPage = true;
       await tester.tap(find.byTooltip('Refresh library'));
       await tester.pumpAndSettle();
-      expect(find.text('Library query failed'), findsOneWidget);
+      expect(
+        find.text(
+          'The document engine is unavailable. Restart the app and try again.',
+        ),
+        findsOneWidget,
+      );
       await captureState(tester, '3c-library-empty-error-1280', view, {
         'state': 'empty-load-error',
         'appLocale': renderedLocale(tester),
@@ -487,7 +502,12 @@ void main() {
       bridge.failNextPage = true;
       await tester.tap(find.byTooltip('Refresh library'));
       await tester.pumpAndSettle();
-      expect(find.text('Library query failed'), findsOneWidget);
+      expect(
+        find.text(
+          'The document engine is unavailable. Restart the app and try again.',
+        ),
+        findsOneWidget,
+      );
       expect(find.byType(LibraryContinueCard), findsOneWidget);
       await captureState(tester, '3c-library-dark-1280', view, {
         'state': 'load-error-dark-palette',

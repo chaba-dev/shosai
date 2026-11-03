@@ -186,7 +186,7 @@
   "shellSearchNotesGroup": "ノート · {count}",
   "shellSearchMatches": "{count}件",
   "shellSearchMoreMatches": "{count}件以上",
-  "shellSearchBookFailed": "この本は検索できませんでした: {error}",
+  "shellSearchBookFailed": "この本を検索できませんでした。もう一度開いてお試しください。",
   "shellBookmarksEmptyHeading": "ブックマークはまだありません",
   "shellBookmarksEmptyBody": "リーダーのツールバーからページをブックマークすると、ここに表示されます。",
   "libraryBookCount": "{count}冊",

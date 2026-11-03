@@ -1224,11 +1224,11 @@ abstract class AppLocalizations {
   /// **'{count}+ matches'**
   String shellSearchMoreMatches(int count);
 
-  /// A search result group: why the book could not be read.
+  /// A search result group whose book could not be read.
   ///
   /// In en, this message translates to:
-  /// **'This book could not be searched: {error}'**
-  String shellSearchBookFailed(String error);
+  /// **'This book could not be searched. Try opening it again.'**
+  String get shellSearchBookFailed;
 
   /// The Bookshelf shell: the Bookmarks place before any bookmark exists.
   ///

@@ -88,7 +88,8 @@ class _DocumentViewState extends State<_DocumentView> {
     final dispatch = widget.dispatch;
     final readerFocus = widget.readerFocus;
     final actionFocus = widget.actionFocus;
-    final title = document.title ?? 'Untitled document';
+    final l10n = AppLocalizations.of(context);
+    final title = document.title ?? l10n.readerUntitledDocument;
     final page = image;
     // Link annotations do not depend on text extraction. A scanned PDF, or
     // one whose text cannot be mapped, still uses its raster's hit-test frame.
@@ -112,7 +113,7 @@ class _DocumentViewState extends State<_DocumentView> {
       // not the light application chrome palette.
       return Center(
         child: Text(
-          model.error ?? 'Document content unavailable',
+          model.error ?? l10n.readerContentUnavailable,
           key: const ValueKey('reader-content-error'),
           style: TextStyle(
             color: pageColors(model.typography.theme).foreground,
@@ -338,9 +339,9 @@ class _DocumentViewState extends State<_DocumentView> {
                               builder: (context, child) => Semantics(
                                 key: const ValueKey('reader-content-semantics'),
                                 readOnly: true,
-                                label: 'Document text: ${surface.text}',
+                                label: l10n.readerDocumentText(surface.text),
                                 hint: screenReaderSelectionAvailable
-                                    ? 'Selects this text and shows selection actions.'
+                                    ? l10n.readerSelectTextHint
                                     : null,
                                 onTap: screenReaderSelectionAvailable
                                     ? () => dispatch(

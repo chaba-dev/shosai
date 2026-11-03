@@ -256,8 +256,8 @@ class _ShellSearchResults extends StatelessWidget {
                 ? l10n.shellSearchMoreMatches(book.matches.length)
                 : l10n.shellSearchMatches(book.matches.length),
           ),
-          if (book.error case final failure?)
-            _ShellSearchLine(text: l10n.shellSearchBookFailed(failure)),
+          if (book.error != null)
+            _ShellSearchLine(text: l10n.shellSearchBookFailed),
           if (book.partial) _ShellSearchLine(text: l10n.shellSearchPartial),
           for (final (index, match) in book.matches.indexed)
             _ShellSearchTextHit(
@@ -271,7 +271,7 @@ class _ShellSearchResults extends StatelessWidget {
         if (error != null)
           _ShellSearchLine(
             key: const ValueKey('shell-search-error'),
-            text: error,
+            text: l10n.shellSearchFailed,
           )
         else if (model.busy)
           _ShellSearchLine(

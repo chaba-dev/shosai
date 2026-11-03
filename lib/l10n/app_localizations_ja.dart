@@ -658,9 +658,7 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String shellSearchBookFailed(String error) {
-    return 'この本は検索できませんでした: $error';
-  }
+  String get shellSearchBookFailed => 'この本を検索できませんでした。もう一度開いてお試しください。';
 
   @override
   String get shellBookmarksEmptyHeading => 'ブックマークはまだありません';

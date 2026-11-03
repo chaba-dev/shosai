@@ -545,6 +545,7 @@ class _ReaderErrorSurfaces extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final document = model.document;
+    final l10n = AppLocalizations.of(context);
     final persistenceError = model.persistenceError;
     final toolError = model.toolError;
     final relayoutError = model.relayoutError;
@@ -552,20 +553,20 @@ class _ReaderErrorSurfaces extends StatelessWidget {
     // error; over a page still shown it is an alert here.
     final layoutRefusal = model.contentState == ReaderContentState.failed
         ? null
-        : model.layoutRefusal?.message;
+        : model.layoutRefusal?.localizedMessage(l10n);
     final entries = <String>[
       // A failed page layout is not a selection problem: it is rendered as its
       // own message instead of the retained "Selection unavailable" prefix.
       ?relayoutError,
       ?layoutRefusal,
       if (model.selectionError != null && document != null)
-        'Selection unavailable: ${model.selectionError}',
+        l10n.readerSelectionUnavailable(model.selectionError!),
       if (model.selectionActionError != null && document != null)
-        'Selection action failed: ${model.selectionActionError}',
+        l10n.readerSelectionActionFailed(model.selectionActionError!),
       if (model.annotationError != null && document != null)
         model.annotationsReady
-            ? 'Highlight action failed: ${model.annotationError}'
-            : 'Highlights unavailable: ${model.annotationError}',
+            ? l10n.readerHighlightActionFailed(model.annotationError!)
+            : l10n.readerHighlightsUnavailable(model.annotationError!),
       ?persistenceError,
       // A tool error (a rejected open while a bookmark write is pending, a
       // failed search start) has no panel of its own while the panel bodies are

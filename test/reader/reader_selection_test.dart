@@ -1113,10 +1113,11 @@ void main() {
       expect(bridge.created, isEmpty);
       expect(
         find.textContaining(
-          'Selection action failed: annotation store unavailable',
+          'Selection action failed: The operation is no longer available. Reopen the book and try again.',
         ),
         findsOneWidget,
-        reason: 'the bridge reason reaches the selection error surface',
+        reason:
+            'localized recovery guidance reaches the selection error surface',
       );
     });
   });
@@ -1334,7 +1335,7 @@ void main() {
       expect(bridge.deleted, isEmpty);
       expect(
         find.textContaining(
-          'Highlight action failed: highlight write rejected',
+          'Highlight action failed: The operation is no longer available. Reopen the book and try again.',
         ),
         findsOneWidget,
       );

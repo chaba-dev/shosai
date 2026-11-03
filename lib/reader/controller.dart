@@ -16,6 +16,9 @@ import 'package:shosai_flutter/app_theme.dart'
     show shosaiJapaneseInterfaceFontFamily;
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
+import 'package:shosai_flutter/l10n/app_localizations_en.dart';
+import 'package:shosai_flutter/l10n/error_text.dart';
 import 'package:shosai_flutter/notices/notice.dart';
 import 'package:shosai_flutter/notices/policy.dart';
 import 'package:shosai_flutter/shell/notes_controller.dart'
@@ -71,6 +74,7 @@ final class ReaderController implements Listenable {
     ReaderDisplaySink? displaySink,
     void Function(bool shown)? systemBars,
     ReaderNoticeReporter? noticeReporter,
+    AppLocalizations Function() localizations = AppLocalizationsEn.new,
     EpubImageDecoder? epubImageDecoder,
     EpubFontRegistrar? epubFontRegistrar,
     LayoutClock? layoutClock,
@@ -122,6 +126,7 @@ final class ReaderController implements Listenable {
        _displaySink = displaySink ?? ((_) {}),
        _systemBars = systemBars ?? ((_) {}),
        _reportNotice = noticeReporter ?? ignoreNotice,
+       _localizations = localizations,
        _epubImageDecoder = epubImageDecoder ?? _noEpubImage,
        _epubFontRegistrar = epubFontRegistrar ?? _noEpubFont,
        _layoutClock = layoutClock ?? systemLayoutClock,
@@ -192,6 +197,8 @@ final class ReaderController implements Listenable {
   final ReaderDisplaySink _displaySink;
   final void Function(bool shown) _systemBars;
   final ReaderNoticeReporter _reportNotice;
+  final AppLocalizations Function() _localizations;
+  AppLocalizations get _l10n => _localizations();
   final EpubImageDecoder _epubImageDecoder;
   final EpubFontRegistrar _epubFontRegistrar;
 
@@ -894,8 +901,8 @@ final class ReaderController implements Listenable {
           _emit(
             _model.copyWith(
               toolError: error == null
-                  ? "This note's place isn't in this edition of the book."
-                  : "This note's place couldn't be found: $error",
+                  ? _l10n.readerNotePlaceMissing
+                  : _l10n.readerNotePlaceFailed(error),
             ),
           );
         }
@@ -1104,7 +1111,7 @@ final class ReaderController implements Listenable {
         if (_isCurrent(message.generation) &&
             message.revision == _bookmarkRevision) {
           final error = message.persistence
-              ? 'Bookmark changes were not saved: ${message.error}'
+              ? _l10n.readerBookmarksNotSaved(message.error)
               : message.error;
           _emit(
             _model.copyWith(
@@ -1192,8 +1199,8 @@ final class ReaderController implements Listenable {
         if (_isCurrent(message.generation) &&
             message.revision == _notesRevision) {
           final error = message.persistence
-              ? 'Note changes were not saved: ${message.error}'
-              : 'Notes are unavailable: ${message.error}';
+              ? _l10n.readerNotesNotSaved(message.error)
+              : _l10n.readerNotesUnavailable(message.error);
           _emit(
             _model.copyWith(
               notesBusy: false,
@@ -1222,7 +1229,7 @@ final class ReaderController implements Listenable {
         if (_isCurrent(message.generation) &&
             message.revision == _readingStateSaveRevision &&
             !_closing) {
-          final error = 'Reading position was not saved: ${message.error}';
+          final error = _l10n.readerPositionNotSaved(message.error);
           final ownsPersistenceError =
               _model.persistenceError == null ||
               _model.persistenceError == _readingStateSaveError;
@@ -1341,8 +1348,7 @@ final class ReaderController implements Listenable {
           } else {
             _emit(
               _model.copyWith(
-                selectionActionError:
-                    'The note was not saved because the selection or reader layout changed. Try again.',
+                selectionActionError: _l10n.readerNoteSelectionChanged,
               ),
             );
           }
@@ -1473,7 +1479,7 @@ final class ReaderController implements Listenable {
               relayoutPending: false,
               relayoutError: refusal != null
                   ? null
-                  : 'Layout failed: ${message.error}',
+                  : _l10n.readerLayoutFailed(message.error),
               layoutRefusal: refusal ?? _unchanged,
               contentState: nothingInstalled
                   ? ReaderContentState.failed
@@ -1510,8 +1516,7 @@ final class ReaderController implements Listenable {
         );
         _noteCreateCancellations.remove(message.cancellation);
         if (interruptedNote && !message.succeeded) {
-          _recoverySelectionNotice =
-              'The note could not be saved while the app was suspended. Try again.';
+          _recoverySelectionNotice = _l10n.readerNoteInterrupted;
         }
         final selectionRevision = _selectionCancellations[message.cancellation];
         _annotationCancellations.remove(message.cancellation);
@@ -1631,8 +1636,8 @@ final class ReaderController implements Listenable {
       _emit(
         _model.copyWith(
           toolError: _bookmarkMutationCancellation != null
-              ? 'Bookmark changes are still saving. Try opening again shortly.'
-              : 'Note changes are still saving. Try opening again shortly.',
+              ? _l10n.readerBookmarksStillSaving
+              : _l10n.readerNotesStillSaving,
         ),
       );
       return;
@@ -1850,8 +1855,9 @@ final class ReaderController implements Listenable {
           );
         } catch (error) {
           restorationFailed = true;
-          restorationError =
-              'Reading position could not be restored: ${_describeError(error)}';
+          restorationError = _l10n.readerPositionNotRestored(
+            _describeError(error),
+          );
         }
       }
       // A highlight's or note's place is where it resolves in this book: an
@@ -1868,13 +1874,11 @@ final class ReaderController implements Listenable {
             cancellation: cancellation,
           );
           if (place == null) {
-            toolError = "This note's place isn't in this edition of the book.";
+            toolError = _l10n.readerNotePlaceMissing;
           }
         } catch (error) {
           place = null;
-          toolError =
-              "This note's place couldn't be found: "
-              '${_describeError(error)}';
+          toolError = _l10n.readerNotePlaceFailed(_describeError(error));
         }
       }
       // A place to open at, such as a note's, wins over the saved position;
@@ -1907,7 +1911,7 @@ final class ReaderController implements Listenable {
             cancellationId: cancellation,
           );
         } catch (error) {
-          toolError ??= 'Bookmarks are unavailable: ${_describeError(error)}';
+          toolError ??= _l10n.readerBookmarksUnavailable(_describeError(error));
         }
       }
       dispatch(
@@ -2530,7 +2534,7 @@ final class ReaderController implements Listenable {
       _emit(
         _model.copyWith(
           relayoutPending: false,
-          relayoutError: 'Layout failed: ${_describeError(error)}',
+          relayoutError: _l10n.readerLayoutFailed(_describeError(error)),
         ),
       );
       return;
@@ -3922,7 +3926,7 @@ final class ReaderController implements Listenable {
             failureKind: 'notes',
             error: writeError == null
                 ? null
-                : 'Note changes were not saved: $writeError',
+                : _l10n.readerNotesNotSaved(writeError),
           );
         }
         dispatch(_ReaderNotesFinished(cancellation));
@@ -3990,7 +3994,7 @@ final class ReaderController implements Listenable {
           failureKind: 'bookmark',
           error: writeError == null
               ? null
-              : 'Bookmark changes were not saved: $writeError',
+              : _l10n.readerBookmarksNotSaved(writeError),
         );
         dispatch(_ReaderBookmarkFinished(cancellation));
       }
@@ -4614,7 +4618,11 @@ final class ReaderController implements Listenable {
       );
     } catch (error) {
       // Detached blocks stay owned until the page painting them is replaced.
-      _emit(_model.copyWith(relayoutError: 'Layout failed: $error'));
+      _emit(
+        _model.copyWith(
+          relayoutError: _l10n.readerLayoutFailed(_describeError(error)),
+        ),
+      );
       return false;
     }
     if (reveal) {
@@ -4785,7 +4793,11 @@ final class ReaderController implements Listenable {
       );
     } catch (error) {
       // A failed batch adopted nothing; the page on screen stays valid.
-      _emit(_model.copyWith(relayoutError: 'Layout failed: $error'));
+      _emit(
+        _model.copyWith(
+          relayoutError: _l10n.readerLayoutFailed(_describeError(error)),
+        ),
+      );
       return;
     }
     // The content under the viewport's top keeps its place: the view scrolls
@@ -5032,7 +5044,7 @@ final class ReaderController implements Listenable {
           generation: generation,
           revision: revision,
           layout: layout,
-          error: refusal.message,
+          error: refusal.localizedMessage(_l10n),
           limit: refusal,
         ),
       );
@@ -5209,7 +5221,7 @@ final class ReaderController implements Listenable {
               failureKind: 'reading-state',
               error: writeError == null
                   ? null
-                  : 'Reading position was not saved: $writeError',
+                  : _l10n.readerPositionNotSaved(writeError),
               succeeded: writeError == null,
             );
             dispatch(const _ReaderReadingStateSaveFinished());
@@ -5820,7 +5832,7 @@ final class ReaderController implements Listenable {
             failureKind: 'annotations',
             error: writeError == null || wasCancelled
                 ? null
-                : 'Highlight changes were not saved: $writeError',
+                : _l10n.readerHighlightsNotSaved(writeError),
           );
         }
         dispatch(
@@ -5952,7 +5964,7 @@ final class ReaderController implements Listenable {
           failureKind: 'annotations',
           error: writeError == null
               ? null
-              : 'Highlight changes were not saved: $writeError',
+              : _l10n.readerHighlightsNotSaved(writeError),
         );
       }
       _annotationCancellations.remove(cancellation);
@@ -6052,7 +6064,7 @@ final class ReaderController implements Listenable {
           failureKind: 'annotations',
           error: writeError == null
               ? null
-              : 'Highlight changes were not saved: $writeError',
+              : _l10n.readerHighlightsNotSaved(writeError),
         );
       }
       dispatch(const _ReaderAnnotationOperationFinished());
@@ -6123,20 +6135,12 @@ final class ReaderController implements Listenable {
         .firstOrNull;
     if (annotation == null) return;
     if (_model.relayoutBusy) {
-      _emit(
-        _model.copyWith(
-          annotationError:
-              'The note was not saved because the reader layout changed. Try again.',
-        ),
-      );
+      _emit(_model.copyWith(annotationError: _l10n.readerNoteLayoutChanged));
       return;
     }
     if (_model.annotationOperations.isNotEmpty) {
       _emit(
-        _model.copyWith(
-          annotationError:
-              'Finish the current highlight change, then save the note again.',
-        ),
+        _model.copyWith(annotationError: _l10n.readerFinishHighlightChange),
       );
       return;
     }
@@ -6208,12 +6212,12 @@ final class ReaderController implements Listenable {
             ? null
             : !ownsSelection && !wasCancelled
             ? createsSelection
-                  ? 'An earlier highlight could not be saved: ${message.error}'
+                  ? _l10n.readerEarlierHighlightNotSaved(message.error!)
                   : message.error
             : _unchanged,
         persistenceError:
             mutatesAnnotations && message.error != null && !wasCancelled
-            ? 'Highlight changes were not saved: ${message.error}'
+            ? _l10n.readerHighlightsNotSaved(message.error!)
             : _unchanged,
       ),
     );
@@ -6487,7 +6491,7 @@ final class ReaderController implements Listenable {
       dispatch(
         _ReaderAssociationFinished(
           sources: message,
-          error: 'No saved highlights are available to associate.',
+          error: _l10n.readerNoHighlightsToAssociate,
         ),
       );
       return;
@@ -6602,8 +6606,7 @@ final class ReaderController implements Listenable {
       if (_isCurrentAssociation(sources)) {
         _emit(
           _model.copyWith(
-            persistenceError:
-                'Highlight association was not saved: $writeError',
+            persistenceError: _l10n.readerAssociationNotSaved(writeError),
           ),
         );
       }
@@ -6615,7 +6618,7 @@ final class ReaderController implements Listenable {
           failureKind: 'association',
           error: writeError == null
               ? null
-              : 'Highlight association was not saved: $writeError',
+              : _l10n.readerAssociationNotSaved(writeError),
         );
       }
     }
@@ -6652,9 +6655,7 @@ final class ReaderController implements Listenable {
       dispatch(
         _ReaderAssociationFinished(
           sources: sources,
-          error:
-              'Association saved, but highlights could not be loaded: '
-              '${_describeError(error)}',
+          error: _l10n.readerAssociationLoadFailed(_describeError(error)),
         ),
       );
     }
@@ -6784,15 +6785,13 @@ final class ReaderController implements Listenable {
     _retireDocumentPicker();
     if (_model.document == null && !_model.busy) return;
     final placeNoteNotice = _activeNoteEditor == _ReaderNoteTarget.place
-        ? 'The note was not saved because the app was suspended. Try again.'
+        ? _l10n.readerNoteInterrupted
         : _model.toolError;
     switch (_activeNoteEditor) {
       case _ReaderNoteTarget.selection:
-        _recoverySelectionNotice =
-            'The note was not saved because the app was suspended. Try again.';
+        _recoverySelectionNotice = _l10n.readerNoteInterrupted;
       case _ReaderNoteTarget.annotation:
-        _recoveryAnnotationNotice =
-            'The note was not saved because the app was suspended. Try again.';
+        _recoveryAnnotationNotice = _l10n.readerNoteInterrupted;
       case _ReaderNoteTarget.place:
       case null:
         break;
@@ -6890,14 +6889,8 @@ final class ReaderController implements Listenable {
     }
   }
 
-  /// Renders a bridge or platform error for the reader's error surfaces.
-  ///
-  /// `FlutterBridgeError` carries a kind and a message but no `toString()`, so a
-  /// bare `_describeError(error)` renders as "Instance of 'FlutterBridgeError'" and
-  /// hides the reason the user (and a bug report) needs.
-  static String _describeError(Object error) => error is FlutterBridgeError
-      ? '${error.message} (${error.kind.name})'
-      : error.toString();
+  /// Presents the failure kind, not an untranslated engine diagnostic.
+  String _describeError(Object error) => localizedErrorText(error, _l10n);
 
   bool _isCurrent(int generation) {
     return !_closing && generation == _model.generation;
@@ -6973,7 +6966,9 @@ final class ReaderController implements Listenable {
       _scheduleChromeHide();
     }
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
-      unawaited(_announceSelection(derived.selectionDescription));
+      unawaited(
+        _announceSelection(derived.localizedSelectionDescription(_l10n)),
+      );
     }
     if (notifyListeners && !_listenersDisposed) {
       for (final listener in _listeners.toList(growable: false)) {
@@ -7312,8 +7307,7 @@ final class ReaderController implements Listenable {
     _noteUpdateOperations.remove(operationId);
     final interrupted = _interruptedNoteUpdates.remove(operationId);
     if (interrupted && !succeeded) {
-      _recoveryAnnotationNotice =
-          'The note could not be saved while the app was suspended. Try again.';
+      _recoveryAnnotationNotice = _l10n.readerNoteInterrupted;
     }
   }
 

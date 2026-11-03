@@ -966,14 +966,9 @@
       }
     }
   },
-  "shellSearchBookFailed": "This book could not be searched: {error}",
+  "shellSearchBookFailed": "This book could not be searched. Try opening it again.",
   "@shellSearchBookFailed": {
-    "description": "A search result group: why the book could not be read.",
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
+    "description": "A search result group whose book could not be read."
   },
   "shellBookmarksEmptyHeading": "No bookmarks yet",
   "@shellBookmarksEmptyHeading": {

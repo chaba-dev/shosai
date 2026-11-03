@@ -1294,6 +1294,80 @@ void main() {
   });
 
   group('interface localization', () {
+    for (final (locale, settings, paper, sepia, night) in const [
+      ('en', 'Settings', 'Paper', 'Sepia', 'Night'),
+      ('ja', '設定', '紙', 'セピア', '夜'),
+    ]) {
+      testWidgets(
+        'Settings uses reader theme names and saves choices ($locale)',
+        (tester) async {
+          final bridge = await pumpLibrary(
+            tester,
+            const Size(1280, 800),
+            locale: Locale(locale),
+          );
+          await tester.tap(navigationEntry(settings));
+          await tester.pumpAndSettle();
+          expect(find.text(paper), findsOneWidget);
+          expect(find.text('Light'), findsNothing);
+          expect(find.text('Dark'), findsNothing);
+          for (final (label, value) in [
+            (sepia, 'sepia'),
+            (night, 'dark'),
+            (paper, 'light'),
+          ]) {
+            await tester.tap(find.byType(ShadSelect<String>));
+            await tester.pumpAndSettle();
+            for (final theme in [paper, sepia, night]) {
+              expect(find.text(theme), findsWidgets);
+            }
+            await tester.tap(
+              find.widgetWithText(ShadOption<String>, label).last,
+            );
+            await tester.pumpAndSettle();
+            expect(bridge.savedSettings?.theme, value);
+          }
+          if (locale == 'ja') {
+            expect(find.text('連続スクロール'), findsOneWidget);
+            expect(find.text('縦書きの本は常にページ単位で表示します。'), findsOneWidget);
+            expect(find.text('EPUB の文字サイズ'), findsOneWidget);
+            expect(find.text('EPUB の行間'), findsOneWidget);
+            expect(find.text('PDF のズーム'), findsOneWidget);
+            expect(find.text('ページに合わせる'), findsOneWidget);
+          }
+          await captureHarnessArtifact(tester, 'localized-settings-$locale');
+        },
+      );
+    }
+
+    testWidgets(
+      'Japanese managed-copy confirmation names the book and cancellation is neutral',
+      (tester) async {
+        final bridge = await pumpLibrary(
+          tester,
+          const Size(1280, 800),
+          locale: const Locale('ja'),
+        );
+        await tester.tap(find.byTooltip('本の操作').first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('コピーも削除'));
+        // Removal stays busy until the confirmation resolves.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('アプリ内のコピーも削除しますか？'), findsOneWidget);
+        expect(
+          find.text('「The Quiet Cartographer」をライブラリから削除し、アプリ内に保存したファイルも削除します。'),
+          findsOneWidget,
+        );
+        expect(find.text('本とコピーを削除'), findsOneWidget);
+        await captureHarnessArtifact(tester, 'localized-removal-ja');
+        await tester.tap(find.text('キャンセル'));
+        await tester.pumpAndSettle();
+        expect(bridge.removeCalls, 0);
+        expect(find.text('アプリ内のコピーも削除しますか？'), findsNothing);
+      },
+    );
+
     testWidgets(
       'a Japanese interface translates the navigation, its semantics and its tooltips',
       (tester) async {

@@ -683,9 +683,8 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String shellSearchBookFailed(String error) {
-    return 'This book could not be searched: $error';
-  }
+  String get shellSearchBookFailed =>
+      'This book could not be searched. Try opening it again.';
 
   @override
   String get shellBookmarksEmptyHeading => 'No bookmarks yet';

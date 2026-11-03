@@ -252,10 +252,17 @@ class _ShosaiShellState extends State<ShosaiShell> {
 /// The reader opens the picked document through its normal open path; a
 /// cancellation returns null and stays neutral. The platform picker is the
 /// same capability the library import flow uses.
-Future<ReaderPickedDocument?> pickReaderDocument() async {
+Future<ReaderPickedDocument?> pickReaderDocument({
+  AppLocalizations? localizations,
+}) async {
   final file = await openFile(
-    acceptedTypeGroups: const [
-      XTypeGroup(label: 'Books', extensions: ['pdf', 'epub']),
+    acceptedTypeGroups: [
+      XTypeGroup(
+        label:
+            localizations?.importBooksType ??
+            lookupAppLocalizations(const Locale('en')).importBooksType,
+        extensions: const ['pdf', 'epub'],
+      ),
     ],
   );
   if (file == null) return null;
@@ -332,7 +339,14 @@ class _ShosaiAppState extends State<ShosaiApp> {
                     // The more panel's open-book action uses the same platform
                     // picker capability as the library import flow; the reader
                     // opens the picked document through its normal open path.
-                    documentPicker: pickReaderDocument,
+                    documentPicker: () => pickReaderDocument(
+                      localizations: lookupAppLocalizations(
+                        basicLocaleListResolution([
+                          widget.locale ??
+                              WidgetsBinding.instance.platformDispatcher.locale,
+                        ], AppLocalizations.supportedLocales),
+                      ),
+                    ),
                   ),
             ),
     );

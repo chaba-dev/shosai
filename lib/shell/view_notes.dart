@@ -57,7 +57,7 @@ class ShellNotesPage extends StatelessWidget {
         ShellNotesStatus.failed => [
           _ShellNotesMessage(
             key: const ValueKey('shell-notes-error'),
-            body: error ?? '',
+            body: l10n.shellNotesFailed,
             action: ShadButton.outline(
               key: const ValueKey('shell-notes-retry'),
               height: shosaiShadButtonHeight(context),
@@ -88,7 +88,7 @@ class ShellNotesPage extends StatelessWidget {
           if (error != null)
             _ShellNotesMessage(
               key: const ValueKey('shell-notes-more-error'),
-              body: error,
+              body: l10n.shellNotesFailed,
               action: ShadButton.outline(
                 key: const ValueKey('shell-notes-more-retry'),
                 height: shosaiShadButtonHeight(context),

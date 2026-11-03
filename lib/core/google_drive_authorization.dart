@@ -5,12 +5,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart';
 import 'package:shosai_core/shosai_core.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'google_drive_location.dart';
@@ -185,10 +187,19 @@ final class GoogleDriveAuthorization {
         await request.response.close();
         return;
       }
-      request.response.headers.contentType = ContentType.text;
+      request.response.headers.contentType = ContentType(
+        'text',
+        'plain',
+        charset: 'utf-8',
+      );
       request.response.write(
-        'Authorization response received. Return to Shōsai to check whether '
-        'the connection completed. You may close this browser tab.',
+        lookupAppLocalizations(
+          ui.Locale(
+            ui.PlatformDispatcher.instance.locale.languageCode == 'ja'
+                ? 'ja'
+                : 'en',
+          ),
+        ).locationAuthorizationReturned,
       );
       await request.response.close();
       if (!completion.isCompleted) {

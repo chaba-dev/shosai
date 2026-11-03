@@ -18,6 +18,7 @@ class _SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final value = model.settings;
+    final l10n = AppLocalizations.of(context);
     final palette = ShellPalette.of(context);
     final gutter = layout == ShellLayout.phone ? 16.0 : 48.0;
     return ColoredBox(
@@ -70,20 +71,28 @@ class _SettingsPage extends StatelessWidget {
                       const Center(child: CircularProgressIndicator())
                     else ...[
                       _SettingField(
-                        label: 'Reader theme',
+                        label: l10n.settingsReaderTheme,
                         child: ShadSelect<String>(
                           initialValue: value.theme,
-                          options: const [
-                            ShadOption(value: 'light', child: Text('Light')),
-                            ShadOption(value: 'sepia', child: Text('Sepia')),
-                            ShadOption(value: 'dark', child: Text('Dark')),
+                          options: [
+                            ShadOption(
+                              value: 'light',
+                              child: Text(l10n.readerThemeLight),
+                            ),
+                            ShadOption(
+                              value: 'sepia',
+                              child: Text(l10n.readerThemeSepia),
+                            ),
+                            ShadOption(
+                              value: 'dark',
+                              child: Text(l10n.readerThemeDark),
+                            ),
                           ],
                           selectedOptionBuilder: (context, theme) =>
                               Text(switch (theme) {
-                                'light' => 'Light',
-                                'sepia' => 'Sepia',
-                                'dark' => 'Dark',
-                                _ => theme,
+                                'sepia' => l10n.readerThemeSepia,
+                                'dark' => l10n.readerThemeDark,
+                                _ => l10n.readerThemeLight,
                               }),
                           onChanged: (theme) {
                             if (theme != null) {
@@ -93,16 +102,16 @@ class _SettingsPage extends StatelessWidget {
                         ),
                       ),
                       _SettingSwitch(
-                        title: 'Continuous reading',
+                        title: l10n.settingsContinuousReading,
                         // A vertical chapter's columns would scroll sideways, so it
                         // reads in pages whatever this says.
-                        subtitle: 'Vertical books always turn pages.',
+                        subtitle: l10n.settingsContinuousReadingHint,
                         value: value.continuous,
                         onChanged: (continuous) =>
                             onChanged(value.copyWith(continuous: continuous)),
                       ),
                       _SettingField(
-                        label: 'EPUB text size',
+                        label: l10n.settingsEpubTextSize,
                         child: ShadSlider(
                           min: 12,
                           max: 32,
@@ -114,7 +123,7 @@ class _SettingsPage extends StatelessWidget {
                         ),
                       ),
                       _SettingField(
-                        label: 'EPUB line spacing',
+                        label: l10n.settingsEpubLineSpacing,
                         child: ShadSlider(
                           min: 1,
                           max: 3,
@@ -127,14 +136,17 @@ class _SettingsPage extends StatelessWidget {
                         ),
                       ),
                       _SettingField(
-                        label: 'PDF zoom',
+                        label: l10n.settingsPdfZoom,
                         child: ShadSelect<double>(
                           initialValue: value.pdfZoom,
                           options: [
-                            const ShadOption(value: 0, child: Text('Fit page')),
-                            const ShadOption(
+                            ShadOption(
+                              value: 0,
+                              child: Text(l10n.readerFitPage),
+                            ),
+                            ShadOption(
                               value: -1,
-                              child: Text('Fit width'),
+                              child: Text(l10n.readerFitWidth),
                             ),
                             const ShadOption(value: 1, child: Text('100%')),
                             const ShadOption(value: 1.5, child: Text('150%')),
@@ -149,12 +161,14 @@ class _SettingsPage extends StatelessWidget {
                               ShadOption(
                                 value: value.pdfZoom,
                                 child: Text(
-                                  '${(value.pdfZoom * 100).round()}% (custom)',
+                                  l10n.settingsCustomZoom(
+                                    (value.pdfZoom * 100).round(),
+                                  ),
                                 ),
                               ),
                           ],
                           selectedOptionBuilder: (context, pdfZoom) =>
-                              Text(_pdfZoomLabel(pdfZoom)),
+                              Text(_pdfZoomLabel(pdfZoom, l10n)),
                           onChanged: (pdfZoom) {
                             if (pdfZoom != null) {
                               onChanged(value.copyWith(pdfZoom: pdfZoom));
@@ -174,14 +188,15 @@ class _SettingsPage extends StatelessWidget {
   }
 }
 
-String _pdfZoomLabel(double pdfZoom) => switch (pdfZoom) {
-  0 => 'Fit page',
-  -1 => 'Fit width',
-  1 => '100%',
-  1.5 => '150%',
-  2 => '200%',
-  _ => '${(pdfZoom * 100).round()}% (custom)',
-};
+String _pdfZoomLabel(double pdfZoom, AppLocalizations l10n) =>
+    switch (pdfZoom) {
+      0 => l10n.readerFitPage,
+      -1 => l10n.readerFitWidth,
+      1 => '100%',
+      1.5 => '150%',
+      2 => '200%',
+      _ => l10n.settingsCustomZoom((pdfZoom * 100).round()),
+    };
 
 class _SettingField extends StatelessWidget {
   const _SettingField({required this.label, required this.child});
