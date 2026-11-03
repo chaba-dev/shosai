@@ -637,6 +637,7 @@ final class ReaderController implements Listenable {
       case ReaderOpenRequested() ||
           ReaderPageStepRequested() ||
           ReaderUnitRequested() ||
+          ReaderLocationNavigated() ||
           ReaderBookmarkNavigated() ||
           ReaderNoteNavigated() ||
           ReaderAnnotationNavigated() ||
@@ -953,7 +954,13 @@ final class ReaderController implements Listenable {
         _disposeBridgeIfIdle();
       case ReaderLocationNavigated():
         _closeContentsAfterChoice();
-        _referenceRequested(message.unit, message.offset);
+        _jump(
+          () => _unitRequested(
+            message.unit,
+            offset: message.offset,
+            replaceReadingOffset: true,
+          ),
+        );
       case ReaderPageInputChanged():
         _pageInputChanged(message.draft);
       case ReaderPageInputSubmitted():

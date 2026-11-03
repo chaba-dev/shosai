@@ -333,14 +333,14 @@ void main() {
       await openContents(tester);
 
       await tester.tap(find.byKey(const ValueKey('reader-contents-entry-2')));
-      await settleNative(tester);
+      await settleEpubPage(tester);
 
       expect(
-        harness.savedReadingStates.last.unit.toInt(),
-        0,
-        reason: 'Contents peeks without moving the page',
+        find.byKey(const ValueKey('reader-reference-peek')),
+        findsNothing,
+        reason: 'Contents navigates directly rather than previewing',
       );
-      await goToReference(tester);
+      expect(find.byKey(const ValueKey('reader-panel-contents')), findsNothing);
       expect(
         harness.savedReadingStates.last.unit.toInt(),
         2,
@@ -732,7 +732,6 @@ void main() {
         await tester.pump();
         await openContents(tester);
         await tester.tap(inContents('Chapter two target'));
-        await goToReference(tester);
         await settleEpubPage(tester);
         gate.complete();
         await settleNative(tester, rounds: 8);
@@ -828,7 +827,7 @@ void main() {
 
       await openContents(tester);
       await tester.tap(find.byKey(const ValueKey('reader-contents-entry-2')));
-      await goToReference(tester);
+      await settleEpubPage(tester);
       await settleNative(tester);
       if (find
           .byKey(const ValueKey('reader-panel-contents'))
@@ -923,7 +922,6 @@ void main() {
         Future<void> jump() async {
           await openContents(tester);
           await tester.tap(inContents('Chapter three deep'));
-          await goToReference(tester);
           await settleEpubPage(tester);
           if (find
               .byKey(const ValueKey('reader-panel-contents'))
@@ -1151,7 +1149,6 @@ void main() {
 
       await openContents(tester);
       await tester.tap(find.byKey(const ValueKey('reader-contents-entry-0')));
-      await goToReference(tester);
       await settleEpubPage(tester);
 
       final after = dartPage(tester);

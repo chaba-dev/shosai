@@ -227,7 +227,9 @@ void main() {
               tester,
               () => keyed('reader-fit-contain').evaluate().isNotEmpty,
             );
-            await tester.dragFrom(linkPoint(0), const Offset(-90, 0));
+            // A short swipe must carry velocity to commit the page curl;
+            // dragFrom's untimed moves otherwise release it below halfway.
+            await tester.flingFrom(linkPoint(0), const Offset(-90, 0), 1500);
             await until(tester, () => onPage(1));
             expect(
               keyed('reader-reference-peek'),
@@ -308,27 +310,29 @@ void main() {
             await capture(tester, '$name-back-$index');
           }
 
-          // Contents uses the same non-destructive preview contract.
-          if (format == 'epub') {
-            await revealReaderChrome(tester);
-            await tester.tap(keyed('reader-header-contents'));
-            await until(
-              tester,
-              () => keyed('reader-contents-entry-1').evaluate().isNotEmpty,
-            );
-            await tester.tap(keyed('reader-contents-entry-1'));
-            await until(
-              tester,
-              () => keyed('reader-reference-peek').evaluate().isNotEmpty,
-            );
-            expect(onPage(0), isTrue);
-            await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-            await until(
-              tester,
-              () => keyed('reader-reference-peek').evaluate().isEmpty,
-            );
-            expect(keyed('reader-back-pill'), findsNothing);
-          }
+          // Contents is a direct jump; in-text references above still peek.
+          await revealReaderChrome(tester);
+          await tapAt(
+            tester,
+            tester.getCenter(keyed('reader-header-contents')),
+          );
+          await until(
+            tester,
+            () => keyed('reader-contents-entry-1').evaluate().isNotEmpty,
+          );
+          await capture(tester, '$name-contents');
+          await tapAt(
+            tester,
+            tester.getCenter(keyed('reader-contents-entry-1')),
+          );
+          await until(tester, () => onPage(1));
+          expect(keyed('reader-reference-peek'), findsNothing);
+          expect(keyed('reader-panel-contents'), findsNothing);
+          expect(keyed('reader-back-pill'), findsOneWidget);
+          await capture(tester, '$name-contents-target');
+          await tapAt(tester, tester.getCenter(keyed('reader-back')));
+          await until(tester, () => onPage(0));
+          expect(keyed('reader-back-pill'), findsNothing);
           if (width == 1200 && format == 'pdf') {
             await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
             await until(tester, () => onPage(1));

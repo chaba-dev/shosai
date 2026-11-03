@@ -440,12 +440,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('reader-contents-entry-1')));
       await tester.pump();
       await _settle(tester);
-      expect(
-        find.byKey(const ValueKey('reader-reference-peek')),
-        findsOneWidget,
-      );
-      await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
-      await _settle(tester);
+      expect(find.byKey(const ValueKey('reader-reference-peek')), findsNothing);
+      expect(find.byKey(const ValueKey('reader-panel-contents')), findsNothing);
+      expect(find.byKey(const ValueKey('reader-back-pill')), findsOneWidget);
       // The status wording follows the navigated unit; its page counts on
       // from the one-page chapter before it.
       expect(find.text('25% · page 2'), findsOneWidget);
