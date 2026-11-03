@@ -576,7 +576,12 @@ class _ReaderFolio extends StatelessWidget {
 
 /// One page slot of the furniture: whether a page sits in it, its number
 /// from the start of the book once known, and whether it opens a chapter.
-typedef _ReaderFurnitureSlot = ({bool page, int? ordinal, bool opening});
+typedef _ReaderFurnitureSlot = ({
+  bool page,
+  int? ordinal,
+  bool opening,
+  String heading,
+});
 
 class _ReaderPageFurniture extends StatelessWidget {
   const _ReaderPageFurniture({
@@ -593,6 +598,18 @@ class _ReaderPageFurniture extends StatelessWidget {
     final first = model.progress.firstOrdinal;
     final page = model.epubPage;
     final paginated = page != null && !page.continuous;
+    // A jump keeps its exact durable target, which can be halfway down a
+    // page. Each head belongs to its page's top, not that jump target.
+    String heading(int? start) =>
+        (start == null
+                ? model.contents.entries.where((e) => e.current)
+                : model.contents.entries.where(
+                    (e) => e.unit == model.unit && (e.offset ?? 0) <= start,
+                  ))
+            .lastOrNull
+            ?.title ??
+        model.document?.title ??
+        '';
     // A slot holds a page, even one not numbered yet while the chapters
     // before it are counted; the second slot is blank paper at a chapter's
     // end. A chapter opening is told by the page, not its number, which runs
@@ -602,6 +619,7 @@ class _ReaderPageFurniture extends StatelessWidget {
         page: paginated || first != null,
         ordinal: first,
         opening: paginated ? page.pageIndex == 0 : first == 1,
+        heading: heading(paginated ? page.canonicalStart : null),
       ),
       if (spread)
         (
@@ -610,14 +628,11 @@ class _ReaderPageFurniture extends StatelessWidget {
               : model.progress.lastOrdinal != null,
           ordinal: model.progress.lastOrdinal,
           opening: false,
+          heading: heading(paginated ? page.facing?.canonicalStart : null),
         ),
     ];
     final lastPage = slots.where((slot) => slot.page).lastOrNull;
     final physical = model.rightToLeft ? slots.reversed : slots;
-    final heading =
-        model.contents.entries.where((e) => e.current).firstOrNull?.title ??
-        model.document?.title ??
-        '';
     // The full-bleed page keeps its physical size. Only the furniture and
     // content inside it clear the stable cutout/home insets, not the padding
     // that changes as the system status bar follows the reader chrome.
@@ -644,7 +659,7 @@ class _ReaderPageFurniture extends StatelessWidget {
                             // Chapter openings leave this space quiet, with the title below.
                             !slot.page || slot.opening || model.document == null
                                 ? ''
-                                : heading,
+                                : slot.heading,
                             key: const ValueKey('reader-running-head'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

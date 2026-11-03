@@ -608,6 +608,91 @@ class _ReaderErrorSurfaces extends StatelessWidget {
   }
 }
 
+/// Floats inside the measured content box, never on its head or folio.
+class _ReaderBackPillPosition extends StatefulWidget {
+  const _ReaderBackPillPosition({
+    required this.content,
+    this.header,
+    this.footer,
+    required this.child,
+  });
+
+  final GlobalKey content;
+  final GlobalKey? header;
+  final GlobalKey? footer;
+  final Widget child;
+
+  @override
+  State<_ReaderBackPillPosition> createState() =>
+      _ReaderBackPillPositionState();
+}
+
+class _ReaderBackPillPositionState extends State<_ReaderBackPillPosition> {
+  Rect? _bounds;
+  Size? _size;
+
+  Rect? _rect(GlobalKey? key) {
+    final box = key?.currentContext?.findRenderObject();
+    final parent = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || parent is! RenderBox) return null;
+    return MatrixUtils.transformRect(
+      box.getTransformTo(parent),
+      Offset.zero & box.size,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    MediaQuery.of(context);
+    _bounds = null;
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (_size != constraints.biggest) {
+        _size = constraints.biggest;
+        _bounds = null;
+      }
+      // Like selection actions, read sibling geometry after the entire
+      // frame's layout, including the chrome's animated transforms.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final content = _rect(widget.content);
+        if (content == null) return;
+        final top = math.max(content.top, _rect(widget.header)?.bottom ?? 0);
+        final bottom = math.min(
+          content.bottom,
+          _rect(widget.footer)?.top ?? constraints.maxHeight,
+        );
+        final bounds = Rect.fromLTRB(
+          ShosaiTokens.space4,
+          top + ShosaiTokens.space2,
+          constraints.maxWidth - ShosaiTokens.space4,
+          math.max(top + ShosaiTokens.space2, bottom - ShosaiTokens.space2),
+        );
+        if (_bounds != bounds) setState(() => _bounds = bounds);
+      });
+      return Stack(
+        children: [
+          if (_bounds case final bounds?
+              when bounds.height >= ShosaiTokens.sizeTouchTarget)
+            Positioned.fromRect(
+              rect: bounds,
+              child: ClipRect(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: widget.child,
+                ),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+}
+
 /// The BackPill (`docs/design-system.md`, BackPill): after a jump, an
 /// `inverse` capsule at the bottom centre names where the jump left from in
 /// the reader's terms, **Back to page 61** or **Back to Chapter III**, or the

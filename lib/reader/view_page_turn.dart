@@ -346,8 +346,14 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
     final duration = Duration(
       milliseconds: (350 * (end - _progress.value).abs()).round().clamp(1, 350),
     );
+    // A fitted PDF's narrow fold is nearly stationary at the start of an
+    // ease-in-out curve. Lift it on the first animated frame, rather than
+    // adding a perceptual pause after the page and its links are ready.
+    final curve = _pageRect != null && _progress.value == 0 && end == 1
+        ? Curves.easeOutCubic
+        : Curves.easeInOut;
     _progress
-        .animateTo(end, duration: duration, curve: Curves.easeInOut)
+        .animateTo(end, duration: duration, curve: curve)
         .whenCompleteOrCancel(() {
           if (!mounted ||
               revision != _captureRevision ||
