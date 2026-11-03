@@ -340,8 +340,6 @@ void main() {
     await settle(tester);
     await tester.tap(inContents('Chapter one deep'));
     await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
-    await settle(tester);
 
     final page = dartPage(tester)!;
     final anchor = book.chapters.first.anchors['one-deep']!;
@@ -374,8 +372,8 @@ void main() {
     await settle(tester);
     await tester.tap(inContents(title));
     await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
-    await settle(tester);
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-panel-contents')), findsNothing);
   }
 
   testWidgets("choosing the open chapter's start in Contents scrolls back to "
@@ -1210,7 +1208,6 @@ void main() {
     await settle(tester);
     await tester.tap(inContents('Tall'));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
     // Frame by frame, while the nodes above are measured: the target line
     // stays where the reader sees it.
     final shownAt = <double>[];

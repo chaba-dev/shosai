@@ -17,10 +17,6 @@ extension on ReaderController {
         unit >= document.logicalUnitCount.toInt()) {
       return;
     }
-    if (document.format == FlutterBookFormat.pdf) {
-      _startPdfReference(target: unit);
-      return;
-    }
     final source = _epubSource;
     if (document.format != FlutterBookFormat.epub ||
         source == null ||
@@ -87,9 +83,8 @@ extension on ReaderController {
   }
 
   void _startPdfReference({
-    int? target,
-    double? x,
-    double? y,
+    required double x,
+    required double y,
     ReaderPageTapped? pageTap,
   }) {
     final pdf = _pdfDocument;
@@ -121,7 +116,6 @@ extension on ReaderController {
       unit,
       spread,
       scale,
-      target: target,
       x: x,
       y: y,
       pageTap: pageTap,
@@ -137,54 +131,51 @@ extension on ReaderController {
     int firstUnit,
     ReaderPdfSpread? spread,
     double scale, {
-    int? target,
-    double? x,
-    double? y,
+    required double x,
+    required double y,
     ReaderPageTapped? pageTap,
   }) async {
     bool current() => _isCurrent(generation) && revision == _referenceRevision;
     try {
+      int? target;
       var source = _model.readingLocation;
       ({double x, double y})? destination;
-      if (target == null) {
-        for (final unit in [firstUnit, ?spread?.facingUnit]) {
-          final size = pdf.pageSize(unit);
-          final left = spread?.leftOf(unit, firstUnit) ?? 0;
-          final px = (x! - left) / scale;
-          final py = size.height - y! / scale;
-          if (px < 0 || px > size.width || py < 0 || py > size.height) continue;
-          final links = await pdf.links(unit);
-          if (!current()) return;
-          for (final link in links) {
-            if (!link.rects.any(
-              (rect) =>
-                  px >= rect.left &&
-                  px <= rect.right &&
-                  py >= rect.bottom &&
-                  py <= rect.top,
-            )) {
-              continue;
-            }
-            if (link.page case final page?) {
-              target = page;
-              destination = link.destination;
-              source = (
-                unit: unit,
-                offset: unit == source.unit ? source.offset : null,
-              );
-            } else if (link.url case final url?
-                when classifyEpubLink(url.toString()) ==
-                    EpubLinkKind.external) {
-              await _openExternalLink(url.toString());
-              return;
-            } else {
-              // A refused or empty link is still a link, not a page-zone tap.
-              return;
-            }
-            break;
+      for (final unit in [firstUnit, ?spread?.facingUnit]) {
+        final size = pdf.pageSize(unit);
+        final left = spread?.leftOf(unit, firstUnit) ?? 0;
+        final px = (x - left) / scale;
+        final py = size.height - y / scale;
+        if (px < 0 || px > size.width || py < 0 || py > size.height) continue;
+        final links = await pdf.links(unit);
+        if (!current()) return;
+        for (final link in links) {
+          if (!link.rects.any(
+            (rect) =>
+                px >= rect.left &&
+                px <= rect.right &&
+                py >= rect.bottom &&
+                py <= rect.top,
+          )) {
+            continue;
           }
-          if (target != null) break;
+          if (link.page case final page?) {
+            target = page;
+            destination = link.destination;
+            source = (
+              unit: unit,
+              offset: unit == source.unit ? source.offset : null,
+            );
+          } else if (link.url case final url?
+              when classifyEpubLink(url.toString()) == EpubLinkKind.external) {
+            await _openExternalLink(url.toString());
+            return;
+          } else {
+            // A refused or empty link is still a link, not a page-zone tap.
+            return;
+          }
+          break;
         }
+        if (target != null) break;
       }
       if (target == null) {
         if (current() && pageTap != null) dispatch(pageTap);

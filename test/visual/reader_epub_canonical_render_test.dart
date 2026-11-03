@@ -214,13 +214,12 @@ void main() {
       reason: 'the nav document loses to the NCX',
     );
 
-    // The NCX row previews without leaving the page; Go to navigates to its
-    // verified cell anchor through the guarded layout path.
+    // The NCX row navigates directly to its verified cell anchor through the
+    // guarded layout path.
     await tester.tap(inContents('NCX Two'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('reader-reference-peek')), findsOneWidget);
-    expect(harness.savedReadingStates.last.offset, isNull);
-    await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-panel-contents')), findsNothing);
     for (var round = 0; round < 6; round += 1) {
       await pumpHarnessFrames(tester, frames: 4);
       await tester.runAsync(

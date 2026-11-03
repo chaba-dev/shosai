@@ -1,25 +1,25 @@
 /// Bounded admission limits for the EPUB engine.
 ///
-/// These mirror the shape (not the exact numbers) of the Rust `EpubLimits`
-/// policy: an archive, chapter or resource that exceeds a limit is rejected
-/// with a typed error instead of being truncated. The engine uses smaller
-/// defaults than production so fixture tests stay fast.
+/// Byte limits apply before and during decompression. Large encoded images and
+/// markup-heavy chapters have separate ceilings from metadata, fonts and CSS;
+/// aggregate bytes and compression ratio still bound the whole archive.
 library;
 
 class EpubLimits {
   const EpubLimits({
     this.maxArchiveEntries = 4096,
-    this.maxEntryBytes = 8 * 1024 * 1024,
-    this.maxTotalUncompressedBytes = 64 * 1024 * 1024,
+    this.maxEntryBytes = 64 * 1024 * 1024,
+    this.maxTotalUncompressedBytes = 512 * 1024 * 1024,
     this.maxCompressionRatio = 200,
-    this.maxChapterBytes = 4 * 1024 * 1024,
+    this.maxMetadataBytes = 4 * 1024 * 1024,
+    this.maxChapterBytes = 32 * 1024 * 1024,
     this.maxXmlNodes = 200000,
     this.maxXmlTextBytes = 16 * 1024 * 1024,
     this.maxCanonicalScalars = 4 * 1024 * 1024,
     this.maxResources = 2048,
-    this.maxImageBytes = 8 * 1024 * 1024,
+    this.maxImageBytes = 64 * 1024 * 1024,
     this.maxImagePixels = 16 * 1024 * 1024,
-    this.maxFontBytes = 8 * 1024 * 1024,
+    this.maxFontBytes = 16 * 1024 * 1024,
     this.maxStyleSheetBytes = 1024 * 1024,
     this.maxCssRules = 20000,
     this.maxTableColumns = 64,
@@ -30,6 +30,7 @@ class EpubLimits {
   final int maxEntryBytes;
   final int maxTotalUncompressedBytes;
   final int maxCompressionRatio;
+  final int maxMetadataBytes;
   final int maxChapterBytes;
   final int maxXmlNodes;
   final int maxXmlTextBytes;

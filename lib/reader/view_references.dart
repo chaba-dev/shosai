@@ -96,6 +96,7 @@ class _ReaderReferenceOverlay extends StatelessWidget {
                       style: shellEditorialStyle(
                         15,
                         23,
+                        weight: FontWeight.w400,
                       ).copyWith(color: palette.ink),
                     ),
                   ],
