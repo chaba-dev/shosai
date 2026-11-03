@@ -11,6 +11,8 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     _ = FolderLocations(messenger: flutterViewController.engine.binaryMessenger)
+    (NSApp.delegate as? AppDelegate)?.openedDocuments.attach(
+      messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }
