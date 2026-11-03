@@ -6,10 +6,20 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kDebugMode, listEquals, setEquals;
 import 'package:flutter/gestures.dart'
-    show GestureBinding, VelocityTracker, kSecondaryButton;
+    show
+        DoubleTapGestureRecognizer,
+        GestureBinding,
+        PointerDownEvent,
+        VelocityTracker,
+        kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'
-    show OffsetLayer, PaintingContext, RenderRepaintBoundary;
+    show
+        ClipPathLayer,
+        OffsetLayer,
+        PaintingContext,
+        RenderProxyBox,
+        RenderRepaintBoundary;
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -413,10 +423,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         systemBars: (shown) {
           if (defaultTargetPlatform == TargetPlatform.android) {
             // Optional for embedded Flutter hosts without the Android adapter.
+            const bars = OptionalMethodChannel('dev.shosai/reader_system_bars');
+            unawaited(bars.invokeMethod<void>('setShown', shown));
+            // A quiet page turns with a drag from its very edge, so the middle
+            // of each side edge is the page's, not the back gesture's.
             unawaited(
-              const OptionalMethodChannel(
-                'dev.shosai/reader_system_bars',
-              ).invokeMethod<void>('setShown', shown),
+              bars.invokeMethod<void>(
+                'setTurnEdges',
+                !shown && !_controller.model.continuousPresentation,
+              ),
             );
           } else if (defaultTargetPlatform == TargetPlatform.iOS) {
             // Only phones hide the system status bar with reader chrome.
@@ -1107,6 +1122,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               model: model,
               layout: layout,
               stage: constraints,
+              topInset: MediaQuery.paddingOf(context).top,
               bottomInset: bottomInset,
               dispatch: _controller.dispatch,
               focusNode: _panelFocus,

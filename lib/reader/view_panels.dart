@@ -51,6 +51,7 @@ List<Widget> _readerPanelOverlay({
   required ReaderModel model,
   required ShellLayout layout,
   required BoxConstraints stage,
+  required double topInset,
   required double bottomInset,
   required void Function(ReaderMessage) dispatch,
   required FocusNode focusNode,
@@ -69,10 +70,14 @@ List<Widget> _readerPanelOverlay({
     focusNode: focusNode,
   );
   final inset = ShosaiTokens.space2;
-  final top = math.min(
-    ShosaiTokens.sizeToolbarHeight,
-    stage.maxHeight * _readerHeaderBoundShare,
-  );
+  // Below the toolbar, which sits under the status bar: the scrim dims the
+  // page, not the chrome around it.
+  final top =
+      math.min(
+        ShosaiTokens.sizeToolbarHeight,
+        stage.maxHeight * _readerHeaderBoundShare,
+      ) +
+      topInset;
   final maxHeight = math.max(
     0.0,
     stage.maxHeight - top - bottomInset - 2 * inset,
@@ -811,8 +816,22 @@ class _ReaderDisplayPanel extends StatelessWidget {
         model.document != null && !model.busy && !model.relayoutBusy;
     final percent =
         ((typography.epubFontSize / baseFontSize * 100) / 10).round() * 10;
-    void textSize(int next) =>
-        dispatch(ReaderTypographyChanged(fontSize: baseFontSize * next / 100));
+    // A step moves the size itself by a tenth of the base, so a step up and
+    // a step down come back to exactly the size the book was laid out at,
+    // also from a size the steps do not land on (the shared settings start
+    // at 16 px, which shows as 90 %): the page then keeps its place and its
+    // number instead of reflowing at a size a few hundredths away.
+    void textSize(int direction) {
+      final size = typography.epubFontSize + direction * baseFontSize / 10;
+      final bounded = size.clamp(
+        baseFontSize * minTextPercent / 100,
+        baseFontSize * maxTextPercent / 100,
+      );
+      dispatch(
+        ReaderTypographyChanged(fontSize: (bounded * 100).round() / 100),
+      );
+    }
+
     final spacing = typography.epubLineSpacing;
     final spacingIndex = _readerLineSpacingSteps.indexWhere(
       (step) => step >= spacing - .001,
@@ -854,10 +873,10 @@ class _ReaderDisplayPanel extends StatelessWidget {
                 increaseLabel: l10n.readerIncreaseFontSize,
                 value: '$percent%',
                 onDecrease: enabled && percent > minTextPercent
-                    ? () => textSize(percent - 10)
+                    ? () => textSize(-1)
                     : null,
                 onIncrease: enabled && percent < maxTextPercent
-                    ? () => textSize(percent + 10)
+                    ? () => textSize(1)
                     : null,
               ),
             ),

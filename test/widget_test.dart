@@ -3314,7 +3314,8 @@ void main() {
 
   test('viewport changes preserve an in-flight navigation target', () async {
     final bridge = _ControlledBridge(logicalUnitCount: 3, immediateLists: true);
-    final controller = _epubController(bridge);
+    // Each engine call is scripted in order, so nothing renders ahead.
+    final controller = _epubController(bridge, renderPdfAhead: false);
     await _openControlled(controller, bridge, '/tmp/book.epub');
     final stale = Completer<FlutterSelectionSurface>();
     bridge.selectionCompleters.add(stale);
@@ -6574,7 +6575,8 @@ void main() {
         logicalUnitCount: 2,
         immediateLists: true,
       );
-      final controller = _epubController(bridge);
+      // Each engine call is scripted in order, so nothing renders ahead.
+      final controller = _epubController(bridge, renderPdfAhead: false);
       await _openControlled(controller, bridge, '/tmp/book.epub');
       final failed = Completer<FlutterRenderedBuffer>();
       bridge.renderCompleters.add(failed);
@@ -7363,7 +7365,8 @@ void main() {
         immediateLists: true,
         loadReadingStateFailure: StateError('temporary read failure'),
       );
-      final controller = _epubController(bridge);
+      // Each engine call is scripted in order, so nothing renders ahead.
+      final controller = _epubController(bridge, renderPdfAhead: false);
       controller.dispatch(
         const ReaderOpenRequested('/tmp/book.epub', bookId: 7),
       );
@@ -7640,6 +7643,8 @@ void main() {
     final controller = ReaderController(
       bridge: bridge,
       decoder: (pixels, {required width, required height}) => _testImage(),
+      // Each engine call is scripted in order, so nothing renders ahead.
+      renderPdfAhead: false,
     );
     await _openControlled(controller, bridge, '/tmp/book.pdf');
 
@@ -8874,10 +8879,14 @@ final class _SequentialBridge
 /// The document box between the reader's edge columns.
 final _documentArea = find.byKey(const ValueKey('reader-document-semantics'));
 
-ReaderController _epubController(FlutterBridge bridge) {
+ReaderController _epubController(
+  FlutterBridge bridge, {
+  bool renderPdfAhead = true,
+}) {
   return ReaderController(
     bridge: bridge,
     decoder: (pixels, {required width, required height}) => _testImage(),
+    renderPdfAhead: renderPdfAhead,
   );
 }
 

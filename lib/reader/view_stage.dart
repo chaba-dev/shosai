@@ -197,7 +197,11 @@ class _ReaderStage extends StatelessWidget {
                   spread: spread,
                   child: content,
                 )
-              : phone && document != null
+              // A PDF has no folio of its own: its place is a muted line
+              // under the page or spread, on every device. The line's row is
+              // there while the book opens too, so the first page is
+              // rendered for the box it is then shown in.
+              : document != null || model.busy
               ? Column(
                   children: [
                     Expanded(child: content),
@@ -234,40 +238,47 @@ class _ReaderStage extends StatelessWidget {
             key: const ValueKey('reader-page'),
             width: width,
             height: constraints.maxHeight,
-            child: turns(
-              _ReaderPageTapScope(
-                model: model,
-                dispatch: dispatch,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: colors.background,
-                    borderRadius: BorderRadius.circular(3),
-                    boxShadow: _readerPageShadow(palette),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // The page's own margins around the layout's: a page on
-                        // the stage reads with wider margins than a full-bleed
-                        // phone page.
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: ShosaiTokens.space5,
-                            vertical: ShosaiTokens.space4,
-                          ),
-                          child: scoped,
-                        ),
-                        if (spread)
-                          Center(
-                            child: _ReaderSpreadGutter(
-                              shade: palette.shadowBase,
-                              dark: palette.dark,
-                              rightToLeft: rightToLeft,
+            // The shadow falls outside the page, so it is drawn outside the
+            // turn too: a curl replaces only what lies inside the page.
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(3),
+                boxShadow: _readerPageShadow(palette),
+              ),
+              child: turns(
+                _ReaderPageTapScope(
+                  model: model,
+                  dispatch: dispatch,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colors.background,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // The page's own margins around the layout's: a page on
+                          // the stage reads with wider margins than a full-bleed
+                          // phone page.
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: ShosaiTokens.space5,
+                              vertical: ShosaiTokens.space4,
                             ),
+                            child: scoped,
                           ),
-                      ],
+                          if (spread)
+                            Center(
+                              child: _ReaderSpreadGutter(
+                                shade: palette.shadowBase,
+                                dark: palette.dark,
+                                rightToLeft: rightToLeft,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -526,9 +537,20 @@ class _ReaderFolio extends StatelessWidget {
         ? ''
         : model.typography.progress == FlutterReaderProgress.percent
         ? '${progress.percentage}%'
-        : model.document?.format == FlutterBookFormat.pdf
-        ? l10n.readerQuietPageOf(page, model.document!.logicalUnitCount.toInt())
-        : l10n.readerPageNumber(page);
+        : model.document?.format != FlutterBookFormat.pdf
+        ? l10n.readerPageNumber(page)
+        // One line under a PDF spread names both of its pages.
+        : switch ((ordinal, progress.lastOrdinal)) {
+            (null, final int last) => l10n.readerQuietPagesOf(
+              page,
+              last,
+              model.document!.logicalUnitCount.toInt(),
+            ),
+            _ => l10n.readerQuietPageOf(
+              page,
+              model.document!.logicalUnitCount.toInt(),
+            ),
+          };
     return Text(
       text,
       key: const ValueKey('reader-folio'),
