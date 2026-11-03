@@ -985,6 +985,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Folders aren’t read on phones and tablets';
 
   @override
+  String get libraryLocationsDescriptionMobile =>
+      'Manage the storage accounts that supply your library.';
+
+  @override
   String get shellSwitcherDone => 'Done';
 
   @override

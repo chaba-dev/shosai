@@ -272,6 +272,7 @@
   "locationNextPage": "次のページ",
   "locationNoFoldersMobile": "Dropbox または Google Drive をつなぐと、そこにある本を読めます。",
   "locationFolderNotRead": "スマートフォンとタブレットではフォルダを読み込みません",
+  "libraryLocationsDescriptionMobile": "ライブラリの本を読み込むストレージアカウントを管理します。",
   "cardKeepOnDevice": "この端末に保存",
   "cardStopKeeping": "この端末への保存を解除",
   "readerProgressLabel": "進捗",

@@ -1100,6 +1100,7 @@
   "locationNextPage": "Next page",
   "locationNoFoldersMobile": "Connect Dropbox or Google Drive to read the books stored there.",
   "locationFolderNotRead": "Folders aren’t read on phones and tablets",
+  "libraryLocationsDescriptionMobile": "Manage the storage accounts that supply your library.",
   "shellSwitcherDone": "Done",
   "@shellSwitcherDone": {
     "description": "The tab switcher's action that returns to the current book."

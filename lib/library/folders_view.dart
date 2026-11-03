@@ -41,7 +41,9 @@ class LibraryFoldersDialog extends StatelessWidget {
         description: Text(
           model.pending != null
               ? l10n.locationConfirmSource
-              : l10n.libraryLocationsDescription,
+              : controller.supportsFolders
+              ? l10n.libraryLocationsDescription
+              : l10n.libraryLocationsDescriptionMobile,
         ),
         actions: [
           if (model.choosingDirectory)
@@ -154,7 +156,7 @@ class LibraryFoldersDialog extends StatelessWidget {
                           ),
                         if (controller.canAddGoogleDrive)
                           ListTile(
-                            leading: const Icon(Icons.add_link),
+                            leading: const Icon(Icons.cloud_outlined),
                             title: Text(l10n.locationAddGoogleDrive),
                             enabled: !model.busy,
                             onTap: model.busy

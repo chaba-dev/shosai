@@ -924,6 +924,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationFolderNotRead => 'スマートフォンとタブレットではフォルダを読み込みません';
 
   @override
+  String get libraryLocationsDescriptionMobile =>
+      'ライブラリの本を読み込むストレージアカウントを管理します。';
+
+  @override
   String get shellSwitcherDone => '完了';
 
   @override

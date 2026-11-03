@@ -1704,6 +1704,12 @@ abstract class AppLocalizations {
   /// **'Folders aren’t read on phones and tablets'**
   String get locationFolderNotRead;
 
+  /// No description provided for @libraryLocationsDescriptionMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage the storage accounts that supply your library.'**
+  String get libraryLocationsDescriptionMobile;
+
   /// The tab switcher's action that returns to the current book.
   ///
   /// In en, this message translates to:

@@ -210,6 +210,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Connect folder'), findsNothing);
+    expect(
+      find.text('Manage the storage accounts that supply your library.'),
+      findsOneWidget,
+    );
     expect(find.text('Connect Dropbox'), findsOneWidget);
     expect(find.text('Folders aren’t read on phones and tablets'), findsOne);
     expect(find.byTooltip('Disconnect folder'), findsNWidgets(2));
