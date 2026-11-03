@@ -619,9 +619,10 @@ class _PageCurlPainter extends CustomPainter {
   bool shouldRepaint(_PageCurlPainter oldDelegate) => true;
 }
 
-/// The live page under a curl: painted into a fully transparent layer while
-/// [hidden], so its own layer stays current for a snapshot but none of it
-/// reaches the screen.
+/// The live page under a curl: while [hidden], only what it paints outside its
+/// own box reaches the screen (a PDF page's `shadow-page` spilling past a
+/// spread that fills the stage), so its layer stays current for a snapshot and
+/// the shadow stays where it is, but the page itself is left to the curl.
 class _ReaderLivePage extends SingleChildRenderObjectWidget {
   const _ReaderLivePage({required this.hidden, super.child});
   final bool hidden;
@@ -659,11 +660,24 @@ class _RenderReaderLivePage extends RenderProxyBox {
       super.paint(context, offset);
       return;
     }
-    layer = context.pushOpacity(
+    // The snapshots cover the box; anything drawn beyond it is not in them.
+    final box = Offset.zero & size;
+    final around = box.inflate(_kLivePageOverflow);
+    layer = context.pushClipPath(
+      true,
       offset,
-      0,
+      around,
+      Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(around)
+        ..addRect(box),
       super.paint,
-      oldLayer: layer as OpacityLayer?,
+      clipBehavior: Clip.hardEdge,
+      oldLayer: layer as ClipPathLayer?,
     );
   }
 }
+
+/// How far past the live page's box its overflow (a page shadow) is kept
+/// under a curl: well beyond `shadow-page`'s blur and offset.
+const double _kLivePageOverflow = 96;
