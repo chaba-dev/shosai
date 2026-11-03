@@ -412,11 +412,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // The action reached the typed import intent: the dialog is up and the
-    // header's add-books action became the import's cancel action.
+    // The action reached the typed import intent: the chooser is up, and the
+    // library behind it shows no import in flight until a choice is made.
     expect(find.text('Add books'), findsWidgets);
     expect(find.text('Choose files'), findsOneWidget);
-    expect(find.text('Cancel'), findsWidgets);
+    expect(find.text('Cancel'), findsNothing);
+    expect(find.text('Add your first books'), findsOneWidget);
     debugDefaultTargetPlatformOverride = null;
   });
 

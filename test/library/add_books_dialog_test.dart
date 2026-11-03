@@ -778,6 +778,11 @@ void main() {
             .first,
       );
       expect(sheet.bottom, 844);
+      // Nothing is imported while the choices are open, so the header keeps
+      // its "+" and shows no activity behind the sheet.
+      expect(find.byTooltip('Add books'), findsOneWidget);
+      expect(find.byTooltip('Cancel'), findsNothing);
+      expect(find.byType(ShadProgress), findsNothing);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),

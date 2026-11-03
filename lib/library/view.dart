@@ -118,6 +118,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   )..addListener(_notesChanged);
   bool _notesShowing = false;
 
+  /// Whether the Add books chooser is open over the library.
+  bool _choosingImport = false;
+
   /// The search palette's searches; its query carries over between openings.
   late final ShellSearchController _search = ShellSearchController(
     bridge: widget.bridgeFactory(),
@@ -749,9 +752,15 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         defaultTargetPlatform == TargetPlatform.iOS;
     final connections = _sessionBridge is LibraryFoldersHost;
     if (mobile && !connections) return _pickMobileFiles();
-    final choice = await _showOwnedDialog<_AddBooksChoice>(
-      (context) => _AddBooksChooser(mobile: mobile, connections: connections),
-    );
+    setState(() => _choosingImport = true);
+    final _AddBooksChoice? choice;
+    try {
+      choice = await _showOwnedDialog<_AddBooksChoice>(
+        (context) => _AddBooksChooser(mobile: mobile, connections: connections),
+      );
+    } finally {
+      if (mounted) setState(() => _choosingImport = false);
+    }
     if (choice == null || !mounted) return null;
     switch (choice) {
       case _AddBooksChoice.files:
@@ -1283,7 +1292,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// The Library place: the header and format filters, then the
   /// collection; on a phone the open books lead as Reading now cards.
   Widget _libraryPlace(ShellLayout layout) {
-    final model = controller.model;
+    // Nothing is imported yet while the Add books chooser is open, so the
+    // library behind it shows no import in flight: no cancel, no activity.
+    final model = _choosingImport
+        ? controller.model.copyWith(importing: false, busy: false)
+        : controller.model;
     return LayoutBuilder(
       builder: (context, constraints) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1300,7 +1313,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             // every other cancellable operation keeps the separate cancel
             // action (the retained Flutter capability Iced has no
             // counterpart for).
-            canCancelOperation: controller.canCancel && !model.importing,
+            canCancelOperation:
+                !_choosingImport && controller.canCancel && !model.importing,
             onQueryChanged: (query) =>
                 controller.dispatch(LibraryQueryChanged(query)),
             onImportRequested: () =>
