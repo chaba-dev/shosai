@@ -208,7 +208,7 @@ void main() {
     ) async {
       final bridge = HarnessBridge(unitCount: 3);
       final gate = Completer<ui.Image>();
-      var hold = false;
+      var decodes = 0;
       var decoding = false;
       ui.Image image() {
         final recorder = ui.PictureRecorder();
@@ -221,8 +221,10 @@ void main() {
 
       final controller = ReaderController(
         bridge: bridge,
+        // The page opened decodes at once; the next page, rendered ahead of
+        // a turn, waits for the gate.
         decoder: (pixels, {required width, required height}) async {
-          if (hold) {
+          if (decodes++ == 1) {
             decoding = true;
             return gate.future;
           }
@@ -231,16 +233,14 @@ void main() {
       );
       addTearDown(controller.dispose);
       controller.dispatch(const ReaderOpenRequested('/books/curl.pdf'));
-      for (var i = 0; i < 30 && controller.model.pageImage == null; i++) {
+      for (var i = 0; i < 30 && !decoding; i++) {
         await tester.pump(const Duration(milliseconds: 20));
       }
       expect(controller.model.pageImage, isNotNull);
+      expect(decoding, isTrue);
       final saves = bridge.savedReadingStates.length;
-      hold = true;
       controller.dispatch(const ReaderTurnPreviewRequested(1));
       await tester.pump();
-      expect(decoding, isTrue);
-      hold = false;
       switch (action) {
         case 'cancel':
           controller.dispatch(const ReaderTurnPreviewRequested(0));
@@ -251,25 +251,83 @@ void main() {
         case 'dispose':
           controller.dispose();
       }
-      final preview = image();
-      gate.complete(preview);
+      final leaf = image();
+      gate.complete(leaf);
       for (var i = 0; i < 20; i++) {
         await tester.pump(const Duration(milliseconds: 20));
       }
       expect(controller.model.unit, 0);
       expect(bridge.savedReadingStates.length, saves);
       if (action == 'keep') {
-        expect(controller.model.turnPreview?.image, same(preview));
+        // The preview is its own handle on the leaf a turn would adopt.
+        final preview = controller.model.turnPreview?.image;
+        expect(preview?.isCloneOf(leaf), isTrue);
         controller.dispatch(const ReaderTurnPreviewRequested(0));
+        await tester.pump();
+        expect(preview?.debugDisposed, isTrue);
       } else {
         expect(controller.model.turnPreview, isNull);
       }
-      expect(preview.debugDisposed, isTrue);
       controller.dispose();
       await tester.pump();
+      expect(leaf.debugDisposed, isTrue);
       expect(bridge.isDisposed, isTrue);
     });
   }
+
+  testWidgets('a PDF turn adopts the page rendered ahead of it', (
+    tester,
+  ) async {
+    final bridge = HarnessBridge(unitCount: 3);
+    final decoded = <ui.Image>[];
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) async {
+        final recorder = ui.PictureRecorder();
+        ui.Canvas(recorder);
+        final picture = recorder.endRecording();
+        final image = picture.toImageSync(1, 1);
+        picture.dispose();
+        decoded.add(image);
+        return image;
+      },
+    );
+    addTearDown(controller.dispose);
+    controller.dispatch(const ReaderOpenRequested('/books/curl.pdf'));
+    for (var i = 0; i < 30 && decoded.length < 2; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    // The page opened, then the one after it; the first page has none before.
+    expect(decoded, hasLength(2));
+    final ahead = decoded[1];
+
+    controller.dispatch(const ReaderUnitRequested(1, turn: true));
+    // The turn lands without rendering the page again.
+    for (var i = 0; i < 5 && controller.model.unit != 1; i++) {
+      await tester.pump();
+    }
+    expect(controller.model.unit, 1);
+    expect(controller.model.pageImage, same(ahead));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    // Then both of its neighbours are rendered ahead.
+    expect(decoded, hasLength(4));
+
+    final behind = decoded[3];
+
+    // Turning back adopts the page behind it the same way, and the page after
+    // it, no longer next to the one shown, is let go.
+    controller.dispatch(const ReaderUnitRequested(0, turn: true));
+    for (var i = 0; i < 5 && controller.model.unit != 0; i++) {
+      await tester.pump();
+    }
+    expect(controller.model.pageImage, same(behind));
+    expect(decoded[2].debugDisposed, isTrue);
+    controller.dispose();
+    await tester.pump();
+    expect(decoded.every((image) => image.debugDisposed), isTrue);
+  });
 
   test('panels are mutually exclusive and search is independent', () {
     final controller = _controller();

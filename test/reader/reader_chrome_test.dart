@@ -109,9 +109,9 @@ class _ChromeBridge extends HarnessBridge {
   /// real in-flight search.
   final List<Completer<List<FlutterSearchMatch>>> searchCompletions = [];
 
-  /// When set, page renders fail with a bridge error, so a layout failure can
-  /// be driven through the rendered chrome.
-  bool failRender = false;
+  /// When set, that page's renders fail with a bridge error, so a layout
+  /// failure can be driven through the rendered chrome.
+  int? failRenderPage;
 
   /// Saved places the contents panel renders (fixture-backed; persistence is
   /// live in production).
@@ -172,7 +172,7 @@ class _ChromeBridge extends HarnessBridge {
     required double scale,
     required BigInt cancellationId,
   }) {
-    if (failRender) {
+    if (page.toInt() == failRenderPage) {
       throw const FlutterBridgeError(
         kind: FlutterBridgeErrorKind.invalidRequest,
         message: 'page render rejected',
@@ -826,6 +826,33 @@ void main() {
       },
     );
 
+    testWidgets('a tap in a PDF turn zone turns without waiting for a '
+        'double tap', (tester) async {
+      _setView(tester, const Size(390, 800));
+      await _open(
+        tester,
+        _reader(bridge: _ChromeBridge(), initialPath: '/books/atlas.pdf'),
+      );
+      String folio() =>
+          tester.widget<Text>(find.byKey(const ValueKey('reader-folio'))).data!;
+      expect(folio(), 'page 1 of 3');
+      final surface = tester.getRect(
+        find.byKey(const ValueKey('reader-selection-surface')),
+      );
+      await tester.tapAt(Offset(surface.right - 20, surface.center.dy));
+      // Well inside the 300 ms double-tap timeout.
+      await tester.pump(const Duration(milliseconds: 50));
+      for (var frame = 0; frame < 20 && folio() != 'page 2 of 3'; frame++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+        await tester.pump(const Duration(milliseconds: 5));
+      }
+      expect(folio(), 'page 2 of 3');
+      expect(find.byKey(const ValueKey('reader-fit-contain')), findsOneWidget);
+      await tester.pumpAndSettle();
+    });
+
     for (final rtl in [false, true]) {
       testWidgets('phone PDF swipes turn in book order (RTL: $rtl)', (
         tester,
@@ -1005,6 +1032,107 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    for (final (name, size, path) in [
+      ('PDF on a phone', const Size(390, 844), '/books/atlas.pdf'),
+      ('PDF on a tablet', const Size(1024, 768), '/books/atlas.pdf'),
+      ('PDF on a tall tablet', const Size(900, 1200), '/books/atlas.pdf'),
+      (
+        'EPUB spread on a tablet',
+        const Size(1180, 820),
+        '/books/slow-rivers.epub',
+      ),
+    ]) {
+      testWidgets('a held curl keeps the stage around the page: $name', (
+        tester,
+      ) async {
+        _setView(tester, size);
+        await _open(
+          tester,
+          _reader(bridge: _ChromeBridge(), initialPath: path),
+        );
+        await tester.pumpAndSettle();
+        final root = tester.getTopLeft(find.byKey(harnessBoundaryKey));
+        final width = tester
+            .getSize(find.byKey(harnessBoundaryKey))
+            .width
+            .ceil();
+        final points = <Offset>[];
+        final page = find.byKey(const ValueKey('reader-page'));
+        if (page.evaluate().isNotEmpty) {
+          // Just outside the paper's edges, where its shadow falls.
+          final paper = tester.getRect(page);
+          points.addAll([
+            paper.bottomCenter + const Offset(0, 12),
+            // The pixel beside the paper's left edge, in its edge line.
+            paper.centerLeft - const Offset(.5, 0),
+          ]);
+        } else {
+          // Around the fitted raster, on the stage beside the page.
+          final paint = tester.getRect(
+            find.byKey(const ValueKey('reader-page-paint')),
+          );
+          final image = _pagePainter(tester).image!;
+          final fitted = Alignment.center.inscribe(
+            applyBoxFit(
+              BoxFit.contain,
+              Size(image.width.toDouble(), image.height.toDouble()),
+              paint.size,
+            ).destination,
+            paint,
+          );
+          if (fitted.top - paint.top >= 6) {
+            points.add(fitted.topCenter - const Offset(0, 4));
+          }
+          if (fitted.left - paint.left >= 6) {
+            points.add(fitted.centerLeft - const Offset(4, 0));
+          } else {
+            // A page as wide as its box casts the soft corner of its shadow
+            // past the box, where no snapshot reaches.
+            points.add(Offset(paint.left - 8, fitted.bottom + 24));
+          }
+        }
+        expect(points, isNotEmpty);
+        Future<List<Color>> surround() async {
+          final pixels = await captureHarnessRgba(tester);
+          return points.map((point) {
+            final at = point - root;
+            final index = (at.dy.toInt() * width + at.dx.toInt()) * 4;
+            return Color.fromARGB(
+              pixels[index + 3],
+              pixels[index],
+              pixels[index + 1],
+              pixels[index + 2],
+            );
+          }).toList();
+        }
+
+        final before = await surround();
+        final stage = tester.getRect(
+          find.byKey(const ValueKey('reader-stage')),
+        );
+        final gesture = await tester.startGesture(
+          Offset(stage.left + stage.width * .8, stage.center.dy),
+        );
+        for (var step = 0; step < 6; step++) {
+          await gesture.moveBy(const Offset(-20, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        // The neighbouring page decodes off the test clock.
+        for (var frame = 0; frame < 10; frame++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(find.byKey(const ValueKey('reader-page-curl')), findsOneWidget);
+        expect(await surround(), before);
+        await gesture.moveBy(const Offset(120, 0));
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('continuous presentation never turns PDF pages on swipe', (
       tester,
     ) async {
@@ -1111,8 +1239,9 @@ void main() {
 
       // Page 3 (unit 2, 200 wide) is drawn on the left and page 2 (unit 1,
       // 300 wide) on the right, in the raster and the selection surface alike.
-      final raster = rasters.last;
-      expect(raster.width, 500);
+      // The spread is rendered ahead of the turn, and the cover behind it
+      // once the turn lands.
+      final raster = rasters.singleWhere((raster) => raster.width == 500);
       int unitAt(int x) => raster.pixels[x * 4];
       expect([unitAt(5), unitAt(195), unitAt(205), unitAt(495)], [2, 2, 1, 1]);
       final painter = _pagePainter(tester);
@@ -1278,17 +1407,37 @@ void main() {
           expect(semantics().value, predicted ?? shown);
         }
 
-        expect(find.textContaining('page 1 of 5'), findsOneWidget);
+        // The status line, and the quiet line under the spread with it.
+        Finder place(String text) => find.descendant(
+          of: find.byKey(const ValueKey('reader-status-line')),
+          matching: find.textContaining(text),
+        );
+        String folio() => tester
+            .widget<Text>(find.byKey(const ValueKey('reader-folio')))
+            .data!;
+
+        expect(place('page 1 of 5'), findsOneWidget);
+        expect(folio(), 'page 1 of 5');
+        // On the desktop stage too, the line sits under the page.
+        expect(
+          tester.getRect(find.byKey(const ValueKey('reader-folio'))).top,
+          greaterThanOrEqualTo(
+            tester
+                .getRect(find.byKey(const ValueKey('reader-page-paint')))
+                .bottom,
+          ),
+        );
         await step(forward);
-        expect(find.textContaining('pages 2–3 of 5'), findsOneWidget);
+        expect(folio(), 'pages 2–3 of 5');
+        expect(place('pages 2–3 of 5'), findsOneWidget);
         await step(forward);
-        expect(find.textContaining('pages 4–5 of 5'), findsOneWidget);
+        expect(place('pages 4–5 of 5'), findsOneWidget);
         await step(forward);
-        expect(find.textContaining('pages 4–5 of 5'), findsOneWidget);
+        expect(place('pages 4–5 of 5'), findsOneWidget);
         await step(backward);
-        expect(find.textContaining('pages 2–3 of 5'), findsOneWidget);
+        expect(place('pages 2–3 of 5'), findsOneWidget);
         await step(backward);
-        expect(find.textContaining('page 1 of 5'), findsOneWidget);
+        expect(place('page 1 of 5'), findsOneWidget);
       });
     }
 
@@ -1835,17 +1984,18 @@ void main() {
       tester,
     ) async {
       _setView(tester, const Size(1280, 800));
-      final bridge = _ChromeBridge();
+      // The next page fails while it is rendered ahead too, so the turn
+      // renders it again itself.
+      final bridge = _ChromeBridge()..failRenderPage = 1;
       await _open(
         tester,
         _reader(bridge: bridge, initialPath: '/books/atlas.pdf'),
       );
 
-      bridge.failRender = true;
       await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
-      bridge.failRender = false;
+      bridge.failRenderPage = null;
 
       // The bridge reason is visible (kind and message, not
       // "Instance of 'FlutterBridgeError'") and the entry is not labelled as a

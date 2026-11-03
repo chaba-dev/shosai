@@ -275,6 +275,7 @@
   "readerProgressPercent": "割合",
   "readerProgressOff": "非表示",
   "readerQuietPageOf": "{total} ページ中 {page} ページ",
+  "readerQuietPagesOf": "{total} ページ中 {first}～{last} ページ",
   "readerControls": "メニュー",
   "readerZonesTitle": "ページのめくり方",
   "readerZonesInstruction": "左右をタップでページ、中央でメニュー\nスワイプでもめくれます。タップして始める。",

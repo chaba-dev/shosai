@@ -1117,6 +1117,8 @@
   "readerProgressOff": "Off",
   "readerQuietPageOf": "page {page} of {total}",
   "@readerQuietPageOf": {"placeholders": {"page": {"type": "int"}, "total": {"type": "int"}}},
+  "readerQuietPagesOf": "pages {first}–{last} of {total}",
+  "@readerQuietPagesOf": {"placeholders": {"first": {"type": "int"}, "last": {"type": "int"}, "total": {"type": "int"}}},
   "readerControls": "Controls",
   "readerZonesTitle": "How to turn pages",
   "readerZonesInstruction": "Tap the sides to turn, the middle for controls.\nYou can also swipe. Tap anywhere to begin.",

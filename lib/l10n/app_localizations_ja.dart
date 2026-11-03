@@ -954,6 +954,11 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String readerQuietPagesOf(int first, int last, int total) {
+    return '$total ページ中 $first～$last ページ';
+  }
+
+  @override
   String get readerControls => 'メニュー';
 
   @override
