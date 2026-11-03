@@ -1787,6 +1787,414 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This book turns leftward.\nTap the sides to turn, the middle for controls. You can also swipe. Tap anywhere to begin.'**
   String get readerZonesLeftward;
+
+  /// No description provided for @settingsReaderTheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Reader theme'**
+  String get settingsReaderTheme;
+
+  /// No description provided for @settingsContinuousReading.
+  ///
+  /// In en, this message translates to:
+  /// **'Continuous reading'**
+  String get settingsContinuousReading;
+
+  /// No description provided for @settingsContinuousReadingHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Vertical books always turn pages.'**
+  String get settingsContinuousReadingHint;
+
+  /// No description provided for @settingsEpubTextSize.
+  ///
+  /// In en, this message translates to:
+  /// **'EPUB text size'**
+  String get settingsEpubTextSize;
+
+  /// No description provided for @settingsEpubLineSpacing.
+  ///
+  /// In en, this message translates to:
+  /// **'EPUB line spacing'**
+  String get settingsEpubLineSpacing;
+
+  /// No description provided for @settingsPdfZoom.
+  ///
+  /// In en, this message translates to:
+  /// **'PDF zoom'**
+  String get settingsPdfZoom;
+
+  /// No description provided for @settingsCustomZoom.
+  ///
+  /// In en, this message translates to:
+  /// **'{percentage}% (custom)'**
+  String settingsCustomZoom(int percentage);
+
+  /// No description provided for @libraryDeleteManagedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete managed copy?'**
+  String get libraryDeleteManagedTitle;
+
+  /// No description provided for @libraryDeleteManagedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'“{title}” will be removed from the library and its managed file will be deleted.'**
+  String libraryDeleteManagedBody(String title);
+
+  /// No description provided for @libraryDeleteManagedAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove and delete'**
+  String get libraryDeleteManagedAction;
+
+  /// No description provided for @readerAssociateTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Associate highlights?'**
+  String get readerAssociateTitle;
+
+  /// No description provided for @readerAssociateAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Associate'**
+  String get readerAssociateAction;
+
+  /// No description provided for @readerAssociateBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the earlier document version this file replaces. Its notes and highlights will be shared with this version. Highlights whose location cannot be recovered will remain marked as ambiguous or unavailable.'**
+  String get readerAssociateBody;
+
+  /// No description provided for @readerSavedHighlights.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 saved highlight} other{{count} saved highlights}}'**
+  String readerSavedHighlights(int count);
+
+  /// No description provided for @readerAssociatePrevious.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous'**
+  String get readerAssociatePrevious;
+
+  /// No description provided for @readerAssociateNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get readerAssociateNext;
+
+  /// No description provided for @readerAssociateHighlights.
+  ///
+  /// In en, this message translates to:
+  /// **'Associate highlights from an earlier version…'**
+  String get readerAssociateHighlights;
+
+  /// No description provided for @readerRetryHighlights.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry loading highlights'**
+  String get readerRetryHighlights;
+
+  /// No description provided for @readerUntitledDocument.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled document'**
+  String get readerUntitledDocument;
+
+  /// No description provided for @readerContentUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Document content unavailable'**
+  String get readerContentUnavailable;
+
+  /// No description provided for @readerDocumentText.
+  ///
+  /// In en, this message translates to:
+  /// **'Document text: {text}'**
+  String readerDocumentText(String text);
+
+  /// No description provided for @readerSelectTextHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Selects this text and shows selection actions.'**
+  String get readerSelectTextHint;
+
+  /// No description provided for @readerDocumentPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Document path'**
+  String get readerDocumentPath;
+
+  /// No description provided for @readerDocumentPathHint.
+  ///
+  /// In en, this message translates to:
+  /// **'/path/to/book.pdf'**
+  String get readerDocumentPathHint;
+
+  /// No description provided for @readerOpenDocument.
+  ///
+  /// In en, this message translates to:
+  /// **'Open document'**
+  String get readerOpenDocument;
+
+  /// No description provided for @readerEnterDocumentPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a local document path to open it.'**
+  String get readerEnterDocumentPath;
+
+  /// No description provided for @readerSelectionIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'No text selected'**
+  String get readerSelectionIdle;
+
+  /// No description provided for @readerSelectionSelecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Selecting text'**
+  String get readerSelectionSelecting;
+
+  /// No description provided for @readerSelectionSelectingText.
+  ///
+  /// In en, this message translates to:
+  /// **'Selecting text: {text}'**
+  String readerSelectionSelectingText(String text);
+
+  /// No description provided for @readerSelectionReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Text selection ready'**
+  String get readerSelectionReady;
+
+  /// No description provided for @readerSelectionSelectedText.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected text: {text}'**
+  String readerSelectionSelectedText(String text);
+
+  /// No description provided for @readerSelectionSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving selected text'**
+  String get readerSelectionSaving;
+
+  /// No description provided for @readerNotePlaceMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'This note\'s place isn\'t in this edition of the book.'**
+  String get readerNotePlaceMissing;
+
+  /// No description provided for @readerNotePlaceFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'This note\'s place could not be found: {error}'**
+  String readerNotePlaceFailed(String error);
+
+  /// No description provided for @readerBookmarksNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmark changes were not saved: {error}'**
+  String readerBookmarksNotSaved(String error);
+
+  /// No description provided for @readerNotesNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Note changes were not saved: {error}'**
+  String readerNotesNotSaved(String error);
+
+  /// No description provided for @readerNotesUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes are unavailable: {error}'**
+  String readerNotesUnavailable(String error);
+
+  /// No description provided for @readerPositionNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading position was not saved: {error}'**
+  String readerPositionNotSaved(String error);
+
+  /// No description provided for @readerPositionNotRestored.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading position could not be restored: {error}'**
+  String readerPositionNotRestored(String error);
+
+  /// No description provided for @readerBookmarksUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmarks are unavailable: {error}'**
+  String readerBookmarksUnavailable(String error);
+
+  /// No description provided for @readerLayoutFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Layout failed: {error}'**
+  String readerLayoutFailed(String error);
+
+  /// No description provided for @readerHighlightsNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Highlight changes were not saved: {error}'**
+  String readerHighlightsNotSaved(String error);
+
+  /// No description provided for @readerEarlierHighlightNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'An earlier highlight could not be saved: {error}'**
+  String readerEarlierHighlightNotSaved(String error);
+
+  /// No description provided for @readerAssociationNotSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Highlight association was not saved: {error}'**
+  String readerAssociationNotSaved(String error);
+
+  /// No description provided for @readerAssociationLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Association saved, but highlights could not be loaded: {error}'**
+  String readerAssociationLoadFailed(String error);
+
+  /// No description provided for @readerSelectionUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Selection unavailable: {error}'**
+  String readerSelectionUnavailable(String error);
+
+  /// No description provided for @readerSelectionActionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Selection action failed: {error}'**
+  String readerSelectionActionFailed(String error);
+
+  /// No description provided for @readerHighlightActionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Highlight action failed: {error}'**
+  String readerHighlightActionFailed(String error);
+
+  /// No description provided for @readerHighlightsUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Highlights unavailable: {error}'**
+  String readerHighlightsUnavailable(String error);
+
+  /// No description provided for @readerNoteSelectionChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'The note was not saved because the selection or reader layout changed. Try again.'**
+  String get readerNoteSelectionChanged;
+
+  /// No description provided for @readerNoteLayoutChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'The note was not saved because the reader layout changed. Try again.'**
+  String get readerNoteLayoutChanged;
+
+  /// No description provided for @readerFinishHighlightChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish the current highlight change, then save the note again.'**
+  String get readerFinishHighlightChange;
+
+  /// No description provided for @readerNoteInterrupted.
+  ///
+  /// In en, this message translates to:
+  /// **'The note was not saved because the app was suspended. Try again.'**
+  String get readerNoteInterrupted;
+
+  /// No description provided for @readerBookmarksStillSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Bookmark changes are still saving. Try opening again shortly.'**
+  String get readerBookmarksStillSaving;
+
+  /// No description provided for @readerNotesStillSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Note changes are still saving. Try opening again shortly.'**
+  String get readerNotesStillSaving;
+
+  /// No description provided for @readerNoHighlightsToAssociate.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved highlights are available to associate.'**
+  String get readerNoHighlightsToAssociate;
+
+  /// No description provided for @readerChapterTextLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapter {chapter} is too large to display: one of its paragraphs is longer than {limit} characters. Choose another chapter from Contents.'**
+  String readerChapterTextLimit(int chapter, int limit);
+
+  /// No description provided for @readerChapterNodeLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Chapter {chapter} is too large to display: one of its lists, tables or sections holds more than {limit} parts. Choose another chapter from Contents.'**
+  String readerChapterNodeLimit(int chapter, int limit);
+
+  /// No description provided for @errorCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'The operation was cancelled.'**
+  String get errorCancelled;
+
+  /// No description provided for @errorNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be found. Check its location and try again.'**
+  String get errorNotFound;
+
+  /// No description provided for @errorInaccessible.
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be accessed. Check its permissions and connection, then try again.'**
+  String get errorInaccessible;
+
+  /// No description provided for @errorInvalidRequest.
+  ///
+  /// In en, this message translates to:
+  /// **'The operation is no longer available. Reopen the book and try again.'**
+  String get errorInvalidRequest;
+
+  /// No description provided for @errorMalformed.
+  ///
+  /// In en, this message translates to:
+  /// **'The book could not be read. Try another copy of the file.'**
+  String get errorMalformed;
+
+  /// No description provided for @errorBackendUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'The document engine is unavailable. Restart the app and try again.'**
+  String get errorBackendUnavailable;
+
+  /// No description provided for @errorRenderFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The page could not be displayed. Reopen the book and try again.'**
+  String get errorRenderFailed;
+
+  /// No description provided for @shellSearchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Search could not be completed. Try again.'**
+  String get shellSearchFailed;
+
+  /// No description provided for @shellNotesFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes could not be loaded. Try again.'**
+  String get shellNotesFailed;
+
+  /// No description provided for @locationAuthorizationReturned.
+  ///
+  /// In en, this message translates to:
+  /// **'Authorization response received. Return to Shōsai to check whether the connection completed. You may close this browser tab.'**
+  String get locationAuthorizationReturned;
 }
 
 class _AppLocalizationsDelegate

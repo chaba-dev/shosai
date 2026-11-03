@@ -971,4 +971,261 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get readerZonesLeftward =>
       'この本は左へめくります。\n左右をタップでページ、中央でメニュー。スワイプでもめくれます。タップして始める。';
+
+  @override
+  String get settingsReaderTheme => '読書テーマ';
+
+  @override
+  String get settingsContinuousReading => '連続スクロール';
+
+  @override
+  String get settingsContinuousReadingHint => '縦書きの本は常にページ単位で表示します。';
+
+  @override
+  String get settingsEpubTextSize => 'EPUB の文字サイズ';
+
+  @override
+  String get settingsEpubLineSpacing => 'EPUB の行間';
+
+  @override
+  String get settingsPdfZoom => 'PDF のズーム';
+
+  @override
+  String settingsCustomZoom(int percentage) {
+    return '$percentage%（カスタム）';
+  }
+
+  @override
+  String get libraryDeleteManagedTitle => 'アプリ内のコピーも削除しますか？';
+
+  @override
+  String libraryDeleteManagedBody(String title) {
+    return '「$title」をライブラリから削除し、アプリ内に保存したファイルも削除します。';
+  }
+
+  @override
+  String get libraryDeleteManagedAction => '本とコピーを削除';
+
+  @override
+  String get readerAssociateTitle => 'ハイライトを引き継ぎますか？';
+
+  @override
+  String get readerAssociateAction => '引き継ぐ';
+
+  @override
+  String get readerAssociateBody =>
+      'このファイルで置き換える旧版を選択してください。旧版のメモとハイライトをこの版でも共有します。位置を復元できないハイライトには、候補が複数あるか、利用できないことを表示します。';
+
+  @override
+  String readerSavedHighlights(int count) {
+    return '保存済みハイライト $count件';
+  }
+
+  @override
+  String get readerAssociatePrevious => '前へ';
+
+  @override
+  String get readerAssociateNext => '次へ';
+
+  @override
+  String get readerAssociateHighlights => '旧版のハイライトを引き継ぐ…';
+
+  @override
+  String get readerRetryHighlights => 'ハイライトを再読み込み';
+
+  @override
+  String get readerUntitledDocument => '無題の文書';
+
+  @override
+  String get readerContentUnavailable => '文書の内容を表示できません';
+
+  @override
+  String readerDocumentText(String text) {
+    return '文書の本文：$text';
+  }
+
+  @override
+  String get readerSelectTextHint => '本文を選択し、選択した文章の操作を表示します。';
+
+  @override
+  String get readerDocumentPath => '文書のパス';
+
+  @override
+  String get readerDocumentPathHint => '/path/to/book.pdf';
+
+  @override
+  String get readerOpenDocument => '文書を開く';
+
+  @override
+  String get readerEnterDocumentPath => '開く文書のローカルパスを入力してください。';
+
+  @override
+  String get readerSelectionIdle => '文章は選択されていません';
+
+  @override
+  String get readerSelectionSelecting => '文章を選択中';
+
+  @override
+  String readerSelectionSelectingText(String text) {
+    return '選択中の文章：$text';
+  }
+
+  @override
+  String get readerSelectionReady => '文章の選択が完了しました';
+
+  @override
+  String readerSelectionSelectedText(String text) {
+    return '選択した文章：$text';
+  }
+
+  @override
+  String get readerSelectionSaving => '選択した文章を保存中';
+
+  @override
+  String get readerNotePlaceMissing => 'この版にはメモの位置が見つかりません。';
+
+  @override
+  String readerNotePlaceFailed(String error) {
+    return 'メモの位置を特定できませんでした。$error';
+  }
+
+  @override
+  String readerBookmarksNotSaved(String error) {
+    return 'ブックマークの変更を保存できませんでした。$error';
+  }
+
+  @override
+  String readerNotesNotSaved(String error) {
+    return 'メモの変更を保存できませんでした。$error';
+  }
+
+  @override
+  String readerNotesUnavailable(String error) {
+    return 'メモを読み込めません。$error';
+  }
+
+  @override
+  String readerPositionNotSaved(String error) {
+    return '読んでいる位置を保存できませんでした。$error';
+  }
+
+  @override
+  String readerPositionNotRestored(String error) {
+    return '読んでいた位置を復元できませんでした。$error';
+  }
+
+  @override
+  String readerBookmarksUnavailable(String error) {
+    return 'ブックマークを読み込めません。$error';
+  }
+
+  @override
+  String readerLayoutFailed(String error) {
+    return 'ページを組み直せませんでした。$error';
+  }
+
+  @override
+  String readerHighlightsNotSaved(String error) {
+    return 'ハイライトの変更を保存できませんでした。$error';
+  }
+
+  @override
+  String readerEarlierHighlightNotSaved(String error) {
+    return '直前のハイライトを保存できませんでした。$error';
+  }
+
+  @override
+  String readerAssociationNotSaved(String error) {
+    return 'ハイライトの引き継ぎを保存できませんでした。$error';
+  }
+
+  @override
+  String readerAssociationLoadFailed(String error) {
+    return '引き継ぎは保存しましたが、ハイライトを読み込めませんでした。$error';
+  }
+
+  @override
+  String readerSelectionUnavailable(String error) {
+    return '文章を選択できません。$error';
+  }
+
+  @override
+  String readerSelectionActionFailed(String error) {
+    return '選択した文章の操作を完了できませんでした。$error';
+  }
+
+  @override
+  String readerHighlightActionFailed(String error) {
+    return 'ハイライトの操作を完了できませんでした。$error';
+  }
+
+  @override
+  String readerHighlightsUnavailable(String error) {
+    return 'ハイライトを読み込めません。$error';
+  }
+
+  @override
+  String get readerNoteSelectionChanged =>
+      '選択範囲またはページの配置が変わったため、メモを保存できませんでした。もう一度お試しください。';
+
+  @override
+  String get readerNoteLayoutChanged =>
+      'ページの配置が変わったため、メモを保存できませんでした。もう一度お試しください。';
+
+  @override
+  String get readerFinishHighlightChange => 'ハイライトの変更が完了してから、もう一度メモを保存してください。';
+
+  @override
+  String get readerNoteInterrupted => 'アプリが中断されたため、メモを保存できませんでした。もう一度お試しください。';
+
+  @override
+  String get readerBookmarksStillSaving =>
+      'ブックマークの変更を保存中です。少し待ってから、もう一度開いてください。';
+
+  @override
+  String get readerNotesStillSaving => 'メモの変更を保存中です。少し待ってから、もう一度開いてください。';
+
+  @override
+  String get readerNoHighlightsToAssociate => '引き継げるハイライトはありません。';
+
+  @override
+  String readerChapterTextLimit(int chapter, int limit) {
+    return '第$chapter章は段落の文字数が$limit字を超えているため、表示できません。目次から別の章を選んでください。';
+  }
+
+  @override
+  String readerChapterNodeLimit(int chapter, int limit) {
+    return '第$chapter章はリスト・表・節のいずれかに$limit個を超える要素があるため、表示できません。目次から別の章を選んでください。';
+  }
+
+  @override
+  String get errorCancelled => '操作をキャンセルしました。';
+
+  @override
+  String get errorNotFound => 'ファイルが見つかりません。保存場所を確認して、もう一度お試しください。';
+
+  @override
+  String get errorInaccessible => 'ファイルにアクセスできません。権限と接続を確認して、もう一度お試しください。';
+
+  @override
+  String get errorInvalidRequest => 'この操作は無効になりました。本を開き直して、もう一度お試しください。';
+
+  @override
+  String get errorMalformed => '本を読み取れません。別のコピーでお試しください。';
+
+  @override
+  String get errorBackendUnavailable => '文書エンジンを利用できません。アプリを再起動して、もう一度お試しください。';
+
+  @override
+  String get errorRenderFailed => 'ページを表示できません。本を開き直して、もう一度お試しください。';
+
+  @override
+  String get shellSearchFailed => '検索を完了できませんでした。もう一度お試しください。';
+
+  @override
+  String get shellNotesFailed => 'ノートを読み込めませんでした。もう一度お試しください。';
+
+  @override
+  String get locationAuthorizationReturned =>
+      '認証結果を受け取りました。Shōsai に戻り、接続が完了したか確認してください。このタブは閉じてかまいません。';
 }
