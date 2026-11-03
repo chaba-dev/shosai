@@ -45,35 +45,38 @@ void main() {
     );
   }
 
-  Finder addBooksButton() => find.ancestor(
-    of: find.text('Add books'),
+  // The phone's header keeps Add books as a "+" icon, so the labelled
+  // control these checks measure is the filter row's All entry, a Shad
+  // button sized by the same helper.
+  const buttonLabel = 'All';
+
+  Finder labelledButton() => find.ancestor(
+    of: find.text(buttonLabel),
     matching: find.byType(ShadButton),
   );
 
-  testWidgets('the add-books button keeps the theme height at 100% text', (
+  testWidgets('a labelled button keeps the theme height at 100% text', (
     tester,
   ) async {
     await renderLibrary(tester, const HarnessView(size: Size(390, 780)));
 
-    final theme = ShadTheme.of(tester.element(addBooksButton()));
+    final theme = ShadTheme.of(tester.element(labelledButton()));
     expect(
-      tester.getSize(addBooksButton()).height,
+      tester.getSize(labelledButton()).height,
       theme.buttonSizesTheme.regular!.height,
       reason: 'the button must not change size at the default text scale',
     );
-    final label = tester.renderObject<RenderParagraph>(find.text('Add books'));
+    final label = tester.renderObject<RenderParagraph>(find.text(buttonLabel));
     expect(label.size.height, greaterThanOrEqualTo(label.textSize.height));
   });
 
-  testWidgets('the add-books label keeps its line box at 200% text', (
-    tester,
-  ) async {
+  testWidgets('a button label keeps its line box at 200% text', (tester) async {
     await renderLibrary(
       tester,
       const HarnessView(size: Size(390, 780), textScale: 2),
     );
 
-    final label = tester.renderObject<RenderParagraph>(find.text('Add books'));
+    final label = tester.renderObject<RenderParagraph>(find.text(buttonLabel));
     expect(
       label.size.height,
       greaterThanOrEqualTo(label.textSize.height),
@@ -82,10 +85,10 @@ void main() {
           'or the glyphs are clipped',
     );
     expect(
-      tester.getSize(addBooksButton()).height,
+      tester.getSize(labelledButton()).height,
       greaterThan(
         ShadTheme.of(
-          tester.element(addBooksButton()),
+          tester.element(labelledButton()),
         ).buttonSizesTheme.regular!.height,
       ),
       reason: 'the button grows only because the scaled label needs the room',

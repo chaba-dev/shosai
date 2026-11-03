@@ -16,8 +16,11 @@ const _channel = MethodChannel('dev.shosai/library_folders');
 final class FolderConnectionProvider implements ConnectionProvider {
   const FolderConnectionProvider();
 
+  /// The provider id persisted with every folder connection.
+  static const providerId = 'folder';
+
   @override
-  String get id => 'folder';
+  String get id => providerId;
 
   /// Upgrade the original folder record without changing any locator key.
   static LibraryConnection migrate(Map<String, dynamic> value) =>
