@@ -180,6 +180,7 @@ All notable changes to this project will be documented in this file.
 - *(android)* Keep the middle of the side edges for page turns (#274)
 - *(reader)* Start the panel scrim under the toolbar, below the status bar (#275)
 - *(reader)* Step the text size back to exactly the size it came from (#278)
+- *(l10n)* Complete Japanese UI and unify reader themes (#282)
 
 ### 🚜 Refactor
 
