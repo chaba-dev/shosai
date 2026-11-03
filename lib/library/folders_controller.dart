@@ -10,7 +10,11 @@ sealed class FoldersMessage {
 }
 
 final class FoldersStarted extends FoldersMessage {
-  const FoldersStarted();
+  const FoldersStarted({this.then});
+
+  /// The add request the dialog was opened for, sent once the connections
+  /// have loaded (Add books opens the dialog straight into a connection).
+  final FoldersMessage? then;
 }
 
 final class FoldersAddRequested extends FoldersMessage {
@@ -65,10 +69,11 @@ final class FoldersRemoveRequested extends FoldersMessage {
 }
 
 final class _FoldersLoaded extends FoldersMessage {
-  const _FoldersLoaded(this.revision, this.grants, {this.selected});
+  const _FoldersLoaded(this.revision, this.grants, {this.selected, this.then});
   final int revision;
   final List<LibraryConnection> grants;
   final String? selected;
+  final FoldersMessage? then;
 }
 
 final class _FoldersListed extends FoldersMessage {
@@ -125,6 +130,7 @@ final class FoldersController extends ChangeNotifier {
     required Future<bool> Function(LibraryConnection connection) confirmRemoval,
     Future<LibraryConnection?> Function(String id)? setupDropbox,
     Future<LibraryConnection?> Function(String id)? setupGoogleDrive,
+    this.supportsFolders = true,
   }) : _folders = folders,
        _setup = setup,
        _setupDropbox = setupDropbox,
@@ -136,6 +142,10 @@ final class FoldersController extends ChangeNotifier {
   bool get supportsDropbox => _setupDropbox != null;
   final Future<LibraryConnection?> Function(String id)? _setupGoogleDrive;
   bool get canAddGoogleDrive => _setupGoogleDrive != null;
+
+  /// Whether device folders can be connected here; phones and tablets read
+  /// books only from files and storage accounts.
+  final bool supportsFolders;
   final Future<bool> Function(LibraryConnection connection) _confirmRemoval;
   FoldersModel _model = const FoldersModel();
   FoldersModel get model => _model;
@@ -164,13 +174,17 @@ final class FoldersController extends ChangeNotifier {
       case FoldersStarted():
         if (_model.busy) return;
         _effect(
-          (revision, _) async =>
-              _FoldersLoaded(revision, await _folders.list()),
+          (revision, _) async => _FoldersLoaded(
+            revision,
+            await _folders.list(),
+            then: message.then,
+          ),
         );
       case FoldersAddRequested() ||
           FoldersAddDropboxRequested() ||
           FoldersAddGoogleDriveRequested():
         if (_model.busy) return;
+        if (message is FoldersAddRequested && !supportsFolders) return;
         final setup = switch (message) {
           FoldersAddDropboxRequested() => _setupDropbox,
           FoldersAddGoogleDriveRequested() => _setupGoogleDrive,
@@ -307,6 +321,7 @@ final class FoldersController extends ChangeNotifier {
             selected: message.selected,
           ),
         );
+        if (message.then case final then?) dispatch(then);
       case _FoldersAuthorized():
         if (message.revision != _revision) return;
         _emit(

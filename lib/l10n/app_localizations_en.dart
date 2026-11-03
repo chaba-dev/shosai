@@ -12,9 +12,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get libraryTitle => 'Library';
 
   @override
-  String get librarySubtitle => 'Your private reading room';
-
-  @override
   String libraryCheckingSource(String source) {
     return 'Checking $source';
   }
@@ -742,10 +739,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get importChooseFilesHint => 'Select one or more PDF or EPUB files';
 
   @override
-  String get importChooseFolder => 'Choose a folder';
+  String get importChooseFolder => 'Connect a folder';
 
   @override
-  String get importChooseFolderHint => 'Find supported books in all subfolders';
+  String get importChooseFolderHint =>
+      'Books stay in the folder, and new ones appear on the shelf. Works with Dropbox, iCloud Drive and other synced folders.';
+
+  @override
+  String get importCopyFolder => 'Copy into Shōsai instead';
+
+  @override
+  String get importCopyFolderHint =>
+      'Keeps a private snapshot of the folder’s books';
+
+  @override
+  String get importStorageHint =>
+      'Books stay in your storage, and new ones appear on the shelf';
 
   @override
   String get importReviewBooks => 'Review books';
@@ -965,6 +974,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get locationNextPage => 'Next page';
+
+  @override
+  String get locationNoFoldersMobile =>
+      'Connect Dropbox or Google Drive to read the books stored there.';
+
+  @override
+  String get locationFolderNotRead =>
+      'Folders aren’t read on phones and tablets';
+
+  @override
+  String get libraryLocationsDescriptionMobile =>
+      'Manage the storage accounts that supply your library.';
 
   @override
   String get shellSwitcherDone => 'Done';

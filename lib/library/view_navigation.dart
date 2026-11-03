@@ -6,8 +6,8 @@ part of 'view.dart';
 // and `mobile_library_filters` in `crates/shosai-app/src/app.rs` at the pinned
 // base `1e54270a6bb2`, with the values frozen in
 // `docs/flutter-ui-reference-spec.md` §3.5: a header carrying the page title,
-// subtitle, a 380 px search and the add-books action, and a filter row carrying
-// the format entries. Settings belongs to the shell navigation instead.
+// a 380 px search and, on a phone, the add-books action, and a filter row
+// carrying the format entries. Settings belongs to the shell navigation instead.
 //
 // Deliberate differences from the reference:
 //
@@ -20,35 +20,47 @@ part of 'view.dart';
 //   390 px without truncating "Settings"; CBZ left with its format support on
 //   2026-10-20 and the sizing stays), and at 200% text it wraps onto a second
 //   line rather than clipping or hiding an entry.
-// * Refresh is a retained Flutter capability with no Iced counterpart in the
-//   library header. It stays reachable as a header action.
+// * The header no longer carries Refresh or, beside a sidebar, Add books
+//   (2026-11-03): the sidebar and rail hold Add books, the phone keeps it as a
+//   "+" in its one-row header, and the library rescans its sources when the
+//   app returns to the foreground or the shelf is pulled down.
 //
 // Every control here renders immutable [LibraryModel] state and dispatches a
 // typed message; no widget owns an effect.
 
-/// The library header: title with the book and open counts beside it,
-/// subtitle, constrained search and the add-books action.
+/// The library header: the title with the book and open counts beside it,
+/// the title/author filter and, on a phone, the add-books action.
 ///
-/// `compact` follows the shared 760 logical-pixel breakpoint: the reference
-/// stacks title, search and action in compact windows and places them in one
-/// row with the search capped at
-/// [ShosaiTokens.layoutLibraryHeaderSearchMaxWidth] in wide ones.
-class LibraryHeader extends StatelessWidget {
+/// Add books and Refresh live elsewhere on wider windows: the sidebar or rail
+/// carries Add books, and the library rescans its sources when the app comes
+/// back to the foreground or the shelf is pulled down (RFD 12, 2026-11-03).
+///
+/// `compact` follows the shared 760 logical-pixel breakpoint. A phone
+/// (`addBooks`) keeps the header to one row: title and counts, then a filter
+/// icon that turns the row into the filter field, and the add-books icon. A
+/// compact window with a sidebar stacks the filter under the title; a wide one
+/// places it beside the title, capped at
+/// [ShosaiTokens.layoutLibraryHeaderSearchMaxWidth].
+class LibraryHeader extends StatefulWidget {
   const LibraryHeader({
     super.key,
     required this.compact,
     required this.model,
+    this.addBooks = false,
     this.openCount = 0,
     required this.canCancelOperation,
     required this.onQueryChanged,
     required this.onImportRequested,
     required this.onImportCancelled,
     required this.onOperationCancelled,
-    required this.onRefresh,
   });
 
   final bool compact;
   final LibraryModel model;
+
+  /// Whether the header carries Add books: only where no sidebar or rail
+  /// does, which is the phone.
+  final bool addBooks;
 
   /// How many books are open in Reading now.
   final int openCount;
@@ -61,8 +73,12 @@ class LibraryHeader extends StatelessWidget {
   final VoidCallback onImportRequested;
   final VoidCallback onImportCancelled;
   final VoidCallback onOperationCancelled;
-  final VoidCallback onRefresh;
 
+  @override
+  State<LibraryHeader> createState() => _LibraryHeaderState();
+}
+
+class _LibraryHeaderState extends State<LibraryHeader> {
   /// The reference's header search padding (`library_header` applies
   /// `[10, 12]`), which the Shad input's own theme does not carry.
   static const EdgeInsets _searchPadding = EdgeInsets.symmetric(
@@ -70,34 +86,60 @@ class LibraryHeader extends StatelessWidget {
     horizontal: 12,
   );
 
+  /// Whether the phone's one-row header shows the filter field. It opens with
+  /// a filter still applied, so returning to the library never hides one.
+  late bool _filtering = widget.model.query.isNotEmpty;
+
+  /// The filter field's focus. Autofocus loses to the icon that opened the
+  /// field, which still holds focus as it unmounts, so opening the filter
+  /// asks for focus once the field is built.
+  final FocusNode _filterFocus = FocusNode(debugLabel: 'Library filter');
+
+  @override
+  void dispose() {
+    _filterFocus.dispose();
+    super.dispose();
+  }
+
+  void _openFilter() {
+    setState(() => _filtering = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _filtering) _filterFocus.requestFocus();
+    });
+  }
+
+  void _closeFilter() {
+    setState(() => _filtering = false);
+    if (widget.model.query.isNotEmpty) widget.onQueryChanged('');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final LibraryHeader(
+      :compact,
+      :model,
+      :addBooks,
+      :canCancelOperation,
+      :onQueryChanged,
+      :onImportCancelled,
+      :onOperationCancelled,
+    ) = widget;
     final scheme = ShadTheme.of(context).colorScheme;
     final l10n = AppLocalizations.of(context);
-    final title = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      spacing: 2,
-      children: [
-        // The library is a screen of its own, titled in `ed-display`.
-        _title(context, l10n, scheme),
-        Text(
-          l10n.librarySubtitle,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: scheme.mutedForeground),
-        ),
-      ],
-    );
+    final oneRow = compact && addBooks;
+    final title = _title(context, l10n, scheme);
     final search = ConstrainedBox(
-      constraints: const BoxConstraints(
-        maxWidth: ShosaiTokens.layoutLibraryHeaderSearchMaxWidth,
+      constraints: BoxConstraints(
+        maxWidth: oneRow
+            ? double.infinity
+            : ShosaiTokens.layoutLibraryHeaderSearchMaxWidth,
       ),
       child: ShadInput(
         // The input is recreated when the window crosses the breakpoint, so it
         // restores the query the controller still filters by instead of
         // starting empty.
         initialValue: model.query,
+        focusNode: _filterFocus,
         padding: _searchPadding,
         // The input lays its placeholder out in a single-line box, so a scaled
         // placeholder that wraps is clipped rather than shown; an ellipsized
@@ -111,52 +153,81 @@ class LibraryHeader extends StatelessWidget {
         onChanged: onQueryChanged,
       ),
     );
-    final actions = Wrap(
-      spacing: 12,
-      runSpacing: 4,
-      children: [
-        if (canCancelOperation && model.discoveryProgress == null)
-          ShadIconAction(
+    // Without a header Add books, its import cancel joins the other
+    // operations' cancel action.
+    final cancel = canCancelOperation || (!addBooks && model.importing);
+    final cancelAction = cancel && model.discoveryProgress == null
+        ? ShadIconAction(
             tooltip: l10n.cancelOperationTooltip,
-            onPressed: onOperationCancelled,
+            onPressed: model.importing
+                ? onImportCancelled
+                : onOperationCancelled,
             icon: const Icon(LucideIcons.x),
-          ),
-        ShadIconAction(
-          tooltip: l10n.refreshLibraryTooltip,
-          onPressed: model.busy ? null : onRefresh,
-          icon: const Icon(LucideIcons.refreshCw),
-        ),
-        _addBooksAction(context),
-      ],
-    );
-    final content = compact
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            spacing: 12,
-            children: [
-              title,
-              // Stretch would hand the search a tight width that its 380 px
-              // cap cannot narrow, so the capped search is aligned instead.
-              Align(alignment: AlignmentDirectional.centerStart, child: search),
-              actions,
-            ],
           )
-        : Row(
-            // The title region and the search share the space the actions
-            // leave, and both are flexible: a narrow wide window shrinks them
-            // instead of overflowing the row, and a leftover appears only once
-            // the search reaches its 380 px cap, where it is distributed
-            // between the entries so the actions stay flush with the header's
-            // padding. The 3:2 split keeps the search next to the actions and
-            // reaches the cap at the primary wide reference (LB-07).
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            spacing: 16,
+        : null;
+    final Widget content;
+    if (oneRow && _filtering) {
+      content = Row(
+        spacing: 8,
+        children: [
+          Expanded(child: search),
+          ShadButton.ghost(
+            height: ShosaiTokens.sizeTouchTarget,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            onPressed: _closeFilter,
+            child: Text(l10n.cancelImportAction),
+          ),
+        ],
+      );
+    } else if (oneRow) {
+      content = Row(
+        spacing: 4,
+        children: [
+          Expanded(child: title),
+          ?cancelAction,
+          Tooltip(
+            message: l10n.searchLibraryPlaceholder,
+            child: ShadIconButton.ghost(
+              width: ShosaiTokens.sizeTouchTarget,
+              height: ShosaiTokens.sizeTouchTarget,
+              onPressed: _openFilter,
+              icon: const Icon(LucideIcons.search, size: 22),
+            ),
+          ),
+          _addBooksIcon(context, l10n),
+        ],
+      );
+    } else if (compact) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 12,
+        children: [
+          Row(
             children: [
-              Expanded(flex: 3, child: title),
-              Flexible(flex: 2, child: search),
-              actions,
+              Expanded(child: title),
+              ?cancelAction,
             ],
-          );
+          ),
+          // Stretch would hand the search a tight width that its 380 px
+          // cap cannot narrow, so the capped search is aligned instead.
+          Align(alignment: AlignmentDirectional.centerStart, child: search),
+        ],
+      );
+    } else {
+      content = Row(
+        // The title region and the search share the width, and both are
+        // flexible: a narrow wide window shrinks them instead of overflowing
+        // the row. The 3:2 split keeps the search at the trailing edge and
+        // reaches its 380 px cap at the primary wide reference (LB-07).
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        spacing: 16,
+        children: [
+          Expanded(flex: 3, child: title),
+          Flexible(flex: 2, child: search),
+          ?cancelAction,
+        ],
+      );
+    }
     return Container(
       decoration: BoxDecoration(
         // The header surface is the mapped application surface: the pinned
@@ -175,7 +246,9 @@ class LibraryHeader extends StatelessWidget {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            padding: oneRow
+                ? const EdgeInsetsDirectional.fromSTEB(20, 8, 12, 8)
+                : const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
             child: content,
           ),
           if (model.discoveryProgress case final progress?)
@@ -206,7 +279,7 @@ class LibraryHeader extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (canCancelOperation)
+                      if (cancel)
                         ShadButton.ghost(
                           onPressed: onOperationCancelled,
                           child: Text(l10n.cancelImportAction),
@@ -225,17 +298,29 @@ class LibraryHeader extends StatelessWidget {
   }
 
   /// The title with the counts beside it on its baseline; where the two do
-  /// not share the width, the counts take the line below.
+  /// not share the width, the counts take the line below. The phone's
+  /// one-row header sets the title a step smaller, at the phone's section
+  /// size, and counts the books only: Reading now shows the open ones.
   Widget _title(
     BuildContext context,
     AppLocalizations l10n,
     ShadColorScheme scheme,
   ) {
-    final titleStyle = shellScreenTitleStyle(
-      ShellLayout.forWidth(MediaQuery.sizeOf(context).width),
-    ).copyWith(color: scheme.foreground);
-    final title = Text(l10n.libraryTitle, style: titleStyle);
-    final counts = _counts(l10n);
+    final oneRow = widget.compact && widget.addBooks;
+    final titleStyle =
+        (oneRow
+                ? shellEditorialStyle(26, 32).copyWith(letterSpacing: -.4)
+                : shellScreenTitleStyle(
+                    ShellLayout.forWidth(MediaQuery.sizeOf(context).width),
+                  ))
+            .copyWith(color: scheme.foreground);
+    final title = Text(
+      l10n.libraryTitle,
+      style: titleStyle,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+    final counts = _counts(l10n, openBooks: !oneRow);
     if (counts == null) return title;
     final countsStyle = shosaiInterfaceStyleForText(
       shellInterfaceStyle(12, 16).copyWith(
@@ -260,7 +345,7 @@ class LibraryHeader extends StatelessWidget {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.baseline,
           textBaseline: TextBaseline.alphabetic,
-          spacing: _titleCountsGap,
+          spacing: oneRow ? 10 : _titleCountsGap,
           children: [title, countsText],
         );
       },
@@ -270,54 +355,44 @@ class LibraryHeader extends StatelessWidget {
   static const double _titleCountsGap = 14;
 
   /// `12 books · 2 open`: the library's size, then the open books when there
-  /// are any; null until the library has reported its size.
-  String? _counts(AppLocalizations l10n) {
-    final books = model.bookCount;
+  /// are any and [openBooks] asks for them; null until the library has
+  /// reported its size.
+  String? _counts(AppLocalizations l10n, {bool openBooks = true}) {
+    final books = widget.model.bookCount;
     if (books == null) return null;
     return [
       l10n.libraryBookCount(books),
-      if (openCount > 0) l10n.libraryOpenCount(openCount),
+      if (openBooks && widget.openCount > 0)
+        l10n.libraryOpenCount(widget.openCount),
     ].join(' · ');
   }
 
-  /// The add-books action, or the cancel action while the import is in flight.
-  ///
-  /// The action keeps the reference's primary button geometry
-  /// (`app.button.primary`) and its opaque hovered fill, the design system's
-  /// accent-hover in each theme, instead of the Shad primary variant's
-  /// translucent one, which darkens the light dark-theme accent under its dark
-  /// label.
-  Widget _addBooksAction(BuildContext context) {
-    const padding = EdgeInsets.symmetric(
-      vertical: ShosaiTokens.layoutButtonPrimaryPaddingVertical,
-      horizontal: ShosaiTokens.layoutButtonPrimaryPaddingHorizontal,
-    );
+  /// The phone's add-books action: the accent "+" at touch-target size, or
+  /// the cancel action while the import is in flight. Its hovered fill is the
+  /// design system's opaque accent-hover in each theme, not the Shad primary
+  /// variant's translucent one.
+  Widget _addBooksIcon(BuildContext context, AppLocalizations l10n) {
     final theme = ShadTheme.of(context);
-    final l10n = AppLocalizations.of(context);
-    final height = shosaiShadButtonHeight(context, padding: padding);
+    final model = widget.model;
     final hover = theme.brightness == Brightness.dark
         ? ShosaiTokens.appDarkPrimaryHovered
         : ShosaiTokens.appAccentHovered;
-    if (model.importing) {
-      return ShadButton(
-        height: height,
-        padding: padding,
+    final importing = model.importing;
+    return Tooltip(
+      message: importing ? l10n.cancelImportAction : l10n.addBooksAction,
+      child: ShadIconButton(
+        width: ShosaiTokens.sizeTouchTarget,
+        height: ShosaiTokens.sizeTouchTarget,
         hoverBackgroundColor: hover,
         pressedBackgroundColor: hover,
-        onPressed: onImportCancelled,
-        leading: const Icon(LucideIcons.x),
-        child: Text(l10n.cancelImportAction),
-      );
-    }
-    return ShadButton(
-      height: height,
-      padding: padding,
-      hoverBackgroundColor: hover,
-      pressedBackgroundColor: hover,
-      enabled: !model.busy,
-      onPressed: model.busy ? null : onImportRequested,
-      leading: const Icon(LucideIcons.plus),
-      child: Text(l10n.addBooksAction),
+        enabled: importing || !model.busy,
+        onPressed: importing
+            ? widget.onImportCancelled
+            : model.busy
+            ? null
+            : widget.onImportRequested,
+        icon: Icon(importing ? LucideIcons.x : LucideIcons.plus, size: 22),
+      ),
     );
   }
 }

@@ -3,6 +3,15 @@ part of 'controller.dart';
 typedef LibraryRemovalConfirmer =
     Future<bool> Function(FlutterLibraryBook book);
 typedef LibraryImportPicker = Future<LibraryImportSelection?> Function();
+
+/// A storage connection Add books or Settings can start: device folders on
+/// desktop, and storage accounts everywhere.
+enum LibraryConnectionKind { folder, dropbox, googleDrive }
+
+/// Opens the connections dialog, starting the given connection when there is
+/// one.
+typedef LibraryConnectionsManager =
+    Future<void> Function(LibraryConnectionKind? start);
 typedef LibraryImportRunner =
     Future<FlutterImportReport> Function(
       ShosaiRecords records,
@@ -55,13 +64,23 @@ final class LibraryImportSelection {
     this.directory = false,
     this.runner,
     this.cleanup,
-  });
+  }) : connect = null;
+
+  /// Add books chose a connection rather than files: nothing is imported, and
+  /// the connections dialog opens on that connection.
+  const LibraryImportSelection.connect(LibraryConnectionKind this.connect)
+    : paths = const [],
+      managed = false,
+      directory = false,
+      runner = null,
+      cleanup = null;
 
   final List<String> paths;
   final bool managed;
   final bool directory;
   final LibraryImportRunner? runner;
   final Future<void> Function()? cleanup;
+  final LibraryConnectionKind? connect;
 }
 
 final class LibraryModel {

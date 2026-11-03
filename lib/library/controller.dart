@@ -25,7 +25,7 @@ class LibraryController implements Listenable {
     required LibraryImportPicker pickImport,
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
-    Future<void> Function()? manageConnections,
+    LibraryConnectionsManager? manageConnections,
     LibraryProviderCleanupRetrier retryProviderCleanup =
         _ignoreProviderCleanupRetry,
     LibraryImportAdapterCanceller cancelImportAdapter =
@@ -34,7 +34,9 @@ class LibraryController implements Listenable {
     NoticeReporter noticeReporter = ignoreNotice,
     AppLocalizations Function() localizations = AppLocalizationsEn.new,
     OpenedDocuments? openedDocuments,
+    DateTime Function() now = DateTime.now,
   }) : _bridge = bridge,
+       _now = now,
        _records = recordsOf(bridge),
        _confirmRemoval = confirmRemoval,
        _pickImport = pickImport,
@@ -49,6 +51,14 @@ class LibraryController implements Listenable {
        _openedDocuments = openedDocuments;
 
   final FlutterBridge _bridge;
+  final DateTime Function() _now;
+
+  /// When the sources were last scanned or rescanned; a resume within
+  /// [resumeRescanInterval] of it does not scan again.
+  DateTime? _sourcesScannedAt;
+
+  /// The shortest time between two rescans started by returning to the app.
+  static const resumeRescanInterval = Duration(minutes: 1);
 
   /// The library's books and settings, served beside [_bridge].
   final ShosaiRecords _records;
@@ -56,7 +66,7 @@ class LibraryController implements Listenable {
   final LibraryImportPicker _pickImport;
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
-  final Future<void> Function()? _manageConnections;
+  final LibraryConnectionsManager? _manageConnections;
   final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
   final LibraryCoverEvicter _evictCover;
@@ -143,6 +153,7 @@ class LibraryController implements Listenable {
     switch (message) {
       case LibraryStarted():
         _retryCleanup();
+        _sourcesScannedAt = _now();
         _load();
         if (!_listeningForDocuments && _openedDocuments != null) {
           _listeningForDocuments = true;
@@ -154,7 +165,19 @@ class LibraryController implements Listenable {
         }
       case _LibraryDocumentsOpened(:final paths):
         _openedPaths.addAll(paths);
+      case LibraryResumed():
+        final scanned = _sourcesScannedAt;
+        if (_model.busy ||
+            _model.loading ||
+            (scanned != null &&
+                _now().difference(scanned) < resumeRescanInterval)) {
+          break;
+        }
+        // Unlike Refresh, a resume keeps the covers it already has.
+        _sourcesScannedAt = _now();
+        _load(refreshSources: true);
       case LibraryRefreshed():
+        _sourcesScannedAt = _now();
         _coverFailures.clear();
         _emit(_model.copyWith(coverRevision: _model.coverRevision + 1));
         _load(refreshSources: true);
@@ -331,7 +354,7 @@ class LibraryController implements Listenable {
         _emit(_model.copyWith(removingBookId: message.book.bookId));
         _remove(message.book);
       case LibraryConnectionsRequested():
-        _connections();
+        _connections(message.start);
       case _LibraryDebounceElapsed():
         if (message.revision == _queryRevision) _load();
       case _LibrarySettingsLoaded():
@@ -757,10 +780,12 @@ class LibraryController implements Listenable {
     unawaited(() async {
       BigInt? cancellation;
       LibraryImportSelection? selection;
+      LibraryConnectionKind? connect;
       try {
         selection = chosen ?? await _pickImport();
         _pendingImportAdapter = false;
         if (!_closing) _emit(_model);
+        connect = selection?.connect;
         if (selection == null || selection.paths.isEmpty) return;
         if (!_ownsAdapter(adapterRevision)) return;
         cancellation = _bridge.createCancellation();
@@ -836,6 +861,9 @@ class LibraryController implements Listenable {
           _releaseCancellation(cancellation);
         }
         dispatch(const _LibraryEffectFinished());
+        if (connect != null && _ownsAdapter(adapterRevision)) {
+          dispatch(LibraryConnectionsRequested(start: connect));
+        }
       }
     }());
   }
@@ -979,14 +1007,14 @@ class LibraryController implements Listenable {
     }());
   }
 
-  void _connections() {
+  void _connections(LibraryConnectionKind? start) {
     final manage = _manageConnections;
     if (_closing || _model.busy || manage == null) return;
     _beginEffect();
     final adapterRevision = ++_adapterRevision;
     unawaited(() async {
       try {
-        await manage();
+        await manage(start);
         if (_ownsAdapter(adapterRevision)) {
           dispatch(const LibraryRefreshed());
         }

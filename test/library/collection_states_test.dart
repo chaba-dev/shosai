@@ -11,6 +11,7 @@ import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
 import '../support/production_shell_harness.dart';
+import '../support/library_refresh.dart';
 
 /// Package 3C: the collection's distinct states and their recovery actions.
 ///
@@ -250,7 +251,7 @@ void main() {
     // A failing reload keeps the loaded grid and reports the failure in the
     // collection's own alert, with the retained retry action.
     bridge.failNextPage = true;
-    await tester.tap(find.byTooltip('Refresh library'));
+    await refreshLibrary(tester);
     await tester.pumpAndSettle();
 
     expect(
@@ -279,7 +280,7 @@ void main() {
     addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
     final bridge = await pumpShell(tester, books: [_book(1, 'A Book')]);
     bridge.failNextPage = true;
-    await tester.tap(find.byTooltip('Refresh library'));
+    await refreshLibrary(tester);
     await tester.pumpAndSettle();
 
     final scheme = shosaiShadTheme(Brightness.dark).colorScheme;
@@ -307,7 +308,7 @@ void main() {
   ) async {
     final bridge = await pumpShell(tester, books: const []);
     bridge.failNextPage = true;
-    await tester.tap(find.byTooltip('Refresh library'));
+    await refreshLibrary(tester);
     await tester.pumpAndSettle();
 
     expect(find.text('A quiet place for every book'), findsOneWidget);
@@ -344,7 +345,7 @@ void main() {
   ) async {
     final bridge = await pumpShell(tester, books: [_book(1, 'A Book')]);
     bridge.failNextPage = true;
-    await tester.tap(find.byTooltip('Refresh library'));
+    await refreshLibrary(tester);
     await tester.pumpAndSettle();
     expect(
       find.text(
@@ -443,11 +444,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // The action reached the typed import intent: the dialog is up and the
-    // header's add-books action became the import's cancel action.
+    // The action reached the typed import intent: the chooser is up, and the
+    // library behind it shows no import in flight until a choice is made.
     expect(find.text('Add books'), findsWidgets);
     expect(find.text('Choose files'), findsOneWidget);
-    expect(find.text('Cancel'), findsWidgets);
+    expect(find.text('Cancel'), findsNothing);
+    expect(find.text('Add your first books'), findsOneWidget);
     debugDefaultTargetPlatformOverride = null;
   });
 

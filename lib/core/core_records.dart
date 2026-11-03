@@ -3,6 +3,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart';
@@ -86,6 +87,8 @@ final class ShosaiCore {
       ),
       GoogleDriveConnectionProvider(),
     ],
+    // Phones and tablets read books only from files and storage accounts.
+    folderSources: !(Platform.isAndroid || Platform.isIOS),
   );
 
   /// Reads PDF metadata on import, and PDF text for the bridge's

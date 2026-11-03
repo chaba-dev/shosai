@@ -62,7 +62,20 @@ final class LibraryFolders {
     this._newPath,
     this._cache, {
     List<ConnectionProvider> providers = const [FolderConnectionProvider()],
+    this.folderSources = true,
   }) : _providers = List.unmodifiable(providers);
+
+  /// Whether device folders may be read as book sources. Phones and tablets
+  /// read books only from files they were given and from storage accounts
+  /// (RFD 12 outcome 6): a folder connection kept from an earlier build is
+  /// listed so it can be removed, but is never scanned or offered.
+  final bool folderSources;
+
+  bool _scans(LibraryConnection grant) =>
+      folderSources || grant.provider != FolderConnectionProvider.providerId;
+
+  List<LibraryConnection> get _scanned =>
+      _grants.where(_scans).toList(growable: false);
 
   final Preferences _preferences;
   final Library _library;
@@ -168,8 +181,17 @@ final class LibraryFolders {
     ),
   );
 
-  Future<LibraryConnection?> setup(String provider, String id) =>
-      _provider(provider).setup(id);
+  Future<LibraryConnection?> setup(String provider, String id) {
+    if (!folderSources && provider == FolderConnectionProvider.providerId) {
+      return Future.error(
+        const CoreException(
+          CoreErrorKind.unsupported,
+          'Folders are not book sources on this device.',
+        ),
+      );
+    }
+    return _provider(provider).setup(id);
+  }
 
   bool _sameAccess(LibraryConnection first, LibraryConnection second) =>
       first.provider == second.provider &&
@@ -237,7 +259,7 @@ final class LibraryFolders {
     if (!_catalogLoaded) {
       _catalog = [
         for (final file in await _locations.catalog())
-          if (_grants.any((grant) => grant.id == file.locationId))
+          if (_scanned.any((grant) => grant.id == file.locationId))
             LibrarySourceFile(
               file.locationId,
               _grant(file.locationId).label,
@@ -249,15 +271,16 @@ final class LibraryFolders {
     if (_discovered && !refresh) return List.unmodifiable(_catalog);
     final next = <LibrarySourceFile>[];
     final failures = <String>{};
-    for (final grant in _grants) {
+    final scanned = _scanned;
+    for (final grant in scanned) {
       cancellation.throwIfCancelled();
       final generation = _generations[grant.id]!;
       final entries = <String, LocationEntry>{};
       void report() => onProgress?.call(
         LibraryDiscoveryProgress(
           source: grant.directoryLabel ?? grant.label,
-          sourceIndex: _grants.indexOf(grant) + 1,
-          sourceCount: _grants.length,
+          sourceIndex: scanned.indexOf(grant) + 1,
+          sourceCount: scanned.length,
           booksFound: entries.length,
         ),
       );

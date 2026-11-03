@@ -104,12 +104,6 @@ abstract class AppLocalizations {
   /// **'Library'**
   String get libraryTitle;
 
-  /// Iced reference key: library-subtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Your private reading room'**
-  String get librarySubtitle;
-
   /// No description provided for @libraryCheckingSource.
   ///
   /// In en, this message translates to:
@@ -1305,14 +1299,32 @@ abstract class AppLocalizations {
   /// No description provided for @importChooseFolder.
   ///
   /// In en, this message translates to:
-  /// **'Choose a folder'**
+  /// **'Connect a folder'**
   String get importChooseFolder;
 
   /// No description provided for @importChooseFolderHint.
   ///
   /// In en, this message translates to:
-  /// **'Find supported books in all subfolders'**
+  /// **'Books stay in the folder, and new ones appear on the shelf. Works with Dropbox, iCloud Drive and other synced folders.'**
   String get importChooseFolderHint;
+
+  /// No description provided for @importCopyFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy into Shōsai instead'**
+  String get importCopyFolder;
+
+  /// No description provided for @importCopyFolderHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Keeps a private snapshot of the folder’s books'**
+  String get importCopyFolderHint;
+
+  /// No description provided for @importStorageHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Books stay in your storage, and new ones appear on the shelf'**
+  String get importStorageHint;
 
   /// No description provided for @importReviewBooks.
   ///
@@ -1679,6 +1691,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Next page'**
   String get locationNextPage;
+
+  /// No description provided for @locationNoFoldersMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect Dropbox or Google Drive to read the books stored there.'**
+  String get locationNoFoldersMobile;
+
+  /// No description provided for @locationFolderNotRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Folders aren’t read on phones and tablets'**
+  String get locationFolderNotRead;
+
+  /// No description provided for @libraryLocationsDescriptionMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage the storage accounts that supply your library.'**
+  String get libraryLocationsDescriptionMobile;
 
   /// The tab switcher's action that returns to the current book.
   ///
