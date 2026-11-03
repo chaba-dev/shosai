@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# usage: mkvideo.sh <frames-dir> <prefix> <out.mp4> <slowdown>
+# Frames are named <prefix>-NNN-<ms>.png; each is shown for its real duration x slowdown,
+# with 0.6 s of the first and last frame around it.
+set -euo pipefail
+d=$1; p=$2; out=$3; slow=$4
+FF=/nix/store/3vyh51l0zwbx7337injvmw2kz7v5x0jm-ffmpeg-7.1-bin/bin/ffmpeg
+list=$(mktemp); files=($(ls "$d"/"$p"-[0-9][0-9][0-9]-*.png | sort))
+prev=""; prevms=0; n=${#files[@]}
+for i in "${!files[@]}"; do
+  f=${files[$i]}; ms=$(basename "$f" .png | sed -E 's/.*-(-?[0-9]+)$/\1/')
+  if [ -n "$prev" ]; then
+    dur=$(awk -v a=$prevms -v b=$ms -v s=$slow 'BEGIN{d=(b-a)/1000*s; if(d<0.02)d=0.02; if(a<0)d=0.6; print d}')
+    echo "file '$prev'" >> $list; echo "duration $dur" >> $list
+  fi
+  prev=$f; prevms=$ms
+done
+echo "file '$prev'" >> $list; echo "duration 0.8" >> $list; echo "file '$prev'" >> $list
+$FF -y -loglevel error -f concat -safe 0 -i $list -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=60,format=yuv420p" -c:v libx264 -crf 20 "$out"
+rm -f $list

@@ -1,0 +1,198 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/C3255EE5-85CE-4AB5-BB26-E654BC4090FF/tmp/qp-frames-j9gQd4
+QP data-dir: /private/var/mobile/Containers/Data/Application/C3255EE5-85CE-4AB5-BB26-E654BC4090FF/tmp/qp-data-b37ooQ
+QP imported: 2
+QP view: logical 1180.0x820.0 dpr 2.0 refresh 60.0 locale en
+QP ipad-01-library-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start size: 1180.0x820.0
+QP ipad-01-library-start stage: 
+QP ipad-01-library-start tap-area: 
+QP ipad-01-library-start page: 
+QP ipad-01-library-start pdf-page: 
+QP ipad-01-library-start folio: 
+QP ipad-01-library-start location:  []
+QP ipad-01-library-start header: 
+QP ipad-01-library-start scrim: 
+QP ipad-01-library-start chrome: false
+SHOT ipad-01-library-start
+# screenshot ipad-01-library-start done
+QP epub-spread: true
+QP epub-open-ok: true
+QP epub-open-0: 0 [page 1]
+QP ipad-02-epub-cover padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-02-epub-cover size: 1180.0x820.0
+QP ipad-02-epub-cover stage: (56.0,0.0 1124.0x820.0)
+QP ipad-02-epub-cover tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-02-epub-cover page: (80.0,24.0 1076.0x772.0)
+QP ipad-02-epub-cover pdf-page: 
+QP ipad-02-epub-cover folio: (346.4,735.0 29.3x12.0)
+QP ipad-02-epub-cover location: 0 [page 1]
+QP ipad-02-epub-cover header: (56.0,-56.0 1124.0x56.0)
+QP ipad-02-epub-cover scrim: 
+QP ipad-02-epub-cover chrome: false
+SHOT ipad-02-epub-cover
+# screenshot ipad-02-epub-cover done
+QP epub-open-1: 0 [page 2 | page 3]
+QP ipad-03-epub-after-cover padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-03-epub-after-cover size: 1180.0x820.0
+QP ipad-03-epub-after-cover stage: (56.0,0.0 1124.0x820.0)
+QP ipad-03-epub-after-cover tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-03-epub-after-cover page: (80.0,24.0 1076.0x772.0)
+QP ipad-03-epub-after-cover pdf-page: 
+QP ipad-03-epub-after-cover folio: (345.4,735.0 31.1x12.0) (859.4,735.0 31.2x12.0)
+QP ipad-03-epub-after-cover location: 0 [page 2 | page 3]
+QP ipad-03-epub-after-cover header: (56.0,-56.0 1124.0x56.0)
+QP ipad-03-epub-after-cover scrim: 
+QP ipad-03-epub-after-cover chrome: false
+SHOT ipad-03-epub-after-cover
+# screenshot ipad-03-epub-after-cover done
+QP epub-open-2: 1368 [page 4 | page 5]
+QP epub-open-3: 1472 [page 6 | page 7]
+QP epub-open-4: 3692 [page 8 | page 9]
+QP epub-opening-ok: true
+QP epub-aa-scrim: (56.0,88.0 1124.0x671.0)
+QP epub-aa-header: (56.0,32.0 1124.0x56.0)
+QP ipad-04-epub-aa-panel padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-04-epub-aa-panel size: 1180.0x820.0
+QP ipad-04-epub-aa-panel stage: (56.0,0.0 1124.0x820.0)
+QP ipad-04-epub-aa-panel tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-04-epub-aa-panel page: (80.0,24.0 1076.0x772.0)
+QP ipad-04-epub-aa-panel pdf-page: 
+QP ipad-04-epub-aa-panel folio: (345.4,735.0 31.2x12.0) (859.4,735.0 31.2x12.0)
+QP ipad-04-epub-aa-panel location: 3692 [page 8 | page 9]
+QP ipad-04-epub-aa-panel header: (56.0,32.0 1124.0x56.0)
+QP ipad-04-epub-aa-panel scrim: (56.0,88.0 1124.0x671.0)
+QP ipad-04-epub-aa-panel chrome: true
+SHOT ipad-04-epub-aa-panel
+# screenshot ipad-04-epub-aa-panel done
+QP epub-aa-ok: true
+QP epub-held-curl: true
+QP epub-held padding: L0.0 T32.0 R0.0 B25.0
+QP epub-held size: 1180.0x820.0
+QP epub-held stage: (56.0,0.0 1124.0x820.0)
+QP epub-held tap-area: (80.0,24.0 1076.0x772.0)
+QP epub-held page: (80.0,24.0 1076.0x772.0)
+QP epub-held pdf-page: 
+QP epub-held folio: (345.4,735.0 31.2x12.0) (859.4,735.0 31.2x12.0)
+QP epub-held location: 3692 [page 8 | page 9]
+QP epub-held header: (56.0,-56.0 1124.0x56.0)
+QP epub-held scrim: 
+QP epub-held chrome: false
+SHOT ipad-05-epub-curl-held
+# screenshot ipad-05-epub-curl-held done
+QP epub-held-release-curl: false
+QP epub-rec-forward: 3692 [page 8 | page 9] -> 6113 [page 10 | page 11]; up 5ms; curl first 9ms leaf moves 40ms last 375ms; folio widget changed 9ms; frames 9:C0.00* 24:C0.00i* 40:C0.00i* 57:C0.02i* 74:C0.04i* 91:C0.07i* 107:C0.12i* 124:C0.17i* 141:C0.23i* 157:C0.30i* 174:C0.38i* 191:C0.46i* 208:C0.54i* 224:C0.62i* 241:C0.70i* 257:C0.77i* 275:C0.83i* 291:C0.88i* 308:C0.93i* 325:C0.96i* 342:C0.98i* 358:C1.00i* 375:C1.00i* 397:-* 407:-* 424:-* 441:-* 458:-* 474:-* 491:-* 508:-* 524:-* 541:-* 558:-* 574:-* 591:-*
+QP epub-held-ok: true
+QP ipad-06-epub-contents padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-06-epub-contents size: 1180.0x820.0
+QP ipad-06-epub-contents stage: (56.0,0.0 1124.0x820.0)
+QP ipad-06-epub-contents tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-06-epub-contents page: (80.0,24.0 1076.0x772.0)
+QP ipad-06-epub-contents pdf-page: 
+QP ipad-06-epub-contents folio: (343.4,735.0 35.3x12.0) (858.4,735.0 33.2x12.0)
+QP ipad-06-epub-contents location: 6113 [page 10 | page 11]
+QP ipad-06-epub-contents header: (56.0,32.0 1124.0x56.0)
+QP ipad-06-epub-contents scrim: (56.0,88.0 1124.0x671.0)
+QP ipad-06-epub-contents chrome: true
+SHOT ipad-06-epub-contents
+# screenshot ipad-06-epub-contents done
+QP ipad-07-epub-contents-preview padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-07-epub-contents-preview size: 1180.0x820.0
+QP ipad-07-epub-contents-preview stage: (56.0,0.0 1124.0x820.0)
+QP ipad-07-epub-contents-preview tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-07-epub-contents-preview page: (80.0,24.0 1076.0x772.0)
+QP ipad-07-epub-contents-preview pdf-page: 
+QP ipad-07-epub-contents-preview folio: (343.4,735.0 35.3x12.0) (858.4,735.0 33.2x12.0)
+QP ipad-07-epub-contents-preview location: 6113 [page 10 | page 11]
+QP ipad-07-epub-contents-preview header: (56.0,32.0 1124.0x56.0)
+QP ipad-07-epub-contents-preview scrim: 
+QP ipad-07-epub-contents-preview chrome: false
+SHOT ipad-07-epub-contents-preview
+# screenshot ipad-07-epub-contents-preview done
+QP go-to-shown: true
+QP epub-jump-numbered-after-ms: 0
+QP epub-jump: 82300 [page 535 | page 536]
+QP ipad-08-epub-jumped-chapter-50 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-08-epub-jumped-chapter-50 size: 1180.0x820.0
+QP ipad-08-epub-jumped-chapter-50 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-08-epub-jumped-chapter-50 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-08-epub-jumped-chapter-50 page: (80.0,24.0 1076.0x772.0)
+QP ipad-08-epub-jumped-chapter-50 pdf-page: 
+QP ipad-08-epub-jumped-chapter-50 folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP ipad-08-epub-jumped-chapter-50 location: 82300 [page 535 | page 536]
+QP ipad-08-epub-jumped-chapter-50 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-08-epub-jumped-chapter-50 scrim: 
+QP ipad-08-epub-jumped-chapter-50 chrome: false
+SHOT ipad-08-epub-jumped-chapter-50
+# screenshot ipad-08-epub-jumped-chapter-50 done
+QP epub-jump-next: 84703 [page 537 | page 538]
+QP epub-jump-back: 82300 [page 535 | page 536]
+QP epub-jump-ok: true
+QP ipad-09-epub-text-larger padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-09-epub-text-larger size: 1180.0x820.0
+QP ipad-09-epub-text-larger stage: (56.0,0.0 1124.0x820.0)
+QP ipad-09-epub-text-larger tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-09-epub-text-larger page: (80.0,24.0 1076.0x772.0)
+QP ipad-09-epub-text-larger pdf-page: 
+QP ipad-09-epub-text-larger folio: (339.5,735.0 42.9x12.0) (853.8,735.0 42.5x12.0)
+QP ipad-09-epub-text-larger location: 82240 [page 686 | page 687]
+QP ipad-09-epub-text-larger header: (56.0,-56.0 1124.0x56.0)
+QP ipad-09-epub-text-larger scrim: 
+QP ipad-09-epub-text-larger chrome: false
+SHOT ipad-09-epub-text-larger
+# screenshot ipad-09-epub-text-larger done
+QP ipad-10-epub-text-back padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-10-epub-text-back size: 1180.0x820.0
+QP ipad-10-epub-text-back stage: (56.0,0.0 1124.0x820.0)
+QP ipad-10-epub-text-back tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-10-epub-text-back page: (80.0,24.0 1076.0x772.0)
+QP ipad-10-epub-text-back pdf-page: 
+QP ipad-10-epub-text-back folio: (339.4,735.0 43.2x12.0) (853.6,735.0 42.7x12.0)
+QP ipad-10-epub-text-back location: 82215 [page 544 | page 545]
+QP ipad-10-epub-text-back header: (56.0,-56.0 1124.0x56.0)
+QP ipad-10-epub-text-back scrim: 
+QP ipad-10-epub-text-back chrome: false
+SHOT ipad-10-epub-text-back
+# screenshot ipad-10-epub-text-back done
+QP epub-text-size: 82300 [page 535 | page 536] -> larger 82240 [page 686 | page 687] -> back 82215 [page 544 | page 545]
+QP epub-text-size-same-folio: false
+QP epub-text-size-ok: true
+QP animations: true -> false
+QP go-to-shown: false
+QP epub-paging-start: 82215 [page 544 | page 545]
+QP epub-paging-trail: 
+QP epub-paging: 1 taps in 0s -> 84578 [page 546 | page 547]
+QP epub-paging-vs-jump: paged "page 546 | page 547" jumped "page 535 | page 536" same false same-place false
+QP ipad-11-epub-paged-to-chapter-50 padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-epub-paged-to-chapter-50 size: 1180.0x820.0
+QP ipad-11-epub-paged-to-chapter-50 stage: (56.0,0.0 1124.0x820.0)
+QP ipad-11-epub-paged-to-chapter-50 tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-11-epub-paged-to-chapter-50 page: (80.0,24.0 1076.0x772.0)
+QP ipad-11-epub-paged-to-chapter-50 pdf-page: 
+QP ipad-11-epub-paged-to-chapter-50 folio: (339.5,735.0 43.0x12.0) (853.8,735.0 42.5x12.0)
+QP ipad-11-epub-paged-to-chapter-50 location: 84578 [page 546 | page 547]
+QP ipad-11-epub-paged-to-chapter-50 header: (56.0,-56.0 1124.0x56.0)
+QP ipad-11-epub-paged-to-chapter-50 scrim: 
+QP ipad-11-epub-paged-to-chapter-50 chrome: false
+SHOT ipad-11-epub-paged-to-chapter-50
+# screenshot ipad-11-epub-paged-to-chapter-50 done
+QP animations: false -> true
+QP epub-paging-ok: true
+QP end-in-library: true
+QP ipad-12-library-end padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-12-library-end size: 1180.0x820.0
+QP ipad-12-library-end stage: 
+QP ipad-12-library-end tap-area: 
+QP ipad-12-library-end page: 
+QP ipad-12-library-end pdf-page: 
+QP ipad-12-library-end folio: 
+QP ipad-12-library-end location:  []
+QP ipad-12-library-end header: 
+QP ipad-12-library-end scrim: 
+QP ipad-12-library-end chrome: false
+SHOT ipad-12-library-end
+# screenshot ipad-12-library-end done
+QP end-library-ok: true
+QP final-exception: null
+DONE

@@ -1,0 +1,142 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/F9E21E1B-2D20-42E4-873F-D4B4499D9BFC/tmp/qp-frames-NI7PGm
+QP data-dir: /private/var/mobile/Containers/Data/Application/F9E21E1B-2D20-42E4-873F-D4B4499D9BFC/tmp/qp-data-hLcXt1
+QP imported: 2
+QP view: logical 430.0x932.0 dpr 3.0 refresh 120.0 locale ja
+QP iphone-01-library-start padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-01-library-start size: 430.0x932.0
+QP iphone-01-library-start stage: 
+QP iphone-01-library-start tap-area: 
+QP iphone-01-library-start page: 
+QP iphone-01-library-start pdf-page: 
+QP iphone-01-library-start folio: 
+QP iphone-01-library-start location:  []
+QP iphone-01-library-start header: 
+QP iphone-01-library-start scrim: 
+QP iphone-01-library-start chrome: false
+SHOT iphone-01-library-start
+# screenshot iphone-01-library-start done
+QP epub-spread: false
+QP epub-open-ok: true
+QP chrome-shown: true
+QP iphone-02-epub-contents padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-02-epub-contents size: 430.0x932.0
+QP iphone-02-epub-contents stage: (0.0,0.0 430.0x932.0)
+QP iphone-02-epub-contents tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-02-epub-contents page: 
+QP iphone-02-epub-contents pdf-page: 
+QP iphone-02-epub-contents folio: (195.9,876.5 38.3x15.0)
+QP iphone-02-epub-contents location: 0 [1ページ]
+QP iphone-02-epub-contents header: (0.0,59.0 430.0x56.0)
+QP iphone-02-epub-contents scrim: (0.0,115.0 430.0x719.0)
+QP iphone-02-epub-contents chrome: true
+SHOT iphone-02-epub-contents
+# screenshot iphone-02-epub-contents done
+QP iphone-03-epub-contents-preview padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-03-epub-contents-preview size: 430.0x932.0
+QP iphone-03-epub-contents-preview stage: (0.0,0.0 430.0x932.0)
+QP iphone-03-epub-contents-preview tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-03-epub-contents-preview page: 
+QP iphone-03-epub-contents-preview pdf-page: 
+QP iphone-03-epub-contents-preview folio: (195.9,876.5 38.3x15.0)
+QP iphone-03-epub-contents-preview location: 0 [1ページ]
+QP iphone-03-epub-contents-preview header: (0.0,59.0 430.0x56.0)
+QP iphone-03-epub-contents-preview scrim: 
+QP iphone-03-epub-contents-preview chrome: false
+SHOT iphone-03-epub-contents-preview
+# screenshot iphone-03-epub-contents-preview done
+QP go-to-shown: true
+QP epub-jump-numbered-after-ms: 1
+QP epub-jump: 50082342 [479ページ]
+QP iphone-04-epub-jumped-chapter-50 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-04-epub-jumped-chapter-50 size: 430.0x932.0
+QP iphone-04-epub-jumped-chapter-50 stage: (0.0,0.0 430.0x932.0)
+QP iphone-04-epub-jumped-chapter-50 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-04-epub-jumped-chapter-50 page: 
+QP iphone-04-epub-jumped-chapter-50 pdf-page: 
+QP iphone-04-epub-jumped-chapter-50 folio: (187.8,876.5 54.3x15.0)
+QP iphone-04-epub-jumped-chapter-50 location: 50082342 [479ページ]
+QP iphone-04-epub-jumped-chapter-50 header: (0.0,-56.0 430.0x56.0)
+QP iphone-04-epub-jumped-chapter-50 scrim: 
+QP iphone-04-epub-jumped-chapter-50 chrome: false
+SHOT iphone-04-epub-jumped-chapter-50
+# screenshot iphone-04-epub-jumped-chapter-50 done
+QP epub-jump-next: 50083659 [480ページ]
+QP epub-jump-back: 50082342 [479ページ]
+QP epub-jump-ok: true
+QP chrome-shown: true
+QP animations: true -> false
+QP chrome-shown: true
+QP go-to-shown: true
+QP epub-paging-start: 10029431 [29ページ]
+QP epub-paging-trail: 10053800 [54ページ] ; 10080608 [79ページ] ; 10109399 [104ページ] ; 20024221 [129ページ] ; 20052752 [154ページ] ; 20082715 [179ページ] ; 30001789 [204ページ] ; 30032028 [229ページ] ; 30061607 [254ページ] ; 30092137 [279ページ] ; 40002848 [304ページ] ; 40034780 [329ページ] ; 40066356 [354ページ] ; 40097578 [379ページ] ; 40129404 [404ページ] ; 50019330 [429ページ] ; 50051270 [454ページ] ; 50082342 [479ページ]
+QP epub-paging: 450 taps in 51s -> 50082342 [479ページ]
+QP epub-paging-vs-jump: paged "479ページ" jumped "479ページ" same true same-place true
+QP iphone-05-epub-paged-to-chapter-50 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-05-epub-paged-to-chapter-50 size: 430.0x932.0
+QP iphone-05-epub-paged-to-chapter-50 stage: (0.0,0.0 430.0x932.0)
+QP iphone-05-epub-paged-to-chapter-50 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-05-epub-paged-to-chapter-50 page: 
+QP iphone-05-epub-paged-to-chapter-50 pdf-page: 
+QP iphone-05-epub-paged-to-chapter-50 folio: (187.8,876.5 54.3x15.0)
+QP iphone-05-epub-paged-to-chapter-50 location: 50082342 [479ページ]
+QP iphone-05-epub-paged-to-chapter-50 header: (0.0,-56.0 430.0x56.0)
+QP iphone-05-epub-paged-to-chapter-50 scrim: 
+QP iphone-05-epub-paged-to-chapter-50 chrome: false
+SHOT iphone-05-epub-paged-to-chapter-50
+# screenshot iphone-05-epub-paged-to-chapter-50 done
+QP chrome-shown: true
+QP animations: false -> true
+QP epub-paging-ok: true
+QP chrome-shown: true
+QP iphone-06-epub-text-larger padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-06-epub-text-larger size: 430.0x932.0
+QP iphone-06-epub-text-larger stage: (0.0,0.0 430.0x932.0)
+QP iphone-06-epub-text-larger tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-06-epub-text-larger page: 
+QP iphone-06-epub-text-larger pdf-page: 
+QP iphone-06-epub-text-larger folio: (187.6,876.5 54.7x15.0)
+QP iphone-06-epub-text-larger location: 50081456 [594ページ]
+QP iphone-06-epub-text-larger header: (0.0,-56.0 430.0x56.0)
+QP iphone-06-epub-text-larger scrim: 
+QP iphone-06-epub-text-larger chrome: false
+SHOT iphone-06-epub-text-larger
+# screenshot iphone-06-epub-text-larger done
+QP chrome-shown: true
+QP epub-text-back-after-10s: 50081305 [484ページ]
+QP epub-text-back-after-30s: 50081305 [484ページ]
+QP iphone-07-epub-text-back padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-07-epub-text-back size: 430.0x932.0
+QP iphone-07-epub-text-back stage: (0.0,0.0 430.0x932.0)
+QP iphone-07-epub-text-back tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-07-epub-text-back page: 
+QP iphone-07-epub-text-back pdf-page: 
+QP iphone-07-epub-text-back folio: (187.4,876.5 55.3x15.0)
+QP iphone-07-epub-text-back location: 50081305 [484ページ]
+QP iphone-07-epub-text-back header: (0.0,-56.0 430.0x56.0)
+QP iphone-07-epub-text-back scrim: 
+QP iphone-07-epub-text-back chrome: false
+SHOT iphone-07-epub-text-back
+# screenshot iphone-07-epub-text-back done
+QP epub-text-size: 50082342 [479ページ] -> larger 50081456 [594ページ] -> back 50081305 [484ページ]
+QP epub-text-size-same-folio: false
+QP epub-text-size-ok: true
+QP chrome-shown: true
+QP end-in-library: true
+QP iphone-08-library-end padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-08-library-end size: 430.0x932.0
+QP iphone-08-library-end stage: 
+QP iphone-08-library-end tap-area: 
+QP iphone-08-library-end page: 
+QP iphone-08-library-end pdf-page: 
+QP iphone-08-library-end folio: 
+QP iphone-08-library-end location:  []
+QP iphone-08-library-end header: 
+QP iphone-08-library-end scrim: 
+QP iphone-08-library-end chrome: false
+SHOT iphone-08-library-end
+# screenshot iphone-08-library-end done
+QP end-library-ok: true
+QP final-exception: null
+DONE

@@ -1,0 +1,39 @@
+# usage: analyze.py <frames-dir> <prefix> <page x,y,w,h> <folio x,y,w,h> [scale]
+# For each in-app frame of a curl: how far the place line has changed (0 = old,
+# 1 = new) and how many pixels changed outside the page and its shadow.
+import sys, glob, os, re
+from PIL import Image, ImageChops
+d, prefix = sys.argv[1], sys.argv[2]
+page = [float(v) for v in sys.argv[3].split(',')]
+folio = [float(v) for v in sys.argv[4].split(',')]
+scale = float(sys.argv[5]) if len(sys.argv) > 5 else 1.0
+files = sorted(glob.glob(os.path.join(d, prefix + '-[0-9][0-9][0-9]-*.png')))
+frames = [(int(re.search(r'-(-?\d+)\.png$', f).group(1)), Image.open(f).convert('RGB')) for f in files]
+first, last = frames[0][1], frames[-1][1]
+W, H = first.size
+def box(r, pad=0):
+    x, y, w, h = [v * scale for v in r]
+    return (max(0, int(x - pad)), max(0, int(y - pad)), min(W, int(x + w + pad)), min(H, int(y + h + pad)))
+fb = box(folio, 4)
+pb = box(page, 0)
+shadow = 28 * scale
+def diffcount(a, b, region=None, exclude=()):
+    diff = ImageChops.difference(a, b).convert('L').point(lambda v: 255 if v > 24 else 0)
+    if region: diff = diff.crop(region)
+    else:
+        diff = diff.copy()
+        for e in exclude: diff.paste(0, e)
+    return sum(1 for v in diff.getdata() if v)
+def mad(a, b, region):
+    da = ImageChops.difference(a.crop(region), b.crop(region)).convert('L')
+    px = list(da.getdata()); return sum(px) / max(1, len(px))
+old_new = mad(first, last, fb)
+print(f'{prefix}: {len(frames)} frames, size {W}x{H}, page {pb}, folio {fb}, line old-vs-new MAD {old_new:.1f}')
+pg_out = box(page, shadow)
+for ms, im in frames:
+    f_old = mad(im, first, fb); f_new = mad(im, last, fb)
+    line = 'old' if f_old < 1 else 'new' if f_new < 1 else f'mix {f_old/(f_old+f_new):.2f}'
+    outside = diffcount(im, first, None, exclude=[pg_out, fb])
+    # the shadow ring: page box + shadow minus the page itself and the line
+    ring = diffcount(im, first, pg_out) - diffcount(im, first, pb) - diffcount(im, first, fb)
+    print(f'  {ms:5d}ms line {line:9s} outside-changed-px {outside:6d} shadow-ring-changed-px {max(0, ring):6d}')

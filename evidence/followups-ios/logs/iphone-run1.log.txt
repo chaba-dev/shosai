@@ -1,0 +1,245 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/02E04CF4-9250-4A18-A3E2-93E3D3889685/tmp/qp-frames-jn43Gh
+QP data-dir: /private/var/mobile/Containers/Data/Application/02E04CF4-9250-4A18-A3E2-93E3D3889685/tmp/qp-data-K8K3C9
+QP imported: 2
+QP view: logical 430.0x932.0 dpr 3.0 refresh 120.0 locale ja
+QP iphone-01-library-start padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-01-library-start size: 430.0x932.0
+QP iphone-01-library-start stage: 
+QP iphone-01-library-start tap-area: 
+QP iphone-01-library-start page: 
+QP iphone-01-library-start pdf-page: 
+QP iphone-01-library-start folio: 
+QP iphone-01-library-start location:  []
+QP iphone-01-library-start header: 
+QP iphone-01-library-start scrim: 
+QP iphone-01-library-start chrome: false
+SHOT iphone-01-library-start
+# screenshot iphone-01-library-start done
+QP pdf-spread: false
+QP iphone-02-pdf-quiet-place-line padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-02-pdf-quiet-place-line size: 430.0x932.0
+QP iphone-02-pdf-quiet-place-line stage: (0.0,0.0 430.0x932.0)
+QP iphone-02-pdf-quiet-place-line tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-02-pdf-quiet-place-line page: 
+QP iphone-02-pdf-quiet-place-line pdf-page: 
+QP iphone-02-pdf-quiet-place-line folio: (161.6,871.0 106.9x15.0)
+QP iphone-02-pdf-quiet-place-line location: 2 [15 ページ中 3 ページ]
+QP iphone-02-pdf-quiet-place-line header: (0.0,-56.0 430.0x56.0)
+QP iphone-02-pdf-quiet-place-line scrim: 
+QP iphone-02-pdf-quiet-place-line chrome: false
+SHOT iphone-02-pdf-quiet-place-line
+# screenshot iphone-02-pdf-quiet-place-line done
+QP pdf-open-ok: true
+QP pdf-tap-0 forward: 2 [15 ページ中 3 ページ] -> 3 [15 ページ中 4 ページ]; up 0ms; curl first 23ms leaf moves 41ms last 371ms; folio widget changed 23ms; frames 7:- 12:- 23:C0.00* 30:C0.00i* 41:C0.00i* 45:C0.00i* 54:C0.01i* 62:C0.02i* 70:C0.03i* 79:C0.04i* 87:C0.06i* 95:C0.07i* 103:C0.09i* 112:C0.12i* 120:C0.14i* 128:C0.17i* 137:C0.20i* 145:C0.23i* 153:C0.27i* 162:C0.30i* 170:C0.34i* 178:C0.38i* 187:C0.42i* 195:C0.46i* 203:C0.50i* 212:C0.54i* 220:C0.58i* 228:C0.62i* 237:C0.66i* 245:C0.70i* 254:C0.73i* 262:C0.77i* 270:C0.80i* 278:C0.83i* 287:C0.86i* 295:C0.88i* 304:C0.91i* 312:C0.93i* 321:C0.94i* 329:C0.96i* 337:C0.97i* 346:C0.98i* 354:C0.99i* 362:C1.00i* 371:C1.00i* 384:-* 387:-* 395:-* 404:-* 412:-* 420:-* 429:-* 437:-* 445:-* 454:-* 462:-* 470:-* 479:-* 487:-* 495:-* 504:-* 512:-* 520:-* 529:-* 537:-* 545:-* 554:-* 562:-* 570:-* 579:-*
+QP pdf-tap-1 back: 3 [15 ページ中 4 ページ] -> 2 [15 ページ中 3 ページ]; up 1ms; curl first 18ms leaf moves 40ms last 381ms; folio widget changed 18ms; frames 6:- 18:C0.00* 33:C0.00i* 40:C0.00i* 64:C0.01i* 72:C0.03i* 81:C0.04i* 89:C0.06i* 97:C0.07i* 106:C0.09i* 114:C0.11i* 122:C0.14i* 131:C0.17i* 139:C0.20i* 147:C0.23i* 156:C0.26i* 164:C0.30i* 172:C0.34i* 181:C0.38i* 189:C0.42i* 197:C0.46i* 206:C0.50i* 214:C0.54i* 222:C0.58i* 231:C0.62i* 239:C0.66i* 248:C0.69i* 256:C0.73i* 265:C0.77i* 273:C0.80i* 281:C0.83i* 290:C0.86i* 298:C0.88i* 307:C0.90i* 315:C0.92i* 323:C0.94i* 332:C0.96i* 340:C0.97i* 348:C0.98i* 356:C0.99i* 365:C1.00i* 373:C1.00i* 381:C1.00i* 393:-* 398:-* 406:-* 414:-* 423:-* 431:-* 439:-* 448:-* 456:-* 464:-* 473:-* 481:-* 489:-* 498:-* 506:-* 514:-* 523:-* 531:-* 539:-* 548:-* 556:-* 564:-* 573:-* 581:-* 589:-*
+QP pdf-tap-2 forward: 2 [15 ページ中 3 ページ] -> 3 [15 ページ中 4 ページ]; up 0ms; curl first 18ms leaf moves 37ms last 364ms; folio widget changed 18ms; frames 6:- 18:C0.00* 22:C0.00i* 37:C0.00i* 47:C0.01i* 56:C0.02i* 64:C0.03i* 74:C0.04i* 80:C0.06i* 88:C0.07i* 97:C0.09i* 105:C0.12i* 113:C0.14i* 122:C0.17i* 130:C0.20i* 138:C0.23i* 147:C0.27i* 155:C0.30i* 164:C0.34i* 172:C0.38i* 180:C0.42i* 189:C0.46i* 197:C0.50i* 205:C0.54i* 214:C0.58i* 222:C0.62i* 231:C0.66i* 239:C0.70i* 247:C0.73i* 256:C0.77i* 264:C0.80i* 273:C0.83i* 281:C0.86i* 289:C0.88i* 298:C0.91i* 306:C0.93i* 314:C0.94i* 322:C0.96i* 331:C0.97i* 339:C0.98i* 347:C0.99i* 355:C1.00i* 364:C1.00i* 373:-* 380:-* 389:-* 397:-* 405:-* 414:-* 422:-* 430:-* 439:-* 447:-* 455:-* 464:-* 472:-* 480:-* 489:-* 497:-* 505:-* 514:-* 522:-* 531:-* 539:-* 547:-* 555:-* 564:-* 572:-*
+QP pdf-tap-3 back: 3 [15 ページ中 4 ページ] -> 2 [15 ページ中 3 ページ]; up 0ms; curl first 17ms leaf moves 33ms last 364ms; folio widget changed 17ms; frames 6:- 17:C0.00* 22:C0.00i* 33:C0.00i* 49:C0.01i* 61:C0.02i* 73:C0.04i* 80:C0.06i* 89:C0.07i* 97:C0.09i* 105:C0.12i* 114:C0.14i* 122:C0.17i* 130:C0.20i* 139:C0.23i* 147:C0.27i* 155:C0.30i* 163:C0.34i* 172:C0.38i* 180:C0.42i* 189:C0.46i* 197:C0.50i* 206:C0.54i* 214:C0.58i* 223:C0.62i* 231:C0.66i* 239:C0.70i* 248:C0.73i* 256:C0.77i* 264:C0.80i* 273:C0.83i* 281:C0.86i* 289:C0.88i* 297:C0.91i* 305:C0.93i* 314:C0.94i* 322:C0.96i* 331:C0.97i* 339:C0.98i* 347:C0.99i* 356:C1.00i* 364:C1.00i* 376:-* 380:-* 389:-* 397:-* 405:-* 414:-* 422:-* 430:-* 439:-* 447:-* 455:-* 464:-* 472:-* 480:-* 489:-* 497:-* 505:-* 514:-* 522:-* 530:-* 539:-* 547:-* 555:-* 564:-* 572:-*
+QP pdf-tap-4 forward: 2 [15 ページ中 3 ページ] -> 3 [15 ページ中 4 ページ]; up 1ms; curl first 19ms leaf moves 37ms last 365ms; folio widget changed 19ms; frames 7:- 19:C0.00* 23:C0.00i* 37:C0.00i* 47:C0.01i* 56:C0.02i* 64:C0.03i* 72:C0.04i* 81:C0.06i* 89:C0.07i* 97:C0.09i* 106:C0.12i* 114:C0.14i* 122:C0.17i* 131:C0.20i* 139:C0.23i* 147:C0.27i* 156:C0.30i* 164:C0.34i* 172:C0.38i* 181:C0.42i* 189:C0.46i* 197:C0.50i* 206:C0.54i* 214:C0.58i* 222:C0.62i* 231:C0.66i* 239:C0.70i* 247:C0.73i* 256:C0.77i* 264:C0.80i* 273:C0.83i* 281:C0.86i* 289:C0.88i* 298:C0.91i* 306:C0.93i* 314:C0.94i* 323:C0.96i* 331:C0.97i* 340:C0.98i* 348:C0.99i* 356:C1.00i* 365:C1.00i* 377:-* 381:-* 389:-* 398:-* 406:-* 414:-* 422:-* 431:-* 439:-* 448:-* 456:-* 464:-* 473:-* 481:-* 489:-* 498:-* 506:-* 514:-* 523:-* 531:-* 539:-* 548:-* 556:-* 564:-* 573:-*
+QP pdf-tap-5 back: 3 [15 ページ中 4 ページ] -> 2 [15 ページ中 3 ページ]; up 1ms; curl first 18ms leaf moves 35ms last 364ms; folio widget changed 18ms; frames 6:- 18:C0.00* 23:C0.00i* 35:C0.00i* 50:C0.01i* 55:C0.02i* 64:C0.03i* 72:C0.04i* 80:C0.06i* 88:C0.07i* 97:C0.09i* 105:C0.12i* 114:C0.14i* 122:C0.17i* 130:C0.20i* 138:C0.23i* 147:C0.27i* 155:C0.30i* 164:C0.34i* 172:C0.38i* 180:C0.42i* 189:C0.46i* 197:C0.50i* 205:C0.54i* 214:C0.58i* 222:C0.62i* 230:C0.66i* 239:C0.70i* 247:C0.73i* 256:C0.77i* 264:C0.80i* 272:C0.83i* 281:C0.86i* 289:C0.88i* 297:C0.91i* 306:C0.93i* 314:C0.94i* 323:C0.96i* 331:C0.97i* 339:C0.98i* 348:C0.99i* 356:C1.00i* 364:C1.00i* 376:-* 380:-* 389:-* 397:-* 405:-* 414:-* 422:-* 430:-* 439:-* 447:-* 455:-* 464:-* 472:-* 481:-* 489:-* 497:-* 505:-* 514:-* 522:-* 531:-* 539:-* 547:-* 555:-* 564:-* 573:-*
+QP pdf-tap-6 forward: 2 [15 ページ中 3 ページ] -> 3 [15 ページ中 4 ページ]; up 1ms; curl first 18ms leaf moves 37ms last 364ms; folio widget changed 18ms; frames 6:- 18:C0.00* 22:C0.00i* 37:C0.00i* 47:C0.01i* 57:C0.02i* 63:C0.03i* 73:C0.04i* 80:C0.06i* 88:C0.07i* 97:C0.09i* 105:C0.12i* 113:C0.14i* 122:C0.17i* 130:C0.20i* 138:C0.23i* 147:C0.27i* 155:C0.30i* 163:C0.34i* 172:C0.38i* 180:C0.42i* 188:C0.46i* 197:C0.50i* 205:C0.54i* 213:C0.58i* 222:C0.62i* 230:C0.66i* 239:C0.70i* 247:C0.73i* 256:C0.77i* 264:C0.80i* 272:C0.83i* 281:C0.86i* 289:C0.88i* 298:C0.91i* 306:C0.93i* 314:C0.94i* 322:C0.96i* 331:C0.97i* 339:C0.98i* 348:C0.99i* 356:C1.00i* 364:C1.00i* 376:-* 380:-* 389:-* 397:-* 405:-* 414:-* 422:-* 430:-* 439:-* 447:-* 455:-* 464:-* 473:-* 480:-* 489:-* 497:-* 505:-* 514:-* 522:-* 530:-* 539:-* 547:-* 555:-* 564:-* 572:-*
+QP pdf-tap-7 back: 3 [15 ページ中 4 ページ] -> 2 [15 ページ中 3 ページ]; up 0ms; curl first 18ms leaf moves 34ms last 364ms; folio widget changed 18ms; frames 6:- 18:C0.00* 22:C0.00i* 34:C0.00i* 50:C0.01i* 64:C0.03i* 72:C0.04i* 80:C0.06i* 89:C0.07i* 97:C0.09i* 105:C0.12i* 113:C0.14i* 122:C0.17i* 130:C0.20i* 138:C0.23i* 147:C0.27i* 155:C0.30i* 163:C0.34i* 172:C0.38i* 180:C0.42i* 188:C0.46i* 197:C0.50i* 206:C0.54i* 214:C0.58i* 222:C0.62i* 231:C0.66i* 239:C0.70i* 247:C0.73i* 256:C0.77i* 264:C0.80i* 273:C0.83i* 281:C0.86i* 289:C0.88i* 297:C0.91i* 305:C0.93i* 314:C0.94i* 322:C0.96i* 331:C0.97i* 339:C0.98i* 347:C0.99i* 356:C1.00i* 364:C1.00i* 377:-* 380:-* 389:-* 397:-* 405:-* 414:-* 422:-* 430:-* 439:-* 447:-* 455:-* 464:-* 472:-* 481:-* 489:-* 497:-* 505:-* 514:-* 522:-* 530:-* 539:-* 547:-* 555:-* 564:-* 572:-*
+QP pdf-tap-8 forward: 2 [15 ページ中 3 ページ] -> 3 [15 ページ中 4 ページ]; up 0ms; curl first 18ms leaf moves 36ms last 364ms; folio widget changed 18ms; frames 6:- 18:C0.00* 22:C0.00i* 36:C0.00i* 47:C0.01i* 56:C0.02i* 64:C0.03i* 72:C0.04i* 81:C0.06i* 88:C0.07i* 97:C0.09i* 105:C0.12i* 113:C0.14i* 122:C0.17i* 130:C0.20i* 138:C0.23i* 147:C0.27i* 155:C0.30i* 163:C0.34i* 172:C0.38i* 180:C0.42i* 189:C0.46i* 197:C0.50i* 205:C0.54i* 214:C0.58i* 222:C0.62i* 230:C0.66i* 238:C0.70i* 247:C0.73i* 255:C0.77i* 263:C0.80i* 273:C0.83i* 281:C0.86i* 289:C0.88i* 297:C0.91i* 306:C0.93i* 314:C0.94i* 322:C0.96i* 331:C0.97i* 339:C0.98i* 348:C0.99i* 356:C1.00i* 364:C1.00i* 377:-* 380:-* 389:-* 397:-* 405:-* 413:-* 422:-* 430:-* 439:-* 447:-* 455:-* 464:-* 472:-* 480:-* 489:-* 497:-* 505:-* 514:-* 522:-* 530:-* 539:-* 547:-* 555:-* 564:-* 572:-*
+QP pdf-tap-9 back: 3 [15 ページ中 4 ページ] -> 2 [15 ページ中 3 ページ]; up 0ms; curl first 17ms leaf moves 59ms last 373ms; folio widget changed 17ms; frames 7:- 17:C0.00* 31:C0.00i* 59:C0.01i* 65:C0.02i* 72:C0.03i* 81:C0.04i* 89:C0.06i* 97:C0.08i* 106:C0.10i* 114:C0.12i* 122:C0.14i* 131:C0.17i* 139:C0.20i* 147:C0.23i* 156:C0.27i* 164:C0.30i* 172:C0.34i* 181:C0.38i* 190:C0.42i* 198:C0.46i* 206:C0.50i* 215:C0.54i* 223:C0.58i* 231:C0.62i* 240:C0.66i* 248:C0.70i* 256:C0.74i* 265:C0.77i* 273:C0.80i* 282:C0.83i* 290:C0.86i* 298:C0.89i* 306:C0.91i* 315:C0.93i* 323:C0.94i* 331:C0.96i* 340:C0.97i* 348:C0.98i* 356:C0.99i* 365:C1.00i* 373:C1.00i* 384:-* 389:-* 398:-* 406:-* 414:-* 423:-* 431:-* 439:-* 448:-* 456:-* 464:-* 473:-* 481:-* 489:-* 498:-* 506:-* 514:-* 523:-* 531:-* 539:-* 548:-* 556:-* 564:-* 573:-* 581:-*
+QP pdf-tap-first-curl-ms: n=10 min 17 median 18 mean 18.4 max 23 all [23, 18, 18, 17, 19, 18, 18, 18, 18, 17]
+QP pdf-tap-first-leaf-move-ms: n=10 min 33 median 37 mean 38.9 max 59 all [41, 40, 37, 33, 37, 35, 37, 34, 36, 59]
+QP pdf-tap-latency-ok: true
+QP pdf-rec-forward: 2 [15 ページ中 3 ページ] -> 3 [15 ページ中 4 ページ]; up 1ms; curl first 16ms leaf moves 38ms last 362ms; folio widget changed 16ms; frames 5:- 16:C0.00* 21:C0.00i* 38:C0.00i* 46:C0.01i* 54:C0.02i* 62:C0.03i* 70:C0.04i* 79:C0.06i* 87:C0.07i* 95:C0.09i* 103:C0.12i* 112:C0.14i* 120:C0.17i* 129:C0.20i* 137:C0.23i* 145:C0.27i* 153:C0.30i* 162:C0.34i* 170:C0.38i* 179:C0.42i* 187:C0.46i* 195:C0.50i* 203:C0.54i* 212:C0.58i* 220:C0.62i* 229:C0.66i* 237:C0.70i* 245:C0.73i* 254:C0.77i* 262:C0.80i* 270:C0.83i* 279:C0.86i* 287:C0.88i* 296:C0.91i* 304:C0.93i* 312:C0.94i* 321:C0.96i* 329:C0.97i* 337:C0.98i* 346:C0.99i* 354:C1.00i* 362:C1.00i* 372:-* 378:-* 387:-* 395:-* 403:-* 412:-* 420:-* 429:-* 437:-* 445:-* 454:-* 462:-* 470:-* 479:-* 487:-* 495:-* 504:-* 512:-* 520:-* 529:-* 537:-* 545:-* 554:-* 562:-* 570:-*
+QP pdf-rec-back: 3 [15 ページ中 4 ページ] -> 2 [15 ページ中 3 ページ]; up 0ms; curl first 19ms leaf moves 35ms last 364ms; folio widget changed 19ms; frames 7:- 19:C0.00* 22:C0.00i* 35:C0.00i* 38:C0.00i* 52:C0.01i* 55:C0.02i* 68:C0.03i* 71:C0.04i* 80:C0.06i* 88:C0.07i* 96:C0.09i* 105:C0.12i* 113:C0.14i* 122:C0.17i* 130:C0.20i* 138:C0.23i* 147:C0.27i* 155:C0.30i* 163:C0.34i* 171:C0.38i* 180:C0.42i* 188:C0.46i* 197:C0.50i* 205:C0.54i* 213:C0.58i* 222:C0.62i* 230:C0.66i* 239:C0.70i* 247:C0.73i* 256:C0.77i* 263:C0.80i* 272:C0.83i* 280:C0.86i* 288:C0.88i* 297:C0.91i* 305:C0.93i* 313:C0.94i* 322:C0.96i* 331:C0.97i* 339:C0.98i* 347:C0.99i* 356:C1.00i* 364:C1.00i* 375:-* 380:-* 388:-* 397:-* 405:-* 413:-* 422:-* 430:-* 438:-* 447:-* 455:-* 463:-* 472:-* 480:-* 488:-* 497:-* 505:-* 513:-* 522:-* 530:-* 538:-* 547:-* 555:-* 564:-* 572:-*
+QP pdf-tap-recorded-ok: true
+QP pdf-held-curl: true
+QP pdf-held padding: L0.0 T59.0 R0.0 B34.0
+QP pdf-held size: 430.0x932.0
+QP pdf-held stage: (0.0,0.0 430.0x932.0)
+QP pdf-held tap-area: (0.0,0.0 430.0x932.0)
+QP pdf-held page: 
+QP pdf-held pdf-page: 
+QP pdf-held folio: (161.6,871.0 106.9x15.0)
+QP pdf-held location: 2 [15 ページ中 3 ページ]
+QP pdf-held header: (0.0,-56.0 430.0x56.0)
+QP pdf-held scrim: 
+QP pdf-held chrome: false
+SHOT iphone-03-pdf-curl-held
+# screenshot iphone-03-pdf-curl-held done
+QP pdf-held-release-curl: false
+QP pdf-held-ok: true
+QP pdf-aa-scrim: (0.0,115.0 430.0x719.0)
+QP pdf-aa-header: (0.0,59.0 430.0x56.0)
+QP iphone-04-pdf-aa-panel padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-04-pdf-aa-panel size: 430.0x932.0
+QP iphone-04-pdf-aa-panel stage: (0.0,0.0 430.0x932.0)
+QP iphone-04-pdf-aa-panel tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-04-pdf-aa-panel page: 
+QP iphone-04-pdf-aa-panel pdf-page: 
+QP iphone-04-pdf-aa-panel folio: (161.6,871.0 106.9x15.0)
+QP iphone-04-pdf-aa-panel location: 2 [15 ページ中 3 ページ]
+QP iphone-04-pdf-aa-panel header: (0.0,59.0 430.0x56.0)
+QP iphone-04-pdf-aa-panel scrim: (0.0,115.0 430.0x719.0)
+QP iphone-04-pdf-aa-panel chrome: true
+SHOT iphone-04-pdf-aa-panel
+# screenshot iphone-04-pdf-aa-panel done
+QP pdf-aa-ok: true
+QP pdf-frames: frames=545 refresh=120.0Hz budget=8.3ms build p50/p95/max=0.13/0.44/3.81 raster p50/p95/max=0.41/0.56/1.86 over-budget=0
+QP pdf-timing-ok: true
+QP epub-spread: false
+QP epub-open-ok: true
+QP epub-open-0: 0 [1ページ]
+QP iphone-05-epub-cover padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-05-epub-cover size: 430.0x932.0
+QP iphone-05-epub-cover stage: (0.0,0.0 430.0x932.0)
+QP iphone-05-epub-cover tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-05-epub-cover page: 
+QP iphone-05-epub-cover pdf-page: 
+QP iphone-05-epub-cover folio: (195.9,876.5 38.3x15.0)
+QP iphone-05-epub-cover location: 0 [1ページ]
+QP iphone-05-epub-cover header: (0.0,-56.0 430.0x56.0)
+QP iphone-05-epub-cover scrim: 
+QP iphone-05-epub-cover chrome: false
+SHOT iphone-05-epub-cover
+# screenshot iphone-05-epub-cover done
+QP epub-open-1: 0 [2ページ]
+QP iphone-06-epub-after-cover padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-06-epub-after-cover size: 430.0x932.0
+QP iphone-06-epub-after-cover stage: (0.0,0.0 430.0x932.0)
+QP iphone-06-epub-after-cover tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-06-epub-after-cover page: 
+QP iphone-06-epub-after-cover pdf-page: 
+QP iphone-06-epub-after-cover folio: (194.8,876.5 40.5x15.0)
+QP iphone-06-epub-after-cover location: 0 [2ページ]
+QP iphone-06-epub-after-cover header: (0.0,-56.0 430.0x56.0)
+QP iphone-06-epub-after-cover scrim: 
+QP iphone-06-epub-after-cover chrome: false
+SHOT iphone-06-epub-after-cover
+# screenshot iphone-06-epub-after-cover done
+QP epub-open-2: 864 [3ページ]
+QP epub-open-3: 1434 [4ページ]
+QP epub-open-4: 1579 [5ページ]
+QP epub-opening-ok: true
+QP epub-aa-scrim: (0.0,115.0 430.0x719.0)
+QP epub-aa-header: (0.0,59.0 430.0x56.0)
+QP iphone-07-epub-aa-panel padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-07-epub-aa-panel size: 430.0x932.0
+QP iphone-07-epub-aa-panel stage: (0.0,0.0 430.0x932.0)
+QP iphone-07-epub-aa-panel tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-07-epub-aa-panel page: 
+QP iphone-07-epub-aa-panel pdf-page: 
+QP iphone-07-epub-aa-panel folio: (194.8,876.5 40.3x15.0)
+QP iphone-07-epub-aa-panel location: 1579 [5ページ]
+QP iphone-07-epub-aa-panel header: (0.0,59.0 430.0x56.0)
+QP iphone-07-epub-aa-panel scrim: (0.0,115.0 430.0x719.0)
+QP iphone-07-epub-aa-panel chrome: true
+SHOT iphone-07-epub-aa-panel
+# screenshot iphone-07-epub-aa-panel done
+QP epub-aa-ok: true
+QP epub-held-curl: true
+QP epub-held padding: L0.0 T59.0 R0.0 B34.0
+QP epub-held size: 430.0x932.0
+QP epub-held stage: (0.0,0.0 430.0x932.0)
+QP epub-held tap-area: (0.0,0.0 430.0x932.0)
+QP epub-held page: 
+QP epub-held pdf-page: 
+QP epub-held folio: (194.8,876.5 40.3x15.0)
+QP epub-held location: 1579 [5ページ]
+QP epub-held header: (0.0,-56.0 430.0x56.0)
+QP epub-held scrim: 
+QP epub-held chrome: false
+SHOT iphone-08-epub-curl-held
+# screenshot iphone-08-epub-curl-held done
+QP epub-held-release-curl: false
+QP epub-rec-forward: 1579 [5ページ] -> 2846 [6ページ]; up 1ms; curl first 9ms leaf moves 24ms last 358ms; folio widget changed 9ms; frames 9:C0.00* 16:C0.00i* 24:C0.00i* 33:C0.00i* 41:C0.01i* 49:C0.02i* 58:C0.03i* 66:C0.04i* 74:C0.06i* 83:C0.07i* 91:C0.09i* 99:C0.12i* 108:C0.14i* 116:C0.17i* 124:C0.20i* 133:C0.23i* 141:C0.27i* 150:C0.30i* 158:C0.34i* 166:C0.38i* 174:C0.42i* 183:C0.46i* 191:C0.50i* 200:C0.54i* 208:C0.58i* 217:C0.62i* 225:C0.66i* 233:C0.70i* 242:C0.73i* 250:C0.77i* 258:C0.80i* 267:C0.83i* 275:C0.86i* 283:C0.88i* 292:C0.91i* 300:C0.93i* 308:C0.94i* 317:C0.96i* 325:C0.97i* 333:C0.98i* 342:C0.99i* 350:C1.00i* 358:C1.00i* 370:-* 375:-* 383:-* 391:-* 400:-* 408:-* 416:-* 425:-* 433:-* 441:-* 450:-* 458:-* 466:-* 475:-* 483:-* 491:-* 500:-* 508:-* 516:-* 525:-* 533:-* 541:-* 550:-* 558:-* 566:-*
+QP epub-held-ok: true
+QP iphone-09-epub-contents padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-09-epub-contents size: 430.0x932.0
+QP iphone-09-epub-contents stage: (0.0,0.0 430.0x932.0)
+QP iphone-09-epub-contents tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-09-epub-contents page: 
+QP iphone-09-epub-contents pdf-page: 
+QP iphone-09-epub-contents folio: (194.7,876.5 40.6x15.0)
+QP iphone-09-epub-contents location: 2846 [6ページ]
+QP iphone-09-epub-contents header: (0.0,59.0 430.0x56.0)
+QP iphone-09-epub-contents scrim: (0.0,115.0 430.0x719.0)
+QP iphone-09-epub-contents chrome: true
+SHOT iphone-09-epub-contents
+# screenshot iphone-09-epub-contents done
+QP iphone-10-epub-contents-preview padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-10-epub-contents-preview size: 430.0x932.0
+QP iphone-10-epub-contents-preview stage: (0.0,0.0 430.0x932.0)
+QP iphone-10-epub-contents-preview tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-10-epub-contents-preview page: 
+QP iphone-10-epub-contents-preview pdf-page: 
+QP iphone-10-epub-contents-preview folio: (194.7,876.5 40.6x15.0)
+QP iphone-10-epub-contents-preview location: 2846 [6ページ]
+QP iphone-10-epub-contents-preview header: (0.0,59.0 430.0x56.0)
+QP iphone-10-epub-contents-preview scrim: 
+QP iphone-10-epub-contents-preview chrome: false
+SHOT iphone-10-epub-contents-preview
+# screenshot iphone-10-epub-contents-preview done
+QP go-to-shown: true
+QP epub-jump-numbered-after-ms: 1
+QP epub-jump: 82342 [479ページ]
+QP iphone-11-epub-jumped-chapter-50 padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-11-epub-jumped-chapter-50 size: 430.0x932.0
+QP iphone-11-epub-jumped-chapter-50 stage: (0.0,0.0 430.0x932.0)
+QP iphone-11-epub-jumped-chapter-50 tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-11-epub-jumped-chapter-50 page: 
+QP iphone-11-epub-jumped-chapter-50 pdf-page: 
+QP iphone-11-epub-jumped-chapter-50 folio: (187.8,876.5 54.3x15.0)
+QP iphone-11-epub-jumped-chapter-50 location: 82342 [479ページ]
+QP iphone-11-epub-jumped-chapter-50 header: (0.0,-56.0 430.0x56.0)
+QP iphone-11-epub-jumped-chapter-50 scrim: 
+QP iphone-11-epub-jumped-chapter-50 chrome: false
+SHOT iphone-11-epub-jumped-chapter-50
+# screenshot iphone-11-epub-jumped-chapter-50 done
+QP epub-jump-next: 83659 [480ページ]
+QP epub-jump-back: 82342 [479ページ]
+QP epub-jump-ok: true
+QP epub-paging-FAILED: Bad state: No element #0      Iterable.first (dart:core/iterable.dart:663) | #1      _FirstFinderMixin.filter (package:flutter_test/src/finders.dart:1340) | #2      _SyncStarIterator.moveNext (dart:async-patch/async_patch.dart:595) | #3      Iterable.single (dart:core/iterable.dart:694)
+QP iphone-12-epub-text-larger padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-12-epub-text-larger size: 430.0x932.0
+QP iphone-12-epub-text-larger stage: (0.0,0.0 430.0x932.0)
+QP iphone-12-epub-text-larger tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-12-epub-text-larger page: 
+QP iphone-12-epub-text-larger pdf-page: 
+QP iphone-12-epub-text-larger folio: (194.7,876.5 40.6x15.0)
+QP iphone-12-epub-text-larger location: 2492 [6ページ]
+QP iphone-12-epub-text-larger header: (0.0,-56.0 430.0x56.0)
+QP iphone-12-epub-text-larger scrim: 
+QP iphone-12-epub-text-larger chrome: false
+SHOT iphone-12-epub-text-larger
+# screenshot iphone-12-epub-text-larger done
+QP epub-text-back-after-10s: 2842 [6ページ]
+QP epub-text-back-after-30s: 2842 [6ページ]
+QP iphone-13-epub-text-back padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-13-epub-text-back size: 430.0x932.0
+QP iphone-13-epub-text-back stage: (0.0,0.0 430.0x932.0)
+QP iphone-13-epub-text-back tap-area: (0.0,0.0 430.0x932.0)
+QP iphone-13-epub-text-back page: 
+QP iphone-13-epub-text-back pdf-page: 
+QP iphone-13-epub-text-back folio: (194.7,876.5 40.6x15.0)
+QP iphone-13-epub-text-back location: 2842 [6ページ]
+QP iphone-13-epub-text-back header: (0.0,-56.0 430.0x56.0)
+QP iphone-13-epub-text-back scrim: 
+QP iphone-13-epub-text-back chrome: false
+SHOT iphone-13-epub-text-back
+# screenshot iphone-13-epub-text-back done
+QP epub-text-size: 2846 [6ページ] -> larger 2492 [6ページ] -> back 2842 [6ページ]
+QP epub-text-size-same-folio: true
+QP epub-text-size-ok: true
+QP end-in-library: true
+QP iphone-14-library-end padding: L0.0 T59.0 R0.0 B34.0
+QP iphone-14-library-end size: 430.0x932.0
+QP iphone-14-library-end stage: 
+QP iphone-14-library-end tap-area: 
+QP iphone-14-library-end page: 
+QP iphone-14-library-end pdf-page: 
+QP iphone-14-library-end folio: 
+QP iphone-14-library-end location:  []
+QP iphone-14-library-end header: 
+QP iphone-14-library-end scrim: 
+QP iphone-14-library-end chrome: false
+SHOT iphone-14-library-end
+# screenshot iphone-14-library-end done
+QP end-library-ok: true
+QP final-exception: null
+DONE
