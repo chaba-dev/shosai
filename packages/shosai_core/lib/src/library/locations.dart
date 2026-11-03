@@ -1,13 +1,28 @@
 /// Persistent device-local associations between contents and capabilities.
 library;
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 import '../cancellation.dart';
 import '../errors.dart';
 import '../store/store.dart';
 import 'files.dart';
+import 'inspection.dart';
 import 'location.dart';
 
 typedef LocatedContent = ({BookLocator locator, LocationFailure? failure});
+
+/// What an unopened source file's contents said about it, read at the size
+/// and revision it was listed with. Its cover is read separately, by
+/// [LibraryLocations.previewCover].
+final class SourcePreview {
+  const SourcePreview({this.title, this.author, this.hasCover = false});
+
+  final String? title;
+  final String? author;
+  final bool hasCover;
+}
 
 /// Location records are independent of notes and reading state. Removing a
 /// connection keeps its books and locators, marking them unavailable. Connecting
@@ -41,8 +56,101 @@ final class LibraryLocations {
     ],
   );
 
+  /// The stored previews of unopened source files, without their covers.
+  /// A preview is kept only while its file is listed unchanged, so each
+  /// belongs to the file now in the catalog.
+  Future<Map<BookLocator, SourcePreview>> previews() => _store.read(
+    (db) => {
+      for (final row in db.select(
+        '''SELECT location_id, locator_key, title, author, cover IS NOT NULL
+           FROM library_source_previews''',
+      ))
+        (
+          locationId: row.columnAt(0) as String,
+          key: row.columnAt(1) as String,
+        ): SourcePreview(
+          title: row.columnAt(2) as String?,
+          author: row.columnAt(3) as String?,
+          hasCover: row.columnAt(4) == 1,
+        ),
+    },
+  );
+
+  /// The preview cover of the unopened file at [locator], or null.
+  Future<Uint8List?> previewCover(BookLocator locator) => _store.read(
+    (db) =>
+        db
+                .select(
+                  '''SELECT cover FROM library_source_previews
+                     WHERE location_id = ? AND locator_key = ?''',
+                  [locator.locationId, locator.key],
+                )
+                .firstOrNull
+                ?.columnAt(0)
+            as Uint8List?,
+  );
+
+  /// Record what [entry]'s contents said about it, and return the preview as
+  /// stored. Ignored, and reported as null, unless the connection is still in
+  /// generation [generation] and the file is still listed, unopened, at the
+  /// size and revision it was read at: a preview never outlives the file or
+  /// the grant it came from.
+  Future<SourcePreview?> savePreview(
+    String id,
+    int generation,
+    LocationEntry entry,
+    BookMetadata metadata,
+  ) {
+    String? text(String? value) {
+      final collapsed = value?.trim().replaceAll(RegExp(r'\s+'), ' ');
+      return collapsed == null ||
+              collapsed.isEmpty ||
+              utf8.encode(collapsed).length > 4096
+          ? null
+          : collapsed;
+    }
+
+    final title = text(metadata.title);
+    final author = text(metadata.author);
+    final given = metadata.cover;
+    final cover = given == null || given.isEmpty || given.length > maxCoverBytes
+        ? null
+        : given;
+    return _store.transaction((db) {
+      if (!_hasGeneration(db, id, generation)) return null;
+      if (db
+          .select(
+            '''SELECT 1 FROM library_source_files
+               WHERE location_id = ? AND locator_key = ?
+                 AND size IS ? AND revision IS ?''',
+            [id, entry.key, entry.size, entry.revision],
+          )
+          .isEmpty) {
+        return null;
+      }
+      db.execute(
+        '''INSERT INTO library_source_previews
+             (location_id, locator_key, size, revision, title, author, cover)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(location_id, locator_key) DO UPDATE SET
+             size = excluded.size, revision = excluded.revision,
+             title = excluded.title, author = excluded.author,
+             cover = excluded.cover''',
+        [id, entry.key, entry.size, entry.revision, title, author, cover],
+      );
+      return SourcePreview(
+        title: title,
+        author: author,
+        hasCover: cover != null,
+      );
+    });
+  }
+
   Future<void> clearCatalog(String id) => _store.transaction((db) {
     db.execute('DELETE FROM library_source_files WHERE location_id = ?', [id]);
+    db.execute('DELETE FROM library_source_previews WHERE location_id = ?', [
+      id,
+    ]);
     db.execute('DELETE FROM library_source_admissions WHERE location_id = ?', [
       id,
     ]);
@@ -68,6 +176,11 @@ final class LibraryLocations {
     );
     db.execute(
       'DELETE FROM library_source_files WHERE location_id = ? AND locator_key = ?',
+      [id, entry.key],
+    );
+    // The book's own record now shows the file.
+    db.execute(
+      'DELETE FROM library_source_previews WHERE location_id = ? AND locator_key = ?',
       [id, entry.key],
     );
     // The content is in the library again: its other hidden copies are
@@ -197,6 +310,17 @@ final class LibraryLocations {
         );
       }
     }
+    // A preview belongs to the bytes it was read from: one whose file went,
+    // changed, or is now a known book is forgotten.
+    db.execute(
+      '''DELETE FROM library_source_previews WHERE location_id = ?
+         AND NOT EXISTS (SELECT 1 FROM library_source_files f
+           WHERE f.location_id = library_source_previews.location_id
+             AND f.locator_key = library_source_previews.locator_key
+             AND f.size IS library_source_previews.size
+             AND f.revision IS library_source_previews.revision)''',
+      [id],
+    );
     for (final row in db.select(
       'SELECT locator_key FROM book_locators WHERE location_id = ?',
       [id],
