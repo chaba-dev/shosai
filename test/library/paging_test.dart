@@ -255,11 +255,20 @@ void main() {
     // who asked for the page sees its alert and its Retry without scrolling
     // back to the top, and the loaded page stays below the grid.
     expect(find.text('Loading more…'), findsNothing);
-    expect(find.text('Library query failed'), findsOneWidget);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Retry'), findsOneWidget);
     expect(
       tester
-          .getSemantics(find.text('Library query failed'))
+          .getSemantics(
+            find.text(
+              'The document engine is unavailable. Restart the app and try again.',
+            ),
+          )
           .getSemanticsData()
           .flagsCollection
           .isLiveRegion,
@@ -302,13 +311,23 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('Loading more…'), findsOneWidget);
-    expect(find.text('Library query failed'), findsNothing);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsNothing,
+    );
 
     bridge.held.single.complete(
       FlutterLibraryPage(books: _books(51, 50), hasMore: false),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Library query failed'), findsNothing);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsNothing,
+    );
     expect(find.byType(LibraryBookCard), findsWidgets);
     position.jumpTo(position.maxScrollExtent);
     await tester.pump();

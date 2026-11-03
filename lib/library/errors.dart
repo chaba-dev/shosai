@@ -1,15 +1,15 @@
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/l10n/app_localizations_en.dart';
+import 'package:shosai_flutter/l10n/error_text.dart';
 import 'package:shosai_flutter/reader/controller.dart';
-import 'package:shosai_flutter/core/bridge.dart';
 
-String safeError(Object error) => switch (error) {
-  FlutterBridgeError() => error.message,
-  ReaderPersistenceException() => error.message,
-  SafeUserError() => error.message,
-  _ => 'The operation could not be completed.',
-};
+String safeError(Object error, [AppLocalizations? localizations]) =>
+    switch (error) {
+      ReaderPersistenceException() => error.message,
+      SafeUserError() => error.message,
+      _ => localizedErrorText(error, localizations ?? AppLocalizationsEn()),
+    };
 
 final class SafeUserError implements Exception {
   const SafeUserError(this.message);

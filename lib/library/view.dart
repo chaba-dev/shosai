@@ -141,6 +141,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       widget.androidImport ?? AndroidDocumentImportAdapter();
   final Set<String> _providerOperations = {};
   int _providerRevision = 0;
+  AppLocalizations _localizations = lookupAppLocalizations(const Locale('en'));
   late final LibraryController controller = LibraryController(
     bridge: widget.bridgeFactory(),
     confirmRemoval: _confirmRemoval,
@@ -150,7 +151,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     manageConnections: _manageLocations,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
-    localizations: () => AppLocalizations.of(context),
+    localizations: () => _localizations,
     openedDocuments: defaultTargetPlatform == TargetPlatform.iOS
         ? _openedDocuments
         : null,
@@ -489,6 +490,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _localizations = AppLocalizations.of(context);
     // The first restoration has run by now, so the saved open books know
     // whether a newer session came back.
     if (!_started) {
@@ -1162,20 +1164,22 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     if (!book.managed) return true;
     return await _showOwnedDialog<bool>(
           (context) => ShadDialog.alert(
-            title: const Text('Delete managed copy?'),
+            title: Text(AppLocalizations.of(context).libraryDeleteManagedTitle),
             description: Text(
-              '“${book.title}” will be removed from the library and its managed file will be deleted.',
+              AppLocalizations.of(context).libraryDeleteManagedBody(book.title),
             ),
             actions: [
               ShadButton.outline(
                 height: shosaiShadButtonHeight(context),
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
+                child: Text(AppLocalizations.of(context).locationCancel),
               ),
               ShadButton.destructive(
                 height: shosaiShadButtonHeight(context),
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('Remove and delete'),
+                child: Text(
+                  AppLocalizations.of(context).libraryDeleteManagedAction,
+                ),
               ),
             ],
           ),

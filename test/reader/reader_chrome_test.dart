@@ -1997,13 +1997,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 32));
       bridge.failRenderPage = null;
 
-      // The bridge reason is visible (kind and message, not
-      // "Instance of 'FlutterBridgeError'") and the entry is not labelled as a
+      // The structured failure has localized guidance and is not labelled as a
       // selection problem.
       final error = find.byKey(const ValueKey('reader-relayout-error'));
       expect(error, findsOneWidget);
       expect(
-        find.textContaining('page render rejected (invalidRequest)'),
+        find.textContaining(
+          'The operation is no longer available. Reopen the book and try again.',
+        ),
         findsOneWidget,
       );
       expect(find.textContaining('Selection unavailable'), findsNothing);

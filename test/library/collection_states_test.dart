@@ -253,14 +253,24 @@ void main() {
     await tester.tap(find.byTooltip('Refresh library'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Library query failed'), findsOneWidget);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsOneWidget,
+    );
     expect(find.byType(LibraryBookCard), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
 
     // Retry asks the controller for another load, which succeeds.
     await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
-    expect(find.text('Library query failed'), findsNothing);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsNothing,
+    );
     expect(find.byType(LibraryBookCard), findsOneWidget);
   });
 
@@ -276,7 +286,9 @@ void main() {
     final alert = tester.widget<Container>(
       find
           .ancestor(
-            of: find.text('Library query failed'),
+            of: find.text(
+              'The document engine is unavailable. Restart the app and try again.',
+            ),
             matching: find.byType(Container),
           )
           .first,
@@ -299,7 +311,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('A quiet place for every book'), findsOneWidget);
-    expect(find.text('Library query failed'), findsOneWidget);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsOneWidget,
+    );
     expect(
       find.text('Add your first books'),
       findsNothing,
@@ -313,7 +330,12 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
     await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
-    expect(find.text('Library query failed'), findsNothing);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsNothing,
+    );
     expect(find.text('A quiet place for every book'), findsOneWidget);
   });
 
@@ -324,7 +346,12 @@ void main() {
     bridge.failNextPage = true;
     await tester.tap(find.byTooltip('Refresh library'));
     await tester.pumpAndSettle();
-    expect(find.text('Library query failed'), findsOneWidget);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsOneWidget,
+    );
 
     // An unrelated search reload replaces the grid with the skeleton; the
     // unresolved failure and its retry stay visible above it.
@@ -334,7 +361,12 @@ void main() {
     await tester.pump();
 
     expect(find.byType(LibrarySkeletonCard), findsWidgets);
-    expect(find.text('Library query failed'), findsOneWidget);
+    expect(
+      find.text(
+        'The document engine is unavailable. Restart the app and try again.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Retry'), findsOneWidget);
 
     bridge.release([_book(1, 'A Book')]);

@@ -404,7 +404,12 @@ void main() {
     await tester.pumpAndSettle();
     const failure = 'Reader settings could not be saved.';
     expect(find.text(failure), findsOneWidget);
-    expect(find.text('disk full'), findsOneWidget);
+    expect(
+      find.text(
+        'The file could not be accessed. Check its permissions and connection, then try again.',
+      ),
+      findsOneWidget,
+    );
     // It is no brief notice: the setting is still unsaved.
     await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
@@ -849,7 +854,7 @@ void main() {
     );
     await tester.tap(_sidebarNotes);
     await tester.pumpAndSettle();
-    expect(find.text('The store is unavailable.'), findsOneWidget);
+    expect(find.text('Notes could not be loaded. Try again.'), findsOneWidget);
 
     bridge.libraryNotesFailure = null;
     await tester.tap(find.byKey(const ValueKey('shell-notes-retry')));

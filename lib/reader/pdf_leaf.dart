@@ -159,7 +159,7 @@ extension on ReaderController {
       } catch (error) {
         content = _PdfLeafContent(
           spread: _textlessSpread(leaf.facing),
-          selectionError: ReaderController._describeError(error),
+          selectionError: _describeError(error),
         );
       }
       if (leaf._discarded) return null;

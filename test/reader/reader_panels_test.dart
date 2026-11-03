@@ -525,14 +525,17 @@ void main() {
       await _openContents(tester);
       expect(find.text('Loading contents…'), findsOneWidget);
 
-      // Failure carries the error payload and a retry.
+      // Failure carries localized guidance and a retry.
       completers.single.completeError(StateError('toc unavailable'));
       await _settle(tester);
       expect(
         find.byKey(const ValueKey('reader-contents-error')),
         findsOneWidget,
       );
-      expect(find.textContaining('toc unavailable'), findsOneWidget);
+      expect(
+        find.textContaining('The operation could not be completed.'),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const ValueKey('reader-contents-retry')),
         findsOneWidget,
@@ -1127,7 +1130,7 @@ void main() {
       await tester.pump();
       await _settle(tester);
       expect(
-        find.textContaining('The library is unavailable.'),
+        find.textContaining('Notes could not be loaded. Try again.'),
         findsOneWidget,
       );
 
@@ -2391,7 +2394,10 @@ void main() {
       );
       await tester.pump();
       await _settle(tester);
-      expect(find.textContaining('search backend failed'), findsOneWidget);
+      expect(
+        find.textContaining('The operation could not be completed.'),
+        findsOneWidget,
+      );
       expect(find.text('No results'), findsNothing);
     });
   });

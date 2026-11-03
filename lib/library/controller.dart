@@ -627,7 +627,7 @@ class LibraryController implements Listenable {
           loading: false,
           loadingMore: false,
           discoveryProgress: null,
-          loadError: safeError(error),
+          loadError: safeError(error, _localizations()),
           // A first page that cannot start leaves the collection's length
           // unknown; an append keeps the next page it was advertising.
           pagingFailed: append,
@@ -701,7 +701,7 @@ class LibraryController implements Listenable {
           }
         } catch (error) {
           discovery.throwIfCancelled();
-          discoveryError = safeError(error);
+          discoveryError = safeError(error, _localizations());
         }
         sourceFiles.sort(
           (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
@@ -733,7 +733,7 @@ class LibraryController implements Listenable {
             revision,
             discovery.isCancelled
                 ? _localizations().libraryCheckCancelled
-                : safeError(error),
+                : safeError(error, _localizations()),
             LibraryFailure.load,
             cancellation,
             append: append,
@@ -852,7 +852,7 @@ class LibraryController implements Listenable {
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.removal,
-            error: safeError(error),
+            error: safeError(error, _localizations()),
           ),
         );
         dispatch(const _LibraryEffectFinished());
@@ -888,7 +888,7 @@ class LibraryController implements Listenable {
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.removal,
-            error: safeError(error),
+            error: safeError(error, _localizations()),
           ),
         );
       } finally {
@@ -921,7 +921,7 @@ class LibraryController implements Listenable {
           dispatch(
             _LibraryMutationCompleted(
               failure: LibraryFailure.load,
-              error: safeError(error),
+              error: safeError(error, _localizations()),
             ),
           );
         }
@@ -943,7 +943,7 @@ class LibraryController implements Listenable {
         await _drainReaderSaves(book.bookId);
         dispatch(const _LibraryReaderClosed(null));
       } catch (error) {
-        dispatch(_LibraryReaderClosed(safeError(error)));
+        dispatch(_LibraryReaderClosed(safeError(error, _localizations())));
       } finally {
         dispatch(const _LibraryEffectFinished());
       }
@@ -967,7 +967,7 @@ class LibraryController implements Listenable {
       } catch (error) {
         book = null;
         if (_ownsAdapter(revision)) {
-          dispatch(_LibraryReaderClosed(safeError(error)));
+          dispatch(_LibraryReaderClosed(safeError(error, _localizations())));
         }
       } finally {
         if (identical(_sourceCancellation, cancellation)) {
@@ -994,7 +994,7 @@ class LibraryController implements Listenable {
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.settings,
-            error: safeError(error),
+            error: safeError(error, _localizations()),
           ),
         );
       } finally {
@@ -1024,7 +1024,7 @@ class LibraryController implements Listenable {
       try {
         await _records.saveReaderSettings(value: settings);
       } catch (caught) {
-        error = safeError(caught);
+        error = safeError(caught, _localizations());
       }
       dispatch(_LibrarySettingsSaved(error, notify: reports));
     }());

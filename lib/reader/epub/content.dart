@@ -15,6 +15,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
+import 'package:shosai_flutter/l10n/app_localizations_en.dart';
 
 import 'flow.dart';
 import 'pages.dart';
@@ -163,16 +165,18 @@ final class EpubLayoutLimitExceeded implements Exception {
   /// The ceiling it exceeds.
   final EpubLayoutLimit limit;
 
-  /// The reader-facing explanation.
-  String get message => switch (limit) {
-    EpubLayoutLimit.blockText =>
-      'Chapter ${unit + 1} is too large to display: one of its paragraphs '
-          'is longer than $kEpubIndivisibleScalarLimit characters. '
-          'Choose another chapter from Contents.',
-    EpubLayoutLimit.blockNodes =>
-      'Chapter ${unit + 1} is too large to display: one of its lists, tables '
-          'or sections holds more than $kEpubIndivisibleNodeLimit parts. '
-          'Choose another chapter from Contents.',
+  /// The diagnostic explanation; reader surfaces supply their current locale.
+  String get message => localizedMessage(AppLocalizationsEn());
+
+  String localizedMessage(AppLocalizations l10n) => switch (limit) {
+    EpubLayoutLimit.blockText => l10n.readerChapterTextLimit(
+      unit + 1,
+      kEpubIndivisibleScalarLimit,
+    ),
+    EpubLayoutLimit.blockNodes => l10n.readerChapterNodeLimit(
+      unit + 1,
+      kEpubIndivisibleNodeLimit,
+    ),
   };
 
   @override

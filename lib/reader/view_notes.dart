@@ -75,8 +75,8 @@ class _ReaderNotesPanel extends StatelessWidget {
                     ? LucideIcons.link
                     : LucideIcons.refreshCw,
                 label: model.annotationsReady
-                    ? 'Associate highlights from an earlier version…'
-                    : 'Retry loading highlights',
+                    ? l10n.readerAssociateHighlights
+                    : l10n.readerRetryHighlights,
                 onPressed: enabled && model.annotationOperations.isEmpty
                     ? () => dispatch(
                         model.annotationsReady
@@ -224,7 +224,7 @@ class _ReaderNotesPanel extends StatelessWidget {
       ShellNotesStatus.failed => [
         _ReaderPanelNote(
           key: const ValueKey('reader-notes-library-error'),
-          text: error ?? '',
+          text: l10n.shellNotesFailed,
           danger: true,
           liveRegion: true,
         ),
@@ -248,7 +248,7 @@ class _ReaderNotesPanel extends StatelessWidget {
         if (error != null) ...[
           _ReaderPanelNote(
             key: const ValueKey('reader-notes-library-more-error'),
-            text: error,
+            text: l10n.shellNotesFailed,
             danger: true,
             liveRegion: true,
           ),

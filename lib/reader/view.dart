@@ -203,6 +203,7 @@ Widget _withReaderLocalizations(BuildContext context, Widget child) {
 
 class _ReaderScreenState extends State<ReaderScreen>
     with WidgetsBindingObserver, RestorationMixin {
+  late AppLocalizations _localizations;
   final RestorableTextEditingController _path =
       RestorableTextEditingController();
   final RestorableStringN _openDocumentPath = RestorableStringN(null);
@@ -404,11 +405,17 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   @override
   void didChangeDependencies() {
+    _localizations =
+        Localizations.of<AppLocalizations>(context, AppLocalizations) ??
+        lookupAppLocalizations(
+          Localizations.maybeLocaleOf(context) ?? const Locale('en'),
+        );
     if (!_controllerInitialized) {
       unawaited(_refreshSystemInsets());
       _controllerInitialized = true;
       _controller = ReaderController(
         bridge: widget.bridge ?? widget.bridgeFactory!(),
+        localizations: () => _localizations,
         decoder: (pixels, {required width, required height}) =>
             widget.decoder(pixels, width: width, height: height),
         initialScale: (widget.initialSettings?.pdfZoom ?? 0) > 0
@@ -595,11 +602,14 @@ class _ReaderScreenState extends State<ReaderScreen>
       _controller.model.typography.theme,
     );
     final route = ShadDialogRoute<AnnotationAssociationChoice>(
-      pageBuilder: (context) => Theme(
-        data: readerTheme,
-        child: ShadTheme(
-          data: shosaiReaderShadTheme(_controller.model.typography.theme),
-          child: _AnnotationAssociationDialog(page: page),
+      pageBuilder: (context) => _withReaderLocalizations(
+        context,
+        Theme(
+          data: readerTheme,
+          child: ShadTheme(
+            data: shosaiReaderShadTheme(_controller.model.typography.theme),
+            child: _AnnotationAssociationDialog(page: page),
+          ),
         ),
       ),
       barrierDismissible: true,
@@ -1372,13 +1382,13 @@ class _ReaderControls extends StatelessWidget {
   Widget build(BuildContext context) {
     final field = Semantics(
       textField: true,
-      label: 'Document path',
+      label: AppLocalizations.of(context).readerDocumentPath,
       child: ShadInput(
         key: pathFieldKey,
         controller: path,
         enabled: !model.busy,
         onSubmitted: (_) => open(),
-        placeholder: const Text('/path/to/book.pdf'),
+        placeholder: Text(AppLocalizations.of(context).readerDocumentPathHint),
       ),
     );
     final button = ShadButton(
@@ -1388,7 +1398,9 @@ class _ReaderControls extends StatelessWidget {
       leading: const Icon(LucideIcons.bookOpen),
       child: Flexible(
         child: Text(
-          model.busy ? 'Opening…' : 'Open document',
+          model.busy
+              ? AppLocalizations.of(context).readerOpeningDocument
+              : AppLocalizations.of(context).readerOpenDocument,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -1496,7 +1508,9 @@ class _ReaderContentPane extends StatelessWidget {
             key: const ValueKey('reader-selection-status'),
             container: true,
             liveRegion: true,
-            label: model.selectionDescription,
+            label: model.localizedSelectionDescription(
+              AppLocalizations.of(context),
+            ),
             child: const SizedBox(width: double.infinity, height: 1),
           ),
         ],
@@ -1597,7 +1611,7 @@ class WelcomePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Text(
-        'Enter a local document path to open it.',
+        AppLocalizations.of(context).readerEnterDocumentPath,
         textAlign: TextAlign.center,
         style: color == null ? null : TextStyle(color: color),
       ),
