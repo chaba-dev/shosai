@@ -1,0 +1,224 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/53FCF124-DC0D-4AA6-B517-8A34DAA721FF/tmp/qp-frames-arVtKV
+QP data-dir: /private/var/mobile/Containers/Data/Application/53FCF124-DC0D-4AA6-B517-8A34DAA721FF/tmp/qp-data-oQJ9T0
+QP imported: 2
+QP view: logical 1180.0x820.0 dpr 2.0 refresh 60.0 locale en
+QP ipad-01-library-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start size: 1180.0x820.0
+QP ipad-01-library-start stage: 
+QP ipad-01-library-start tap-area: 
+QP ipad-01-library-start page: 
+QP ipad-01-library-start pdf-page: 
+QP ipad-01-library-start folio: 
+QP ipad-01-library-start location:  []
+QP ipad-01-library-start header: 
+QP ipad-01-library-start scrim: 
+QP ipad-01-library-start chrome: false
+SHOT ipad-01-library-start
+# screenshot ipad-01-library-start done
+QP pdf-spread: false
+QP ipad-02-pdf-at-rest padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-02-pdf-at-rest size: 1180.0x820.0
+QP ipad-02-pdf-at-rest stage: (56.0,0.0 1124.0x820.0)
+QP ipad-02-pdf-at-rest tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-02-pdf-at-rest page: 
+QP ipad-02-pdf-at-rest pdf-page: (80.0,30.9 1076.0x696.2)
+QP ipad-02-pdf-at-rest folio: (582.3,747.0 71.3x12.0)
+QP ipad-02-pdf-at-rest location: 3 [pages 4–5 of 15]
+QP ipad-02-pdf-at-rest header: (56.0,-56.0 1124.0x56.0)
+QP ipad-02-pdf-at-rest scrim: 
+QP ipad-02-pdf-at-rest chrome: false
+SHOT ipad-02-pdf-at-rest
+# screenshot ipad-02-pdf-at-rest done
+QP pdf-open-ok: true
+QP pdf-held-curl: true
+QP pdf-held padding: L0.0 T32.0 R0.0 B25.0
+QP pdf-held size: 1180.0x820.0
+QP pdf-held stage: (56.0,0.0 1124.0x820.0)
+QP pdf-held tap-area: (80.0,24.0 1076.0x772.0)
+QP pdf-held page: 
+QP pdf-held pdf-page: (80.0,30.9 1076.0x696.2)
+QP pdf-held folio: (582.3,747.0 71.3x12.0)
+QP pdf-held location: 3 [pages 4–5 of 15]
+QP pdf-held header: (56.0,-56.0 1124.0x56.0)
+QP pdf-held scrim: 
+QP pdf-held chrome: false
+SHOT ipad-03-pdf-curl-held
+# screenshot ipad-03-pdf-curl-held done
+QP pdf-held-release-curl: false
+QP pdf-held-ok: true
+QP pdf-tap-0: 3 [pages 4–5 of 15] -> 5 [pages 6–7 of 15]; up 0ms; curl first 17ms leaf moves 64ms last 380ms; folio widget changed 17ms; frames 0:- 17:C0.00* 42:C0.00i* 64:C0.02i* 80:C0.04i* 97:C0.07i* 113:C0.12i* 130:C0.17i* 147:C0.23i* 164:C0.30i* 180:C0.38i* 197:C0.46i* 214:C0.54i* 230:C0.62i* 248:C0.70i* 265:C0.77i* 282:C0.83i* 298:C0.88i* 315:C0.93i* 332:C0.96i* 348:C0.98i* 364:C1.00i* 380:C1.00i* 399:-* 414:-* 431:-* 447:-* 464:-* 481:-* 497:-* 514:-* 531:-* 547:-* 564:-* 581:-*
+QP pdf-tap-1: 5 [pages 6–7 of 15] -> 3 [pages 4–5 of 15]; up 1ms; curl first 34ms leaf moves 87ms last 396ms; folio widget changed 34ms; frames 14:- 34:C0.00* 50:C0.00i* 87:C0.02i* 114:C0.07i* 130:C0.12i* 146:C0.17i* 163:C0.23i* 179:C0.30i* 196:C0.38i* 213:C0.46i* 229:C0.54i* 246:C0.62i* 263:C0.70i* 280:C0.77i* 297:C0.83i* 314:C0.88i* 331:C0.93i* 346:C0.96i* 363:C0.98i* 380:C1.00i* 396:C1.00i* 415:-* 429:-* 446:-* 463:-* 480:-* 496:-* 513:-* 530:-* 546:-* 563:-* 580:-* 596:-* 613:-*
+QP pdf-tap-2: 3 [pages 4–5 of 15] -> 5 [pages 6–7 of 15]; up 0ms; curl first 32ms leaf moves 82ms last 396ms; folio widget changed 32ms; frames 13:- 32:C0.00* 48:C0.00i* 82:C0.02i* 96:C0.04i* 112:C0.07i* 128:C0.12i* 145:C0.17i* 162:C0.23i* 178:C0.30i* 195:C0.38i* 212:C0.46i* 229:C0.54i* 245:C0.62i* 262:C0.70i* 279:C0.77i* 296:C0.83i* 313:C0.88i* 330:C0.93i* 346:C0.96i* 363:C0.98i* 379:C1.00i* 396:C1.00i* 414:-* 428:-* 445:-* 462:-* 479:-* 496:-* 512:-* 529:-* 546:-* 562:-* 579:-* 596:-* 612:-*
+QP pdf-tap-3: 5 [pages 6–7 of 15] -> 3 [pages 4–5 of 15]; up 0ms; curl first 31ms leaf moves 85ms last 395ms; folio widget changed 31ms; frames 13:- 31:C0.00* 46:C0.00i* 85:C0.02i* 112:C0.07i* 128:C0.12i* 145:C0.17i* 162:C0.23i* 178:C0.30i* 195:C0.38i* 212:C0.46i* 228:C0.54i* 245:C0.62i* 262:C0.70i* 278:C0.77i* 296:C0.83i* 313:C0.88i* 329:C0.93i* 346:C0.96i* 363:C0.98i* 379:C1.00i* 395:C1.00i* 415:-* 429:-* 445:-* 462:-* 479:-* 495:-* 512:-* 529:-* 545:-* 562:-* 579:-* 595:-* 612:-*
+QP pdf-tap-4: 3 [pages 4–5 of 15] -> 5 [pages 6–7 of 15]; up 0ms; curl first 22ms leaf moves 84ms last 398ms; folio widget changed 22ms; frames 22:C0.00* 54:C0.00i* 84:C0.02i* 99:C0.04i* 114:C0.07i* 131:C0.11i* 148:C0.16i* 164:C0.22i* 181:C0.29i* 198:C0.37i* 214:C0.45i* 231:C0.53i* 248:C0.61i* 264:C0.69i* 282:C0.76i* 298:C0.82i* 315:C0.88i* 332:C0.92i* 348:C0.95i* 365:C0.98i* 382:C0.99i* 398:C1.00i* 418:-* 431:-* 448:-* 465:-* 481:-* 498:-* 514:-* 531:-* 548:-* 565:-* 581:-* 598:-* 614:-*
+QP pdf-tap-5: 5 [pages 6–7 of 15] -> 3 [pages 4–5 of 15]; up 0ms; curl first 19ms leaf moves 78ms last 382ms; folio widget changed 19ms; frames 19:C0.00* 46:C0.00i* 78:C0.02i* 98:C0.07i* 114:C0.12i* 131:C0.17i* 148:C0.23i* 164:C0.30i* 181:C0.38i* 197:C0.46i* 214:C0.54i* 231:C0.62i* 248:C0.70i* 264:C0.77i* 281:C0.83i* 298:C0.88i* 315:C0.93i* 332:C0.96i* 348:C0.98i* 365:C1.00i* 382:C1.00i* 402:-* 414:-* 431:-* 448:-* 465:-* 481:-* 498:-* 514:-* 531:-* 548:-* 565:-* 581:-* 598:-*
+QP pdf-tap-6: 3 [pages 4–5 of 15] -> 5 [pages 6–7 of 15]; up 0ms; curl first 19ms leaf moves 85ms last 382ms; folio widget changed 19ms; frames 19:C0.00* 46:C0.00i* 85:C0.04i* 99:C0.07i* 114:C0.12i* 131:C0.17i* 147:C0.23i* 164:C0.30i* 181:C0.38i* 197:C0.46i* 214:C0.54i* 231:C0.62i* 248:C0.70i* 264:C0.77i* 281:C0.83i* 298:C0.88i* 314:C0.93i* 332:C0.96i* 348:C0.98i* 365:C1.00i* 382:C1.00i* 401:-* 414:-* 431:-* 448:-* 464:-* 481:-* 497:-* 514:-* 531:-* 548:-* 564:-* 581:-* 598:-*
+QP pdf-tap-7: 5 [pages 6–7 of 15] -> 3 [pages 4–5 of 15]; up 0ms; curl first 20ms leaf moves 91ms last 382ms; folio widget changed 20ms; frames 20:C0.00* 42:C0.00i* 91:C0.04i* 98:C0.07i* 115:C0.12i* 131:C0.17i* 148:C0.23i* 164:C0.30i* 181:C0.38i* 198:C0.46i* 214:C0.54i* 231:C0.62i* 248:C0.70i* 264:C0.77i* 281:C0.83i* 298:C0.88i* 315:C0.93i* 332:C0.96i* 349:C0.98i* 366:C1.00i* 382:C1.00i* 403:-* 415:-* 432:-* 448:-* 465:-* 482:-* 498:-* 515:-* 532:-* 548:-* 565:-* 582:-* 598:-*
+QP pdf-tap-8: 3 [pages 4–5 of 15] -> 5 [pages 6–7 of 15]; up 0ms; curl first 31ms leaf moves 91ms last 397ms; folio widget changed 31ms; frames 13:- 31:C0.00* 48:C0.00i* 91:C0.03i* 112:C0.07i* 129:C0.12i* 145:C0.17i* 162:C0.23i* 178:C0.30i* 195:C0.38i* 212:C0.46i* 228:C0.54i* 245:C0.62i* 262:C0.70i* 279:C0.77i* 295:C0.83i* 312:C0.88i* 329:C0.93i* 345:C0.96i* 363:C0.98i* 379:C1.00i* 397:C1.00i* 418:-* 429:-* 446:-* 462:-* 479:-* 496:-* 512:-* 529:-* 545:-* 562:-* 579:-* 595:-* 612:-*
+QP pdf-tap-9: 5 [pages 6–7 of 15] -> 3 [pages 4–5 of 15]; up 0ms; curl first 32ms leaf moves 97ms last 397ms; folio widget changed 32ms; frames 14:- 32:C0.00* 62:C0.00i* 97:C0.04i* 112:C0.07i* 129:C0.12i* 145:C0.17i* 162:C0.23i* 179:C0.30i* 195:C0.38i* 212:C0.46i* 229:C0.54i* 245:C0.62i* 262:C0.70i* 279:C0.77i* 295:C0.83i* 312:C0.88i* 329:C0.93i* 346:C0.96i* 363:C0.98i* 380:C1.00i* 397:C1.00i* 418:-* 429:-* 446:-* 463:-* 479:-* 496:-* 512:-* 529:-* 546:-* 563:-* 579:-* 596:-* 612:-*
+QP pdf-tap-first-curl-ms: n=10 min 17 median 31 mean 25.7 max 34 all [17, 34, 32, 31, 22, 19, 19, 20, 31, 32]
+QP pdf-tap-first-leaf-move-ms: n=10 min 64 median 85 mean 84.4 max 97 all [64, 87, 82, 85, 84, 78, 85, 91, 91, 97]
+QP pdf-tap-latency-ok: true
+QP pdf-rec-forward: 3 [pages 4–5 of 15] -> 5 [pages 6–7 of 15]; up 0ms; curl first 30ms leaf moves 81ms last 394ms; folio widget changed 30ms; frames 11:- 30:C0.00* 47:C0.00i* 81:C0.02i* 94:C0.04i* 110:C0.07i* 127:C0.12i* 143:C0.17i* 160:C0.23i* 176:C0.30i* 193:C0.38i* 210:C0.46i* 227:C0.54i* 243:C0.62i* 260:C0.70i* 277:C0.77i* 293:C0.83i* 310:C0.88i* 327:C0.93i* 343:C0.96i* 361:C0.98i* 378:C1.00i* 394:C1.00i* 415:-* 427:-* 443:-* 460:-* 476:-* 493:-* 510:-* 526:-* 543:-* 560:-* 577:-* 594:-* 610:-*
+QP pdf-rec-back: 5 [pages 6–7 of 15] -> 3 [pages 4–5 of 15]; up 0ms; curl first 31ms leaf moves 112ms last 396ms; folio widget changed 31ms; frames 13:- 31:C0.00* 55:C0.00i* 112:C0.07i* 128:C0.12i* 145:C0.17i* 162:C0.23i* 178:C0.30i* 195:C0.38i* 212:C0.46i* 228:C0.54i* 245:C0.62i* 262:C0.70i* 278:C0.77i* 295:C0.83i* 312:C0.88i* 329:C0.93i* 346:C0.96i* 363:C0.98i* 379:C1.00i* 396:C1.00i* 417:-* 429:-* 445:-* 462:-* 479:-* 495:-* 512:-* 529:-* 546:-* 562:-* 579:-* 595:-* 612:-*
+QP ipad-04-pdf-after-turns padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-04-pdf-after-turns size: 1180.0x820.0
+QP ipad-04-pdf-after-turns stage: (56.0,0.0 1124.0x820.0)
+QP ipad-04-pdf-after-turns tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-04-pdf-after-turns page: 
+QP ipad-04-pdf-after-turns pdf-page: (80.0,30.9 1076.0x696.2)
+QP ipad-04-pdf-after-turns folio: (582.3,747.0 71.3x12.0)
+QP ipad-04-pdf-after-turns location: 3 [pages 4–5 of 15]
+QP ipad-04-pdf-after-turns header: (56.0,-56.0 1124.0x56.0)
+QP ipad-04-pdf-after-turns scrim: 
+QP ipad-04-pdf-after-turns chrome: false
+SHOT ipad-04-pdf-after-turns
+# screenshot ipad-04-pdf-after-turns done
+QP pdf-tap-recorded-ok: true
+QP chrome-shown: true
+QP f2-open-ok: true
+QP chrome-shown: true
+QP go-to-shown: true
+QP f2a-start: 50082300 [page 535 | page 536]
+QP ipad-05-f2a-1-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-f2a-1-start size: 1180.0x820.0
+QP ipad-05-f2a-1-start stage: (56.0,0.0 1124.0x820.0)
+QP ipad-05-f2a-1-start tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-05-f2a-1-start page: (80.0,24.0 1076.0x772.0)
+QP ipad-05-f2a-1-start pdf-page: 
+QP ipad-05-f2a-1-start folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP ipad-05-f2a-1-start location: 50082300 [page 535 | page 536]
+QP ipad-05-f2a-1-start header: (56.0,-56.0 1124.0x56.0)
+QP ipad-05-f2a-1-start scrim: 
+QP ipad-05-f2a-1-start chrome: false
+SHOT ipad-05-f2a-1-start
+# screenshot ipad-05-f2a-1-start done
+QP chrome-shown: true
+QP ipad-06-f2a-2-larger padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-06-f2a-2-larger size: 1180.0x820.0
+QP ipad-06-f2a-2-larger stage: (56.0,0.0 1124.0x820.0)
+QP ipad-06-f2a-2-larger tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-06-f2a-2-larger page: (80.0,24.0 1076.0x772.0)
+QP ipad-06-f2a-2-larger pdf-page: 
+QP ipad-06-f2a-2-larger folio: (339.4,735.0 43.2x12.0) (853.4,735.0 43.2x12.0)
+QP ipad-06-f2a-2-larger location: 50082923 [page 648 | page 649]
+QP ipad-06-f2a-2-larger header: (56.0,32.0 1124.0x56.0)
+QP ipad-06-f2a-2-larger scrim: (56.0,88.0 1124.0x671.0)
+QP ipad-06-f2a-2-larger chrome: true
+SHOT ipad-06-f2a-2-larger
+# screenshot ipad-06-f2a-2-larger done
+QP ipad-07-f2a-3-back-panel-open padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-07-f2a-3-back-panel-open size: 1180.0x820.0
+QP ipad-07-f2a-3-back-panel-open stage: (56.0,0.0 1124.0x820.0)
+QP ipad-07-f2a-3-back-panel-open tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-07-f2a-3-back-panel-open page: (80.0,24.0 1076.0x772.0)
+QP ipad-07-f2a-3-back-panel-open pdf-page: 
+QP ipad-07-f2a-3-back-panel-open folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP ipad-07-f2a-3-back-panel-open location: 50082300 [page 535 | page 536]
+QP ipad-07-f2a-3-back-panel-open header: (56.0,32.0 1124.0x56.0)
+QP ipad-07-f2a-3-back-panel-open scrim: (56.0,88.0 1124.0x671.0)
+QP ipad-07-f2a-3-back-panel-open chrome: true
+SHOT ipad-07-f2a-3-back-panel-open
+# screenshot ipad-07-f2a-3-back-panel-open done
+QP ipad-08-f2a-4-after-10s padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-08-f2a-4-after-10s size: 1180.0x820.0
+QP ipad-08-f2a-4-after-10s stage: (56.0,0.0 1124.0x820.0)
+QP ipad-08-f2a-4-after-10s tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-08-f2a-4-after-10s page: (80.0,24.0 1076.0x772.0)
+QP ipad-08-f2a-4-after-10s pdf-page: 
+QP ipad-08-f2a-4-after-10s folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP ipad-08-f2a-4-after-10s location: 50082300 [page 535 | page 536]
+QP ipad-08-f2a-4-after-10s header: (56.0,-56.0 1124.0x56.0)
+QP ipad-08-f2a-4-after-10s scrim: 
+QP ipad-08-f2a-4-after-10s chrome: false
+SHOT ipad-08-f2a-4-after-10s
+# screenshot ipad-08-f2a-4-after-10s done
+QP f2a-labels: 90% -> 100% -> 90%
+QP f2a-places: 50082300 [page 535 | page 536] -> 50082923 [page 648 | page 649] -> 50082300 [page 535 | page 536] -> after 10s 50082300 [page 535 | page 536]
+QP f2a-same: folios true place true
+QP f2-chapter-l-ok: true
+QP chrome-shown: true
+QP animations: true -> false
+QP chrome-shown: true
+QP go-to-shown: true
+QP f2b-paged-to: 30046694 [page 271 | page 272]
+QP chrome-shown: true
+QP animations: false -> true
+QP f2b-start: 30046694 [page 271 | page 272]
+QP ipad-09-f2b-1-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-09-f2b-1-start size: 1180.0x820.0
+QP ipad-09-f2b-1-start stage: (56.0,0.0 1124.0x820.0)
+QP ipad-09-f2b-1-start tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-09-f2b-1-start page: (80.0,24.0 1076.0x772.0)
+QP ipad-09-f2b-1-start pdf-page: 
+QP ipad-09-f2b-1-start folio: (340.8,735.0 40.4x12.0) (853.9,735.0 42.3x12.0)
+QP ipad-09-f2b-1-start location: 30046694 [page 271 | page 272]
+QP ipad-09-f2b-1-start header: (56.0,-56.0 1124.0x56.0)
+QP ipad-09-f2b-1-start scrim: 
+QP ipad-09-f2b-1-start chrome: false
+SHOT ipad-09-f2b-1-start
+# screenshot ipad-09-f2b-1-start done
+QP chrome-shown: true
+QP ipad-10-f2b-2-larger padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-10-f2b-2-larger size: 1180.0x820.0
+QP ipad-10-f2b-2-larger stage: (56.0,0.0 1124.0x820.0)
+QP ipad-10-f2b-2-larger tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-10-f2b-2-larger page: (80.0,24.0 1076.0x772.0)
+QP ipad-10-f2b-2-larger pdf-page: 
+QP ipad-10-f2b-2-larger folio: (339.6,735.0 42.8x12.0) (853.8,735.0 42.4x12.0)
+QP ipad-10-f2b-2-larger location: 30045943 [page 326 | page 327]
+QP ipad-10-f2b-2-larger header: (56.0,32.0 1124.0x56.0)
+QP ipad-10-f2b-2-larger scrim: (56.0,88.0 1124.0x671.0)
+QP ipad-10-f2b-2-larger chrome: true
+SHOT ipad-10-f2b-2-larger
+# screenshot ipad-10-f2b-2-larger done
+QP ipad-11-f2b-3-back-panel-open padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-11-f2b-3-back-panel-open size: 1180.0x820.0
+QP ipad-11-f2b-3-back-panel-open stage: (56.0,0.0 1124.0x820.0)
+QP ipad-11-f2b-3-back-panel-open tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-11-f2b-3-back-panel-open page: (80.0,24.0 1076.0x772.0)
+QP ipad-11-f2b-3-back-panel-open pdf-page: 
+QP ipad-11-f2b-3-back-panel-open folio: (340.8,735.0 40.4x12.0) (853.9,735.0 42.3x12.0)
+QP ipad-11-f2b-3-back-panel-open location: 30046694 [page 271 | page 272]
+QP ipad-11-f2b-3-back-panel-open header: (56.0,32.0 1124.0x56.0)
+QP ipad-11-f2b-3-back-panel-open scrim: (56.0,88.0 1124.0x671.0)
+QP ipad-11-f2b-3-back-panel-open chrome: true
+SHOT ipad-11-f2b-3-back-panel-open
+# screenshot ipad-11-f2b-3-back-panel-open done
+QP ipad-12-f2b-4-after-10s padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-12-f2b-4-after-10s size: 1180.0x820.0
+QP ipad-12-f2b-4-after-10s stage: (56.0,0.0 1124.0x820.0)
+QP ipad-12-f2b-4-after-10s tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-12-f2b-4-after-10s page: (80.0,24.0 1076.0x772.0)
+QP ipad-12-f2b-4-after-10s pdf-page: 
+QP ipad-12-f2b-4-after-10s folio: (340.8,735.0 40.4x12.0) (853.9,735.0 42.3x12.0)
+QP ipad-12-f2b-4-after-10s location: 30046694 [page 271 | page 272]
+QP ipad-12-f2b-4-after-10s header: (56.0,-56.0 1124.0x56.0)
+QP ipad-12-f2b-4-after-10s scrim: 
+QP ipad-12-f2b-4-after-10s chrome: false
+SHOT ipad-12-f2b-4-after-10s
+# screenshot ipad-12-f2b-4-after-10s done
+QP f2b-labels: 90% -> 100% -> 90%
+QP f2b-places: 30046694 [page 271 | page 272] -> 30045943 [page 326 | page 327] -> 30046694 [page 271 | page 272] -> after 10s 30046694 [page 271 | page 272]
+QP f2b-same: folios true place true
+QP f2-mid-book-ok: true
+QP chrome-shown: true
+QP end-in-library: true
+QP ipad-13-library-end padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-13-library-end size: 1180.0x820.0
+QP ipad-13-library-end stage: 
+QP ipad-13-library-end tap-area: 
+QP ipad-13-library-end page: 
+QP ipad-13-library-end pdf-page: 
+QP ipad-13-library-end folio: 
+QP ipad-13-library-end location:  []
+QP ipad-13-library-end header: 
+QP ipad-13-library-end scrim: 
+QP ipad-13-library-end chrome: false
+SHOT ipad-13-library-end
+# screenshot ipad-13-library-end done
+QP end-library-ok: true
+QP final-exception: null
+DONE

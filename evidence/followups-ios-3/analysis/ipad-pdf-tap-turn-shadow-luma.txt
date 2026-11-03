@@ -1,0 +1,62 @@
+In-app frames of iPad two-page PDF tap turns at fea4478 (1x, logical pt).
+under-page band: mean luma of x 200-560, y 729-740; left edge: x 60-78, y 200-600; right corner: x 1100-1170, y 729-760
+
+ipad-pdf-rec-forward
+     1 ms  band 164.8  left 206.1  right-corner 197.2
+    11 ms  band 164.8  left 206.1  right-corner 197.2
+    30 ms  band 165.3  left 206.1  right-corner 197.3
+    47 ms  band 165.3  left 206.1  right-corner 197.3
+    81 ms  band 165.0  left 206.1  right-corner 197.3
+    94 ms  band 165.0  left 206.1  right-corner 197.3
+   110 ms  band 165.0  left 206.1  right-corner 197.3
+   127 ms  band 165.0  left 206.1  right-corner 197.3
+   143 ms  band 165.0  left 206.1  right-corner 197.3
+   160 ms  band 165.0  left 206.1  right-corner 197.3
+   176 ms  band 165.0  left 206.1  right-corner 197.3
+   193 ms  band 165.0  left 206.1  right-corner 197.3
+   210 ms  band 165.0  left 206.1  right-corner 197.3
+   227 ms  band 165.0  left 206.1  right-corner 197.3
+   243 ms  band 165.0  left 206.1  right-corner 197.3
+   260 ms  band 165.0  left 206.1  right-corner 197.3
+   277 ms  band 165.0  left 206.1  right-corner 197.3
+   293 ms  band 165.0  left 206.1  right-corner 197.3
+   310 ms  band 165.0  left 206.1  right-corner 197.3
+   327 ms  band 165.0  left 206.1  right-corner 197.3
+   343 ms  band 165.0  left 206.1  right-corner 197.3
+   361 ms  band 165.0  left 206.1  right-corner 197.3
+   378 ms  band 165.0  left 206.1  right-corner 197.3
+   394 ms  band 165.0  left 206.1  right-corner 197.3
+   415 ms  band 164.8  left 206.1  right-corner 197.2
+   427 ms  band 164.8  left 206.1  right-corner 197.2
+   443 ms  band 164.8  left 206.1  right-corner 197.2
+   460 ms  band 164.8  left 206.1  right-corner 197.2
+
+ipad-pdf-rec-back
+     1 ms  band 164.8  left 206.1  right-corner 197.2
+    13 ms  band 164.8  left 206.1  right-corner 197.2
+    31 ms  band 165.3  left 206.1  right-corner 197.3
+    55 ms  band 165.3  left 206.1  right-corner 197.3
+   112 ms  band 165.0  left 206.1  right-corner 197.3
+   128 ms  band 165.0  left 206.1  right-corner 197.3
+   145 ms  band 165.0  left 206.1  right-corner 197.3
+   162 ms  band 165.0  left 206.1  right-corner 197.3
+   178 ms  band 165.0  left 206.1  right-corner 197.3
+   195 ms  band 165.0  left 206.1  right-corner 197.3
+   212 ms  band 165.0  left 206.1  right-corner 197.3
+   228 ms  band 165.0  left 206.1  right-corner 197.3
+   245 ms  band 165.0  left 206.1  right-corner 197.3
+   262 ms  band 165.0  left 206.1  right-corner 197.3
+   278 ms  band 165.0  left 206.1  right-corner 197.3
+   295 ms  band 165.0  left 206.1  right-corner 197.3
+   312 ms  band 165.0  left 206.1  right-corner 197.3
+   329 ms  band 165.0  left 206.1  right-corner 197.3
+   346 ms  band 165.0  left 206.1  right-corner 197.3
+   363 ms  band 165.0  left 206.1  right-corner 197.3
+   379 ms  band 165.0  left 206.1  right-corner 197.3
+   396 ms  band 165.0  left 206.1  right-corner 197.3
+   417 ms  band 164.8  left 206.1  right-corner 197.2
+   429 ms  band 164.8  left 206.1  right-corner 197.2
+   445 ms  band 164.8  left 206.1  right-corner 197.2
+   462 ms  band 164.8  left 206.1  right-corner 197.2
+   479 ms  band 164.8  left 206.1  right-corner 197.2
+   495 ms  band 164.8  left 206.1  right-corner 197.2
