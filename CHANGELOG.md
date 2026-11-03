@@ -125,6 +125,8 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Number EPUB pages from the start of the book (#277)
 - *(intake)* Open Android and macOS books in Shōsai (#283)
 - *(library)* One-row phone header, Add books by platform, no folders on mobile (#279)
+- *(library)* Show the covers of unopened EPUBs on the shelf (#286)
+- *(library)* Show the first page of unopened PDFs on the shelf (#287)
 
 ### 🐛 Bug Fixes
 
@@ -261,6 +263,7 @@ All notable changes to this project will be documented in this file.
 - *(android)* Package every ABI and run the packaged check on Android and iOS (#171)
 - *(mobile)* Use dev.shosai.shosai application identifiers (#251)
 - *(assets)* Update development app icon (#252)
+- *(ios)* Raise the minimum to iOS 15 for Xcode 27 (#285)
 
 ### 🛡️ Security
 
