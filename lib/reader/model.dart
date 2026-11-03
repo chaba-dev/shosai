@@ -736,15 +736,22 @@ final class ReaderModel {
     return String.fromCharCodes(scalars.sublist(start, end));
   }
 
-  String get selectionDescription {
+  String get selectionDescription =>
+      localizedSelectionDescription(AppLocalizationsEn());
+
+  String localizedSelectionDescription(AppLocalizations l10n) {
     final selected = selectedText;
     return switch (selectionPhase) {
-      ReaderSelectionPhase.idle => 'No text selected',
+      ReaderSelectionPhase.idle => l10n.readerSelectionIdle,
       ReaderSelectionPhase.selecting =>
-        selected == null ? 'Selecting text' : 'Selecting text: $selected',
+        selected == null
+            ? l10n.readerSelectionSelecting
+            : l10n.readerSelectionSelectingText(selected),
       ReaderSelectionPhase.selected =>
-        selected == null ? 'Text selection ready' : 'Selected text: $selected',
-      ReaderSelectionPhase.committing => 'Saving selected text',
+        selected == null
+            ? l10n.readerSelectionReady
+            : l10n.readerSelectionSelectedText(selected),
+      ReaderSelectionPhase.committing => l10n.readerSelectionSaving,
     };
   }
 

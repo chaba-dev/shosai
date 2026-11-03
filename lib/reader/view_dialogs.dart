@@ -17,8 +17,9 @@ class _AnnotationAssociationDialogState
   @override
   Widget build(BuildContext context) {
     final contentWidth = _dialogContentWidth(context, 520);
+    final l10n = AppLocalizations.of(context);
     return ShadDialog(
-      title: const Text('Associate highlights?'),
+      title: Text(l10n.readerAssociateTitle),
       // Large text stacks the actions; otherwise Shad lays them in a row, or
       // stacks them at full width on a phone. Forcing a row there gives the
       // full-width buttons an unbounded width and the dialog never lays out.
@@ -30,7 +31,7 @@ class _AnnotationAssociationDialogState
           height: shosaiShadButtonHeight(context),
           onPressed: () =>
               Navigator.pop(context, const AnnotationAssociationCancelled()),
-          child: const Text('Cancel'),
+          child: Text(l10n.readerNoteCancel),
         ),
         ShadButton(
           height: shosaiShadButtonHeight(context),
@@ -40,7 +41,7 @@ class _AnnotationAssociationDialogState
                   context,
                   AnnotationAssociationSelected(_selected!),
                 ),
-          child: const Text('Associate'),
+          child: Text(l10n.readerAssociateAction),
         ),
       ],
       child: ConstrainedBox(
@@ -49,12 +50,7 @@ class _AnnotationAssociationDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Choose the earlier document version this file replaces. '
-              'Its notes and highlights will be shared with this version. '
-              'Highlights whose location cannot be recovered will remain marked '
-              'as ambiguous or unavailable.',
-            ),
+            Text(l10n.readerAssociateBody),
             const SizedBox(height: 12),
             ShadRadioGroup<FlutterAnnotationAssociationSource>(
               initialValue: _selected,
@@ -69,8 +65,7 @@ class _AnnotationAssociationDialogState
                         value: source,
                         label: Text(source.localPath),
                         sublabel: Text(
-                          '${source.liveAnnotations} saved highlight'
-                          '${source.liveAnnotations == BigInt.one ? '' : 's'} · '
+                          '${l10n.readerSavedHighlights(source.liveAnnotations.toInt())} · '
                           '${source.fingerprintAlgorithm} '
                           '${_fingerprintLabel(source.fingerprint)}',
                         ),
@@ -91,7 +86,7 @@ class _AnnotationAssociationDialogState
                         context,
                         const AnnotationAssociationPreviousPage(),
                       ),
-                      child: const Text('Previous'),
+                      child: Text(l10n.readerAssociatePrevious),
                     ),
                   if (widget.page.canGoForward)
                     ShadButton.ghost(
@@ -100,7 +95,7 @@ class _AnnotationAssociationDialogState
                         context,
                         const AnnotationAssociationNextPage(),
                       ),
-                      child: const Text('Next'),
+                      child: Text(l10n.readerAssociateNext),
                     ),
                 ],
               ),

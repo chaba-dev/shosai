@@ -659,9 +659,9 @@ void main() {
       }
     }
 
-    await tester.tap(find.text('Light'));
+    await tester.tap(find.text('Paper'));
     await settlePopover();
-    await tester.tap(find.text('Dark').last);
+    await tester.tap(find.text('Night').last);
     await settlePopover();
     await tester.tap(find.text('Continuous reading'));
     await tester.pump();
@@ -674,7 +674,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Reader theme'), findsNothing);
     await _openReaderSettings(tester);
-    expect(find.text('Dark'), findsOneWidget);
+    expect(find.text('Night'), findsOneWidget);
     expect(
       tester.widget<ShadSwitch>(find.byType(ShadSwitch).first).value,
       isTrue,

@@ -683,9 +683,8 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String shellSearchBookFailed(String error) {
-    return 'This book could not be searched: $error';
-  }
+  String get shellSearchBookFailed =>
+      'This book could not be searched. Try opening it again.';
 
   @override
   String get shellBookmarksEmptyHeading => 'No bookmarks yet';
@@ -1029,4 +1028,282 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get readerZonesLeftward =>
       'This book turns leftward.\nTap the sides to turn, the middle for controls. You can also swipe. Tap anywhere to begin.';
+
+  @override
+  String get settingsReaderTheme => 'Reader theme';
+
+  @override
+  String get settingsContinuousReading => 'Continuous reading';
+
+  @override
+  String get settingsContinuousReadingHint =>
+      'Vertical books always turn pages.';
+
+  @override
+  String get settingsEpubTextSize => 'EPUB text size';
+
+  @override
+  String get settingsEpubLineSpacing => 'EPUB line spacing';
+
+  @override
+  String get settingsPdfZoom => 'PDF zoom';
+
+  @override
+  String settingsCustomZoom(int percentage) {
+    return '$percentage% (custom)';
+  }
+
+  @override
+  String get libraryDeleteManagedTitle => 'Delete managed copy?';
+
+  @override
+  String libraryDeleteManagedBody(String title) {
+    return '“$title” will be removed from the library and its managed file will be deleted.';
+  }
+
+  @override
+  String get libraryDeleteManagedAction => 'Remove and delete';
+
+  @override
+  String get readerAssociateTitle => 'Associate highlights?';
+
+  @override
+  String get readerAssociateAction => 'Associate';
+
+  @override
+  String get readerAssociateBody =>
+      'Choose the earlier document version this file replaces. Its notes and highlights will be shared with this version. Highlights whose location cannot be recovered will remain marked as ambiguous or unavailable.';
+
+  @override
+  String readerSavedHighlights(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count saved highlights',
+      one: '1 saved highlight',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get readerAssociatePrevious => 'Previous';
+
+  @override
+  String get readerAssociateNext => 'Next';
+
+  @override
+  String get readerAssociateHighlights =>
+      'Associate highlights from an earlier version…';
+
+  @override
+  String get readerRetryHighlights => 'Retry loading highlights';
+
+  @override
+  String get readerUntitledDocument => 'Untitled document';
+
+  @override
+  String get readerContentUnavailable => 'Document content unavailable';
+
+  @override
+  String readerDocumentText(String text) {
+    return 'Document text: $text';
+  }
+
+  @override
+  String get readerSelectTextHint =>
+      'Selects this text and shows selection actions.';
+
+  @override
+  String get readerDocumentPath => 'Document path';
+
+  @override
+  String get readerDocumentPathHint => '/path/to/book.pdf';
+
+  @override
+  String get readerOpenDocument => 'Open document';
+
+  @override
+  String get readerEnterDocumentPath =>
+      'Enter a local document path to open it.';
+
+  @override
+  String get readerSelectionIdle => 'No text selected';
+
+  @override
+  String get readerSelectionSelecting => 'Selecting text';
+
+  @override
+  String readerSelectionSelectingText(String text) {
+    return 'Selecting text: $text';
+  }
+
+  @override
+  String get readerSelectionReady => 'Text selection ready';
+
+  @override
+  String readerSelectionSelectedText(String text) {
+    return 'Selected text: $text';
+  }
+
+  @override
+  String get readerSelectionSaving => 'Saving selected text';
+
+  @override
+  String get readerNotePlaceMissing =>
+      'This note\'s place isn\'t in this edition of the book.';
+
+  @override
+  String readerNotePlaceFailed(String error) {
+    return 'This note\'s place could not be found: $error';
+  }
+
+  @override
+  String readerBookmarksNotSaved(String error) {
+    return 'Bookmark changes were not saved: $error';
+  }
+
+  @override
+  String readerNotesNotSaved(String error) {
+    return 'Note changes were not saved: $error';
+  }
+
+  @override
+  String readerNotesUnavailable(String error) {
+    return 'Notes are unavailable: $error';
+  }
+
+  @override
+  String readerPositionNotSaved(String error) {
+    return 'Reading position was not saved: $error';
+  }
+
+  @override
+  String readerPositionNotRestored(String error) {
+    return 'Reading position could not be restored: $error';
+  }
+
+  @override
+  String readerBookmarksUnavailable(String error) {
+    return 'Bookmarks are unavailable: $error';
+  }
+
+  @override
+  String readerLayoutFailed(String error) {
+    return 'Layout failed: $error';
+  }
+
+  @override
+  String readerHighlightsNotSaved(String error) {
+    return 'Highlight changes were not saved: $error';
+  }
+
+  @override
+  String readerEarlierHighlightNotSaved(String error) {
+    return 'An earlier highlight could not be saved: $error';
+  }
+
+  @override
+  String readerAssociationNotSaved(String error) {
+    return 'Highlight association was not saved: $error';
+  }
+
+  @override
+  String readerAssociationLoadFailed(String error) {
+    return 'Association saved, but highlights could not be loaded: $error';
+  }
+
+  @override
+  String readerSelectionUnavailable(String error) {
+    return 'Selection unavailable: $error';
+  }
+
+  @override
+  String readerSelectionActionFailed(String error) {
+    return 'Selection action failed: $error';
+  }
+
+  @override
+  String readerHighlightActionFailed(String error) {
+    return 'Highlight action failed: $error';
+  }
+
+  @override
+  String readerHighlightsUnavailable(String error) {
+    return 'Highlights unavailable: $error';
+  }
+
+  @override
+  String get readerNoteSelectionChanged =>
+      'The note was not saved because the selection or reader layout changed. Try again.';
+
+  @override
+  String get readerNoteLayoutChanged =>
+      'The note was not saved because the reader layout changed. Try again.';
+
+  @override
+  String get readerFinishHighlightChange =>
+      'Finish the current highlight change, then save the note again.';
+
+  @override
+  String get readerNoteInterrupted =>
+      'The note was not saved because the app was suspended. Try again.';
+
+  @override
+  String get readerBookmarksStillSaving =>
+      'Bookmark changes are still saving. Try opening again shortly.';
+
+  @override
+  String get readerNotesStillSaving =>
+      'Note changes are still saving. Try opening again shortly.';
+
+  @override
+  String get readerNoHighlightsToAssociate =>
+      'No saved highlights are available to associate.';
+
+  @override
+  String readerChapterTextLimit(int chapter, int limit) {
+    return 'Chapter $chapter is too large to display: one of its paragraphs is longer than $limit characters. Choose another chapter from Contents.';
+  }
+
+  @override
+  String readerChapterNodeLimit(int chapter, int limit) {
+    return 'Chapter $chapter is too large to display: one of its lists, tables or sections holds more than $limit parts. Choose another chapter from Contents.';
+  }
+
+  @override
+  String get errorCancelled => 'The operation was cancelled.';
+
+  @override
+  String get errorNotFound =>
+      'The file could not be found. Check its location and try again.';
+
+  @override
+  String get errorInaccessible =>
+      'The file could not be accessed. Check its permissions and connection, then try again.';
+
+  @override
+  String get errorInvalidRequest =>
+      'The operation is no longer available. Reopen the book and try again.';
+
+  @override
+  String get errorMalformed =>
+      'The book could not be read. Try another copy of the file.';
+
+  @override
+  String get errorBackendUnavailable =>
+      'The document engine is unavailable. Restart the app and try again.';
+
+  @override
+  String get errorRenderFailed =>
+      'The page could not be displayed. Reopen the book and try again.';
+
+  @override
+  String get shellSearchFailed => 'Search could not be completed. Try again.';
+
+  @override
+  String get shellNotesFailed => 'Notes could not be loaded. Try again.';
+
+  @override
+  String get locationAuthorizationReturned =>
+      'Authorization response received. Return to Shōsai to check whether the connection completed. You may close this browser tab.';
 }

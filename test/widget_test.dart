@@ -89,7 +89,7 @@ void main() {
 
   testWidgets('welcome panel describes the path entry', (tester) async {
     await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: WelcomePanel())),
+      const ShosaiShell(home: Scaffold(body: WelcomePanel())),
     );
 
     expect(find.textContaining('local document path'), findsOneWidget);
@@ -376,7 +376,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(announcements, ['Selected text: e', 'No text selected']);
       expect(controller.model.document, isNull);
-      expect(controller.model.error, contains('too many cancellation tokens'));
+      expect(
+        controller.model.error,
+        'The operation is no longer available. Reopen the book and try again.',
+      );
       controller.dispatch(const ReaderSelectionCancelled());
       await Future<void>.delayed(Duration.zero);
       expect(announcements, ['Selected text: e', 'No text selected']);
@@ -734,13 +737,10 @@ void main() {
 
     expect(controller.model.document, isNull);
     expect(controller.model.pageImage, isNull);
-    // User-visible bridge failures carry the kind alongside the message (the
-    // retained reader interpolated the raw error object, which rendered as
-    // "Instance of 'FlutterBridgeError'"). The assertion stays exact, so a
-    // change to either half of the format still fails here.
+    // Structured failures show translated recovery text, not engine diagnostics.
     expect(
       controller.model.error,
-      'too many cancellation tokens (invalidRequest)',
+      'The operation is no longer available. Reopen the book and try again.',
     );
     expect(controller.model.openPath, '/tmp/second.pdf');
     expect(image.debugDisposed, isTrue);
@@ -766,14 +766,24 @@ void main() {
       controller.dispatch(const ReaderOpenRequested('/tmp/book.epub'));
       bridge.openCompleter.completeError(StateError('open failed'));
 
-      await _expectFailedOperation(controller, bridge, 'open failed');
+      await _expectFailedOperation(
+        controller,
+        bridge,
+        'The operation could not be completed.',
+      );
       expect(bridge.releasedDocuments, isEmpty);
       expect(bridge.releasedBuffers, isEmpty);
     });
 
     for (final unavailable in [
-      (FlutterBridgeErrorKind.notFound, 'document was not found'),
-      (FlutterBridgeErrorKind.inaccessible, 'document is inaccessible'),
+      (
+        FlutterBridgeErrorKind.notFound,
+        'The file could not be found. Check its location and try again.',
+      ),
+      (
+        FlutterBridgeErrorKind.inaccessible,
+        'The file could not be accessed. Check its permissions and connection, then try again.',
+      ),
     ]) {
       test('${unavailable.$1} locator failure remains actionable', () async {
         final bridge = _FakeBridge();
@@ -796,7 +806,11 @@ void main() {
       await bridge.renderStarted.future;
       bridge.renderCompleter.completeError(StateError('render failed'));
 
-      await _expectFailedOperation(controller, bridge, 'render failed');
+      await _expectFailedOperation(
+        controller,
+        bridge,
+        'The operation could not be completed.',
+      );
       expect(bridge.releasedDocuments, [_documentHandle]);
       expect(bridge.releasedBuffers, isEmpty);
     });
@@ -817,7 +831,11 @@ void main() {
         ),
       );
 
-      await _expectFailedOperation(controller, bridge, 'transfer failed');
+      await _expectFailedOperation(
+        controller,
+        bridge,
+        'The operation could not be completed.',
+      );
       expect(bridge.releasedDocuments, [_documentHandle]);
       expect(bridge.releasedBuffers, [_bufferHandle]);
     });
@@ -841,7 +859,11 @@ void main() {
         ),
       );
 
-      await _expectFailedOperation(controller, bridge, 'decode failed');
+      await _expectFailedOperation(
+        controller,
+        bridge,
+        'The operation could not be completed.',
+      );
       expect(bridge.releasedDocuments, [_documentHandle]);
       expect(bridge.releasedBuffers, [_bufferHandle]);
     });
@@ -907,7 +929,7 @@ void main() {
       controller.dispatch(const ReaderOpenRequested('/tmp/failure.epub'));
       await bridge.waitForFinishedOperations(3);
       expect(controller.model.document, isNull);
-      expect(controller.model.error, contains('replacement failed'));
+      expect(controller.model.error, 'The operation could not be completed.');
       expect(bridge.releasedDocuments, [firstDocument, secondDocument]);
 
       controller.dispatch(const ReaderOpenRequested('/tmp/retry.epub'));
@@ -1512,7 +1534,10 @@ void main() {
       await bridge.waitForOp(2);
 
       expect(controller.model.annotations, isEmpty);
-      expect(controller.model.annotationError, contains('another document'));
+      expect(
+        controller.model.annotationError,
+        'The operation could not be completed.',
+      );
       expect(controller.model.annotationOperations, isEmpty);
       controller.dispose();
       await bridge.disposed.future;
@@ -1581,10 +1606,11 @@ void main() {
     );
     await bridge.waitForOp(2);
 
-    // The reload path interpolated the raw error object, so the alert rendered
-    // "Instance of 'FlutterBridgeError'". The assertion is exact in both halves,
-    // so neither the message nor the kind can drop out unnoticed.
-    expect(controller.model.annotationError, 'highlights are gone (notFound)');
+    // Show translated guidance for the structured error, not raw diagnostics.
+    expect(
+      controller.model.annotationError,
+      'The file could not be found. Check its location and try again.',
+    );
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -1759,6 +1785,87 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
+
+  testWidgets('Japanese reader localizes an asynchronous open failure', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(immediateLists: true)
+      ..openFailure = const FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.notFound,
+        message: 'English engine diagnostic /private/book.pdf',
+      );
+    await tester.pumpWidget(
+      ShosaiShell(
+        locale: const Locale('ja'),
+        home: ReaderScreen(
+          initialPath: '/tmp/missing.pdf',
+          bridge: bridge,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('ファイルが見つかりません。保存場所を確認して、もう一度お試しください。'), findsOneWidget);
+    expect(find.textContaining('English engine diagnostic'), findsNothing);
+    expect(find.text('再試行'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets(
+    'Japanese reader localizes highlight association and selection semantics',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 800);
+      addTearDown(tester.view.reset);
+      final semantics = tester.ensureSemantics();
+      final bridge = _ControlledBridge(
+        associationSources: [_associationSource()],
+        associatedAnnotations: [_resolutionAnnotations().first],
+        immediateLists: true,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          locale: const Locale('ja'),
+          home: ReaderScreen(
+            initialPath: '/tmp/changed.epub',
+            bridge: bridge,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('reader-selection-status')))
+            .label,
+        '文章は選択されていません',
+      );
+      await _openNotesPanel(tester);
+      await tester.tap(find.byTooltip('旧版のハイライトを引き継ぐ…'));
+      await tester.pumpAndSettle();
+      expect(find.text('ハイライトを引き継ぎますか？'), findsOneWidget);
+      expect(find.textContaining('旧版のメモとハイライト'), findsOneWidget);
+      expect(find.textContaining('保存済みハイライト'), findsOneWidget);
+      expect(
+        tester
+            .widget<ShadButton>(find.widgetWithText(ShadButton, '引き継ぐ'))
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('/tmp/original.epub'));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ShadButton, '引き継ぐ'));
+      await tester.pumpAndSettle();
+      expect(bridge.associatedSourceIds, ['source-version']);
+      expect(find.textContaining('復元'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+      semantics.dispose();
+    },
+  );
 
   for (final size in const [Size(390, 844), Size(600, 800), Size(1280, 800)]) {
     testWidgets('association dialog lays out its actions and sources at '
@@ -2215,7 +2322,10 @@ void main() {
     expect(controller.model.relayoutBusy, isFalse);
     // The rendered page stays up, so a PDF page whose text layout failed
     // reports a selection failure, recorded once and not retried.
-    expect(controller.model.selectionError, contains('persistent failure'));
+    expect(
+      controller.model.selectionError,
+      'The operation could not be completed.',
+    );
     expect(controller.model.relayoutError, isNull);
     controller.dispose();
     await bridge.disposed.future;
@@ -3499,7 +3609,10 @@ void main() {
 
     expect(controller.model.relayoutBusy, isFalse);
     expect(controller.model.document, isNull);
-    expect(controller.model.error, contains('cancellation tokens'));
+    expect(
+      controller.model.error,
+      'The operation is no longer available. Reopen the book and try again.',
+    );
     pendingLayout.complete(_surface(BigInt.from(20), raster: true));
     await bridge.waitForOp(2);
     controller.dispose();
@@ -3650,7 +3763,7 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect(
           controller.model.annotationError,
-          contains('cancellation tokens'),
+          'The operation is no longer available. Reopen the book and try again.',
         );
         expect(controller.model.annotationOperations, isEmpty);
         expect(bridge.updateCalls, 0);
@@ -3933,7 +4046,7 @@ void main() {
       expect(controller.model.openPath, '/tmp/b.epub');
       expect(controller.model.openBookId, isNull);
       await bridge.waitForOp(2);
-      expect(controller.model.error, contains('replacement failed'));
+      expect(controller.model.error, 'The operation could not be completed.');
       expect(controller.model.openBookId, isNull);
 
       controller.dispose();
@@ -3996,7 +4109,7 @@ void main() {
         } else {
           expect(
             controller.model.selectionActionError,
-            'The note could not be saved while the app was suspended. Try again.',
+            'The note was not saved because the app was suspended. Try again.',
           );
           expect(controller.model.annotations, isEmpty);
         }
@@ -4048,7 +4161,7 @@ void main() {
         } else {
           expect(
             controller.model.annotationError,
-            'The note could not be saved while the app was suspended. Try again.',
+            'The note was not saved because the app was suspended. Try again.',
           );
           expect(controller.model.annotations.single.body, isNull);
         }
@@ -4063,35 +4176,31 @@ void main() {
     (FlutterBridgeErrorKind.notFound, 'document was not found'),
     (FlutterBridgeErrorKind.inaccessible, 'document is inaccessible'),
   ]) {
-    test(
-      '${unavailable.$1} retries after background memory pressure',
-      () async {
-        final error = FlutterBridgeError(
-          kind: unavailable.$1,
-          message: unavailable.$2,
-        );
-        final bridge = _SequentialBridge(Queue<Object>.of([error, error]));
-        final controller = _epubController(bridge);
-        controller.dispatch(const ReaderOpenRequested('/tmp/missing.epub'));
-        await bridge.waitForFinishedOperations(1);
-        // The open alert carries the bridge message and its kind; the assertion
-        // is exact in both halves, so the retained "Instance of
-        // 'FlutterBridgeError'" rendering cannot come back unnoticed.
-        final described = '${unavailable.$2} (${unavailable.$1.name})';
-        expect(controller.model.error, described);
+    test('${unavailable.$1} retries after background memory pressure', () async {
+      final error = FlutterBridgeError(
+        kind: unavailable.$1,
+        message: unavailable.$2,
+      );
+      final bridge = _SequentialBridge(Queue<Object>.of([error, error]));
+      final controller = _epubController(bridge);
+      controller.dispatch(const ReaderOpenRequested('/tmp/missing.epub'));
+      await bridge.waitForFinishedOperations(1);
+      final described = unavailable.$1 == FlutterBridgeErrorKind.notFound
+          ? 'The file could not be found. Check its location and try again.'
+          : 'The file could not be accessed. Check its permissions and connection, then try again.';
+      expect(controller.model.error, described);
 
-        controller.dispatch(const ReaderSuspended());
-        controller.dispatch(const ReaderMemoryPressureReceived());
-        expect(controller.model.error, described);
-        controller.dispatch(const ReaderResumed());
-        await bridge.waitForFinishedOperations(2);
+      controller.dispatch(const ReaderSuspended());
+      controller.dispatch(const ReaderMemoryPressureReceived());
+      expect(controller.model.error, described);
+      controller.dispatch(const ReaderResumed());
+      await bridge.waitForFinishedOperations(2);
 
-        expect(controller.model.error, described);
-        expect(bridge.openResults, isEmpty);
-        controller.dispose();
-        expect(bridge.disposeCount, 1);
-      },
-    );
+      expect(controller.model.error, described);
+      expect(bridge.openResults, isEmpty);
+      controller.dispose();
+      expect(bridge.disposeCount, 1);
+    });
   }
 
   testWidgets('reader maps platform lifecycle events to recovery messages', (
@@ -4196,7 +4305,10 @@ void main() {
     controller.dispatch(const ReaderSelectionCopyRequested());
     copies.single.completeError(StateError('clipboard denied'));
     await Future<void>.delayed(Duration.zero);
-    expect(controller.model.selectionActionError, contains('clipboard denied'));
+    expect(
+      controller.model.selectionActionError,
+      'The operation could not be completed.',
+    );
 
     controller.dispatch(const ReaderSelectionCopyRequested());
     expect(controller.model.selectionActionError, isNull);
@@ -4241,7 +4353,7 @@ void main() {
         if (createFails) {
           expect(
             controller.model.selectionActionError,
-            contains('save failed'),
+            'The operation could not be completed.',
           );
         } else {
           expect(controller.model.selectionPhase, ReaderSelectionPhase.idle);
@@ -4279,7 +4391,10 @@ void main() {
       while (controller.model.annotationOperations.isNotEmpty) {
         await Future<void>.delayed(Duration.zero);
       }
-      expect(controller.model.annotationError, contains('$operation failed'));
+      expect(
+        controller.model.annotationError,
+        'The operation could not be completed.',
+      );
 
       if (operation == 'update') {
         bridge.updateCompleter = null;
@@ -4334,7 +4449,7 @@ void main() {
           isA<ReaderPersistenceException>().having(
             (error) => error.message,
             'message',
-            contains('first update failed'),
+            'Highlight changes were not saved: The operation could not be completed.',
           ),
         ),
       );
@@ -5623,82 +5738,83 @@ void main() {
   }
 
   for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
-    testWidgets(
-      '$platform retains cleared selection status during replacement',
-      (tester) async {
-        final semantics = tester.ensureSemantics();
-        debugDefaultTargetPlatformOverride = platform;
-        try {
-          final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
-          await tester.pumpWidget(
-            MaterialApp(
-              home: ReaderScreen(
-                debugPathEntry: true,
-                bridge: bridge,
-                decoder: (pixels, {required width, required height}) =>
-                    _testImage(),
-              ),
+    testWidgets('$platform retains cleared selection status during replacement', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      debugDefaultTargetPlatformOverride = platform;
+      try {
+        final bridge = _ControlledBridge(format: FlutterBookFormat.pdf);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ReaderScreen(
+              debugPathEntry: true,
+              bridge: bridge,
+              decoder: (pixels, {required width, required height}) =>
+                  _testImage(),
             ),
-          );
-          await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
-          await tester.tap(find.text('Open document'));
-          await tester.pumpAndSettle();
-          await dismissReaderZonesHint(tester);
-          final statusFinder = find.byKey(
-            const ValueKey('reader-selection-status'),
-          );
-          final statusNode = tester.getSemantics(statusFinder);
+          ),
+        );
+        await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
+        await tester.tap(find.text('Open document'));
+        await tester.pumpAndSettle();
+        await dismissReaderZonesHint(tester);
+        final statusFinder = find.byKey(
+          const ValueKey('reader-selection-status'),
+        );
+        final statusNode = tester.getSemantics(statusFinder);
 
-          await tester.tap(
-            find.byKey(const ValueKey('reader-selection-surface')),
-          );
-          // Allow the double-tap recognizer's minimum inter-tap timer to end,
-          // but not its 300 ms single-tap delay: keyboard focus is immediate.
-          await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(
+          find.byKey(const ValueKey('reader-selection-surface')),
+        );
+        // Allow the double-tap recognizer's minimum inter-tap timer to end,
+        // but not its 300 ms single-tap delay: keyboard focus is immediate.
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pump();
+        expect(statusNode.getSemanticsData().label, 'Selected text: e');
+
+        final editable = tester.state<EditableTextState>(
+          find.byType(EditableText),
+        );
+        for (
+          var tabs = 0;
+          tabs < 12 && !editable.widget.focusNode.hasFocus;
+          tabs += 1
+        ) {
           await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
           await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
           await tester.pump();
-          expect(statusNode.getSemanticsData().label, 'Selected text: e');
-
-          final editable = tester.state<EditableTextState>(
-            find.byType(EditableText),
-          );
-          for (
-            var tabs = 0;
-            tabs < 12 && !editable.widget.focusNode.hasFocus;
-            tabs += 1
-          ) {
-            await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-            await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-            await tester.pump();
-          }
-          expect(editable.widget.focusNode.hasFocus, isTrue);
-          tester.testTextInput.enterText('/tmp/replacement.epub');
-          bridge.failCancellationCreation = true;
-          await tester.testTextInput.receiveAction(TextInputAction.done);
-          await tester.pump();
-
-          expect(tester.getSemantics(statusFinder), same(statusNode));
-          expect(statusNode.getSemanticsData().label, 'No text selected');
-          expect(
-            statusNode.getSemanticsData().flagsCollection.isLiveRegion,
-            isTrue,
-          );
-          expect(
-            find.textContaining('too many cancellation tokens'),
-            findsOneWidget,
-          );
-
-          await tester.pumpWidget(const SizedBox());
-          await bridge.disposed.future;
-        } finally {
-          debugDefaultTargetPlatformOverride = null;
-          semantics.dispose();
         }
-      },
-    );
+        expect(editable.widget.focusNode.hasFocus, isTrue);
+        tester.testTextInput.enterText('/tmp/replacement.epub');
+        bridge.failCancellationCreation = true;
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+
+        expect(tester.getSemantics(statusFinder), same(statusNode));
+        expect(statusNode.getSemanticsData().label, 'No text selected');
+        expect(
+          statusNode.getSemanticsData().flagsCollection.isLiveRegion,
+          isTrue,
+        );
+        expect(
+          find.text(
+            'The operation is no longer available. Reopen the book and try again.',
+          ),
+          findsOneWidget,
+        );
+
+        await tester.pumpWidget(const SizedBox());
+        await bridge.disposed.future;
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+        semantics.dispose();
+      }
+    });
   }
 
   for (final format in [FlutterBookFormat.pdf]) {
@@ -6405,8 +6521,8 @@ void main() {
 
     expect(
       find.text(
-        'Bad state: book moved\n'
-        'The note could not be saved while the app was suspended. Try again.',
+        'The operation could not be completed.\n'
+        'The note was not saved because the app was suspended. Try again.',
       ),
       findsOneWidget,
     );
@@ -6474,7 +6590,7 @@ void main() {
     expect(find.textContaining('annotation list failed'), findsNothing);
     expect(
       find.text(
-        'The note could not be saved while the app was suspended. Try again.',
+        'The note was not saved because the app was suspended. Try again.',
       ),
       findsOneWidget,
     );
@@ -7040,7 +7156,9 @@ void main() {
     firstSave.completeError(StateError('position failed'));
     await _waitUntil(
       () =>
-          controller.model.persistenceError?.contains('position failed') ??
+          controller.model.persistenceError?.startsWith(
+            'Reading position was not saved:',
+          ) ??
           false,
     );
     controller.dispatch(const ReaderBookmarkToggled());
@@ -7055,11 +7173,14 @@ void main() {
         isA<ReaderPersistenceException>().having(
           (error) => error.message,
           'message',
-          contains('bookmark failed'),
+          'Bookmark changes were not saved: The operation could not be completed.',
         ),
       ),
     );
-    expect(controller.model.persistenceError, contains('bookmark failed'));
+    expect(
+      controller.model.persistenceError,
+      'Bookmark changes were not saved: The operation could not be completed.',
+    );
 
     controller.dispose();
     await bridge.disposed.future;
@@ -7083,13 +7204,20 @@ void main() {
       controller.dispatch(const ReaderBookmarkToggled());
       bookmark.completeError(StateError('bookmark failed'));
       await _waitUntil(() => !controller.model.bookmarkBusy);
-      expect(controller.model.persistenceError, contains('bookmark failed'));
+      expect(
+        controller.model.persistenceError,
+        'Bookmark changes were not saved: The operation could not be completed.',
+      );
 
       controller.dispatch(const ReaderUnitRequested(1));
       await _waitUntil(() => bridge.savedReadingStates.length == 1);
       failedSave.completeError(StateError('position failed'));
       await _waitUntil(
-        () => controller.model.toolError?.contains('position failed') ?? false,
+        () =>
+            controller.model.toolError?.startsWith(
+              'Reading position was not saved:',
+            ) ??
+            false,
       );
       controller.dispatch(const ReaderUnitRequested(2));
       await _waitUntil(() => bridge.savedReadingStates.length == 2);
@@ -7099,11 +7227,14 @@ void main() {
           isA<ReaderPersistenceException>().having(
             (error) => error.message,
             'message',
-            contains('bookmark failed'),
+            'Bookmark changes were not saved: The operation could not be completed.',
           ),
         ),
       );
-      expect(controller.model.persistenceError, contains('bookmark failed'));
+      expect(
+        controller.model.persistenceError,
+        'Bookmark changes were not saved: The operation could not be completed.',
+      );
 
       controller.dispose();
       await bridge.disposed.future;
@@ -7131,12 +7262,15 @@ void main() {
         isA<ReaderPersistenceException>().having(
           (error) => error.message,
           'message',
-          contains('commit failed'),
+          'Reading position was not saved: The operation could not be completed.',
         ),
       ),
     );
 
-    expect(controller.model.persistenceError, contains('commit failed'));
+    expect(
+      controller.model.persistenceError,
+      'Reading position was not saved: The operation could not be completed.',
+    );
     expect(controller.model.openPanel, isNull);
     controller.dispose();
     await bridge.disposed.future;
@@ -7565,7 +7699,7 @@ void main() {
         isA<ReaderPersistenceException>().having(
           (error) => error.message,
           'message',
-          contains('late commit failed'),
+          'Reading position was not saved: The operation could not be completed.',
         ),
       ),
     );
@@ -7653,10 +7787,13 @@ void main() {
 
     expect(controller.model.unit, 1);
     expect(controller.model.pageImage, isNotNull);
-    expect(controller.model.selectionError, contains('selection failed'));
+    expect(
+      controller.model.selectionError,
+      'The operation could not be completed.',
+    );
     expect(
       controller.model.annotationError,
-      contains('annotation list failed'),
+      'The operation could not be completed.',
     );
     expect(bridge.renderUnits, [0, 1]);
     controller.dispose();
