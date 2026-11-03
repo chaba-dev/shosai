@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/core/bridge.dart';
@@ -27,13 +28,41 @@ final class LibrarySourceFile {
     this.source,
     this.entry, {
     this.failure,
+    this.preview,
   });
   final String locationId;
   final String source;
   final LocationEntry entry;
   final LocationFailure? failure;
-  String get title => entry.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
+
+  /// What the file's own contents say about it, read before it is opened;
+  /// null until [LibraryFolders.previewSourceFiles] has read it.
+  final SourcePreview? preview;
+
+  BookLocator get locator => (locationId: locationId, key: entry.key);
+
+  /// The file's own title, or its name without the extension.
+  String get title =>
+      preview?.title ?? entry.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
+  String? get author => preview?.author;
+
+  BookFormat? get format =>
+      BookFormat.fromExtension(entry.name.split('.').last.toLowerCase());
+
+  /// Whether a preview may still be read: a book, reachable, not yet read.
+  bool get previewable => preview == null && failure == null && format != null;
+
+  LibrarySourceFile _withPreview(SourcePreview? preview) => LibrarySourceFile(
+    locationId,
+    source,
+    entry,
+    failure: failure,
+    preview: preview,
+  );
 }
+
+/// How many unopened files are previewed at once.
+const sourcePreviewConcurrency = 3;
 
 /// Scan activity, not an estimate of a provider's unknown total. Books are
 /// unique EPUB/PDF candidates seen in the current source, not admitted content.
@@ -62,8 +91,16 @@ final class LibraryFolders {
     this._newPath,
     this._cache, {
     List<ConnectionProvider> providers = const [FolderConnectionProvider()],
+    Map<BookFormat, BookPreviewer> previewers = const {
+      BookFormat.epub: EpubPreviewer(),
+    },
     this.folderSources = true,
-  }) : _providers = List.unmodifiable(providers);
+  }) : _providers = List.unmodifiable(providers),
+       _previewers = Map.unmodifiable(previewers);
+
+  /// How an unopened file of each format is previewed; a format without
+  /// one keeps its generated cover until it is opened.
+  final Map<BookFormat, BookPreviewer> _previewers;
 
   /// Whether device folders may be read as book sources. Phones and tablets
   /// read books only from files they were given and from storage accounts
@@ -102,6 +139,16 @@ final class LibraryFolders {
   Future<void> _tail = Future.value();
   bool _closed = false;
 
+  /// The previews in flight from each connection, cancelled when it is
+  /// removed or pointed at another directory.
+  final Map<String, Set<CancellationToken>> _previewCancellations = {};
+
+  void _cancelPreviews(String id) {
+    for (final token in _previewCancellations.remove(id) ?? const {}) {
+      token.cancel();
+    }
+  }
+
   Future<T> _serial<T>(Future<T> Function() effect) {
     if (_closed) return Future.error(const CoreException.cancelled());
     final result = _tail.then((_) => effect());
@@ -113,6 +160,9 @@ final class LibraryFolders {
 
   Future<void> close() {
     _closed = true;
+    for (final id in _previewCancellations.keys.toList()) {
+      _cancelPreviews(id);
+    }
     return drain();
   }
 
@@ -235,6 +285,7 @@ final class LibraryFolders {
         _grants = List.unmodifiable([
           for (final item in _grants) item.id == id ? next : item,
         ]);
+        _cancelPreviews(id);
         _catalog = List.unmodifiable(
           _catalog.where((file) => file.locationId != id),
         );
@@ -266,6 +317,7 @@ final class LibraryFolders {
               file.entry,
             ),
       ];
+      _catalog = await _withPreviews(_catalog);
       _catalogLoaded = true;
     }
     if (_discovered && !refresh) return List.unmodifiable(_catalog);
@@ -348,11 +400,126 @@ final class LibraryFolders {
       }
     }
     cancellation.throwIfCancelled();
-    _catalog = List.unmodifiable(next);
+    _catalog = List.unmodifiable(await _withPreviews(next));
     _scanFailures = Set.unmodifiable(failures);
     _discovered = true;
     return _catalog;
   });
+
+  /// [files] with the previews stored for them.
+  Future<List<LibrarySourceFile>> _withPreviews(
+    List<LibrarySourceFile> files,
+  ) async {
+    final previews = await _locations.previews();
+    return [
+      for (final file in files) file._withPreview(previews[file.locator]),
+    ];
+  }
+
+  /// The preview cover of the unopened file at [locator], or null.
+  Future<Uint8List?> sourceCover(BookLocator locator) =>
+      _locations.previewCover(locator);
+
+  /// Read the title, author and cover of each [LibrarySourceFile.previewable]
+  /// file among [files] through its connection's byte ranges, without
+  /// downloading it, [sourcePreviewConcurrency] at a time.
+  ///
+  /// Each stored preview is reported to [onPreviewed] as the file carrying
+  /// it. This runs beside the serialized mutations, never queued behind or
+  /// ahead of them: opening a book or scanning does not wait for previews.
+  /// What keeps a preview from outliving its grant or its bytes is the store,
+  /// which refuses one from an older connection generation or for a file no
+  /// longer listed as it was read. Removing or redirecting a connection
+  /// cancels its previews; [cancellation] stops the whole pass. A file that
+  /// cannot be previewed (not a readable EPUB, over a limit) is recorded as
+  /// read, so it is not fetched again while unchanged; one that cannot be
+  /// reached now is left to the next pass.
+  Future<void> previewSourceFiles(
+    List<LibrarySourceFile> files, {
+    required void Function(LibrarySourceFile file) onPreviewed,
+    CancellationToken? cancellation,
+    int concurrency = sourcePreviewConcurrency,
+  }) async {
+    final pending = [
+      for (final file in files)
+        if (file.previewable && _previewers.containsKey(file.format)) file,
+    ];
+    final locations = <String, Future<LibraryLocation>>{};
+    // One token per connection in this pass, stopped by the pass or by the
+    // connection's removal.
+    final tokens = <String, CancellationToken>{};
+    CancellationToken tokenFor(String id) => tokens.putIfAbsent(id, () {
+      final token = CancellationToken();
+      unawaited(cancellation?.whenCancelled.then((_) => token.cancel()));
+      _previewCancellations.putIfAbsent(id, () => {}).add(token);
+      return token;
+    });
+
+    Future<void> preview(LibrarySourceFile file) async {
+      final id = file.locationId;
+      final generation = _generations[id];
+      final grant = _grants.where((grant) => grant.id == id).firstOrNull;
+      if (generation == null || grant == null || !_scans(grant)) return;
+      final token = tokenFor(id);
+      if (token.isCancelled) return;
+      BookMetadata metadata;
+      try {
+        final location = await locations.putIfAbsent(
+          id,
+          () => _provider(grant.provider).open(grant),
+        );
+        metadata = await _previewers[file.format]!.preview(
+          location,
+          file.entry,
+          cancellation: token,
+        );
+      } on CoreException catch (error) {
+        if (error.kind == CoreErrorKind.cancelled || token.isCancelled) return;
+        metadata = const BookMetadata();
+      } catch (_) {
+        // Unreachable now (offline, revoked) or failing in its adapter: left
+        // for a later pass, and the other files still get theirs.
+        return;
+      }
+      if (token.isCancelled) return;
+      final saved = await _locations.savePreview(
+        id,
+        generation,
+        file.entry,
+        metadata,
+      );
+      if (saved == null) return;
+      final previewed = file._withPreview(saved);
+      _catalog = List.unmodifiable([
+        for (final known in _catalog)
+          known.locator == file.locator &&
+                  known.entry.size == file.entry.size &&
+                  known.entry.revision == file.entry.revision
+              ? previewed
+              : known,
+      ]);
+      if (!token.isCancelled) onPreviewed(previewed);
+    }
+
+    Future<void> worker() async {
+      while (pending.isNotEmpty &&
+          !_closed &&
+          !(cancellation?.isCancelled ?? false)) {
+        await preview(pending.removeAt(0));
+      }
+    }
+
+    try {
+      await Future.wait([for (var i = 0; i < concurrency; i++) worker()]);
+    } finally {
+      for (final MapEntry(key: id, value: token) in tokens.entries) {
+        _previewCancellations[id]?.remove(token);
+        if (_previewCancellations[id]?.isEmpty ?? false) {
+          _previewCancellations.remove(id);
+        }
+      }
+    }
+  }
 
   /// Optimized providers own server pagination; others retain the bounded
   /// directory-key traversal, including empty pages with a continuation.
@@ -425,6 +592,7 @@ final class LibraryFolders {
   Future<void> remove(String id) => _serial(() async {
     await _load();
     final grant = _grant(id);
+    _cancelPreviews(id);
     // Unavailable is durable before attempting platform cleanup. A failed
     // cleanup never deletes a book or makes its annotations inaccessible.
     await _locations.remove(id);

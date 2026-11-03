@@ -88,6 +88,7 @@ final class LibraryModel {
     this.books = const [],
     this.sourceFiles = const [],
     this.covers = const {},
+    this.sourceCovers = const {},
     this.coverRevision = 0,
     this.query = '',
     this.format,
@@ -116,6 +117,9 @@ final class LibraryModel {
   final List<FlutterLibraryBook> books;
   final List<LibrarySourceFile> sourceFiles;
   final Map<int, Uint8List> covers;
+
+  /// Preview covers of unopened files, by locator.
+  final Map<BookLocator, Uint8List> sourceCovers;
   final int coverRevision;
   final String query;
   final FlutterBookFormat? format;
@@ -212,6 +216,7 @@ final class LibraryModel {
     List<FlutterLibraryBook>? books,
     List<LibrarySourceFile>? sourceFiles,
     Map<int, Uint8List>? covers,
+    Map<BookLocator, Uint8List>? sourceCovers,
     int? coverRevision,
     String? query,
     Object? format = _same,
@@ -239,6 +244,7 @@ final class LibraryModel {
     books: books ?? this.books,
     sourceFiles: sourceFiles ?? this.sourceFiles,
     covers: covers ?? this.covers,
+    sourceCovers: sourceCovers ?? this.sourceCovers,
     coverRevision: coverRevision ?? this.coverRevision,
     query: query ?? this.query,
     format: identical(format, _same)

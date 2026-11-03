@@ -109,6 +109,11 @@ final class LibraryCoverRequested extends LibraryMessage {
   final int bookId;
 }
 
+final class LibrarySourceCoverRequested extends LibraryMessage {
+  const LibrarySourceCoverRequested(this.locator);
+  final BookLocator locator;
+}
+
 final class LibraryOperationCancelled extends LibraryMessage {
   const LibraryOperationCancelled();
 }
@@ -290,6 +295,33 @@ final class _LibraryCoverFailed extends LibraryMessage {
 final class _LibraryCoverEffectFinished extends LibraryMessage {
   const _LibraryCoverEffectFinished(this.bookId);
   final int bookId;
+}
+
+final class _LibrarySourceCoverLoaded extends LibraryMessage {
+  const _LibrarySourceCoverLoaded(this.locator, this.cover);
+  final BookLocator locator;
+  final Uint8List? cover;
+}
+
+final class _LibrarySourceCoverFailed extends LibraryMessage {
+  const _LibrarySourceCoverFailed(this.locator);
+  final BookLocator locator;
+}
+
+final class _LibrarySourceCoverEffectFinished extends LibraryMessage {
+  const _LibrarySourceCoverEffectFinished(this.locator);
+  final BookLocator locator;
+}
+
+/// An unopened file whose preview pass [pass] read and stored its preview.
+final class _LibrarySourcePreviewed extends LibraryMessage {
+  const _LibrarySourcePreviewed(this.pass, this.file);
+  final int pass;
+  final LibrarySourceFile file;
+}
+
+final class _LibrarySourcePreviewsFinished extends LibraryMessage {
+  const _LibrarySourcePreviewsFinished();
 }
 
 final class _LibraryCleanupStatusChanged extends LibraryMessage {

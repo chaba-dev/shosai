@@ -681,7 +681,16 @@ void main() {
     }
 
     await settle();
-    expect(find.text('discovered').last, findsOneWidget);
+    // The unopened file shows its own title once its preview is read.
+    for (
+      var attempt = 0;
+      attempt < 20 && find.text('Sample Book').evaluate().isEmpty;
+      attempt++
+    ) {
+      await settle();
+    }
+    expect(find.text('Sample Book').last, findsOneWidget);
+    expect(find.text('discovered'), findsNothing);
     expect((await tester.runAsync(core.library.page))!.bookCount, 0);
     expect(find.text('Connections'), findsNothing);
     await tester.tap(find.text('Settings'));
@@ -754,9 +763,9 @@ void main() {
       (await tester.runAsync(core.folders.list))!.map((grant) => grant.id),
       ['two'],
     );
-    await tester.ensureVisible(find.text('discovered').last);
+    await tester.ensureVisible(find.text('Sample Book').last);
     await tester.pump();
-    await tester.tap(find.text('discovered').last);
+    await tester.tap(find.text('Sample Book').last);
     for (
       var attempt = 0;
       attempt < 20 &&

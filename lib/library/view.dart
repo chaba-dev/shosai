@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_core/shosai_core.dart' show BookLocator;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -1427,6 +1428,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               retryPaging: () =>
                   controller.dispatch(const LibraryMoreRetryRequested()),
               loadCover: controller.requestCover,
+              loadSourceCover: controller.requestSourceCover,
               retry: () => controller.dispatch(const LibraryRetryRequested()),
               addFirstBooks: () =>
                   controller.dispatch(const LibraryImportRequested()),

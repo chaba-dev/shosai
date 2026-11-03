@@ -286,6 +286,7 @@ class LibraryCollection extends StatelessWidget {
     required this.loadMore,
     required this.retryPaging,
     required this.loadCover,
+    this.loadSourceCover,
     required this.retry,
     required this.addFirstBooks,
     required this.cancelImport,
@@ -314,6 +315,10 @@ class LibraryCollection extends StatelessWidget {
   /// own page.
   final VoidCallback retryPaging;
   final bool Function(int) loadCover;
+
+  /// Asks for an unopened file's preview cover; null shows only generated
+  /// covers for unopened files.
+  final bool Function(BookLocator)? loadSourceCover;
 
   /// The failure alert's recovery action.
   final VoidCallback retry;
@@ -351,6 +356,7 @@ class LibraryCollection extends StatelessWidget {
       loadMore: loadMore,
       retryPaging: retryPaging,
       loadCover: loadCover,
+      loadSourceCover: loadSourceCover,
       retry: retry,
     ),
   };
@@ -553,6 +559,7 @@ class _LibraryGrid extends StatefulWidget {
     required this.loadMore,
     required this.retryPaging,
     required this.loadCover,
+    required this.loadSourceCover,
     required this.retry,
   });
 
@@ -567,6 +574,7 @@ class _LibraryGrid extends StatefulWidget {
   final VoidCallback loadMore;
   final VoidCallback retryPaging;
   final bool Function(int) loadCover;
+  final bool Function(BookLocator)? loadSourceCover;
   final VoidCallback retry;
 
   @override
@@ -725,6 +733,9 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         final file = item;
                         return _SourceFileCard(
                           file: file,
+                          cover: widget.model.sourceCovers[file.locator],
+                          demandRevision: widget.model.coverRevision,
+                          loadCover: widget.loadSourceCover,
                           shelf: shelf,
                           onPressed: widget.model.busy
                               ? null
@@ -1294,14 +1305,22 @@ class _Kicker extends StatelessWidget {
   }
 }
 
-/// Unopened source metadata uses a generated cover until first admission.
+/// An unopened file: its preview cover, title and author once its contents
+/// were read through byte ranges, else a generated cover and its file name,
+/// until opening it makes it a book.
 class _SourceFileCard extends StatelessWidget {
   const _SourceFileCard({
     required this.file,
+    required this.cover,
+    required this.demandRevision,
+    required this.loadCover,
     required this.shelf,
     required this.onPressed,
   });
   final LibrarySourceFile file;
+  final Uint8List? cover;
+  final int demandRevision;
+  final bool Function(BookLocator)? loadCover;
   final LibraryShelf shelf;
   final VoidCallback? onPressed;
 
@@ -1322,9 +1341,11 @@ class _SourceFileCard extends StatelessWidget {
         children: [
           SizedBox(
             height: shelf.columnWidth * 1.5,
-            child: ShellGeneratedCover(
-              title: file.title,
-              author: null,
+            child: _SourceFileCover(
+              file: file,
+              cover: cover,
+              demandRevision: demandRevision,
+              loadCover: loadCover,
               type: shelf.coverType,
             ),
           ),
@@ -1364,6 +1385,92 @@ class _SourceFileCard extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// An unopened file's cover box: its preview cover once loaded, else the
+/// generated cover. Like [LibraryBookCover], the preview cover is requested
+/// once the box is built, so only visible cards load one.
+class _SourceFileCover extends StatefulWidget {
+  const _SourceFileCover({
+    required this.file,
+    required this.cover,
+    required this.demandRevision,
+    required this.loadCover,
+    required this.type,
+  });
+
+  final LibrarySourceFile file;
+  final Uint8List? cover;
+  final int demandRevision;
+  final bool Function(BookLocator)? loadCover;
+  final ShellCoverType type;
+
+  @override
+  State<_SourceFileCover> createState() => _SourceFileCoverState();
+}
+
+class _SourceFileCoverState extends State<_SourceFileCover> {
+  late bool _requested;
+
+  bool get _wanted => widget.file.preview?.hasCover ?? false;
+
+  @override
+  void initState() {
+    super.initState();
+    _requested = widget.cover != null;
+  }
+
+  @override
+  void didUpdateWidget(_SourceFileCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.file.locator != widget.file.locator ||
+        oldWidget.file.preview?.hasCover != widget.file.preview?.hasCover ||
+        oldWidget.demandRevision != widget.demandRevision) {
+      _requested = widget.cover != null;
+    } else if (widget.cover != null) {
+      _requested = true;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final load = widget.loadCover;
+    if (_wanted && load != null && widget.cover == null && !_requested) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && load(widget.file.locator)) {
+          setState(() => _requested = true);
+        }
+      });
+    }
+    final bytes = widget.cover;
+    final generated = ShellGeneratedCover(
+      title: widget.file.title,
+      author: widget.file.author,
+      type: widget.type,
+    );
+    if (bytes == null || bytes.isEmpty) return generated;
+    final radius = BorderRadius.circular(ShellGeneratedCover.radius);
+    return ClipRRect(
+      borderRadius: radius,
+      child: Semantics(
+        container: true,
+        image: true,
+        label: AppLocalizations.of(
+          context,
+        ).cardCoverSemantics(widget.file.title),
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          // The generated cover stays until the preview decodes, so a card
+          // never shows an empty box between the two.
+          frameBuilder: (_, image, frame, synchronous) =>
+              frame == null && !synchronous ? generated : image,
+          errorBuilder: (_, _, _) => generated,
+        ),
+      ),
+    );
+  }
 }
 
 /// One identified book on the shelf, with its cover, format, reading state

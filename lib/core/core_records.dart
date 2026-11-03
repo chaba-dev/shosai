@@ -80,6 +80,10 @@ final class ShosaiCore {
     locations,
     snapshots.newPath,
     fileCache,
+    previewers: {
+      BookFormat.epub: const EpubPreviewer(),
+      BookFormat.pdf: PdfEnginePreviewer(pdfEngine),
+    },
     providers: [
       const FolderConnectionProvider(),
       DropboxConnectionProvider(
@@ -187,7 +191,7 @@ final class PdfEngineInspector implements BookInspector {
         return BookMetadata(
           title: info.title,
           author: info.author,
-          cover: await _cover(document),
+          cover: await _pdfCover(document),
         );
       } finally {
         try {
@@ -214,19 +218,129 @@ final class PdfEngineInspector implements BookInspector {
       );
     }
   }
+}
 
-  Future<Uint8List?> _cover(PdfEngineDocument document) async {
+/// The first page rendered into a cover thumbnail, or null when it cannot
+/// be rendered.
+Future<Uint8List?> _pdfCover(PdfEngineDocument document) async {
+  try {
+    final size = document.pageSize(0);
+    if (size.width <= 0 || size.height <= 0) return null;
+    final scale = [
+      coverMaxWidth / size.width,
+      coverMaxHeight / size.height,
+    ].reduce((a, b) => a < b ? a : b);
+    final page = await document.render(0, scale);
+    return coverThumbnailFromRgba(page.width, page.height, page.pixels);
+  } on Exception {
+    return null;
+  }
+}
+
+/// An unopened PDF's title, author and first-page cover, read through its
+/// location's byte ranges by the reader's PDF engine.
+///
+/// The engine reads the file through [PreviewRanges], at most
+/// [maxPreviewPdfReadBytes] of it. A file that needs more, one the engine
+/// cannot read, or a password-protected one fails as a [CoreException], so
+/// it is recorded as not previewable; a read the location failed, or a
+/// cancelled one, fails with that error instead, so it is tried again later.
+final class PdfEnginePreviewer implements BookPreviewer {
+  const PdfEnginePreviewer(
+    this._engine, {
+    this.budget = maxPreviewPdfReadBytes,
+  });
+
+  final PdfEngine _engine;
+  final int budget;
+
+  static int _sources = 0;
+
+  @override
+  Future<BookMetadata> preview(
+    LibraryLocation location,
+    LocationEntry entry, {
+    CancellationToken? cancellation,
+  }) async {
+    final engine = _engine;
+    if (engine is! RangedPdfEngine) {
+      throw const CoreException(
+        CoreErrorKind.unsupported,
+        'The PDF engine cannot read a file in parts.',
+      );
+    }
+    cancellation.throwIfCancelled();
+    final size =
+        entry.size ??
+        (await location.stat(entry.key, cancellation: cancellation)).size;
+    if (size == null) {
+      throw const CoreException(
+        CoreErrorKind.unsupported,
+        'The file has no known size.',
+      );
+    }
+    final ranges = PreviewRanges(
+      location,
+      entry.key,
+      size,
+      budget: budget,
+      cancellation: cancellation,
+    );
+    // The engine sees a failed read only as a document it cannot read.
+    Never failed(Object error) {
+      if (ranges.failure case final failure?) throw failure;
+      if (ranges.exceeded) {
+        throw CoreException.limitExceeded(
+          'The PDF needs more than $budget bytes to preview.',
+        );
+      }
+      throw switch (error) {
+        CoreException() => error,
+        PdfEnginePasswordException() => const CoreException(
+          CoreErrorKind.unsupported,
+          'Password-protected PDFs are not supported.',
+        ),
+        PdfEngineLimitException(:final message) => CoreException.limitExceeded(
+          message,
+        ),
+        PdfEngineException(:final message) => CoreException.malformed(message),
+        _ => CoreException.malformed('The PDF cannot be read: $error'),
+      };
+    }
+
+    final PdfEngineDocument document;
     try {
-      final size = document.pageSize(0);
-      if (size.width <= 0 || size.height <= 0) return null;
-      final scale = [
-        coverMaxWidth / size.width,
-        coverMaxHeight / size.height,
-      ].reduce((a, b) => a < b ? a : b);
-      final page = await document.render(0, scale);
-      return coverThumbnailFromRgba(page.width, page.height, page.pixels);
-    } on Exception {
-      return null;
+      document = await engine.openRanged(
+        size,
+        ranges.read,
+        sourceName: 'shosai-preview:${++_sources}',
+      );
+    } catch (error) {
+      failed(error);
+    }
+    try {
+      cancellation.throwIfCancelled();
+      final PdfDocumentInfo info;
+      try {
+        info = await document.info();
+      } catch (error) {
+        failed(error);
+      }
+      cancellation.throwIfCancelled();
+      final cover = await _pdfCover(document);
+      // PDFium renders what it could read of a page whose bytes it was
+      // refused, so a page that met a failed read is not trusted as a cover:
+      // the file is the same as one the engine could not open.
+      if (ranges.failure != null || ranges.exceeded) {
+        failed(StateError('The first page could not be read.'));
+      }
+      return BookMetadata(title: info.title, author: info.author, cover: cover);
+    } finally {
+      try {
+        await document.dispose();
+      } on Exception {
+        // The preview's result stands.
+      }
     }
   }
 }
