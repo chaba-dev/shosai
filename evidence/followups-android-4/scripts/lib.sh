@@ -1,0 +1,3 @@
+fol(){ adb shell uiautomator dump /data/local/tmp/ui.xml >/dev/null 2>&1; adb shell cat /data/local/tmp/ui.xml | tr '>' '\n' | grep -m1 -oE 'content-desc="[^"]{0,60}&#10;page [0-9]+"|content-desc="page [0-9]+"' | sed 's/content-desc=//; s/&#10;/ | /'; }
+jump(){ adb shell sh /data/local/tmp/jump.sh $1 $2 $3 > $S/r4/$2_times.txt; S=$S $S/r4/pull.sh $2 $3 >/dev/null; echo "$(date +%T) jump ch$1 [$2] -> $(fol)"; }
+bf(){ adb shell input tap 130 1200; sleep 1.3; a=$(fol); adb exec-out screencap -p > $S/r4/ev/$1_back.png; adb shell input tap 950 1200; sleep 1.3; b=$(fol); adb exec-out screencap -p > $S/r4/ev/$1_fwd.png; echo "   back -> $a ; fwd -> $b"; }
