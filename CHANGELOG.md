@@ -123,6 +123,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Search for the selected text from the selection capsule (#269)
 - *(reader)* Show a quiet PDF's place under the page on tablet and desktop (#276)
 - *(reader)* Number EPUB pages from the start of the book (#277)
+- *(intake)* Open Android and macOS books in Shōsai (#283)
 
 ### 🐛 Bug Fixes
 
