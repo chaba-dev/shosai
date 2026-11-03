@@ -4,7 +4,157 @@ import 'package:archive/archive.dart';
 import 'package:shosai_epub/shosai_epub.dart';
 import 'package:test/test.dart';
 
+import 'support/large_entries_fixture.dart';
+
 void main() {
+  test('opens and inspects a book with image and XHTML entries over 8 MiB', () {
+    final bytes = largeEntriesEpub(compressImage: true);
+    final entries = ZipDecoder().decodeBytes(bytes);
+    expect(entries.find('chapter.xhtml')!.size, greaterThan(8 * 1024 * 1024));
+    expect(entries.find('landscape.png')!.size, greaterThan(8 * 1024 * 1024));
+
+    final book = openEpubBytes(bytes);
+    expect(
+      book.chapters.single.canonicalText,
+      startsWith('Large entries, readable book\n'),
+    );
+    expect(
+      book.chapters.single.canonicalText,
+      endsWith('The end of the large XHTML part is readable too.\n'),
+    );
+    final art = book.chapters.single.blocks.whereType<EpubImage>().single;
+    expect(art.intrinsicSize?.width, 1800);
+    expect(art.intrinsicSize?.height, 1600);
+    final inspection = inspectEpubBytes(bytes);
+    expect(inspection.title, 'Large entries');
+    expect(inspection.cover, book.resources['landscape.png']!.bytes);
+  });
+
+  test(
+    'resource byte ceilings depend on manifest type, not just the ZIP cap',
+    () {
+      for (final (path, mediaType, limits, kind) in [
+        ('art', 'image/png', const EpubLimits(maxImageBytes: 8), 'image bytes'),
+        (
+          'face.ttf',
+          'application/octet-stream',
+          const EpubLimits(maxFontBytes: 8),
+          'font bytes',
+        ),
+        (
+          'style',
+          'text/css',
+          const EpubLimits(maxStyleSheetBytes: 8),
+          'stylesheet bytes',
+        ),
+        (
+          'vector',
+          'image/svg+xml',
+          const EpubLimits(maxMetadataBytes: 1024),
+          'metadata bytes',
+        ),
+      ]) {
+        final ceiling = mediaType == 'image/svg+xml' ? 1024 : 8;
+        Uint8List book(int size) => _epub(
+          manifest: '<item id="r" href="$path" media-type="$mediaType"/>',
+          files: {'OEBPS/$path': Uint8List(size)..fillRange(0, size, 32)},
+        );
+        expect(
+          () => openEpubBytes(book(ceiling), limits: limits),
+          returnsNormally,
+        );
+        expect(
+          () => openEpubBytes(book(ceiling + 1), limits: limits),
+          throwsA(isA<EpubLimitError>().having((e) => e.kind, 'kind', kind)),
+        );
+      }
+    },
+  );
+
+  test(
+    'chapter, metadata and aggregate limits include their exact boundary',
+    () {
+      final bytes = _epub();
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final chapterSize = archive.find('OEBPS/ch1.xhtml')!.size;
+      final metadataSize = archive.find('OEBPS/content.opf')!.size;
+      final total = archive.files.fold<int>(0, (sum, file) => sum + file.size);
+      for (final (accepted, rejected, kind) in [
+        (
+          EpubLimits(maxChapterBytes: chapterSize),
+          EpubLimits(maxChapterBytes: chapterSize - 1),
+          'chapter bytes',
+        ),
+        (
+          EpubLimits(maxMetadataBytes: metadataSize),
+          EpubLimits(maxMetadataBytes: metadataSize - 1),
+          'metadata bytes',
+        ),
+        (
+          EpubLimits(maxTotalUncompressedBytes: total),
+          EpubLimits(maxTotalUncompressedBytes: total - 1),
+          'archive uncompressed bytes',
+        ),
+        (
+          EpubLimits(maxEntryBytes: metadataSize),
+          EpubLimits(maxEntryBytes: metadataSize - 1),
+          'archive entry bytes',
+        ),
+      ]) {
+        expect(() => openEpubBytes(bytes, limits: accepted), returnsNormally);
+        expect(
+          () => openEpubBytes(bytes, limits: rejected),
+          throwsA(isA<EpubLimitError>().having((e) => e.kind, 'kind', kind)),
+        );
+      }
+      expect(
+        () => inspectEpubBytes(
+          bytes,
+          limits: EpubLimits(maxTotalUncompressedBytes: total - 1),
+        ),
+        throwsA(isA<EpubLimitError>()),
+      );
+    },
+  );
+
+  test('high aggregate expansion is refused even below the byte budget', () {
+    final bytes = _epub(files: {'padding': Uint8List(4 * 1024 * 1024)});
+    for (final read in [openEpubBytes, inspectEpubBytes]) {
+      expect(
+        () => read(bytes),
+        throwsA(
+          isA<EpubLimitError>().having(
+            (e) => e.kind,
+            'kind',
+            'archive compression ratio',
+          ),
+        ),
+      );
+    }
+  });
+
+  test('inflation cannot exceed forged ZIP sizes, stored or deflated', () {
+    for (final compression in [CompressionType.none, CompressionType.deflate]) {
+      final bytes = _epub(
+        compression: compression,
+        manifest:
+            '<item id="r" href="art" media-type="image/png" properties="cover-image"/>',
+        files: {'OEBPS/art': Uint8List(64 * 1024)},
+      );
+      _declareEntrySize(bytes, 'OEBPS/art', 8);
+      for (final read in [openEpubBytes, inspectEpubBytes]) {
+        expect(() => read(bytes), throwsA(isA<EpubFormatError>()));
+      }
+    }
+  });
+
+  test('an entry shorter than its declared size is not silently accepted', () {
+    final bytes = _epub();
+    final size = ZipDecoder().decodeBytes(bytes).find('OEBPS/ch1.xhtml')!.size;
+    _declareEntrySize(bytes, 'OEBPS/ch1.xhtml', size + 1);
+    expect(() => openEpubBytes(bytes), throwsA(isA<EpubFormatError>()));
+  });
+
   test('reads title, author and the EPUB 3 cover-image item', () {
     final inspection = inspectEpubBytes(
       _epub(
@@ -54,9 +204,18 @@ void main() {
       ),
       limits: const EpubLimits(maxImageBytes: 4),
     );
+    final tooLargeSvg = inspectEpubBytes(
+      _epub(
+        manifest:
+            '<item id="c" href="art.svg" media-type="image/svg+xml" properties="cover-image"/>',
+        files: {'OEBPS/art.svg': Uint8List(1025)},
+      ),
+      limits: const EpubLimits(maxMetadataBytes: 1024),
+    );
 
     expect(notImage.cover, isNull);
     expect(tooLarge.cover, isNull);
+    expect(tooLargeSvg.cover, isNull);
   });
 
   test('reads the spine page progression, left to right by default', () {
@@ -93,10 +252,12 @@ Uint8List _epub({
   String manifest = '',
   String spineAttributes = '',
   Map<String, Uint8List> files = const {},
+  CompressionType compression = CompressionType.deflate,
 }) {
   final archive = Archive();
-  void add(String name, List<int> bytes) =>
-      archive.addFile(ArchiveFile(name, bytes.length, bytes));
+  void add(String name, List<int> bytes) => archive.addFile(
+    ArchiveFile(name, bytes.length, bytes)..compression = compression,
+  );
   add('mimetype', 'application/epub+zip'.codeUnits);
   add(
     'META-INF/container.xml',
@@ -115,4 +276,24 @@ Uint8List _epub({
   );
   files.forEach(add);
   return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
+/// Change both size declarations, leaving compressed payload and CRC intact.
+void _declareEntrySize(Uint8List bytes, String name, int size) {
+  final directory = ZipDirectory()..read(InputMemoryStream(bytes));
+  final data = ByteData.sublistView(bytes);
+  var offset = directory.centralDirectoryOffset;
+  for (final header in directory.fileHeaders) {
+    if (header.filename == name) {
+      data.setUint32(offset + 24, size, Endian.little);
+      data.setUint32(header.localHeaderOffset + 22, size, Endian.little);
+      return;
+    }
+    offset +=
+        46 +
+        data.getUint16(offset + 28, Endian.little) +
+        data.getUint16(offset + 30, Endian.little) +
+        data.getUint16(offset + 32, Endian.little);
+  }
+  throw StateError('fixture entry not found: $name');
 }

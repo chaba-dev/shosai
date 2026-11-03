@@ -29,6 +29,32 @@ services.
 - bounded MathML fallback and embedded-font admission (TTF/OTF; WOFF/WOFF2 are
   reported unsupported rather than applied).
 
+## Byte admission
+
+The default ZIP entry ceiling is 64 MiB, with tighter limits at the point a
+resource is read: 32 MiB for XHTML chapters/navigation, 16 MiB for fonts,
+4 MiB for package/container/NCX XML and SVG, and 1 MiB for CSS. Raster image
+payloads may use the full 64 MiB. The renderer uses the same image-byte ceiling;
+the existing 16-megapixel engine limit and 64 MiB decoded-raster budget remain.
+
+Archives still have a 4,096-entry limit, a 512 MiB total uncompressed-byte
+budget, and a maximum aggregate expansion ratio of 200. These checks happen
+before any entry is decompressed, including Unix symlink entries. Only EPUB's
+stored/deflated, unencrypted ZIP entries are supported. Each read inflates
+directly into a size-bounded buffer and rejects output that disagrees with the
+declared size, using archive 4.5.2 or newer's bounded native streaming decoder,
+so falsified headers cannot bypass the byte budget. Encoded image
+bytes are retained for Flutter; streaming inflation avoids a second unbounded
+decompression buffer, not the encoded image's own storage.
+
+`test/support/large_entries_fixture.dart` generates an original landscape PNG
+(1,800 × 1,600, over 8 MiB) and an XHTML part over 8 MiB. Tests generate it in
+memory rather than committing a large binary. To open the same book in the app,
+run `dart run test/support/large_entries_fixture.dart /tmp/large-entries.epub`
+from this package. The fixture uses a fixed ZIP timestamp and no third-party
+content. The package regression also deflates the large image; Flutter's layout
+test decodes the stored variant with the real image codec.
+
 ## Navigation resolution
 
 The reader serves its Contents panel and its painted internal links from this
