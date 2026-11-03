@@ -206,6 +206,7 @@ Widget _reader({
   ReaderExportSink? exportSink,
   ReaderNoticeReporter? noticeReporter,
   ReaderPlaceRequests? placeRequests,
+  ReaderDisplaySink? onDisplayChanged,
   Locale? locale,
 }) => productionShell(
   locale: locale,
@@ -221,6 +222,7 @@ Widget _reader({
     exportSink: exportSink,
     noticeReporter: noticeReporter,
     placeRequests: placeRequests,
+    onDisplayChanged: onDisplayChanged,
   ),
 );
 
@@ -1427,6 +1429,43 @@ void main() {
         },
       );
     }
+
+    testWidgets('a text size step up and back returns to the exact size', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      final bridge = _PanelBridge(unitCount: 3);
+      final sizes = <double>[];
+      await _open(
+        tester,
+        _reader(
+          bridge: bridge,
+          onDisplayChanged: (change) {
+            if (change.fontSize case final size?) sizes.add(size);
+          },
+          settings: const FlutterReaderSettings(
+            continuous: false,
+            theme: 'light',
+            // The shared settings' default, between two steps.
+            epubFontSize: 16,
+            epubLineSpacing: 1.6,
+            pdfZoom: 0,
+          ),
+        ),
+      );
+      await _openTypography(tester);
+      expect(find.text('90%'), findsOneWidget);
+      for (final (key, label, size) in [
+        ('reader-typography-font-increase', '100%', 17.8),
+        ('reader-typography-font-decrease', '90%', 16.0),
+      ]) {
+        await tester.tap(find.byKey(ValueKey(key)));
+        await tester.pump();
+        await _settle(tester);
+        expect(find.text(label), findsOneWidget);
+        expect(sizes.last, size);
+      }
+    });
 
     testWidgets('EPUB shows text size, line spacing and page theme with '
         'clamps', (tester) async {
