@@ -966,6 +966,13 @@ void main() {
         find.byKey(const ValueKey('reader-reference-peek')),
         findsOneWidget,
       );
+      final preview = tester.widget<Text>(
+        find.byKey(const ValueKey('reader-reference-preview')),
+      );
+      expect(preview.style!.fontWeight, FontWeight.w400);
+      expect(preview.style!.fontVariations, [
+        const ui.FontVariation('wght', 400),
+      ]);
       await tester.pump(const Duration(seconds: 5));
       // The modal barrier covers the toolbar's hit targets, but must not
       // allow its chrome to fade underneath the reference card.
