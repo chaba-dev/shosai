@@ -210,4 +210,25 @@ void main() {
     );
     await closeReader(tester);
   });
+
+  testWidgets('a text size and back numbers a page as before', (tester) async {
+    await openReader(tester, bridge(book), place: const ReaderPlace(1));
+    int number() => int.parse(
+      texts(tester, 'reader-folio').single.substring('page '.length),
+    );
+    final start = number();
+    await revealReaderChrome(tester);
+    await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+    await settle(tester);
+    for (final (key, check) in [
+      ('reader-typography-font-increase', greaterThan(start)),
+      ('reader-typography-font-decrease', start),
+    ]) {
+      await tester.tap(find.byKey(ValueKey(key)));
+      await settle(tester);
+      expect(page(tester).unit, 1);
+      expect(number(), check, reason: key);
+    }
+    await closeReader(tester);
+  });
 }

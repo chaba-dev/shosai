@@ -36,7 +36,7 @@ final class _EpubBookPages {
 
 extension on ReaderController {
   _EpubPagesKey? get _epubPagesKey {
-    final key = _epubSessionKey;
+    final key = _epubNumberingKey ?? _epubSessionKey;
     if (key == null || key.continuous) return null;
     return (
       generation: key.generation,
@@ -45,6 +45,18 @@ extension on ReaderController {
       fontSize: key.fontSize,
       lineSpacing: key.lineSpacing,
     );
+  }
+
+  /// Runs [derive] numbering pages at [key] instead of the current session's
+  /// layout.
+  T _numberingAt<T>(_EpubLayoutKey? key, T Function() derive) {
+    final previous = _epubNumberingKey;
+    _epubNumberingKey = key;
+    try {
+      return derive();
+    } finally {
+      _epubNumberingKey = previous;
+    }
   }
 
   /// The page number, from the start of the book, of [page]'s first page.
@@ -111,14 +123,21 @@ extension on ReaderController {
         _isCurrent(key.generation) &&
         identical(_epubSource, source) &&
         _epubPagesKey == key;
+    // The key's own text size and spacing, never the model's: after a text
+    // size change the model has the new size before the session (and so the
+    // key) follows it, and counts at one size must not be stored under the
+    // other.
+    final typography = _epubTypography(
+      ReaderLayout(fontSize: key.fontSize, lineSpacing: key.lineSpacing),
+      source,
+    );
     // Chapters are counted in reading order: the ones before the page being
     // read number it, and they come first.
-    final typography = _epubTypography(_model.layout, source);
     for (var unit = 0; unit < pages.counts.length; unit++) {
       if (pages.counts[unit] != null) continue;
       await _pauseCountingEpubPages();
       if (!current()) return;
-      if (_model.relayoutBusy || _model.busy) {
+      if (_model.relayoutBusy || _model.relayoutPending || _model.busy) {
         // Count again once the reader's own layout settles.
         _epubPagesCounting = null;
         return;
