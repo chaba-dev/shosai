@@ -231,4 +231,39 @@ void main() {
     }
     await closeReader(tester);
   });
+  testWidgets('a page laid out a little shorter is numbered at the book\'s '
+      'counts', (tester) async {
+    // A height change under one line (system bars or the keyboard coming and
+    // going) keeps the page laid out as it is, but a chapter laid out while
+    // it lasts is a little shorter: it is still numbered at the counts the
+    // book already has, not at a count of its own a few pages off.
+    final long = {
+      'OPS/Text/one.xhtml': chapter('One', 160),
+      'OPS/Text/two.xhtml': chapter('Two', 40),
+    };
+    const size = Size(480, 800);
+    await openReader(
+      tester,
+      bridge(long),
+      place: const ReaderPlace(1),
+      size: size,
+    );
+    int number() => int.parse(
+      texts(tester, 'reader-folio').single.substring('page '.length),
+    );
+    expect(page(tester).unit, 1);
+    final opening = number();
+
+    tester.view.physicalSize = Size(size.width, size.height - 24);
+    await settle(tester);
+    expect(number(), opening, reason: 'the page is not laid out again');
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await settle(tester);
+    expect(page(tester).unit, 0);
+    await turn(tester);
+    expect(page(tester).unit, 1);
+    expect(page(tester).pageIndex, 0);
+    expect(number(), opening);
+    await closeReader(tester);
+  });
 }

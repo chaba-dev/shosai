@@ -38,13 +38,29 @@ extension on ReaderController {
   _EpubPagesKey? get _epubPagesKey {
     final key = _epubNumberingKey ?? _epubSessionKey;
     if (key == null || key.continuous) return null;
-    return (
+    final exact = (
       generation: key.generation,
       pageWidth: key.pageWidth,
       height: key.height,
       fontSize: key.fontSize,
       lineSpacing: key.lineSpacing,
     );
+    // A page height change under one line keeps the page laid out as it is
+    // (see `_epubHeightNeedsLayout`), so system bars or the keyboard coming
+    // and going can leave chapters laid out a little shorter or taller than
+    // the ones around them. They share the counts the book already has at
+    // that layout instead of being counted again a few pages off.
+    final tolerance = key.fontSize * key.lineSpacing;
+    for (final counted in _epubBookPages.keys) {
+      if (counted.generation == exact.generation &&
+          counted.pageWidth == exact.pageWidth &&
+          counted.fontSize == exact.fontSize &&
+          counted.lineSpacing == exact.lineSpacing &&
+          (counted.height - exact.height).abs() <= tolerance) {
+        return counted;
+      }
+    }
+    return exact;
   }
 
   /// Runs [derive] numbering pages at [key] instead of the current session's
