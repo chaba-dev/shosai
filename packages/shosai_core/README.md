@@ -125,6 +125,13 @@ import of a referenced book adopts it as a private copy.
   from a `BookInspector` the host supplies with its PDF engine; without one
   the file name is the title. Covers are stored as PNG thumbnails of at most
   300×400 pixels and 512 KiB.
+- An unopened EPUB in a connection gets a preview: `previewEpub` reads its
+  title, author and cover through the location's byte ranges (the end of the
+  archive, its directory, the container, the package and the cover image, at
+  most 16 MiB and an 8 MiB cover), and `LibraryLocations` keeps it per
+  connection, file, size and revision. A preview is not a book identity: it
+  is forgotten when the file changes or goes, when the catalog is cleared, or
+  once the file is opened.
 - Import takes a `CancellationToken`, checked between file chunks and books;
   once a book's commit starts it finishes.
 
