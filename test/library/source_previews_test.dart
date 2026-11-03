@@ -158,7 +158,6 @@ LibrarySourceFile _named(List<LibrarySourceFile> files, String name) =>
     files.singleWhere((file) => file.entry.name == name);
 
 void main() {
-
   test('unopened EPUBs get their own title, author and cover', () async {
     final fixture = await _Fixture.create({
       'book.epub': 'fixtures/sample.epub',
