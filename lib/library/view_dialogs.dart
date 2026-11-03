@@ -352,3 +352,154 @@ class _DialogActionTileState extends State<_DialogActionTile> {
     );
   }
 }
+
+/// What Add books was asked to do.
+enum _AddBooksChoice { files, dropbox, googleDrive, folder, folderCopy }
+
+/// Add books: Choose files everywhere, then the storage accounts on phones
+/// and tablets, or a folder connected in place on desktop with a switch that
+/// copies its books in instead. On a phone it rises from the bottom edge.
+class _AddBooksChooser extends StatefulWidget {
+  const _AddBooksChooser({required this.mobile, required this.connections});
+
+  /// Phones and tablets never read folders (RFD 12 outcome 6).
+  final bool mobile;
+
+  /// Whether storage connections exist in this session at all.
+  final bool connections;
+
+  @override
+  State<_AddBooksChooser> createState() => _AddBooksChooserState();
+}
+
+class _AddBooksChooserState extends State<_AddBooksChooser> {
+  bool _copyFolder = false;
+
+  void _choose(_AddBooksChoice choice) => Navigator.pop(context, choice);
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final options = [
+      _DialogActionTile(
+        icon: LucideIcons.file,
+        title: l10n.importChooseFiles,
+        subtitle: widget.mobile
+            ? l10n.importPickedCopyHint
+            : l10n.importChooseFilesHint,
+        onPressed: () => _choose(_AddBooksChoice.files),
+      ),
+      if (widget.mobile && widget.connections) ...[
+        _DialogActionTile(
+          icon: LucideIcons.cloud,
+          title: l10n.dropboxConnect,
+          subtitle: l10n.importStorageHint,
+          onPressed: () => _choose(_AddBooksChoice.dropbox),
+        ),
+        _DialogActionTile(
+          icon: LucideIcons.cloud,
+          title: l10n.locationAddGoogleDrive,
+          subtitle: l10n.importStorageHint,
+          onPressed: () => _choose(_AddBooksChoice.googleDrive),
+        ),
+      ],
+      if (!widget.mobile) ...[
+        _DialogActionTile(
+          icon: LucideIcons.folder,
+          title: l10n.importChooseFolder,
+          subtitle: l10n.importChooseFolderHint,
+          onPressed: () => _choose(
+            _copyFolder || !widget.connections
+                ? _AddBooksChoice.folderCopy
+                : _AddBooksChoice.folder,
+          ),
+        ),
+        // A session without connections can only copy a folder in.
+        if (widget.connections)
+          _SettingSwitch(
+            title: l10n.importCopyFolder,
+            subtitle: l10n.importCopyFolderHint,
+            value: _copyFolder,
+            onChanged: (value) => setState(() => _copyFolder = value),
+          ),
+      ],
+    ];
+    final column = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: options,
+    );
+    final phone =
+        ShellLayout.forWidth(MediaQuery.sizeOf(context).width) ==
+        ShellLayout.phone;
+    if (!phone) {
+      return ShadDialog(
+        title: Text(l10n.addBooksAction),
+        child: SizedBox(width: 480, child: column),
+      );
+    }
+    final palette = ShellPalette.of(context);
+    final title = l10n.addBooksAction;
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .9,
+        ),
+        child: Material(
+          color: palette.chrome,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(ShosaiTokens.radiusLg),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SafeArea(
+            top: false,
+            minimum: const EdgeInsets.only(bottom: 16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: palette.line,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Semantics(
+                    header: true,
+                    child: Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        start: 4,
+                        bottom: 8,
+                      ),
+                      child: Text(
+                        title,
+                        style: shosaiInterfaceStyleForText(
+                          shellInterfaceStyle(
+                            17,
+                            22,
+                            weight: FontWeight.w600,
+                          ).copyWith(color: palette.ink),
+                          title,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Large text scrolls the choices rather than overflowing.
+                  Flexible(child: SingleChildScrollView(child: column)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

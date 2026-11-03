@@ -11,6 +11,7 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/shell/view.dart';
 
 import '../support/production_shell_harness.dart';
+import '../support/library_refresh.dart';
 
 /// Package 3C rendered states (`3C-RENDER`).
 ///
@@ -357,7 +358,7 @@ void main() {
         ready: () => harnessImagesReady(tester),
       );
       bridge.failNextPage = true;
-      await tester.tap(find.byTooltip('Refresh library'));
+      await refreshLibrary(tester);
       await tester.pumpAndSettle();
       expect(find.text('Library query failed'), findsOneWidget);
       expect(find.byType(LibraryBookCard), findsWidgets);
@@ -459,7 +460,7 @@ void main() {
             find.text('A quiet place for every book').evaluate().isNotEmpty,
       );
       bridge.failNextPage = true;
-      await tester.tap(find.byTooltip('Refresh library'));
+      await refreshLibrary(tester);
       await tester.pumpAndSettle();
       expect(find.text('Library query failed'), findsOneWidget);
       await captureState(tester, '3c-library-empty-error-1280', view, {
@@ -485,7 +486,7 @@ void main() {
         ready: () => harnessImagesReady(tester),
       );
       bridge.failNextPage = true;
-      await tester.tap(find.byTooltip('Refresh library'));
+      await refreshLibrary(tester);
       await tester.pumpAndSettle();
       expect(find.text('Library query failed'), findsOneWidget);
       expect(find.byType(LibraryContinueCard), findsOneWidget);

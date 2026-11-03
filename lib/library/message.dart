@@ -12,6 +12,13 @@ final class LibraryRefreshed extends LibraryMessage {
   const LibraryRefreshed();
 }
 
+/// The app came back to the foreground (or its window regained focus): the
+/// library rescans its sources unless it did so a moment ago, so books added
+/// to Dropbox, Drive or a folder elsewhere appear without a Refresh button.
+final class LibraryResumed extends LibraryMessage {
+  const LibraryResumed();
+}
+
 final class LibraryMoreRequested extends LibraryMessage {
   const LibraryMoreRequested();
 }
@@ -133,7 +140,10 @@ final class LibraryBookKeepRequested extends LibraryMessage {
 }
 
 final class LibraryConnectionsRequested extends LibraryMessage {
-  const LibraryConnectionsRequested();
+  const LibraryConnectionsRequested({this.start});
+
+  /// The connection to start once the dialog is open, if any.
+  final LibraryConnectionKind? start;
 }
 
 final class _LibraryDiscoveryProgressed extends LibraryMessage {

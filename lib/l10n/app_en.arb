@@ -4,10 +4,6 @@
   "@libraryTitle": {
     "description": "Iced reference key: library (crates/shosai-app/locales/en-US/main.ftl)."
   },
-  "librarySubtitle": "Your private reading room",
-  "@librarySubtitle": {
-    "description": "Iced reference key: library-subtitle."
-  },
   "libraryCheckingSource": "Checking {source}",
   "@libraryCheckingSource": {
     "placeholders": {"source": {"type": "String"}}
@@ -1032,8 +1028,11 @@
   },
   "importChooseFiles": "Choose files",
   "importChooseFilesHint": "Select one or more PDF or EPUB files",
-  "importChooseFolder": "Choose a folder",
-  "importChooseFolderHint": "Find supported books in all subfolders",
+  "importChooseFolder": "Connect a folder",
+  "importChooseFolderHint": "Books stay in the folder, and new ones appear on the shelf. Works with Dropbox, iCloud Drive and other synced folders.",
+  "importCopyFolder": "Copy into Shōsai instead",
+  "importCopyFolderHint": "Keeps a private snapshot of the folder’s books",
+  "importStorageHint": "Books stay in your storage, and new ones appear on the shelf",
   "importReviewBooks": "Review books",
   "importReviewFolder": "Review folder import",
   "importBooksType": "Books",
@@ -1099,6 +1098,8 @@
   "locationRemoveDescription": "Books and notes stay in your library. Books with no other location become unavailable. No source files are deleted.",
   "locationNoFolders": "Connect a device folder or a folder offered by your system’s file provider.",
   "locationNextPage": "Next page",
+  "locationNoFoldersMobile": "Connect Dropbox or Google Drive to read the books stored there.",
+  "locationFolderNotRead": "Folders aren’t read on phones and tablets",
   "shellSwitcherDone": "Done",
   "@shellSwitcherDone": {
     "description": "The tab switcher's action that returns to the current book."

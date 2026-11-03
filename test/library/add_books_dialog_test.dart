@@ -10,7 +10,16 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_core/shosai_core.dart'
+    show
+        BookFileCache,
+        CancellationToken,
+        Library,
+        LibraryLocations,
+        Preferences,
+        Store;
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/library_folders.dart';
 import '../support/bridge_pdf_engine.dart';
 import '../support/bridge_records.dart';
 
@@ -19,10 +28,23 @@ import '../support/bridge_records.dart';
 const _pickerChannel = MethodChannel('plugins.flutter.io/file_selector');
 const _openedChannel = MethodChannel('dev.shosai/opened_documents');
 
-/// The two desktop choices and the picker request each one must produce.
+const _folderHint =
+    'Books stay in the folder, and new ones appear on the shelf. Works with '
+    'Dropbox, iCloud Drive and other synced folders.';
+
+/// The add-books control: the sidebar or rail row beside a shelf, and the
+/// header's "+" on a phone.
+Finder _addBooksControl() {
+  final row = find.text('Add books');
+  return row.evaluate().isNotEmpty ? row : find.byTooltip('Add books');
+}
+
+/// The two desktop choices and the picker request each one must produce. A
+/// session without storage connections copies the chosen folder in, so the
+/// folder choice still asks for a directory.
 const _choices = [
   (title: 'Choose files', pickerCall: 'openFile'),
-  (title: 'Choose a folder', pickerCall: 'getDirectoryPath'),
+  (title: 'Connect a folder', pickerCall: 'getDirectoryPath'),
 ];
 
 class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
@@ -87,6 +109,58 @@ class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
   );
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A session with storage connections, whose Add books offers them.
+class _ConnectedBridge extends _Bridge implements LibraryFoldersHost {
+  _ConnectedBridge(this.folders);
+
+  @override
+  final LibraryFolders folders;
+
+  @override
+  Future<FlutterLibraryBook> admitSourceFile(
+    LibrarySourceFile file, {
+    CancellationToken? cancellation,
+  }) => throw StateError('No content reads');
+}
+
+/// Opens an empty connections service for [_ConnectedBridge].
+Future<_ConnectedBridge> _connectedBridge(WidgetTester tester) async {
+  final opened = await tester.runAsync(() async {
+    final directory = await Directory.systemTemp.createTemp('shosai-add');
+    final store = await Store.open('${directory.path}/library.sqlite3');
+    final folders = LibraryFolders(
+      Preferences(store),
+      Library(store, managedDirectory: '${directory.path}/books'),
+      LibraryLocations(store),
+      () async => '${directory.path}/unused',
+      BookFileCache(store, '${directory.path}/cache'),
+      providers: const [],
+    );
+    return (directory, store, folders);
+  });
+  final (directory, store, folders) = opened!;
+  addTearDown(() async {
+    // The library's discovery runs in the test zone, so it drains while
+    // frames and real time both advance.
+    await tester.pumpWidget(const SizedBox());
+    var closed = false;
+    final closing = () async {
+      await folders.close();
+      await store.close();
+      await directory.delete(recursive: true);
+    }().whenComplete(() => closed = true);
+    for (var frame = 0; frame < 500 && !closed; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+    }
+    expect(closed, isTrue);
+    await closing;
+  });
+  return _ConnectedBridge(folders);
 }
 
 /// Counts route pops so a test can tell one activation from two.
@@ -159,7 +233,7 @@ Future<void> _pumpShell(
 }
 
 Future<void> _openAddBooks(WidgetTester tester) async {
-  await tester.tap(find.widgetWithText(ShadButton, 'Add books'));
+  await tester.tap(_addBooksControl());
   // The import effect stays pending while the picker is open, so settle is
   // not available; pump the dialog entrance instead.
   await tester.pump();
@@ -224,9 +298,9 @@ void main() {
     await _openAddBooks(tester);
 
     expect(find.text('Choose files'), findsOneWidget);
-    expect(find.text('Choose a folder'), findsOneWidget);
+    expect(find.text('Connect a folder'), findsOneWidget);
     expect(find.text('Select one or more PDF or EPUB files'), findsOneWidget);
-    expect(find.text('Find supported books in all subfolders'), findsOneWidget);
+    expect(find.text(_folderHint), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -238,7 +312,7 @@ void main() {
 
     for (final (title, subtitle) in const [
       ('Choose files', 'Select one or more PDF or EPUB files'),
-      ('Choose a folder', 'Find supported books in all subfolders'),
+      ('Connect a folder', _folderHint),
     ]) {
       final node = tester.getSemantics(find.text(title));
       expect(
@@ -272,11 +346,11 @@ void main() {
 
     final unfocused = tester.getRect(find.byType(ShadCard).first);
     expect(_ringOn(tester, 'Choose files'), isNull);
-    expect(_ringOn(tester, 'Choose a folder'), isNull);
+    expect(_ringOn(tester, 'Connect a folder'), isNull);
 
     await _tabToChoice(tester, 'Choose files');
     expect(_ringOn(tester, 'Choose files'), _focusedRing());
-    expect(_ringOn(tester, 'Choose a folder'), isNull);
+    expect(_ringOn(tester, 'Connect a folder'), isNull);
     expect(
       tester.getRect(find.byType(ShadCard).first),
       unfocused,
@@ -286,12 +360,12 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     expect(
-      tester.getSemantics(find.text('Choose a folder')),
+      tester.getSemantics(find.text('Connect a folder')),
       isSemantics(isFocused: true),
       reason: 'Tab moves focus to the second choice',
     );
     expect(_ringOn(tester, 'Choose files'), isNull);
-    expect(_ringOn(tester, 'Choose a folder'), _focusedRing());
+    expect(_ringOn(tester, 'Connect a folder'), _focusedRing());
   });
 
   for (final choice in _choices) {
@@ -361,7 +435,7 @@ void main() {
     expect(pops.pops, 1);
 
     await _openAddBooks(tester);
-    await tester.tap(find.text('Choose a folder'));
+    await tester.tap(find.text('Connect a folder'));
     await tester.pumpAndSettle();
 
     expect(picker.calls, ['openFile', 'getDirectoryPath']);
@@ -383,7 +457,7 @@ void main() {
     expect(picker.calls, isEmpty);
     expect(pops.pops, 1);
     expect(find.text('Choose files'), findsNothing);
-    expect(find.widgetWithText(ShadButton, 'Add books'), findsOneWidget);
+    expect(_addBooksControl(), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await _openAddBooks(tester);
@@ -407,10 +481,10 @@ void main() {
       await _openAddBooks(tester);
 
       expect(find.text('Choose files'), findsOneWidget);
-      expect(find.text('Choose a folder'), findsOneWidget);
+      expect(find.text('Connect a folder'), findsOneWidget);
       expect(tester.takeException(), isNull);
 
-      await tester.tap(find.text('Choose a folder'));
+      await tester.tap(find.text('Connect a folder'));
       await tester.pumpAndSettle();
 
       expect(picker.calls, ['getDirectoryPath']);
@@ -633,7 +707,7 @@ void main() {
           cancelImport: outcome == 'cancelled',
         );
         await _pumpShell(tester, bridge: bridge, locale: const Locale('ja'));
-        await tester.tap(find.widgetWithText(ShadButton, '本を追加'));
+        await tester.tap(find.text('本を追加'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         await tester.pump(const Duration(milliseconds: 400));
@@ -668,4 +742,93 @@ void main() {
       variant: TargetPlatformVariant.only(TargetPlatform.iOS),
     );
   }
+
+  testWidgets(
+    'a phone offers files and storage accounts, never a folder',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final bridge = await _connectedBridge(tester);
+      await _pumpShell(tester, bridge: bridge, settle: false);
+      for (var frame = 0; frame < 20; frame++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await _openAddBooks(tester);
+
+      expect(find.text('Choose files'), findsOneWidget);
+      expect(find.text('Connect Dropbox'), findsOneWidget);
+      expect(find.text('Connect Google Drive'), findsOneWidget);
+      expect(find.text('Connect a folder'), findsNothing);
+      expect(find.text('Copy into Shōsai instead'), findsNothing);
+      expect(
+        find.byType(ShadDialog),
+        findsNothing,
+        reason: 'a phone shows the choices as a bottom sheet',
+      );
+      final sheet = tester.getRect(
+        find
+            .ancestor(
+              of: find.text('Connect Google Drive'),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      expect(sheet.bottom, 844);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'desktop connects a folder in place unless its copy is asked for',
+    (tester) async {
+      final picker = _PickerStub(tester);
+      final bridge = await _connectedBridge(tester);
+      await _pumpShell(tester, bridge: bridge, settle: false);
+      for (var frame = 0; frame < 20; frame++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await _openAddBooks(tester);
+
+      expect(find.text('Connect Dropbox'), findsNothing);
+      final copy = tester.widget<ShadSwitch>(find.byType(ShadSwitch));
+      expect(copy.value, isFalse, reason: 'connecting in place is the default');
+
+      await tester.tap(find.text('Connect a folder'));
+      for (var frame = 0; frame < 20; frame++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(
+        picker.calls,
+        isNot(contains('getDirectoryPath')),
+        reason: 'a connected folder is not copied in',
+      );
+      expect(find.text('Connections'), findsOneWidget);
+      await tester.tapAt(const Offset(8, 8));
+      for (var frame = 0; frame < 20; frame++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+
+      await _openAddBooks(tester);
+      await tester.tap(find.text('Copy into Shōsai instead'));
+      await tester.pump();
+      await tester.tap(find.text('Connect a folder'));
+      await tester.pumpAndSettle();
+      expect(picker.calls, ['getDirectoryPath']);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.linux),
+  );
 }

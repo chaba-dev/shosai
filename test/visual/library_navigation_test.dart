@@ -190,14 +190,21 @@ void main() {
           // The reference's Japanese strings, taken from the Iced catalogs.
           // The header's title and the sidebar's place.
           expect(find.text('ライブラリ'), findsNWidgets(2));
-          expect(find.text('自分だけの読書室'), findsOneWidget);
           expect(find.text('読書中'), findsNothing);
           expect(entry('すべて'), findsOneWidget);
           expect(entry('設定'), findsOneWidget);
-          expect(entry('本を追加'), findsOneWidget);
+          // Add books is the sidebar's; the header repeats neither it nor
+          // Refresh.
+          expect(
+            find.descendant(
+              of: find.byType(ShellSidebar),
+              matching: find.text('本を追加'),
+            ),
+            findsOneWidget,
+          );
           expect(find.text('タイトル・著者を検索...'), findsOneWidget);
           // Tooltips and accessibility text are translated too.
-          expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
+          expect(find.byTooltip('ライブラリを更新'), findsNothing);
           expect(find.bySemanticsLabel('本を追加'), findsWidgets);
           expect(
             find.descendant(
@@ -394,7 +401,6 @@ void main() {
           // back to English at 200% text.
           expect(find.text('ライブラリ'), findsNWidgets(2));
           expect(entry('設定'), findsOneWidget);
-          expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
           expect(find.text('Library'), findsNothing);
         },
         metadata: const <String, Object?>{
@@ -450,8 +456,10 @@ void main() {
               // with Japanese metadata.
               // The header's title and the bottom bar's place.
               expect(find.text('ライブラリ'), findsNWidgets(2));
-              expect(find.text('タイトル・著者を検索...'), findsOneWidget);
-              expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
+              // The one-row header's filter icon and "+" carry the
+              // translated names.
+              expect(find.byTooltip('タイトル・著者を検索...'), findsOneWidget);
+              expect(find.byTooltip('本を追加'), findsOneWidget);
               expect(find.text('All'), findsNothing);
               expect(find.text('Settings'), findsNothing);
               expect(find.byTooltip('Refresh library'), findsNothing);
@@ -571,6 +579,12 @@ void main() {
 
     expect(find.byType(ShellSidebar), findsOneWidget);
     expect(entry('Settings'), findsOneWidget);
-    expect(entry('Add books'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ShellSidebar),
+        matching: find.text('Add books'),
+      ),
+      findsOneWidget,
+    );
   });
 }

@@ -16,6 +16,7 @@ import 'package:shosai_flutter/shell/view.dart';
 import 'support/production_shell_harness.dart';
 import 'support/bridge_pdf_engine.dart';
 import 'support/bridge_records.dart';
+import 'support/library_refresh.dart';
 
 /// The card's own title line.
 ///
@@ -281,7 +282,7 @@ void main() {
     expect(find.text('Book 59'), findsNothing);
     expect(bridge.coverRequests, contains(7));
 
-    await tester.tap(find.byTooltip('Refresh library'));
+    await refreshLibrary(tester);
     await tester.pumpAndSettle();
     expect(
       find.descendant(
@@ -354,7 +355,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(1));
-    await tester.tap(find.byTooltip('Refresh library'));
+    await refreshLibrary(tester);
     await tester.pumpAndSettle();
     expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(2));
   });
@@ -1238,7 +1239,7 @@ void main() {
           pickImport: () => picker.future,
           openBook: (_) async {},
           drainReaderSaves: (_) async {},
-          manageConnections: () => connections.future,
+          manageConnections: (_) => connections.future,
         );
         controller.dispatch(const LibraryStarted());
         await _waitUntil(() => !controller.model.busy);

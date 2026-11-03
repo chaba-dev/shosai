@@ -302,6 +302,15 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     final keyboard = HardwareKeyboard.instance;
     final command = keyboard.isControlPressed || keyboard.isMetaPressed;
     final key = event.logicalKey;
+    // Ctrl+R or Command+R rescans the library's sources on the shelf, where
+    // a pointer has no pull-to-refresh.
+    if (command &&
+        !keyboard.isAltPressed &&
+        key == LogicalKeyboardKey.keyR &&
+        !_shell.model.reading) {
+      controller.dispatch(const LibraryRefreshed());
+      return KeyEventResult.handled;
+    }
     final open =
         (command && !keyboard.isAltPressed && key == LogicalKeyboardKey.keyK) ||
         (!command &&
@@ -480,10 +489,16 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
   }
 
+  /// Returning to the app rescans the library's sources.
+  late final AppLifecycleListener _lifecycle = AppLifecycleListener(
+    onResume: () => controller.dispatch(const LibraryResumed()),
+  );
+
   @override
   void initState() {
     super.initState();
     controller.dispatch(const LibraryStarted());
+    _lifecycle;
   }
 
   @override
@@ -506,6 +521,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         navigator.removeRoute(route);
       }
     }
+    _lifecycle.dispose();
     controller.removeListener(_changed);
     controller.dispose();
     _shell.removeListener(_shellChanged);
@@ -724,37 +740,38 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     closeSwitcher: () => _shell.dispatch(const ShellSwitcherClosed()),
   );
 
+  /// Add books: files are copied in on every platform. Phones and tablets
+  /// also offer the storage accounts, and desktop a folder that is connected
+  /// in place unless its books are copied in instead (RFD 12 outcome 6).
   Future<LibraryImportSelection?> _pickImport() async {
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      return _pickAndroidImport();
-    }
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return _pickIosImport();
-    }
-    final directory = await _showOwnedDialog<bool>(
-      (context) => ShadDialog(
-        title: Text(AppLocalizations.of(context).addBooksAction),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _DialogActionTile(
-              icon: LucideIcons.file,
-              title: AppLocalizations.of(context).importChooseFiles,
-              subtitle: AppLocalizations.of(context).importChooseFilesHint,
-              onPressed: () => Navigator.pop(context, false),
-            ),
-            _DialogActionTile(
-              icon: LucideIcons.folder,
-              title: AppLocalizations.of(context).importChooseFolder,
-              subtitle: AppLocalizations.of(context).importChooseFolderHint,
-              onPressed: () => Navigator.pop(context, true),
-            ),
-          ],
-        ),
-      ),
+    final mobile =
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    final connections = _sessionBridge is LibraryFoldersHost;
+    if (mobile && !connections) return _pickMobileFiles();
+    final choice = await _showOwnedDialog<_AddBooksChoice>(
+      (context) => _AddBooksChooser(mobile: mobile, connections: connections),
     );
-    if (directory == null || !mounted) return null;
+    if (choice == null || !mounted) return null;
+    switch (choice) {
+      case _AddBooksChoice.files:
+        if (mobile) return _pickMobileFiles();
+      case _AddBooksChoice.dropbox:
+        return const LibraryImportSelection.connect(
+          LibraryConnectionKind.dropbox,
+        );
+      case _AddBooksChoice.googleDrive:
+        return const LibraryImportSelection.connect(
+          LibraryConnectionKind.googleDrive,
+        );
+      case _AddBooksChoice.folder:
+        return const LibraryImportSelection.connect(
+          LibraryConnectionKind.folder,
+        );
+      case _AddBooksChoice.folderCopy:
+        break;
+    }
+    final directory = choice == _AddBooksChoice.folderCopy;
     final l10n = AppLocalizations.of(context);
     final paths = directory
         ? [
@@ -770,8 +787,15 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             confirmButtonText: l10n.importReviewBooks,
           )).map((file) => file.path).toList();
     if (paths.isEmpty || !mounted) return null;
-    return _reviewImport(paths, directory: directory);
+    // A folder is only copied when the copy was asked for; connecting it in
+    // place is the other choice.
+    return _reviewImport(paths, directory: directory, managedOnly: directory);
   }
+
+  Future<LibraryImportSelection?> _pickMobileFiles() =>
+      defaultTargetPlatform == TargetPlatform.android
+      ? _pickAndroidImport()
+      : _pickIosImport();
 
   /// iOS opens the system document picker, which copies each chosen book
   /// into the app's inbox. The library keeps its own copy, so the inbox
@@ -1060,79 +1084,95 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  Future<void> _manageLocations() async {
+  Future<void> _manageLocations([LibraryConnectionKind? start]) async {
     final host = _sessionBridge;
     if (host is! LibraryFoldersHost) return;
-    final folders = FoldersController(
-      folders: (host as LibraryFoldersHost).folders,
-      setup: (id) => (host as LibraryFoldersHost).folders.setup('folder', id),
-      setupDropbox: (id) async {
-        if (DropboxConnectionProvider.defaultClientId.isEmpty) {
-          await _showOwnedDialog<void>(
-            (context) => ShadDialog.alert(
-              title: Text(AppLocalizations.of(context).dropboxConnect),
-              description: Text(
-                AppLocalizations.of(context).dropboxRegistrationRequired,
-              ),
-              actions: [
-                ShadButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(AppLocalizations.of(context).locationClose),
+    final folders =
+        FoldersController(
+          folders: (host as LibraryFoldersHost).folders,
+          supportsFolders: (host as LibraryFoldersHost).folders.folderSources,
+          setup: (id) =>
+              (host as LibraryFoldersHost).folders.setup('folder', id),
+          setupDropbox: (id) async {
+            if (DropboxConnectionProvider.defaultClientId.isEmpty) {
+              await _showOwnedDialog<void>(
+                (context) => ShadDialog.alert(
+                  title: Text(AppLocalizations.of(context).dropboxConnect),
+                  description: Text(
+                    AppLocalizations.of(context).dropboxRegistrationRequired,
+                  ),
+                  actions: [
+                    ShadButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(AppLocalizations.of(context).locationClose),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          );
-          return null;
-        }
-        return DropboxConnectionProvider(
-          credentials: const PlatformConnectionCredentialStore(),
-          authorizeNative: DropboxAuthorization.supported
-              ? DropboxAuthorization(
-                  cancellationTitle: AppLocalizations.of(
-                    context,
-                  ).dropboxCancelTitle,
-                  cancelAction: AppLocalizations.of(
-                    context,
-                  ).dropboxCancelConnection,
-                  keepWaitingAction: AppLocalizations.of(
-                    context,
-                  ).dropboxKeepWaiting,
-                ).authorize
-              : null,
-          authorize: (authorization) async {
-            if (!await launchUrl(
-              authorization,
-              mode: LaunchMode.externalApplication,
-            )) {
-              throw StateError('The system browser could not be opened.');
+              );
+              return null;
             }
-            if (!mounted) return null;
-            return _showOwnedDialog<String>((_) => const DropboxCodeDialog());
+            return DropboxConnectionProvider(
+              credentials: const PlatformConnectionCredentialStore(),
+              authorizeNative: DropboxAuthorization.supported
+                  ? DropboxAuthorization(
+                      cancellationTitle: AppLocalizations.of(
+                        context,
+                      ).dropboxCancelTitle,
+                      cancelAction: AppLocalizations.of(
+                        context,
+                      ).dropboxCancelConnection,
+                      keepWaitingAction: AppLocalizations.of(
+                        context,
+                      ).dropboxKeepWaiting,
+                    ).authorize
+                  : null,
+              authorize: (authorization) async {
+                if (!await launchUrl(
+                  authorization,
+                  mode: LaunchMode.externalApplication,
+                )) {
+                  throw StateError('The system browser could not be opened.');
+                }
+                if (!mounted) return null;
+                return _showOwnedDialog<String>(
+                  (_) => const DropboxCodeDialog(),
+                );
+              },
+            ).setup(id);
           },
-        ).setup(id);
-      },
-      setupGoogleDrive: (id) =>
-          (host as LibraryFoldersHost).folders.setup('google-drive', id),
-      confirmRemoval: (grant) async =>
-          await _showOwnedDialog<bool>((context) {
-            final l10n = AppLocalizations.of(context);
-            return ShadDialog.alert(
-              title: Text(l10n.locationRemove),
-              description: Text(l10n.locationRemoveDescription),
-              actions: [
-                ShadButton.outline(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: Text(l10n.locationCancel),
-                ),
-                ShadButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: Text(l10n.locationRemove),
-                ),
-              ],
-            );
-          }) ??
-          false,
-    )..dispatch(const FoldersStarted());
+          setupGoogleDrive: (id) =>
+              (host as LibraryFoldersHost).folders.setup('google-drive', id),
+          confirmRemoval: (grant) async =>
+              await _showOwnedDialog<bool>((context) {
+                final l10n = AppLocalizations.of(context);
+                return ShadDialog.alert(
+                  title: Text(l10n.locationRemove),
+                  description: Text(l10n.locationRemoveDescription),
+                  actions: [
+                    ShadButton.outline(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: Text(l10n.locationCancel),
+                    ),
+                    ShadButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: Text(l10n.locationRemove),
+                    ),
+                  ],
+                );
+              }) ??
+              false,
+        )..dispatch(
+          FoldersStarted(
+            then: switch (start) {
+              LibraryConnectionKind.folder => const FoldersAddRequested(),
+              LibraryConnectionKind.dropbox =>
+                const FoldersAddDropboxRequested(),
+              LibraryConnectionKind.googleDrive =>
+                const FoldersAddGoogleDriveRequested(),
+              null => null,
+            },
+          ),
+        );
     try {
       await _showOwnedDialog<void>(
         (_) => LibraryFoldersDialog(controller: folders),
@@ -1253,6 +1293,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 constraints.maxWidth <
                 ShosaiTokens.layoutLibraryCompactBreakpoint,
             model: model,
+            // Only the phone has no sidebar or rail to carry Add books.
+            addBooks: layout == ShellLayout.phone,
             openCount: _shell.model.openBooks.length,
             // The header's add-books action is the import's cancel action;
             // every other cancellable operation keeps the separate cancel
@@ -1267,7 +1309,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 controller.dispatch(const LibraryOperationCancelled()),
             onOperationCancelled: () =>
                 controller.dispatch(const LibraryOperationCancelled()),
-            onRefresh: () => controller.dispatch(const LibraryRefreshed()),
           ),
           LibraryFilterRow(
             model: model,
@@ -1283,10 +1324,39 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 actions: _shellActions,
               ),
             ),
-          Expanded(child: _libraryContent(model)),
+          Expanded(child: _libraryContent(model, layout)),
         ],
       ),
     );
+  }
+
+  /// Pull-to-refresh rescans the connected storage. The indicator follows the
+  /// controller's own load: it settles once the library reports no load or
+  /// scan in flight, and the widget never awaits the effect itself.
+  Future<void> _pulledToRefresh() {
+    final settled = Completer<void>();
+    var started = false;
+    void check() {
+      final model = controller.model;
+      final active = model.loading || model.discoveryProgress != null;
+      started |= active;
+      if ((started && !active) || !mounted) {
+        controller.removeListener(check);
+        if (!settled.isCompleted) settled.complete();
+      }
+    }
+
+    controller.addListener(check);
+    controller.dispatch(const LibraryRefreshed());
+    check();
+    // A refresh refused while busy never starts a load to wait for.
+    Future<void>.delayed(const Duration(seconds: 1), () {
+      if (!started) {
+        controller.removeListener(check);
+        if (!settled.isCompleted) settled.complete();
+      }
+    });
+    return settled.future;
   }
 
   /// The collection column, with the retained debt surfaces above it.
@@ -1295,7 +1365,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   /// inside the scroll column above the grid), and the two debt states are
   /// retained Flutter surfaces with no Iced counterpart, so they stay above the
   /// collection with their own recovery actions.
-  Widget _libraryContent(LibraryModel model) {
+  Widget _libraryContent(LibraryModel model, ShellLayout layout) {
     final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1316,31 +1386,49 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             ),
           ),
         Expanded(
-          child: LibraryCollection(
-            model: model,
-            openBookIds: {for (final open in _shell.model.openBooks) open.id},
-            sortBooks: (sort) => controller.dispatch(LibrarySortChanged(sort)),
-            openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
-            openSourceFile: (file) =>
-                controller.dispatch(LibrarySourceFileOpened(file)),
-            openNotes: () =>
-                _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),
-            removeBook: (book) =>
-                controller.dispatch(LibraryBookRemovalRequested(book)),
-            keepBook: (book) =>
-                controller.dispatch(LibraryBookKeepRequested(book)),
-            loadMore: () => controller.dispatch(const LibraryMoreRequested()),
-            retryPaging: () =>
-                controller.dispatch(const LibraryMoreRetryRequested()),
-            loadCover: controller.requestCover,
-            retry: () => controller.dispatch(const LibraryRetryRequested()),
-            addFirstBooks: () =>
-                controller.dispatch(const LibraryImportRequested()),
-            cancelImport: () =>
-                controller.dispatch(const LibraryOperationCancelled()),
+          child: _pullToRefresh(
+            layout,
+            LibraryCollection(
+              model: model,
+              openBookIds: {for (final open in _shell.model.openBooks) open.id},
+              sortBooks: (sort) =>
+                  controller.dispatch(LibrarySortChanged(sort)),
+              openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
+              openSourceFile: (file) =>
+                  controller.dispatch(LibrarySourceFileOpened(file)),
+              openNotes: () =>
+                  _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),
+              removeBook: (book) =>
+                  controller.dispatch(LibraryBookRemovalRequested(book)),
+              keepBook: (book) =>
+                  controller.dispatch(LibraryBookKeepRequested(book)),
+              loadMore: () => controller.dispatch(const LibraryMoreRequested()),
+              retryPaging: () =>
+                  controller.dispatch(const LibraryMoreRetryRequested()),
+              loadCover: controller.requestCover,
+              retry: () => controller.dispatch(const LibraryRetryRequested()),
+              addFirstBooks: () =>
+                  controller.dispatch(const LibraryImportRequested()),
+              cancelImport: () =>
+                  controller.dispatch(const LibraryOperationCancelled()),
+            ),
           ),
         ),
       ],
+    );
+  }
+
+  /// Touch layouts rescan by pulling the shelf down; a pointer has no pull,
+  /// and the rescan on returning to the app covers it.
+  Widget _pullToRefresh(ShellLayout layout, Widget collection) {
+    if (!layout.touch) return collection;
+    final palette = ShellPalette.of(context);
+    return RefreshIndicator.adaptive(
+      color: palette.accent,
+      backgroundColor: palette.surface,
+      semanticsLabel: AppLocalizations.of(context).refreshLibraryTooltip,
+      onRefresh: _pulledToRefresh,
+      child: collection,
     );
   }
 }

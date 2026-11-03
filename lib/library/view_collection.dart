@@ -671,6 +671,8 @@ class _LibraryGridState extends State<_LibraryGrid> {
         );
         return CustomScrollView(
           controller: _scroll,
+          // A short shelf still answers pull-to-refresh on touch.
+          physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
               padding: padding.copyWith(bottom: 0),
@@ -830,6 +832,7 @@ class LibrarySkeletonGrid extends StatelessWidget {
           constraints.maxWidth - padding.horizontal,
         );
         return CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
               padding: padding,
@@ -946,6 +949,7 @@ class _LibraryEmptyCollection extends StatelessWidget {
         (empty ? l10n.libraryEmptyBody : l10n.libraryNoMatchesBody);
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         child: ConstrainedBox(
           // The composition is centred while it fits and scrolls once a scaled
           // heading, body and action no longer do, instead of overflowing the

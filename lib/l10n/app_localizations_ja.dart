@@ -12,9 +12,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get libraryTitle => 'ライブラリ';
 
   @override
-  String get librarySubtitle => '自分だけの読書室';
-
-  @override
   String libraryCheckingSource(String source) {
     return '$sourceを確認中';
   }
@@ -705,10 +702,20 @@ class AppLocalizationsJa extends AppLocalizations {
   String get importChooseFilesHint => 'PDFまたはEPUBファイルを選択します（複数選択可）';
 
   @override
-  String get importChooseFolder => 'フォルダを選択';
+  String get importChooseFolder => 'フォルダをつなぐ';
 
   @override
-  String get importChooseFolderHint => 'サブフォルダも含めて対応する本を探します';
+  String get importChooseFolderHint =>
+      '本はフォルダに置いたまま。新しい本も自動で本棚に並びます。Dropbox や iCloud Drive などの同期フォルダにも使えます。';
+
+  @override
+  String get importCopyFolder => '代わりに Shōsai にコピー';
+
+  @override
+  String get importCopyFolderHint => 'フォルダの本のコピーを Shōsai 内に保存します';
+
+  @override
+  String get importStorageHint => '本はそこに置いたまま。新しい本も自動で本棚に並びます';
 
   @override
   String get importReviewBooks => '追加する本を確認';
@@ -908,6 +915,13 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get locationNextPage => '次のページ';
+
+  @override
+  String get locationNoFoldersMobile =>
+      'Dropbox または Google Drive をつなぐと、そこにある本を読めます。';
+
+  @override
+  String get locationFolderNotRead => 'スマートフォンとタブレットではフォルダを読み込みません';
 
   @override
   String get shellSwitcherDone => '完了';

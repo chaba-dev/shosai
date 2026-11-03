@@ -177,7 +177,6 @@ void main() {
                   onImportRequested: () {},
                   onImportCancelled: () {},
                   onOperationCancelled: () => cancelled++,
-                  onRefresh: () {},
                 ),
               ),
             ),
@@ -326,6 +325,19 @@ void main() {
 
   ShadButton navigationButton(WidgetTester tester, String label) =>
       tester.widget<ShadButton>(navigationEntry(label));
+
+  /// The phone header's icon action labelled [label]: "+" Add books, or its
+  /// Cancel while an import runs.
+  Finder headerAction(String label) => find.descendant(
+    of: find.byType(LibraryHeader),
+    matching: find.descendant(
+      of: find.byTooltip(label),
+      matching: find.byType(ShadIconButton),
+    ),
+  );
+
+  ShadIconButton headerButton(WidgetTester tester, String label) =>
+      tester.widget<ShadIconButton>(headerAction(label));
 
   /// The format entries in the order the reference lists them.
   const formatLabels = ['EPUB', 'PDF'];
@@ -483,7 +495,7 @@ void main() {
       );
     });
 
-    testWidgets('the header carries the title, subtitle, search and action', (
+    testWidgets('the wide header carries the title and search only', (
       tester,
     ) async {
       await pumpLibrary(tester, const Size(1280, 800));
@@ -492,11 +504,7 @@ void main() {
       final title = tester.renderObject<RenderParagraph>(headerText('Library'));
       expect(title.text.style?.fontSize, 40);
       expect(title.text.style?.fontFamily, shellEditorialFontFamily);
-      final subtitle = tester.renderObject<RenderParagraph>(
-        find.text('Your private reading room'),
-      );
-      expect(subtitle.text.style?.fontSize, ShosaiTokens.typeSize12);
-      expect(subtitle.text.style?.color, ShosaiTokens.appTextMuted);
+      expect(find.text('Your private reading room'), findsNothing);
 
       final search = tester.getRect(find.byType(ShadInput));
       expect(
@@ -506,19 +514,74 @@ void main() {
       );
       final header = tester.getRect(find.byType(LibraryHeader));
       expect(search.left, greaterThan(header.left + 100));
+      expect(search.right, closeTo(header.right - 20, 1));
 
-      // The add-books action is a header control; the floating overlay that
-      // used to cover the collection is gone (2B deferred overlap defect).
+      // Add books lives in the sidebar beside a shelf, and the library rescans
+      // on its own, so the header repeats neither (2026-11-03).
       expect(
-        find.ancestor(
-          of: find.text('Add books'),
-          matching: find.byType(LibraryHeader),
+        find.descendant(
+          of: find.byType(LibraryHeader),
+          matching: find.text('Add books'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(ShellSidebar),
+          matching: find.text('Add books'),
         ),
         findsOneWidget,
       );
+      expect(find.byTooltip('Refresh library'), findsNothing);
       expect(find.byType(FloatingActionButton), findsNothing);
-      final action = tester.getRect(navigationEntry('Add books'));
-      expect(action.right, closeTo(header.right - 20, 1));
+    });
+
+    testWidgets('the phone header is one row with filter and add icons', (
+      tester,
+    ) async {
+      await pumpLibrary(tester, const Size(390, 844));
+
+      final header = tester.getRect(find.byType(LibraryHeader));
+      final title = tester.getRect(headerText('Library'));
+      final filter = tester.getRect(find.byTooltip('Search title or author'));
+      final add = tester.getRect(find.byTooltip('Add books'));
+      expect(find.byType(ShadInput), findsNothing);
+      for (final control in [filter, add]) {
+        expect(control.center.dy, closeTo(title.center.dy, 6));
+        expect(
+          control.height,
+          greaterThanOrEqualTo(ShosaiTokens.sizeTouchTarget),
+        );
+      }
+      expect(add.left, greaterThan(filter.right - 1));
+      expect(add.right, lessThanOrEqualTo(header.right));
+      expect(header.height, lessThan(80), reason: 'one row, not four');
+
+      // The filter icon turns the row into the filter field, and Cancel
+      // clears the filter and brings the title back.
+      await tester.tap(find.byTooltip('Search title or author'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ShadInput), findsOneWidget);
+      expect(headerText('Library'), findsNothing);
+      expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText))
+            .focusNode
+            .hasFocus,
+        isTrue,
+        reason: 'the field opens ready to type',
+      );
+      await tester.enterText(find.byType(ShadInput), 'Book');
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(LibraryHeader),
+          matching: find.text('Cancel'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ShadInput), findsNothing);
+      expect(headerText('Library'), findsOneWidget);
     });
 
     testWidgets('the header action never overlaps the collection', (
@@ -723,11 +786,11 @@ void main() {
     testWidgets('the light theme paints the reference hovered fill', (
       tester,
     ) async {
-      await pumpLibrary(tester, const Size(1280, 800));
+      await pumpLibrary(tester, const Size(390, 844));
 
       final hovered = await hoverPaintedSurface(
         tester,
-        navigationEntry('Add books'),
+        headerAction('Add books'),
       );
       expect(
         hovered.toARGB32(),
@@ -741,11 +804,11 @@ void main() {
     ) async {
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-      await pumpLibrary(tester, const Size(1280, 800));
+      await pumpLibrary(tester, const Size(390, 844));
 
       final hovered = await hoverPaintedSurface(
         tester,
-        navigationEntry('Add books'),
+        headerAction('Add books'),
       );
       expect(
         hovered.toARGB32(),
@@ -776,11 +839,11 @@ void main() {
         bridge.importCompleter = Completer<FlutterImportReport>();
         await pumpControlledLibrary(
           tester,
-          const Size(1280, 800),
+          const Size(390, 844),
           bridge: bridge,
         );
 
-        await tester.tap(navigationEntry('Add books'));
+        await tester.tap(headerAction('Add books'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         await tester.tap(find.text('Choose files'));
@@ -791,11 +854,11 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         expect(picker.calls, ['openFile']);
-        expect(navigationEntry('Cancel'), findsOneWidget);
+        expect(headerAction('Cancel'), findsOneWidget);
 
         final hovered = await hoverPaintedSurface(
           tester,
-          navigationEntry('Cancel'),
+          headerAction('Cancel'),
         );
         expect(hovered.computeLuminance(), greaterThan(0.5));
 
@@ -1078,11 +1141,11 @@ void main() {
         bridge.importCompleter = Completer<FlutterImportReport>();
         await pumpControlledLibrary(
           tester,
-          const Size(1280, 800),
+          const Size(390, 844),
           bridge: bridge,
         );
 
-        await tester.tap(navigationEntry('Add books'));
+        await tester.tap(headerAction('Add books'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         await tester.tap(find.text('Choose files'));
@@ -1097,15 +1160,15 @@ void main() {
         // add-books action is the cancel action for it.
         expect(picker.calls, ['openFile']);
         expect(bridge.importCalls, 1);
-        expect(navigationEntry('Cancel'), findsOneWidget);
-        expect(navigationEntry('Add books'), findsNothing);
+        expect(headerAction('Cancel'), findsOneWidget);
+        expect(headerAction('Add books'), findsNothing);
         expect(
           find.byTooltip('Cancel operation'),
           findsNothing,
           reason: 'the import owns the header cancel action',
         );
 
-        await tester.tap(navigationEntry('Cancel'));
+        await tester.tap(headerAction('Cancel'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
 
@@ -1124,8 +1187,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(navigationEntry('Add books'), findsOneWidget);
-        expect(navigationEntry('Cancel'), findsNothing);
+        expect(headerAction('Add books'), findsOneWidget);
+        expect(headerAction('Cancel'), findsNothing);
       },
       variant: TargetPlatformVariant.only(TargetPlatform.linux),
     );
@@ -1138,12 +1201,12 @@ void main() {
         bridge.importCompleter = Completer<FlutterImportReport>();
         await pumpControlledLibrary(
           tester,
-          const Size(1280, 800),
+          const Size(390, 844),
           bridge: bridge,
           locale: const Locale('ja'),
         );
 
-        await tester.tap(navigationEntry('本を追加'));
+        await tester.tap(headerAction('本を追加'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         await tester.tap(find.text('ファイルを選択'));
@@ -1157,11 +1220,11 @@ void main() {
         // The import owns the header action, and that action carries the
         // catalog's Japanese label rather than the English one.
         expect(picker.calls, ['openFile']);
-        expect(navigationEntry('キャンセル'), findsOneWidget);
-        expect(navigationEntry('Cancel'), findsNothing);
-        expect(navigationEntry('本を追加'), findsNothing);
+        expect(headerAction('キャンセル'), findsOneWidget);
+        expect(headerAction('Cancel'), findsNothing);
+        expect(headerAction('本を追加'), findsNothing);
 
-        await tester.tap(navigationEntry('キャンセル'));
+        await tester.tap(headerAction('キャンセル'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         expect(
@@ -1179,8 +1242,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(navigationEntry('本を追加'), findsOneWidget);
-        expect(navigationEntry('キャンセル'), findsNothing);
+        expect(headerAction('本を追加'), findsOneWidget);
+        expect(headerAction('キャンセル'), findsNothing);
       },
       variant: TargetPlatformVariant.only(TargetPlatform.linux),
     );
@@ -1190,7 +1253,7 @@ void main() {
       bridge.pageCompleter = Completer<FlutterLibraryPage>();
       await pumpControlledLibrary(
         tester,
-        const Size(1280, 800),
+        const Size(390, 844),
         bridge: bridge,
         settle: false,
       );
@@ -1198,9 +1261,9 @@ void main() {
       // The initial load is in flight: the add-books action is disabled and
       // the retained cancel action is present.
       expect(find.byTooltip('Cancel operation'), findsOneWidget);
-      expect(navigationButton(tester, 'Add books').enabled, isFalse);
-      expect(navigationButton(tester, 'Add books').onPressed, isNull);
-      await tester.tap(navigationEntry('Add books'));
+      expect(headerButton(tester, 'Add books').enabled, isFalse);
+      expect(headerButton(tester, 'Add books').onPressed, isNull);
+      await tester.tap(headerAction('Add books'));
       await tester.pump();
       expect(
         bridge.importCalls,
@@ -1217,8 +1280,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byTooltip('Cancel operation'), findsNothing);
-      expect(navigationButton(tester, 'Add books').enabled, isTrue);
-      expect(navigationButton(tester, 'Add books').onPressed, isNotNull);
+      expect(headerButton(tester, 'Add books').enabled, isTrue);
+      expect(headerButton(tester, 'Add books').onPressed, isNotNull);
     });
   });
 
@@ -1306,12 +1369,16 @@ void main() {
         // Header, filters, actions and the search placeholder come from the
         // generated catalogs.
         expect(headerText('ライブラリ'), findsOneWidget);
-        expect(find.text('自分だけの読書室'), findsOneWidget);
         expect(find.text('タイトル・著者を検索...'), findsOneWidget);
         expect(navigationEntry('すべて'), findsOneWidget);
         expect(navigationEntry('設定'), findsOneWidget);
-        expect(navigationEntry('本を追加'), findsOneWidget);
-        expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(ShellSidebar),
+            matching: find.text('本を追加'),
+          ),
+          findsOneWidget,
+        );
         // Format entries stay Latin in both locales, as in the reference.
         for (final label in const ['EPUB', 'PDF']) {
           expect(navigationEntry(label), findsOneWidget);
@@ -1333,7 +1400,7 @@ void main() {
         // Controls announce themselves in the selected language.
         expect(
           find.descendant(
-            of: navigationChrome,
+            of: find.byType(ShellSidebar),
             matching: find.bySemanticsLabel('本を追加'),
           ),
           findsOneWidget,
