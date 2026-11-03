@@ -1,0 +1,193 @@
+Launched application with dev.shosai.shosai bundle identifier.
+Waiting for the application to terminate…
+FRAMES /private/var/mobile/Containers/Data/Application/8D304333-A4E7-490F-B1BA-2FFB29BD67CC/tmp/qp-frames-50CDUH
+QP data-dir: /private/var/mobile/Containers/Data/Application/8D304333-A4E7-490F-B1BA-2FFB29BD67CC/tmp/qp-data-8Lk769
+QP imported: 2
+QP view: logical 1180.0x820.0 dpr 2.0 refresh 60.0 locale en
+QP ipad-01-library-start padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-01-library-start size: 1180.0x820.0
+QP ipad-01-library-start stage: 
+QP ipad-01-library-start tap-area: 
+QP ipad-01-library-start page: 
+QP ipad-01-library-start pdf-page: 
+QP ipad-01-library-start folio: 
+QP ipad-01-library-start location:  []
+QP ipad-01-library-start header: 
+QP ipad-01-library-start scrim: 
+QP ipad-01-library-start chrome: false
+SHOT ipad-01-library-start
+# screenshot ipad-01-library-start done
+QP pdf-spread: false
+QP ipad-02-pdf-at-rest padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-02-pdf-at-rest size: 1180.0x820.0
+QP ipad-02-pdf-at-rest stage: (56.0,0.0 1124.0x820.0)
+QP ipad-02-pdf-at-rest tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-02-pdf-at-rest page: 
+QP ipad-02-pdf-at-rest pdf-page: (80.0,30.9 1076.0x696.2)
+QP ipad-02-pdf-at-rest folio: (582.3,747.0 71.3x12.0)
+QP ipad-02-pdf-at-rest location: 3 [pages 4–5 of 15]
+QP ipad-02-pdf-at-rest header: (56.0,-56.0 1124.0x56.0)
+QP ipad-02-pdf-at-rest scrim: 
+QP ipad-02-pdf-at-rest chrome: false
+SHOT ipad-02-pdf-at-rest
+# screenshot ipad-02-pdf-at-rest done
+QP pdf-open-ok: true
+QP pdf-held-curl: true
+QP pdf-held padding: L0.0 T32.0 R0.0 B25.0
+QP pdf-held size: 1180.0x820.0
+QP pdf-held stage: (56.0,0.0 1124.0x820.0)
+QP pdf-held tap-area: (80.0,24.0 1076.0x772.0)
+QP pdf-held page: 
+QP pdf-held pdf-page: (80.0,30.9 1076.0x696.2)
+QP pdf-held folio: (582.3,747.0 71.3x12.0)
+QP pdf-held location: 3 [pages 4–5 of 15]
+QP pdf-held header: (56.0,-56.0 1124.0x56.0)
+QP pdf-held scrim: 
+QP pdf-held chrome: false
+SHOT ipad-03-pdf-curl-held
+# screenshot ipad-03-pdf-curl-held done
+QP pdf-held-release-curl: false
+QP pdf-held-ok: true
+QP pdf-rec-forward: 3 [pages 4–5 of 15] -> 5 [pages 6–7 of 15]; up 0ms; curl first 13ms leaf moves 75ms last 392ms; folio widget changed 13ms; frames 13:C0.00* 52:C0.00i* 75:C0.01i* 92:C0.03i* 108:C0.06i* 125:C0.10i* 142:C0.15i* 159:C0.21i* 175:C0.28i* 192:C0.35i* 209:C0.43i* 225:C0.51i* 242:C0.59i* 260:C0.67i* 276:C0.75i* 293:C0.81i* 309:C0.87i* 326:C0.91i* 343:C0.95i* 359:C0.98i* 376:C0.99i* 392:C1.00i* 410:-* 425:-* 442:-* 459:-* 476:-* 492:-* 509:-* 526:-* 542:-* 559:-* 576:-* 592:-* 609:-*
+QP pdf-rec-back: 5 [pages 6–7 of 15] -> 3 [pages 4–5 of 15]; up 0ms; curl first 22ms leaf moves 97ms last 381ms; folio widget changed 22ms; frames 22:C0.00* 38:C0.00i* 97:C0.05i* 114:C0.12i* 130:C0.17i* 147:C0.23i* 164:C0.30i* 180:C0.38i* 197:C0.46i* 214:C0.54i* 230:C0.62i* 247:C0.70i* 264:C0.77i* 280:C0.83i* 297:C0.88i* 315:C0.93i* 331:C0.96i* 348:C0.98i* 365:C1.00i* 381:C1.00i* 401:-* 414:-* 431:-* 447:-* 464:-* 481:-* 497:-* 514:-* 531:-* 547:-* 564:-* 581:-* 597:-*
+QP ipad-04-pdf-after-turns padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-04-pdf-after-turns size: 1180.0x820.0
+QP ipad-04-pdf-after-turns stage: (56.0,0.0 1124.0x820.0)
+QP ipad-04-pdf-after-turns tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-04-pdf-after-turns page: 
+QP ipad-04-pdf-after-turns pdf-page: (80.0,30.9 1076.0x696.2)
+QP ipad-04-pdf-after-turns folio: (582.3,747.0 71.3x12.0)
+QP ipad-04-pdf-after-turns location: 3 [pages 4–5 of 15]
+QP ipad-04-pdf-after-turns header: (56.0,-56.0 1124.0x56.0)
+QP ipad-04-pdf-after-turns scrim: 
+QP ipad-04-pdf-after-turns chrome: false
+SHOT ipad-04-pdf-after-turns
+# screenshot ipad-04-pdf-after-turns done
+QP pdf-tap-recorded-ok: true
+QP chrome-shown: true
+QP f2-opened: 0 [page 1]
+QP chrome-shown: true
+QP go-to-shown: true
+QP f2-jumped: 50082300 [page 535 | page 536] numbered after 0ms
+QP area chrome-hidden reader-stage: (56.0,0.0 1124.0x820.0)
+QP area chrome-hidden reader-page: (80.0,24.0 1076.0x772.0)
+QP area chrome-hidden reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+QP area chrome-hidden reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+QP area chrome-hidden reader-selection-surface: (104.0,100.0 1028.0x626.0)
+QP area chrome-hidden reader-folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP area chrome-hidden reader-header: (56.0,-56.0 1124.0x56.0)
+QP ipad-05-f2-1-jumped padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-05-f2-1-jumped size: 1180.0x820.0
+QP ipad-05-f2-1-jumped stage: (56.0,0.0 1124.0x820.0)
+QP ipad-05-f2-1-jumped tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-05-f2-1-jumped page: (80.0,24.0 1076.0x772.0)
+QP ipad-05-f2-1-jumped pdf-page: 
+QP ipad-05-f2-1-jumped folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP ipad-05-f2-1-jumped location: 50082300 [page 535 | page 536]
+QP ipad-05-f2-1-jumped header: (56.0,-56.0 1124.0x56.0)
+QP ipad-05-f2-1-jumped scrim: 
+QP ipad-05-f2-1-jumped chrome: false
+SHOT ipad-05-f2-1-jumped
+# screenshot ipad-05-f2-1-jumped done
+QP chrome-shown: true
+QP area chrome-shown reader-stage: (56.0,0.0 1124.0x820.0)
+QP area chrome-shown reader-page: (80.0,24.0 1076.0x772.0)
+QP area chrome-shown reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+QP area chrome-shown reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+QP area chrome-shown reader-selection-surface: (104.0,100.0 1028.0x626.0)
+QP area chrome-shown reader-folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP area chrome-shown reader-header: (56.0,32.0 1124.0x56.0)
+QP ipad-06-f2-2-chrome-shown padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-06-f2-2-chrome-shown size: 1180.0x820.0
+QP ipad-06-f2-2-chrome-shown stage: (56.0,0.0 1124.0x820.0)
+QP ipad-06-f2-2-chrome-shown tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-06-f2-2-chrome-shown page: (80.0,24.0 1076.0x772.0)
+QP ipad-06-f2-2-chrome-shown pdf-page: 
+QP ipad-06-f2-2-chrome-shown folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP ipad-06-f2-2-chrome-shown location: 50082300 [page 535 | page 536]
+QP ipad-06-f2-2-chrome-shown header: (56.0,32.0 1124.0x56.0)
+QP ipad-06-f2-2-chrome-shown scrim: 
+QP ipad-06-f2-2-chrome-shown chrome: true
+SHOT ipad-06-f2-2-chrome-shown
+# screenshot ipad-06-f2-2-chrome-shown done
+QP area chrome-hidden-again reader-stage: (56.0,0.0 1124.0x820.0)
+QP area chrome-hidden-again reader-page: (80.0,24.0 1076.0x772.0)
+QP area chrome-hidden-again reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+QP area chrome-hidden-again reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+QP area chrome-hidden-again reader-selection-surface: (104.0,100.0 1028.0x626.0)
+QP area chrome-hidden-again reader-folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+QP area chrome-hidden-again reader-header: (56.0,-56.0 1124.0x56.0)
+QP f2-before-text-size: 50082300 [page 535 | page 536]
+SHOSAI-MARK ---- text size change starts ----
+QP chrome-shown: true
+QP f2-aa-open: 50082300 [page 535 | page 536]
+SHOSAI-MARK tap larger
+QP f2-larger: 50083169 [page 687 | page 688] numbered after 1ms
+QP ipad-07-f2-3-larger-panel-open padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-07-f2-3-larger-panel-open size: 1180.0x820.0
+QP ipad-07-f2-3-larger-panel-open stage: (56.0,0.0 1124.0x820.0)
+QP ipad-07-f2-3-larger-panel-open tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-07-f2-3-larger-panel-open page: (80.0,24.0 1076.0x772.0)
+QP ipad-07-f2-3-larger-panel-open pdf-page: 
+QP ipad-07-f2-3-larger-panel-open folio: (339.8,735.0 42.5x12.0) (853.5,735.0 42.9x12.0)
+QP ipad-07-f2-3-larger-panel-open location: 50083169 [page 687 | page 688]
+QP ipad-07-f2-3-larger-panel-open header: (56.0,32.0 1124.0x56.0)
+QP ipad-07-f2-3-larger-panel-open scrim: (56.0,88.0 1124.0x671.0)
+QP ipad-07-f2-3-larger-panel-open chrome: true
+SHOT ipad-07-f2-3-larger-panel-open
+# screenshot ipad-07-f2-3-larger-panel-open done
+SHOSAI-MARK tap smaller
+QP f2-smaller-panel-open: 50082215 [page 544 | page 545] numbered after 3ms
+SHOSAI-MARK close Aa
+QP f2-aa-closed: 50082215 [page 544 | page 545] chrome true
+SHOSAI-MARK hide chrome
+QP f2-hidden-1s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-2s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-3s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-4s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-5s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-6s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-7s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-8s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-9s: 50082215 [page 544 | page 545] chrome false
+QP f2-hidden-10s: 50082215 [page 544 | page 545] chrome false
+QP area after reader-stage: (56.0,0.0 1124.0x820.0)
+QP area after reader-page: (80.0,24.0 1076.0x772.0)
+QP area after reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+QP area after reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+QP area after reader-selection-surface: (104.0,100.0 1028.0x626.0)
+QP area after reader-folio: (339.4,735.0 43.2x12.0) (853.6,735.0 42.7x12.0)
+QP area after reader-header: (56.0,-56.0 1124.0x56.0)
+QP ipad-08-f2-4-after-10s padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-08-f2-4-after-10s size: 1180.0x820.0
+QP ipad-08-f2-4-after-10s stage: (56.0,0.0 1124.0x820.0)
+QP ipad-08-f2-4-after-10s tap-area: (80.0,24.0 1076.0x772.0)
+QP ipad-08-f2-4-after-10s page: (80.0,24.0 1076.0x772.0)
+QP ipad-08-f2-4-after-10s pdf-page: 
+QP ipad-08-f2-4-after-10s folio: (339.4,735.0 43.2x12.0) (853.6,735.0 42.7x12.0)
+QP ipad-08-f2-4-after-10s location: 50082215 [page 544 | page 545]
+QP ipad-08-f2-4-after-10s header: (56.0,-56.0 1124.0x56.0)
+QP ipad-08-f2-4-after-10s scrim: 
+QP ipad-08-f2-4-after-10s chrome: false
+SHOT ipad-08-f2-4-after-10s
+# screenshot ipad-08-f2-4-after-10s done
+SHOSAI-MARK ---- end ----
+QP f2-ok: true
+QP chrome-shown: true
+QP end-in-library: true
+QP ipad-09-library-end padding: L0.0 T32.0 R0.0 B25.0
+QP ipad-09-library-end size: 1180.0x820.0
+QP ipad-09-library-end stage: 
+QP ipad-09-library-end tap-area: 
+QP ipad-09-library-end page: 
+QP ipad-09-library-end pdf-page: 
+QP ipad-09-library-end folio: 
+QP ipad-09-library-end location:  []
+QP ipad-09-library-end header: 
+QP ipad-09-library-end scrim: 
+QP ipad-09-library-end chrome: false
+SHOT ipad-09-library-end
+# screenshot ipad-09-library-end done
+QP end-library-ok: true
+QP final-exception: null
+DONE

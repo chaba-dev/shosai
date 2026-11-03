@@ -1,0 +1,34 @@
+In-app frames of a forward tap turn on the iPad two-page PDF (1x, logical pt).
+under-page band: mean luma of x 200-560, y 729-740 (the drop shadow just under the spread)
+left edge: mean luma of x 60-78, y 200-600 (the shadow left of the spread)
+
+     1 ms  under-page band 164.8  left edge 206.1
+    13 ms  under-page band 165.3  left edge 206.1
+    52 ms  under-page band 165.3  left edge 206.1
+    75 ms  under-page band 164.9  left edge 206.1
+    92 ms  under-page band 164.1  left edge 206.1
+   108 ms  under-page band 163.0  left edge 206.1
+   125 ms  under-page band 161.5  left edge 206.1
+   142 ms  under-page band 159.5  left edge 206.1
+   159 ms  under-page band 157.4  left edge 206.1
+   175 ms  under-page band 154.8  left edge 206.1
+   192 ms  under-page band 152.0  left edge 206.1
+   209 ms  under-page band 148.9  left edge 206.1
+   225 ms  under-page band 145.8  left edge 206.1
+   242 ms  under-page band 142.8  left edge 206.1
+   260 ms  under-page band 139.8  left edge 206.1
+   276 ms  under-page band 137.0  left edge 206.1
+   293 ms  under-page band 134.5  left edge 206.1
+   309 ms  under-page band 132.3  left edge 206.1
+   326 ms  under-page band 130.5  left edge 206.1
+   343 ms  under-page band 129.0  left edge 206.1
+   359 ms  under-page band 128.0  left edge 206.1
+   376 ms  under-page band 127.4  left edge 206.1
+   392 ms  under-page band 127.1  left edge 206.1
+   410 ms  under-page band 164.8  left edge 206.1
+   425 ms  under-page band 164.8  left edge 206.1
+   442 ms  under-page band 164.8  left edge 206.1
+   459 ms  under-page band 164.8  left edge 206.1
+   476 ms  under-page band 164.8  left edge 206.1
+   492 ms  under-page band 164.8  left edge 206.1
+   509 ms  under-page band 164.8  left edge 206.1

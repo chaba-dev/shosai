@@ -1,0 +1,105 @@
+F2 diagnosis log: EPUB number after text size up and back
+Build: debug/epub-numbers-ios 6783547 (verify-all df91a4d + SHOSAI-DBG prints), profile, installed over the app
+Device: iPad Air 5 (iPad13,17), iPadOS 27.2, 1180x820 pt @2x landscape, two pages, English
+Safe area: padding top 32 pt (status bar, always visible on iPad), bottom 25 pt; the rail takes x 0-56
+Book: Pride and Prejudice (Gutenberg 1342 EPUB 3), temporary library (the real library was not opened)
+Sequence: Contents -> CHAPTER L. -> Go to; wait for the number; Aa -> larger, wait; Aa -> smaller, wait; close Aa; hide chrome; 10 s
+Place notation: unit*10000000 + canonical start of each page on screen, then [folios]
+Times are the device clock (iPad syslog). QP lines come from the harness, SHOSAI-DBG from the app, SHOSAI-MARK are harness markers.
+
+== Page area with the chrome hidden / shown / hidden again (logical pt: x,y wxh) ==
+area chrome-hidden reader-stage: (56.0,0.0 1124.0x820.0)
+area chrome-hidden reader-page: (80.0,24.0 1076.0x772.0)
+area chrome-hidden reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+area chrome-hidden reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+area chrome-hidden reader-selection-surface: (104.0,100.0 1028.0x626.0)
+area chrome-hidden reader-folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+area chrome-hidden reader-header: (56.0,-56.0 1124.0x56.0)
+area chrome-shown reader-stage: (56.0,0.0 1124.0x820.0)
+area chrome-shown reader-page: (80.0,24.0 1076.0x772.0)
+area chrome-shown reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+area chrome-shown reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+area chrome-shown reader-selection-surface: (104.0,100.0 1028.0x626.0)
+area chrome-shown reader-folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+area chrome-shown reader-header: (56.0,32.0 1124.0x56.0)
+area chrome-hidden-again reader-stage: (56.0,0.0 1124.0x820.0)
+area chrome-hidden-again reader-page: (80.0,24.0 1076.0x772.0)
+area chrome-hidden-again reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+area chrome-hidden-again reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+area chrome-hidden-again reader-selection-surface: (104.0,100.0 1028.0x626.0)
+area chrome-hidden-again reader-folio: (339.8,735.0 42.5x12.0) (853.7,735.0 42.7x12.0)
+area chrome-hidden-again reader-header: (56.0,-56.0 1124.0x56.0)
+area after reader-stage: (56.0,0.0 1124.0x820.0)
+area after reader-page: (80.0,24.0 1076.0x772.0)
+area after reader-page-tap-area: (80.0,24.0 1076.0x772.0)
+area after reader-running-head: (276.7,80.0 168.6x12.0) (790.7,80.0 168.6x12.0)
+area after reader-selection-surface: (104.0,100.0 1028.0x626.0)
+area after reader-folio: (339.4,735.0 43.2x12.0) (853.6,735.0 42.7x12.0)
+area after reader-header: (56.0,-56.0 1124.0x56.0)
+
+== Every SHOSAI-DBG line in the run before the text size change (book open and jump) ==
+18:45:35.960961 SHOSAI-DBG layoutChanged w=1076.0 f=16.0 h=711.0 installed=null busy=true chrome=true
+18:46:22.014765 SHOSAI-DBG layoutChanged w=1028.0 f=16.0 h=626.0 installed=null busy=true chrome=true
+18:46:22.341171 SHOSAI-DBG pageLoaded unit=0 start=0 index=0 adopting=true key=w=680.0 h=626.0 f=18.0 s=1.6 viewport=626.0
+18:46:22.342825 SHOSAI-DBG pageLoaded unit=0 start=0 index=0 adopting=true key=w=490.0 h=626.0 f=16.0 s=1.6 viewport=626.0
+18:46:26.996330 QP f2-opened: 0 [page 1]
+18:46:31.983687 SHOSAI-DBG pageLoaded unit=5 start=82300 index=72 adopting=true key=w=490.0 h=626.0 f=16.0 s=1.6 viewport=626.0
+18:46:34.927364 QP f2-jumped: 50082300 [page 535 | page 536] numbered after 0ms
+(ordinal lookups before the change are all: unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0])
+
+== From just before the text size change to the end (all lines, unfiltered) ==
+18:46:46.229387 QP f2-before-text-size: 50082300 [page 535 | page 536]
+18:46:46.229759 SHOSAI-MARK ---- text size change starts ----
+18:46:46.231600 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:46.231951 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:46.859432 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:46.859769 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:48.424248 QP f2-aa-open: 50082300 [page 535 | page 536]
+18:46:48.424415 SHOSAI-MARK tap larger
+18:46:48.428147 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:48.428518 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:48.428558 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:48.428617 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:48.457047 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:48.457107 SHOSAI-DBG ordinal unit=5 index=72 key=h626.0 f16.0 before=462 entries=[h626.0/f16.0]
+18:46:48.527723 SHOSAI-DBG pageLoaded unit=5 start=83169 index=94 adopting=true key=w=490.0 h=626.0 f=18.0 s=1.6 viewport=626.0
+18:46:48.527830 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=null entries=[h626.0/f16.0]
+18:46:48.586985 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=null entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:48.706826 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=null entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:48.794985 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=null entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:48.884326 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=null entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:48.991280 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=592 entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:50.974592 QP f2-larger: 50083169 [page 687 | page 688] numbered after 1ms
+18:46:55.771796 SHOSAI-MARK tap smaller
+18:46:55.778571 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=592 entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:55.779408 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=592 entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:55.779627 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=592 entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:55.780183 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=592 entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:55.808206 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=592 entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:55.808518 SHOSAI-DBG ordinal unit=5 index=94 key=h626.0 f18.0 before=592 entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:55.903852 SHOSAI-DBG pageLoaded unit=5 start=82215 index=73 adopting=true key=w=490.0 h=626.0 f=16.2 s=1.6 viewport=626.0
+18:46:55.903965 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=null entries=[h626.0/f16.0, h626.0/f18.0]
+18:46:55.958537 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=null entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:56.079710 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=null entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:56.168236 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=null entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:56.259341 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=null entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:56.364656 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=470 entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:58.327516 QP f2-smaller-panel-open: 50082215 [page 544 | page 545] numbered after 3ms
+18:46:58.328000 SHOSAI-MARK close Aa
+18:46:58.330869 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=470 entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:58.331555 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=470 entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:59.359293 QP f2-aa-closed: 50082215 [page 544 | page 545] chrome true
+18:46:59.360021 SHOSAI-MARK hide chrome
+18:46:59.362422 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=470 entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:46:59.363237 SHOSAI-DBG ordinal unit=5 index=73 key=h626.0 f16.2 before=470 entries=[h626.0/f16.0, h626.0/f18.0, h626.0/f16.2]
+18:47:01.425673 QP f2-hidden-1s: 50082215 [page 544 | page 545] chrome false
+18:47:02.458772 QP f2-hidden-2s: 50082215 [page 544 | page 545] chrome false
+18:47:03.504273 QP f2-hidden-3s: 50082215 [page 544 | page 545] chrome false
+18:47:04.525678 QP f2-hidden-4s: 50082215 [page 544 | page 545] chrome false
+18:47:05.559279 QP f2-hidden-5s: 50082215 [page 544 | page 545] chrome false
+18:47:06.589624 QP f2-hidden-6s: 50082215 [page 544 | page 545] chrome false
+18:47:07.625847 QP f2-hidden-7s: 50082215 [page 544 | page 545] chrome false
+18:47:08.658520 QP f2-hidden-8s: 50082215 [page 544 | page 545] chrome false
+18:47:09.693540 QP f2-hidden-9s: 50082215 [page 544 | page 545] chrome false
+18:47:10.724985 QP f2-hidden-10s: 50082215 [page 544 | page 545] chrome false
+18:47:15.537212 SHOSAI-MARK ---- end ----
