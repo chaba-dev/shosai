@@ -167,6 +167,11 @@ final class ReaderController implements Listenable {
   ChapterLayoutSession? _turnPreviewSession;
   final Set<Future<void>> _referenceEffects = {};
   final List<_PdfLeaf> _pdfLeaves = [];
+  final Map<
+    int,
+    ({Future<List<PdfPageLink>> pending, List<PdfPageLink>? ready})
+  >
+  _pdfLinks = {};
 
   /// Whether a settled PDF page renders its neighbours ahead of a turn.
   /// Tests that script each engine call in order turn it off.

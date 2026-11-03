@@ -8,7 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/core/bridge.dart';
-import 'package:shosai_flutter/reader/controller.dart' show ReaderDisplayChange;
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderDisplayChange, ReaderPlace;
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/shell/view.dart';
@@ -19,10 +20,12 @@ class _Book extends HarnessBridge {
   _Book({this.rtl = false, this.links = const []}) : super(unitCount: 5);
   final bool rtl;
   final List<PdfPageLink> links;
+  Completer<List<PdfPageLink>>? linkGate;
   @override
   bool get pdfEngineRightToLeft => rtl;
   @override
-  Future<List<PdfPageLink>> pdfEngineLinks(int page) async => links;
+  Future<List<PdfPageLink>> pdfEngineLinks(int page) async =>
+      linkGate?.future ?? links;
 }
 
 const _settings = FlutterReaderSettings(
@@ -39,7 +42,7 @@ final _stage = find.byKey(const ValueKey('reader-stage'));
 final _toolbar = find.byKey(const ValueKey('reader-header-contents'));
 final _folio = find.byKey(const ValueKey('reader-folio'));
 
-Future<void> _open(
+Future<_Book> _open(
   WidgetTester tester,
   Size size, {
   bool rtl = false,
@@ -52,6 +55,7 @@ Future<void> _open(
   bool shellFrame = false,
   double ratio = 1,
   bool longChapter = false,
+  ReaderPlace? place,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = ratio;
@@ -66,6 +70,7 @@ Future<void> _open(
     key: UniqueKey(),
     bridge: bridge,
     initialPath: path,
+    initialPlace: place,
     initialSettings: settings,
     onDisplayChanged: save,
     decoder: (pixels, {required width, required height}) async {
@@ -136,6 +141,7 @@ Future<void> _open(
   for (var i = 0; i < 12; i++) {
     await tester.pump(const Duration(milliseconds: 32));
   }
+  return bridge;
 }
 
 Future<void> _tap(WidgetTester tester, double fraction) async {
@@ -299,6 +305,26 @@ void main() {
       },
     );
   }
+
+  testWidgets('a warm PDF tap does not wait for the link worker', (
+    tester,
+  ) async {
+    final bridge = await _open(tester, const Size(390, 844));
+    final gate = Completer<List<PdfPageLink>>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete(const []);
+    });
+    bridge.linkGate = gate;
+    final rect = tester.getRect(
+      find.byKey(const ValueKey('reader-selection-surface')),
+    );
+    await tester.tapAt(Offset(rect.left + rect.width * .9, rect.center.dy));
+    await tester.pump();
+    expect(curl, findsOneWidget);
+    expect(_place(tester), 'page 2 of 5');
+    gate.complete(const []);
+    await tester.pumpAndSettle();
+  });
 
   testWidgets('a PDF tap turn changes the place line with the curl', (
     tester,
@@ -735,6 +761,43 @@ void main() {
     ),
   ]) {
     for (final format in ['epub', 'pdf']) {
+      testWidgets('$name $format jump capsule clears page furniture', (
+        tester,
+      ) async {
+        tester.view.viewPadding = insets;
+        tester.view.padding = FakeViewPadding.zero;
+        await _open(
+          tester,
+          size,
+          ratio: ratio,
+          path: '/books/atlas.$format',
+          longChapter: format == 'epub',
+          place: ReaderPlace(
+            format == 'pdf' ? 1 : 0,
+            offset: format == 'epub' ? 1000 : null,
+            returnPoints: const [(unit: 0, offset: 0, book: null)],
+          ),
+        );
+        await tester.pumpAndSettle();
+        final pill = find.byKey(const ValueKey('reader-back-pill'));
+        expect(pill, findsOneWidget);
+        for (final shown in [false, true, false]) {
+          if (shown) await _tap(tester, .5);
+          for (final furniture in [
+            _folio,
+            if (format == 'epub')
+              find.byKey(const ValueKey('reader-running-head')),
+          ]) {
+            expect(
+              tester.getRect(pill).overlaps(tester.getRect(furniture)),
+              isFalse,
+            );
+          }
+          if (shown) await _tap(tester, .5);
+        }
+        expect(tester.takeException(), isNull);
+      });
+
       testWidgets('$name $format furniture stays safe across chrome toggles', (
         tester,
       ) async {
