@@ -31,7 +31,7 @@ const int _lcdText = pdfrx.PdfPageRenderFlags.lcdText;
 const int _reverseByteOrder = 0x10;
 
 /// The production [PdfEngine].
-final class PdfrxPdfEngine implements PdfEngine {
+final class PdfrxPdfEngine implements RangedPdfEngine {
   PdfrxPdfEngine();
 
   static Future<void>? _initialized;
@@ -77,11 +77,46 @@ final class PdfrxPdfEngine implements PdfEngine {
         'PDF exceeds the $pdfMaxInputBytes-byte input limit',
       );
     }
+    return _adopt(() => pdfrx.PdfDocument.openFile(filePath), filePath);
+  }
+
+  @override
+  Future<PdfEngineDocument> openRanged(
+    int size,
+    Future<int> Function(Uint8List buffer, int position, int length) read, {
+    required String sourceName,
+  }) async {
+    await ensureInitialized();
+    if (size > pdfMaxInputBytes) {
+      throw const PdfEngineLimitException(
+        'PDF exceeds the $pdfMaxInputBytes-byte input limit',
+      );
+    }
+    return _adopt(
+      () => pdfrx.PdfDocument.openCustom(
+        read: read,
+        fileSize: size,
+        sourceName: sourceName,
+        // Only the first page is loaded: loading every page would read every
+        // page object of the file.
+        useProgressiveLoading: true,
+        // A small document is read whole, in one range, and opened from
+        // memory; a larger one is read block by block as PDFium asks.
+        maxSizeToCacheOnMemory: 256 * 1024,
+      ),
+      sourceName,
+    );
+  }
+
+  Future<PdfEngineDocument> _adopt(
+    Future<pdfrx.PdfDocument> Function() opening,
+    String name,
+  ) async {
     final pdfrx.PdfDocument document;
     try {
-      document = await pdfrx.PdfDocument.openFile(filePath);
+      document = await opening();
     } on pdfrx.PdfPasswordException {
-      throw PdfEnginePasswordException(filePath);
+      throw PdfEnginePasswordException(name);
     } on pdfrx.PdfException catch (error) {
       throw PdfEngineException('Cannot open PDF: ${error.message}');
     }

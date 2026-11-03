@@ -215,4 +215,83 @@ void main() {
       );
     },
   );
+
+  group('preview ranges', () {
+    final bytes = Uint8List.fromList(List.generate(10000, (i) => i % 251));
+
+    test('serve any read from aligned, fetched-once blocks', () async {
+      final location = _Files({'f': bytes});
+      final ranges = PreviewRanges(
+        location,
+        'f',
+        bytes.length,
+        blockBytes: 1024,
+      );
+      final buffer = Uint8List(3000);
+      expect(await ranges.read(buffer, 900, 3000), 3000);
+      expect(buffer, bytes.sublist(900, 3900));
+      // Blocks 0..3 in one range.
+      expect(location.reads, [('f', 0, 4096)]);
+      expect(await ranges.read(buffer, 1000, 100), 100);
+      expect(location.reads, hasLength(1));
+      // The end of the file is short.
+      expect(await ranges.read(buffer, 9900, 3000), 100);
+      expect(buffer.sublist(0, 100), bytes.sublist(9900));
+      expect(location.reads.last, ('f', 9216, 10000));
+      expect(ranges.fetched, 4096 + 784);
+    });
+
+    test('refuse to read past the budget', () async {
+      final location = _Files({'f': bytes});
+      final ranges = PreviewRanges(
+        location,
+        'f',
+        bytes.length,
+        blockBytes: 1024,
+        budget: 2048,
+      );
+      final buffer = Uint8List(4096);
+      expect(await ranges.read(buffer, 0, 2048), 2048);
+      await expectLater(
+        ranges.read(buffer, 4096, 10),
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.limitExceeded,
+          ),
+        ),
+      );
+      expect(ranges.exceeded, isTrue);
+      expect(ranges.failure, isNull);
+      expect(ranges.fetched, 2048);
+    });
+
+    test('keep the failure of a cancelled or failed read', () async {
+      final cancellation = CancellationToken()..cancel();
+      final cancelled = PreviewRanges(
+        _Files({'f': bytes}),
+        'f',
+        bytes.length,
+        cancellation: cancellation,
+      );
+      await expectLater(
+        cancelled.read(Uint8List(10), 0, 10),
+        throwsA(isA<CoreException>()),
+      );
+      expect(
+        (cancelled.failure! as CoreException).kind,
+        CoreErrorKind.cancelled,
+      );
+      expect(cancelled.exceeded, isFalse);
+
+      // A file shorter than it was listed.
+      final short = PreviewRanges(_Files({'f': bytes}), 'f', bytes.length + 5);
+      await expectLater(
+        short.read(Uint8List(bytes.length + 5), 0, bytes.length + 5),
+        throwsA(isA<CoreException>()),
+      );
+      expect(short.failure, isA<CoreException>());
+    });
+  });
 }

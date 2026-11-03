@@ -80,6 +80,161 @@ BookMetadata _inspectEpub(Uint8List bytes, EpubLimits limits) {
   );
 }
 
+/// Reads an unopened book's metadata through its location's byte ranges,
+/// without downloading it. One previewer serves each format; the PDF one
+/// belongs to the PDF engine and is supplied by the host.
+abstract interface class BookPreviewer {
+  Future<BookMetadata> preview(
+    LibraryLocation location,
+    LocationEntry entry, {
+    CancellationToken? cancellation,
+  });
+}
+
+/// [previewEpub] as a [BookPreviewer].
+final class EpubPreviewer implements BookPreviewer {
+  const EpubPreviewer();
+
+  @override
+  Future<BookMetadata> preview(
+    LibraryLocation location,
+    LocationEntry entry, {
+    CancellationToken? cancellation,
+  }) => previewEpub(location, entry, cancellation: cancellation);
+}
+
+/// The most a PDF preview reads from one file. A PDF whose first page needs
+/// more (a file without a nearby cross-reference table, or a heavy first
+/// page) is not previewed rather than downloaded.
+const maxPreviewPdfReadBytes = 4 * 1024 * 1024;
+
+/// The size of each ranged read [PreviewRanges] makes.
+const previewBlockBytes = 64 * 1024;
+
+/// Serves a document engine's small, random reads of an unopened file from
+/// a few larger ranged reads of its location, within a byte budget.
+///
+/// Reads are aligned [blockBytes] blocks, fetched once and kept, with
+/// neighbouring missing blocks fetched in one range. A read that would take
+/// the file past [budget] bytes fails and sets [exceeded]; a read the
+/// location fails, or one after [cancellation], fails and keeps the error in
+/// [failure]. An engine that reports failed reads only as a failure to open
+/// lets its caller tell these apart.
+final class PreviewRanges {
+  PreviewRanges(
+    this._location,
+    this._key,
+    this.size, {
+    this.budget = maxPreviewPdfReadBytes,
+    this.blockBytes = previewBlockBytes,
+    CancellationToken? cancellation,
+  }) : _cancellation = cancellation;
+
+  final LibraryLocation _location;
+  final String _key;
+  final CancellationToken? _cancellation;
+
+  /// The file's size in bytes.
+  final int size;
+  final int budget;
+  final int blockBytes;
+  final Map<int, Uint8List> _blocks = {};
+
+  /// The bytes fetched from the location so far.
+  int fetched = 0;
+
+  /// Whether a read was refused because it would exceed [budget].
+  bool exceeded = false;
+
+  /// The first error a fetch failed with, other than the budget.
+  Object? failure;
+
+  /// Copy up to [length] bytes at [position] into [buffer] and return how
+  /// many were copied: fewer only at the end of the file.
+  Future<int> read(Uint8List buffer, int position, int length) async {
+    if (position < 0 || length < 0) {
+      throw const CoreException.invalidRequest('Invalid byte range.');
+    }
+    final end = position + length > size ? size : position + length;
+    if (end <= position) return 0;
+    final first = position ~/ blockBytes;
+    final last = (end - 1) ~/ blockBytes;
+    var index = first;
+    while (index <= last) {
+      if (_blocks.containsKey(index)) {
+        index++;
+        continue;
+      }
+      var stop = index;
+      while (stop < last && !_blocks.containsKey(stop + 1)) {
+        stop++;
+      }
+      await _fetch(index, stop);
+      index = stop + 1;
+    }
+    var copied = 0;
+    for (var block = first; block <= last; block++) {
+      final bytes = _blocks[block]!;
+      final blockStart = block * blockBytes;
+      final from = (position > blockStart ? position : blockStart) - blockStart;
+      final to =
+          (end < blockStart + bytes.length ? end : blockStart + bytes.length) -
+          blockStart;
+      buffer.setRange(copied, copied + to - from, bytes, from);
+      copied += to - from;
+    }
+    return copied;
+  }
+
+  Future<void> _fetch(int first, int last) async {
+    try {
+      _cancellation.throwIfCancelled();
+      final start = first * blockBytes;
+      final end = (last + 1) * blockBytes > size
+          ? size
+          : (last + 1) * blockBytes;
+      if (fetched + end - start > budget) {
+        exceeded = true;
+        throw CoreException.limitExceeded(
+          'The preview would read more than $budget bytes.',
+        );
+      }
+      fetched += end - start;
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in _location.read(
+        _key,
+        start: start,
+        end: end,
+        cancellation: _cancellation,
+      )) {
+        _cancellation.throwIfCancelled();
+        bytes.add(chunk);
+        if (bytes.length > end - start) {
+          throw const CoreException.malformed(
+            'The source returned more than the requested range.',
+          );
+        }
+      }
+      final data = bytes.takeBytes();
+      if (data.length != end - start) {
+        throw const CoreException.malformed(
+          'The source ended before its listed size.',
+        );
+      }
+      for (var block = first; block <= last; block++) {
+        final from = (block - first) * blockBytes;
+        final to = from + blockBytes > data.length
+            ? data.length
+            : from + blockBytes;
+        _blocks[block] = Uint8List.sublistView(data, from, to);
+      }
+    } catch (error) {
+      if (!exceeded) failure ??= error;
+      rethrow;
+    }
+  }
+}
+
 /// The limits for reading a book before it is opened: an import's, with a
 /// smaller cover image, so a preview costs at most a few megabytes to fetch.
 const previewEpubLimits = EpubLimits(maxImageBytes: 8 * 1024 * 1024);

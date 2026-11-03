@@ -131,7 +131,10 @@ import of a referenced book adopts it as a private copy.
   most 16 MiB and an 8 MiB cover), and `LibraryLocations` keeps it per
   connection, file, size and revision. A preview is not a book identity: it
   is forgotten when the file changes or goes, when the catalog is cleared, or
-  once the file is opened.
+  once the file is opened. Other formats preview through a `BookPreviewer`
+  the host supplies (the PDF engine's, for PDFs), reading the file through
+  `PreviewRanges`: aligned 64 KiB blocks fetched once, at most 4 MiB per
+  PDF. A file that needs more is recorded as not previewable.
 - Import takes a `CancellationToken`, checked between file chunks and books;
   once a book's commit starts it finishes.
 
