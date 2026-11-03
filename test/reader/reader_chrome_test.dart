@@ -1035,6 +1035,7 @@ void main() {
     for (final (name, size, path) in [
       ('PDF on a phone', const Size(390, 844), '/books/atlas.pdf'),
       ('PDF on a tablet', const Size(1024, 768), '/books/atlas.pdf'),
+      ('PDF on a tall tablet', const Size(900, 1200), '/books/atlas.pdf'),
       (
         'EPUB spread on a tablet',
         const Size(1180, 820),
@@ -1084,6 +1085,10 @@ void main() {
           }
           if (fitted.left - paint.left >= 6) {
             points.add(fitted.centerLeft - const Offset(4, 0));
+          } else {
+            // A page as wide as its box casts the soft corner of its shadow
+            // past the box, where no snapshot reaches.
+            points.add(Offset(paint.left - 8, fitted.bottom + 24));
           }
         }
         expect(points, isNotEmpty);
