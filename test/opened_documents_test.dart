@@ -1,39 +1,41 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/opened_documents.dart';
 
+const _channel = MethodChannel('dev.shosai/opened_documents');
+
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('dev.shosai/opened_documents');
+  final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  final messenger = binding.defaultBinaryMessenger;
+
+  test('an iOS response after cancellation releases Inbox copies', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final inbox = await Directory.systemTemp.createTemp('shosai-late-open');
+    addTearDown(() => inbox.delete(recursive: true));
+    final file = await File('${inbox.path}/late.epub').writeAsString('book');
+    final response = Completer<List<String>>();
+    messenger.setMockMethodCallHandler(_channel, (_) => response.future);
+    addTearDown(() => messenger.setMockMethodCallHandler(_channel, null));
+    final adapter = OpenedDocuments();
+    final delivered = <String>[];
+    final listening = adapter.listen(delivered.addAll);
+    adapter.cancel();
+    response.complete([file.path]);
+    await listening;
+    expect(delivered, isEmpty);
+    expect(await file.exists(), isFalse);
+  });
 
   test(
-    'a pending response after cancellation releases copies without delivery',
+    'iOS wake-ups deduplicate copies and arrivals between listeners',
     () async {
-      final inbox = await Directory.systemTemp.createTemp('shosai-late-open');
-      addTearDown(() => inbox.delete(recursive: true));
-      final file = await File('${inbox.path}/late.epub').writeAsString('book');
-      final response = Completer<List<String>>();
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(channel, (_) => response.future);
-      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-      final adapter = OpenedDocuments();
-      final delivered = <String>[];
-      final listening = adapter.listen(delivered.addAll);
-      adapter.cancel();
-      response.complete([file.path]);
-      await listening;
-      expect(delivered, isEmpty);
-      expect(await file.exists(), isFalse);
-    },
-  );
-
-  test(
-    'wake-ups drain native pending copies and deduplicate active paths',
-    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final inbox = await Directory.systemTemp.createTemp('shosai-open-wakeup');
       addTearDown(() => inbox.delete(recursive: true));
       final files = [
@@ -41,14 +43,12 @@ void main() {
           await File('${inbox.path}/$name').writeAsString(name),
       ];
       var pending = [files.first.path];
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(channel, (_) async {
+      messenger.setMockMethodCallHandler(_channel, (_) async {
         final taken = pending;
         pending = [];
         return taken;
       });
-      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      addTearDown(() => messenger.setMockMethodCallHandler(_channel, null));
       final adapter = OpenedDocuments();
       addTearDown(adapter.cancel);
       final batches = <List<String>>[];
@@ -56,8 +56,8 @@ void main() {
       pending = [files.first.path, files[1].path];
       final replied = Completer<void>();
       await messenger.handlePlatformMessage(
-        channel.name,
-        channel.codec.encodeMethodCall(const MethodCall('opened')),
+        _channel.name,
+        _channel.codec.encodeMethodCall(const MethodCall('opened')),
         (_) => replied.complete(),
       );
       await replied.future;
@@ -68,7 +68,6 @@ void main() {
       expect(files.every((file) => file.existsSync()), isTrue);
       await adapter.discard(files.take(2).map((file) => file.path));
       adapter.cancel();
-      // Native retains these paths even when its wake-up has no Dart listener.
       pending = [files.last.path];
       await adapter.listen(batches.add);
       expect(batches.last, [files.last.path]);
@@ -76,4 +75,80 @@ void main() {
       expect(files.any((file) => file.existsSync()), isFalse);
     },
   );
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.macOS]) {
+    test('$platform idle cleanup needs no native host', () async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await OpenedDocuments().discard([]);
+    });
+
+    test('$platform never deletes an original during native cleanup', () async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final directory = await Directory.systemTemp.createTemp(
+        'opened-documents',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final original = await File(
+        '${directory.path}/original.epub',
+      ).writeAsString('original');
+      final staged = await File(
+        '${directory.path}/copy',
+      ).writeAsString('original');
+      var pending = [staged.path];
+      messenger.setMockMethodCallHandler(_channel, (call) async {
+        if (call.method == 'discard') {
+          for (final path in (call.arguments! as List).cast<String>()) {
+            if (path == staged.path && await staged.exists()) {
+              await staged.delete();
+            }
+          }
+          return null;
+        }
+        final paths = pending;
+        pending = [];
+        return paths;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(_channel, null));
+      final documents = OpenedDocuments();
+      addTearDown(documents.cancel);
+      final batches = <List<String>>[];
+      await documents.listen(batches.add);
+      pending = [staged.path];
+      await messenger.handlePlatformMessage(
+        _channel.name,
+        _channel.codec.encodeMethodCall(const MethodCall('opened')),
+        (_) {},
+      );
+      expect(batches, [
+        [staged.path],
+      ], reason: 'an active copy is not redelivered');
+      await documents.discard([staged.path, original.path]);
+      expect(await staged.exists(), isFalse);
+      expect(await original.readAsString(), 'original');
+    });
+
+    test(
+      '$platform releases startup copies if delivery is cancelled',
+      () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final response = Completer<List<String>>();
+        final discarded = <String>[];
+        messenger.setMockMethodCallHandler(_channel, (call) async {
+          if (call.method == 'takePending') return response.future;
+          discarded.addAll((call.arguments! as List).cast<String>());
+          return null;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(_channel, null));
+        final documents = OpenedDocuments();
+        final listening = documents.listen((_) => fail('cancelled delivery'));
+        documents.cancel();
+        response.complete(['/temporary/book']);
+        await listening;
+        expect(discarded, ['/temporary/book']);
+      },
+    );
+  }
 }

@@ -18,6 +18,11 @@ import '../support/bridge_records.dart';
 /// file-selector channel is the platform boundary these tests stub.
 const _pickerChannel = MethodChannel('plugins.flutter.io/file_selector');
 const _openedChannel = MethodChannel('dev.shosai/opened_documents');
+const _openedPlatforms = TargetPlatformVariant({
+  TargetPlatform.iOS,
+  TargetPlatform.android,
+  TargetPlatform.macOS,
+});
 
 /// The two desktop choices and the picker request each one must produce.
 const _choices = [
@@ -477,7 +482,7 @@ void main() {
   );
 
   testWidgets(
-    'iOS imports books another app opens in Shōsai',
+    'imports books another app opens in Shōsai at startup and while running',
     (tester) async {
       final inbox = (await tester.runAsync(
         () => Directory.systemTemp.createTemp('shosai-opened'),
@@ -492,6 +497,12 @@ void main() {
       final messenger = tester.binding.defaultBinaryMessenger;
       var pending = [opened.first];
       messenger.setMockMethodCallHandler(_openedChannel, (call) async {
+        if (call.method == 'discard') {
+          for (final path in (call.arguments! as List).cast<String>()) {
+            await File(path).delete();
+          }
+          return null;
+        }
         final paths = pending;
         pending = [];
         return paths;
@@ -539,16 +550,17 @@ void main() {
       }
       expect(opened.where((path) => File(path).existsSync()), isEmpty);
     },
-    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    variant: _openedPlatforms,
   );
 
   testWidgets(
-    'iOS bounds and deduplicates incoming batches before the library loads',
+    'bounds and deduplicates incoming batches before the library loads',
     (tester) async {
       final paths = List.generate(257, (index) => '/inbox/$index.epub');
       final messenger = tester.binding.defaultBinaryMessenger;
       var pending = [...paths, paths.first];
       messenger.setMockMethodCallHandler(_openedChannel, (call) async {
+        if (call.method == 'discard') return null;
         final result = pending;
         pending = [];
         return result;
@@ -577,11 +589,11 @@ void main() {
       expect(bridge.imports.expand((batch) => batch.paths), paths);
       expect(bridge.imports.every((batch) => batch.managed), isTrue);
     },
-    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    variant: _openedPlatforms,
   );
 
   testWidgets(
-    'iOS releases queued incoming copies when the shell closes before loading',
+    'releases queued incoming copies when the shell closes before loading',
     (tester) async {
       final inbox = (await tester.runAsync(
         () => Directory.systemTemp.createTemp('shosai-queued'),
@@ -590,10 +602,13 @@ void main() {
       final file = File('${inbox.path}/queued.epub');
       await tester.runAsync(() => file.writeAsString('book'));
       final messenger = tester.binding.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(
-        _openedChannel,
-        (_) async => [file.path],
-      );
+      messenger.setMockMethodCallHandler(_openedChannel, (call) async {
+        if (call.method == 'discard') {
+          await file.delete();
+          return null;
+        }
+        return [file.path];
+      });
       addTearDown(
         () => messenger.setMockMethodCallHandler(_openedChannel, null),
       );
@@ -614,7 +629,7 @@ void main() {
       expect(file.existsSync(), isFalse);
       expect(bridge.imports, isEmpty);
     },
-    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    variant: _openedPlatforms,
   );
 
   for (final outcome in ['decline', 'failure', 'cancelled']) {

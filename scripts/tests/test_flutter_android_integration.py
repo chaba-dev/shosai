@@ -2,12 +2,38 @@ import pathlib
 import shutil
 import subprocess
 import unittest
+import xml.etree.ElementTree as ET
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class FlutterAndroidIntegrationTest(unittest.TestCase):
+    def test_open_in_shosai_advertises_only_books_and_local_view_uris(self):
+        android = "{http://schemas.android.com/apk/res/android}"
+        manifest = ET.parse(ROOT / "android/app/src/main/AndroidManifest.xml")
+        activity = manifest.find(".//activity[@" + android + "name='.MainActivity']")
+        filters = {
+            item.find("action").get(android + "name"): item
+            for item in activity.findall("intent-filter")
+        }
+        for action in ("VIEW", "SEND"):
+            item = filters["android.intent.action." + action]
+            self.assertEqual(
+                {data.get(android + "mimeType") for data in item.findall("data")}
+                - {None},
+                {"application/epub+zip", "application/pdf"},
+            )
+            self.assertEqual(
+                {category.get(android + "name") for category in item.findall("category")},
+                {"android.intent.category.DEFAULT"},
+            )
+        self.assertEqual(
+            {data.get(android + "scheme") for data in filters[
+                "android.intent.action.VIEW"].findall("data")} - {None},
+            {"content", "file"},
+        )
+
     def test_development_icon_overlay_covers_debug_and_profile(self):
         build = (ROOT / "android/app/build.gradle.kts").read_text()
         self.assertIn('if (name == "debug" || name == "profile")', build)
