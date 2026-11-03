@@ -13,6 +13,7 @@ import 'package:shosai_flutter/reader/epub/pages.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/epub/text_style.dart';
 
+import '../../packages/shosai_epub/test/support/large_entries_fixture.dart';
 import '../support/epub_navigation_fixture.dart';
 
 /// Layout-level tests for the Dart EPUB renderer: the page window, its
@@ -1052,6 +1053,24 @@ void main() {
     // About 0.2 s here; mapping each grapheme from its segment start took 3.3 s.
     expect(elapsed, lessThan(const Duration(milliseconds: 1500)));
     disposeFlowBlocks(flow.blocks);
+  });
+
+  test('an image over 8 MiB is decoded and owned by the reader', () async {
+    final book = openEpubBytes(largeEntriesEpub());
+    final source = EpubContentSource(book: book, embeddedFamilies: const {});
+    addTearDown(source.dispose);
+    await source.ensureImages(book.chapters.single, (bytes) async {
+      final codec = await ui.instantiateImageCodec(bytes);
+      try {
+        return (await codec.getNextFrame()).image;
+      } finally {
+        codec.dispose();
+      }
+    });
+    final decoded = source.images['landscape.png'];
+    expect(decoded?.width, 1800);
+    expect(decoded?.height, 1600);
+    expect(source.decodedImageBytes, 1800 * 1600 * 4);
   });
 
   test('a decode shared by concurrent callers is adopted once', () async {
