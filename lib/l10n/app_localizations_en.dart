@@ -1007,6 +1007,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String readerQuietPagesOf(int first, int last, int total) {
+    return 'pages $first–$last of $total';
+  }
+
+  @override
   String get readerControls => 'Controls';
 
   @override
