@@ -362,12 +362,13 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Once both textures exist, the curl paints the entire stage.
-            // Do not also rasterize the covered live EPUB text on every
-            // animation frame. Keep its layout, input and semantics intact.
-            Opacity(
-              opacity: _outgoing != null && _incoming != null ? 0 : 1,
-              alwaysIncludeSemantics: true,
+            // While the curl paints the stage, the live page must not show
+            // through the snapshots' transparent stage, nor be rasterized
+            // on every animation frame. It is still painted, so the incoming
+            // page can be captured, and keeps its layout, input and
+            // semantics.
+            _ReaderLivePage(
+              hidden: _outgoing != null,
               child: RepaintBoundary(key: _boundaryKey, child: widget.child),
             ),
             if (_outgoing != null)
@@ -456,18 +457,28 @@ class _PageCurlPainter extends CustomPainter {
     final under = backward ? outgoing : incoming;
     final leaf = backward ? incoming : outgoing;
     if (pageRect case final rect?) {
-      final background = under ?? outgoing;
-      canvas.drawImageRect(
-        background,
-        Rect.fromLTWH(
-          0,
-          0,
-          background.width.toDouble(),
-          background.height.toDouble(),
-        ),
-        Offset.zero & size,
-        Paint(),
-      );
+      // Around a PDF page only its place line differs: it fades to the new
+      // page's as the leaf turns, rather than changing before it moves. The
+      // two stages are mixed in proportion (added in a layer of their own),
+      // so what both show alike, such as the page's shadow, stays exactly as
+      // it was instead of darkening as one is laid over the other.
+      final mix = incoming == null ? 0.0 : progress.clamp(0.0, 1.0);
+      canvas.saveLayer(Offset.zero & size, Paint());
+      for (final (stage, opacity, blend) in [
+        (outgoing, 1 - mix, BlendMode.srcOver),
+        (incoming, mix, BlendMode.plus),
+      ]) {
+        if (stage == null || opacity <= 0) continue;
+        canvas.drawImageRect(
+          stage,
+          Rect.fromLTWH(0, 0, stage.width.toDouble(), stage.height.toDouble()),
+          Offset.zero & size,
+          Paint()
+            ..color = Color.fromRGBO(0, 0, 0, opacity)
+            ..blendMode = blend,
+        );
+      }
+      canvas.restore();
       canvas.translate(rect.left * size.width, rect.top * size.height);
       size = Size(rect.width * size.width, rect.height * size.height);
       canvas.clipRect(Offset.zero & size);
@@ -618,3 +629,66 @@ class _PageCurlPainter extends CustomPainter {
   @override
   bool shouldRepaint(_PageCurlPainter oldDelegate) => true;
 }
+
+/// The live page under a curl: while [hidden], only what it paints outside its
+/// own box reaches the screen (a PDF page's `shadow-page` spilling past a
+/// spread that fills the stage), so its layer stays current for a snapshot and
+/// the shadow stays where it is, but the page itself is left to the curl.
+class _ReaderLivePage extends SingleChildRenderObjectWidget {
+  const _ReaderLivePage({required this.hidden, super.child});
+  final bool hidden;
+
+  @override
+  _RenderReaderLivePage createRenderObject(BuildContext context) =>
+      _RenderReaderLivePage(hidden);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderReaderLivePage renderObject,
+  ) => renderObject.hidden = hidden;
+}
+
+class _RenderReaderLivePage extends RenderProxyBox {
+  _RenderReaderLivePage(this._hidden);
+
+  bool _hidden;
+  bool get hidden => _hidden;
+  set hidden(bool value) {
+    if (value == _hidden) return;
+    _hidden = value;
+    markNeedsCompositingBitsUpdate();
+    markNeedsPaint();
+  }
+
+  @override
+  bool get alwaysNeedsCompositing => child != null && _hidden;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child == null || !_hidden) {
+      layer = null;
+      super.paint(context, offset);
+      return;
+    }
+    // The snapshots cover the box; anything drawn beyond it is not in them.
+    final box = Offset.zero & size;
+    final around = box.inflate(_kLivePageOverflow);
+    layer = context.pushClipPath(
+      true,
+      offset,
+      around,
+      Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(around)
+        ..addRect(box),
+      super.paint,
+      clipBehavior: Clip.hardEdge,
+      oldLayer: layer as ClipPathLayer?,
+    );
+  }
+}
+
+/// How far past the live page's box its overflow (a page shadow) is kept
+/// under a curl: well beyond `shadow-page`'s blur and offset.
+const double _kLivePageOverflow = 96;

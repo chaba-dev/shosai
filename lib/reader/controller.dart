@@ -37,6 +37,7 @@ part 'effects.dart';
 part 'message.dart';
 part 'model.dart';
 part 'page_turn.dart';
+part 'pdf_leaf.dart';
 part 'references.dart';
 
 /// Most jumps Back remembers; the oldest is forgotten first.
@@ -86,6 +87,7 @@ final class ReaderController implements Listenable {
         ),
     double? baseScale,
     bool zonesHintDismissed = false,
+    this.renderPdfAhead = true,
   }) : _bridge = bridge,
        _records = recordsOf(bridge),
        _decoder = decoder,
@@ -158,6 +160,11 @@ final class ReaderController implements Listenable {
   int _turnPreviewRevision = 0;
   ChapterLayoutSession? _turnPreviewSession;
   final Set<Future<void>> _referenceEffects = {};
+  final List<_PdfLeaf> _pdfLeaves = [];
+
+  /// Whether a settled PDF page renders its neighbours ahead of a turn.
+  /// Tests that script each engine call in order turn it off.
+  final bool renderPdfAhead;
   final NoteEditor _noteEditor;
   final PlaceNoteEditor _placeNoteEditor;
   final NoteEditorCanceller _noteEditorCanceller;
@@ -1466,6 +1473,7 @@ final class ReaderController implements Listenable {
         _recoverIfIdle();
         _startRequestedRelayoutIfReady();
         _disposeBridgeIfIdle();
+        _prefetchPdfLeaves();
       case _ReaderAnnotationListFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _annotationRevision) {
@@ -1584,7 +1592,7 @@ final class ReaderController implements Listenable {
       ),
     );
     _scheduleChromeHide();
-    if (middle || _model.continuousPresentation) return;
+    if (!readerTapTurns(_model, message)) return;
     final delta =
         (message.fraction < .5 ? -1 : 1) * (_model.rightToLeft ? -1 : 1);
     dispatch(ReaderPageStepRequested(delta));
@@ -4899,43 +4907,64 @@ final class ReaderController implements Listenable {
       FlutterSelectionSurface? surface;
       ReaderPdfSpread? spread;
       String? selectionError;
-      try {
-        (:surface, :spread) = await _pdfSurface(
-          pdf,
-          unit,
-          layout.scale,
-          facing: facing,
-        );
-        if (!_isCurrentLayout(generation, revision)) {
-          return;
+      // A turn to a leaf rendered ahead adopts it instead of rendering again.
+      final leaf = _pdfLeafFor(pdf, generation, unit, facing, layout);
+      final leafContent = leaf == null ? null : await leaf.content;
+      if (!_isCurrentLayout(generation, revision)) {
+        return;
+      }
+      ownedImage = leafContent == null ? null : leaf!.take();
+      var rasterScale = leaf?.rasterScale ?? layout.scale;
+      if (ownedImage != null) {
+        surface = leafContent!.surface;
+        spread = leafContent.spread;
+        selectionError = leafContent.selectionError;
+        if (selectionError != null) {
+          offset = null;
+          length = null;
         }
-      } catch (error) {
-        selectionError = _describeError(error);
-        // The spread still shows and turns both pages; with no text, a
-        // location on either is the page's top.
-        spread = _textlessSpread(facing);
-        offset = null;
-        length = null;
+      } else {
+        try {
+          (:surface, :spread) = await _pdfSurface(
+            pdf,
+            unit,
+            layout.scale,
+            facing: facing,
+          );
+          if (!_isCurrentLayout(generation, revision)) {
+            return;
+          }
+        } catch (error) {
+          selectionError = _describeError(error);
+          // The spread still shows and turns both pages; with no text, a
+          // location on either is the page's top.
+          spread = _textlessSpread(facing);
+          offset = null;
+          length = null;
+        }
       }
       if (offset != null && spread != null && target == spread.facingUnit) {
         offset += spread.textShift;
       }
-      final (rendered, rasterScale) = await _renderPdfPage(
-        pdf,
-        unit,
-        layout,
-        facing: facing,
-      );
-      if (!_isCurrentLayout(generation, revision)) {
-        return;
-      }
-      ownedImage = await _decoder(
-        rendered.pixels,
-        width: rendered.width,
-        height: rendered.height,
-      );
-      if (!_isCurrentLayout(generation, revision)) {
-        return;
+      if (ownedImage == null) {
+        final (rendered, scale) = await _renderPdfPage(
+          pdf,
+          unit,
+          layout,
+          facing: facing,
+        );
+        rasterScale = scale;
+        if (!_isCurrentLayout(generation, revision)) {
+          return;
+        }
+        ownedImage = await _decoder(
+          rendered.pixels,
+          width: rendered.width,
+          height: rendered.height,
+        );
+        if (!_isCurrentLayout(generation, revision)) {
+          return;
+        }
       }
       List<FlutterAnnotation> annotations = const [];
       String? annotationError;
@@ -6717,6 +6746,7 @@ final class ReaderController implements Listenable {
     _activeBridgeOperations -= 1;
     _recoverIfIdle();
     _disposeBridgeIfIdle();
+    _prefetchPdfLeaves();
   }
 
   void _suspendRequested() {
@@ -7165,6 +7195,7 @@ final class ReaderController implements Listenable {
     if (document != null) {
       _bridge.releaseDocument(handle: document.handle);
     }
+    _discardPdfLeaves();
     final pdf = _pdfDocument;
     _pdfDocument = null;
     // A link lookup/preview retains this engine document through its awaits.
@@ -7629,3 +7660,14 @@ Future<ui.Image?> _noEpubImage(Uint8List bytes) async => null;
 /// The default embedded-font registrar: none, so an embedded family falls back
 /// to the reader's base family.
 Future<void> _noEpubFont(String family, Uint8List bytes) async {}
+
+/// Whether [tap] turns the page: a touch in the outer quarter of the page or
+/// spread, while pages are turned rather than scrolled. The middle half shows
+/// the chrome.
+bool readerTapTurns(ReaderModel model, ReaderPageTapped tap) =>
+    tap.touch &&
+    model.document != null &&
+    !model.chromePinned &&
+    model.selectionPhase == ReaderSelectionPhase.idle &&
+    !model.continuousPresentation &&
+    (tap.fraction < .25 || tap.fraction >= .75);

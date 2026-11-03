@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -298,6 +299,99 @@ void main() {
       },
     );
   }
+
+  testWidgets('a PDF tap turn changes the place line with the curl', (
+    tester,
+  ) async {
+    await _open(tester, const Size(390, 844));
+    final root = tester.getTopLeft(find.byKey(harnessBoundaryKey));
+    final width = tester.getSize(find.byKey(harnessBoundaryKey)).width.ceil();
+    final line = tester.getRect(_folio).shift(-root);
+    int change(List<int> a, List<int> b) => [
+      for (var i = 0; i < a.length; i++) (a[i] - b[i]).abs(),
+    ].reduce(math.max);
+    Future<List<int>> place() async {
+      final pixels = await captureHarnessRgba(tester);
+      return [
+        for (var y = line.top.ceil(); y < line.bottom.floor(); y++)
+          for (var x = line.left.ceil(); x < line.right.floor(); x++)
+            ...pixels.sublist((y * width + x) * 4, (y * width + x) * 4 + 3),
+      ];
+    }
+
+    expect(_place(tester), 'page 1 of 5');
+    final before = await place();
+    final rect = tester.getRect(_stage);
+    await tester.tapAt(Offset(rect.left + rect.width * .9, rect.center.dy));
+    for (var frame = 0; frame < 20 && curl.evaluate().isEmpty; frame++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+      await tester.pump(const Duration(milliseconds: 5));
+    }
+    expect(curl, findsOneWidget);
+    expect(_place(tester), 'page 2 of 5');
+    // The leaf has barely moved, and the line under it with it.
+    expect(change(await place(), before), lessThan(16));
+    await tester.pumpAndSettle();
+    expect(curl, findsNothing);
+    expect(change(await place(), before), greaterThan(64));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a PDF tap turn on a tablet keeps the page shadow as it is', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      const Size(1180, 820),
+      settings: _settings.copyWith(twoPages: true),
+    );
+    // Past the cover, onto a spread.
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+    await tester.pumpAndSettle();
+    final root = tester.getTopLeft(find.byKey(harnessBoundaryKey));
+    final width = tester.getSize(find.byKey(harnessBoundaryKey)).width.ceil();
+    final page = tester.getRect(
+      find.byKey(const ValueKey('reader-pdf-page-shadow')),
+    );
+    // Under the page, where `shadow-page` is darkest, and past its corner.
+    final points = [
+      page.bottomCenter + const Offset(0, 14),
+      page.bottomLeft + const Offset(-4, 10),
+    ];
+    Future<List<int>> shadow() async {
+      final pixels = await captureHarnessRgba(tester);
+      return [
+        for (final point in points)
+          for (final (x, y) in [
+            ((point - root).dx.toInt(), (point - root).dy.toInt()),
+          ])
+            ...pixels.sublist((y * width + x) * 4, (y * width + x) * 4 + 3),
+      ];
+    }
+
+    final before = await shadow();
+    final rect = tester.getRect(_stage);
+    await tester.tapAt(Offset(rect.left + rect.width * .9, rect.center.dy));
+    for (var frame = 0; frame < 20 && curl.evaluate().isEmpty; frame++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+      await tester.pump(const Duration(milliseconds: 5));
+    }
+    expect(curl, findsOneWidget);
+    for (final step in [120, 120]) {
+      await tester.pump(Duration(milliseconds: step));
+      expect(curl, findsOneWidget);
+      final during = await shadow();
+      expect([
+        for (var i = 0; i < before.length; i++) (during[i] - before[i]).abs(),
+      ], everyElement(lessThanOrEqualTo(2)));
+    }
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('keys curl for 350ms and both motion gates change immediately', (
     tester,

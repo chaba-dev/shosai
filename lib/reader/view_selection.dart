@@ -774,97 +774,119 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       _ReaderTurnScope.of(context)?.release(complete: false);
       setState(() => _previewScale = 1);
     },
-    child: GestureDetector(
-      supportedDevices: const {ui.PointerDeviceKind.touch},
+    child: RawGestureDetector(
       excludeFromSemantics: true,
       behavior: HitTestBehavior.opaque,
-      onDoubleTap: widget.fittedZoom == null || !_enabled
-          ? null
-          : () {
-              if (!_enabled) return;
-              widget.dispatch(
-                widget.model.typography.rasterFit == ReaderRasterFit.manual
-                    ? const ReaderTypographyChanged(
-                        rasterFit: ReaderRasterFit.fitPage,
-                      )
-                    : ReaderTypographyChanged(zoom: widget.fittedZoom! * 2),
-              );
-            },
-      onScaleStart: (details) {
-        if (_startedPage != null) return;
-        _startZoom = widget.fittedZoom ?? 1;
-        _startedPage = _enabled && !_cancelled ? _page : null;
-      },
-      onScaleUpdate: (details) {
-        _multiTouch |= details.pointerCount > 1;
-        final turn = _ReaderTurnScope.of(context);
-        if (_multiTouch) {
-          turn?.release(complete: false);
-        } else if (_startedPage == _page &&
-            _enabled &&
-            !widget.model.continuousPresentation &&
-            _readerFit(widget.model.typography) == BoxFit.contain &&
-            _distance.dx.abs() >= 18 &&
-            _distance.dx.abs() >= _distance.dy.abs() * 1.5) {
-          turn?.drag(_distance.dx);
-        }
-        if (!_multiTouch && widget.fittedZoom != null && _enabled) {
-          for (final (controller, delta) in [
-            (_horizontal, details.focalPointDelta.dx),
-            (_vertical, details.focalPointDelta.dy),
-          ]) {
-            if (!controller.hasClients) continue;
-            final position = controller.position;
-            controller.jumpTo(
-              (position.pixels - delta).clamp(
-                position.minScrollExtent,
-                position.maxScrollExtent,
+      gestures: {
+        if (widget.fittedZoom != null && _enabled)
+          _ReaderZoomDoubleTap:
+              GestureRecognizerFactoryWithHandlers<_ReaderZoomDoubleTap>(
+                () => _ReaderZoomDoubleTap(
+                  supportedDevices: const {ui.PointerDeviceKind.touch},
+                ),
+                (recognizer) => recognizer
+                  ..allows = _zoomsOnDoubleTap
+                  ..onDoubleTap = _zoomOnDoubleTap,
               ),
-            );
-          }
-        }
-        if (_pointers.length == 2 &&
-            _startSpan > 0 &&
-            widget.fittedZoom != null &&
-            _startedPage == _page &&
-            _enabled) {
-          final scale =
-              (_pointers.values.first - _pointers.values.last).distance /
-              _startSpan;
-          setState(
-            () =>
-                _previewScale = (_startZoom * scale).clamp(.25, 5) / _startZoom,
+      },
+      child: _scaleGestures(context),
+    ),
+  );
+
+  /// A double tap zooms only where a single tap does not turn the page: in
+  /// the quiet page's outer quarters, a waiting double-tap recognizer would
+  /// hold every tap there for the double-tap timeout before the page turns.
+  bool _zoomsOnDoubleTap(PointerDownEvent event) {
+    final tap = _ReaderPageTapScope.tap(context, event.position, event.kind);
+    return tap == null || !readerTapTurns(widget.model, tap);
+  }
+
+  void _zoomOnDoubleTap() {
+    if (!_enabled) return;
+    widget.dispatch(
+      widget.model.typography.rasterFit == ReaderRasterFit.manual
+          ? const ReaderTypographyChanged(rasterFit: ReaderRasterFit.fitPage)
+          : ReaderTypographyChanged(zoom: widget.fittedZoom! * 2),
+    );
+  }
+
+  Widget _scaleGestures(BuildContext context) => GestureDetector(
+    supportedDevices: const {ui.PointerDeviceKind.touch},
+    excludeFromSemantics: true,
+    behavior: HitTestBehavior.opaque,
+    onScaleStart: (details) {
+      if (_startedPage != null) return;
+      _startZoom = widget.fittedZoom ?? 1;
+      _startedPage = _enabled && !_cancelled ? _page : null;
+    },
+    onScaleUpdate: (details) {
+      _multiTouch |= details.pointerCount > 1;
+      final turn = _ReaderTurnScope.of(context);
+      if (_multiTouch) {
+        turn?.release(complete: false);
+      } else if (_startedPage == _page &&
+          _enabled &&
+          !widget.model.continuousPresentation &&
+          _readerFit(widget.model.typography) == BoxFit.contain &&
+          _distance.dx.abs() >= 18 &&
+          _distance.dx.abs() >= _distance.dy.abs() * 1.5) {
+        turn?.drag(_distance.dx);
+      }
+      if (!_multiTouch && widget.fittedZoom != null && _enabled) {
+        for (final (controller, delta) in [
+          (_horizontal, details.focalPointDelta.dx),
+          (_vertical, details.focalPointDelta.dy),
+        ]) {
+          if (!controller.hasClients) continue;
+          final position = controller.position;
+          controller.jumpTo(
+            (position.pixels - delta).clamp(
+              position.minScrollExtent,
+              position.maxScrollExtent,
+            ),
           );
         }
-      },
-      onScaleEnd: (details) {
-        if (_multiTouch || _cancelled || !_enabled) return;
-        for (final (controller, velocity) in [
-          (_horizontal, details.velocity.pixelsPerSecond.dx),
-          (_vertical, details.velocity.pixelsPerSecond.dy),
-        ]) {
-          if (controller.hasClients) {
-            (controller.position as ScrollPositionWithSingleContext)
-                .goBallistic(-velocity);
-          }
+      }
+      if (_pointers.length == 2 &&
+          _startSpan > 0 &&
+          widget.fittedZoom != null &&
+          _startedPage == _page &&
+          _enabled) {
+        final scale =
+            (_pointers.values.first - _pointers.values.last).distance /
+            _startSpan;
+        setState(
+          () => _previewScale = (_startZoom * scale).clamp(.25, 5) / _startZoom,
+        );
+      }
+    },
+    onScaleEnd: (details) {
+      if (_multiTouch || _cancelled || !_enabled) return;
+      for (final (controller, velocity) in [
+        (_horizontal, details.velocity.pixelsPerSecond.dx),
+        (_vertical, details.velocity.pixelsPerSecond.dy),
+      ]) {
+        if (controller.hasClients) {
+          (controller.position as ScrollPositionWithSingleContext).goBallistic(
+            -velocity,
+          );
         }
-      },
-      child: ClipRect(
-        clipBehavior: _previewScale == 1 ? Clip.none : Clip.hardEdge,
-        child: Transform.scale(
-          scale: _previewScale,
-          child: ScrollConfiguration(
-            // Only the inner PDF owner pans its scroll controllers itself.
-            // A furniture fallback must preserve descendant touch scrolling.
-            behavior: widget.fittedZoom == null
-                ? ScrollConfiguration.of(context)
-                : ScrollConfiguration.of(context).copyWith(
-                    dragDevices: {
-                      ...ScrollConfiguration.of(context).dragDevices,
-                    }..remove(ui.PointerDeviceKind.touch),
-                  ),
-            child: widget.builder(_horizontal, _vertical),
-          ),
+      }
+    },
+    child: ClipRect(
+      clipBehavior: _previewScale == 1 ? Clip.none : Clip.hardEdge,
+      child: Transform.scale(
+        scale: _previewScale,
+        child: ScrollConfiguration(
+          // Only the inner PDF owner pans its scroll controllers itself.
+          // A furniture fallback must preserve descendant touch scrolling.
+          behavior: widget.fittedZoom == null
+              ? ScrollConfiguration.of(context)
+              : ScrollConfiguration.of(context).copyWith(
+                  dragDevices: {...ScrollConfiguration.of(context).dragDevices}
+                    ..remove(ui.PointerDeviceKind.touch),
+                ),
+          child: widget.builder(_horizontal, _vertical),
         ),
       ),
     ),
@@ -1467,4 +1489,16 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
       },
     );
   }
+}
+
+/// PDF double-tap zoom that never joins the arena for a pointer [allows]
+/// refuses, so a tap there resolves at once.
+class _ReaderZoomDoubleTap extends DoubleTapGestureRecognizer {
+  _ReaderZoomDoubleTap({super.supportedDevices});
+
+  bool Function(PointerDownEvent event)? allows;
+
+  @override
+  bool isPointerAllowed(PointerDownEvent event) =>
+      super.isPointerAllowed(event) && (allows?.call(event) ?? true);
 }
