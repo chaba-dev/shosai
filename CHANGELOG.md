@@ -184,6 +184,7 @@ All notable changes to this project will be documented in this file.
 - *(l10n)* Complete Japanese UI and unify reader themes (#282)
 - *(reader)* Navigate directly from Contents and use regular peek text (#281)
 - *(epub)* Open books with large images and XHTML (#280)
+- *(reader)* Finish quiet-page turns, heads and Back placement (#284)
 
 ### 🚜 Refactor
 
