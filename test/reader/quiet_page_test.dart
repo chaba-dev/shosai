@@ -600,10 +600,12 @@ void main() {
     (tester) async {
       const channel = MethodChannel('dev.shosai/reader_system_bars');
       final calls = <bool>[];
+      final edges = <bool>[];
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
         call,
       ) async {
         if (call.method == 'setShown') calls.add(call.arguments as bool);
+        if (call.method == 'setTurnEdges') edges.add(call.arguments as bool);
         return null;
       });
       addTearDown(
@@ -614,6 +616,9 @@ void main() {
       );
       await _open(tester, const Size(390, 844), pushRoute: true);
       expect(calls.last, isFalse);
+      // The quiet page takes the middle of the side edges from the back
+      // gesture, and gives them back with the bars.
+      expect(edges.last, isTrue);
       // A pending keyboard cooldown must not hide bars on the library later.
       tester.view.viewInsets = const FakeViewPadding(bottom: 300);
       await tester.pumpAndSettle();
@@ -627,6 +632,7 @@ void main() {
         reason: 'the outgoing route is still animating',
       );
       expect(calls.last, isTrue);
+      expect(edges.last, isFalse);
       final restored = calls.length;
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 2));
@@ -1004,6 +1010,7 @@ void main() {
         call,
       ) async {
         if (call.method == 'getStableInsets') return null;
+        if (call.method == 'setTurnEdges') return null;
         expectSync(call.method, 'setShown');
         calls.add(call.arguments as bool);
         return null;
