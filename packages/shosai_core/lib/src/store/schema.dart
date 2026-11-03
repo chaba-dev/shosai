@@ -443,6 +443,27 @@ CREATE TABLE library_hidden_source_files (
 CREATE INDEX library_hidden_source_files_content_idx
     ON library_hidden_source_files(content_hash);
 '''),
+  Migration(13, 'source file previews', '''
+-- What an unopened source file's own contents say about it, read through
+-- byte ranges so the shelf can show its cover, title and author. Not a book
+-- identity: the row names a device-local locator and the size and revision
+-- it was read at, and is forgotten when the file changes or goes, when its
+-- connection's catalog is cleared, or once its content is admitted. A row
+-- without title, author or cover records a file that was read and gave none,
+-- so it is not read again while it is unchanged.
+CREATE TABLE library_source_previews (
+    location_id TEXT NOT NULL REFERENCES library_locations(id),
+    locator_key TEXT NOT NULL,
+    size        INTEGER,
+    revision    TEXT,
+    title       TEXT
+                CHECK (title IS NULL OR length(CAST(title AS BLOB)) BETWEEN 1 AND 4096),
+    author      TEXT
+                CHECK (author IS NULL OR length(CAST(author AS BLOB)) BETWEEN 1 AND 4096),
+    cover       BLOB CHECK (cover IS NULL OR length(cover) BETWEEN 1 AND 524288),
+    PRIMARY KEY (location_id, locator_key)
+) STRICT;
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

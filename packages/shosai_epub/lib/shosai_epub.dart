@@ -16,3 +16,4 @@ export 'src/limits.dart';
 export 'src/model.dart';
 export 'src/normalize.dart';
 export 'src/paths.dart';
+export 'src/ranged.dart';

@@ -293,7 +293,63 @@ EpubInspection inspectEpubBytes(
   if (containerFile == null) {
     throw const EpubFormatError('EPUB archive has no META-INF/container.xml');
   }
-  final container = _parseXml(containerFile.content, 'META-INF/container.xml');
+  final opfPath = epubPackagePath(containerFile.content);
+  final opfFile = entries[opfPath];
+  if (opfFile == null) {
+    throw EpubFormatError('EPUB package document is missing: $opfPath');
+  }
+  final package = inspectEpubPackage(opfFile.content, opfPath);
+  String? coverPath;
+  String? coverMediaType;
+  Uint8List? cover;
+  final file = switch (package.coverPath) {
+    final path? => entries[path],
+    null => null,
+  };
+  if (file != null &&
+      file.size <= limits.maxImageBytes &&
+      (package.coverMediaType != 'image/svg+xml' ||
+          file.size <= limits.maxMetadataBytes)) {
+    coverPath = package.coverPath;
+    coverMediaType = package.coverMediaType;
+    cover = file.read(limits.maxImageBytes, 'image bytes');
+  }
+  return EpubInspection(
+    title: package.title,
+    author: package.author,
+    coverPath: coverPath,
+    coverMediaType: coverMediaType,
+    cover: cover,
+  );
+}
+
+/// What a package document says about its book for the library: the part of
+/// [inspectEpubBytes] that needs only the package document, for a reader that
+/// fetches the cover image itself.
+class EpubPackageInspection {
+  const EpubPackageInspection({
+    required this.title,
+    required this.author,
+    required this.coverPath,
+    required this.coverMediaType,
+  });
+
+  /// `dc:title`, or null when the package has none.
+  final String? title;
+
+  /// The first `dc:creator`, or null.
+  final String? author;
+
+  /// Canonical archive path of the manifest's cover image, or null when the
+  /// manifest names none or names one that is not an image.
+  final String? coverPath;
+  final String? coverMediaType;
+}
+
+/// The canonical archive path of the package document that
+/// `META-INF/container.xml` ([containerXml]) names.
+String epubPackagePath(List<int> containerXml) {
+  final container = _parseXml(containerXml, 'META-INF/container.xml');
   final opfPath = container.descendants
       .whereType<XmlElement>()
       .where((element) => element.name.local == 'rootfile')
@@ -302,26 +358,28 @@ EpubInspection inspectEpubBytes(
   if (opfPath == null) {
     throw const EpubFormatError('EPUB container has no rootfile');
   }
-  final canonicalOpfPath = canonicalEpubPath(opfPath);
-  final opfFile = entries[canonicalOpfPath];
-  if (opfFile == null) {
-    throw EpubFormatError(
-      'EPUB package document is missing: $canonicalOpfPath',
-    );
-  }
-  final opf = _parseXml(opfFile.content, canonicalOpfPath);
+  return canonicalEpubPath(opfPath);
+}
+
+/// Title, author and cover image of the package document [opf] stored at
+/// the canonical archive path [opfPath].
+///
+/// The cover is the manifest item with the `cover-image` property (EPUB 3),
+/// else the item named by `<meta name="cover" content="…">` (EPUB 2).
+EpubPackageInspection inspectEpubPackage(List<int> opf, String opfPath) {
+  final document = _parseXml(opf, opfPath);
   XmlElement? child(XmlNode parent, String local) => parent.descendants
       .whereType<XmlElement>()
       .where((element) => element.name.local == local)
       .firstOrNull;
-  final metadata = child(opf, 'metadata');
+  final metadata = child(document, 'metadata');
   String? metadataValue(String local) {
     final value = metadata == null ? null : child(metadata, local)?.innerText;
     final trimmed = value?.trim();
     return trimmed == null || trimmed.isEmpty ? null : trimmed;
   }
 
-  final manifest = child(opf, 'manifest');
+  final manifest = child(document, 'manifest');
   final items = manifest == null
       ? const <XmlElement>[]
       : manifest.children
@@ -348,30 +406,16 @@ EpubInspection inspectEpubBytes(
       items
           .where((item) => item.getAttribute('id') == legacyCoverId)
           .firstOrNull;
-
-  String? coverPath;
-  String? coverMediaType;
-  Uint8List? cover;
   final href = coverItem?.getAttribute('href');
   final mediaType = coverItem?.getAttribute('media-type') ?? '';
-  if (href != null && mediaType.startsWith('image/')) {
-    final resolved = _tryResolve(directoryOf(canonicalOpfPath), href);
-    final file = resolved == null ? null : entries[resolved];
-    if (file != null &&
-        file.size <= limits.maxImageBytes &&
-        (mediaType != 'image/svg+xml' ||
-            file.size <= limits.maxMetadataBytes)) {
-      coverPath = resolved;
-      coverMediaType = mediaType;
-      cover = file.read(limits.maxImageBytes, 'image bytes');
-    }
-  }
-  return EpubInspection(
+  final coverPath = href != null && mediaType.startsWith('image/')
+      ? _tryResolve(directoryOf(opfPath), href)
+      : null;
+  return EpubPackageInspection(
     title: metadataValue('title'),
     author: metadataValue('creator'),
     coverPath: coverPath,
-    coverMediaType: coverMediaType,
-    cover: cover,
+    coverMediaType: coverPath == null ? null : mediaType,
   );
 }
 

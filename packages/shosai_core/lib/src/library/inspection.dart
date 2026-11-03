@@ -10,6 +10,7 @@ import 'package:shosai_epub/shosai_epub.dart';
 import '../cancellation.dart';
 import '../errors.dart';
 import 'files.dart';
+import 'location.dart';
 
 /// Largest cover thumbnail the library stores.
 const maxCoverBytes = 512 * 1024;
@@ -78,6 +79,80 @@ BookMetadata _inspectEpub(Uint8List bytes, EpubLimits limits) {
     },
   );
 }
+
+/// The limits for reading a book before it is opened: an import's, with a
+/// smaller cover image, so a preview costs at most a few megabytes to fetch.
+const previewEpubLimits = EpubLimits(maxImageBytes: 8 * 1024 * 1024);
+
+/// The most a preview reads from one file, in all.
+const maxPreviewReadBytes = 16 * 1024 * 1024;
+
+/// An unopened EPUB's title, author and cover, read through [location]'s
+/// byte ranges without downloading [entry]: the end of the archive, its
+/// central directory, the container, the package document and the cover
+/// image. The cover is scaled off the calling isolate, as an import's is.
+Future<BookMetadata> previewEpub(
+  LibraryLocation location,
+  LocationEntry entry, {
+  CancellationToken? cancellation,
+}) async {
+  cancellation.throwIfCancelled();
+  final size =
+      entry.size ??
+      (await location.stat(entry.key, cancellation: cancellation)).size;
+  if (size == null) {
+    throw const CoreException(
+      CoreErrorKind.unsupported,
+      'The file has no known size.',
+    );
+  }
+  Future<Uint8List> read(int start, int end) async {
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in location.read(
+      entry.key,
+      start: start,
+      end: end,
+      cancellation: cancellation,
+    )) {
+      cancellation.throwIfCancelled();
+      bytes.add(chunk);
+      if (bytes.length > end - start) {
+        throw const CoreException.malformed(
+          'The source returned more than the requested range.',
+        );
+      }
+    }
+    return bytes.takeBytes();
+  }
+
+  final EpubInspection inspection;
+  try {
+    inspection = await inspectEpubRanges(
+      read,
+      size,
+      limits: previewEpubLimits,
+      maxReadBytes: maxPreviewReadBytes,
+    );
+  } on EpubLimitError catch (error) {
+    throw CoreException.limitExceeded('The EPUB exceeds a limit: $error');
+  } on EpubFormatError catch (error) {
+    throw CoreException.malformed('The EPUB cannot be read: ${error.message}');
+  } on EpubPathError catch (error) {
+    throw CoreException.malformed('The EPUB cannot be read: $error');
+  }
+  cancellation.throwIfCancelled();
+  final cover = inspection.cover;
+  return BookMetadata(
+    title: inspection.title,
+    author: inspection.author,
+    cover: cover == null ? null : await _thumbnailOffIsolate(cover),
+  );
+}
+
+/// [coverThumbnail] on another isolate. A closure sends its whole context,
+/// so this one is made where nothing else is in scope.
+Future<Uint8List?> _thumbnailOffIsolate(Uint8List cover) =>
+    Isolate.run(() => coverThumbnail(cover));
 
 /// Scale a straight RGBA rendering ([width] × [height]) into a PNG
 /// thumbnail, as [coverThumbnail] does for an encoded image.
