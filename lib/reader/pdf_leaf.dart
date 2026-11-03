@@ -100,10 +100,12 @@ extension on ReaderController {
     final generation = _model.generation;
     final layout = _model.layout;
     final wanted = <_PdfLeaf>[];
+    final linkPages = <int>{_model.unit, ?_model.pdfSpread?.facingUnit};
     for (final delta in const [1, -1]) {
       final unit = _pdfLeafUnit(_model, pdf, delta);
       if (unit == null) continue;
       final facing = _pdfFacingUnit(pdf, unit, layout);
+      linkPages.addAll([unit, ?facing]);
       final double scale;
       try {
         scale = _pdfLeafScale(pdf, unit, layout, facing);
@@ -140,6 +142,31 @@ extension on ReaderController {
     _pdfLeaves
       ..clear()
       ..addAll(wanted);
+    // Every document tap checks links before falling through to its page
+    // zone. Read them while idle, not behind a PDFium worker round-trip on
+    // every tap. Retain only the displayed and neighboring leaves.
+    _pdfLinks.removeWhere((page, _) => !linkPages.contains(page));
+    for (final page in linkPages) {
+      if (_pdfLinks.containsKey(page)) continue;
+      final links = pdf.links(page);
+      _pdfLinks[page] = (pending: links, ready: null);
+      final effect = links.then<void>(
+        (ready) {
+          if (identical(_pdfLinks[page]?.pending, links)) {
+            _pdfLinks[page] = (pending: links, ready: ready);
+          }
+        },
+        onError: (Object _) {
+          // A speculative failure must not turn a page into a dead tap zone;
+          // the real tap retries through the normal reference error path.
+          if (identical(_pdfLinks[page]?.pending, links)) {
+            _pdfLinks.remove(page);
+          }
+        },
+      );
+      _referenceEffects.add(effect);
+      unawaited(effect.then((_) => _referenceEffects.remove(effect)));
+    }
   }
 
   Future<_PdfLeafContent?> _loadPdfLeaf(
@@ -208,6 +235,7 @@ extension on ReaderController {
   }
 
   void _discardPdfLeaves() {
+    _pdfLinks.clear();
     for (final leaf in _pdfLeaves) {
       leaf.discard();
     }

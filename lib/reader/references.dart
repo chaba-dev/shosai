@@ -146,7 +146,9 @@ extension on ReaderController {
         final px = (x - left) / scale;
         final py = size.height - y / scale;
         if (px < 0 || px > size.width || py < 0 || py > size.height) continue;
-        final links = await pdf.links(unit);
+        final cached = _pdfLinks[unit];
+        final links =
+            cached?.ready ?? await (cached?.pending ?? pdf.links(unit));
         if (!current()) return;
         for (final link in links) {
           if (!link.rects.any(

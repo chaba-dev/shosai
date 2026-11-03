@@ -1066,12 +1066,15 @@ class _ReaderScreenState extends State<ReaderScreen>
               ),
             ),
             if (model.returnPoints.isNotEmpty && model.document != null)
-              Positioned(
-                left: ShosaiTokens.space4,
-                right: ShosaiTokens.space4,
-                bottom:
-                    ShosaiTokens.space6 + (model.chromeShown ? bottomInset : 0),
-                child: Center(
+              Positioned.fill(
+                child: AnimatedBuilder(
+                  animation: _chromeGeometry,
+                  builder: (context, child) => _ReaderBackPillPosition(
+                    content: _contentKey,
+                    header: model.chromeShown ? _headerBoundsKey : null,
+                    footer: model.chromeShown ? _footerBoundsKey : null,
+                    child: child!,
+                  ),
                   child: _ReaderBackPill(
                     model: model,
                     dispatch: _controller.dispatch,
