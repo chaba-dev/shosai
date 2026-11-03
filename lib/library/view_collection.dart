@@ -1462,6 +1462,10 @@ class _SourceFileCoverState extends State<_SourceFileCover> {
           bytes,
           fit: BoxFit.cover,
           gaplessPlayback: true,
+          // The generated cover stays until the preview decodes, so a card
+          // never shows an empty box between the two.
+          frameBuilder: (_, image, frame, synchronous) =>
+              frame == null && !synchronous ? generated : image,
           errorBuilder: (_, _, _) => generated,
         ),
       ),
