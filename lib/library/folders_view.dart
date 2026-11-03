@@ -4,12 +4,20 @@ import 'package:shosai_core/shosai_core.dart'
     show LocationException, LocationFailure;
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/google_drive_authorization.dart';
+import 'package:shosai_flutter/core/library_connection.dart';
+import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/folders_controller.dart';
 
 class LibraryFoldersDialog extends StatelessWidget {
   const LibraryFoldersDialog({super.key, required this.controller});
   final FoldersController controller;
+
+  /// A folder connection kept from an earlier build on a phone or tablet is
+  /// listed only so it can be removed.
+  bool _readsFolder(LibraryConnection grant) =>
+      controller.supportsFolders ||
+      grant.provider != FolderConnectionProvider.providerId;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -43,7 +51,7 @@ class LibraryFoldersDialog extends StatelessWidget {
                   : () => controller.dispatch(const FoldersDirectorySaved()),
               child: Text(l10n.locationUseFolder),
             ),
-          if (model.selected == null)
+          if (model.selected == null && controller.supportsFolders)
             ShadButton.outline(
               height: shosaiShadButtonHeight(context),
               onPressed: model.busy
@@ -158,16 +166,22 @@ class LibraryFoldersDialog extends StatelessWidget {
                         if (model.grants.isEmpty && !model.busy)
                           Padding(
                             padding: const EdgeInsets.all(16),
-                            child: Text(l10n.locationNoFolders),
+                            child: Text(
+                              controller.supportsFolders
+                                  ? l10n.locationNoFolders
+                                  : l10n.locationNoFoldersMobile,
+                            ),
                           ),
                         for (final grant in model.grants)
                           ListTile(
                             leading: const Icon(Icons.folder_outlined),
                             title: Text(grant.label),
                             subtitle: Text(
-                              '${l10n.locationSourceFolder}: ${grant.directoryLabel ?? grant.label}',
+                              _readsFolder(grant)
+                                  ? '${l10n.locationSourceFolder}: ${grant.directoryLabel ?? grant.label}'
+                                  : l10n.locationFolderNotRead,
                             ),
-                            onTap: model.busy
+                            onTap: model.busy || !_readsFolder(grant)
                                 ? null
                                 : () => controller.dispatch(
                                     FoldersSelected(grant.id),
