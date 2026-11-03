@@ -735,6 +735,11 @@ String _readerStatusLabel(
   required bool short,
 }) {
   final percent = progress.percentage;
+  // A page whose number is still being counted says how far in it is.
+  if (progress.kind == ReaderProgressKind.single &&
+      progress.firstOrdinal == null) {
+    return l10n.readerPercentStatus(percent);
+  }
   switch (progress.kind) {
     case ReaderProgressKind.none:
       return l10n.readerNoBookOpen;

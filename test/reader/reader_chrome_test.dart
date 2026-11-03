@@ -1173,7 +1173,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 32));
       expect(bridge.events, isNotEmpty);
-      expect(find.text('33% · page 1'), findsOneWidget);
+      // The one-page first chapter is page 1, so the second starts at 2.
+      expect(find.text('33% · page 2'), findsOneWidget);
       expect(_button(tester, 'reader-edge-previous').enabled, isTrue);
     });
 
