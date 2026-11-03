@@ -240,7 +240,7 @@ On phones, Contents, Aa, Bookmark and Notes move to the bottom bar. Search lives
 - Fills are `hl-*` at 40% with `radius-xs` corners that wrap per line. A highlight with a note gets a dotted underline (`sh-hl--noted`); the one open in the notes panel or just jumped to gets a 2 px `accent` ring (`sh-hl--focus`).
 - Tapping a highlight opens the swatches with **Edit note**, **Copy** and **Delete**. Never label colours ("Important").
 
-**ReferencePeek.** Footnotes, cross-references, figure links and contents entries open a peek first.
+**ReferencePeek.** In-text footnotes, cross-references and figure links open a peek first. Choices in the Contents panel navigate directly to their target, close the panel and show the BackPill.
 
 - Kicker in `ui-label` (`FOOTNOTE 1 · PAGE 2`), a title for sections and figures, then the first lines of the target in `ed-quote`, clamped to five lines with an ellipsis. Figures show the image.
 - **Close** and **Go to**. **Go to** records the current place and shows the BackPill.

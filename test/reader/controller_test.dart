@@ -150,7 +150,14 @@ void main() {
     );
   }
 
-  for (final action in ['keep', 'dismiss', 'navigate', 'suspend', 'replace']) {
+  for (final action in [
+    'keep',
+    'dismiss',
+    'navigate',
+    'contents',
+    'suspend',
+    'replace',
+  ]) {
     testWidgets('a delayed PDF preview respects $action', (tester) async {
       final bridge = _ReferenceBridge();
       final controller = ReaderController(
@@ -179,6 +186,8 @@ void main() {
           controller.dispatch(const ReaderReferenceDismissed());
         case 'navigate':
           controller.dispatch(const ReaderUnitRequested(2));
+        case 'contents':
+          controller.dispatch(const ReaderLocationNavigated(2));
         case 'suspend':
           controller.dispatch(const ReaderSuspended());
         case 'replace':
@@ -194,7 +203,12 @@ void main() {
       } else {
         expect(controller.model.referencePeek, isNull);
       }
-      expect(controller.model.returnPoints, isEmpty);
+      if (action == 'contents') {
+        expect(controller.model.unit, 2);
+        expect(controller.model.returnPoints.single.unit, 0);
+      } else {
+        expect(controller.model.returnPoints, isEmpty);
+      }
       expect(controller.model.error, isNull);
       controller.dispose();
       await tester.pump();
