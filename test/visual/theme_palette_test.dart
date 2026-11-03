@@ -167,11 +167,17 @@ void main() {
         expect(painter.foregroundColor, entry.value.foreground);
         expect(painter.recolorImage, format == 'epub');
         if (format == 'epub') {
+          // The first box under the page casts its shadow; the paper is the
+          // box inside it.
           final paper = tester.widget<DecoratedBox>(
             find
                 .descendant(
                   of: find.byKey(const ValueKey('reader-page')),
-                  matching: find.byType(DecoratedBox),
+                  matching: find.byWidgetPredicate(
+                    (widget) =>
+                        widget is DecoratedBox &&
+                        (widget.decoration as BoxDecoration).color != null,
+                  ),
                 )
                 .first,
           );

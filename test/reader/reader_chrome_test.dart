@@ -1032,6 +1032,107 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    for (final (name, size, path) in [
+      ('PDF on a phone', const Size(390, 844), '/books/atlas.pdf'),
+      ('PDF on a tablet', const Size(1024, 768), '/books/atlas.pdf'),
+      ('PDF on a tall tablet', const Size(900, 1200), '/books/atlas.pdf'),
+      (
+        'EPUB spread on a tablet',
+        const Size(1180, 820),
+        '/books/slow-rivers.epub',
+      ),
+    ]) {
+      testWidgets('a held curl keeps the stage around the page: $name', (
+        tester,
+      ) async {
+        _setView(tester, size);
+        await _open(
+          tester,
+          _reader(bridge: _ChromeBridge(), initialPath: path),
+        );
+        await tester.pumpAndSettle();
+        final root = tester.getTopLeft(find.byKey(harnessBoundaryKey));
+        final width = tester
+            .getSize(find.byKey(harnessBoundaryKey))
+            .width
+            .ceil();
+        final points = <Offset>[];
+        final page = find.byKey(const ValueKey('reader-page'));
+        if (page.evaluate().isNotEmpty) {
+          // Just outside the paper's edges, where its shadow falls.
+          final paper = tester.getRect(page);
+          points.addAll([
+            paper.bottomCenter + const Offset(0, 12),
+            // The pixel beside the paper's left edge, in its edge line.
+            paper.centerLeft - const Offset(.5, 0),
+          ]);
+        } else {
+          // Around the fitted raster, on the stage beside the page.
+          final paint = tester.getRect(
+            find.byKey(const ValueKey('reader-page-paint')),
+          );
+          final image = _pagePainter(tester).image!;
+          final fitted = Alignment.center.inscribe(
+            applyBoxFit(
+              BoxFit.contain,
+              Size(image.width.toDouble(), image.height.toDouble()),
+              paint.size,
+            ).destination,
+            paint,
+          );
+          if (fitted.top - paint.top >= 6) {
+            points.add(fitted.topCenter - const Offset(0, 4));
+          }
+          if (fitted.left - paint.left >= 6) {
+            points.add(fitted.centerLeft - const Offset(4, 0));
+          } else {
+            // A page as wide as its box casts the soft corner of its shadow
+            // past the box, where no snapshot reaches.
+            points.add(Offset(paint.left - 8, fitted.bottom + 24));
+          }
+        }
+        expect(points, isNotEmpty);
+        Future<List<Color>> surround() async {
+          final pixels = await captureHarnessRgba(tester);
+          return points.map((point) {
+            final at = point - root;
+            final index = (at.dy.toInt() * width + at.dx.toInt()) * 4;
+            return Color.fromARGB(
+              pixels[index + 3],
+              pixels[index],
+              pixels[index + 1],
+              pixels[index + 2],
+            );
+          }).toList();
+        }
+
+        final before = await surround();
+        final stage = tester.getRect(
+          find.byKey(const ValueKey('reader-stage')),
+        );
+        final gesture = await tester.startGesture(
+          Offset(stage.left + stage.width * .8, stage.center.dy),
+        );
+        for (var step = 0; step < 6; step++) {
+          await gesture.moveBy(const Offset(-20, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        // The neighbouring page decodes off the test clock.
+        for (var frame = 0; frame < 10; frame++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(find.byKey(const ValueKey('reader-page-curl')), findsOneWidget);
+        expect(await surround(), before);
+        await gesture.moveBy(const Offset(120, 0));
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('continuous presentation never turns PDF pages on swipe', (
       tester,
     ) async {

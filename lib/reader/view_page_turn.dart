@@ -226,12 +226,29 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
     );
     canvas.save();
     canvas.clipRect(rect);
-    canvas.translate(rect.left, rect.top);
     final colors = pageColors(widget.model.typography.theme);
-    canvas.drawRect(
-      Offset.zero & rect.size,
-      Paint()..color = colors.background,
-    );
+    if (preview.image != null) {
+      // A PDF page lies on the stage: only the page itself is replaced, so
+      // the stage and its shadow around it stay as they are.
+      if (_pageRect case final page?) {
+        canvas.drawRect(
+          Rect.fromLTWH(
+            page.left * size.width,
+            page.top * size.height,
+            page.width * size.width,
+            page.height * size.height,
+          ),
+          Paint()..blendMode = BlendMode.clear,
+        );
+      }
+      canvas.translate(rect.left, rect.top);
+    } else {
+      canvas.translate(rect.left, rect.top);
+      canvas.drawRect(
+        Offset.zero & rect.size,
+        Paint()..color = colors.background,
+      );
+    }
     if (preview.page case final page?) {
       ReaderEpubPageContentPainter(
         page: page,
@@ -247,6 +264,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
         fitted.destination,
         Offset.zero & rect.size,
       );
+      canvas.drawRect(target, Paint()..color = colors.background);
       canvas.drawImageRect(
         image,
         Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
