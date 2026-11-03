@@ -125,14 +125,10 @@ EpubBook openEpubBytes(
       continue;
     }
     if (item.mediaType == 'text/css') {
-      if (file.size > limits.maxStyleSheetBytes) {
-        throw EpubLimitError(
-          'stylesheet bytes',
-          limits.maxStyleSheetBytes,
-          file.size,
-        );
-      }
-      final source = utf8.decode(file.content, allowMalformed: true);
+      final source = utf8.decode(
+        file.read(limits.maxStyleSheetBytes, 'stylesheet bytes'),
+        allowMalformed: true,
+      );
       stylesheets.add((resolved, CssStylesheet.parse(source, limits)));
       continue;
     }
@@ -140,10 +136,27 @@ EpubBook openEpubBytes(
     if (resources.length >= limits.maxResources) {
       throw EpubLimitError('admitted resources', limits.maxResources);
     }
+    var byteLimit = limits.maxEntryBytes;
+    var kind = 'resource bytes';
+    if (item.mediaType == 'image/svg+xml' ||
+        item.mediaType == 'application/x-dtbncx+xml') {
+      byteLimit = limits.maxMetadataBytes;
+      kind = 'metadata bytes';
+    } else if (item.mediaType.startsWith('image/')) {
+      byteLimit = limits.maxImageBytes;
+      kind = 'image bytes';
+    } else if (item.mediaType.startsWith('font/') ||
+        RegExp(
+          r'\.(ttf|otf|woff2?)$',
+          caseSensitive: false,
+        ).hasMatch(resolved)) {
+      byteLimit = limits.maxFontBytes;
+      kind = 'font bytes';
+    }
     resources[resolved] = EpubResource(
       path: resolved,
       mediaType: item.mediaType,
-      bytes: file.content,
+      bytes: file.read(byteLimit, kind),
     );
   }
 
@@ -163,6 +176,7 @@ EpubBook openEpubBytes(
     entries: entries,
     opfDirectory: opfDirectory,
     warnings: allWarnings,
+    limits: limits,
   );
   final tocTitles = <String, String>{};
   void collectTitles(List<EpubTocEntry> entries) {
@@ -197,10 +211,10 @@ EpubBook openEpubBytes(
     if (file == null) {
       throw EpubFormatError('failed to read chapter: $resolved');
     }
-    if (file.size > limits.maxChapterBytes) {
-      throw EpubLimitError('chapter bytes', limits.maxChapterBytes, file.size);
-    }
-    final xhtml = utf8.decode(file.content, allowMalformed: true);
+    final xhtml = utf8.decode(
+      file.read(limits.maxChapterBytes, 'chapter bytes'),
+      allowMalformed: true,
+    );
     final normalized = normalizeChapter(
       xhtml: xhtml,
       chapterPath: resolved,
@@ -343,10 +357,13 @@ EpubInspection inspectEpubBytes(
   if (href != null && mediaType.startsWith('image/')) {
     final resolved = _tryResolve(directoryOf(canonicalOpfPath), href);
     final file = resolved == null ? null : entries[resolved];
-    if (file != null && file.size <= limits.maxImageBytes) {
+    if (file != null &&
+        file.size <= limits.maxImageBytes &&
+        (mediaType != 'image/svg+xml' ||
+            file.size <= limits.maxMetadataBytes)) {
       coverPath = resolved;
       coverMediaType = mediaType;
-      cover = Uint8List.fromList(file.content);
+      cover = file.read(limits.maxImageBytes, 'image bytes');
     }
   }
   return EpubInspection(
@@ -360,40 +377,47 @@ EpubInspection inspectEpubBytes(
 
 /// Decode the archive and apply the entry-count, entry-size, aggregate-size,
 /// compression-ratio and duplicate-name admission rules.
-Map<String, ArchiveFile> _admittedEntries(
+Map<String, _EpubEntry> _admittedEntries(
   Uint8List bytes,
   EpubLimits limits,
   List<String> warnings,
 ) {
-  final Archive archive;
+  // ZipDecoder eagerly inflates Unix symlink entries. Read the directory
+  // directly so no payload is inflated before the size/ratio admission pass.
+  _detectDuplicateEntries(bytes, limits, warnings);
+  final archive = ZipDirectory();
   try {
-    archive = ZipDecoder().decodeBytes(bytes);
+    archive.read(InputMemoryStream(bytes));
   } catch (error) {
     throw EpubFormatError('failed to read EPUB archive: $error');
   }
-  if (archive.files.length > limits.maxArchiveEntries) {
+  if (archive.fileHeaders.length > limits.maxArchiveEntries) {
     throw EpubLimitError(
       'archive entries',
       limits.maxArchiveEntries,
-      archive.files.length,
+      archive.fileHeaders.length,
     );
   }
-  final entries = <String, ArchiveFile>{};
-  _detectDuplicateEntries(bytes, limits, warnings);
-  for (final file in archive.files) {
-    if (!file.isFile) continue;
-    final name = file.name;
+  final entries = <String, _EpubEntry>{};
+  for (final header in archive.fileHeaders) {
+    final file = header.file!;
+    final name = file.filename;
+    if (name.endsWith('/') || name.endsWith('\\')) continue;
     if (entries.containsKey(name)) {
       throw EpubFormatError('duplicate EPUB archive entry: $name');
     }
-    if (file.size > limits.maxEntryBytes) {
+    if (file.uncompressedSize > limits.maxEntryBytes) {
       throw EpubLimitError(
         'archive entry bytes',
         limits.maxEntryBytes,
-        file.size,
+        file.uncompressedSize,
       );
     }
-    entries[name] = file;
+    if (header.compressionMethod != 0 && header.compressionMethod != 8 ||
+        file.flags & 1 != 0) {
+      throw EpubFormatError('unsupported EPUB ZIP encoding: $name');
+    }
+    entries[name] = _EpubEntry(file, limits);
   }
   final totalUncompressed = entries.values.fold<int>(
     0,
@@ -416,6 +440,40 @@ Map<String, ArchiveFile> _admittedEntries(
   }
 
   return entries;
+}
+
+/// One lazy entry; reads stream inflate output into a single bounded buffer.
+/// Encoded images remain in memory for Flutter, but the ZIP decoder never
+/// accumulates a second, unbounded copy before applying admission limits.
+class _EpubEntry {
+  _EpubEntry(this.file, this.limits);
+
+  final ZipFile file;
+  final EpubLimits limits;
+  int get size => file.uncompressedSize;
+  Uint8List get content => read(limits.maxMetadataBytes, 'metadata bytes');
+
+  Uint8List read(int limit, String kind) {
+    if (size > limit) throw EpubLimitError(kind, limit, size);
+    final output = OutputMemoryStream(size: size);
+    try {
+      // archive >=4.5 bounds every output write by the declared ZIP size,
+      // including on the native streaming path, and restores the read cursor.
+      file.decompress(output);
+      if (output.length != size) {
+        throw EpubFormatError(
+          'incorrect EPUB ZIP entry size: ${file.filename}',
+        );
+      }
+      return output.getBytes();
+    } on EpubFormatError {
+      rethrow;
+    } catch (error) {
+      throw EpubFormatError(
+        'failed to read EPUB entry ${file.filename}: $error',
+      );
+    }
+  }
 }
 
 /// Bounded ZIP central-directory scan that rejects duplicate entry names.
@@ -642,8 +700,10 @@ void _populateImageMetadata(
 }
 
 EpubImageSize? _imageIntrinsicSize(EpubResource resource, EpubLimits limits) {
-  final bytes = Uint8List.fromList(resource.bytes);
-  if (bytes.length > limits.maxImageBytes) return null;
+  if (resource.byteLength > limits.maxImageBytes) return null;
+  final bytes = resource.bytes is Uint8List
+      ? resource.bytes as Uint8List
+      : Uint8List.fromList(resource.bytes);
   try {
     final decoder = image.findDecoderForData(bytes);
     if (decoder != null) {
@@ -735,9 +795,10 @@ double? _svgLength(String raw) {
 
 List<EpubTocEntry> _parseToc({
   required Map<String, _ManifestItem> manifestItems,
-  required Map<String, ArchiveFile> entries,
+  required Map<String, _EpubEntry> entries,
   required String opfDirectory,
   required List<String> warnings,
+  required EpubLimits limits,
 }) {
   // The production parser tries an NCX first (EPUB 2): the manifest item whose
   // media type is the NCX type — there is no `.ncx` suffix rule — and only
@@ -781,7 +842,11 @@ List<EpubTocEntry> _parseToc({
     final path = _tryResolve(opfDirectory, navItem.href);
     final file = path == null ? null : entries[path];
     if (path != null && file != null) {
-      return _parseNavDocument(file.content, path, warnings);
+      return _parseNavDocument(
+        file.read(limits.maxChapterBytes, 'chapter bytes'),
+        path,
+        warnings,
+      );
     }
   }
   return const [];

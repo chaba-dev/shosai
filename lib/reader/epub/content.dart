@@ -103,7 +103,7 @@ double epubSpreadPageWidth(double spreadWidth) =>
 const int kEpubChapterImageLimit = 32;
 
 /// Maximum bytes of one image resource this renderer decodes.
-const int kEpubImageByteLimit = 8 * 1024 * 1024;
+final int kEpubImageByteLimit = const EpubLimits().maxImageBytes;
 
 /// How long one image decode may take before the layout falls back to the
 /// image's alt text.
@@ -293,7 +293,12 @@ class EpubContentSource {
       }
       if (resource.byteLength > kEpubImageByteLimit) continue;
       decoded += 1;
-      await _admitImage(src, decode, Uint8List.fromList(resource.bytes));
+      final bytes = resource.bytes;
+      await _admitImage(
+        src,
+        decode,
+        bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
+      );
     }
   }
 
