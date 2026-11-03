@@ -3,7 +3,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
 import 'package:shosai_core/shosai_core.dart'
-    show maxSelectedImportPaths, CancellationToken, CancellationCheck;
+    show
+        maxSelectedImportPaths,
+        BookLocator,
+        CancellationToken,
+        CancellationCheck;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -86,9 +90,17 @@ class LibraryController implements Listenable {
   final Set<BigInt> _foregroundCancellations = {};
   final Set<BigInt> _loadCancellations = {};
   final Map<int, BigInt> _coverRequests = {};
-  final Map<int, Uint8List> _coverCache = {};
-  final Set<int> _coverFailures = {};
+  final Set<BookLocator> _sourceCoverRequests = {};
+
+  /// Covers by book id, and preview covers of unopened files by locator.
+  final Map<Object, Uint8List> _coverCache = {};
+  final Set<Object> _coverFailures = {};
   int _coverCacheBytes = 0;
+
+  /// The background preview pass over the shelf's unopened files, and its
+  /// number: a completion from a replaced pass is ignored.
+  CancellationToken? _previewCancellation;
+  int _previewPass = 0;
   Timer? _searchTimer;
   int _loadRevision = 0;
   int _queryRevision = 0;
@@ -132,6 +144,14 @@ class LibraryController implements Listenable {
     return true;
   }
 
+  /// Asks for the preview cover of the unopened file at [locator]; false
+  /// when the request was not admitted.
+  bool requestSourceCover(BookLocator locator) {
+    if (!_canLoadSourceCover(locator)) return false;
+    dispatch(LibrarySourceCoverRequested(locator));
+    return true;
+  }
+
   void dispatch(LibraryMessage message) {
     if (_closing && message is _LibraryDocumentsOpened) {
       unawaited(_openedDocuments?.discard(message.paths));
@@ -146,6 +166,10 @@ class LibraryController implements Listenable {
         message is! _LibraryCoverLoaded &&
         message is! _LibraryCoverFailed &&
         message is! _LibraryCoverEffectFinished &&
+        message is! _LibrarySourceCoverLoaded &&
+        message is! _LibrarySourceCoverFailed &&
+        message is! _LibrarySourceCoverEffectFinished &&
+        message is! _LibrarySourcePreviewsFinished &&
         message is! _LibrarySettingsSaved &&
         message is! _LibraryCleanupStatusChanged) {
       return;
@@ -324,6 +348,8 @@ class LibraryController implements Listenable {
         _import();
       case LibraryCoverRequested():
         _loadCover(message.bookId);
+      case LibrarySourceCoverRequested():
+        _loadSourceCover(message.locator);
       case LibraryOperationCancelled():
         _adapterRevision += 1;
         _keepCancellation?.cancel();
@@ -429,6 +455,7 @@ class LibraryController implements Listenable {
               when loaded.librarySort != message.sort) {
             _saveSettings();
           }
+          if (!message.append) _previewSources(message.sourceFiles);
         }
       case _LibraryFailed():
         _releaseCancellation(message.cancellation);
@@ -501,23 +528,7 @@ class LibraryController implements Listenable {
         _disposeBridgeIfIdle();
       case _LibraryCoverLoaded():
         _releaseCancellation(message.cancellation);
-        if (!_closing) {
-          _coverFailures.remove(message.bookId);
-          final cover = message.cover ?? Uint8List(0);
-          final previous = _coverCache.remove(message.bookId);
-          _coverCacheBytes -= previous?.length ?? 0;
-          _coverCache[message.bookId] = cover;
-          _coverCacheBytes += cover.length;
-          while ((_coverCacheBytes > _coverCacheByteLimit ||
-                  _coverCache.length > _coverCacheEntryLimit) &&
-              _coverCache.isNotEmpty) {
-            final oldest = _coverCache.keys.first;
-            final removed = _coverCache.remove(oldest)!;
-            _coverCacheBytes -= removed.length;
-            _evictCover(removed);
-          }
-          _emit(_model.copyWith(covers: Map.unmodifiable(_coverCache)));
-        }
+        if (!_closing) _cacheCover(message.bookId, message.cover);
       case _LibraryCoverFailed():
         _releaseCancellation(message.cancellation);
         _coverFailures.add(message.bookId);
@@ -525,6 +536,41 @@ class LibraryController implements Listenable {
         _coverRequests.remove(message.bookId);
         _activeEffects -= 1;
         if (!_closing) _emit(_model);
+        _disposeBridgeIfIdle();
+      case _LibrarySourceCoverLoaded():
+        if (!_closing) _cacheCover(message.locator, message.cover);
+      case _LibrarySourceCoverFailed():
+        _coverFailures.add(message.locator);
+      case _LibrarySourceCoverEffectFinished():
+        _sourceCoverRequests.remove(message.locator);
+        _activeEffects -= 1;
+        if (!_closing) _emit(_model);
+        _disposeBridgeIfIdle();
+      case _LibrarySourcePreviewed(:final file):
+        if (_closing || message.pass != _previewPass) break;
+        // A cover asked for before the file was read was not there yet.
+        _coverFailures.remove(file.locator);
+        if (_coverCache.remove(file.locator) case final stale?) {
+          _coverCacheBytes -= stale.length;
+          _evictCover(stale);
+          _publishCovers();
+        }
+        // The card keeps its place: the shelf is sorted again on its next
+        // load, not while it is being looked at.
+        _emit(
+          _model.copyWith(
+            sourceFiles: List.unmodifiable([
+              for (final known in _model.sourceFiles)
+                known.locator == file.locator &&
+                        known.entry.size == file.entry.size &&
+                        known.entry.revision == file.entry.revision
+                    ? file
+                    : known,
+            ]),
+          ),
+        );
+      case _LibrarySourcePreviewsFinished():
+        _activeEffects -= 1;
         _disposeBridgeIfIdle();
       case _LibraryCleanupStatusChanged():
         if (_closing) break;
@@ -609,7 +655,98 @@ class LibraryController implements Listenable {
       !_coverRequests.containsKey(bookId) &&
       !_coverCache.containsKey(bookId) &&
       !_coverFailures.contains(bookId) &&
-      _coverRequests.length < _coverLoadLimit;
+      _coverRequests.length + _sourceCoverRequests.length < _coverLoadLimit;
+
+  bool _canLoadSourceCover(BookLocator locator) =>
+      !_closing &&
+      _bridge is LibraryFoldersHost &&
+      !_sourceCoverRequests.contains(locator) &&
+      !_coverCache.containsKey(locator) &&
+      !_coverFailures.contains(locator) &&
+      _coverRequests.length + _sourceCoverRequests.length < _coverLoadLimit;
+
+  void _loadSourceCover(BookLocator locator) {
+    if (!_canLoadSourceCover(locator)) return;
+    final folders = (_bridge as LibraryFoldersHost).folders;
+    _sourceCoverRequests.add(locator);
+    _activeEffects += 1;
+    unawaited(() async {
+      try {
+        final cover = await folders.sourceCover(locator);
+        dispatch(_LibrarySourceCoverLoaded(locator, cover));
+      } catch (_) {
+        dispatch(_LibrarySourceCoverFailed(locator));
+      } finally {
+        dispatch(_LibrarySourceCoverEffectFinished(locator));
+      }
+    }());
+  }
+
+  /// Keeps [cover] for [key], a book id or an unopened file's locator, within
+  /// the cache's bounds, and publishes the covers.
+  void _cacheCover(Object key, Uint8List? loaded) {
+    _coverFailures.remove(key);
+    final cover = loaded ?? Uint8List(0);
+    final previous = _coverCache.remove(key);
+    _coverCacheBytes -= previous?.length ?? 0;
+    _coverCache[key] = cover;
+    _coverCacheBytes += cover.length;
+    while ((_coverCacheBytes > _coverCacheByteLimit ||
+            _coverCache.length > _coverCacheEntryLimit) &&
+        _coverCache.isNotEmpty) {
+      final oldest = _coverCache.keys.first;
+      final removed = _coverCache.remove(oldest)!;
+      _coverCacheBytes -= removed.length;
+      _evictCover(removed);
+    }
+    _publishCovers();
+  }
+
+  void _publishCovers() {
+    _emit(
+      _model.copyWith(
+        covers: Map.unmodifiable({
+          for (final MapEntry(:key, :value) in _coverCache.entries)
+            if (key is int) key: value,
+        }),
+        sourceCovers: Map.unmodifiable({
+          for (final MapEntry(:key, :value) in _coverCache.entries)
+            if (key is BookLocator) key: value,
+        }),
+      ),
+    );
+  }
+
+  /// Reads the title, author and cover of the shelf's unopened EPUBs in the
+  /// background, a few at a time. A later load replaces the pass, and the
+  /// shelf never waits for it: each preview updates its card as it lands.
+  void _previewSources(List<LibrarySourceFile> files) {
+    _previewCancellation?.cancel();
+    _previewCancellation = null;
+    final host = _bridge;
+    if (_closing ||
+        host is! LibraryFoldersHost ||
+        !files.any((file) => file.previewable)) {
+      return;
+    }
+    final folders = (host as LibraryFoldersHost).folders;
+    final pass = ++_previewPass;
+    final cancellation = _previewCancellation = CancellationToken();
+    _activeEffects += 1;
+    unawaited(() async {
+      try {
+        await folders.previewSourceFiles(
+          files,
+          cancellation: cancellation,
+          onPreviewed: (file) => dispatch(_LibrarySourcePreviewed(pass, file)),
+        );
+      } catch (_) {
+        // A preview is optional: the shelf keeps the generated covers.
+      } finally {
+        dispatch(const _LibrarySourcePreviewsFinished());
+      }
+    }());
+  }
 
   FlutterLibraryBook _withoutCover(FlutterLibraryBook book) =>
       FlutterLibraryBook(
@@ -674,6 +811,8 @@ class LibraryController implements Listenable {
       ),
     );
     _discoveryCancellation?.cancel();
+    // A rescan can change the files; the next load starts a new pass.
+    _previewCancellation?.cancel();
     final discovery = _discoveryCancellation = CancellationToken();
     unawaited(() async {
       try {
@@ -710,7 +849,11 @@ class LibraryController implements Listenable {
                           (query.isEmpty ||
                               file.title.toLowerCase().contains(
                                 query.toLowerCase(),
-                              )),
+                              ) ||
+                              (file.author?.toLowerCase().contains(
+                                    query.toLowerCase(),
+                                  ) ??
+                                  false)),
                     )
                     .toList()
               : <LibrarySourceFile>[];
@@ -1166,6 +1309,7 @@ class LibraryController implements Listenable {
     _keepCancellation?.cancel();
     _sourceCancellation?.cancel();
     _discoveryCancellation?.cancel();
+    _previewCancellation?.cancel();
     _openedDocuments?.cancel();
     final queued = List<String>.of(_openedPaths);
     _openedPaths.clear();
@@ -1175,7 +1319,7 @@ class LibraryController implements Listenable {
     }
     _coverCache.clear();
     _coverCacheBytes = 0;
-    _model = _model.copyWith(covers: const {});
+    _model = _model.copyWith(covers: const {}, sourceCovers: const {});
     _adapterRevision += 1;
     _cancelImportAdapter();
     _searchTimer?.cancel();
