@@ -70,6 +70,10 @@
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<false/>
+	<!-- Intake owns disposable Inbox copies, not editable external originals.
+	     Do not publish Documents as a user-managed library; see docs/open-in-shosai.md. -->
+	<key>UIFileSharingEnabled</key>
+	<false/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

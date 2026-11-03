@@ -1382,6 +1382,13 @@ class _IncomingDocuments extends OpenedDocuments {
   }
 
   @override
+  Future<void> discard(Iterable<String> paths) async {
+    for (final path in paths) {
+      await File(path).delete();
+    }
+  }
+
+  @override
   void cancel() {}
 }
 

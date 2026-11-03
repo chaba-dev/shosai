@@ -5,6 +5,8 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.BadParcelableException
+import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
@@ -474,8 +476,131 @@ private object DocumentImportChannel {
     }
 }
 
+/** The same disposable-path intake as iOS, backed by the provider copier above. */
+private object OpenedDocumentsChannel {
+    private var channel: MethodChannel? = null
+    private val pending = mutableListOf<String>()
+    private val owned = mutableMapOf<String, String>()
+    private val waiting = ArrayDeque<String>()
+    private var copying = false
+    private var receivedLaunch = false
+    private val handler = Handler(Looper.getMainLooper())
+
+    fun receiveLaunch(intent: Intent?, restoring: Boolean) {
+        if (!restoring || !receivedLaunch) receive(intent)
+        receivedLaunch = true
+    }
+
+    fun attach(flutterEngine: FlutterEngine) {
+        if (channel != null) return
+        channel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "dev.shosai/opened_documents",
+        ).also {
+            it.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "takePending" -> {
+                        result.success(pending.toList())
+                        pending.clear()
+                    }
+                    "discard" -> {
+                        val paths = call.arguments as? List<*> ?: emptyList<Any>()
+                        val tokens = paths.mapNotNull { path -> owned.remove(path) }
+                        if (tokens.isEmpty()) result.success(null)
+                        else {
+                            var remaining = tokens.size
+                            tokens.forEach { token ->
+                                // Failed deletions remain native cleanup debt; the ordinary
+                                // provider cleanup retry also owns these staging sessions.
+                                DocumentImportManager.releaseAsync(token) {
+                                    remaining--
+                                    if (remaining == 0) result.success(null)
+                                }
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+    }
+
+    fun receive(intent: Intent?) {
+        val uri = openedDocumentUri(intent) ?: return
+        if (waiting.size + owned.size >= MAX_SELECTIONS) return
+        val selection = DocumentImportManager.addSelections(DocumentImportManager.owner, listOf(uri))
+        waiting.addLast(selection.single().getValue("token"))
+        copyNext()
+    }
+
+    private fun copyNext() {
+        if (copying || waiting.isEmpty()) return
+        copying = true
+        val token = waiting.first()
+        val owner = DocumentImportManager.owner
+        DocumentImportManager.acquire(owner, token, UUID.randomUUID().toString(),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    val copy = result as Map<*, *>
+                    val path = copy["path"] as String
+                    val release = copy["releaseToken"] as String
+                    if (DocumentImportManager.beginUse(owner, release)) {
+                        owned[path] = release
+                        pending.add(path)
+                        channel?.invokeMethod("opened", null)
+                    } else DocumentImportManager.releaseAsync(release) {}
+                    finish()
+                }
+                override fun error(code: String, message: String?, details: Any?) {
+                    if (code == "busy") {
+                        copying = false
+                        handler.postDelayed(::copyNext, 100)
+                    } else finish()
+                }
+                override fun notImplemented() = finish()
+                private fun finish() {
+                    DocumentImportManager.discardSelection(token)
+                    waiting.removeFirst()
+                    copying = false
+                    copyNext()
+                }
+            },
+        )
+    }
+}
+
+/** Explicit intents must meet the same contract as the advertised filters. */
+internal fun openedDocumentUri(intent: Intent?): Uri? {
+    if (intent?.type !in setOf("application/epub+zip", "application/pdf")) return null
+    @Suppress("DEPRECATION")
+    val uri = try {
+        when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> (intent.getParcelableExtra<android.os.Parcelable>(
+                Intent.EXTRA_STREAM,
+            ) as? Uri) ?: intent.clipData?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.uri
+            else -> null
+        }
+    } catch (_: BadParcelableException) {
+        null
+    }
+    return uri?.takeIf { it.scheme in setOf("content", "file") }
+}
+
 class MainActivity : FlutterActivity() {
     internal val importHostId = UUID.randomUUID().toString()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // The process-owned engine and queue survive Activity recreation.
+        // After process death, however, a restored Activity must re-acquire.
+        OpenedDocumentsChannel.receiveLaunch(intent, savedInstanceState != null)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        OpenedDocumentsChannel.receive(intent)
+    }
 
     override fun provideFlutterEngine(context: Context): FlutterEngine =
         ShosaiFlutterEngine.get(context)
@@ -486,6 +611,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         DocumentImportManager.initialize(this)
         DocumentImportChannel.attach(this, flutterEngine)
+        OpenedDocumentsChannel.attach(flutterEngine)
         FolderLocations.attach(this, flutterEngine)
         DropboxAuthorization.attach(this, flutterEngine)
         ReaderSystemBars.attach(this, flutterEngine)

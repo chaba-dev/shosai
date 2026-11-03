@@ -1,5 +1,6 @@
 import json
 import pathlib
+import plistlib
 import re
 import struct
 import unittest
@@ -10,6 +11,29 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class FlutterIosIntegrationTest(unittest.TestCase):
+    def test_document_associations_and_ios_private_storage_policy(self):
+        for platform in ("ios", "macos"):
+            with self.subTest(platform=platform):
+                info = plistlib.loads((ROOT / platform / "Runner/Info.plist").read_bytes())
+                documents = info["CFBundleDocumentTypes"]
+                self.assertEqual(
+                    {uti for item in documents for uti in item["LSItemContentTypes"]},
+                    {"org.idpf.epub-container", "com.adobe.pdf"},
+                )
+                for item in documents:
+                    self.assertEqual(item["CFBundleTypeRole"], "Viewer")
+                    self.assertEqual(item["LSHandlerRank"], "Alternate")
+                if platform == "ios":
+                    self.assertFalse(info["UIFileSharingEnabled"])
+                    self.assertFalse(info["LSSupportsOpeningDocumentsInPlace"])
+                else:
+                    epub = next(item for item in info["UTImportedTypeDeclarations"]
+                                if item["UTTypeIdentifier"] == "org.idpf.epub-container")
+                    self.assertEqual(epub["UTTypeTagSpecification"], {
+                        "public.filename-extension": ["epub"],
+                        "public.mime-type": "application/epub+zip",
+                    })
+
     def test_apple_build_modes_select_complete_icon_catalogs(self):
         for platform in ("ios", "macos"):
             with self.subTest(platform=platform):
