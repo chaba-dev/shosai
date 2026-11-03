@@ -1,10 +1,10 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Books another app hands Shōsai on iOS: "Open in Shōsai" in the share
-/// sheet, or Share from Files. iOS copies each book into the app's inbox
-/// before the app hears of it, so only those copies' paths cross here.
+/// Books another app opens in Shōsai. Hosts hand over temporary copies, never
+/// originals: iOS uses its Inbox; Android and macOS stage granted documents.
 class OpenedDocuments {
   int _revision = 0;
   final Set<String> _owned = {};
@@ -59,6 +59,16 @@ class OpenedDocuments {
 
   /// Releases only platform-owned temporary copies, after importing or cancelling.
   Future<void> discard(Iterable<String> paths) async {
+    if (paths.isEmpty) return;
+    if (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      // Native retains cleanup ownership of staging sessions (and Android's
+      // provider resources). Never fall back to deleting an external path.
+      final copies = paths.toList();
+      await _channel.invokeMethod<void>('discard', copies);
+      _owned.removeAll(copies);
+      return;
+    }
     for (final path in paths) {
       try {
         await File(path).delete();

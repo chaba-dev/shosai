@@ -152,9 +152,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     localizations: () => _localizations,
-    openedDocuments: defaultTargetPlatform == TargetPlatform.iOS
-        ? _openedDocuments
-        : null,
+    openedDocuments: switch (defaultTargetPlatform) {
+      TargetPlatform.iOS ||
+      TargetPlatform.android ||
+      TargetPlatform.macOS => _openedDocuments,
+      _ => null,
+    },
     noticeReporter: widget.noticeReporter ?? ignoreNotice,
     evictCover: (bytes) {
       final provider = MemoryImage(bytes);
