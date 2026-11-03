@@ -339,6 +339,60 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a PDF tap turn on a tablet keeps the page shadow as it is', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      const Size(1180, 820),
+      settings: _settings.copyWith(twoPages: true),
+    );
+    // Past the cover, onto a spread.
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+    await tester.pumpAndSettle();
+    final root = tester.getTopLeft(find.byKey(harnessBoundaryKey));
+    final width = tester.getSize(find.byKey(harnessBoundaryKey)).width.ceil();
+    final page = tester.getRect(
+      find.byKey(const ValueKey('reader-pdf-page-shadow')),
+    );
+    // Under the page, where `shadow-page` is darkest, and past its corner.
+    final points = [
+      page.bottomCenter + const Offset(0, 14),
+      page.bottomLeft + const Offset(-4, 10),
+    ];
+    Future<List<int>> shadow() async {
+      final pixels = await captureHarnessRgba(tester);
+      return [
+        for (final point in points)
+          for (final (x, y) in [
+            ((point - root).dx.toInt(), (point - root).dy.toInt()),
+          ])
+            ...pixels.sublist((y * width + x) * 4, (y * width + x) * 4 + 3),
+      ];
+    }
+
+    final before = await shadow();
+    final rect = tester.getRect(_stage);
+    await tester.tapAt(Offset(rect.left + rect.width * .9, rect.center.dy));
+    for (var frame = 0; frame < 20 && curl.evaluate().isEmpty; frame++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+      await tester.pump(const Duration(milliseconds: 5));
+    }
+    expect(curl, findsOneWidget);
+    for (final step in [120, 120]) {
+      await tester.pump(Duration(milliseconds: step));
+      expect(curl, findsOneWidget);
+      final during = await shadow();
+      expect([
+        for (var i = 0; i < before.length; i++) (during[i] - before[i]).abs(),
+      ], everyElement(lessThanOrEqualTo(2)));
+    }
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('keys curl for 350ms and both motion gates change immediately', (
     tester,
   ) async {

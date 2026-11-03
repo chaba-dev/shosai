@@ -476,16 +476,27 @@ class _PageCurlPainter extends CustomPainter {
     final leaf = backward ? incoming : outgoing;
     if (pageRect case final rect?) {
       // Around a PDF page only its place line differs: it fades to the new
-      // page's as the leaf turns, rather than changing before it moves.
-      for (final (stage, opacity) in [(outgoing, 1.0), (incoming, progress)]) {
+      // page's as the leaf turns, rather than changing before it moves. The
+      // two stages are mixed in proportion (added in a layer of their own),
+      // so what both show alike, such as the page's shadow, stays exactly as
+      // it was instead of darkening as one is laid over the other.
+      final mix = incoming == null ? 0.0 : progress.clamp(0.0, 1.0);
+      canvas.saveLayer(Offset.zero & size, Paint());
+      for (final (stage, opacity, blend) in [
+        (outgoing, 1 - mix, BlendMode.srcOver),
+        (incoming, mix, BlendMode.plus),
+      ]) {
         if (stage == null || opacity <= 0) continue;
         canvas.drawImageRect(
           stage,
           Rect.fromLTWH(0, 0, stage.width.toDouble(), stage.height.toDouble()),
           Offset.zero & size,
-          Paint()..color = Color.fromRGBO(0, 0, 0, opacity.clamp(0, 1)),
+          Paint()
+            ..color = Color.fromRGBO(0, 0, 0, opacity)
+            ..blendMode = blend,
         );
       }
+      canvas.restore();
       canvas.translate(rect.left * size.width, rect.top * size.height);
       size = Size(rect.width * size.width, rect.height * size.height);
       canvas.clipRect(Offset.zero & size);
