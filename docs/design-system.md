@@ -47,6 +47,11 @@ Recorded 2026-10-20, the **Bookshelf** look (D1, paper), chosen over colour-only
 - The accent deepens to `#2b3a5c` on light chrome and lifts to `#a8b8df` in dark; the application's `#4d5e86` remains the brand slate for covers and the website.
 - The current sidebar entry, note cards, phone tab cards and the library hero are lifted by `shadow-raised` instead of a border; popovers and peeks carry their hairline in their shadow. The reading stage is a radial gradient from `stage` to `stage-edge`.
 
+Recorded 2026-11-03:
+
+- The library header drops its subtitle, its Refresh button and, beside a sidebar, its Add books; the phone header becomes one row with a search icon and a "+" (about 125 pt more shelf on an iPhone). Rescans happen on returning to the app and on pull-to-refresh.
+- Phones and tablets never read device folders. Add books there offers Choose files and the storage accounts; desktop keeps Connect a folder, in place by default.
+
 ## Principles
 
 1. **The page is the product.** Chrome is quiet, warm and out of the way. Colour lives on the page (highlights, links) and in one accent; the chrome itself is paper, not plastic.
@@ -201,9 +206,9 @@ Each component has a preview in `docs/design-system/components/` and its referen
 **Sidebar** (desktop and tablet). The study's left wall: the places you can go and the books you have open. It replaces the tab strip.
 
 1. The 書 mark and the wordmark, then a field-shaped **Search** button with its shortcut (desktop only).
-2. The places **Library**, **Notes**, **Bookmarks** and **Search**, followed by **Settings**, as 34 px rows with 8 px corners. The current place is a `surface` card lifted by `shadow-raised`, its icon in `accent`; the others sit flat on `chrome` in `ink` and take `hover` under the pointer. Notes and Bookmarks open the library-side lists across all books. Settings is a full page for application preferences and library connections, with changes saved as they are made; the sidebar or bottom navigation remains available. Each connection configures a source directory; its EPUB and PDF files, including subfolders, appear automatically on the library shelf. Connection details never offer individual book imports. Unopened files use filename titles and generated covers until opening identifies their content and reads book metadata. The library's filter row contains only book filters.
+2. The places **Library**, **Notes**, **Bookmarks** and **Search**, followed by **Settings**, as 34 px rows with 8 px corners. The current place is a `surface` card lifted by `shadow-raised`, its icon in `accent`; the others sit flat on `chrome` in `ink` and take `hover` under the pointer. Notes and Bookmarks open the library-side lists across all books. Settings is a full page for application preferences and library connections, with changes saved as they are made; the sidebar or bottom navigation remains available. Each connection configures a source directory; its EPUB and PDF files, including subfolders, appear automatically on the library shelf. Desktop connects device folders as well as Dropbox and Google Drive; phones and tablets connect only the storage accounts and never read a device folder. Connection details never offer individual book imports. Unopened files use filename titles and generated covers until opening identifies their content and reads book metadata. The library's filter row contains only book filters.
 3. **Reading now**: every open book in the order opened, a 34 px cover, the title in `ed-title` at 13/17, the place in `ui-caption` and a 3 px progress bar. The current book is lifted like the current place. The close button shows on hover and always on touch; closing the current book selects the one below it, else above, and with none left the library shows. Rows reorder by dragging and survive relaunch, as tabs did.
-4. **Add books** at the foot opens the file picker.
+4. **Add books** at the foot opens the **AddBooks** choices. It is the only Add books beside a shelf: the library header does not repeat it.
 
 While reading the sidebar collapses to the **rail** (`sh-sidebar--rail`, `rail-width`): the mark, the four places and Settings as icon buttons with tooltips, then the open books as 30 px covers under a hairline, the current one outlined in `accent`. The rail never hides; the reader toolbar sits beside it. Width is `sidebar-width`; the sidebar does not resize.
 
@@ -294,7 +299,11 @@ Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. 
 
 - Cover at 168 px under a deep cover shadow, the kicker *Continue reading* in `ui-label`, the title in `ed-screen`, author and format badge, then the book's latest highlight or note quoted in the editorial face at 18/27 (hidden when there is none, never a placeholder), the place in the reader's terms over a 4 px progress bar at most 480 px wide, and **Continue** (primary) beside **Notes** with its count.
 - It shows the book last opened for reading, not the last added, and carries no recent list: the other open books are in the sidebar's Reading now. The compact form (`sh-hero--compact`) for narrow tablets drops the quote and puts the cover at 72 px; phones replace the hero with Reading now cards.
-- The library screen is titled *Library* in `ed-display` with the book and open counts beside it and the sort control at the right; the shelf below sits under an **All books** section head (`ed-section`) that runs a `line` rule to the right edge.
+- The library screen is titled *Library* in `ed-display` with the book and open counts beside it and the title/author filter at the right, capped at 380 px; the shelf below sits under an **All books** section head (`ed-section`) that runs a `line` rule to the right edge, with the sort control at its end. The header carries no subtitle, no Refresh and, beside a sidebar, no Add books.
+- **Phone header.** One row on `surface`: *Library* at 26/32 in the editorial serif with the book count beside it, then two `touch-target` icon buttons, `search` (ghost) and `plus` (primary, **Add books**). The search icon turns the row into the filter field with **Cancel**, which clears the filter and brings the title back; the row opens in that state while a filter is applied.
+- **Rescanning.** The library rescans its connections when the app returns to the foreground (at most once a minute) and, on touch, when the shelf is pulled down; Ctrl+R or ⌘R rescans from a keyboard. There is no Refresh button.
+
+**AddBooks.** **Choose files** comes first everywhere and copies the chosen EPUB and PDF files into Shōsai. Phones and tablets follow it with **Connect Dropbox** and **Connect Google Drive**, which open the connection on that account; they never offer a folder. Desktop follows it with **Connect a folder**, which connects the folder in place like Settings does, and a **Copy into Shōsai instead** switch, off by default, that copies the folder's books in rather than connecting it. Each choice is a `surface` card with its icon, title and one-line hint. On a phone the choices rise in a bottom sheet on `chrome` with a grabber; elsewhere they are a dialog.
 
 **LibraryBook.** Cover, title, format, place and progress, on the shelf.
 
