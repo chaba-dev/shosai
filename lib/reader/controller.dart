@@ -1605,7 +1605,7 @@ final class ReaderController implements Listenable {
       ),
     );
     _scheduleChromeHide();
-    if (middle || _model.continuousPresentation) return;
+    if (!readerTapTurns(_model, message)) return;
     final delta =
         (message.fraction < .5 ? -1 : 1) * (_model.rightToLeft ? -1 : 1);
     dispatch(ReaderPageStepRequested(delta));
@@ -7684,3 +7684,14 @@ Future<ui.Image?> _noEpubImage(Uint8List bytes) async => null;
 /// The default embedded-font registrar: none, so an embedded family falls back
 /// to the reader's base family.
 Future<void> _noEpubFont(String family, Uint8List bytes) async {}
+
+/// Whether [tap] turns the page: a touch in the outer quarter of the page or
+/// spread, while pages are turned rather than scrolled. The middle half shows
+/// the chrome.
+bool readerTapTurns(ReaderModel model, ReaderPageTapped tap) =>
+    tap.touch &&
+    model.document != null &&
+    !model.chromePinned &&
+    model.selectionPhase == ReaderSelectionPhase.idle &&
+    !model.continuousPresentation &&
+    (tap.fraction < .25 || tap.fraction >= .75);

@@ -826,6 +826,33 @@ void main() {
       },
     );
 
+    testWidgets('a tap in a PDF turn zone turns without waiting for a '
+        'double tap', (tester) async {
+      _setView(tester, const Size(390, 800));
+      await _open(
+        tester,
+        _reader(bridge: _ChromeBridge(), initialPath: '/books/atlas.pdf'),
+      );
+      String folio() =>
+          tester.widget<Text>(find.byKey(const ValueKey('reader-folio'))).data!;
+      expect(folio(), 'page 1 of 3');
+      final surface = tester.getRect(
+        find.byKey(const ValueKey('reader-selection-surface')),
+      );
+      await tester.tapAt(Offset(surface.right - 20, surface.center.dy));
+      // Well inside the 300 ms double-tap timeout.
+      await tester.pump(const Duration(milliseconds: 50));
+      for (var frame = 0; frame < 20 && folio() != 'page 2 of 3'; frame++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+        await tester.pump(const Duration(milliseconds: 5));
+      }
+      expect(folio(), 'page 2 of 3');
+      expect(find.byKey(const ValueKey('reader-fit-contain')), findsOneWidget);
+      await tester.pumpAndSettle();
+    });
+
     for (final rtl in [false, true]) {
       testWidgets('phone PDF swipes turn in book order (RTL: $rtl)', (
         tester,
