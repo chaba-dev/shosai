@@ -131,11 +131,15 @@ final class LibraryFolders {
   Future<void> _tail = Future.value();
   bool _closed = false;
 
-  /// Cancels the previews in flight from each connection when it is
+  /// The previews in flight from each connection, cancelled when it is
   /// removed or pointed at another directory.
-  final Map<String, CancellationToken> _previewCancellations = {};
+  final Map<String, Set<CancellationToken>> _previewCancellations = {};
 
-  void _cancelPreviews(String id) => _previewCancellations.remove(id)?.cancel();
+  void _cancelPreviews(String id) {
+    for (final token in _previewCancellations.remove(id) ?? const {}) {
+      token.cancel();
+    }
+  }
 
   Future<T> _serial<T>(Future<T> Function() effect) {
     if (_closed) return Future.error(const CoreException.cancelled());
@@ -435,14 +439,8 @@ final class LibraryFolders {
     final tokens = <String, CancellationToken>{};
     CancellationToken tokenFor(String id) => tokens.putIfAbsent(id, () {
       final token = CancellationToken();
-      void cancel(void _) => token.cancel();
-      unawaited(cancellation?.whenCancelled.then(cancel));
-      unawaited(
-        _previewCancellations
-            .putIfAbsent(id, CancellationToken.new)
-            .whenCancelled
-            .then(cancel),
-      );
+      unawaited(cancellation?.whenCancelled.then((_) => token.cancel()));
+      _previewCancellations.putIfAbsent(id, () => {}).add(token);
       return token;
     });
 
@@ -496,7 +494,16 @@ final class LibraryFolders {
       }
     }
 
-    await Future.wait([for (var i = 0; i < concurrency; i++) worker()]);
+    try {
+      await Future.wait([for (var i = 0; i < concurrency; i++) worker()]);
+    } finally {
+      for (final MapEntry(key: id, value: token) in tokens.entries) {
+        _previewCancellations[id]?.remove(token);
+        if (_previewCancellations[id]?.isEmpty ?? false) {
+          _previewCancellations.remove(id);
+        }
+      }
+    }
   }
 
   /// Optimized providers own server pagination; others retain the bounded
