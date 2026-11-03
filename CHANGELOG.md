@@ -124,6 +124,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Show a quiet PDF's place under the page on tablet and desktop (#276)
 - *(reader)* Number EPUB pages from the start of the book (#277)
 - *(intake)* Open Android and macOS books in Shōsai (#283)
+- *(library)* One-row phone header, Add books by platform, no folders on mobile (#279)
 
 ### 🐛 Bug Fixes
 
