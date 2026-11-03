@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-02
+## [0.1.0] - 2026-11-03
 
 ### 🚀 Features
 
@@ -121,6 +121,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Add interactive page curls (#266)
 - *(reader)* Show highlight colours as swatches in the selection capsule (#268)
 - *(reader)* Search for the selected text from the selection capsule (#269)
+- *(reader)* Show a quiet PDF's place under the page on tablet and desktop (#276)
 
 ### 🐛 Bug Fixes
 
@@ -173,6 +174,11 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Separate pointer interaction from layout and quiet page furniture (#263)
 - *(reader)* Paint selections and highlights as one band per line (#270)
 - *(library)* Keep a removed source book off the shelf (#255)
+- *(reader)* Start a PDF page turn promptly, with its page line (#272)
+- *(reader)* Keep the stage and page shadow still under a curl (#273)
+- *(android)* Keep the middle of the side edges for page turns (#274)
+- *(reader)* Start the panel scrim under the toolbar, below the status bar (#275)
+- *(reader)* Step the text size back to exactly the size it came from (#278)
 
 ### 🚜 Refactor
 
