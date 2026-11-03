@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_core/shosai_core.dart' hide Row;
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/library/controller.dart';
+import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 import '../support/production_shell_harness.dart';
 
@@ -114,7 +116,13 @@ class _SourceBridge extends HarnessBridge implements LibraryFoldersHost {
 final class _Fixture {
   _Fixture._(this.directory, this.store, this.location, this.folders);
 
-  static Future<_Fixture> create(Map<String, String> files) async {
+  static Future<_Fixture> create(
+    Map<String, String> files, {
+    Map<BookFormat, BookPreviewer> previewers = const {
+      BookFormat.epub: EpubPreviewer(),
+    },
+    Map<String, List<int>> bytes = const {},
+  }) async {
     final directory = await Directory.systemTemp.createTemp('shosai-preview');
     final books = Directory('${directory.path}/source')..createSync();
     for (final MapEntry(key: name, value: fixture) in files.entries) {
@@ -123,6 +131,9 @@ final class _Fixture {
       } else {
         File(fixture).copySync('${books.path}/$name');
       }
+    }
+    for (final MapEntry(key: name, value: content) in bytes.entries) {
+      File('${books.path}/$name').writeAsBytesSync(content);
     }
     final store = await Store.open('${directory.path}/library.sqlite3');
     final location = _Location(await FolderLocation.open('one', books.path));
@@ -133,6 +144,7 @@ final class _Fixture {
       () async => '${directory.path}/unused',
       BookFileCache(store, '${directory.path}/cache'),
       providers: [_Provider(location)],
+      previewers: previewers,
     );
     await folders.add(LibraryConnection('one', 'Books', 'fixture', const {}));
     final fixture = _Fixture._(directory, store, location, folders);
@@ -154,6 +166,36 @@ final class _Fixture {
   }
 }
 
+/// A one-page PDF whose content stream is about 200 KiB.
+List<int> _heavyPdf() {
+  final content = StringBuffer('0.1 0.6 0.3 rg 0 0 300 400 re f\n');
+  while (content.length < 200 * 1024) {
+    content.write('% ${'x' * 76}\n');
+  }
+  final objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Contents 4 0 R >>',
+    '<< /Length ${content.length} >>\nstream\n${content}endstream',
+  ];
+  final pdf = StringBuffer('%PDF-1.7\n');
+  final offsets = <int>[];
+  for (var index = 0; index < objects.length; index++) {
+    offsets.add(pdf.length);
+    pdf.write('${index + 1} 0 obj\n${objects[index]}\nendobj\n');
+  }
+  final xref = pdf.length;
+  pdf.write('xref\n0 ${objects.length + 1}\n0000000000 65535 f \n');
+  for (final offset in offsets) {
+    pdf.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  pdf.write(
+    'trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n'
+    'startxref\n$xref\n%%EOF\n',
+  );
+  return pdf.toString().codeUnits;
+}
+
 LibrarySourceFile _named(List<LibrarySourceFile> files, String name) =>
     files.singleWhere((file) => file.entry.name == name);
 
@@ -168,7 +210,7 @@ void main() {
     final discovered = await folders.discover();
     expect(
       {for (final file in discovered) file.entry.name: file.previewable},
-      {'book.epub': true, 'Broken.epub': true, 'paper.pdf': false},
+      {'book.epub': true, 'Broken.epub': true, 'paper.pdf': true},
     );
     expect(_named(discovered, 'book.epub').title, 'book');
 
@@ -193,10 +235,43 @@ void main() {
     // The previews come back with the catalog, and nothing is read twice.
     final again = await folders.discover(refresh: true);
     expect(_named(again, 'book.epub').title, 'Sample Book');
-    expect(again.where((file) => file.previewable), isEmpty);
+    // The PDF is left alone: these folders have no PDF previewer.
+    expect(again.where((file) => file.previewable).map((f) => f.entry.name), [
+      'paper.pdf',
+    ]);
     final reads = fixture.location.reads;
     await folders.previewSourceFiles(again, onPreviewed: (_) => fail('read'));
     expect(fixture.location.reads, reads);
+  });
+
+  test('unopened PDFs get their first page and own title', () async {
+    final fixture = await _Fixture.create(
+      {'scan_0001.pdf': 'fixtures/sample.pdf'},
+      previewers: {
+        BookFormat.epub: const EpubPreviewer(),
+        BookFormat.pdf: PdfEnginePreviewer(PdfrxPdfEngine(), budget: 64 * 1024),
+      },
+      // A first page heavier than the budget.
+      bytes: {'heavy.pdf': _heavyPdf()},
+    );
+    final folders = fixture.folders;
+    final previewed = <LibrarySourceFile>[];
+    await folders.previewSourceFiles(
+      await folders.discover(),
+      onPreviewed: previewed.add,
+    );
+    final scan = _named(previewed, 'scan_0001.pdf');
+    expect(scan.preview!.hasCover, isTrue);
+    expect(await folders.sourceCover(scan.locator), isNotEmpty);
+    // A file that needs more than the budget is recorded as read, with
+    // nothing to show, and is not fetched again.
+    final heavy = _named(previewed, 'heavy.pdf');
+    expect(heavy.preview!.hasCover, isFalse);
+    expect(heavy.title, 'heavy');
+    expect(
+      (await folders.discover()).where((file) => file.previewable),
+      isEmpty,
+    );
   });
 
   test('previews run a few at a time and stop with the pass', () async {

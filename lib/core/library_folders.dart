@@ -46,11 +46,11 @@ final class LibrarySourceFile {
       preview?.title ?? entry.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
   String? get author => preview?.author;
 
-  /// Whether a preview may still be read: an EPUB, reachable, not yet read.
-  bool get previewable =>
-      preview == null &&
-      failure == null &&
-      entry.name.toLowerCase().endsWith('.epub');
+  BookFormat? get format =>
+      BookFormat.fromExtension(entry.name.split('.').last.toLowerCase());
+
+  /// Whether a preview may still be read: a book, reachable, not yet read.
+  bool get previewable => preview == null && failure == null && format != null;
 
   LibrarySourceFile _withPreview(SourcePreview? preview) => LibrarySourceFile(
     locationId,
@@ -91,8 +91,16 @@ final class LibraryFolders {
     this._newPath,
     this._cache, {
     List<ConnectionProvider> providers = const [FolderConnectionProvider()],
+    Map<BookFormat, BookPreviewer> previewers = const {
+      BookFormat.epub: EpubPreviewer(),
+    },
     this.folderSources = true,
-  }) : _providers = List.unmodifiable(providers);
+  }) : _providers = List.unmodifiable(providers),
+       _previewers = Map.unmodifiable(previewers);
+
+  /// How an unopened file of each format is previewed; a format without
+  /// one keeps its generated cover until it is opened.
+  final Map<BookFormat, BookPreviewer> _previewers;
 
   /// Whether device folders may be read as book sources. Phones and tablets
   /// read books only from files they were given and from storage accounts
@@ -432,7 +440,10 @@ final class LibraryFolders {
     CancellationToken? cancellation,
     int concurrency = sourcePreviewConcurrency,
   }) async {
-    final pending = files.where((file) => file.previewable).toList();
+    final pending = [
+      for (final file in files)
+        if (file.previewable && _previewers.containsKey(file.format)) file,
+    ];
     final locations = <String, Future<LibraryLocation>>{};
     // One token per connection in this pass, stopped by the pass or by the
     // connection's removal.
@@ -457,7 +468,11 @@ final class LibraryFolders {
           id,
           () => _provider(grant.provider).open(grant),
         );
-        metadata = await previewEpub(location, file.entry, cancellation: token);
+        metadata = await _previewers[file.format]!.preview(
+          location,
+          file.entry,
+          cancellation: token,
+        );
       } on CoreException catch (error) {
         if (error.kind == CoreErrorKind.cancelled || token.isCancelled) return;
         metadata = const BookMetadata();

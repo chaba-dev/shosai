@@ -34,6 +34,21 @@ abstract interface class PdfEngine {
   Future<PdfEngineDocument> open(String path);
 }
 
+/// A [PdfEngine] that can also open a document it reads only in parts.
+abstract interface class RangedPdfEngine implements PdfEngine {
+  /// Opens a [size]-byte document whose bytes come from [read]: it copies up
+  /// to `length` bytes at `position` into `buffer` and returns how many it
+  /// copied. The engine reads only what it needs, and loads only the first
+  /// page, so a document's first page and metadata can be read without the
+  /// rest; other pages' sizes are not known. A read that throws fails the
+  /// open, or the render that needed it, as an unreadable document.
+  Future<PdfEngineDocument> openRanged(
+    int size,
+    Future<int> Function(Uint8List buffer, int position, int length) read, {
+    required String sourceName,
+  });
+}
+
 /// One open PDF document.
 abstract interface class PdfEngineDocument {
   /// Number of pages.
