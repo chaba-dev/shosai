@@ -239,6 +239,10 @@ final class ReaderController implements Listenable {
   /// The layout whose chapters are being counted, if any.
   _EpubPagesKey? _epubPagesCounting;
 
+  /// The layout a page about to be installed is numbered at, while its model
+  /// is derived and before its session replaces the current one.
+  _EpubLayoutKey? _epubNumberingKey;
+
   /// The pause the count is in between chapters or batches, ended early when
   /// the book is released.
   Timer? _epubPagesPause;
@@ -1478,7 +1482,9 @@ final class ReaderController implements Listenable {
         _recoverIfIdle();
         _startRequestedRelayoutIfReady();
         _disposeBridgeIfIdle();
-        if (!_model.relayoutBusy) _countEpubBookPages();
+        if (!_model.relayoutBusy && !_model.relayoutPending) {
+          _countEpubBookPages();
+        }
       case _ReaderAnnotationListFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _annotationRevision) {
@@ -2820,46 +2826,51 @@ final class ReaderController implements Listenable {
     // source, or while releasing the previous page, must not leave a published
     // page whose session this effect still thinks it owns (and would then
     // release), nor an installed session whose page the model does not show.
-    final next = _deriveModel(
-      _model.copyWith(
-        unit: unit,
-        readingOffset: readingOffset,
-        // The more panel's page input follows the reader's location, the way
-        // the pinned reference syncs `page_input` on navigation (RD-10).
-        pageInput: changedLocation
-            ? ReaderPageInputPresentation(draft: '${unit + 1}')
-            : _model.pageInput,
-        pageImage: null,
-        epubPage: page,
-        pdfSpread: null,
-        readingPage: null,
-        locationRequestRevision: changedLocation
-            ? _model.locationRequestRevision + 1
-            : _model.locationRequestRevision,
-        selectionSurface: _freezeSurface(page.surface),
-        annotations: annotations,
-        savedSelections: _savedSelections(annotations, unit),
-        anchor: offset ?? _model.anchor,
-        focus: offset == null ? _model.focus : offset + (length ?? 0),
-        selectionPhase: length == null
-            ? _model.selectionPhase
-            : ReaderSelectionPhase.selected,
-        relayoutError: null,
-        layoutRefusal: changedLocation ? null : _model.layoutRefusal,
-        annotationsReady: annotationError == null,
-        annotationError:
-            annotationError ??
-            (_model.annotationsReady ? _model.annotationError : null),
-        layout: layout,
-        relayoutBusy: false,
-        relayoutPending: false,
-        selectionError: selectionError,
-        contentState: ReaderContentState.ready,
-        selectionVisualLine: null,
-        selectionPreferredX: null,
+    final adopting = session != null && !identical(session, previousSession);
+    // The page is numbered at the layout it was laid out at, which is the
+    // session it brings, not the one it replaces.
+    final next = _numberingAt(
+      adopting ? sessionKey : null,
+      () => _deriveModel(
+        _model.copyWith(
+          unit: unit,
+          readingOffset: readingOffset,
+          // The more panel's page input follows the reader's location, the way
+          // the pinned reference syncs `page_input` on navigation (RD-10).
+          pageInput: changedLocation
+              ? ReaderPageInputPresentation(draft: '${unit + 1}')
+              : _model.pageInput,
+          pageImage: null,
+          epubPage: page,
+          pdfSpread: null,
+          readingPage: null,
+          locationRequestRevision: changedLocation
+              ? _model.locationRequestRevision + 1
+              : _model.locationRequestRevision,
+          selectionSurface: _freezeSurface(page.surface),
+          annotations: annotations,
+          savedSelections: _savedSelections(annotations, unit),
+          anchor: offset ?? _model.anchor,
+          focus: offset == null ? _model.focus : offset + (length ?? 0),
+          selectionPhase: length == null
+              ? _model.selectionPhase
+              : ReaderSelectionPhase.selected,
+          relayoutError: null,
+          layoutRefusal: changedLocation ? null : _model.layoutRefusal,
+          annotationsReady: annotationError == null,
+          annotationError:
+              annotationError ??
+              (_model.annotationsReady ? _model.annotationError : null),
+          layout: layout,
+          relayoutBusy: false,
+          relayoutPending: false,
+          selectionError: selectionError,
+          contentState: ReaderContentState.ready,
+          selectionVisualLine: null,
+          selectionPreferredX: null,
+        ),
       ),
     );
-    final adopting = session != null && !identical(session, previousSession);
     if (adopting) {
       _epubSession = session;
       _epubSessionKey = sessionKey;
@@ -6727,7 +6738,9 @@ final class ReaderController implements Listenable {
       }
       _startRequestedRelayoutIfReady();
       // A count that stopped for the operation picks up where it left off.
-      if (!_model.relayoutBusy) _countEpubBookPages();
+      if (!_model.relayoutBusy && !_model.relayoutPending) {
+        _countEpubBookPages();
+      }
     }
     _activeBridgeOperations -= 1;
     _recoverIfIdle();
