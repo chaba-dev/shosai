@@ -84,6 +84,8 @@ extension on ReaderController {
         : key == null
         ? null
         : _epubBookPages[key]?.before(page.unit);
+    // ignore: avoid_print
+    print('SHOSAI-DBG ordinal unit=${page.unit} index=${page.pageIndex} key=h${key?.height} f${key?.fontSize} before=$before entries=${[for (final k in _epubBookPages.keys) 'h${k.height}/f${k.fontSize}']}');
     return before == null ? null : before + page.pageIndex + 1;
   }
 

@@ -2126,6 +2126,8 @@ final class ReaderController implements Listenable {
   void _layoutChanged(ReaderLayout layout, {double? height}) {
     if (!layout.isValid || _closing) return;
     final epubHeight = _epubPageHeight(height);
+    // ignore: avoid_print
+    print('SHOSAI-DBG layoutChanged w=${layout.width} f=${layout.fontSize} h=$epubHeight installed=$_epubLayoutHeight busy=${_model.busy} chrome=${_model.chromeShown}');
     if (_suspended || _recovering) {
       _requestedLayout = layout;
       _failedLayout = null;
@@ -2835,6 +2837,8 @@ final class ReaderController implements Listenable {
     // page whose session this effect still thinks it owns (and would then
     // release), nor an installed session whose page the model does not show.
     final adopting = session != null && !identical(session, previousSession);
+    // ignore: avoid_print
+    print('SHOSAI-DBG pageLoaded unit=$unit start=${page.canonicalStart} index=${page.pageIndex} adopting=$adopting key=${adopting ? 'w=${sessionKey?.pageWidth} h=${sessionKey?.height} f=${sessionKey?.fontSize} s=${sessionKey?.lineSpacing}' : 'same h=${_epubSessionKey?.height}'} viewport=$_epubViewportHeight');
     // The page is numbered at the layout it was laid out at, which is the
     // session it brings, not the one it replaces.
     final next = _numberingAt(
