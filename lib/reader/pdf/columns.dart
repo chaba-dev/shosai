@@ -224,10 +224,7 @@ PdfColumnPage _analyzePage(
       return fallback();
     }
   }
-  return PdfColumnPage(
-    columnCount: gutters.length + 1,
-    regions: padded,
-  );
+  return PdfColumnPage(columnCount: gutters.length + 1, regions: padded);
 }
 
 // Keep raster antialiasing at crop edges without widening the physical line
