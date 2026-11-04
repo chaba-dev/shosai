@@ -282,14 +282,33 @@ Head, then scope and count, then the book note and groups per section in reading
 | Row | EPUB | PDF |
 | --- | --- | --- |
 | Page theme | Paper, Sepia, Night | Same; Night inverts page luminance |
-| Size | **Text size**, 70%–160% in 10% steps; pages reflow and the place is kept | **Zoom**: Fit width, Fit page, then 50%–400%; pages re-render sharp |
+| Size | **Text size**, 70%–160% in 10% steps; pages reflow and the place is kept | **Zoom**: Columns, Fit width, Fit page; size steps re-render sharp. Columns uses 50%–400% of the fitted column size |
 | Pages | One or Two; Two by default where the stage is wide enough | Same |
 | Font | **Book’s own** (default), Serif, Sans | Not shown: PDF pages keep their fonts |
 | Typeface | The current type set’s name, opening the TypefacePicker | Same |
 | Progress | **Page** (default), **Percent**, **Off**: what the folio shows while the chrome is hidden | Same, for the place under a PDF's page or spread |
-| Page animations | A switch, on by default: pages curl over; off, the page changes at once | Same |
+| Page animations | A switch, on by default: pages curl over; off, the page changes at once | Whole pages curl; Columns screens slide. Off or reduced motion changes instantly |
 
-Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; theme, text size, line spacing, Pages, Progress and Page animations are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; the explicit PDF fit choice (Columns, Fit width or Fit page), theme, text size, line spacing, Pages, Progress and Page animations are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+
+**PDF Columns.** A strip of original PDF crops, not reflowed text: full-width
+bands and figures alternate with ordered columns, including declared
+right-to-left column order. Each piece is rendered at its fitted size and
+display density, never by enlarging a page bitmap. Wider bands shrink to fit;
+uncertain layouts and scans stay complete at fit width inside the same strip.
+Screens break between physical lines and may contain the end of one column
+and the start of the next, or continue across pages. A short muted rule marks
+a column change; a light band naming the new page marks a page change.
+
+The quiet outer quarters and swipes move one **screen**, not one PDF page;
+the middle half reveals chrome. PageUp/PageDown and edge controls use the same
+screen step. The top folio always names the topmost visible original page,
+“page x of y”, beside a 12 × 15 pt page outline shading that page's visible
+area. Neither fit-width fallback nor Columns uses facing-page layout. Columns
+slides when Page animations is on and changes instantly when it is off or the
+platform requests reduced motion; it never curls. Page-coordinate restoration,
+selection/mark/link mapping, double-tap entry and phone auto-defaults are the
+successor integration, not a second text layout in this component.
 
 **TypefacePicker.** The six type sets as a radio list (`role="radiogroup"`), each row showing the set’s name in its sans, its faces in `ui-caption` and a one-line specimen in its serif, so the choice is made by looking rather than by name. The current set carries a check in `accent`. Choosing applies at once to the interface, the editorial text and the reader’s Serif and Sans fonts; a book’s own fonts are untouched. Rows never preview with system fallbacks: a set that is not bundled is not listed.
 

@@ -15,10 +15,26 @@ body { margin: 0; background: var(--canvas); }
 .pg .sh-page__folio { margin-top: 18px; }
 .ja { width: 500px; height: 720px; padding: 48px 60px 32px; }
 .ja .sh-page__body { font-family: var(--font-book); }
+.columns { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.columns figure { width: 330px; max-width: 100%; margin: 0; }
+.columns img { display: block; width: 100%; height: auto; border: 1px solid var(--border); }
+.columns figcaption, .columns-note { font-size: 12px; line-height: 18px; color: var(--ink-muted); }
+.columns figcaption { margin-top: 8px; }
+.columns-note { padding: 0 32px 24px; max-width: 920px; }
 </style>
 </head>
 <body>
 <div class="sh">
+  <div class="cap">PDF · Columns · native Linux reader at 440 × 900 pt · original page pixels, not text reflow</div>
+  <div class="sh-stage columns" aria-label="PDF Columns reading surfaces">
+    <figure><img src="images/columns-title.jpg" alt="First screen: fitted title band above a larger fitted column, with page 1 of 8 and visible-area outline"><figcaption>Wider title bands shrink to fit. Columns use their own fitted scale. The 12 × 15 pt outline marks the visible original-page area.</figcaption></figure>
+    <figure><img src="images/columns-next.jpg" alt="Next screen continues the first column and crosses to the next at a short muted rule"><figcaption>One screen later. Breaks fall between physical lines; a short muted rule marks the column change.</figcaption></figure>
+    <figure><img src="images/columns-page-band.jpg" alt="A screen spanning PDF pages 1 and 2, separated by a light band naming page 2"><figcaption>The strip continues across pages. A page-number band marks the new page; the top folio still names the topmost visible page.</figcaption></figure>
+  </div>
+  <p class="columns-note">Captured by <code>integration_test/pdf_columns_test.dart</code>, not a browser imitation of the reader. Quiet outer zones and swipes move one screen; the middle reveals chrome. Page animations slides the strip, never curls it; off or reduced motion changes instantly. Scans and uncertain layouts stay at fit width. Paper: Slee, Agarwal and Kwiatkowski, <em>Thrift: Scalable Cross-Language Services Implementation</em> (2007), Apache Thrift; see <a href="../../../fixtures/pdf-columns/README.md">source, license and attribution</a>.</p>
+  <div class="sh-stage columns">
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns-title.jpg" aria-label="Native Linux Columns interaction recording"><source src="images/columns-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop: Display fit changes, keyboard screen steps and vertical slides. A narrow desktop window, not an Android device.</figcaption></figure>
+  </div>
   <div class="cap">Two-page spread · EPUB · Paper · left to right</div>
   <div class="sh-stage">
     <div class="sh-spread" id="en">
