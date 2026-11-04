@@ -35,14 +35,14 @@ final class PdfColumnPage {
 }
 
 /// Analyzes a document (or a representative page sample) without mutating it.
-/// The output has one entry per input page, in the same order. A fallback is
-/// one complete page: a scan or an uncertain layout must never lose content.
+/// The output has one entry per input page, in the same order. Fallback bounds
+/// trim only proven empty margins; unknown painted coverage keeps the page.
 ///
 /// Gutters need at least three lines on either side, simultaneous vertical
 /// extent, and a gap of at least 12pt or 1.2 line heights. Up to 20% spanning
 /// lines may cross a gutter (titles, equations, etc.); those become bands.
-/// This deliberately conservative geometric heuristic is not OCR or semantic
-/// figure/table recognition. [rightToLeft] comes from `/Direction /R2L`, not
+/// Connected painted objects and their labels are indivisible figures/tables,
+/// not OCR or semantic recognition. [rightToLeft] comes from `/Direction /R2L`, not
 /// from guessing the script of the page's text.
 List<PdfColumnPage> analyzePdfColumns(
   List<PdfPageGeometry> pages, {
@@ -108,29 +108,43 @@ PdfColumnPage _analyzePage(
   List<PdfTextLine> lines,
   bool rtl,
 ) {
+  final ink = [
+    ...lines.map((line) => line.bounds),
+    ...page.images,
+    ...page.graphics,
+  ];
   PdfColumnPage fallback() => PdfColumnPage(
     columnCount: 0,
     regions: [
       PdfReadingRegion(
         kind: PdfRegionKind.page,
-        bounds: PdfRect(0, 0, page.width, page.height),
+        bounds: page.hasUnboundedGraphics || ink.isEmpty
+            ? PdfRect(0, 0, page.width, page.height)
+            : _padded(ink.reduce((a, b) => a.union(b)), page),
         lines: lines,
       ),
     ],
   );
   if (page.hasUnboundedGraphics) return fallback();
-  final gutters = _gutters(lines);
+  final textGutters = _gutters(lines);
+  final figures = _figures(lines, [
+    ...page.images,
+    ...page.graphics,
+  ], textGutters);
+  final owned = figures.expand((r) => r.lines).toSet();
+  final body = lines.where((line) => !owned.contains(line)).toList();
+  final bodyGutters = _gutters(body);
+  final gutters = bodyGutters.isEmpty ? textGutters : bodyGutters;
   if (gutters.isEmpty) return fallback();
   bool spans(PdfRect r) => gutters.any((x) => r.left < x && r.right > x);
   final bands = <PdfReadingRegion>[
-    for (final line in lines.where((line) => spans(line.bounds)))
+    for (final line in body.where((line) => spans(line.bounds)))
       PdfReadingRegion(
         kind: PdfRegionKind.band,
         bounds: line.bounds,
         lines: [line],
       ),
-    for (final image in page.images.where(spans))
-      PdfReadingRegion(kind: PdfRegionKind.figure, bounds: image),
+    ...figures.where((r) => spans(r.bounds)),
   ]..sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
   // Adjacent spanning lines are one title/equation band; an image always owns
   // its own region, even when it touches a title or caption.
@@ -141,7 +155,7 @@ PdfColumnPage _analyzePage(
         last.kind == PdfRegionKind.band &&
         band.kind == PdfRegionKind.band &&
         band.bounds.top - last.bounds.bottom <=
-            math.max(last.lines.last.bounds.height, band.bounds.height) * 1.5) {
+            math.max(last.lines.last.bounds.height, band.bounds.height) * 2) {
       merged[merged.length - 1] = PdfReadingRegion(
         kind: PdfRegionKind.band,
         bounds: last.bounds.union(band.bounds),
@@ -152,13 +166,15 @@ PdfColumnPage _analyzePage(
     }
   }
   final regions = <PdfReadingRegion>[];
-  final remaining = lines.where((line) => !spans(line.bounds)).toList();
-  final images = page.images.where((r) => !spans(r)).toList();
+  final remaining = body.where((line) => !spans(line.bounds)).toList();
+  final localFigures = figures.where((r) => !spans(r.bounds)).toList();
   void flush(double before) {
     final slabLines = remaining.where((l) => l.bounds.top < before).toList();
-    final slabImages = images.where((r) => r.top < before).toList();
+    final slabFigures = localFigures
+        .where((r) => r.bounds.top < before)
+        .toList();
     remaining.removeWhere(slabLines.contains);
-    images.removeWhere(slabImages.contains);
+    localFigures.removeWhere(slabFigures.contains);
     final order = List.generate(gutters.length + 1, (i) => i);
     if (rtl) order.sort((a, b) => b.compareTo(a));
     for (final column in order) {
@@ -168,7 +184,7 @@ PdfColumnPage _analyzePage(
       regions.addAll(
         _columnRegions(
           slabLines.where((l) => belongs(l.bounds)).toList(),
-          slabImages.where(belongs).toList(),
+          slabFigures.where((r) => belongs(r.bounds)).toList(),
         ),
       );
     }
@@ -176,45 +192,96 @@ PdfColumnPage _analyzePage(
 
   for (final band in merged) {
     // A full-width band owns the complete horizontal slice, including author
-    // affiliations or figure labels that do not themselves cross the gutter.
-    final inside = remaining
-        .where(
-          (l) =>
-              l.bounds.top < band.bounds.bottom &&
-              l.bounds.bottom > band.bounds.top,
-        )
-        .toList();
-    remaining.removeWhere(inside.contains);
+    // rows and short caption tails that do not themselves cross the gutter.
+    var bounds = band.bounds;
+    final inside = <PdfTextLine>[];
+    while (true) {
+      final adjacent = remaining.where((l) {
+        final gap = l.bounds.height * .75;
+        return l.bounds.height <= l.bounds.width &&
+            l.bounds.top < bounds.bottom + gap &&
+            l.bounds.bottom > bounds.top - gap;
+      }).toList();
+      if (adjacent.isEmpty) break;
+      remaining.removeWhere(adjacent.contains);
+      inside.addAll(adjacent);
+      bounds = adjacent.fold(bounds, (r, l) => r.union(l.bounds));
+    }
     final bandLines = [...band.lines, ...inside]
       ..sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
-    final bounds = inside.fold(band.bounds, (r, l) => r.union(l.bounds));
     flush(bounds.top);
     regions.add(
       PdfReadingRegion(kind: band.kind, bounds: bounds, lines: bandLines),
     );
   }
   flush(double.infinity);
-  // Crops must own all retained ink exactly once. Paths/shadings are not
-  // segmented into semantic figures: uncertain coverage keeps the full page.
-  for (final ink in [
-    ...lines.map((line) => line.bounds),
-    ...page.images,
-    ...page.graphics,
-  ]) {
-    final owners = regions.where((r) => r.bounds.overlaps(ink)).toList();
-    if (owners.length != 1 || !owners.single.bounds.contains(ink)) {
+  final padded = _padRegions(regions, page);
+  // Keep the coverage guard independent of figure detection: every retained
+  // painted object and physical line must belong to exactly one final crop.
+  for (final rect in ink) {
+    final owners = padded.where((r) => r.bounds.overlaps(rect)).toList();
+    if (owners.length != 1 || !owners.single.bounds.contains(rect)) {
       return fallback();
     }
   }
-  return PdfColumnPage(columnCount: gutters.length + 1, regions: regions);
+  return PdfColumnPage(
+    columnCount: gutters.length + 1,
+    regions: padded,
+  );
+}
+
+// Keep raster antialiasing at crop edges without widening the physical line
+// boxes used for screen cuts. Neighboring crops meet at whitespace midpoints.
+PdfRect _padded(PdfRect r, PdfPageGeometry page) => PdfRect(
+  math.max(0, r.left - 1),
+  math.max(0, r.top - 1),
+  math.min(page.width, r.right + 1),
+  math.min(page.height, r.bottom + 1),
+);
+
+List<PdfReadingRegion> _padRegions(
+  List<PdfReadingRegion> regions,
+  PdfPageGeometry page,
+) {
+  final paddedRegions = <PdfReadingRegion>[];
+  for (final region in regions) {
+    final r = region.bounds;
+    final padded = _padded(r, page);
+    var left = padded.left;
+    var top = padded.top;
+    var right = padded.right;
+    var bottom = padded.bottom;
+    for (final other in regions) {
+      if (identical(region, other)) continue;
+      final b = other.bounds;
+      if (r.left - 1 < b.right + 1 && r.right + 1 > b.left - 1) {
+        if (r.bottom <= b.top) {
+          bottom = math.min(bottom, (r.bottom + b.top) / 2);
+        }
+        if (r.top >= b.bottom) top = math.max(top, (r.top + b.bottom) / 2);
+      }
+      if (r.top - 1 < b.bottom + 1 && r.bottom + 1 > b.top - 1) {
+        if (r.right <= b.left) right = math.min(right, (r.right + b.left) / 2);
+        if (r.left >= b.right) left = math.max(left, (r.left + b.right) / 2);
+      }
+    }
+    paddedRegions.add(
+      PdfReadingRegion(
+        kind: region.kind,
+        bounds: PdfRect(left, top, right, bottom),
+        lines: region.lines,
+      ),
+    );
+  }
+  return paddedRegions;
 }
 
 List<PdfReadingRegion> _columnRegions(
   List<PdfTextLine> lines,
-  List<PdfRect> images,
+  List<PdfReadingRegion> figures,
 ) {
   lines.sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
-  images.sort((a, b) => a.top.compareTo(b.top));
+  figures.sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
   final regions = <PdfReadingRegion>[];
   void textBefore(double y) {
     final block = lines.where((l) => l.bounds.top < y).toList();
@@ -229,27 +296,97 @@ List<PdfReadingRegion> _columnRegions(
     );
   }
 
-  for (final image in images) {
-    // Labels already painted into this crop belong to the figure, not a
-    // second text crop after it. Partial overlaps fail the coverage check.
-    final labels = lines.where((line) => image.contains(line.bounds)).toList();
-    lines.removeWhere(labels.contains);
-    textBefore(image.top);
-    regions.add(
-      PdfReadingRegion(
-        kind: PdfRegionKind.figure,
-        bounds: image,
-        lines: labels,
-      ),
-    );
+  for (final figure in figures) {
+    textBefore(figure.bounds.top);
+    regions.add(figure);
   }
   textBefore(double.infinity);
   return regions;
 }
 
+/// Tiny raster hyphens and vector underlines within a line are inline ink.
+/// Other painted components own intersecting labels/cells, before gutters are
+/// inferred. Repeating to closure prevents partial labels and overlapping
+/// subfigures from appearing in multiple crops. Lines themselves stay physical.
+List<PdfReadingRegion> _figures(
+  List<PdfTextLine> lines,
+  List<PdfRect> objects,
+  List<double> gutters,
+) {
+  final width = lines.isEmpty
+      ? 0.0
+      : lines.map((l) => l.bounds).reduce((a, b) => a.union(b)).width;
+  final heights =
+      lines
+          .where((l) => l.bounds.width >= width * .2)
+          .map((l) => l.bounds.height)
+          .toList()
+        ..sort();
+  final height = heights.isEmpty ? 10.0 : heights[heights.length ~/ 2];
+  final gap = height * .7;
+  final figures = <PdfReadingRegion>[
+    for (final object in objects)
+      if (!lines.any(
+        (line) =>
+            line.bounds.contains(object) &&
+            object.height < line.bounds.height * .5,
+      ))
+        PdfReadingRegion(kind: PdfRegionKind.figure, bounds: object),
+  ];
+  bool near(PdfRect a, PdfRect b, double distance) =>
+      a.left <= b.right + distance &&
+      a.right + distance >= b.left &&
+      a.top <= b.bottom + distance &&
+      a.bottom + distance >= b.top;
+  bool parallel(PdfRect a, PdfRect b) =>
+      gutters.isNotEmpty &&
+      !gutters.any(
+        (x) => math.min(a.left, b.left) < x && math.max(a.right, b.right) > x,
+      ) &&
+      a.top < b.bottom &&
+      a.bottom > b.top;
+  var changed = true;
+  while (changed) {
+    changed = false;
+    for (var i = 0; i < figures.length; i++) {
+      var bounds = figures[i].bounds;
+      final labels = figures[i].lines.toSet();
+      for (final line in lines) {
+        final small =
+            math.min(line.bounds.width, line.bounds.height) < height * .9;
+        if (near(bounds, line.bounds, small ? gap : 0) && labels.add(line)) {
+          bounds = bounds.union(line.bounds);
+          changed = true;
+        }
+      }
+      for (var j = figures.length - 1; j > i; j--) {
+        if (near(bounds, figures[j].bounds, gap) ||
+            parallel(bounds, figures[j].bounds)) {
+          bounds = bounds.union(figures[j].bounds);
+          labels.addAll(figures.removeAt(j).lines);
+          changed = true;
+        }
+      }
+      figures[i] = PdfReadingRegion(
+        kind: PdfRegionKind.figure,
+        bounds: bounds,
+        lines: labels.toList()
+          ..sort((a, b) => a.bounds.top.compareTo(b.bounds.top)),
+      );
+    }
+  }
+  return figures;
+}
+
 /// Sweep x edges, admitting only whitespace with substantial text on both
 /// sides. Spanning lines cost votes but do not hide a page's body gutter.
-List<double> _gutters(List<PdfTextLine> lines) {
+List<double> _gutters(List<PdfTextLine> input) {
+  if (input.length < 6) return [];
+  final extent = input.map((l) => l.bounds).reduce((a, b) => a.union(b));
+  // Short author names, plot labels and marginal stamps must not fragment an
+  // otherwise clear body gutter into intervals narrower than the threshold.
+  final minColumnWidth = extent.width * .2;
+  final lines = input.where((l) => l.bounds.width >= minColumnWidth).toList();
   if (lines.length < 6) return [];
   final heights = lines.map((l) => l.bounds.height).toList()..sort();
   final minGap = math.max(12.0, heights[heights.length ~/ 2] * 1.2);
@@ -264,8 +401,6 @@ List<double> _gutters(List<PdfTextLine> lines) {
   var crossing = 0;
   final minX = edges.first.x;
   final maxX = edges.last.x;
-  // Marginal vertical arXiv stamps and side labels are not body columns.
-  final minColumnWidth = (maxX - minX) * .2;
   ({double from, double to, int crossing, int support})? best;
   double? from;
   int? previousCrossing;

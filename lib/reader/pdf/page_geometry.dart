@@ -45,6 +45,8 @@ final class PdfTextLine {
     required this.end,
   });
 
+  /// Painted glyph union, not the loose selection boxes. Physical rows can
+  /// therefore expose genuine whitespace cuts even when loose boxes overlap.
   final PdfRect bounds;
   final String text;
 
@@ -72,9 +74,8 @@ final class PdfPageGeometry {
   /// Image objects, including images inside transformed Form XObjects.
   final List<PdfRect> images;
 
-  /// Other painted objects (paths/shadings), used to prove crop coverage.
-  /// They are not semantically segmented figures; uncertain coverage requires
-  /// the complete page rather than silently discarding vector ink.
+  /// Other painted objects (paths/shadings), grouped geometrically with labels
+  /// into figures/tables and also used to prove exact-once crop coverage.
   final List<PdfRect> graphics;
   final bool hasUnboundedGraphics;
 }

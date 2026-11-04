@@ -40,6 +40,7 @@ final class PdfCharacterSample {
     required this.visible,
     this.pageBounds,
     this.deviceBounds,
+    this.inkBounds,
     this.baseline,
   });
 
@@ -60,6 +61,9 @@ final class PdfCharacterSample {
 
   /// Loose glyph box in bitmap pixels, before clamping to the bitmap.
   final PdfDeviceBounds? deviceBounds;
+
+  /// Tight painted glyph bounds for line cuts; selection still uses loose boxes.
+  final PdfDeviceBounds? inkBounds;
 
   /// Device-space delta of a probe along the text matrix baseline.
   final PdfBaselineProbe? baseline;
@@ -142,6 +146,7 @@ List<PdfTextLine> buildPdfTextLines(
 }) {
   final lines = <PdfTextLine>[];
   PdfRect? bounds;
+  PdfRect? ink;
   PdfRect? row;
   var start = 0;
   var end = 0;
@@ -152,11 +157,17 @@ List<PdfTextLine> buildPdfTextLines(
       final text = String.fromCharCodes(source.sublist(start, end));
       if (text.trim().isNotEmpty) {
         lines.add(
-          PdfTextLine(bounds: bounds!, text: text, start: start, end: end),
+          PdfTextLine(
+            bounds: ink ?? bounds!,
+            text: text,
+            start: start,
+            end: end,
+          ),
         );
       }
     }
     bounds = null;
+    ink = null;
     row = null;
   }
 
@@ -208,6 +219,18 @@ List<PdfTextLine> buildPdfTextLines(
       row = rect;
     }
     bounds = bounds?.union(rect) ?? rect;
+    final paint = sample.inkBounds;
+    final painted = paint == null
+        ? rect
+        : PdfRect(
+            (paint.left / scale).clamp(0, width),
+            (paint.top / scale).clamp(0, height),
+            (paint.right / scale).clamp(0, width),
+            (paint.bottom / scale).clamp(0, height),
+          );
+    if (painted.width > 0 && painted.height > 0) {
+      ink = ink?.union(painted) ?? painted;
+    }
     end = sample.index + 1;
   }
   flush();

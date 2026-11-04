@@ -239,6 +239,7 @@ final class _PdfrxDocument implements PdfEngineDocument {
       page,
       PdfBitmapSize(width, height),
       geometry: true,
+      inkGeometry: true,
     );
     final objects = await pdfrx.PdfrxEntryFunctions.instance.compute(
       _pageObjectsOnWorker,
@@ -372,6 +373,7 @@ final class _PdfrxDocument implements PdfEngineDocument {
     int page,
     PdfBitmapSize size, {
     required bool geometry,
+    bool inkGeometry = false,
   }) {
     final handle = _handle;
     return pdfrx.PdfrxEntryFunctions.instance.compute(
@@ -382,6 +384,7 @@ final class _PdfrxDocument implements PdfEngineDocument {
         bitmapWidth: size.width,
         bitmapHeight: size.height,
         geometry: geometry,
+        inkGeometry: inkGeometry,
       ),
     );
   }
@@ -394,6 +397,7 @@ final class _SampleRequest {
     required this.bitmapWidth,
     required this.bitmapHeight,
     required this.geometry,
+    required this.inkGeometry,
   });
 
   final int document;
@@ -401,6 +405,7 @@ final class _SampleRequest {
   final int bitmapWidth;
   final int bitmapHeight;
   final bool geometry;
+  final bool inkGeometry;
 }
 
 /// PDFium bindings loaded in the worker isolate (top-level state is
@@ -658,6 +663,7 @@ List<PdfCharacterSample> _sampleOnWorker(_SampleRequest request) {
         final box = arena<pdfium_bindings.FS_RECTF>();
         final pageBox = arena<pdfium_bindings.FS_RECTF>();
         final matrix = arena<pdfium_bindings.FS_MATRIX>();
+        final tight = arena<Double>(4);
         final deviceX = arena<Int>();
         final deviceY = arena<Int>();
         final hasPageBox = pdfium.FPDF_GetPageBoundingBox(page, pageBox) != 0;
@@ -684,6 +690,7 @@ List<PdfCharacterSample> _sampleOnWorker(_SampleRequest request) {
                 pageBounds.top > pageBox.ref.bottom;
           }
           PdfDeviceBounds? deviceBounds;
+          PdfDeviceBounds? inkBounds;
           PdfBaselineProbe? baseline;
           if (request.geometry && pageBounds != null) {
             (int, int)? toDevice(double x, double y) {
@@ -718,6 +725,31 @@ List<PdfCharacterSample> _sampleOnWorker(_SampleRequest request) {
                 ys.reduce(math.max),
               );
             }
+            if (request.inkGeometry &&
+                pdfium.FPDFText_GetCharBox(
+                      textPage,
+                      index,
+                      tight,
+                      tight + 1,
+                      tight + 2,
+                      tight + 3,
+                    ) !=
+                    0) {
+              final corners = [
+                toDevice(tight[0], tight[2]),
+                toDevice(tight[0], tight[3]),
+                toDevice(tight[1], tight[2]),
+                toDevice(tight[1], tight[3]),
+              ];
+              if (!corners.contains(null)) {
+                inkBounds = PdfDeviceBounds(
+                  corners.map((p) => p!.$1).reduce(math.min),
+                  corners.map((p) => p!.$2).reduce(math.min),
+                  corners.map((p) => p!.$1).reduce(math.max),
+                  corners.map((p) => p!.$2).reduce(math.max),
+                );
+              }
+            }
             if (pdfium.FPDFText_GetMatrix(textPage, index, matrix) != 0) {
               final a = matrix.ref.a;
               final b = matrix.ref.b;
@@ -750,6 +782,7 @@ List<PdfCharacterSample> _sampleOnWorker(_SampleRequest request) {
               visible: visible,
               pageBounds: pageBounds,
               deviceBounds: deviceBounds,
+              inkBounds: inkBounds,
               baseline: baseline,
             ),
           );

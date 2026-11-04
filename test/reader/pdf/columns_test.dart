@@ -71,11 +71,11 @@ void main() {
     );
   });
 
-  test('uncertain ink coverage falls back, covered graphics keep columns', () {
+  test('bounded graphics own labels; only unknown coverage needs fallback', () {
     final body = columns(120);
     for (final (graphics, unbounded, expected) in [
       ([const PdfRect(100, 125, 120, 150)], false, 2),
-      ([const PdfRect(100, 180, 120, 200)], false, 0),
+      ([const PdfRect(100, 180, 120, 200)], false, 2),
       (<PdfRect>[], true, 0),
     ]) {
       final result = analyzePdfColumns([
@@ -90,14 +90,14 @@ void main() {
       ]).single;
       expect(result.columnCount, expected);
     }
-    // The image cuts through a body line; silently duplicating/clipping it
-    // would be unsafe even though the gutter itself is clear.
-    expect(
-      analyzePdfColumns([
-        page(body, images: [const PdfRect(54, 130, 293, 150)]),
-      ]).single.columnCount,
-      0,
-    );
+    // A partial overlay owns complete physical lines, not clipped/repeated
+    // labels, without losing the neighboring text column.
+    final overlaid = analyzePdfColumns([
+      page(body, images: [const PdfRect(54, 130, 293, 150)]),
+    ]).single;
+    expect(overlaid.columnCount, 2);
+    expect(overlaid.regions.expand((r) => r.lines).toSet(), body.toSet());
+    expect(overlaid.regions.expand((r) => r.lines), hasLength(body.length));
   });
 
   test('three columns and ragged edges are not reduced to two', () {
@@ -164,12 +164,17 @@ void main() {
         ],
       ]),
     ];
-    for (final input in inputs) {
+    final sizes = [(612, 792), (504, 144), (504, 48), (504, 248)];
+    for (var p = 0; p < inputs.length; p++) {
+      final input = inputs[p];
       final result = analyzePdfColumns([input]).single;
       expect(result.columnCount, 0);
       expect(result.regions.single.kind, PdfRegionKind.page);
-      expect(result.regions.single.bounds.width, 612);
-      expect(result.regions.single.bounds.height, 792);
+      expect(result.regions.single.bounds.width, sizes[p].$1);
+      expect(result.regions.single.bounds.height, sizes[p].$2);
+      for (final line in input.lines) {
+        expect(result.regions.single.bounds.contains(line.bounds), isTrue);
+      }
     }
   });
 }

@@ -92,7 +92,12 @@ void main() {
           0,
           reason: 'no figure/label ink appears twice, page $p',
         );
-        expect(result.columnCount, p == 2 ? 2 : 0);
+        expect(result.columnCount, 2);
+        expect(
+          result.regions.where((r) => r.kind == PdfRegionKind.figure),
+          hasLength(1),
+          reason: 'vector/shading figures keep neighboring text columns',
+        );
         if (p == 2) {
           final figure = result.regions.singleWhere(
             (r) => r.kind == PdfRegionKind.figure,
@@ -124,16 +129,16 @@ void main() {
       expect(result.columnCount, 2);
       final title = result.regions.first;
       expect(title.kind, PdfRegionKind.band);
-      // RFD's y24..104 title uses ink bounds; loose glyph boxes start at y20.
+      // Tight painted bounds follow RFD's y24..104 title, with raster padding.
       expect(title.bounds.top, closeTo(24, 4));
       expect(title.bounds.bottom, closeTo(104, 1));
       final columns = result.regions
           .where((r) => r.kind == PdfRegionKind.column)
           .toList();
-      expect(columns.first.bounds.left, closeTo(54, .1));
-      expect(columns.first.bounds.right, closeTo(293, .5));
-      expect(columns.last.bounds.left, closeTo(317, .1));
-      expect(columns.last.bounds.right, closeTo(556, .5));
+      expect(columns.first.bounds.left, closeTo(53, .1));
+      expect(columns.first.bounds.right, closeTo(294, .5));
+      expect(columns.last.bounds.left, closeTo(316, .1));
+      expect(columns.last.bounds.right, closeTo(557, .5));
       expect(
         result.regions.where((r) => r.kind == PdfRegionKind.figure),
         hasLength(geometry.images.length),
@@ -149,6 +154,53 @@ void main() {
         result.regions.expand((r) => r.lines).toSet(),
         geometry.lines.toSet(),
       );
+    },
+  );
+
+  test(
+    'every Thrift page splits; physical rows expose real safe cuts',
+    () async {
+      final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+      addTearDown(document.dispose);
+      final pages = [
+        for (var p = 0; p < document.pageCount; p++)
+          await document.pageGeometry(p),
+      ];
+      expect(
+        analyzePdfColumns(pages).map((p) => p.columnCount),
+        List.filled(8, 2),
+      );
+      // Former loose-box chains on exactly the device-reported pages/blocks.
+      for (final (p, top, bottom, count) in [
+        (0, 339, 378, 4),
+        (3, 403, 450, 5),
+        (2, 549, 578, 3),
+      ]) {
+        final rows =
+            pages[p].lines
+                .where(
+                  (l) =>
+                      l.bounds.left < 60 &&
+                      l.bounds.top >= top &&
+                      l.bounds.top < bottom,
+                )
+                .toList()
+              ..sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
+        expect(rows, hasLength(count), reason: 'Thrift page ${p + 1}');
+        for (var n = 1; n < rows.length; n++) {
+          expect(
+            rows[n].bounds.top - rows[n - 1].bounds.bottom,
+            greaterThan(1),
+          );
+        }
+        final text = (await document.pageText(p)).runes.toList();
+        for (final row in rows) {
+          expect(
+            row.text,
+            String.fromCharCodes(text.sublist(row.start, row.end)),
+          );
+        }
+      }
     },
   );
 
