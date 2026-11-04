@@ -33,6 +33,7 @@ class _DocumentViewState extends State<_DocumentView> {
   /// the same space the [CustomSingleChildLayout] delegate receives.
   final GlobalKey _overlayKey = GlobalKey(debugLabel: 'reader overlay');
   Rect? _selectionBounds;
+  Rect _selectionTarget = Rect.zero;
 
   /// Bumped whenever the rendered content geometry changes — a scroll or a
   /// content resize — so the action overlay re-reads the transform that
@@ -193,7 +194,7 @@ class _DocumentViewState extends State<_DocumentView> {
                   onNotification: (notification) {
                     if (notification is ScrollUpdateNotification ||
                         notification is ScrollMetricsNotification) {
-                      _bumpContentGeometry();
+                      _measureSelectionBounds(_ReaderChromeBounds.of(context));
                     }
                     return false;
                   },
@@ -387,8 +388,10 @@ class _DocumentViewState extends State<_DocumentView> {
                                         )
                                       : _ReachableSelectableSurface(
                                           contentKey: _contentKey,
-                                          onContentGeometryChanged:
-                                              _bumpContentGeometry,
+                                          onContentGeometryChanged: () =>
+                                              _measureSelectionBounds(
+                                                _ReaderChromeBounds.of(context),
+                                              ),
                                           presentationKey: ValueKey(
                                             model.continuousPresentation
                                                 ? 'reader-continuous-presentation'
@@ -417,11 +420,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             builder: (context, revision, child) =>
                                 CustomSingleChildLayout(
                                   delegate: _SelectionActionsLayout(
-                                    target: _selectionActionsTarget(
-                                      surface,
-                                      model,
-                                      constraints.biggest,
-                                    ),
+                                    target: _selectionTarget,
                                     bounds:
                                         (_selectionBounds ??
                                                 (Offset.zero &
@@ -460,8 +459,18 @@ class _DocumentViewState extends State<_DocumentView> {
       final bounds =
           chrome?.availableRect(overlay, overlay.size) ??
           (Offset.zero & overlay.size);
-      if (_selectionBounds != bounds) {
+      final model = widget.model;
+      final surface = model.selectionSurface;
+      // A new Columns screen can reparent the content under scroll/preview
+      // transforms. Read that complete transform only after frame layout.
+      final target =
+          surface == null ||
+              model.selectionPhase != ReaderSelectionPhase.selected
+          ? Rect.zero
+          : _selectionActionsTarget(surface, model, overlay.size);
+      if (_selectionBounds != bounds || _selectionTarget != target) {
         _selectionBounds = bounds;
+        _selectionTarget = target;
         _bumpContentGeometry();
       }
     });

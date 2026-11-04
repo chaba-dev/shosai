@@ -213,13 +213,22 @@ void main() {
       .whereType<PagePainter>()
       .firstOrNull;
 
-  for (final reopen in [false, true]) {
+  for (final scenario in [
+    (reopen: false, detail: false),
+    (reopen: true, detail: false),
+    (reopen: false, detail: true),
+    (reopen: true, detail: true),
+  ]) {
+    final reopen = scenario.reopen;
     testWidgets('a textless right-column figure keeps its place after '
+        '${scenario.detail ? 'both-axis detail pan and ' : ''}'
         '${reopen ? 'reopen' : 'a fit round-trip'}', (tester) async {
       tester.view.physicalSize = const Size(880, 1100);
       tester.view.devicePixelRatio = 2;
+      tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewPadding);
       final directory = await Directory.systemTemp.createTemp('shosai-figure-');
       final path = '${directory.path}/Figure.pdf';
       await File('fixtures/pdf-columns/right-column-figure.pdf').copy(path);
@@ -330,10 +339,50 @@ void main() {
       await tester.tapAt(target);
       await until(tester, () => painting(tester)?.columns != null);
       final first = painting(tester)!.columns!.pieces.first;
-      expect(first.source.left, 317);
+      // PR1 keeps a one-point guard around the figure's x317 painted edge.
+      expect(first.source.left, 316);
       expect(first.source.top, closeTo(350, 1));
       expect(painting(tester)!.surface.endpoints, isEmpty);
       await capture('figure-before-${reopen ? 'reopen' : 'fit'}');
+      var expectedY = first.source.top;
+      if (scenario.detail) {
+        await pinch(tester, tester.getCenter(raster), 30, 90);
+        await until(tester, () => painting(tester)!.columns!.detailZoom > 1);
+        final detail = painting(tester)!.columns!.pieces.single;
+        final origin = tester.getTopLeft(raster);
+        final area = find.byKey(const ValueKey('reader-page-tap-area'));
+        await tester.fling(area, const Offset(-100, -120), 700);
+        await tester.pumpAndSettle();
+        final panned = tester.getTopLeft(raster);
+        expect(panned.dx, lessThan(origin.dx - 50));
+        expect(panned.dy, lessThan(origin.dy - 50));
+        // Derive the original-page point from measured on-screen movement,
+        // independently of the controller's saved-place implementation.
+        expectedY = detail.source.top + (origin.dy - panned.dy) / detail.scale;
+        final expectedX =
+            detail.source.left +
+            (tester.getCenter(area).dx - panned.dx) / detail.scale;
+        final cancellation = bridge.createCancellation();
+        FlutterReadingState? saved;
+        for (var attempt = 0; attempt < 100; attempt++) {
+          saved = await bridge.loadReadingState(
+            bookId: book.bookId,
+            cancellationId: cancellation,
+          );
+          if (saved?.pdfY != null &&
+              (saved!.pdfY! - expectedY).abs() < .01 &&
+              saved.pdfX != null &&
+              (saved.pdfX! - expectedX).abs() < .01) {
+            break;
+          }
+          await tester.pump(const Duration(milliseconds: 30));
+        }
+        bridge.releaseCancellation(id: cancellation);
+        expect(saved!.pdfY, closeTo(expectedY, .01));
+        expect(saved.pdfX, closeTo(expectedX, .01));
+        expect(saved.offset, isNull);
+        await capture('figure-detail-panned-${reopen ? 'reopen' : 'fit'}');
+      }
       if (reopen) {
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
@@ -348,8 +397,8 @@ void main() {
       }
       final restored = painting(tester)!.columns!.pieces.first;
       await capture('figure-after-${reopen ? 'reopen' : 'fit'}');
-      expect(restored.source.left, 317);
-      expect(restored.source.top, closeTo(first.source.top, .01));
+      expect(restored.source.left, 316);
+      expect(restored.source.top, closeTo(expectedY, .01));
       expect(painting(tester)!.surface.endpoints, isEmpty);
       expect(tester.takeException(), isNull);
     });
@@ -562,10 +611,10 @@ void main() {
       await until(tester, () => painting(tester)?.columns != null);
       final first = painting(tester)!.columns!.pieces.first;
       expect(first.page, 0);
-      expect(first.source.left, greaterThanOrEqualTo(317));
-      // Thrift's loose boxes overlap slightly within this paragraph. Entry
-      // starts above that indivisible row, just like a normal screen break.
-      expect(first.source.top, closeTo(310.648, .2));
+      expect(first.source.left, closeTo(316.04, .02));
+      // PR1 now exposes physical ink rows rather than the loose paragraph
+      // union. Entry keeps the tapped row, not the earlier paragraph start.
+      expect(first.source.top, closeTo(342.276, .2));
       await capture('columns-right-column-entry');
       final endpoints = painting(tester)!.surface.endpoints;
       // The fit controls leave chrome visible. Select below its overlay, not
@@ -629,7 +678,7 @@ void main() {
       await fit('columns');
       expect(
         painting(tester)!.columns!.pieces.first.source.left,
-        greaterThanOrEqualTo(317),
+        closeTo(316.04, .02),
       );
       expect(
         painting(tester)!.columns!.pieces.first.source.top,
@@ -651,7 +700,7 @@ void main() {
       );
       await open();
       final restored = painting(tester)!.columns!.pieces.first;
-      expect(restored.source.left, greaterThanOrEqualTo(317));
+      expect(restored.source.left, closeTo(316.04, .02));
       expect(restored.source.top, closeTo(top, 1));
       expect(
         painting(tester)!.annotations.single.body,
@@ -700,7 +749,7 @@ void main() {
       );
       expect(
         painting(tester)!.columns!.pieces.first.source.left,
-        greaterThanOrEqualTo(317),
+        closeTo(316.04, .02),
       );
       await capture('columns-note-jump');
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -783,75 +832,135 @@ void main() {
     },
   );
 
-  testWidgets(
-    'PDF link areas map through a strip piece to the original destination',
-    (tester) async {
-      tester.view.physicalSize = const Size(880, 1800);
-      tester.view.devicePixelRatio = 2;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final directory = await Directory.systemTemp.createTemp(
-        'shosai-strip-link-',
-      );
-      final path = '${directory.path}/Reference.pdf';
-      await File(path).writeAsBytes(referencePdf());
-      final bridge = await createApplicationBridge(
-        applicationSupportDirectory: () async => directory,
-      );
-      await tester.pumpWidget(
-        ShosaiShell(
-          home: RepaintBoundary(
-            key: captureKey,
-            child: ReaderScreen(
-              bridge: bridge,
-              initialPath: path,
-              initialSettings: const FlutterReaderSettings(
-                continuous: false,
-                theme: 'light',
-                epubFontSize: 18,
-                epubLineSpacing: 1.6,
-                pdfZoom: 0,
-                pdfFit: FlutterPdfFit.columns,
-                twoPages: false,
-                zonesHintDismissed: true,
+  for (final detail in [false, true]) {
+    testWidgets(
+      'PDF link areas map through ${detail ? 'panned detail' : 'a strip piece'} '
+      'to the original destination',
+      (tester) async {
+        tester.view.physicalSize = const Size(880, 1800);
+        tester.view.devicePixelRatio = 2;
+        tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetViewPadding);
+        final directory = await Directory.systemTemp.createTemp(
+          'shosai-strip-link-',
+        );
+        final path = '${directory.path}/Reference.pdf';
+        await File(path).writeAsBytes(referencePdf());
+        final bridge = await createApplicationBridge(
+          applicationSupportDirectory: () async => directory,
+        );
+        await tester.pumpWidget(
+          ShosaiShell(
+            home: RepaintBoundary(
+              key: captureKey,
+              child: ReaderScreen(
+                bridge: bridge,
+                initialPath: path,
+                initialSettings: const FlutterReaderSettings(
+                  continuous: false,
+                  theme: 'light',
+                  epubFontSize: 18,
+                  epubLineSpacing: 1.6,
+                  pdfZoom: 0,
+                  pdfFit: FlutterPdfFit.columns,
+                  twoPages: false,
+                  zonesHintDismissed: true,
+                ),
               ),
             ),
           ),
-        ),
-      );
-      await until(tester, () => painting(tester)?.columns != null);
-      final piece = painting(tester)!.columns!.pieces.first;
-      final local = piece.fromPage(
-        100,
-        260,
-      ); // Named Footnote 1 link, page points.
-      final box = tester.getRect(
-        find.byKey(const ValueKey('reader-selection-surface')),
-      );
-      await tester.tapAt(box.topLeft + Offset(local.x, local.y));
-      await tester.pump(const Duration(milliseconds: 350));
-      await until(
-        tester,
-        () => find
-            .byKey(const ValueKey('reader-reference-peek'))
-            .evaluate()
-            .isNotEmpty,
-      );
-      expect(find.textContaining('Quiet is the old name'), findsOneWidget);
-      await capture('columns-link-peek');
-      await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
-      await until(tester, () => painting(tester)!.columns!.topPage == 1);
-      expect(
-        painting(tester)!.columns!.pieces.first.source.top,
-        greaterThan(600),
-      );
-      await tester.pumpWidget(const SizedBox());
-      await tester.pumpAndSettle();
-      await closeApplicationCores();
-      await directory.delete(recursive: true);
-      expect(tester.takeException(), isNull);
-    },
-  );
+        );
+        await until(tester, () => painting(tester)?.columns != null);
+        if (detail) {
+          final area = find.byKey(const ValueKey('reader-page-tap-area'));
+          await pinch(tester, tester.getCenter(raster), 30, 90);
+          await until(tester, () => painting(tester)!.columns!.detailZoom > 1);
+          final origin = tester.getTopLeft(raster);
+          await tester.fling(area, const Offset(-100, -120), 700);
+          await tester.pumpAndSettle();
+          final panned = tester.getTopLeft(raster);
+          expect(panned.dx, lessThan(origin.dx - 50));
+          expect(panned.dy, lessThan(origin.dy - 50));
+          final paint = painting(tester)!;
+          final box = tester.getRect(
+            find.byKey(const ValueKey('reader-selection-surface')),
+          );
+          final viewport = tester.getRect(area).deflate(20);
+          final visible = paint.surface.endpoints.where((e) {
+            final center =
+                box.topLeft +
+                Offset(
+                  (e.rect.left + e.rect.right) / 2,
+                  (e.rect.top + e.rect.bottom) / 2,
+                );
+            return viewport.contains(center);
+          }).toList();
+          final first = visible.first;
+          final last = visible.where((e) => e.rect.top == first.rect.top).last;
+          expect(last.offset, greaterThan(first.offset));
+          final mouse = await tester.startGesture(
+            box.topLeft + Offset(first.rect.left, first.rect.top + 2),
+            kind: ui.PointerDeviceKind.mouse,
+          );
+          await mouse.moveTo(
+            box.topLeft + Offset(last.rect.right, last.rect.bottom - 2),
+          );
+          await mouse.up();
+          await tester.pumpAndSettle();
+          final selected = painting(tester)!;
+          expect(selected.anchor, isNot(selected.focus));
+          expect(
+            selected.anchor,
+            greaterThanOrEqualTo(first.rangeStart.toInt()),
+          );
+          expect(selected.focus, lessThanOrEqualTo(last.rangeEnd.toInt()));
+          await capture('columns-detail-selection');
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+        }
+        final piece = painting(tester)!.columns!.pieces.first;
+        final local = piece.fromPage(
+          130,
+          260,
+        ); // Named Footnote 1 link, page points.
+        final box = tester.getRect(
+          find.byKey(const ValueKey('reader-selection-surface')),
+        );
+        expect(
+          tester
+              .getRect(find.byKey(const ValueKey('reader-page-tap-area')))
+              .contains(box.topLeft + Offset(local.x, local.y)),
+          isTrue,
+        );
+        await tester.tapAt(box.topLeft + Offset(local.x, local.y));
+        await tester.pump(const Duration(milliseconds: 350));
+        await until(
+          tester,
+          () => find
+              .byKey(const ValueKey('reader-reference-peek'))
+              .evaluate()
+              .isNotEmpty,
+        );
+        expect(find.textContaining('Quiet is the old name'), findsOneWidget);
+        await capture(
+          detail ? 'columns-detail-link-peek' : 'columns-link-peek',
+        );
+        await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
+        await until(tester, () => painting(tester)!.columns!.topPage == 1);
+        expect(
+          painting(tester)!.columns!.pieces.first.source.top,
+          greaterThan(600),
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await closeApplicationCores();
+        await directory.delete(recursive: true);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('Columns reads the real Thrift paper across screens and pages', (
     tester,
@@ -1352,6 +1461,7 @@ void main() {
         () => tester.widget<RawImage>(raster).image != enlarged,
       );
       await tester.tapAt(tester.getCenter(area));
+      await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
       await tester.pumpAndSettle();

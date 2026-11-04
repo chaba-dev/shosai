@@ -41,6 +41,54 @@ final class _ReaderColumnsFinished extends ReaderMessage {
 }
 
 extension on ReaderController {
+  void _columnsViewportChanged(ReaderColumnsViewportChanged message) {
+    final screen = message.screen;
+    if (!identical(screen, _model.pdfColumns) ||
+        screen.strip == null ||
+        _model.relayoutBusy ||
+        _closing ||
+        _suspended) {
+      return;
+    }
+    final piece = screen.pieces.single;
+    final visible = ui.Rect.fromLTWH(
+      piece.left,
+      piece.top,
+      piece.width,
+      piece.height,
+    ).intersect(message.viewport);
+    if (visible.isEmpty) return;
+    final point = piece.toPage(visible.center.dx, visible.top);
+    if (_model.pdfX == point.x && _model.pdfY == point.y) return;
+    final selection = _model.pdfColumnSelection!;
+    final endpoint = selection.surface.endpoints.where((e) {
+      final rect = e.rect;
+      return rect.left < visible.right &&
+          rect.right > visible.left &&
+          rect.top < visible.bottom &&
+          rect.bottom > visible.top;
+    }).firstOrNull;
+    final offset = endpoint == null
+        ? null
+        : selection.location(endpoint.offset.toInt()).offset;
+    _emit(_model.copyWith(pdfX: point.x, pdfY: point.y, readingOffset: offset));
+    final bookId = _model.document?.bookId;
+    if (bookId != null) {
+      _queueReadingStateSave(
+        bookId,
+        _model.document!.logicalUnitCount,
+        FlutterReadingState(
+          unit: BigInt.from(piece.page),
+          offset: offset == null ? null : BigInt.from(offset),
+          pdfX: point.x,
+          pdfY: point.y,
+          zoom: _model.layout.scale,
+          progress: _bookProgress(_model),
+        ),
+      );
+    }
+  }
+
   void _pdfViewportChanged(ReaderPdfViewportChanged message) {
     final pdf = _pdfDocument;
     if (pdf == null ||
@@ -125,9 +173,11 @@ extension on ReaderController {
   /// In particular, deferred annotation/open effects must not drop its height.
   void _refreshColumns() {
     final pending = _columnsIntent;
+    final screen = _model.pdfColumns;
+    final piece = screen?.strip == null ? null : screen!.pieces.single;
     _requestColumns(
       pending?.position ??
-          _model.pdfColumns?.start ??
+          screen?.start ??
           PdfStripPosition(_model.readingLocation.unit, y: _model.pdfY),
       back: pending?.back,
       previous: pending?.previous ?? false,
@@ -135,6 +185,17 @@ extension on ReaderController {
       length: pending?.length,
       x: pending?.x,
       locate: pending?.locate ?? false,
+      detail: pending != null
+          ? pending.detail
+          : piece == null
+          ? null
+          : (
+              page: piece.page,
+              region: piece.region,
+              zoom: screen!.detailZoom,
+              baseScale: piece.scale / screen.detailZoom,
+            ),
+      strip: pending != null ? pending.strip : screen?.strip,
     );
   }
 
@@ -207,6 +268,8 @@ extension on ReaderController {
       // anchor across page fits/reopen rather than guessing from height alone.
       x: x ?? (_model.pdfColumns == null && !locate ? _model.pdfX : null),
       locate: locate || _model.pdfColumns == null,
+      detail: detail,
+      strip: strip,
     );
     _columnsIntent = intent;
     // A whole-page render started before a fit switch cannot overwrite a

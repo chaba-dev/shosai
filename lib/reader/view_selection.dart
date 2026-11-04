@@ -680,11 +680,29 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   @override
   void initState() {
     super.initState();
+    _horizontal.addListener(_pdfScrolled);
     _vertical.addListener(_pdfScrolled);
     _revealPdfPlace();
   }
 
   void _pdfScrolled() {
+    final screen = widget.columnsScreen;
+    if (screen?.strip != null &&
+        _horizontal.hasClients &&
+        _vertical.hasClients) {
+      widget.dispatch(
+        ReaderColumnsViewportChanged(
+          screen!,
+          Rect.fromLTWH(
+            _horizontal.offset,
+            _vertical.offset,
+            _horizontal.position.viewportDimension,
+            _vertical.position.viewportDimension,
+          ),
+        ),
+      );
+      return;
+    }
     final scale = widget.pdfScrollScale;
     if (_revealing || scale == null || !_vertical.hasClients) return;
     widget.dispatch(

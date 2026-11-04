@@ -380,6 +380,13 @@ final class ReaderPdfViewportChanged extends ReaderMessage {
   final double y;
 }
 
+/// The visible rectangle in an adopted Columns detail raster's frame.
+final class ReaderColumnsViewportChanged extends ReaderMessage {
+  const ReaderColumnsViewportChanged(this.screen, this.viewport);
+  final PdfStripScreen screen;
+  final ui.Rect viewport;
+}
+
 final class ReaderReferenceDismissed extends ReaderMessage {
   const ReaderReferenceDismissed();
 }

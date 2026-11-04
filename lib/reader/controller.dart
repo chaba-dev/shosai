@@ -181,6 +181,8 @@ final class ReaderController implements Listenable {
     int? length,
     double? x,
     bool locate,
+    ({int page, int region, double zoom, double baseScale})? detail,
+    PdfStripScreen? strip,
   })?
   _columnsIntent;
   int _referenceRevision = 0;
@@ -965,6 +967,8 @@ final class ReaderController implements Listenable {
         _pdfDoubleTapped(message.x, message.y);
       case ReaderPdfViewportChanged():
         _pdfViewportChanged(message);
+      case ReaderColumnsViewportChanged():
+        _columnsViewportChanged(message);
       case ReaderReferenceDismissed():
         _focusAdapter(ReaderFocusTarget.surface);
       case ReaderReferenceGoToRequested():
