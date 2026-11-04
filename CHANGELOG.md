@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-03
+## [0.1.0] - 2026-11-04
 
 ### 🚀 Features
 
@@ -188,6 +188,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Navigate directly from Contents and use regular peek text (#281)
 - *(epub)* Open books with large images and XHTML (#280)
 - *(reader)* Finish quiet-page turns, heads and Back placement (#284)
+- *(library)* Keep Japanese reading status and shelf progress consistent (#293)
 
 ### 🚜 Refactor
 
