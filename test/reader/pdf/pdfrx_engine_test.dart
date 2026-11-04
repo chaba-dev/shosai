@@ -44,6 +44,76 @@ void main() {
   final engine = PdfrxPdfEngine();
 
   test(
+    'column regions retain vector ink and own overlaid image labels',
+    () async {
+      final document = await engine.open(
+        'fixtures/pdf-columns/content-preservation.pdf',
+      );
+      addTearDown(document.dispose);
+      for (var p = 0; p < 4; p++) {
+        final geometry = await document.pageGeometry(p);
+        final result = analyzePdfColumns([geometry]).single;
+        final raster = await document.render(p, 1);
+        var missing = 0;
+        var duplicated = 0;
+        var painted = 0;
+        for (var y = 0; y < raster.height; y++) {
+          for (var x = 0; x < raster.width; x++) {
+            final offset = (y * raster.width + x) * 4;
+            if (raster.pixels[offset] >= 245 &&
+                raster.pixels[offset + 1] >= 245 &&
+                raster.pixels[offset + 2] >= 245) {
+              continue;
+            }
+            painted++;
+            final crops = result.regions.where((r) {
+              final b = r.bounds;
+              return x + .5 >= b.left &&
+                  x + .5 < b.right &&
+                  y + .5 >= b.top &&
+                  y + .5 < b.bottom;
+            }).length;
+            if (crops == 0) missing++;
+            if (crops > 1) duplicated++;
+          }
+        }
+        expect(
+          painted,
+          greaterThan(16000),
+          reason: 'real painted figure, page $p',
+        );
+        expect(
+          missing,
+          0,
+          reason: 'every painted pixel survives region crops, page $p',
+        );
+        expect(
+          duplicated,
+          0,
+          reason: 'no figure/label ink appears twice, page $p',
+        );
+        expect(result.columnCount, p == 2 ? 2 : 0);
+        if (p == 2) {
+          final figure = result.regions.singleWhere(
+            (r) => r.kind == PdfRegionKind.figure,
+          );
+          expect(figure.lines.single.text, 'Overlaid label');
+          expect(
+            result.regions.expand((r) => r.lines),
+            hasLength(geometry.lines.length),
+          );
+          expect(result.regions.map((r) => r.kind), [
+            PdfRegionKind.column,
+            PdfRegionKind.figure,
+            PdfRegionKind.column,
+            PdfRegionKind.column,
+          ]);
+        }
+      }
+    },
+  );
+
+  test(
     'Thrift Letter title band, measured columns and stable text offsets',
     () async {
       final document = await engine.open('fixtures/pdf-columns/thrift.pdf');

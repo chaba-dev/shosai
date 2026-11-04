@@ -93,7 +93,8 @@ abstract interface class PdfEngineDocument {
   /// Extracted text of [page], one scalar per PDFium character.
   Future<String> pageText(int page);
 
-  /// Physical text lines and image objects in rotated visible page points.
+  /// Physical lines, images and other painted-object coverage in rotated
+  /// visible page points. Unknown coverage is explicit for safe fallback.
   /// Independent of render scale; callers own the returned immutable values.
   Future<PdfPageGeometry> pageGeometry(int page);
 

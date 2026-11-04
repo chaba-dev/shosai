@@ -108,19 +108,19 @@ PdfColumnPage _analyzePage(
   List<PdfTextLine> lines,
   bool rtl,
 ) {
+  PdfColumnPage fallback() => PdfColumnPage(
+    columnCount: 0,
+    regions: [
+      PdfReadingRegion(
+        kind: PdfRegionKind.page,
+        bounds: PdfRect(0, 0, page.width, page.height),
+        lines: lines,
+      ),
+    ],
+  );
+  if (page.hasUnboundedGraphics) return fallback();
   final gutters = _gutters(lines);
-  if (gutters.isEmpty) {
-    return PdfColumnPage(
-      columnCount: 0,
-      regions: [
-        PdfReadingRegion(
-          kind: PdfRegionKind.page,
-          bounds: PdfRect(0, 0, page.width, page.height),
-          lines: lines,
-        ),
-      ],
-    );
-  }
+  if (gutters.isEmpty) return fallback();
   bool spans(PdfRect r) => gutters.any((x) => r.left < x && r.right > x);
   final bands = <PdfReadingRegion>[
     for (final line in lines.where((line) => spans(line.bounds)))
@@ -194,6 +194,18 @@ PdfColumnPage _analyzePage(
     );
   }
   flush(double.infinity);
+  // Crops must own all retained ink exactly once. Paths/shadings are not
+  // segmented into semantic figures: uncertain coverage keeps the full page.
+  for (final ink in [
+    ...lines.map((line) => line.bounds),
+    ...page.images,
+    ...page.graphics,
+  ]) {
+    final owners = regions.where((r) => r.bounds.overlaps(ink)).toList();
+    if (owners.length != 1 || !owners.single.bounds.contains(ink)) {
+      return fallback();
+    }
+  }
   return PdfColumnPage(columnCount: gutters.length + 1, regions: regions);
 }
 
@@ -218,8 +230,18 @@ List<PdfReadingRegion> _columnRegions(
   }
 
   for (final image in images) {
+    // Labels already painted into this crop belong to the figure, not a
+    // second text crop after it. Partial overlaps fail the coverage check.
+    final labels = lines.where((line) => image.contains(line.bounds)).toList();
+    lines.removeWhere(labels.contains);
     textBefore(image.top);
-    regions.add(PdfReadingRegion(kind: PdfRegionKind.figure, bounds: image));
+    regions.add(
+      PdfReadingRegion(
+        kind: PdfRegionKind.figure,
+        bounds: image,
+        lines: labels,
+      ),
+    );
   }
   textBefore(double.infinity);
   return regions;

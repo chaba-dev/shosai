@@ -16,6 +16,18 @@ final class PdfRect {
   double get width => right - left;
   double get height => bottom - top;
 
+  bool contains(PdfRect other) =>
+      left <= other.left &&
+      top <= other.top &&
+      right >= other.right &&
+      bottom >= other.bottom;
+
+  bool overlaps(PdfRect other) =>
+      left < other.right &&
+      right > other.left &&
+      top < other.bottom &&
+      bottom > other.top;
+
   PdfRect union(PdfRect other) => PdfRect(
     math.min(left, other.left),
     math.min(top, other.top),
@@ -47,14 +59,22 @@ final class PdfPageGeometry {
     required this.height,
     required List<PdfTextLine> lines,
     required List<PdfRect> images,
+    List<PdfRect> graphics = const [],
+    this.hasUnboundedGraphics = false,
   }) : lines = List.unmodifiable(lines),
-       images = List.unmodifiable(images);
+       images = List.unmodifiable(images),
+       graphics = List.unmodifiable(graphics);
 
   final double width;
   final double height;
   final List<PdfTextLine> lines;
 
   /// Image objects, including images inside transformed Form XObjects.
-  /// Vector drawings are not image objects and remain in the page raster.
   final List<PdfRect> images;
+
+  /// Other painted objects (paths/shadings), used to prove crop coverage.
+  /// They are not semantically segmented figures; uncertain coverage requires
+  /// the complete page rather than silently discarding vector ink.
+  final List<PdfRect> graphics;
+  final bool hasUnboundedGraphics;
 }

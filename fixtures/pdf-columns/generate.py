@@ -70,6 +70,38 @@ def main():
         stream(b"q 612 0 0 792 0 0 cm /Im Do Q"),
     ])
 
+    # Real PDF painting controls: vector-only art below body text, a wider
+    # vector figure above a caption, a raster figure with a text label, and
+    # an axial shading outside text bounds.
+    body = b"".join(
+        b"BT /F1 10 Tf %d %d Td (%s body line %d with column text here) Tj ET\n"
+        % (x, 650 - n * 14, side, n)
+        for x, side in ((54, b"Left"), (317, b"Right")) for n in range(8))
+    write("content-preservation.pdf", [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 11 0 R] /Count 4 >>",
+        *[b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+          b"/Resources << /Font << /F1 6 0 R >> /XObject << /Im 7 0 R >> >> "
+          b"/Contents %d 0 R >>" % contents for contents in (8, 9, 10)],
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+        stream(zlib.compress(bytes([180] * 4)),
+               b"/Type /XObject /Subtype /Image /Width 2 /Height 2 "
+               b"/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode"),
+        stream(body + b"0 g 70 350 210 80 re f"),
+        stream(body + b"0 g 45 350 255 80 re f "
+               b"BT /F1 10 Tf 80 330 Td (Vector caption) Tj ET"),
+        stream(body + b"q 239 0 0 80 54 350 cm /Im Do Q "
+               b"BT /F1 10 Tf 90 390 Td (Overlaid label) Tj ET "
+               b"BT /F1 10 Tf 80 330 Td (Image caption) Tj ET"),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 6 0 R >> /Shading << /Sh 13 0 R >> >> "
+        b"/Contents 12 0 R >>",
+        stream(body + b"/Sh sh"),
+        b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [70 350 280 430] "
+        b"/BBox [70 350 280 430] /Function << /FunctionType 2 /Domain [0 1] "
+        b"/C0 [0 0 0] /C1 [0 0.3 0.8] /N 1 >> /Extend [false false] >>",
+    ])
+
 
 if __name__ == "__main__":
     main()

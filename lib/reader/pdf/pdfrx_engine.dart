@@ -240,8 +240,8 @@ final class _PdfrxDocument implements PdfEngineDocument {
       PdfBitmapSize(width, height),
       geometry: true,
     );
-    final images = await pdfrx.PdfrxEntryFunctions.instance.compute(
-      _imagesOnWorker,
+    final objects = await pdfrx.PdfrxEntryFunctions.instance.compute(
+      _pageObjectsOnWorker,
       (document: _handle.address, page: page, width: width, height: height),
     );
     return PdfPageGeometry(
@@ -253,7 +253,9 @@ final class _PdfrxDocument implements PdfEngineDocument {
         width: size.width,
         height: size.height,
       ),
-      images: images,
+      images: objects.images,
+      graphics: objects.graphics,
+      hasUnboundedGraphics: objects.unbounded,
     );
   }
 
@@ -482,9 +484,10 @@ bool _rightToLeftOnWorker(int address) {
   });
 }
 
-/// Image bounds include the object's matrix; nested forms additionally need
+/// Object bounds include the object's matrix; nested forms additionally need
 /// every ancestor matrix. Apply those before the page's CropBox/rotation.
-List<PdfRect> _imagesOnWorker(
+({List<PdfRect> images, List<PdfRect> graphics, bool unbounded})
+_pageObjectsOnWorker(
   ({int document, int page, int width, int height}) request,
 ) => using((arena) {
   final pdfium = _pdfium;
@@ -496,7 +499,9 @@ List<PdfRect> _imagesOnWorker(
     throw PdfEngineException('failed to load page ${request.page}');
   }
   try {
-    final result = <PdfRect>[];
+    final images = <PdfRect>[];
+    final graphics = <PdfRect>[];
+    var unbounded = false;
     final left = arena<Float>();
     final bottom = arena<Float>();
     final right = arena<Float>();
@@ -511,24 +516,46 @@ List<PdfRect> _imagesOnWorker(
       parents,
     ) {
       if (++objects > 65536 || parents.length > 64) {
-        throw const PdfEngineLimitException(
-          'PDF page image object limit exceeded',
-        );
+        throw const PdfEngineLimitException('PDF page object limit exceeded');
       }
       final type = pdfium.FPDFPageObj_GetType(object);
       if (type == pdfium_bindings.FPDF_PAGEOBJ_FORM) {
-        if (pdfium.FPDFPageObj_GetMatrix(object, matrix) == 0) return;
+        if (pdfium.FPDFPageObj_GetMatrix(object, matrix) == 0) {
+          unbounded = true;
+          return;
+        }
         final m = matrix.ref;
+        if (![m.a, m.b, m.c, m.d, m.e, m.f].every((v) => v.isFinite)) {
+          unbounded = true;
+          return;
+        }
         final chain = [
           (a: m.a, b: m.b, c: m.c, d: m.d, e: m.e, f: m.f),
           ...parents,
         ];
         final count = pdfium.FPDFFormObj_CountObjects(object);
+        if (count < 0) unbounded = true;
         for (var i = 0; i < count; i++) {
           visit(pdfium.FPDFFormObj_GetObject(object, i), chain);
         }
-      } else if (type == pdfium_bindings.FPDF_PAGEOBJ_IMAGE &&
-          pdfium.FPDFPageObj_GetBounds(object, left, bottom, right, top) != 0) {
+      } else if (type != pdfium_bindings.FPDF_PAGEOBJ_TEXT) {
+        if ((type != pdfium_bindings.FPDF_PAGEOBJ_IMAGE &&
+                type != pdfium_bindings.FPDF_PAGEOBJ_PATH &&
+                type != pdfium_bindings.FPDF_PAGEOBJ_SHADING) ||
+            pdfium.FPDFPageObj_GetBounds(object, left, bottom, right, top) ==
+                0) {
+          unbounded = true;
+          return;
+        }
+        if (![
+          left.value,
+          bottom.value,
+          right.value,
+          top.value,
+        ].every((v) => v.isFinite)) {
+          unbounded = true;
+          return;
+        }
         final points = <({double x, double y})>[];
         for (var x in [left.value, right.value]) {
           for (var y in [bottom.value, top.value]) {
@@ -556,7 +583,10 @@ List<PdfRect> _imagesOnWorker(
             }
           }
         }
-        if (points.length != 4) return;
+        if (points.length != 4) {
+          unbounded = true;
+          return;
+        }
         final rect = PdfRect(
           points
               .map((p) => p.x)
@@ -575,15 +605,24 @@ List<PdfRect> _imagesOnWorker(
               .reduce(math.max)
               .clamp(0, request.height / 1000),
         );
-        if (rect.width > 0 && rect.height > 0) result.add(rect);
+        if (rect.width > 0 && rect.height > 0) {
+          (type == pdfium_bindings.FPDF_PAGEOBJ_IMAGE ? images : graphics).add(
+            rect,
+          );
+        } else {
+          // Zero-area path bounds do not prove no ink: hairline strokes can
+          // still paint device pixels. Prefer the full page over discarding it.
+          unbounded = true;
+        }
       }
     }
 
     final count = pdfium.FPDFPage_CountObjects(page);
+    if (count < 0) unbounded = true;
     for (var i = 0; i < count; i++) {
       visit(pdfium.FPDFPage_GetObject(page, i), const []);
     }
-    return result;
+    return (images: images, graphics: graphics, unbounded: unbounded);
   } finally {
     pdfium.FPDF_ClosePage(page);
   }

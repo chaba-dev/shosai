@@ -11,8 +11,10 @@ that Columns is already available.
 
 ## Contract for the successors
 
-`PdfEngineDocument.pageGeometry(page)` returns owned immutable text lines and
-image-object rectangles. All rectangles are **points in the rotated visible
+`PdfEngineDocument.pageGeometry(page)` returns owned immutable text lines,
+image-object rectangles and other painted-object bounds (`graphics`, paths and
+shadings). `hasUnboundedGraphics` signals an object whose coverage could not be
+established. All rectangles are **points in the rotated visible
 page, top-left origin**, not unrotated PDF coordinates or display pixels.
 Nested Form XObject transforms, CropBox and page rotation are applied by the
 engine. Character offsets remain PDFium indices, just like selection/search.
@@ -42,6 +44,13 @@ distinct sampled pages is omitted; numeric/Roman folios may vary. Alternating
 heads can recur on facing pages. Single-page analysis cannot establish a head.
 Fallback preserves the complete raster, including any printed head/folio.
 There is no OCR, semantic table recognition or vector-figure segmentation.
+Before returning column crops, the analyzer checks that every retained line,
+image and other painted-object bound is contained by exactly one region and
+does not overlap another crop. Unknown object bounds, uncovered vector ink,
+partial intersections or ambiguous overlaps return the complete page instead.
+Contained image labels belong to their figure region, not a later text block.
+Successors must use the engine geometry unchanged, including its coverage
+fields; constructing a text/image-only copy discards the safety contract.
 
 ## Ten-rule delivery boundary
 
@@ -64,7 +73,11 @@ There is no OCR, semantic table recognition or vector-figure segmentation.
 ACM two-column paper, a single-column arXiv excerpt (including its vertical
 identifier), synthetic scan fallback, three columns, R2L, bands/figures,
 recurring heads/folios, and raster-checked nested image geometry at all four
-rotations with a nonzero CropBox. Corpus attribution, rights and checksums are
+rotations with a nonzero CropBox. A first-party four-page PDF also checks every
+painted pixel for exactly-once crop coverage: vector art below the body, wider
+vector art above its caption, a labeled raster figure, and an axial shading.
+Unsafe vector/shading cases fall back, while the labeled image keeps columns.
+Corpus attribution, rights and checksums are
 in `fixtures/pdf-columns/README.md` and `SHA256SUMS`.
 
 Run `make lint`, `make test`, and the existing production-shell golden harness.

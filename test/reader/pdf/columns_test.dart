@@ -24,7 +24,13 @@ PdfPageGeometry page(
 void main() {
   test('bands top-to-bottom, columns between bands, figures own regions', () {
     final input = page(
-      [line('Title', 100, 24, 400), ...columns(120), ...columns(320)],
+      [
+        line('Title', 100, 24, 400),
+        ...columns(120),
+        line('Band label', 100, 250, 100),
+        ...columns(320),
+        line('Image label', 100, 390, 100),
+      ],
       images: [
         const PdfRect(54, 230, 556, 290),
         const PdfRect(60, 370, 250, 430),
@@ -57,6 +63,41 @@ void main() {
     expect(rtl.regions.first.lines.single, same(input.lines.first));
     expect(ltr.regions.expand((r) => r.lines).toSet(), input.lines.toSet());
     expect(ltr.regions.expand((r) => r.lines), hasLength(input.lines.length));
+    expect(
+      ltr.regions
+          .where((r) => r.kind == PdfRegionKind.figure)
+          .map((r) => r.lines.single.text),
+      ['Band label', 'Image label'],
+    );
+  });
+
+  test('uncertain ink coverage falls back, covered graphics keep columns', () {
+    final body = columns(120);
+    for (final (graphics, unbounded, expected) in [
+      ([const PdfRect(100, 125, 120, 150)], false, 2),
+      ([const PdfRect(100, 180, 120, 200)], false, 0),
+      (<PdfRect>[], true, 0),
+    ]) {
+      final result = analyzePdfColumns([
+        PdfPageGeometry(
+          width: 612,
+          height: 792,
+          lines: body,
+          images: [],
+          graphics: graphics,
+          hasUnboundedGraphics: unbounded,
+        ),
+      ]).single;
+      expect(result.columnCount, expected);
+    }
+    // The image cuts through a body line; silently duplicating/clipping it
+    // would be unsafe even though the gutter itself is clear.
+    expect(
+      analyzePdfColumns([
+        page(body, images: [const PdfRect(54, 130, 293, 150)]),
+      ]).single.columnCount,
+      0,
+    );
   });
 
   test('three columns and ragged edges are not reduced to two', () {
