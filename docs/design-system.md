@@ -302,9 +302,13 @@ a column change; a light band naming the new page marks a page change.
 
 The quiet outer quarters and swipes move one **screen**, not one PDF page;
 the middle half reveals chrome. PageUp/PageDown and edge controls use the same
-screen step. The top folio always names the topmost visible original page,
-“page x of y”, beside a 12 × 15 pt page outline shading that page's visible
-area. Neither fit-width fallback nor Columns uses facing-page layout. Columns
+screen step. The top folio follows Display's Progress choice: **Page** names
+the topmost visible original page, “page x of y”, beside a 12 × 15 pt page
+outline shading that page's visible area; **Percent** shows the existing
+book-wide percentage without the outline; **Off** hides both. Its reserved
+header space stays fixed so changing Progress never moves the reading crop.
+Column rules and page-change bands remain content boundaries in every setting.
+Neither fit-width fallback nor Columns uses facing-page layout. Columns
 slides when Page animations is on and changes instantly when it is off or the
 platform requests reduced motion; it never curls. Page-coordinate restoration,
 selection/mark/link mapping, double-tap entry and phone auto-defaults are the

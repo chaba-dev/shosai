@@ -17,6 +17,11 @@ void main() {
   final captureKey = GlobalKey();
   final raster = find.byKey(const ValueKey('reader-columns-raster'));
   final folio = find.byKey(const ValueKey('reader-columns-folio'));
+  final folioText = find.descendant(
+    of: folio,
+    matching: find.byType(Text),
+    matchRoot: true,
+  );
   final artifacts = Platform.environment['SHOSAI_COLUMNS_ARTIFACTS'];
 
   Future<void> capture(String name) async {
@@ -83,7 +88,7 @@ void main() {
     ui.Image? image() => raster.evaluate().isEmpty
         ? null
         : tester.widget<RawImage>(raster).image;
-    String place() => tester.widget<Text>(folio).data!;
+    String place() => tester.widget<Text>(folioText).data!;
     await until(tester, () => image() != null);
     expect(place(), 'page 1 of 8');
     expect(
@@ -152,6 +157,45 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-typography-columns')));
     await until(tester, () => image() != null);
     expect(saved.last.pdfFit, FlutterPdfFit.columns);
+    for (final progress in [
+      FlutterReaderProgress.off,
+      FlutterReaderProgress.percent,
+      FlutterReaderProgress.page,
+    ]) {
+      before = image();
+      await tester.tap(
+        find.byKey(ValueKey('reader-progress-${progress.name}')),
+      );
+      await tester.pumpAndSettle();
+      expect(saved.last.progress, progress);
+      expect(image(), same(before), reason: 'Progress must not move the crop');
+      final outline = find.byKey(const ValueKey('reader-columns-outline'));
+      if (progress == FlutterReaderProgress.off) {
+        expect(folio, findsNothing);
+        expect(outline, findsNothing);
+      } else {
+        // The top visible original page is 1 of 8, even on later strip screens.
+        expect(
+          place(),
+          progress == FlutterReaderProgress.page ? 'page 1 of 8' : '13%',
+        );
+        expect(
+          outline,
+          progress == FlutterReaderProgress.page
+              ? findsOneWidget
+              : findsNothing,
+        );
+      }
+      await tester.tapAt(const Offset(10, 100));
+      await tester.pumpAndSettle();
+      await tester.tapAt(rect.center, kind: ui.PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      await capture('columns-progress-${progress.name}');
+      await tester.tapAt(rect.center);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+      await tester.pumpAndSettle();
+    }
     // Animation off changes at once; changing the platform's reduced-motion
     // request has the same effect even with Page animations on.
     await tester.tap(
@@ -247,7 +291,7 @@ void main() {
       ),
     );
     await until(tester, () => raster.evaluate().isNotEmpty);
-    expect(tester.widget<Text>(folio).data, 'page 1 of 1');
+    expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
     final box = tester.getSize(
       find.byKey(const ValueKey('reader-page-tap-area')),
     );

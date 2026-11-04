@@ -33,25 +33,27 @@ class _ReaderColumns extends StatelessWidget {
         children: [
           SizedBox(
             height: pdfStripHeaderHeight,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CustomPaint(
-                  key: const ValueKey('reader-columns-outline'),
-                  size: const Size(12, 15),
-                  painter: _ColumnsOutlinePainter(screen, colors.foreground),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  label,
-                  key: const ValueKey('reader-columns-folio'),
-                  style: _readerFolioStyle(
-                    model,
-                    color: colors.foreground.withValues(alpha: .6),
+            child: model.typography.progress == FlutterReaderProgress.off
+                ? null
+                : Row(
+                    key: const ValueKey('reader-columns-folio'),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (model.typography.progress ==
+                          FlutterReaderProgress.page) ...[
+                        CustomPaint(
+                          key: const ValueKey('reader-columns-outline'),
+                          size: const Size(12, 15),
+                          painter: _ColumnsOutlinePainter(
+                            screen,
+                            colors.foreground,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      _ReaderFolio(model: model, ordinal: screen.topPage + 1),
+                    ],
                   ),
-                ),
-              ],
-            ),
           ),
           Expanded(
             child: Padding(

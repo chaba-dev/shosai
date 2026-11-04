@@ -32,8 +32,15 @@ body { margin: 0; background: var(--canvas); }
     <figure><img src="images/columns-page-band.jpg" alt="A screen spanning PDF pages 1 and 2, separated by a light band naming page 2"><figcaption>The strip continues across pages. A page-number band marks the new page; the top folio still names the topmost visible page.</figcaption></figure>
   </div>
   <p class="columns-note">Captured by <code>integration_test/pdf_columns_test.dart</code>, not a browser imitation of the reader. Quiet outer zones and swipes move one screen; the middle reveals chrome. Page animations slides the strip, never curls it; off or reduced motion changes instantly. Scans and uncertain layouts stay at fit width. Paper: Slee, Agarwal and Kwiatkowski, <em>Thrift: Scalable Cross-Language Services Implementation</em> (2007), Apache Thrift; see <a href="../../../fixtures/pdf-columns/README.md">source, license and attribution</a>.</p>
+  <div class="cap">Columns · Display progress · native Linux header crops</div>
+  <div class="sh-stage columns" aria-label="Columns progress settings">
+    <figure><img src="images/columns-progress-page.jpg" alt="Page progress shows page 1 of 8 and the visible-area outline above the PDF"><figcaption>Page: the topmost original page and its visible-area outline.</figcaption></figure>
+    <figure><img src="images/columns-progress-percent.jpg" alt="Percent progress shows 13% above the same PDF crop without a page outline"><figcaption>Percent: the existing book-wide percentage, without an outline.</figcaption></figure>
+    <figure><img src="images/columns-progress-off.jpg" alt="Progress Off leaves a quiet empty header above the same PDF crop"><figcaption>Off: neither folio nor outline. Reserved space stays fixed, so the document does not move.</figcaption></figure>
+  </div>
   <div class="sh-stage columns">
     <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns-title.jpg" aria-label="Native Linux Columns interaction recording"><source src="images/columns-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop: Display fit changes, keyboard screen steps and vertical slides. A narrow desktop window, not an Android device.</figcaption></figure>
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns-title.jpg" aria-label="Native Linux Columns progress preference recording"><source src="images/columns-progress-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop: Progress changes from Page to Percent to Off and back to Page, without moving the PDF crop.</figcaption></figure>
   </div>
   <div class="cap">Two-page spread · EPUB · Paper · left to right</div>
   <div class="sh-stage">
