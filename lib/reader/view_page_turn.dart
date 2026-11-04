@@ -352,8 +352,11 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
 
   void _settle(double end) {
     final revision = ++_captureRevision;
+    final milliseconds = widget.model.columnsPresentation ? 200 : 350;
     final duration = Duration(
-      milliseconds: (350 * (end - _progress.value).abs()).round().clamp(1, 350),
+      milliseconds: (milliseconds * (end - _progress.value).abs())
+          .round()
+          .clamp(1, milliseconds),
     );
     // A fitted PDF's narrow fold is nearly stationary at the start of an
     // ease-in-out curve. Lift it on the first animated frame, rather than
