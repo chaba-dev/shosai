@@ -7,6 +7,25 @@ surface with Note/Copy/Search controls. The images show the original page and
 an Abstract selection. They demonstrate that the existing app still reads the
 corpus, not the analyzer's ordering (which the unit corpus verifies).
 
+## ResNet page 4 — orphan network headers
+
+Mac validation of the cumulative reader exposed an acceptance gap despite
+exact-once ink coverage: the three network headers were a separate text crop,
+so pagination could leave them on the preceding screen without their diagram.
+The new exact-page regression failed on the previously approved analyzer.
+Nearby small-type headers above and horizontally inside a figure now join its
+indivisible region. Body-sized type (including narrow glyphs), more distant
+headers and neighboring-column text are negative controls. No offsets, physical
+line bounds or view API changed; no paper-specific production branch was added.
+
+The pinned originals still match the existing rights/hash record; no original
+PDF or new third-party artwork is committed. Current checks: all **66 PDF and
+production-shell tests pass**, including original-PDF extraction and all 27
+ResNet/Attention raster pages with zero missing/repeated painted pixels excluding
+folios; all 11 goldens have zero drift. `make lint check-fmt` passes. PR2 owns
+the screen-boundary regression and cumulative native captures; analyzer tests
+alone do not certify the Mac/iPhone screen result. No golden baseline changed.
+
 ## Current follow-up — exact phone-reported pages
 
 Darwin's iPhone findings supersede the broad fallback accepted in the earlier

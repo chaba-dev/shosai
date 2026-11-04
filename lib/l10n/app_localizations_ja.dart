@@ -686,7 +686,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get librarySortAuthor => '著者';
 
   @override
-  String get cardOpenTag => '読書中';
+  String get cardOpenTag => '開いた本';
 
   @override
   String shellOpenBooks(int count) {

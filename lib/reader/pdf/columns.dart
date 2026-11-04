@@ -351,7 +351,18 @@ List<PdfReadingRegion> _figures(
       for (final line in lines) {
         final small =
             math.min(line.bounds.width, line.bounds.height) < height * .9;
-        if (near(bounds, line.bounds, small ? gap : 0) && labels.add(line)) {
+        // A diagram's small headers can sit outside its painted frame. Allow
+        // one body-line height above it, but not across a column boundary or
+        // into ordinary body-sized text. Growing to closure keeps header rows
+        // with the same indivisible figure as their internal labels.
+        final header =
+            line.bounds.height < height * .9 &&
+            line.bounds.left >= bounds.left &&
+            line.bounds.right <= bounds.right &&
+            line.bounds.bottom <= bounds.top &&
+            bounds.top - line.bounds.bottom <= height;
+        if ((near(bounds, line.bounds, small ? gap : 0) || header) &&
+            labels.add(line)) {
           bounds = bounds.union(line.bounds);
           changed = true;
         }

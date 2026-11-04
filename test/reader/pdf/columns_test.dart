@@ -100,6 +100,34 @@ void main() {
     expect(overlaid.regions.expand((r) => r.lines), hasLength(body.length));
   });
 
+  test('small figure headers attach without absorbing nearby body text', () {
+    for (final (bounds, attached) in [
+      (const PdfRect(80, 213, 160, 221), true),
+      (const PdfRect(80, 211, 160, 221), false), // Body-sized glyphs.
+      (const PdfRect(80, 211, 84, 221), false), // Narrow is not small type.
+      (const PdfRect(80, 211, 160, 219), false), // More than one line away.
+      (const PdfRect(317, 213, 397, 221), false), // Neighboring column.
+    ]) {
+      final header = PdfTextLine(
+        bounds: bounds,
+        text: 'Header',
+        start: 0,
+        end: 6,
+      );
+      final input = page(
+        [...columns(120), header, ...columns(400)],
+        images: [const PdfRect(54, 230, 293, 350)],
+      );
+      final result = analyzePdfColumns([input]).single;
+      expect(result.columnCount, 2);
+      final figure = result.regions.singleWhere(
+        (r) => r.kind == PdfRegionKind.figure,
+      );
+      expect(figure.lines.contains(header), attached);
+      expect(result.regions.expand((r) => r.lines), contains(header));
+    }
+  });
+
   test('three columns and ragged edges are not reduced to two', () {
     final input = page([
       for (var n = 0; n < 6; n++)

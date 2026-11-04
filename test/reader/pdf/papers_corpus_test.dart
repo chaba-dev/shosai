@@ -160,6 +160,30 @@ void main() {
         }
         expect(pages, hasLength(paper.pages));
         final results = analyzePdfColumns(pages);
+        if (paper.name == 'resnet') {
+          // Page 4's three network headers must travel with the diagram, not
+          // survive as an orphan text crop on the preceding strip screen.
+          // Offsets identify the pinned original without redistributing prose.
+          final headers = [
+            for (final start in [995, 1002, 1558])
+              pages[3].lines.singleWhere((line) => line.start == start),
+          ];
+          final diagram = results[3].regions.singleWhere(
+            (r) => r.bounds.contains(pages[3].graphics.first),
+          );
+          expect(diagram.kind, PdfRegionKind.figure);
+          expect(diagram.lines, containsAll(headers));
+          expect(
+            diagram.lines.any((line) => line.bounds.bottom > 600),
+            isTrue,
+            reason: 'headers and bottom network layers stay indivisible',
+          );
+          expect(
+            diagram.lines.every((line) => line.bounds.right < 300),
+            isTrue,
+            reason: 'neighboring body column remains independent',
+          );
+        }
         for (var p = 0; p < pages.length; p++) {
           final result = results[p];
           expect(
