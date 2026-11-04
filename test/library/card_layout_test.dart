@@ -499,8 +499,8 @@ void main() {
       for (final (locale, tag, textScale) in const [
         (Locale('en'), 'Open', 1.0),
         (Locale('en'), 'Open', 2.0),
-        (Locale('ja'), '読書中', 1.0),
-        (Locale('ja'), '読書中', 2.0),
+        (Locale('ja'), '開いた本', 1.0),
+        (Locale('ja'), '開いた本', 2.0),
       ]) {
         tester.platformDispatcher.textScaleFactorTestValue = textScale;
         final l10n = await AppLocalizations.delegate.load(locale);
@@ -513,7 +513,17 @@ void main() {
           await pumpCard(locale, progress, true);
           expect(cut(status), closedCut, reason: '$reason: status');
           final tagText = find.text(tag);
+          expect(tagText, findsOneWidget, reason: reason);
+          if (locale.languageCode == 'ja') {
+            expect(find.text('読書中'), findsNothing, reason: reason);
+          }
           expect(cut(tagText), isFalse, reason: '$reason: tag');
+          final paragraph = tester.renderObject<RenderParagraph>(tagText);
+          expect(
+            paragraph.getMaxIntrinsicWidth(double.infinity),
+            lessThanOrEqualTo(paragraph.size.width + 0.01),
+            reason: '$reason: the unwrapped tag must not clip any glyphs',
+          );
           final card = tester.getRect(find.byType(LibraryBookCard));
           final tagRect = tester.getRect(tagText);
           expect(
