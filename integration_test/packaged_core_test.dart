@@ -9,6 +9,8 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
+import 'library_progress_test.dart' as library_progress;
+
 /// Packaged-host check for the Dart core's native libraries.
 ///
 /// Run on a desktop host with no `SHOSAI_PDFIUM_LIBRARY` or `PDFIUM_PATH`
@@ -21,6 +23,7 @@ import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 /// a second user of the same image.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  library_progress.main();
 
   testWidgets('the packaged PDFium and SQLite serve import, open and render', (
     tester,

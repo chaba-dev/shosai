@@ -194,7 +194,7 @@
   "librarySortRecent": "最近",
   "librarySortTitle": "タイトル",
   "librarySortAuthor": "著者",
-  "cardOpenTag": "読書中",
+  "cardOpenTag": "開いた本",
   "shellOpenBooks": "読書中の本 {count}冊",
   "shellSwitcherDone": "完了",
   "importChooseFiles": "ファイルを選択",
