@@ -316,8 +316,9 @@ Neither fit-width fallback nor Columns uses facing-page layout. Columns
 slides over about 200 ms when Page animations is on and changes instantly when it is off or the
 platform requests reduced motion; it never curls. Selection, highlights, notes,
 search hits and links follow each crop's original-page offset and scale, not a
-second text layout. The saved place is the top piece's original page and height;
-switching fits or reopening keeps it. A double tap on a fitted column opens
+second text layout. The saved place is the visible original page and x+y point,
+including detail panning over a textless figure; switching fits or reopening
+keeps it. A double tap on a fitted column opens
 Columns there; a double tap in Columns returns to Fit page. Phones without a
 saved fit choice sample the first three pages: two or more columns opens
 Columns, otherwise Fit width. Tablets and desktops keep Fit page unless the

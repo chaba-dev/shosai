@@ -211,9 +211,15 @@ so repeated fit changes cannot creep upward one line at a time.
 body text beside a tall raster figure at x317–556, y190–730. The native reader
 regressions enter a completely textless figure screen at y350 and check both
 Columns → Fit page → Columns and a fresh core reopen. Before the horizontal
-anchor, both restore to left-column x54; with it both retain x317 and y350.
-The before/after screenshots and moving-pointer fit round-trip recording are
-captured on Linux, not a phone runtime.
+anchor, both restore to left-column x54; with it both retain the right figure
+and y350. Current PR1 geometry adds a 1pt raster guard (source x316).
+Additional regressions pinch sharply, pan in both axes under injected safe
+insets, and verify the persisted page-space point against measured raster
+movement before switching fits or reopening. A detail viewport message is
+guarded by its adopted screen identity; textless viewports keep x+y without
+inventing a text offset. Pending detail requests survive viewport refresh.
+The screenshots and real moving-pointer recordings are captured on Linux,
+not a phone runtime.
 
 The strip selection surface keeps each visible page's complete canonical text
 but maps only the visible geometry through `PdfStripPiece.fromPage`. A page is
@@ -225,6 +231,11 @@ existing PDF destination/peek flow. Notes and search jumps enter the region that
 contains their original character range. A targeted range reserves leading
 space for the overlaid toolbar and selection capsule, accounted for in the
 line-safe screen layout, so the hit is visible rather than covered by controls.
+Both detail scroll offsets belong to the rendered content's transform, outside
+the original-page geometry. Selection actions measure that transform after
+frame layout, so reparenting under new scroll/preview ancestors cannot read an
+unlaid-out transform. Native tests select and activate links after both-axis
+panning, retaining canonical page-local offsets and destinations.
 
 Touch double-tap is handled on the actual selectable surface: a fitted page
 opens Columns at the tapped column; Columns returns to Fit page, not 2x. A
