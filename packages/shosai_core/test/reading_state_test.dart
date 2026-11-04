@@ -153,6 +153,11 @@ void main() {
       await ReadingState(
         t.store,
       ).save(epub.id, const ReadingPosition(unit: 7, offset: 42), unitCount: 9);
+      await ReadingState(t.store).save(
+        pdf.id,
+        const ReadingPosition(unit: 2, offset: 1337, pdfY: 287.25),
+        unitCount: 8,
+      );
       await t.store.close();
 
       final reopened = await Store.open(t.store.path);
@@ -162,6 +167,14 @@ void main() {
         await ReadingState(reopened).load(epub.id),
         const ReadingPosition(unit: 7, offset: 42),
       );
+      expect(
+        await ReadingState(reopened).load(pdf.id),
+        const ReadingPosition(unit: 2, offset: 1337, pdfY: 287.25),
+      );
+      await ReadingState(
+        reopened,
+      ).save(pdf.id, const ReadingPosition(unit: 3), unitCount: 8);
+      expect((await ReadingState(reopened).load(pdf.id))!.pdfY, isNull);
     });
 
     test(
@@ -203,6 +216,9 @@ void main() {
         const ReadingPosition(unit: 0, zoom: -1),
         const ReadingPosition(unit: 0, zoom: double.nan),
         const ReadingPosition(unit: 0, zoom: double.infinity),
+        const ReadingPosition(unit: 0, pdfY: -1),
+        const ReadingPosition(unit: 0, pdfY: double.nan),
+        const ReadingPosition(unit: 0, pdfY: double.infinity),
       ]) {
         await expectLater(
           state.save(epub.id, position, unitCount: 1),

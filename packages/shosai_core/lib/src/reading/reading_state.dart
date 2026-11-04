@@ -8,21 +8,30 @@ import '../store/store.dart';
 /// A reading position: a unit (PDF page or EPUB spine item), an optional
 /// offset within it (an EPUB character offset), and the zoom.
 final class ReadingPosition {
-  const ReadingPosition({required this.unit, this.offset, this.zoom = 1});
+  const ReadingPosition({
+    required this.unit,
+    this.offset,
+    this.zoom = 1,
+    this.pdfY,
+  });
 
   final int unit;
   final int? offset;
   final double zoom;
+
+  /// Height from the rotated PDF page's top, in original points, not pixels.
+  final double? pdfY;
 
   @override
   bool operator ==(Object other) =>
       other is ReadingPosition &&
       other.unit == unit &&
       other.offset == offset &&
-      other.zoom == zoom;
+      other.zoom == zoom &&
+      other.pdfY == pdfY;
 
   @override
-  int get hashCode => Object.hash(unit, offset, zoom);
+  int get hashCode => Object.hash(unit, offset, zoom, pdfY);
 
   @override
   String toString() => 'ReadingPosition($unit, $offset, $zoom)';
@@ -88,6 +97,11 @@ double readingProgress(int unit, int unitCount) => unitCount <= 1
     : (unit < unitCount - 1 ? unit : unitCount - 1) / (unitCount - 1);
 
 void _validate(ReadingPosition position) {
+  if (position.pdfY case final y? when !y.isFinite || y < 0) {
+    throw const CoreException.invalidRequest(
+      'The PDF height must be finite and nonnegative.',
+    );
+  }
   if (position.unit < 0 || (position.offset ?? 0) < 0) {
     throw const CoreException.invalidRequest(
       'The reading position must not be negative.',
@@ -104,7 +118,7 @@ ReadingPosition? _load(Database db, int bookId) {
   final hash = bookContentHash(db, bookId);
   final row = db
       .select(
-        '''SELECT unit, location_offset, zoom FROM reading_state
+        '''SELECT unit, location_offset, zoom, pdf_y FROM reading_state
        WHERE content_hash = ?''',
         [hash],
       )
@@ -114,20 +128,22 @@ ReadingPosition? _load(Database db, int bookId) {
     unit: row.columnAt(0) as int,
     offset: row.columnAt(1) as int?,
     zoom: row.columnAt(2) as double,
+    pdfY: row.columnAt(3) as double?,
   );
 }
 
 void _save(Database db, int bookId, ReadingPosition position, double progress) {
   final hash = bookContentHash(db, bookId);
   db.execute(
-    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom)
-       VALUES (?, ?, ?, ?)
+    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom, pdf_y)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(content_hash) DO UPDATE SET
          unit = excluded.unit,
          location_offset = excluded.location_offset,
          zoom = excluded.zoom,
+         pdf_y = excluded.pdf_y,
          updated_at = excluded.updated_at''',
-    [hash, position.unit, position.offset, position.zoom],
+    [hash, position.unit, position.offset, position.zoom, position.pdfY],
   );
   db.execute(
     '''UPDATE books SET progress = ?,
