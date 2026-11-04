@@ -453,6 +453,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerColumns => '段組み';
 
   @override
+  String get readerColumnsSizeMaximum => '100% · 最大';
+
+  @override
   String get readerFitPage => 'ページに合わせる';
 
   @override

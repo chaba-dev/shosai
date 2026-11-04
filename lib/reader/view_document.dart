@@ -104,7 +104,7 @@ class _DocumentViewState extends State<_DocumentView> {
                 readerFocus.requestFocus();
               }
             },
-            child: _ReaderColumns(model: model),
+            child: _ReaderColumns(model: model, dispatch: dispatch),
           ),
         ),
       );

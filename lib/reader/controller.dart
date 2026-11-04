@@ -1416,6 +1416,25 @@ final class ReaderController implements Listenable {
         _imageDecoded(message);
       case _ReaderColumnsLoaded():
         _columnsLoaded(message);
+      case ReaderColumnsDetailRequested():
+        if (identical(message.screen, _model.pdfColumns) &&
+            message.piece.zoomable &&
+            message.screen.pieces.contains(message.piece) &&
+            !_model.relayoutBusy) {
+          final strip = message.screen.strip ?? message.screen;
+          _requestColumns(
+            strip.start,
+            detail: message.zoom <= 1.03
+                ? null
+                : (
+                    page: message.piece.page,
+                    region: message.piece.region,
+                    zoom: message.zoom.clamp(1, 5),
+                    baseScale: message.piece.scale / message.screen.detailZoom,
+                  ),
+            strip: strip,
+          );
+        }
       case _ReaderColumnsFailed():
         if (_isCurrentColumns(message.generation, message.revision)) {
           _emit(
@@ -3558,7 +3577,7 @@ final class ReaderController implements Listenable {
         _rasterFit = ReaderRasterFit.manual;
       }
       _rasterZoom = _rasterFit == ReaderRasterFit.columns
-          ? zoom.clamp(0.5, 4.0)
+          ? zoom.clamp(0.5, 1.0)
           : zoom.clamp(0.25, 5.0);
     }
     _emit(_model);

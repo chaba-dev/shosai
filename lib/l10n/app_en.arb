@@ -674,6 +674,7 @@
   "readerFitWidth": "Fit width",
   "readerColumns": "Columns",
   "@readerColumns": { "description": "PDF reading mode showing original page pieces in column reading order." },
+  "readerColumnsSizeMaximum": "100% · max",
   "@readerFitWidth": {
     "description": "Iced reference key: fit-width."
   },

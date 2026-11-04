@@ -133,11 +133,156 @@ void main() {
         zoom: 2,
       );
       expect(screen.pieces.map((p) => p.page), [0, 0, 0, 1]);
-      expect(screen.pieces.map((p) => p.width), [200, 400, 400, 200]);
+      expect(screen.pieces.map((p) => p.width), [200, 200, 200, 200]);
       expect(screen.pieces.map((p) => p.left), [0, 0, 0, 0]);
       expect(screen.separators.map((s) => s.page), [null, 1]);
       expect(screen.next.page, 2);
       expect(screen.pieces.last.source.bottom, 400);
+    },
+  );
+
+  test(
+    'a paragraph first row carries forward but ordinary rows fill the screen',
+    () {
+      final rows = [line(0, 8), line(10, 18), line(30, 38), line(40, 48)];
+      PdfStripScreen screen(double height) => layoutPdfColumnScreen(
+        pages: {
+          0: page([
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(20, 0, 120, 48),
+              lines: rows,
+            ),
+          ]),
+        },
+        pageCount: 1,
+        start: const PdfStripPosition(0),
+        width: 100,
+        height: height,
+      );
+      expect(screen(39).pieces.single.source.bottom, 24);
+      expect(screen(19).pieces.single.source.bottom, 18.5);
+      expect(screen(48).next.page, 1);
+      final heading = layoutPdfColumnScreen(
+        pages: {
+          0: page([
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(20, 0, 120, 52),
+              lines: [
+                line(0, 8),
+                line(10, 18),
+                line(22, 35),
+                line(38, 46),
+                line(48, 52),
+              ],
+            ),
+          ]),
+        },
+        pageCount: 1,
+        start: const PdfStripPosition(0),
+        width: 100,
+        height: 36,
+      );
+      expect(
+        heading.pieces.single.source.bottom,
+        20,
+        reason: 'A larger heading stays with the following body',
+      );
+      final newBlock = layoutPdfColumnScreen(
+        pages: {
+          0: page([
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(20, 0, 120, 30),
+            ),
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(20, 45, 120, 73),
+              lines: [line(45, 53), line(55, 63), line(65, 73)],
+            ),
+          ]),
+        },
+        pageCount: 1,
+        start: const PdfStripPosition(0),
+        width: 100,
+        height: 55,
+      );
+      expect(
+        newBlock.pieces.length,
+        1,
+        reason: 'A new block cannot leave just its first row in a tail',
+      );
+      expect(newBlock.next.region, 1);
+    },
+  );
+
+  test(
+    'a figure fits indivisibly after text, preserving its selection lines',
+    () {
+      final pages = {
+        0: page([
+          PdfReadingRegion(
+            kind: PdfRegionKind.column,
+            bounds: const PdfRect(20, 0, 120, 30),
+          ),
+          PdfReadingRegion(
+            kind: PdfRegionKind.figure,
+            bounds: const PdfRect(20, 40, 120, 240),
+            lines: [line(50, 60), line(210, 220)],
+          ),
+        ]),
+      };
+      final first = layoutPdfColumnScreen(
+        pages: pages,
+        pageCount: 1,
+        start: const PdfStripPosition(0),
+        width: 100,
+        height: 150,
+      );
+      expect(first.pieces.length, 1);
+      expect(first.next.region, 1);
+      final next = layoutPdfColumnScreen(
+        pages: pages,
+        pageCount: 1,
+        start: first.next,
+        width: 100,
+        height: 150,
+      );
+      expect(next.pieces.single.source.bottom, 240);
+      expect(next.pieces.single.height, 150);
+      expect(next.pieces.single.zoomable, isTrue);
+      expect(next.next.page, 1);
+    },
+  );
+
+  test(
+    'short fragments share their column scale, not the opposite column width',
+    () {
+      final screen = layoutPdfColumnScreen(
+        pages: {
+          0: page([
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(20, 0, 120, 20),
+            ),
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(35, 40, 85, 48),
+            ),
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(180, 0, 260, 20),
+            ),
+          ]),
+        },
+        pageCount: 1,
+        start: const PdfStripPosition(0),
+        width: 200,
+        height: 300,
+      );
+      expect(screen.pieces.map((p) => p.scale), [2, 2, 2.5]);
+      expect(screen.pieces.map((p) => p.width), [200, 100, 200]);
     },
   );
 

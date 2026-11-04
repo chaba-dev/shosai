@@ -8,7 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/main.dart';
-import 'package:shosai_flutter/reader/controller.dart' show ReaderDisplayChange;
+import 'package:shosai_flutter/reader/controller.dart'
+    show ReaderDisplayChange, ReaderPlace;
 
 /// Production PDFium, controller, settings and gestures. Runs on Linux, not a
 /// browser approximation of a native reader. Artifacts are opt-in.
@@ -49,13 +50,40 @@ void main() {
     if (settle) await tester.pumpAndSettle();
   }
 
+  Future<void> pinch(
+    WidgetTester tester,
+    Offset center,
+    double from,
+    double to,
+  ) async {
+    final left = await tester.startGesture(
+      center - Offset(from, 0),
+      pointer: 11,
+    );
+    final right = await tester.startGesture(
+      center + Offset(from, 0),
+      pointer: 12,
+    );
+    await tester.pump();
+    for (var i = 1; i <= 8; i++) {
+      final span = from + (to - from) * i / 8;
+      await left.moveTo(center - Offset(span, 0));
+      await right.moveTo(center + Offset(span, 0));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await left.up();
+    await right.up();
+  }
+
   testWidgets('Columns reads the real Thrift paper across screens and pages', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(880, 1800);
     tester.view.devicePixelRatio = 2;
+    tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewPadding);
     final directory = await Directory.systemTemp.createTemp('shosai-columns-');
     final path = '${directory.path}/Thrift.pdf';
     await File('fixtures/pdf-columns/thrift.pdf').copy(path);
@@ -91,6 +119,8 @@ void main() {
     String place() => tester.widget<Text>(folioText).data!;
     await until(tester, () => image() != null);
     expect(place(), 'page 1 of 8');
+    expect(tester.getTopLeft(folio).dy, greaterThanOrEqualTo(59));
+    expect(tester.getBottomRight(raster).dy, lessThanOrEqualTo(900 - 34));
     expect(
       tester.getSize(find.byKey(const ValueKey('reader-columns-outline'))),
       const Size(12, 15),
@@ -103,35 +133,20 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
     await tester.pumpAndSettle();
-    for (var i = 0; i < 4; i++) {
-      before = image();
-      await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-in')));
-      await until(tester, () => image() != before);
-    }
-    expect(tester.getSize(raster).width, (rect.width - 28) * 2);
-    await tester.tapAt(const Offset(10, 100));
-    await tester.pumpAndSettle();
-    await tester.tapAt(rect.center, kind: ui.PointerDeviceKind.mouse);
-    await tester.pumpAndSettle();
-    await capture('columns-enlarged');
+    expect(find.text('100% · max'), findsOneWidget);
     before = image();
-    final beforePan = tester.getTopLeft(raster).dx;
-    await tester.fling(area, const Offset(-180, 0), 1000);
+    await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-in')));
     await tester.pumpAndSettle();
-    expect(image(), same(before), reason: 'An enlarged column pans, not steps');
-    expect(tester.getTopLeft(raster).dx, lessThan(beforePan));
-    await capture('columns-enlarged-panned');
-    await tester.fling(area, const Offset(180, 0), 1000);
-    await tester.pumpAndSettle();
-    expect(image(), same(before));
-    expect(tester.getTopLeft(raster).dx, closeTo(beforePan, 1));
-    await tester.tapAt(rect.center);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
-    await tester.pumpAndSettle();
-    before = image();
-    await tester.tap(find.byKey(const ValueKey('reader-typography-columns')));
+    expect(image(), same(before), reason: 'Size cannot exceed fitted width');
+    await capture('columns-size-maximum');
+    await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-out')));
     await until(tester, () => image() != before);
+    expect(find.text('75%'), findsOneWidget);
+    before = image();
+    await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-in')));
+    await until(tester, () => image() != before);
+    expect(find.text('100% · max'), findsOneWidget);
+    expect(tester.getSize(raster).width, rect.width - 28);
     await tester.tapAt(const Offset(10, 100));
     await tester.pumpAndSettle();
     before = image();
@@ -143,6 +158,8 @@ void main() {
     expect(find.byKey(const ValueKey('reader-page-curl')), findsNothing);
     expect(find.byKey(const ValueKey('reader-columns-slide')), findsOneWidget);
     await capture('columns-slide');
+    await tester.pump(const Duration(milliseconds: 210));
+    expect(find.byKey(const ValueKey('reader-columns-slide')), findsNothing);
     await tester.pumpAndSettle();
     await capture('columns-next');
     before = image();
@@ -224,12 +241,32 @@ void main() {
     await until(tester, () => image() != before, settle: false);
     expect(find.byKey(const ValueKey('reader-columns-slide')), findsNothing);
     await tester.pumpAndSettle();
-    for (var i = 0; i < 7; i++) {
+    final namedPages = <int>{};
+    var sawRange = false;
+    for (var i = 0; i < 40; i++) {
+      final numbers = RegExp(
+        r'\d+',
+      ).allMatches(place()).map((m) => int.parse(m.group(0)!)).toList();
+      final first = numbers.first;
+      final last = numbers.length == 3 ? numbers[1] : first;
+      sawRange |= last > first;
+      for (var page = first; page <= last; page++) {
+        namedPages.add(page);
+      }
+      if (last == 8) break;
       before = image();
       await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
       await until(tester, () => image() != before);
-      await capture('columns-screen-$i');
+      if (i < 7) await capture('columns-screen-$i');
+      if (place().startsWith('pages ')) await capture('columns-page-range');
     }
+    expect(
+      namedPages,
+      containsAll([2, 3, 4, 5, 6, 7, 8]),
+      reason:
+          'Every traversed PDF page must be named, even when it never starts a screen',
+    );
+    expect(sawRange, isTrue);
     expect(place(), isNot('page 1 of 8'));
     if (find
         .byKey(const ValueKey('reader-header-typography'))
@@ -308,10 +345,141 @@ void main() {
     );
     expect(tester.getSize(raster).width, box.width - 28);
     await capture('columns-scan-fallback');
+    final area = find.byKey(const ValueKey('reader-page-tap-area'));
+    final center = tester.getCenter(raster);
+    final fitted = tester.widget<RawImage>(raster).image!;
+    await pinch(tester, center, 45, 90);
+    await until(tester, () => tester.widget<RawImage>(raster).image != fitted);
+    final enlarged = tester.widget<RawImage>(raster).image!;
+    expect(
+      enlarged.width,
+      greaterThan(fitted.width * 1.8),
+      reason: 'Pinch requests newly rendered PDF pixels',
+    );
+    expect(tester.getSize(raster).width, greaterThan(box.width * 1.7));
+    expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
+    await capture('columns-scan-pinched');
+    final origin = tester.getTopLeft(raster);
+    await tester.fling(area, const Offset(-150, -100), 700);
+    await tester.pumpAndSettle();
+    expect(tester.widget<RawImage>(raster).image, same(enlarged));
+    expect(tester.getTopLeft(raster).dx, lessThan(origin.dx));
+    expect(tester.getTopLeft(raster).dy, lessThan(origin.dy));
+    await capture('columns-scan-panned');
+    await pinch(tester, tester.getCenter(area), 90, 40);
+    await until(
+      tester,
+      () => tester.widget<RawImage>(raster).image != enlarged,
+    );
+    expect(tester.getSize(raster).width, box.width - 28);
+    expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();
     await closeApplicationCores();
     await directory.delete(recursive: true);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'a figure in a mixed strip pinches sharply without changing Size',
+    (tester) async {
+      tester.view.physicalSize = const Size(880, 1800);
+      tester.view.devicePixelRatio = 2;
+      tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewPadding);
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-columns-figure-',
+      );
+      final path = '${directory.path}/Figure.pdf';
+      await File('fixtures/pdf-columns/content-preservation.pdf').copy(path);
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          locale: const Locale('ja'),
+          home: RepaintBoundary(
+            key: captureKey,
+            child: ReaderScreen(
+              bridge: bridge,
+              initialPath: path,
+              initialPlace: const ReaderPlace(2),
+              initialSettings: const FlutterReaderSettings(
+                continuous: false,
+                theme: 'light',
+                epubFontSize: 18,
+                epubLineSpacing: 1.6,
+                pdfZoom: 0,
+                pdfFit: FlutterPdfFit.columns,
+                twoPages: false,
+                zonesHintDismissed: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await until(tester, () => raster.evaluate().isNotEmpty);
+      expect(tester.getTopLeft(folio).dy, greaterThanOrEqualTo(59));
+      final fitted = tester.widget<RawImage>(raster).image!;
+      final fittedWidth = fitted.width;
+      // Locate the fixture's gray raster figure in the actual composed pixels,
+      // not through the layout function whose hit mapping is under test.
+      final bytes = (await fitted.toByteData())!.buffer.asUint8List();
+      var pixel = -1;
+      for (var row = 0; row < fitted.height && pixel < 0; row++) {
+        var run = 0;
+        for (var x = 0; x < fittedWidth; x++) {
+          final i = (row * fittedWidth + x) * 4;
+          run = bytes[i] == 180 && bytes[i + 1] == 180 && bytes[i + 2] == 180
+              ? run + 1
+              : 0;
+          if (run >= 200) {
+            pixel = row * fittedWidth + x - run + 1;
+            break;
+          }
+        }
+      }
+      expect(
+        pixel,
+        greaterThanOrEqualTo(0),
+        reason: 'The labeled image must be on the mixed strip screen',
+      );
+      final origin = tester.getTopLeft(raster);
+      final center =
+          origin +
+          Offset(
+            (pixel % fittedWidth) / 2 + 60,
+            (pixel ~/ fittedWidth) / 2 + 40,
+          );
+      await capture('columns-figure-ja');
+      await pinch(tester, center, 30, 60);
+      await until(
+        tester,
+        () => tester.widget<RawImage>(raster).image != fitted,
+      );
+      final enlarged = tester.widget<RawImage>(raster).image!;
+      expect(enlarged.width, greaterThan(fittedWidth * 1.8));
+      expect(tester.widget<Text>(folioText).data, '4 ページ中 3 ページ');
+      await capture('columns-figure-pinched-ja');
+      final area = find.byKey(const ValueKey('reader-page-tap-area'));
+      await pinch(tester, tester.getCenter(area), 90, 40);
+      await until(
+        tester,
+        () => tester.widget<RawImage>(raster).image != enlarged,
+      );
+      await tester.tapAt(tester.getCenter(area));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
+      await tester.pumpAndSettle();
+      expect(find.text('100% · 最大'), findsOneWidget);
+      await capture('columns-size-maximum-ja');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      await directory.delete(recursive: true);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

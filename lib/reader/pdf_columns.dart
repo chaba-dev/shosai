@@ -66,6 +66,8 @@ extension on ReaderController {
     PdfStripPosition position, {
     List<PdfStripPosition>? back,
     bool previous = false,
+    ({int page, int region, double zoom, double baseScale})? detail,
+    PdfStripScreen? strip,
   }) {
     final pdf = _pdfDocument;
     final height = _epubViewportHeight;
@@ -106,6 +108,8 @@ extension on ReaderController {
       position,
       back ?? List.of(_columnsBack),
       previous: previous,
+      detail: detail,
+      strip: strip,
     );
     _referenceEffects.add(effect);
     unawaited(effect.then((_) => _referenceEffects.remove(effect)));
@@ -122,6 +126,8 @@ extension on ReaderController {
     PdfStripPosition position,
     List<PdfStripPosition> back, {
     required bool previous,
+    required ({int page, int region, double zoom, double baseScale})? detail,
+    required PdfStripScreen? strip,
   }) async {
     bool current() => _isCurrentColumns(generation, revision);
     final pages = Map<int, PdfStripPage>.of(_columnsPages);
@@ -213,6 +219,40 @@ extension on ReaderController {
       if (!current()) return;
       if (screen == null || screen.pieces.isEmpty) {
         throw const PdfEngineException('No PDF content fits this screen');
+      }
+      if (detail != null) {
+        if (!await load(detail.page)) return;
+        final page = pages[detail.page]!;
+        final region = page.columns.regions[detail.region];
+        final bounds = region.bounds;
+        final availableWidth = math.max(
+          1.0,
+          layout.width - 2 * pdfStripSideInset,
+        );
+        final availableHeight = math.max(1.0, height - pdfStripHeaderHeight);
+        final scale = detail.baseScale * detail.zoom;
+        screen = PdfStripScreen(
+          start: screen.start,
+          next: screen.next,
+          width: math.max(availableWidth, bounds.width * scale),
+          height: math.max(availableHeight, bounds.height * scale),
+          pageWidth: page.geometry.width,
+          pageHeight: page.geometry.height,
+          pieces: [
+            PdfStripPiece(
+              page: detail.page,
+              region: detail.region,
+              source: bounds,
+              left: math.max(0, (availableWidth - bounds.width * scale) / 2),
+              top: 0,
+              scale: scale,
+              zoomable: true,
+            ),
+          ],
+          separators: const [],
+          strip: strip ?? screen,
+          detailZoom: detail.zoom,
+        );
       }
       final size = pdfBitmapSizeFor(
         PdfPageSize(screen.width, screen.height),

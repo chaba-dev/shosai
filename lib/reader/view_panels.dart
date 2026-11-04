@@ -971,7 +971,11 @@ class _ReaderDisplayPanel extends StatelessWidget {
                     increaseKey: const ValueKey('reader-typography-zoom-in'),
                     decreaseLabel: l10n.readerZoomOut,
                     increaseLabel: l10n.readerZoomIn,
-                    value: '${(typography.rasterZoom * 100).round()}%',
+                    value:
+                        typography.rasterFit == ReaderRasterFit.columns &&
+                            typography.rasterZoom >= 1
+                        ? l10n.readerColumnsSizeMaximum
+                        : '${(typography.rasterZoom * 100).round()}%',
                     onDecrease: enabled
                         ? () => dispatch(
                             ReaderTypographyChanged(
@@ -979,7 +983,10 @@ class _ReaderDisplayPanel extends StatelessWidget {
                             ),
                           )
                         : null,
-                    onIncrease: enabled
+                    onIncrease:
+                        enabled &&
+                            (typography.rasterFit != ReaderRasterFit.columns ||
+                                typography.rasterZoom < 1)
                         ? () => dispatch(
                             ReaderTypographyChanged(
                               zoom: typography.rasterZoom + 0.25,

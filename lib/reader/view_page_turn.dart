@@ -135,6 +135,8 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
     if (!_motion ||
         before.generation != after.generation ||
         before.typography.rasterFit != after.typography.rasterFit ||
+        (before.pdfColumns?.detailZoom ?? 1) !=
+            (after.pdfColumns?.detailZoom ?? 1) ||
         before.layout != after.layout ||
         before.epubPage?.box.size != after.epubPage?.box.size ||
         oldWidget.spread != widget.spread ||

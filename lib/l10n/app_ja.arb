@@ -124,6 +124,7 @@
   "readerZoomIn": "拡大",
   "readerFitWidth": "幅に合わせる",
   "readerColumns": "段組み",
+  "readerColumnsSizeMaximum": "100% · 最大",
   "readerFitPage": "ページに合わせる",
   "readerPages": "ページ",
   "readerPageAnimations": "ページアニメーション",

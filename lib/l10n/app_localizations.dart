@@ -852,6 +852,12 @@ abstract class AppLocalizations {
   /// **'Columns'**
   String get readerColumns;
 
+  /// No description provided for @readerColumnsSizeMaximum.
+  ///
+  /// In en, this message translates to:
+  /// **'100% · max'**
+  String get readerColumnsSizeMaximum;
+
   /// Iced reference key: fit-page.
   ///
   /// In en, this message translates to:

@@ -34,6 +34,7 @@ final class PdfStripPiece {
     required this.left,
     required this.top,
     required this.scale,
+    this.zoomable = false,
   });
   final int page;
   final int region;
@@ -41,6 +42,7 @@ final class PdfStripPiece {
   final double left;
   final double top;
   final double scale;
+  final bool zoomable;
 
   double get width => source.width * scale;
   double get height => source.height * scale;
@@ -68,6 +70,8 @@ final class PdfStripScreen {
     required List<PdfStripPiece> pieces,
     required List<PdfStripSeparator> separators,
     this.needsPage,
+    this.strip,
+    this.detailZoom = 1,
   }) : pieces = List.unmodifiable(pieces),
        separators = List.unmodifiable(separators);
 
@@ -82,6 +86,11 @@ final class PdfStripScreen {
 
   /// Geometry to load before this screen can be rendered completely.
   final int? needsPage;
+
+  /// Detail preserves the strip cursor/history while exposing its own exact
+  /// page-space transform. Pinching back to fit returns to this strip screen.
+  final PdfStripScreen? strip;
+  final double detailZoom;
   int get topPage => pieces.first.page;
 }
 
@@ -101,7 +110,8 @@ PdfStripScreen layoutPdfColumnScreen({
   var cursor = start;
   var top = 0.0;
   int? needsPage;
-  final contentWidth = width * math.max(1, zoom);
+  zoom = zoom.clamp(.5, 1);
+  final contentWidth = width;
   while (cursor.page < pageCount && top < height - .01) {
     final page = pages[cursor.page];
     if (page == null) {
@@ -139,7 +149,26 @@ PdfStripScreen layoutPdfColumnScreen({
       PdfRegionKind.column => width * zoom,
       _ => width * math.min(1, zoom),
     };
-    var scale = fitWidth / bounds.width;
+    // A short caption/paragraph is still part of a column. Its tighter ink
+    // crop must not enlarge its font relative to the surrounding body text.
+    final fittedWidth = region.kind == PdfRegionKind.column
+        ? regions
+              .where(
+                (r) =>
+                    r.kind == PdfRegionKind.column &&
+                    r.bounds.left < bounds.right &&
+                    r.bounds.right > bounds.left,
+              )
+              .map((r) => r.bounds.width)
+              .reduce(math.max)
+        : bounds.width;
+    var scale = fitWidth / fittedWidth;
+    if (region.kind == PdfRegionKind.figure) {
+      scale = math.min(scale, (height - gap) / bounds.height);
+      // A figure/table is one object, not a set of paragraph break promises.
+      // Leave it for the next screen rather than shrinking to a leftover tail.
+      if (top > 0 && bounds.height * scale > height - top - gap) break;
+    }
     // Overlapping physical lines form an indivisible row (superscripts,
     // equations, etc.). Even a tall row must fit without being cut in two.
     final rows = region.lines.toList()
@@ -156,7 +185,7 @@ PdfStripScreen layoutPdfColumnScreen({
       scale = (height - gap) / tallestLine;
     }
     var end = math.min(bounds.bottom, y + (height - top - gap) / scale);
-    if (end < bounds.bottom) {
+    if (end < bounds.bottom && region.kind != PdfRegionKind.figure) {
       // Moving the cut upward repeatedly handles overlapping line boxes.
       var moved = true;
       while (moved) {
@@ -165,6 +194,31 @@ PdfStripScreen layoutPdfColumnScreen({
           if (line.bounds.top < end && line.bounds.bottom > end) {
             end = line.bounds.top;
             moved = true;
+          }
+        }
+      }
+      // Carry a paragraph's first row or a heading with its following text.
+      // Geometry, not punctuation or language, identifies the larger gap
+      // before a new block. Never move all rows off an otherwise empty screen.
+      final visible = rows
+          .where((l) => l.bounds.top >= y && l.bounds.bottom <= end)
+          .toList();
+      if (pieces.isNotEmpty && cursor.y == null && visible.length == 1) {
+        // Do not start a new block with just one row in the previous tail.
+        break;
+      }
+      if (visible.length > 1) {
+        final last = visible.last;
+        final index = rows.indexOf(last);
+        if (index + 1 < rows.length) {
+          final prior = visible[visible.length - 2];
+          final next = rows[index + 1];
+          final beforeGap = last.bounds.top - prior.bounds.bottom;
+          final afterGap = next.bounds.top - last.bounds.bottom;
+          if (beforeGap >= 0 &&
+              (beforeGap > math.max(last.bounds.height * .3, afterGap * 1.5) ||
+                  last.bounds.height > next.bounds.height * 1.15)) {
+            end = last.bounds.top;
           }
         }
       }
@@ -192,6 +246,9 @@ PdfStripScreen layoutPdfColumnScreen({
             2,
         top: top,
         scale: scale,
+        zoomable:
+            region.kind == PdfRegionKind.page ||
+            region.kind == PdfRegionKind.figure,
       ),
     );
     top += (end - y) * scale;
