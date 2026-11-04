@@ -226,7 +226,7 @@ void main() {
         ? 'DPR 3 capped scan'
         : 'textless right-column figure';
     testWidgets('a $subject keeps its place after '
-        '${scenario.detail ? 'both-axis detail pan and ' : ''}'
+        '${scenario.detail ? 'both-axis detail pan, resize and ' : ''}'
         '${reopen ? 'reopen' : 'a fit round-trip'}', (tester) async {
       final density = scenario.scan ? 3.0 : 2.0;
       tester.view.physicalSize = Size(440 * density, 550 * density);
@@ -405,6 +405,21 @@ void main() {
         expect(saved.pdfX, closeTo(expectedX, .01));
         expect(saved.offset, isNull);
         await capture('$fixture-detail-panned-${reopen ? 'reopen' : 'fit'}');
+        final beforeResize = painting(tester)!.columns;
+        tester.view.physicalSize = Size(440 * density, 590 * density);
+        await until(tester, () => painting(tester)!.columns != beforeResize);
+        final resized = painting(tester)!.columns!.pieces.single;
+        final moved = tester.getTopLeft(raster);
+        expect(
+          resized.source.top + (origin.dy - moved.dy) / resized.scale,
+          closeTo(expectedY, .01),
+        );
+        expect(
+          resized.source.left +
+              (tester.getCenter(area).dx - moved.dx) / resized.scale,
+          closeTo(expectedX, .01),
+        );
+        await capture('$fixture-detail-resized-${reopen ? 'reopen' : 'fit'}');
       }
       if (reopen) {
         await tester.pumpWidget(const SizedBox());

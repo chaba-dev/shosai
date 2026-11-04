@@ -183,6 +183,7 @@ final class ReaderController implements Listenable {
     bool locate,
     ({int page, int region, double zoom, double baseScale})? detail,
     PdfStripScreen? strip,
+    bool retainDetailPlace,
   })?
   _columnsIntent;
   int _referenceRevision = 0;

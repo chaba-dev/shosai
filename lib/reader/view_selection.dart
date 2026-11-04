@@ -686,6 +686,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   }
 
   void _pdfScrolled() {
+    if (_revealing) return;
     final screen = widget.columnsScreen;
     if (screen?.strip != null &&
         _horizontal.hasClients &&
@@ -704,7 +705,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       return;
     }
     final scale = widget.pdfScrollScale;
-    if (_revealing || scale == null || !_vertical.hasClients) return;
+    if (scale == null || !_vertical.hasClients) return;
     widget.dispatch(
       ReaderPdfViewportChanged(
         widget.model.generation,
@@ -715,23 +716,49 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   }
 
   void _revealPdfPlace() {
-    if (widget.pdfScrollScale == null || widget.model.relayoutBusy) return;
+    final screen = widget.columnsScreen;
+    final detail = screen?.strip != null;
+    if (!detail && widget.pdfScrollScale == null || widget.model.relayoutBusy) {
+      return;
+    }
+    final generation = widget.model.generation;
     final revision = widget.model.locationRequestRevision;
+    // Do not durably report origin or a half-restored two-axis viewport.
+    _revealing = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
+          widget.model.generation != generation ||
           widget.model.locationRequestRevision != revision ||
+          widget.model.relayoutBusy ||
           !_vertical.hasClients ||
-          widget.pdfScrollScale == null) {
+          (detail
+              ? !identical(screen, widget.columnsScreen) ||
+                    !_horizontal.hasClients
+              : widget.pdfScrollScale == null)) {
         return;
       }
-      _revealing = true;
-      _vertical.jumpTo(
-        ((widget.model.pdfY ?? 0) * widget.pdfScrollScale!).clamp(
-          0.0,
-          _vertical.position.maxScrollExtent,
-        ),
-      );
+      if (detail) {
+        final piece = screen!.pieces.single;
+        final point = piece.fromPage(widget.model.pdfX!, widget.model.pdfY!);
+        _horizontal.jumpTo(
+          (point.x - _horizontal.position.viewportDimension / 2).clamp(
+            0.0,
+            _horizontal.position.maxScrollExtent,
+          ),
+        );
+        _vertical.jumpTo(
+          point.y.clamp(0.0, _vertical.position.maxScrollExtent),
+        );
+      } else {
+        _vertical.jumpTo(
+          ((widget.model.pdfY ?? 0) * widget.pdfScrollScale!).clamp(
+            0.0,
+            _vertical.position.maxScrollExtent,
+          ),
+        );
+      }
       _revealing = false;
+      if (detail) _pdfScrolled();
     });
   }
 

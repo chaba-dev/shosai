@@ -220,6 +220,10 @@ guarded by its adopted screen identity; textless viewports keep x+y without
 inventing a text offset. Pending detail requests survive viewport refresh.
 DPR 3 scan regressions repeat both restoration paths after a capped 5× pinch;
 the durable point uses the admitted scale, not the requested gesture ratio.
+Those cases also resize the passive detail viewport before switching fits or
+reopening. Rerenders retain the visible original-page point; both scroll axes
+restore after layout before reporting a new viewport, never saving an interim
+region origin or a half-restored pan.
 The screenshots and real moving-pointer recordings are captured on Linux,
 not a phone runtime.
 

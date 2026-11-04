@@ -196,6 +196,7 @@ extension on ReaderController {
               baseScale: piece.scale / screen.detailZoom,
             ),
       strip: pending != null ? pending.strip : screen?.strip,
+      retainDetailPlace: pending?.retainDetailPlace ?? piece != null,
     );
   }
 
@@ -233,6 +234,7 @@ extension on ReaderController {
     bool previous = false,
     ({int page, int region, double zoom, double baseScale})? detail,
     PdfStripScreen? strip,
+    bool retainDetailPlace = false,
     int? offset,
     int? length,
     double? x,
@@ -270,6 +272,7 @@ extension on ReaderController {
       locate: locate || _model.pdfColumns == null,
       detail: detail,
       strip: strip,
+      retainDetailPlace: retainDetailPlace,
     );
     _columnsIntent = intent;
     // A whole-page render started before a fit switch cannot overwrite a
@@ -649,6 +652,9 @@ extension on ReaderController {
       message.image.dispose();
       return;
     }
+    final retainDetailPlace =
+        (_columnsIntent?.retainDetailPlace ?? false) &&
+        message.screen.strip != null;
     _columnsIntent = null;
     final old = _model.pageImage;
     _columnsPages
@@ -671,9 +677,29 @@ extension on ReaderController {
               e.rect.bottom > first.top,
         )
         .firstOrNull;
-    final offset = endpoint == null
+    final offset = retainDetailPlace
+        ? _model.readingLocation.offset
+        : endpoint == null
         ? null
         : message.selection.location(endpoint.offset.toInt()).offset;
+    // A passive detail render keeps the visible page point, not the region
+    // origin. Initial detail entry instead starts at its actual visible center.
+    final y = retainDetailPlace ? _model.pdfY! : first.source.top;
+    final x = retainDetailPlace
+        ? _model.pdfX!
+        : message.screen.strip == null
+        ? (first.source.left + first.source.right) / 2
+        : first
+              .toPage(
+                first.left +
+                    math.min(
+                          first.width,
+                          message.layout.width - 2 * pdfStripSideInset,
+                        ) /
+                        2,
+                first.top,
+              )
+              .x;
     final target = message.targetOffset == null
         ? null
         : message.targetOffset! + (message.selection.shifts[first.page] ?? 0);
@@ -683,8 +709,8 @@ extension on ReaderController {
       _model.copyWith(
         pdfColumns: message.screen,
         pdfColumnSelection: message.selection,
-        pdfY: first.source.top,
-        pdfX: (first.source.left + first.source.right) / 2,
+        pdfY: y,
+        pdfX: x,
         pageImage: message.image,
         pdfSpread: null,
         readingPage: null,
@@ -723,8 +749,8 @@ extension on ReaderController {
           unit: BigInt.from(first.page),
           offset: offset == null ? null : BigInt.from(offset),
           zoom: message.layout.scale,
-          pdfY: first.source.top,
-          pdfX: _model.pdfX,
+          pdfY: y,
+          pdfX: x,
           progress: _bookProgress(_model),
         ),
       );
