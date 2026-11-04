@@ -218,6 +218,8 @@ insets, and verify the persisted page-space point against measured raster
 movement before switching fits or reopening. A detail viewport message is
 guarded by its adopted screen identity; textless viewports keep x+y without
 inventing a text offset. Pending detail requests survive viewport refresh.
+DPR 3 scan regressions repeat both restoration paths after a capped 5× pinch;
+the durable point uses the admitted scale, not the requested gesture ratio.
 The screenshots and real moving-pointer recordings are captured on Linux,
 not a phone runtime.
 

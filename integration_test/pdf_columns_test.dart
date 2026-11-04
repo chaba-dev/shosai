@@ -214,24 +214,34 @@ void main() {
       .firstOrNull;
 
   for (final scenario in [
-    (reopen: false, detail: false),
-    (reopen: true, detail: false),
-    (reopen: false, detail: true),
-    (reopen: true, detail: true),
+    (reopen: false, detail: false, scan: false),
+    (reopen: true, detail: false, scan: false),
+    (reopen: false, detail: true, scan: false),
+    (reopen: true, detail: true, scan: false),
+    (reopen: false, detail: true, scan: true),
+    (reopen: true, detail: true, scan: true),
   ]) {
     final reopen = scenario.reopen;
-    testWidgets('a textless right-column figure keeps its place after '
+    final subject = scenario.scan
+        ? 'DPR 3 capped scan'
+        : 'textless right-column figure';
+    testWidgets('a $subject keeps its place after '
         '${scenario.detail ? 'both-axis detail pan and ' : ''}'
         '${reopen ? 'reopen' : 'a fit round-trip'}', (tester) async {
-      tester.view.physicalSize = const Size(880, 1100);
-      tester.view.devicePixelRatio = 2;
-      tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+      final density = scenario.scan ? 3.0 : 2.0;
+      tester.view.physicalSize = Size(440 * density, 550 * density);
+      tester.view.devicePixelRatio = density;
+      tester.view.viewPadding = FakeViewPadding(
+        top: 59 * density,
+        bottom: 34 * density,
+      );
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.view.resetViewPadding);
       final directory = await Directory.systemTemp.createTemp('shosai-figure-');
       final path = '${directory.path}/Figure.pdf';
-      await File('fixtures/pdf-columns/right-column-figure.pdf').copy(path);
+      final fixture = scenario.scan ? 'scanned' : 'right-column-figure';
+      await File('fixtures/pdf-columns/$fixture.pdf').copy(path);
       var bridge = await createApplicationBridge(
         applicationSupportDirectory: () async => directory,
       );
@@ -340,14 +350,27 @@ void main() {
       await until(tester, () => painting(tester)?.columns != null);
       final first = painting(tester)!.columns!.pieces.first;
       // PR1 keeps a one-point guard around the figure's x317 painted edge.
-      expect(first.source.left, 316);
+      expect(first.source.left, scenario.scan ? 0 : 316);
       expect(first.source.top, closeTo(350, 1));
       expect(painting(tester)!.surface.endpoints, isEmpty);
-      await capture('figure-before-${reopen ? 'reopen' : 'fit'}');
+      await capture('$fixture-before-${reopen ? 'reopen' : 'fit'}');
       var expectedY = first.source.top;
       if (scenario.detail) {
-        await pinch(tester, tester.getCenter(raster), 30, 90);
+        await pinch(
+          tester,
+          tester.getCenter(raster),
+          scenario.scan ? 20 : 30,
+          scenario.scan ? 100 : 90,
+        );
         await until(tester, () => painting(tester)!.columns!.detailZoom > 1);
+        if (scenario.scan) {
+          expect(painting(tester)!.columns!.detailZoom, lessThan(5));
+          final image = tester.widget<RawImage>(raster).image!;
+          expect(
+            image.width * image.height,
+            lessThanOrEqualTo(pdfMaxBitmapPixels),
+          );
+        }
         final detail = painting(tester)!.columns!.pieces.single;
         final origin = tester.getTopLeft(raster);
         final area = find.byKey(const ValueKey('reader-page-tap-area'));
@@ -381,7 +404,7 @@ void main() {
         expect(saved!.pdfY, closeTo(expectedY, .01));
         expect(saved.pdfX, closeTo(expectedX, .01));
         expect(saved.offset, isNull);
-        await capture('figure-detail-panned-${reopen ? 'reopen' : 'fit'}');
+        await capture('$fixture-detail-panned-${reopen ? 'reopen' : 'fit'}');
       }
       if (reopen) {
         await tester.pumpWidget(const SizedBox());
@@ -396,8 +419,8 @@ void main() {
         await fit('columns');
       }
       final restored = painting(tester)!.columns!.pieces.first;
-      await capture('figure-after-${reopen ? 'reopen' : 'fit'}');
-      expect(restored.source.left, 316);
+      await capture('$fixture-after-${reopen ? 'reopen' : 'fit'}');
+      expect(restored.source.left, scenario.scan ? 0 : 316);
       expect(restored.source.top, closeTo(expectedY, .01));
       expect(painting(tester)!.surface.endpoints, isEmpty);
       expect(tester.takeException(), isNull);
