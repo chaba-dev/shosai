@@ -282,7 +282,7 @@ Head, then scope and count, then the book note and groups per section in reading
 | Row | EPUB | PDF |
 | --- | --- | --- |
 | Page theme | Paper, Sepia, Night | Same; Night inverts page luminance |
-| Size | **Text size**, 70%–160% in 10% steps; pages reflow and the place is kept | **Zoom**: Columns, Fit width, Fit page; size steps re-render sharp. Columns uses 50%–400% of the fitted column size |
+| Size | **Text size**, 70%–160% in 10% steps; pages reflow and the place is kept | **Zoom**: Columns, Fit width, Fit page; size steps re-render sharp. Columns uses 50%–100% of fitted column size; 100% is marked maximum and + is disabled |
 | Pages | One or Two; Two by default where the stage is wide enough | Same |
 | Font | **Book’s own** (default), Serif, Sans | Not shown: PDF pages keep their fonts |
 | Typeface | The current type set’s name, opening the TypefacePicker | Same |
@@ -296,23 +296,33 @@ bands and figures alternate with ordered columns, including declared
 right-to-left column order. Each piece is rendered at its fitted size and
 display density, never by enlarging a page bitmap. Wider bands shrink to fit;
 uncertain layouts and scans stay complete at fit width inside the same strip.
-Screens break between physical lines and may contain the end of one column
+The strip and its folio stay within the device's safe cutout/home insets.
+Screens break between painted physical lines, including inside paragraphs;
+a heading or a new block's first row carries forward rather than sitting alone
+at the bottom. Figures and tables remain indivisible and fit a whole screen.
+Screens may contain the end of one column
 and the start of the next, or continue across pages. A short muted rule marks
 a column change; a light band naming the new page marks a page change.
 
 The quiet outer quarters and swipes move one **screen**, not one PDF page;
 the middle half reveals chrome. PageUp/PageDown and edge controls use the same
 screen step. The top folio follows Display's Progress choice: **Page** names
-the topmost visible original page, “page x of y”, beside a 12 × 15 pt page
-outline shading that page's visible area; **Percent** shows the existing
+every visible original page, “page x of y” or “pages x–z of y”, beside a 12 × 15 pt page
+outline shading the top page's visible area; **Percent** shows the existing
 book-wide percentage without the outline; **Off** hides both. Its reserved
 header space stays fixed so changing Progress never moves the reading crop.
 Column rules and page-change bands remain content boundaries in every setting.
 Neither fit-width fallback nor Columns uses facing-page layout. Columns
-slides when Page animations is on and changes instantly when it is off or the
+slides over about 200 ms when Page animations is on and changes instantly when it is off or the
 platform requests reduced motion; it never curls. Page-coordinate restoration,
 selection/mark/link mapping, double-tap entry and phone auto-defaults are the
 successor integration, not a second text layout in this component.
+
+Column Size never forces horizontal panning. Pinch a figure, table or genuine
+no-column fallback page for detail: the controller renders its safe original
+region at the new density, without magnifying the strip bitmap. Detail pans in
+both axes without advancing the strip; pinch back to fit to resume the same
+screen. This transient detail zoom does not change the Columns Size preference.
 
 **TypefacePicker.** The six type sets as a radio list (`role="radiogroup"`), each row showing the set’s name in its sans, its faces in `ui-caption` and a one-line specimen in its serif, so the choice is made by looking rather than by name. The current set carries a check in `accent`. Choosing applies at once to the interface, the editorial text and the reader’s Serif and Sans fonts; a book’s own fonts are untouched. Rows never preview with system fallbacks: a set that is not bundled is not listed.
 

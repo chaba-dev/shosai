@@ -107,8 +107,13 @@ macOS text rasterization.
 `layoutPdfColumnScreen` consumes nearby `PdfStripPage` metadata and returns an
 immutable `PdfStripScreen`: start/next cursors, visible original-page crops,
 column/page separators and the next missing page's index. Text rows that overlap
-are never split at a screen edge. Bands, figures and no-column fallback pages
-fit the viewport width; the shared size steps scale columns relative to that fit.
+are never split at a screen edge. Paragraphs break at physical rows, with
+heading/first-row carry protection. Bands and no-column fallback pages fit the
+viewport width; figures/tables fit indivisibly to one screen. Shared Size steps
+scale columns from 50% to 100% of their fitted width; short fragments keep their
+column's scale rather than magnifying their fonts. The maximum is labeled and
+the increase button disabled. Figure/table and fallback-page detail pinch is
+separate from Size and always requests fresh clipped PDF pixels.
 The strip may cross a column or page boundary within a screen.
 
 The reader controller loads geometry on demand with three initial pages for
@@ -122,8 +127,12 @@ document remains alive until its outstanding render/decode effects drain.
 `ReaderModel.pdfColumns` exposes the current immutable screen for PR3.
 `PdfStripPiece.toPage` / `fromPage` map between strip-content logical pixels and
 rotated original-page points. The view adds `pdfStripHeaderHeight` (32 pt) and
-`pdfStripSideInset` (14 pt) outside that space; horizontal scrolling at enlarged
-sizes must also be accounted for by interaction adapters. A screen can contain
+`pdfStripSideInset` (14 pt) outside that space, all within stable device safe
+insets. Both axes' scroll offsets in detail mode must also be accounted for by
+interaction adapters. `PdfStripPiece.zoomable` identifies figure/page pieces;
+`PdfStripScreen.detailZoom` and `strip` preserve the original cursor while a
+pinch renders the whole safe region. Pinching back to fit returns to that
+screen without changing Size or navigation history. A screen can contain
 more than one page, so mapping must select the hit piece, not assume model.unit
 applies to every point. These transforms do not themselves implement selection
 or durable restoration.
@@ -138,15 +147,20 @@ or annotation/link/search coordinate integration.
 
 The [PageSpread preview](design-system/components/PageSpread.html) contains
 native Linux screenshots of the fitted title/column, column rule and cross-page
-band, plus a real desktop screen recording of Display fit changes and keyboard
-screen steps. [DisplaySettings](design-system/components/DisplaySettings.html)
+band, plus two real desktop recording excerpts: the maximum/submaximum Size
+controls, then keyboard screen steps and chrome. The revised captures include
+injected 59pt top / 34pt bottom safe insets. Japanese mixed-figure and sharp-detail
+captures use the first-party labeled-raster fixture.
+[DisplaySettings](design-system/components/DisplaySettings.html)
 also includes the native narrow-window sheet. These are Linux at 440 × 900
 logical pixels, not an Android device or a browser reader simulation.
 
 `flutter test -d linux integration_test/pdf_columns_test.dart` exercises real
 PDFium with Thrift: touch outer-zone steps, middle-zone chrome, swipe and backward
-navigation, cross-page traversal, explicit fit callbacks, slide-on/instant-off,
-reduced motion, and complete fit-width scan fallback. Set
+navigation, every-page range naming, safe cutout/home insets, maximum/submaximum
+Size, explicit fit callbacks, 200 ms slide-on/instant-off, reduced motion,
+fit-width scan fallback, and crisp figure/page pinch with two-axis panning.
+The mixed figure test also runs the Japanese UI. Set
 `SHOSAI_COLUMNS_ARTIFACTS` to capture the repaint-boundary PNGs. Unit tests cover
 line-safe windows (including indivisible overlapping tall rows), transforms,
 band sizing, page/column separators and missing-page loading. Engine crop tests
