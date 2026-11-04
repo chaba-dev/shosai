@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
+import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 import '../../support/reference_documents.dart';
@@ -40,6 +42,116 @@ Future<String> _pdfWith(String catalogExtra) async {
 
 void main() {
   final engine = PdfrxPdfEngine();
+
+  test(
+    'Thrift Letter title band, measured columns and stable text offsets',
+    () async {
+      final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+      addTearDown(document.dispose);
+      final geometry = await document.pageGeometry(0);
+      expect([geometry.width, geometry.height], [612, 792]);
+      final result = analyzePdfColumns([geometry]).single;
+      expect(result.columnCount, 2);
+      final title = result.regions.first;
+      expect(title.kind, PdfRegionKind.band);
+      // RFD's y24..104 title uses ink bounds; loose glyph boxes start at y20.
+      expect(title.bounds.top, closeTo(24, 4));
+      expect(title.bounds.bottom, closeTo(104, 1));
+      final columns = result.regions
+          .where((r) => r.kind == PdfRegionKind.column)
+          .toList();
+      expect(columns.first.bounds.left, closeTo(54, .1));
+      expect(columns.first.bounds.right, closeTo(293, .5));
+      expect(columns.last.bounds.left, closeTo(317, .1));
+      expect(columns.last.bounds.right, closeTo(556, .5));
+      expect(
+        result.regions.where((r) => r.kind == PdfRegionKind.figure),
+        hasLength(geometry.images.length),
+      );
+      final text = (await document.pageText(0)).runes.toList();
+      for (final line in geometry.lines) {
+        expect(
+          line.text,
+          String.fromCharCodes(text.sublist(line.start, line.end)),
+        );
+      }
+      expect(
+        result.regions.expand((r) => r.lines).toSet(),
+        geometry.lines.toSet(),
+      );
+    },
+  );
+
+  test('licensed ACM two-column and arXiv single-column corpus', () async {
+    for (final (file, expected) in [
+      ('acm-chi.pdf', 2),
+      ('arxiv-first-five.pdf', 0),
+    ]) {
+      final document = await engine.open('fixtures/pdf-columns/$file');
+      try {
+        final pages = <PdfPageGeometry>[
+          for (var p = 0; p < 5; p++) await document.pageGeometry(p),
+        ];
+        final results = analyzePdfColumns(pages);
+        for (final result in results.take(3)) {
+          // The arXiv blank verso and vertical identifier must not make columns.
+          expect(result.columnCount, expected, reason: file);
+        }
+        if (expected == 2) {
+          expect(results.first.regions.first.kind, PdfRegionKind.band);
+          expect(
+            results[2].regions
+                .expand((r) => r.lines)
+                .any((l) => l.text.startsWith('Exploring the Experiences')),
+            isFalse,
+            reason: 'recurring running head, not body text',
+          );
+        }
+      } finally {
+        await document.dispose();
+      }
+    }
+  });
+
+  test('image-only scan falls back to the complete page', () async {
+    final document = await engine.open('fixtures/pdf-columns/scanned.pdf');
+    addTearDown(document.dispose);
+    final geometry = await document.pageGeometry(0);
+    expect(geometry.lines, isEmpty);
+    expect(geometry.images, hasLength(1));
+    final result = analyzePdfColumns([geometry]).single;
+    expect(result.columnCount, 0);
+    expect(result.regions.single.kind, PdfRegionKind.page);
+    expect(result.regions.single.bounds.width, 612);
+    expect(result.regions.single.bounds.height, 792);
+  });
+
+  test('nested image bounds match rotated, cropped rendered pixels', () async {
+    final document = await engine.open(
+      'fixtures/pdf-columns/transformed-images.pdf',
+    );
+    addTearDown(document.dispose);
+    final expected = [
+      [100.0, 491.0, 120.0, 551.0],
+      [201.0, 100.0, 261.0, 120.0],
+      [472.0, 201.0, 492.0, 261.0],
+      [491.0, 472.0, 551.0, 492.0],
+    ];
+    for (var p = 0; p < 4; p++) {
+      final geometry = await document.pageGeometry(p);
+      final rect = geometry.images.single;
+      expect([rect.left, rect.top, rect.right, rect.bottom], expected[p]);
+      expect(geometry.lines.single.text, 'Geometry control');
+      final rendered = await document.render(p, 1);
+      final x = ((rect.left + rect.right) / 2).floor();
+      final y = ((rect.top + rect.bottom) / 2).floor();
+      expect(
+        rendered.pixels[(y * rendered.width + x) * 4],
+        0,
+        reason: 'the predicted image rectangle must contain the black image',
+      );
+    }
+  });
 
   for (final fixture in [
     (
