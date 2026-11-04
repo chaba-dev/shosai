@@ -21,6 +21,7 @@ import 'package:pdfrx/pdfrx.dart' as pdfrx;
 import 'package:shosai_flutter/core/bridge.dart';
 
 import 'engine.dart';
+import 'page_geometry.dart';
 import 'search.dart';
 import 'selection.dart';
 
@@ -225,6 +226,35 @@ final class _PdfrxDocument implements PdfEngineDocument {
       geometry: false,
     );
     return pdfPageText(samples).text;
+  }
+
+  @override
+  Future<PdfPageGeometry> pageGeometry(int page) async {
+    final size = pageSize(page);
+    // Sampling only: no bitmap is allocated. Preserve millipoint geometry
+    // despite PDFium's integer page-to-device API.
+    final width = (size.width * 1000).round();
+    final height = (size.height * 1000).round();
+    final samples = await _sample(
+      page,
+      PdfBitmapSize(width, height),
+      geometry: true,
+    );
+    final images = await pdfrx.PdfrxEntryFunctions.instance.compute(
+      _imagesOnWorker,
+      (document: _handle.address, page: page, width: width, height: height),
+    );
+    return PdfPageGeometry(
+      width: size.width,
+      height: size.height,
+      lines: buildPdfTextLines(
+        samples,
+        scale: 1000,
+        width: size.width,
+        height: size.height,
+      ),
+      images: images,
+    );
   }
 
   @override
@@ -451,6 +481,113 @@ bool _rightToLeftOnWorker(int address) {
     return String.fromCharCodes(buffer.asTypedList(length - 1)) == 'R2L';
   });
 }
+
+/// Image bounds include the object's matrix; nested forms additionally need
+/// every ancestor matrix. Apply those before the page's CropBox/rotation.
+List<PdfRect> _imagesOnWorker(
+  ({int document, int page, int width, int height}) request,
+) => using((arena) {
+  final pdfium = _pdfium;
+  final page = pdfium.FPDF_LoadPage(
+    pdfium_bindings.FPDF_DOCUMENT.fromAddress(request.document),
+    request.page,
+  );
+  if (page == nullptr) {
+    throw PdfEngineException('failed to load page ${request.page}');
+  }
+  try {
+    final result = <PdfRect>[];
+    final left = arena<Float>();
+    final bottom = arena<Float>();
+    final right = arena<Float>();
+    final top = arena<Float>();
+    final matrix = arena<pdfium_bindings.FS_MATRIX>();
+    final dx = arena<Int>();
+    final dy = arena<Int>();
+    var objects = 0;
+    void visit(
+      pdfium_bindings.FPDF_PAGEOBJECT object,
+      List<({double a, double b, double c, double d, double e, double f})>
+      parents,
+    ) {
+      if (++objects > 65536 || parents.length > 64) {
+        throw const PdfEngineLimitException(
+          'PDF page image object limit exceeded',
+        );
+      }
+      final type = pdfium.FPDFPageObj_GetType(object);
+      if (type == pdfium_bindings.FPDF_PAGEOBJ_FORM) {
+        if (pdfium.FPDFPageObj_GetMatrix(object, matrix) == 0) return;
+        final m = matrix.ref;
+        final chain = [
+          (a: m.a, b: m.b, c: m.c, d: m.d, e: m.e, f: m.f),
+          ...parents,
+        ];
+        final count = pdfium.FPDFFormObj_CountObjects(object);
+        for (var i = 0; i < count; i++) {
+          visit(pdfium.FPDFFormObj_GetObject(object, i), chain);
+        }
+      } else if (type == pdfium_bindings.FPDF_PAGEOBJ_IMAGE &&
+          pdfium.FPDFPageObj_GetBounds(object, left, bottom, right, top) != 0) {
+        final points = <({double x, double y})>[];
+        for (var x in [left.value, right.value]) {
+          for (var y in [bottom.value, top.value]) {
+            var px = x;
+            var py = y;
+            for (final m in parents) {
+              final nx = m.a * px + m.c * py + m.e;
+              py = m.b * px + m.d * py + m.f;
+              px = nx;
+            }
+            if (pdfium.FPDF_PageToDevice(
+                  page,
+                  0,
+                  0,
+                  request.width,
+                  request.height,
+                  0,
+                  px,
+                  py,
+                  dx,
+                  dy,
+                ) !=
+                0) {
+              points.add((x: dx.value / 1000, y: dy.value / 1000));
+            }
+          }
+        }
+        if (points.length != 4) return;
+        final rect = PdfRect(
+          points
+              .map((p) => p.x)
+              .reduce(math.min)
+              .clamp(0, request.width / 1000),
+          points
+              .map((p) => p.y)
+              .reduce(math.min)
+              .clamp(0, request.height / 1000),
+          points
+              .map((p) => p.x)
+              .reduce(math.max)
+              .clamp(0, request.width / 1000),
+          points
+              .map((p) => p.y)
+              .reduce(math.max)
+              .clamp(0, request.height / 1000),
+        );
+        if (rect.width > 0 && rect.height > 0) result.add(rect);
+      }
+    }
+
+    final count = pdfium.FPDFPage_CountObjects(page);
+    for (var i = 0; i < count; i++) {
+      visit(pdfium.FPDFPage_GetObject(page, i), const []);
+    }
+    return result;
+  } finally {
+    pdfium.FPDF_ClosePage(page);
+  }
+});
 
 /// Runs on pdfrx's worker isolate: samples every character of one page.
 List<PdfCharacterSample> _sampleOnWorker(_SampleRequest request) {

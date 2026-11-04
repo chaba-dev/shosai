@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:shosai_flutter/reader/pdf/engine.dart';
+import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
 /// A fake rendered page: [width] × [height] pixels a fake keeps behind
@@ -172,6 +173,14 @@ final class BridgePdfDocument implements PdfEngineDocument {
   @override
   Future<String> pageText(int page) async =>
       (await selectionSurface(page, 1)).text;
+
+  @override
+  Future<PdfPageGeometry> pageGeometry(int page) async => PdfPageGeometry(
+    width: pageSize(page).width,
+    height: pageSize(page).height,
+    lines: const [],
+    images: const [],
+  );
 
   @override
   Future<List<FlutterSearchMatch>> search(String query) =>

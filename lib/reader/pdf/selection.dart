@@ -20,6 +20,8 @@ import 'package:characters/characters.dart';
 import 'package:shosai_epub/shosai_epub.dart' show navigationBoundaries;
 import 'package:shosai_flutter/core/bridge.dart';
 
+import 'page_geometry.dart';
+
 /// Maximum number of character endpoints retained for one selectable page.
 const int pdfSelectionMaxEndpoints = 65536;
 
@@ -125,6 +127,79 @@ final class PdfSelectionLimitException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Builds physical lines from the engine's high-resolution device samples.
+/// Unlike keyboard visual rows, these split at gutters as well as newlines.
+/// [scale] is the sampling scale, not the reader's current zoom; PDFium indices
+/// remain the indices used by selection and search. Rotations and CropBoxes
+/// have already been applied by PDFium's page-to-device mapping.
+List<PdfTextLine> buildPdfTextLines(
+  List<PdfCharacterSample> samples, {
+  required double scale,
+  required double width,
+  required double height,
+}) {
+  final lines = <PdfTextLine>[];
+  PdfRect? bounds;
+  var start = 0;
+  var end = 0;
+  var vertical = false;
+  final source = pdfPageText(samples).text.runes.toList();
+  void flush() {
+    if (bounds != null) {
+      final text = String.fromCharCodes(source.sublist(start, end));
+      if (text.trim().isNotEmpty) {
+        lines.add(
+          PdfTextLine(bounds: bounds!, text: text, start: start, end: end),
+        );
+      }
+    }
+    bounds = null;
+  }
+
+  for (final sample in samples) {
+    if (sample.codePoint == 10 || sample.codePoint == 13) {
+      flush();
+      continue;
+    }
+    final device = sample.deviceBounds;
+    if (!sample.visible || device == null || sample.generated) continue;
+    final rect = PdfRect(
+      (device.left / scale).clamp(0, width),
+      (device.top / scale).clamp(0, height),
+      (device.right / scale).clamp(0, width),
+      (device.bottom / scale).clamp(0, height),
+    );
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    final last = bounds;
+    final probe = sample.baseline;
+    final nextVertical = probe != null && probe.dy.abs() > probe.dx.abs();
+    final sameAxis =
+        last == null ||
+        (vertical
+            ? rect.left < last.right && rect.right > last.left
+            : rect.top < last.bottom && rect.bottom > last.top);
+    final gap = last == null
+        ? 0
+        : (vertical
+              ? _max(rect.top - last.bottom, last.top - rect.bottom)
+              : _max(rect.left - last.right, last.left - rect.right));
+    if (last != null &&
+        (!sameAxis ||
+            vertical != nextVertical ||
+            gap > (vertical ? rect.width : rect.height) * 1.5)) {
+      flush();
+    }
+    if (bounds == null) {
+      start = sample.index;
+      vertical = nextVertical;
+    }
+    bounds = bounds?.union(rect) ?? rect;
+    end = sample.index + 1;
+  }
+  flush();
+  return List.unmodifiable(lines);
 }
 
 /// Builds the selection surface for one rendered page.

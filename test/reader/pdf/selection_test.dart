@@ -37,6 +37,33 @@ List<PdfCharacterSample> _row(
 }
 
 void main() {
+  test('physical lines split gutters while retaining canonical spaces', () {
+    final lines = buildPdfTextLines(
+      [
+        ..._row('A'),
+        const PdfCharacterSample(
+          index: 1,
+          codePoint: 32,
+          generated: true,
+          visible: false,
+        ),
+        ..._row('B', firstIndex: 2, left: 20),
+        ..._row('CD', firstIndex: 3, left: 100),
+        ..._row('E', firstIndex: 5, top: 130),
+      ],
+      scale: 1,
+      width: 200,
+      height: 200,
+    );
+    expect(lines.map((l) => l.text), ['A B', 'CD', 'E']);
+    expect(lines.map((l) => (l.start, l.end)), [(0, 3), (3, 5), (5, 6)]);
+    expect(lines.map((l) => (l.bounds.left, l.bounds.top, l.bounds.right)), [
+      (0, 100, 30),
+      (100, 100, 120),
+      (0, 130, 10),
+    ]);
+  });
+
   group('page text', () {
     test('keeps one scalar per PDFium character', () {
       final samples = _row('ab');
