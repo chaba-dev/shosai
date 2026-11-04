@@ -7,6 +7,61 @@ surface with Note/Copy/Search controls. The images show the original page and
 an Abstract selection. They demonstrate that the existing app still reads the
 corpus, not the analyzer's ordering (which the unit corpus verifies).
 
+## Current follow-up — exact phone-reported pages
+
+Darwin's iPhone findings supersede the broad fallback accepted in the earlier
+Oracle review. On the earlier approved head, the real engine/analyzer probe
+reproduced Thrift pages **2/6/7** falling back and **9/12 ResNet pages** falling
+back, including page 1 and all figure/table pages. Attention remained one-column.
+
+Current results, from real local PDFium extraction and rasterization:
+
+- **Thrift: 8/8 pages split into two columns.** Inline raster hyphens no longer
+  create overlapping figure crops.
+- **ResNet: 12/12 pages split into two columns.** Connected vector objects,
+  plot/network labels and table cells own indivisible figure regions before
+  body-gutter inference. Body columns remain around them.
+- **Attention: 15/15 pages remain no-gutter fallbacks**, with safe margins
+  trimmed. Unknown painted coverage still retains full-page bounds.
+- **All 35 real paper pages: zero missing and zero repeated painted pixels**
+  at 1×, excluding only deliberately suppressed recurring folios. The
+  [per-page executed output](paper-raster-checks.txt) records counts and region
+  totals. The retained optional original-PDF test rechecks all 27 ResNet and
+  Attention pages; their non-CC originals are not redistributed. CI uses
+  prose-free numeric/hash geometry facts instead. See the
+  [corpus rights and reproduction](../../../fixtures/pdf-columns/README.md).
+
+Physical rows also expose genuine cuts. Thrift page 1's former four-baseline
+338.1–378.1 loose box becomes painted rows **339.876–347.255**, **349.836–357.906**,
+**359.796–367.866**, **369.756–377.826**. Page 4's former five-row block and page
+3's Utilities block have analogous retained regressions. Grouping compares a
+representative row, not the accumulated union; raised glyphs remain inline.
+Selection retains loose boxes and unchanged canonical character offsets.
+Region crops separately add 1pt raster padding limited at whitespace
+midpoints, so tight row cuts do not discard antialiasing at crop edges.
+
+Checks: `make lint check-fmt` passed all three analyzers (**255 files, zero
+format changes**). `flutter test test/reader/pdf test/visual/production_shell_golden_test.dart`
+passed **65 tests (54 PDF + 11 goldens)** with zero pixel drift. The optional
+pinned-original checks passed independently. All **eight fixture hashes** pass.
+No golden baseline changed. The full `make test` was not repeated for this
+localized follow-up; its initial core-test orb OOM limitation remains below.
+
+Inline self-review covered the complete diff: no paper-specific production
+branches; figure/label exact-once ownership after final crop padding; real body
+gutter rather than table/plot gaps; R2L, rotated coordinates and offsets;
+unknown-coverage fallback; physical rows/superscripts; and source rights.
+Changed old fallback expectations now require columns plus retained ink, not
+weaker safety assertions. No review thread/subagent was created. Prior Oracle
+sign-off applies **only to the old head**, not this follow-up.
+
+The native app screenshots and recording below are **retained earlier-head
+captures**, re-inspected for this follow-up. PR1 still has no Columns view;
+these do not certify new-head UI or iPhone/macOS behavior. Current-head runtime
+evidence above exercises the actual engine/analyzer boundary PR1 owns. PR2
+owns indivisible figure fitting and crisp figure/page pinch; final device
+validation must follow its restack.
+
 Captured 2026-11-04 from a debug Linux build of the real `ShosaiApp` and
 application core, with Thrift and the synthetic scan imported into disposable
 local storage. A temporary bootstrap supplied only that storage/import setup;

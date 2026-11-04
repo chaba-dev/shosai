@@ -1,0 +1,70 @@
+thrift 1: columns=2, lines=98, images=1, graphics=0, unknown=false, regions=5
+RASTER thrift 1: painted=84918 missing=0 repeated=0 first=[]
+thrift 2: columns=2, lines=111, images=1, graphics=0, unknown=false, regions=2
+RASTER thrift 2: painted=78321 missing=0 repeated=0 first=[]
+thrift 3: columns=2, lines=123, images=0, graphics=0, unknown=false, regions=2
+RASTER thrift 3: painted=69905 missing=0 repeated=0 first=[]
+thrift 4: columns=2, lines=117, images=0, graphics=0, unknown=false, regions=2
+RASTER thrift 4: painted=81481 missing=0 repeated=0 first=[]
+thrift 5: columns=2, lines=110, images=0, graphics=0, unknown=false, regions=2
+RASTER thrift 5: painted=75507 missing=0 repeated=0 first=[]
+thrift 6: columns=2, lines=118, images=4, graphics=0, unknown=false, regions=2
+RASTER thrift 6: painted=92715 missing=0 repeated=0 first=[]
+thrift 7: columns=2, lines=120, images=8, graphics=0, unknown=false, regions=2
+RASTER thrift 7: painted=99877 missing=0 repeated=0 first=[]
+thrift 8: columns=2, lines=79, images=0, graphics=0, unknown=false, regions=2
+RASTER thrift 8: painted=61284 missing=0 repeated=0 first=[]
+resnet 1: columns=2, lines=110, images=0, graphics=59, unknown=false, regions=7
+RASTER resnet 1: painted=80113 missing=0 repeated=0 first=[]
+resnet 2: columns=2, lines=104, images=0, graphics=19, unknown=false, regions=3
+RASTER resnet 2: painted=100002 missing=0 repeated=0 first=[]
+resnet 3: columns=2, lines=99, images=0, graphics=1, unknown=false, regions=4
+RASTER resnet 3: painted=98740 missing=0 repeated=0 first=[]
+resnet 4: columns=2, lines=174, images=0, graphics=419, unknown=false, regions=4
+RASTER resnet 4: painted=98892 missing=0 repeated=0 first=[]
+resnet 5: columns=2, lines=227, images=0, graphics=270, unknown=false, regions=9
+RASTER resnet 5: painted=73967 missing=0 repeated=0 first=[]
+resnet 6: columns=2, lines=158, images=0, graphics=90, unknown=false, regions=10
+RASTER resnet 6: painted=83428 missing=0 repeated=0 first=[]
+resnet 7: columns=2, lines=134, images=0, graphics=53, unknown=false, regions=7
+RASTER resnet 7: painted=95662 missing=0 repeated=0 first=[]
+resnet 8: columns=2, lines=170, images=0, graphics=367, unknown=false, regions=8
+RASTER resnet 8: painted=85649 missing=0 repeated=0 first=[]
+resnet 9: columns=2, lines=119, images=0, graphics=0, unknown=false, regions=2
+RASTER resnet 9: painted=82698 missing=0 repeated=0 first=[]
+resnet 10: columns=2, lines=103, images=0, graphics=5, unknown=false, regions=2
+RASTER resnet 10: painted=101337 missing=0 repeated=0 first=[]
+resnet 11: columns=2, lines=128, images=0, graphics=89, unknown=false, regions=11
+RASTER resnet 11: painted=81604 missing=0 repeated=0 first=[]
+resnet 12: columns=2, lines=133, images=0, graphics=55, unknown=false, regions=4
+RASTER resnet 12: painted=100971 missing=0 repeated=0 first=[]
+attention 1: columns=0, lines=56, images=0, graphics=3, unknown=false, regions=1
+RASTER attention 1: painted=56318 missing=0 repeated=0 first=[]
+attention 2: columns=0, lines=50, images=0, graphics=0, unknown=false, regions=1
+RASTER attention 2: painted=78834 missing=0 repeated=0 first=[]
+attention 3: columns=0, lines=23, images=1, graphics=0, unknown=false, regions=1
+RASTER attention 3: painted=60919 missing=0 repeated=0 first=[]
+attention 4: columns=0, lines=47, images=2, graphics=8, unknown=false, regions=1
+RASTER attention 4: painted=56201 missing=0 repeated=0 first=[]
+attention 5: columns=0, lines=60, images=0, graphics=1, unknown=false, regions=1
+RASTER attention 5: painted=57385 missing=0 repeated=0 first=[]
+attention 6: columns=0, lines=69, images=0, graphics=3, unknown=false, regions=1
+RASTER attention 6: painted=65729 missing=0 repeated=0 first=[]
+attention 7: columns=0, lines=52, images=0, graphics=0, unknown=false, regions=1
+RASTER attention 7: painted=61392 missing=0 repeated=0 first=[]
+attention 8: columns=0, lines=76, images=0, graphics=8, unknown=false, regions=1
+RASTER attention 8: painted=62939 missing=0 repeated=0 first=[]
+attention 9: columns=0, lines=97, images=0, graphics=53, unknown=false, regions=1
+RASTER attention 9: painted=61336 missing=0 repeated=0 first=[]
+attention 10: columns=0, lines=73, images=0, graphics=33, unknown=false, regions=1
+RASTER attention 10: painted=63153 missing=0 repeated=0 first=[]
+attention 11: columns=0, lines=45, images=0, graphics=0, unknown=false, regions=1
+RASTER attention 11: painted=61899 missing=0 repeated=0 first=[]
+attention 12: columns=0, lines=43, images=0, graphics=0, unknown=false, regions=1
+RASTER attention 12: painted=61580 missing=0 repeated=0 first=[]
+attention 13: columns=0, lines=73, images=0, graphics=624, unknown=false, regions=1
+RASTER attention 13: painted=17032 missing=0 repeated=0 first=[]
+attention 14: columns=0, lines=114, images=0, graphics=1030, unknown=false, regions=1
+RASTER attention 14: painted=32000 missing=0 repeated=0 first=[]
+attention 15: columns=0, lines=114, images=0, graphics=947, unknown=false, regions=1
+RASTER attention 15: painted=42335 missing=0 repeated=0 first=[]
