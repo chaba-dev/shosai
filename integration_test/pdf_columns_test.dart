@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +12,8 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/controller.dart'
     show ReaderDisplayChange, ReaderPlace;
+import 'package:shosai_flutter/reader/pdf/engine.dart'
+    show pdfMaxBitmapDimension, pdfMaxBitmapPixels;
 
 /// Production PDFium, controller, settings and gestures. Runs on Linux, not a
 /// browser approximation of a native reader. Artifacts are opt-in.
@@ -302,83 +306,183 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a scan remains a complete fit-width page in the Columns strip', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(880, 1800);
-    tester.view.devicePixelRatio = 2;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final directory = await Directory.systemTemp.createTemp(
-      'shosai-columns-scan-',
-    );
-    final path = '${directory.path}/Scan.pdf';
-    await File('fixtures/pdf-columns/scanned.pdf').copy(path);
-    final bridge = await createApplicationBridge(
-      applicationSupportDirectory: () async => directory,
-    );
-    await tester.pumpWidget(
-      ShosaiShell(
-        home: RepaintBoundary(
-          key: captureKey,
-          child: ReaderScreen(
-            bridge: bridge,
-            initialPath: path,
-            initialSettings: const FlutterReaderSettings(
-              continuous: false,
-              theme: 'light',
-              epubFontSize: 18,
-              epubLineSpacing: 1.6,
-              pdfZoom: 0,
-              pdfFit: FlutterPdfFit.columns,
-              twoPages: true,
-              zonesHintDismissed: true,
+  for (final pageWidth in [612, 100, 50]) {
+    testWidgets(
+      'DPR 3 scan width $pageWidth caps detail and returns to its strip',
+      (tester) async {
+        tester.view.physicalSize = const Size(1320, 2700);
+        tester.view.devicePixelRatio = 3;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final directory = await Directory.systemTemp.createTemp(
+          'shosai-columns-scan-',
+        );
+        final path = '${directory.path}/Scan.pdf';
+        // Equal-length substitutions keep the original xref and stream lengths.
+        // Narrow pages are tall fallback controls without another binary fixture.
+        final width = pageWidth.toString().padLeft(3, '0');
+        final source = latin1.decode(
+          await File('fixtures/pdf-columns/scanned.pdf').readAsBytes(),
+        );
+        await File(path).writeAsBytes(
+          latin1.encode(
+            source
+                .replaceFirst(
+                  '/MediaBox [0 0 612 792]',
+                  '/MediaBox [0 0 $width 792]',
+                )
+                .replaceFirst('q 612 0 0 792', 'q $width 0 0 792'),
+          ),
+        );
+        final bridge = await createApplicationBridge(
+          applicationSupportDirectory: () async => directory,
+        );
+        await tester.pumpWidget(
+          ShosaiShell(
+            home: RepaintBoundary(
+              key: captureKey,
+              child: ReaderScreen(
+                bridge: bridge,
+                initialPath: path,
+                initialSettings: const FlutterReaderSettings(
+                  continuous: false,
+                  theme: 'light',
+                  epubFontSize: 18,
+                  epubLineSpacing: 1.6,
+                  pdfZoom: 0,
+                  pdfFit: FlutterPdfFit.columns,
+                  twoPages: true,
+                  zonesHintDismissed: true,
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+        await until(tester, () => raster.evaluate().isNotEmpty);
+        expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
+        final box = tester.getSize(
+          find.byKey(const ValueKey('reader-page-tap-area')),
+        );
+        expect(tester.getSize(raster).width, box.width - 28);
+        final area = find.byKey(const ValueKey('reader-page-tap-area'));
+        final rect = tester.getRect(area);
+        if (pageWidth != 612) {
+          final first = tester.widget<RawImage>(raster).image;
+          await tester.tapAt(Offset(rect.right - 20, rect.center.dy));
+          await until(
+            tester,
+            () => tester.widget<RawImage>(raster).image != first,
+          );
+        }
+        Future<Digest> pixels(ui.Image image) async =>
+            sha256.convert((await image.toByteData())!.buffer.asUint8List());
+        final fittedPixels = await pixels(
+          tester.widget<RawImage>(raster).image!,
+        );
+        await capture('columns-scan-$pageWidth-fallback');
+        final nearZoom = pageWidth == 612 ? 4.4 : 1.5;
+        for (final zoom in pageWidth == 50 ? [5.0] : [nearZoom, 5.0]) {
+          final fitted = tester.widget<RawImage>(raster).image!;
+          // Cross touch slop even for the smaller 1.5× request. Keep the
+          // original 20→100 half-span for the reported over-limit gesture.
+          final span = zoom == 1.5 ? 40.0 : 20.0;
+          await pinch(tester, tester.getCenter(area), span, span * zoom);
+          await until(
+            tester,
+            () => tester.widget<RawImage>(raster).image != fitted,
+          );
+          final enlarged = tester.widget<RawImage>(raster).image!;
+          expect(
+            enlarged.width * enlarged.height,
+            lessThanOrEqualTo(pdfMaxBitmapPixels),
+          );
+          expect(enlarged.width, lessThanOrEqualTo(pdfMaxBitmapDimension));
+          expect(enlarged.height, lessThanOrEqualTo(pdfMaxBitmapDimension));
+          expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
+          if (pageWidth == 50) {
+            expect(
+              await pixels(enlarged),
+              fittedPixels,
+              reason: 'Whole-region fit is inadmissible; keep the crisp strip',
+            );
+            continue;
+          }
+          expect(
+            enlarged.width,
+            greaterThan(fitted.width * nearZoom - 1),
+            reason: 'Legal detail must render newly dense pixels, not fail',
+          );
+          if (zoom == nearZoom) {
+            expect(
+              enlarged.width,
+              closeTo(fitted.width * zoom, 1),
+              reason: 'Below-limit requests keep their exact scale',
+            );
+          } else if (pageWidth == 612) {
+            expect(
+              enlarged.width * enlarged.height,
+              greaterThan(39900000),
+              reason: 'Use the admitted area rather than a fixed low zoom',
+            );
+          } else {
+            expect(
+              enlarged.height,
+              16384,
+              reason: 'Tall detail hits the edge cap',
+            );
+          }
+          await capture('columns-scan-$pageWidth-zoom-$zoom');
+          final origin = tester.getTopLeft(raster);
+          await tester.fling(area, const Offset(-150, -100), 700);
+          await tester.pumpAndSettle();
+          expect(tester.widget<RawImage>(raster).image, same(enlarged));
+          expect(tester.getTopLeft(raster).dx, lessThan(origin.dx));
+          expect(tester.getTopLeft(raster).dy, lessThan(origin.dy));
+          await capture('columns-scan-$pageWidth-pan-$zoom');
+          await pinch(tester, tester.getCenter(area), 100, 10);
+          await until(
+            tester,
+            () => tester.widget<RawImage>(raster).image != enlarged,
+          );
+          expect(tester.getSize(raster).width, box.width - 28);
+          expect(
+            await pixels(tester.widget<RawImage>(raster).image!),
+            fittedPixels,
+            reason: 'Pinching back preserves the exact strip cursor',
+          );
+          await capture('columns-scan-$pageWidth-return-$zoom');
+        }
+        if (pageWidth != 612) {
+          final before = tester.widget<RawImage>(raster).image;
+          await tester.tapAt(Offset(rect.left + 20, rect.center.dy));
+          await until(
+            tester,
+            () => tester.widget<RawImage>(raster).image != before,
+          );
+          expect(
+            await pixels(tester.widget<RawImage>(raster).image!),
+            isNot(fittedPixels),
+          );
+          final previous = tester.widget<RawImage>(raster).image;
+          await tester.tapAt(Offset(rect.right - 20, rect.center.dy));
+          await until(
+            tester,
+            () => tester.widget<RawImage>(raster).image != previous,
+          );
+          expect(
+            await pixels(tester.widget<RawImage>(raster).image!),
+            fittedPixels,
+            reason: 'Detail retains backward/forward screen history',
+          );
+        }
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await closeApplicationCores();
+        await directory.delete(recursive: true);
+        expect(tester.takeException(), isNull);
+      },
     );
-    await until(tester, () => raster.evaluate().isNotEmpty);
-    expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
-    final box = tester.getSize(
-      find.byKey(const ValueKey('reader-page-tap-area')),
-    );
-    expect(tester.getSize(raster).width, box.width - 28);
-    await capture('columns-scan-fallback');
-    final area = find.byKey(const ValueKey('reader-page-tap-area'));
-    final center = tester.getCenter(raster);
-    final fitted = tester.widget<RawImage>(raster).image!;
-    await pinch(tester, center, 45, 90);
-    await until(tester, () => tester.widget<RawImage>(raster).image != fitted);
-    final enlarged = tester.widget<RawImage>(raster).image!;
-    expect(
-      enlarged.width,
-      greaterThan(fitted.width * 1.8),
-      reason: 'Pinch requests newly rendered PDF pixels',
-    );
-    expect(tester.getSize(raster).width, greaterThan(box.width * 1.7));
-    expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
-    await capture('columns-scan-pinched');
-    final origin = tester.getTopLeft(raster);
-    await tester.fling(area, const Offset(-150, -100), 700);
-    await tester.pumpAndSettle();
-    expect(tester.widget<RawImage>(raster).image, same(enlarged));
-    expect(tester.getTopLeft(raster).dx, lessThan(origin.dx));
-    expect(tester.getTopLeft(raster).dy, lessThan(origin.dy));
-    await capture('columns-scan-panned');
-    await pinch(tester, tester.getCenter(area), 90, 40);
-    await until(
-      tester,
-      () => tester.widget<RawImage>(raster).image != enlarged,
-    );
-    expect(tester.getSize(raster).width, box.width - 28);
-    expect(tester.widget<Text>(folioText).data, 'page 1 of 1');
-    await tester.pumpWidget(const SizedBox());
-    await tester.pumpAndSettle();
-    await closeApplicationCores();
-    await directory.delete(recursive: true);
-    expect(tester.takeException(), isNull);
-  });
+  }
 
   testWidgets(
     'a figure in a mixed strip pinches sharply without changing Size',

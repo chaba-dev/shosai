@@ -230,29 +230,69 @@ extension on ReaderController {
           layout.width - 2 * pdfStripSideInset,
         );
         final availableHeight = math.max(1.0, height - pdfStripHeaderHeight);
-        final scale = detail.baseScale * detail.zoom;
-        screen = PdfStripScreen(
-          start: screen.start,
-          next: screen.next,
-          width: math.max(availableWidth, bounds.width * scale),
-          height: math.max(availableHeight, bounds.height * scale),
-          pageWidth: page.geometry.width,
-          pageHeight: page.geometry.height,
-          pieces: [
-            PdfStripPiece(
-              page: detail.page,
-              region: detail.region,
-              source: bounds,
-              left: math.max(0, (availableWidth - bounds.width * scale) / 2),
-              top: 0,
-              scale: scale,
-              zoomable: true,
-            ),
-          ],
-          separators: const [],
-          strip: strip ?? screen,
-          detailZoom: detail.zoom,
-        );
+        bool admits(double scale) {
+          try {
+            // The source crop can gain pixels from the virtual page's ceil
+            // and outward clipping. The composed canvas also reserves the
+            // viewport, including blank paper around a short figure.
+            pdfBitmapSizeFor(
+              pdf.pageSize(detail.page),
+              scale * density,
+              clip: bounds,
+            );
+            pdfBitmapSizeFor(
+              PdfPageSize(
+                math.max(availableWidth, bounds.width * scale),
+                math.max(availableHeight, bounds.height * scale),
+              ),
+              density,
+            );
+            return true;
+          } on PdfEngineLimitException {
+            return false;
+          }
+        }
+
+        var scale = detail.baseScale * detail.zoom;
+        if (!admits(scale)) {
+          var low = 0.0;
+          var high = scale;
+          for (var i = 0; i < 32; i++) {
+            final mid = (low + high) / 2;
+            if (admits(mid)) {
+              low = mid;
+            } else {
+              high = mid;
+            }
+          }
+          scale = low;
+        }
+        // An extremely tall page may not admit even whole-region fit. Keep
+        // its already-crisp screen strip rather than shrink/upscale or fail.
+        if (scale > detail.baseScale * 1.03) {
+          screen = PdfStripScreen(
+            start: screen.start,
+            next: screen.next,
+            width: math.max(availableWidth, bounds.width * scale),
+            height: math.max(availableHeight, bounds.height * scale),
+            pageWidth: page.geometry.width,
+            pageHeight: page.geometry.height,
+            pieces: [
+              PdfStripPiece(
+                page: detail.page,
+                region: detail.region,
+                source: bounds,
+                left: math.max(0, (availableWidth - bounds.width * scale) / 2),
+                top: 0,
+                scale: scale,
+                zoomable: true,
+              ),
+            ],
+            separators: const [],
+            strip: strip ?? screen,
+            detailZoom: scale / detail.baseScale,
+          );
+        }
       }
       final size = pdfBitmapSizeFor(
         PdfPageSize(screen.width, screen.height),

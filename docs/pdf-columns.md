@@ -132,7 +132,12 @@ insets. Both axes' scroll offsets in detail mode must also be accounted for by
 interaction adapters. `PdfStripPiece.zoomable` identifies figure/page pieces;
 `PdfStripScreen.detailZoom` and `strip` preserve the original cursor while a
 pinch renders the whole safe region. Pinching back to fit returns to that
-screen without changing Size or navigation history. A screen can contain
+screen without changing Size or navigation history. Detail scale is bounded
+by the existing 40-million-pixel / 16384px edge admission, for both the outward-
+rounded source crop and composed canvas at device density. `detailZoom` stores
+the admitted ratio, not the unclamped gesture request. Extremely tall fallback
+regions that cannot admit a whole-region enlargement retain their crisp strip.
+A screen can contain
 more than one page, so mapping must select the hit piece, not assume model.unit
 applies to every point. These transforms do not themselves implement selection
 or durable restoration.
@@ -160,7 +165,9 @@ PDFium with Thrift: touch outer-zone steps, middle-zone chrome, swipe and backwa
 navigation, every-page range naming, safe cutout/home insets, maximum/submaximum
 Size, explicit fit callbacks, 200 ms slide-on/instant-off, reduced motion,
 fit-width scan fallback, and crisp figure/page pinch with two-axis panning.
-The mixed figure test also runs the Japanese UI. Set
+The DPR 3 scan controls cover below/above area and edge admission, an exceptionally
+tall fallback, and pixel-identical return to a noninitial strip cursor with
+backward/forward history. The mixed figure test also runs the Japanese UI. Set
 `SHOSAI_COLUMNS_ARTIFACTS` to capture the repaint-boundary PNGs. Unit tests cover
 line-safe windows (including indivisible overlapping tall rows), transforms,
 band sizing, page/column separators and missing-page loading. Engine crop tests

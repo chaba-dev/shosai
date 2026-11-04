@@ -323,6 +323,9 @@ no-column fallback page for detail: the controller renders its safe original
 region at the new density, without magnifying the strip bitmap. Detail pans in
 both axes without advancing the strip; pinch back to fit to resume the same
 screen. This transient detail zoom does not change the Columns Size preference.
+Detail stops at the existing renderer's pixel/edge limits, including device
+density and crop rounding. If an exceptionally tall whole region cannot admit
+an enlargement, retain its crisp screen strip rather than blur, shrink or fail.
 
 **TypefacePicker.** The six type sets as a radio list (`role="radiogroup"`), each row showing the set’s name in its sans, its faces in `ui-caption` and a one-line specimen in its serif, so the choice is made by looking rather than by name. The current set carries a check in `accent`. Choosing applies at once to the interface, the editorial text and the reader’s Serif and Sans fonts; a book’s own fonts are untouched. Rows never preview with system fallbacks: a set that is not bundled is not listed.
 

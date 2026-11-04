@@ -240,13 +240,44 @@ final class PdfEngineException implements Exception {
   String toString() => message;
 }
 
-/// Computes the bitmap size for a page, with the retained core's limits.
-PdfBitmapSize pdfBitmapSizeFor(PdfPageSize size, double scale) {
+/// Computes an admitted page/crop bitmap, including PDFium's outward rounding.
+/// A crop need not admit the virtual full page, but its native dimensions must
+/// still fit signed integers. Callers can preflight without allocating pixels.
+PdfBitmapSize pdfBitmapSizeFor(
+  PdfPageSize size,
+  double scale, {
+  PdfRect? clip,
+}) {
   if (!scale.isFinite || scale <= 0) {
     throw const PdfEngineException('page scale must be finite and positive');
   }
-  final width = (size.width * scale).ceilToDouble();
-  final height = (size.height * scale).ceilToDouble();
+  var width = (size.width * scale).ceilToDouble();
+  var height = (size.height * scale).ceilToDouble();
+  if (clip != null) {
+    if (!clip.left.isFinite ||
+        !clip.top.isFinite ||
+        !clip.right.isFinite ||
+        !clip.bottom.isFinite ||
+        clip.left < 0 ||
+        clip.top < 0 ||
+        clip.right > size.width ||
+        clip.bottom > size.height) {
+      throw const PdfEngineException('PDF crop is outside the page');
+    }
+    if (!width.isFinite ||
+        !height.isFinite ||
+        width > 0x7fffffff ||
+        height > 0x7fffffff) {
+      throw const PdfEngineLimitException(
+        'PDF render scale exceeds native limits',
+      );
+    }
+    final sx = width / size.width;
+    final sy = height / size.height;
+    width = (clip.right * sx).ceilToDouble() - (clip.left * sx).floorToDouble();
+    height =
+        (clip.bottom * sy).ceilToDouble() - (clip.top * sy).floorToDouble();
+  }
   if (!width.isFinite ||
       !height.isFinite ||
       width < 1 ||
