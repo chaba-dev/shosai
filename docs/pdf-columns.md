@@ -1,10 +1,10 @@
-# PDF Columns — region analysis (stack PR1)
+# PDF Columns — geometry, strip and reader integration
 
 Acceptance source: [RFD 12, Papers on phones and revised Decisions](https://github.com/chaba-dev/rfds/blob/d9fae4eb30607b4620d09441c6d08b4cbab64425/rfd/0012/README.adoc),
 [rfds PR #16](https://github.com/chaba-dev/rfds/pull/16).
 
 PR1 supplies the nonvisual foundation. PR2 adds the Columns reading mode and
-explicit Display preference described below; PR3 integrates durable place,
+explicit Display preference described below; PR3 adds durable place,
 selection/marks/search/links, double-tap entry and phone defaults. PR1's
 unchanged-reader screenshots are not evidence of the PR2 Columns UI.
 
@@ -192,3 +192,49 @@ The orb's pinned Mesa 26 cannot expose GLX on Xvfb; the desktop recording used
 Nix's `github:NixOS/nixpkgs/nixos-25.05#mesa` (25.0.7), its EGL vendor, driver
 directory and library path, with software GL. This capture-only workaround does
 not alter application rendering or the project's graphics dependencies.
+
+## PR3 place and interaction integration
+
+Reading state now stores an optional `pdfY` in original rotated-page points
+(SQLite migration 14, `reading_state.pdf_y`). Existing positions without a
+height still open at their page. Columns saves the first visible piece's page
+and height, plus its first visible canonical character offset to distinguish
+the left and right columns at the same height. Fit changes retain that place;
+fit-width scrolling updates it through a generation/revision-guarded message.
+A page that already fits vertically need not scroll to retain its place.
+Entry and restoration normalize overlapping physical lines to a stable boundary,
+so repeated fit changes cannot creep upward one line at a time.
+
+The strip selection surface keeps each visible page's complete canonical text
+but maps only the visible geometry through `PdfStripPiece.fromPage`. A page is
+shifted once, even when it appears in several crops. Saved text marks and search
+hits use those same offsets; area marks clip in original page space. A selection
+crossing pages saves one original-page annotation per intersected page, never
+strip pixels. Link hits select the containing piece and use `toPage` before the
+existing PDF destination/peek flow. Notes and search jumps enter the region that
+contains their original character range. A targeted range reserves leading
+space for the overlaid toolbar and selection capsule, accounted for in the
+line-safe screen layout, so the hit is visible rather than covered by controls.
+
+Touch double-tap is handled on the actual selectable surface: a fitted page
+opens Columns at the tapped column; Columns returns to Fit page, not 2x. A
+pending entry/jump is replayed across viewport changes, rather than replaced
+by the old screen's position. The single-tap delay is the gesture recognizer's
+normal double-tap window; mouse selection and touch long-press remain available.
+
+On a phone with no explicit fit choice and the legacy default zoom, the
+controller samples up to the first three pages. Any detected two-column page
+selects Columns; otherwise it selects Fit width. It does not persist that
+inferred default as an explicit choice. Saved fits and legacy width/manual
+choices win; larger screens retain Fit page with optional Columns.
+
+The native Linux integration test covers right-column entry, selection and
+canonical note storage, fit changes, reopen, note/search jumps, later-page
+restoration, and link peeks/destinations alongside PR2's strip tests. The
+asymmetric selection adapter test covers two crops of one page and another page
+at a different scale, including horizontal and vertical carets. Core tests cover
+the height's storage, validation, reopen and clearing. The PageSpread preview
+includes the actual native captures and desktop recording for this integration.
+Android and macOS are not certified by Linux evidence; real iPhone verification
+belongs to Darwin. No macOS golden baseline is changed here; any such change
+requires regeneration and verification on the Darwin Mac mini.
