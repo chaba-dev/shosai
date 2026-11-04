@@ -123,6 +123,7 @@
   "readerZoomOut": "縮小",
   "readerZoomIn": "拡大",
   "readerFitWidth": "幅に合わせる",
+  "readerColumns": "段組み",
   "readerFitPage": "ページに合わせる",
   "readerPages": "ページ",
   "readerPageAnimations": "ページアニメーション",

@@ -94,6 +94,7 @@ extension on ReaderController {
         document.format != FlutterBookFormat.pdf ||
         _model.contentState != ReaderContentState.ready ||
         _model.continuousPresentation ||
+        _model.columnsPresentation ||
         !_canPeek) {
       return;
     }

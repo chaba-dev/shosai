@@ -467,6 +467,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerFitWidth => 'Fit width';
 
   @override
+  String get readerColumns => 'Columns';
+
+  @override
   String get readerFitPage => 'Fit page';
 
   @override

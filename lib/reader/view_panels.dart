@@ -923,6 +923,20 @@ class _ReaderDisplayPanel extends StatelessWidget {
                   _ReaderSegmented(
                     segments: [
                       (
+                        key: const ValueKey('reader-typography-columns'),
+                        icon: null,
+                        label: l10n.readerColumns,
+                        selected:
+                            typography.rasterFit == ReaderRasterFit.columns,
+                        onPressed: enabled
+                            ? () => dispatch(
+                                const ReaderTypographyChanged(
+                                  rasterFit: ReaderRasterFit.columns,
+                                ),
+                              )
+                            : null,
+                      ),
+                      (
                         key: const ValueKey('reader-typography-fit-width'),
                         icon: null,
                         label: l10n.readerFitWidth,

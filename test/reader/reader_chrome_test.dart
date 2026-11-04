@@ -1510,6 +1510,7 @@ void main() {
               animations: !animations,
               progress: null,
               zonesHintDismissed: null,
+              pdfFit: null,
             ),
           ]);
           expect(bridge.selectionLayouts, hasLength(layouts));
@@ -1548,6 +1549,7 @@ void main() {
         animations: null,
         progress: null,
         zonesHintDismissed: null,
+        pdfFit: null,
       ));
       expect(saved[1].fontSize, greaterThan(18));
       expect((saved[1].theme, saved[1].lineSpacing), (null, null));

@@ -60,6 +60,7 @@ bool _readerShowsSpread(
 ) {
   final typography = model.typography;
   if (layout == ShellLayout.phone ||
+      model.columnsPresentation ||
       !typography.twoPages ||
       model.continuousPresentation ||
       area.maxWidth < ShosaiTokens.sizeSpreadMinWidth ||
@@ -201,6 +202,8 @@ class _ReaderStage extends StatelessWidget {
               // under the page or spread, on every device. The line's row is
               // there while the book opens too, so the first page is
               // rendered for the box it is then shown in.
+              : model.columnsPresentation
+              ? content
               : document != null || model.busy
               ? Column(
                   children: [

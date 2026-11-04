@@ -33,6 +33,9 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 import 'pdf/engine.dart';
+import 'pdf/column_strip.dart';
+import 'pdf/columns.dart';
+import 'pdf/page_geometry.dart';
 import 'pdf/pdfrx_engine.dart';
 import 'pdf/spread.dart';
 
@@ -42,6 +45,7 @@ part 'model.dart';
 part 'epub_book_pages.dart';
 part 'page_turn.dart';
 part 'pdf_leaf.dart';
+part 'pdf_columns.dart';
 part 'references.dart';
 
 /// Most jumps Back remembers; the oldest is forgotten first.
@@ -162,6 +166,9 @@ final class ReaderController implements Listenable {
   /// document summary: opened by the open effect, released with the model's
   /// resources.
   PdfEngineDocument? _pdfDocument;
+  int _columnsRevision = 0;
+  final Map<int, PdfStripPage> _columnsPages = {};
+  final List<PdfStripPosition> _columnsBack = [];
   int _referenceRevision = 0;
   int _turnPreviewRevision = 0;
   ChapterLayoutSession? _turnPreviewSession;
@@ -737,6 +744,7 @@ final class ReaderController implements Listenable {
               animations: null,
               progress: null,
               zonesHintDismissed: true,
+              pdfFit: null,
             ));
           }
           final generation = _model.generation;
@@ -1406,6 +1414,18 @@ final class ReaderController implements Listenable {
         _documentOpened(message);
       case _ReaderImageDecoded():
         _imageDecoded(message);
+      case _ReaderColumnsLoaded():
+        _columnsLoaded(message);
+      case _ReaderColumnsFailed():
+        if (_isCurrentColumns(message.generation, message.revision)) {
+          _emit(
+            _model.copyWith(relayoutBusy: false, relayoutError: message.error),
+          );
+        }
+      case _ReaderColumnsFinished():
+        _activeBridgeOperations--;
+        _recoverIfIdle();
+        _disposeBridgeIfIdle();
       case _ReaderSurfaceLoaded():
         if (_isCurrent(message.generation)) {
           _emit(
@@ -2155,6 +2175,14 @@ final class ReaderController implements Listenable {
       return;
     }
     final document = _model.document;
+    if (document?.format == FlutterBookFormat.pdf &&
+        _rasterFit == ReaderRasterFit.columns) {
+      _requestedLayout = layout;
+      _requestColumns(
+        _model.pdfColumns?.start ?? PdfStripPosition(_model.unit),
+      );
+      return;
+    }
     if (document == null) {
       _requestedLayout = layout;
       _emit(_model.copyWith(layout: layout, relayoutPending: false));
@@ -2264,6 +2292,7 @@ final class ReaderController implements Listenable {
     double? height,
     double? devicePixelRatio,
   }) {
+    final oldHeight = _epubViewportHeight;
     if (height != null && height.isFinite && height > 0) {
       _epubViewportHeight = height;
     }
@@ -2283,6 +2312,21 @@ final class ReaderController implements Listenable {
             spread: observed.spread,
           );
     final document = _model.document;
+    if (document?.format == FlutterBookFormat.pdf &&
+        _rasterFit == ReaderRasterFit.columns) {
+      final changed =
+          layout != _requestedLayout ||
+          height != null && oldHeight != height ||
+          pixelRatioChanged;
+      _requestedLayout = layout;
+      if (changed) _columnsBack.clear();
+      if (changed || _model.pdfColumns == null && !_model.relayoutBusy) {
+        _requestColumns(
+          _model.pdfColumns?.start ?? PdfStripPosition(_model.unit),
+        );
+      }
+      return;
+    }
     final intent = _activeRelayoutIntent;
     final isNavigation =
         intent != null &&
@@ -2335,7 +2379,10 @@ final class ReaderController implements Listenable {
     double width, {
     int? facing,
   }) {
-    if (_rasterFit == ReaderRasterFit.manual) return null;
+    if (_rasterFit == ReaderRasterFit.manual ||
+        _rasterFit == ReaderRasterFit.columns) {
+      return null;
+    }
     if (!width.isFinite || width <= 0) return null;
     final PdfPageSize page;
     try {
@@ -2616,6 +2663,10 @@ final class ReaderController implements Listenable {
   /// is genuinely over the step becomes a chapter change through the normal
   /// guarded relayout path.
   void _pageStepRequested(int delta) {
+    if (_model.columnsPresentation) {
+      _columnsStep(delta);
+      return;
+    }
     final page = _model.epubPage;
     final session = _epubSession;
     final document = _model.document;
@@ -3022,6 +3073,18 @@ final class ReaderController implements Listenable {
     EpubPositionEdge epubEdge = EpubPositionEdge.startOrInterior,
   }) {
     final document = _model.document;
+    if (_model.columnsPresentation) {
+      if (unit >= 0 &&
+          unit < (document?.logicalUnitCount.toInt() ?? 0) &&
+          !_model.busy &&
+          !_model.relayoutBusy &&
+          !_closing &&
+          !_suspended) {
+        _columnsBack.clear();
+        _requestColumns(PdfStripPosition(unit));
+      }
+      return;
+    }
     if (document == null ||
         unit < 0 ||
         unit >= document.logicalUnitCount.toInt() ||
@@ -3424,8 +3487,7 @@ final class ReaderController implements Listenable {
   /// Font size, line spacing and zoom are clamped to the pinned ranges; a
   /// layout-affecting change is applied through the guarded relayout path so a
   /// failed layout reports through the existing error surface. Global Display
-  /// changes are handed to the settings sink; per-book precedence and the
-  /// typed fit codec are 5A/6B.
+  /// changes, including explicit PDF fit choices, go to the settings sink.
   void _typographyChanged(ReaderTypographyChanged message) {
     if (_closing) return;
     final document = _model.document;
@@ -3470,25 +3532,55 @@ final class ReaderController implements Listenable {
           ? null
           : _typographyProgress,
       zonesHintDismissed: null,
+      pdfFit:
+          message.rasterFit == null ||
+              message.rasterFit == ReaderRasterFit.manual
+          ? null
+          : FlutterPdfFit.values.byName(message.rasterFit!.name),
     );
     if (change.theme != null ||
         change.fontSize != null ||
         change.lineSpacing != null ||
         change.twoPages != null ||
         change.animations != null ||
-        change.progress != null) {
+        change.progress != null ||
+        change.pdfFit != null) {
       _displaySink(change);
     }
     if (message.rasterFit case final fit?) {
       _rasterFit = fit;
-      if (fit != ReaderRasterFit.manual) _rasterZoom = _baseScale;
+      if (fit != ReaderRasterFit.manual) {
+        _rasterZoom = fit == ReaderRasterFit.columns ? 1 : _baseScale;
+      }
     }
     if (message.zoom case final zoom?) {
-      _rasterFit = ReaderRasterFit.manual;
-      _rasterZoom = zoom.clamp(0.25, 5.0);
+      if (_rasterFit != ReaderRasterFit.columns) {
+        _rasterFit = ReaderRasterFit.manual;
+      }
+      _rasterZoom = _rasterFit == ReaderRasterFit.columns
+          ? zoom.clamp(0.5, 4.0)
+          : zoom.clamp(0.25, 5.0);
     }
     _emit(_model);
     final after = _model.typography;
+    if (document?.format == FlutterBookFormat.pdf &&
+        after.rasterFit == ReaderRasterFit.columns) {
+      if (before.rasterFit != after.rasterFit ||
+          before.rasterZoom != after.rasterZoom) {
+        _columnsBack.clear();
+        _discardPdfLeaves();
+        _requestColumns(
+          _model.pdfColumns?.start ??
+              PdfStripPosition(_model.readingLocation.unit),
+        );
+      }
+      return;
+    }
+    if (before.rasterFit == ReaderRasterFit.columns &&
+        after.rasterFit != before.rasterFit) {
+      _columnsRevision++;
+      _emit(_model.copyWith(pdfColumns: null, relayoutBusy: false));
+    }
     // A theme change re-palettes an EPUB page: its text is styled with the
     // palette captured when the page was laid out, unlike a PDF raster, which
     // is recolored from current model state at paint time.
@@ -5262,6 +5354,9 @@ final class ReaderController implements Listenable {
         contentState: ReaderContentState.ready,
       ),
     );
+    if (_rasterFit == ReaderRasterFit.columns) {
+      _requestColumns(PdfStripPosition(_model.unit));
+    }
   }
 
   void _selectionStarted(int offset) {
@@ -6244,6 +6339,14 @@ final class ReaderController implements Listenable {
         _model.annotationOperations.isNotEmpty) {
       return;
     }
+    if (_model.columnsPresentation) {
+      if (_model.pdfColumns == null || _requestedLayout != _model.layout) {
+        _requestColumns(
+          _model.pdfColumns?.start ?? PdfStripPosition(_model.unit),
+        );
+      }
+      return;
+    }
     if (_model.contentState != ReaderContentState.ready) {
       // An EPUB whose open ran before the first page height was reported is
       // laid out once the height is known.
@@ -7189,6 +7292,9 @@ final class ReaderController implements Listenable {
   }
 
   void _releaseModelResources({bool publish = false}) {
+    _columnsRevision++;
+    _columnsPages.clear();
+    _columnsBack.clear();
     _clearTurnPreview();
     final pageImage = _model.pageImage;
     final document = _model.document;
@@ -7200,6 +7306,7 @@ final class ReaderController implements Listenable {
       // A PDF spread describes the released document's surface; a document
       // opened through the same controller starts without one.
       pdfSpread: null,
+      pdfColumns: null,
       pdfRightToLeft: false,
       readingPage: null,
       selectionSurface: null,

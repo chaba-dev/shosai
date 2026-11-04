@@ -720,7 +720,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     final total = model.document?.logicalUnitCount.toInt() ?? 0;
     if (_canStepPage(model, delta, total)) {
       final velocity = _velocity?.getVelocity().pixelsPerSecond.dx ?? 0;
-      if (turn != null) {
+      if (turn != null && !model.columnsPresentation) {
         turn.release(
           complete:
               turn.pastMidpoint ||

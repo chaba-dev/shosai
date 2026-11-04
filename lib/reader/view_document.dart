@@ -90,6 +90,25 @@ class _DocumentViewState extends State<_DocumentView> {
     final actionFocus = widget.actionFocus;
     final l10n = AppLocalizations.of(context);
     final title = document.title ?? l10n.readerUntitledDocument;
+    if (model.columnsPresentation) {
+      return CallbackShortcuts(
+        bindings: readerPageKeys(model, dispatch, arrows: true),
+        child: Focus(
+          focusNode: readerFocus,
+          autofocus: true,
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (event) {
+              if (event.kind != ui.PointerDeviceKind.mouse ||
+                  (event.buttons & 1) != 0) {
+                readerFocus.requestFocus();
+              }
+            },
+            child: _ReaderColumns(model: model),
+          ),
+        ),
+      );
+    }
     final page = image;
     // Link annotations do not depend on text extraction. A scanned PDF, or
     // one whose text cannot be mapped, still uses its raster's hit-test frame.
@@ -542,7 +561,9 @@ Map<ShortcutActivator, VoidCallback> readerPageKeys(
 /// document and the retained EPUB path keep the logical-unit semantics, which
 /// is what the edge columns and PageUp/PageDown have always dispatched.
 ReaderMessage pageStepMessage(ReaderModel model, int delta) {
-  if (model.epubPage != null) return ReaderPageStepRequested(delta);
+  if (model.epubPage != null || model.columnsPresentation) {
+    return ReaderPageStepRequested(delta);
+  }
   // A PDF read in spreads turns both pages of the spread.
   if (model.layout.spread && model.document?.format == FlutterBookFormat.pdf) {
     return ReaderUnitRequested(pdfSpreadStep(model.unit, delta), turn: true);
@@ -556,6 +577,14 @@ ReaderMessage pageStepMessage(ReaderModel model, int delta) {
 /// in which case a step can extend it); the retained path keeps the unit-count
 /// bound.
 bool _canStepPage(ReaderModel model, int delta, int total) {
+  final columns = model.pdfColumns;
+  if (model.columnsPresentation && columns != null) {
+    return delta < 0
+        ? columns.start.page > 0 ||
+              columns.start.region > 0 ||
+              columns.start.y != null
+        : columns.next.page < total;
+  }
   final page = model.epubPage;
   if (page != null) {
     return delta < 0 ? page.canGoBackward : page.canGoForward;
@@ -567,6 +596,7 @@ bool _canStepPage(ReaderModel model, int delta, int total) {
 BoxFit _readerFit(ReaderTypographyPresentation typography) {
   if (typography.format == FlutterBookFormat.epub) return BoxFit.contain;
   return switch (typography.rasterFit) {
+    ReaderRasterFit.columns => BoxFit.contain,
     ReaderRasterFit.fitPage => BoxFit.contain,
     ReaderRasterFit.fitWidth => BoxFit.fitWidth,
     ReaderRasterFit.manual => BoxFit.none,

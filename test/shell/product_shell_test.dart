@@ -389,6 +389,7 @@ void main() {
                       animations: false,
                       progress: null,
                       zonesHintDismissed: null,
+                      pdfFit: null,
                     )),
                     child: const Text('One page'),
                   ),

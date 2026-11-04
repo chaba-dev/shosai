@@ -134,6 +134,7 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
     final after = widget.model;
     if (!_motion ||
         before.generation != after.generation ||
+        before.typography.rasterFit != after.typography.rasterFit ||
         before.layout != after.layout ||
         before.epubPage?.box.size != after.epubPage?.box.size ||
         oldWidget.spread != widget.spread ||
@@ -144,6 +145,12 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
       return;
     }
     var delta = after.unit.compareTo(before.unit);
+    if (delta == 0 && before.pdfColumns != null && after.pdfColumns != null) {
+      final a = before.pdfColumns!.start;
+      final b = after.pdfColumns!.start;
+      delta = b.region.compareTo(a.region);
+      if (delta == 0) delta = (b.y ?? -1).compareTo(a.y ?? -1);
+    }
     if (delta == 0) {
       delta = (after.epubPage?.canonicalStart ?? 0).compareTo(
         before.epubPage?.canonicalStart ?? 0,
@@ -285,6 +292,8 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
 
   /// Returns true when this scope owns the swipe (also with motion disabled).
   bool drag(double dx) {
+    // Columns swipes dispatch one screen on release, never a lifted leaf.
+    if (widget.model.columnsPresentation) return false;
     if (_committing) return true;
     final model = widget.model;
     final delta = (dx < 0 ? 1 : -1) * (model.rightToLeft ? -1 : 1);
@@ -402,19 +411,33 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
                     child: AnimatedBuilder(
                       animation: _progress,
                       builder: (context, _) => CustomPaint(
-                        key: const ValueKey('reader-page-curl'),
-                        painter: _PageCurlPainter(
-                          outgoing: _outgoing!,
-                          incoming: _incoming,
-                          pageRect: _pageRect,
-                          progress: _progress.value,
-                          backward: _delta < 0,
-                          rightToLeft: widget.model.rightToLeft,
-                          spread: _turnSpread,
-                          paper: pageColors(
-                            widget.model.typography.theme,
-                          ).background,
+                        key: ValueKey(
+                          widget.model.columnsPresentation
+                              ? 'reader-columns-slide'
+                              : 'reader-page-curl',
                         ),
+                        painter: widget.model.columnsPresentation
+                            ? _ColumnsSlidePainter(
+                                _outgoing!,
+                                _incoming,
+                                _progress.value,
+                                _delta < 0,
+                                pageColors(
+                                  widget.model.typography.theme,
+                                ).background,
+                              )
+                            : _PageCurlPainter(
+                                outgoing: _outgoing!,
+                                incoming: _incoming,
+                                pageRect: _pageRect,
+                                progress: _progress.value,
+                                backward: _delta < 0,
+                                rightToLeft: widget.model.rightToLeft,
+                                spread: _turnSpread,
+                                paper: pageColors(
+                                  widget.model.typography.theme,
+                                ).background,
+                              ),
                       ),
                     ),
                   ),
@@ -425,6 +448,47 @@ class _ReaderPageTurnState extends State<_ReaderPageTurn>
       );
     },
   );
+}
+
+/// Two fitted screen textures slide vertically; neither is curled or reflowed.
+class _ColumnsSlidePainter extends CustomPainter {
+  const _ColumnsSlidePainter(
+    this.outgoing,
+    this.incoming,
+    this.progress,
+    this.backward,
+    this.paper,
+  );
+  final ui.Image outgoing;
+  final ui.Image? incoming;
+  final double progress;
+  final bool backward;
+  final Color paper;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = paper);
+    final distance = size.height * (backward ? -1 : 1);
+    void draw(ui.Image image, double y) => canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Rect.fromLTWH(0, y, size.width, size.height),
+      Paint(),
+    );
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    draw(outgoing, -distance * progress);
+    if (incoming case final image?) draw(image, distance * (1 - progress));
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_ColumnsSlidePainter old) =>
+      outgoing != old.outgoing ||
+      incoming != old.incoming ||
+      progress != old.progress ||
+      backward != old.backward ||
+      paper != old.paper;
 }
 
 /// One clipped texture for the front and a paper-colored reverse with faint

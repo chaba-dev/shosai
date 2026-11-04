@@ -846,6 +846,12 @@ abstract class AppLocalizations {
   /// **'Fit width'**
   String get readerFitWidth;
 
+  /// PDF reading mode showing original page pieces in column reading order.
+  ///
+  /// In en, this message translates to:
+  /// **'Columns'**
+  String get readerColumns;
+
   /// Iced reference key: fit-page.
   ///
   /// In en, this message translates to:

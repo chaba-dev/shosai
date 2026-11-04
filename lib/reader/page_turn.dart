@@ -52,7 +52,11 @@ extension on ReaderController {
       _emit(_model);
       return;
     }
-    if (!_canPeek || _model.continuousPresentation) return;
+    if (!_canPeek ||
+        _model.continuousPresentation ||
+        _model.columnsPresentation) {
+      return;
+    }
     _clearTurnPreview();
     final generation = _model.generation;
     final layoutRevision = _layoutRevision;
