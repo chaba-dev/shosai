@@ -142,6 +142,7 @@ List<PdfTextLine> buildPdfTextLines(
 }) {
   final lines = <PdfTextLine>[];
   PdfRect? bounds;
+  PdfRect? row;
   var start = 0;
   var end = 0;
   var vertical = false;
@@ -156,6 +157,7 @@ List<PdfTextLine> buildPdfTextLines(
       }
     }
     bounds = null;
+    row = null;
   }
 
   for (final sample in samples) {
@@ -175,11 +177,17 @@ List<PdfTextLine> buildPdfTextLines(
     final last = bounds;
     final probe = sample.baseline;
     final nextVertical = probe != null && probe.dy.abs() > probe.dx.abs();
+    // Loose boxes of adjacent physical rows can overlap slightly. Compare
+    // substantial overlap with a representative glyph, never the growing
+    // union: superscripts must not let successive rows chain into a block.
+    final axis = row;
     final sameAxis =
-        last == null ||
+        axis == null ||
         (vertical
-            ? rect.left < last.right && rect.right > last.left
-            : rect.top < last.bottom && rect.bottom > last.top);
+            ? _min(rect.right, axis.right) - _max(rect.left, axis.left) >=
+                  _min(rect.width, axis.width) * .25
+            : _min(rect.bottom, axis.bottom) - _max(rect.top, axis.top) >=
+                  _min(rect.height, axis.height) * .25);
     final gap = last == null
         ? 0
         : (vertical
@@ -194,6 +202,10 @@ List<PdfTextLine> buildPdfTextLines(
     if (bounds == null) {
       start = sample.index;
       vertical = nextVertical;
+    }
+    if (row == null ||
+        (vertical ? rect.width > row!.width : rect.height > row!.height)) {
+      row = rect;
     }
     bounds = bounds?.union(rect) ?? rect;
     end = sample.index + 1;
