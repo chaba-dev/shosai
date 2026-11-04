@@ -265,3 +265,35 @@ includes the actual native captures and desktop recording for this integration.
 Android and macOS are not certified by Linux evidence; real iPhone verification
 belongs to Darwin. No macOS golden baseline is changed here; any such change
 requires regeneration and verification on the Darwin Mac mini.
+
+### Grouped-figure successor validation
+
+PR3 is restacked on PR2 `824ab48bcf3827381aa618855cc74aab7517075c`,
+including PR1 `6e4dc3ba40482dc497a9607514cd22fafb741f51` and main
+`9fa9a52f0a5f15f2cc48e2f61c56cc796b2f6fc1`. PR3's interaction and
+persistence implementation is unchanged from its reviewed resize fix. The
+combined native Linux suite passes 16 scenarios, including the new real-ResNet
+header/diagram regression and both-axis detail pan, resize, fit and reopen.
+
+The inspected native [preceding screen](design-system/components/images/columns3-resnet-tail.jpg)
+and [complete grouped diagram](design-system/components/images/columns3-resnet-diagram.jpg)
+confirm the headers are no longer stranded. They do **not** establish the
+no-huge-tail acceptance rule: this 412 × 775 probe still leaves 588.285px
+(75.9%) blank before the diagram. The separate Mac runtime at 412 × 774 leaves
+566.156px (73.15%) blank, as reported by the upstream owner. These are distinct
+viewports and measurements, not contradictory results. Cumulative sign-off
+remains withheld pending the Darwin/Puck tail-policy decision; historical
+approval of PR3's resize fix is not approval of this successor.
+
+The [fresh Linux pointer recording](design-system/components/images/columns3-successor-linux.mp4)
+shows selection, a yellow highlight, Columns → Fit page → Columns and the
+retained original-text mark on this restack. A temporary bootstrap only opened
+Thrift in disposable storage through the production shell, reader and PDFium;
+it did not substitute geometry or reader widgets. This desktop recording has
+no injected device safe insets and does not certify touch, resize or a phone.
+Those interactions are covered separately by the native suite above.
+
+`make check-fmt lint test` passes: scripts 110 (6 skipped), Flutter 1471
+(3 skipped), EPUB 178, core 266 and PDFium hook 7. Both render-harness runs pass
+170 tests (2 skipped), produce 145 identical captures and retain zero golden
+drift. No golden baselines change.
