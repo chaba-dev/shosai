@@ -178,14 +178,53 @@ final class _PdfrxDocument implements PdfEngineDocument {
       pdfBitmapSizeFor(pageSize(page), scale);
 
   @override
-  Future<PdfRenderedPage> render(int page, double scale) async {
+  Future<PdfRenderedPage> render(
+    int page,
+    double scale, {
+    PdfRect? clip,
+  }) async {
     final loaded = _page(page);
-    final size = bitmapSize(page, scale);
+    // Validate the allocation, not the virtual full page: a high-zoom screen
+    // crop must not allocate (or reject) an enormous offscreen page bitmap.
+    if (clip != null &&
+        (!clip.left.isFinite ||
+            !clip.top.isFinite ||
+            !clip.right.isFinite ||
+            !clip.bottom.isFinite ||
+            clip.left < 0 ||
+            clip.top < 0 ||
+            clip.right > loaded.width ||
+            clip.bottom > loaded.height)) {
+      throw const PdfEngineException('PDF crop is outside the page');
+    }
+    final requested = clip == null
+        ? bitmapSize(page, scale)
+        : pdfBitmapSizeFor(PdfPageSize(clip.width, clip.height), scale);
+    final fullWidth = (loaded.width * scale).ceil();
+    final fullHeight = (loaded.height * scale).ceil();
+    // PDFium's virtual page dimensions are signed native integers, even when
+    // the admitted crop itself is small.
+    if (fullWidth > 0x7fffffff || fullHeight > 0x7fffffff) {
+      throw const PdfEngineLimitException(
+        'PDF render scale exceeds native limits',
+      );
+    }
+    final sx = fullWidth / loaded.width;
+    final sy = fullHeight / loaded.height;
+    final x = clip == null ? 0 : (clip.left * sx).floor();
+    final y = clip == null ? 0 : (clip.top * sy).floor();
+    final width = clip == null ? requested.width : (clip.right * sx).ceil() - x;
+    final height = clip == null
+        ? requested.height
+        : (clip.bottom * sy).ceil() - y;
+    pdfBitmapSizeFor(PdfPageSize(width.toDouble(), height.toDouble()), 1);
     final image = await loaded.render(
-      width: size.width,
-      height: size.height,
-      fullWidth: size.width.toDouble(),
-      fullHeight: size.height.toDouble(),
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      fullWidth: fullWidth.toDouble(),
+      fullHeight: fullHeight.toDouble(),
       flags: _lcdText | _reverseByteOrder,
     );
     if (image == null) {
@@ -196,6 +235,9 @@ final class _PdfrxDocument implements PdfEngineDocument {
         width: image.width,
         height: image.height,
         pixels: Uint8List.fromList(image.pixels),
+        source: clip == null
+            ? null
+            : PdfRect(x / sx, y / sy, (x + width) / sx, (y + height) / sy),
       );
     } finally {
       image.dispose();

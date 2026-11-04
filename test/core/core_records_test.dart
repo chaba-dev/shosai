@@ -19,6 +19,7 @@ import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
+import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/library/controller.dart';
 
@@ -43,7 +44,11 @@ final class _PdfDocument implements PdfEngineDocument {
   PdfPageSize pageSize(int page) => const PdfPageSize(600, 800);
 
   @override
-  Future<PdfRenderedPage> render(int page, double scale) async {
+  Future<PdfRenderedPage> render(
+    int page,
+    double scale, {
+    PdfRect? clip,
+  }) async {
     final width = (600 * scale).round();
     final height = (800 * scale).round();
     return PdfRenderedPage(
@@ -1111,6 +1116,7 @@ void main() {
       epubFontSize: 20,
       epubLineSpacing: 1.8,
       pdfZoom: -1,
+      pdfFit: FlutterPdfFit.columns,
       twoPages: false,
       animations: false,
       progress: FlutterReaderProgress.percent,

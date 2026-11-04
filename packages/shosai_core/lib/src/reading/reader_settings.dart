@@ -9,6 +9,8 @@ enum ReaderTheme { light, sepia, dark }
 
 enum ReaderProgress { page, percent, off }
 
+enum PdfFit { columns, fitWidth, fitPage }
+
 /// The reader's settings.
 ///
 /// [pdfZoom] is a scale from [minPdfZoom] to [maxPdfZoom], or one of the
@@ -20,6 +22,7 @@ final class ReaderSettings {
     this.epubFontSize = 16,
     this.epubLineSpacing = 1.6,
     this.pdfZoom = pdfZoomFitPage,
+    this.pdfFit,
     this.twoPages = true,
     this.animations = true,
     this.progress = ReaderProgress.page,
@@ -41,6 +44,9 @@ final class ReaderSettings {
   final double epubFontSize;
   final double epubLineSpacing;
   final double pdfZoom;
+
+  /// Null until explicitly selected; phone defaults must not override a choice.
+  final PdfFit? pdfFit;
 
   /// Show two pages side by side where there is room for them, rather than
   /// always one.
@@ -70,6 +76,7 @@ final class ReaderSettings {
       other.epubFontSize == epubFontSize &&
       other.epubLineSpacing == epubLineSpacing &&
       other.pdfZoom == pdfZoom &&
+      other.pdfFit == pdfFit &&
       other.twoPages == twoPages &&
       other.animations == animations &&
       other.progress == progress &&
@@ -82,6 +89,7 @@ final class ReaderSettings {
     epubFontSize,
     epubLineSpacing,
     pdfZoom,
+    pdfFit,
     twoPages,
     animations,
     progress,
@@ -103,6 +111,7 @@ const _themeKey = 'reader.theme';
 const _epubFontSizeKey = 'reader.epub_font_size';
 const _epubLineSpacingKey = 'reader.epub_line_spacing';
 const _pdfZoomKey = 'reader.pdf_zoom';
+const _pdfFitKey = 'reader.pdf_fit';
 const _pagesKey = 'reader.pages';
 const _animationsKey = 'reader.animations';
 const _progressKey = 'reader.progress';
@@ -151,6 +160,7 @@ final class ReaderSettingsStore {
         defaults.pdfZoom,
         (v) => ReaderSettings(pdfZoom: v).isValid,
       ),
+      pdfFit: PdfFit.values.asNameMap()[stored[_pdfFitKey]],
       twoPages: stored[_pagesKey] != 'one',
       animations: stored[_animationsKey] != 'off',
       progress:
@@ -174,6 +184,7 @@ final class ReaderSettingsStore {
       _epubFontSizeKey: '${settings.epubFontSize}',
       _epubLineSpacingKey: '${settings.epubLineSpacing}',
       _pdfZoomKey: '${settings.pdfZoom}',
+      _pdfFitKey: settings.pdfFit?.name ?? '',
       _pagesKey: settings.twoPages ? 'two' : 'one',
       _animationsKey: settings.animations ? 'on' : 'off',
       _progressKey: settings.progress.name,

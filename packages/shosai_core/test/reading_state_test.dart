@@ -258,6 +258,7 @@ void main() {
         epubFontSize: 20,
         epubLineSpacing: 1.8,
         pdfZoom: ReaderSettings.pdfZoomFitWidth,
+        pdfFit: PdfFit.columns,
         twoPages: false,
         animations: false,
         progress: ReaderProgress.percent,

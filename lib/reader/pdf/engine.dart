@@ -85,7 +85,9 @@ abstract interface class PdfEngineDocument {
   PdfBitmapSize bitmapSize(int page, double scale);
 
   /// Renders [page] at [scale] as straight (non-premultiplied) RGBA pixels.
-  Future<PdfRenderedPage> render(int page, double scale);
+  /// With [clip], allocates only that rectangle in rotated page points. The
+  /// returned [PdfRenderedPage.source] includes outward pixel rounding.
+  Future<PdfRenderedPage> render(int page, double scale, {PdfRect? clip});
 
   /// Builds the selection surface for [page] rendered at [scale].
   Future<FlutterSelectionSurface> selectionSurface(int page, double scale);
@@ -145,10 +147,14 @@ final class PdfRenderedPage {
     required this.width,
     required this.height,
     required this.pixels,
+    this.source,
   });
 
   final int width;
   final int height;
+
+  /// Actual page-point area of a clipped raster, including rounded edge pixels.
+  final PdfRect? source;
 
   /// Straight RGBA pixels, row-major, `width * height * 4` bytes.
   final Uint8List pixels;

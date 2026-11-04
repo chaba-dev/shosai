@@ -43,6 +43,41 @@ Future<String> _pdfWith(String catalogExtra) async {
 void main() {
   final engine = PdfrxPdfEngine();
 
+  test('clipped renders match full-page pixels at fitted density', () async {
+    final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+    addTearDown(document.dispose);
+    const scale = 2.0;
+    final full = await document.render(0, scale);
+    final crop = await document.render(
+      0,
+      scale,
+      clip: const PdfRect(53.8, 130.2, 293.3, 350.7),
+    );
+    final source = crop.source!;
+    expect(crop.width, 480);
+    expect(crop.height, 442);
+    expect(source.left, 53.5);
+    expect(source.top, 130);
+    final x = (source.left * scale).round();
+    final y = (source.top * scale).round();
+    for (var row = 0; row < crop.height; row++) {
+      expect(
+        crop.pixels.sublist(row * crop.width * 4, (row + 1) * crop.width * 4),
+        full.pixels.sublist(
+          ((y + row) * full.width + x) * 4,
+          ((y + row) * full.width + x + crop.width) * 4,
+        ),
+      );
+    }
+    // A tiny high-density crop must not allocate an inadmissible full bitmap.
+    final detail = await document.render(
+      0,
+      30,
+      clip: const PdfRect(54, 130, 64, 140),
+    );
+    expect([detail.width, detail.height], [300, 300]);
+  });
+
   test(
     'column regions retain vector ink and own overlaid image labels',
     () async {

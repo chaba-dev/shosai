@@ -538,6 +538,9 @@ final class CoreRecords implements ShosaiRecords {
       epubFontSize: settings.epubFontSize,
       epubLineSpacing: settings.epubLineSpacing,
       pdfZoom: settings.pdfZoom,
+      pdfFit: settings.pdfFit == null
+          ? null
+          : FlutterPdfFit.values.byName(settings.pdfFit!.name),
       twoPages: settings.twoPages,
       animations: settings.animations,
       progress: FlutterReaderProgress.values.byName(settings.progress.name),
@@ -564,6 +567,9 @@ final class CoreRecords implements ShosaiRecords {
             epubFontSize: value.epubFontSize,
             epubLineSpacing: value.epubLineSpacing,
             pdfZoom: value.pdfZoom,
+            pdfFit: value.pdfFit == null
+                ? null
+                : PdfFit.values.byName(value.pdfFit!.name),
             twoPages: value.twoPages,
             animations: value.animations,
             progress: ReaderProgress.values.byName(value.progress.name),
