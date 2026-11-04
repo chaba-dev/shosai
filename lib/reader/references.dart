@@ -91,13 +91,34 @@ extension on ReaderController {
     if (pdf == null) return;
     final generation = _model.generation;
     final revision = ++_referenceRevision;
-    final unit = _model.unit;
+    var unit = _model.unit;
     var spread = _model.pdfSpread;
     // Text geometry uses the committed layout scale, independently of the
     // fitted raster resolution. Only the textless fallback uses raster pixels.
-    final scale = _model.selectionSurface != null
+    var scale = _model.selectionSurface != null
         ? _model.layout.scale
         : _renderedRasterScale ?? _model.layout.scale;
+    if (_model.pdfColumns case final screen?) {
+      final piece = screen.pieces
+          .where(
+            (p) =>
+                x >= p.left &&
+                x <= p.left + p.width &&
+                y >= p.top &&
+                y <= p.top + p.height,
+          )
+          .firstOrNull;
+      if (piece == null) {
+        if (pageTap != null) dispatch(pageTap);
+        return;
+      }
+      final point = piece.toPage(x, y);
+      unit = piece.page;
+      spread = null;
+      scale = 1;
+      x = point.x;
+      y = point.y;
+    }
     if (_model.selectionSurface == null && spread != null) {
       spread = ReaderPdfSpread(
         facingUnit: spread.facingUnit,

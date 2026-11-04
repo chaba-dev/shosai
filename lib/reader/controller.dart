@@ -34,6 +34,7 @@ import 'package:shosai_flutter/theme_tokens.dart';
 
 import 'pdf/engine.dart';
 import 'pdf/column_strip.dart';
+import 'pdf/column_selection.dart';
 import 'pdf/columns.dart';
 import 'pdf/page_geometry.dart';
 import 'pdf/pdfrx_engine.dart';
@@ -96,6 +97,7 @@ final class ReaderController implements Listenable {
         ),
     double? baseScale,
     bool zonesHintDismissed = false,
+    this.autoPdfFit = false,
     this.renderPdfAhead = true,
   }) : _bridge = bridge,
        _records = recordsOf(bridge),
@@ -161,6 +163,8 @@ final class ReaderController implements Listenable {
   final ShosaiRecords _records;
   final PageDecoder _decoder;
   final PdfEngine _pdfEngine;
+  final bool autoPdfFit;
+  bool _pdfChoiceExplicit = false;
 
   /// The engine document behind the current PDF, owned with the model's
   /// document summary: opened by the open effect, released with the model's
@@ -169,6 +173,16 @@ final class ReaderController implements Listenable {
   int _columnsRevision = 0;
   final Map<int, PdfStripPage> _columnsPages = {};
   final List<PdfStripPosition> _columnsBack = [];
+  ({
+    PdfStripPosition position,
+    List<PdfStripPosition> back,
+    bool previous,
+    int? offset,
+    int? length,
+    double? x,
+    bool locate,
+  })?
+  _columnsIntent;
   int _referenceRevision = 0;
   int _turnPreviewRevision = 0;
   ChapterLayoutSession? _turnPreviewSession;
@@ -947,6 +961,10 @@ final class ReaderController implements Listenable {
         _linkActivated(message.href, message.label);
       case ReaderPdfLinkTapped():
         _pdfLinkTapped(message.x, message.y, message.pageTap);
+      case ReaderPdfDoubleTapped():
+        _pdfDoubleTapped(message.x, message.y);
+      case ReaderPdfViewportChanged():
+        _pdfViewportChanged(message);
       case ReaderReferenceDismissed():
         _focusAdapter(ReaderFocusTarget.surface);
       case ReaderReferenceGoToRequested():
@@ -1437,6 +1455,7 @@ final class ReaderController implements Listenable {
         }
       case _ReaderColumnsFailed():
         if (_isCurrentColumns(message.generation, message.revision)) {
+          _columnsIntent = null;
           _emit(
             _model.copyWith(relayoutBusy: false, relayoutError: message.error),
           );
@@ -1941,6 +1960,25 @@ final class ReaderController implements Listenable {
       final restoredOffset = place == null
           ? restored?.offset?.toInt()
           : place.offset;
+      ReaderRasterFit? defaultPdfFit;
+      if (pdf != null && autoPdfFit) {
+        final sample = <PdfPageGeometry>[];
+        for (var page = 0; page < math.min(3, pdf.pageCount); page++) {
+          try {
+            sample.add(await pdf.pageGeometry(page));
+          } catch (_) {
+            // A scan or unavailable text layer still opens at fit width.
+          }
+          if (!_isCurrent(generation)) return;
+        }
+        defaultPdfFit =
+            analyzePdfColumns(
+              sample,
+              rightToLeft: pdf.rightToLeft,
+            ).any((page) => page.columnCount >= 2)
+            ? ReaderRasterFit.columns
+            : ReaderRasterFit.fitWidth;
+      }
       // A PDF read in spreads opens on the spread that holds its page.
       final unit = pdf != null && layout.spread
           ? pdfSpreadStart(restoredUnit)
@@ -1977,6 +2015,8 @@ final class ReaderController implements Listenable {
           restorationFailed: restorationFailed,
           restorationError: restorationError,
           offset: unit == restoredUnit ? restoredOffset : null,
+          pdfY: place == null ? restored?.pdfY : null,
+          defaultPdfFit: defaultPdfFit,
           toolError: toolError,
           // A book opened at a note or search hit returns to where it was
           // left, or, opened from another book, to that book.
@@ -2124,6 +2164,10 @@ final class ReaderController implements Listenable {
       return;
     }
     _pdfDocument = message.pdfDocument;
+    if (message.defaultPdfFit case final fit? when !_pdfChoiceExplicit) {
+      _rasterFit = fit;
+      _rasterZoom = fit == ReaderRasterFit.columns ? 1 : _baseScale;
+    }
     final requestedLayout = ReaderLayout(
       scale: message.restoredLayout
           ? message.layout.scale
@@ -2142,6 +2186,7 @@ final class ReaderController implements Listenable {
         pdfRightToLeft: message.pdfDocument?.rightToLeft ?? false,
         unit: message.unit,
         readingOffset: message.offset,
+        pdfY: message.pdfY,
         bookmarks: message.bookmarks,
         layout: message.layout,
         relayoutPending: requestedLayout != message.layout,
@@ -2197,9 +2242,7 @@ final class ReaderController implements Listenable {
     if (document?.format == FlutterBookFormat.pdf &&
         _rasterFit == ReaderRasterFit.columns) {
       _requestedLayout = layout;
-      _requestColumns(
-        _model.pdfColumns?.start ?? PdfStripPosition(_model.unit),
-      );
+      _refreshColumns();
       return;
     }
     if (document == null) {
@@ -2340,9 +2383,7 @@ final class ReaderController implements Listenable {
       _requestedLayout = layout;
       if (changed) _columnsBack.clear();
       if (changed || _model.pdfColumns == null && !_model.relayoutBusy) {
-        _requestColumns(
-          _model.pdfColumns?.start ?? PdfStripPosition(_model.unit),
-        );
+        _refreshColumns();
       }
       return;
     }
@@ -3008,8 +3049,11 @@ final class ReaderController implements Listenable {
     final ReaderReturnPoint from =
         source ?? (unit: here.unit, offset: here.offset, book: null);
     final before = _activeRelayoutIntent;
+    final columnsBefore = _columnsRevision;
     navigate();
-    if (identical(_activeRelayoutIntent, before) || _model.document == null) {
+    if ((identical(_activeRelayoutIntent, before) &&
+            _columnsRevision == columnsBefore) ||
+        _model.document == null) {
       return;
     }
     // Every jump restarts the turns that close Back, even one from where
@@ -3048,9 +3092,11 @@ final class ReaderController implements Listenable {
     _hideChrome();
     final intent = _activeRelayoutIntent;
     final page = _model.epubPage;
+    final columns = _columnsRevision;
     turn();
     if (identical(_activeRelayoutIntent, intent) &&
-        identical(_model.epubPage, page)) {
+        identical(_model.epubPage, page) &&
+        columns == _columnsRevision) {
       return;
     }
     if (_model.returnPoints.isNotEmpty && ++_turnsSinceJump >= 3) {
@@ -3078,8 +3124,12 @@ final class ReaderController implements Listenable {
       return;
     }
     final before = _activeRelayoutIntent;
+    final columns = _columnsRevision;
     _unitRequested(to.unit, offset: to.offset, replaceReadingOffset: true);
-    if (identical(_activeRelayoutIntent, before)) return;
+    if (identical(_activeRelayoutIntent, before) &&
+        columns == _columnsRevision) {
+      return;
+    }
     _turnsSinceJump = 0;
     _emit(_model.copyWith(returnPoints: points.sublist(0, points.length - 1)));
   }
@@ -3096,11 +3146,16 @@ final class ReaderController implements Listenable {
       if (unit >= 0 &&
           unit < (document?.logicalUnitCount.toInt() ?? 0) &&
           !_model.busy &&
-          !_model.relayoutBusy &&
           !_closing &&
           !_suspended) {
         _columnsBack.clear();
-        _requestColumns(PdfStripPosition(unit));
+        _readingStatePersistenceBlocked = false;
+        _requestColumns(
+          PdfStripPosition(unit),
+          offset: offset,
+          length: length,
+          locate: true,
+        );
       }
       return;
     }
@@ -3567,6 +3622,7 @@ final class ReaderController implements Listenable {
       _displaySink(change);
     }
     if (message.rasterFit case final fit?) {
+      _pdfChoiceExplicit = true;
       _rasterFit = fit;
       if (fit != ReaderRasterFit.manual) {
         _rasterZoom = fit == ReaderRasterFit.columns ? 1 : _baseScale;
@@ -3588,17 +3644,24 @@ final class ReaderController implements Listenable {
           before.rasterZoom != after.rasterZoom) {
         _columnsBack.clear();
         _discardPdfLeaves();
-        _requestColumns(
-          _model.pdfColumns?.start ??
-              PdfStripPosition(_model.readingLocation.unit),
-        );
+        _refreshColumns();
       }
       return;
     }
     if (before.rasterFit == ReaderRasterFit.columns &&
         after.rasterFit != before.rasterFit) {
       _columnsRevision++;
-      _emit(_model.copyWith(pdfColumns: null, relayoutBusy: false));
+      _columnsIntent = null;
+      _emit(
+        _model.copyWith(
+          pdfColumns: null,
+          pdfColumnSelection: null,
+          selectionPhase: ReaderSelectionPhase.idle,
+          anchor: null,
+          focus: null,
+          relayoutBusy: false,
+        ),
+      );
     }
     // A theme change re-palettes an EPUB page: its text is styled with the
     // palette captured when the page was laid out, unlike a PDF raster, which
@@ -3627,7 +3690,9 @@ final class ReaderController implements Listenable {
         spread: _requestedLayout.spread,
       ),
       unit: _model.readingLocation.unit,
-      offset: _model.readingLocation.offset,
+      offset: document.format == FlutterBookFormat.pdf
+          ? null
+          : _model.readingLocation.offset,
     );
   }
 
@@ -5229,10 +5294,21 @@ final class ReaderController implements Listenable {
     } else {
       readingOffset = _model.readingOffset;
     }
+    double? pdfY = _model.pdfY;
+    if (_pdfDocument != null && (changedPage || explicitLocation)) {
+      final endpoint = message.surface?.endpoints
+          .where((e) => e.rangeEnd.toInt() > (readingOffset ?? 0))
+          .firstOrNull;
+      pdfY = readingOffset == null || endpoint == null
+          ? 0
+          : endpoint.rect.top / message.layout.scale;
+    }
     _emit(
       _model.copyWith(
         unit: message.unit,
         readingOffset: readingOffset,
+        pdfY: pdfY,
+        locationRequestRevision: _model.locationRequestRevision + 1,
         // The more panel's page input follows the reader's location, the way
         // the pinned reference syncs `page_input` on navigation (RD-10).
         pageInput: changedLocation
@@ -5294,6 +5370,7 @@ final class ReaderController implements Listenable {
           unit: BigInt.from(unit),
           offset: offset == null ? null : BigInt.from(offset),
           zoom: message.layout.scale,
+          pdfY: _model.pdfY,
           progress: _bookProgress(_model),
           lastUnit: lastUnit != null && lastUnit > unit
               ? BigInt.from(lastUnit)
@@ -5374,7 +5451,7 @@ final class ReaderController implements Listenable {
       ),
     );
     if (_rasterFit == ReaderRasterFit.columns) {
-      _requestColumns(PdfStripPosition(_model.unit));
+      _refreshColumns();
     }
   }
 
@@ -5903,28 +5980,64 @@ final class ReaderController implements Listenable {
     // A highlight on a PDF spread belongs to the page it was made on, in that
     // page's own offsets and against its own surface.
     final spread = _model.pdfSpread;
+    final columns = _model.pdfColumnSelection;
     final pdf = _pdfDocument;
     final unit = spread?.unitOf(selection.start, _model.unit) ?? _model.unit;
     final start = spread?.pageOffset(selection.start) ?? selection.start;
     final end = spread?.pageOffset(selection.end) ?? selection.end;
-    final scale = _model.layout.scale;
+    final scale = columns == null ? _model.layout.scale : 1.0;
     unawaited(() async {
       var succeeded = false;
       String? writeError;
+      final created = <FlutterAnnotation>[];
       try {
-        final created = await _records.createAnnotation(
-          document: document,
-          surface: spread == null || pdf == null
-              ? surface
-              : await pdf.selectionSurface(unit, scale),
-          unit: BigInt.from(unit),
-          start: BigInt.from(start),
-          end: BigInt.from(end),
-          displayScale: scale,
-          color: color,
-          body: body,
-          cancellationId: cancellation,
-        );
+        final ranges = columns == null
+            ? [
+                (
+                  unit: unit,
+                  start: start,
+                  end: end,
+                  surface: spread == null || pdf == null
+                      ? surface
+                      : await pdf.selectionSurface(unit, scale),
+                ),
+              ]
+            : [
+                for (final page in columns.pages.keys)
+                  if (selection.start <
+                          columns.shifts[page]! +
+                              columns.pages[page]!.text.runes.length &&
+                      selection.end > columns.shifts[page]!)
+                    (
+                      unit: page,
+                      start: math.max(
+                        0,
+                        selection.start - columns.shifts[page]!,
+                      ),
+                      end: math.min(
+                        columns.pages[page]!.text.runes.length,
+                        selection.end - columns.shifts[page]!,
+                      ),
+                      surface: columns.pages[page]!,
+                    ),
+              ];
+        for (final range in ranges) {
+          if (!_isCurrent(generation)) return;
+          if (selectionRevision != _selectionRevision) break;
+          created.add(
+            await _records.createAnnotation(
+              document: document,
+              surface: range.surface,
+              unit: BigInt.from(range.unit),
+              start: BigInt.from(range.start),
+              end: BigInt.from(range.end),
+              displayScale: scale,
+              color: color,
+              body: body,
+              cancellationId: cancellation,
+            ),
+          );
+        }
         succeeded = true;
         if (!_isCurrent(generation)) return;
         dispatch(
@@ -5933,7 +6046,7 @@ final class ReaderController implements Listenable {
             revision,
             operationId,
             selectionRevision,
-            [..._model.annotations, created],
+            [..._model.annotations, ...created],
           ),
         );
       } catch (error) {
@@ -5944,7 +6057,7 @@ final class ReaderController implements Listenable {
             revision,
             operationId,
             selectionRevision,
-            null,
+            created.isEmpty ? null : [..._model.annotations, ...created],
             writeError,
           ),
         );
@@ -6001,6 +6114,7 @@ final class ReaderController implements Listenable {
           annotations,
           _model.unit,
           _model.pdfSpread,
+          _model.pdfColumnSelection,
         ),
       ),
     );
@@ -6360,9 +6474,7 @@ final class ReaderController implements Listenable {
     }
     if (_model.columnsPresentation) {
       if (_model.pdfColumns == null || _requestedLayout != _model.layout) {
-        _requestColumns(
-          _model.pdfColumns?.start ?? PdfStripPosition(_model.unit),
-        );
+        _refreshColumns();
       }
       return;
     }
@@ -7314,6 +7426,7 @@ final class ReaderController implements Listenable {
     _columnsRevision++;
     _columnsPages.clear();
     _columnsBack.clear();
+    _columnsIntent = null;
     _clearTurnPreview();
     final pageImage = _model.pageImage;
     final document = _model.document;
@@ -7326,6 +7439,8 @@ final class ReaderController implements Listenable {
       // opened through the same controller starts without one.
       pdfSpread: null,
       pdfColumns: null,
+      pdfColumnSelection: null,
+      pdfY: null,
       pdfRightToLeft: false,
       readingPage: null,
       selectionSurface: null,
@@ -7757,17 +7872,21 @@ List<ReaderSelection> _savedSelections(
   List<FlutterAnnotation> annotations,
   int unit, [
   ReaderPdfSpread? spread,
+  PdfStripSelection? columns,
 ]) => List.unmodifiable(
   annotations
       .where(
         (item) =>
             item.textRange != null &&
             (item.unit.toInt() == unit ||
-                item.unit.toInt() == spread?.facingUnit),
+                item.unit.toInt() == spread?.facingUnit ||
+                columns?.shifts.containsKey(item.unit.toInt()) == true),
       )
       .map((item) {
         final range = item.textRange!;
-        final shift = item.unit.toInt() == unit ? 0 : spread!.textShift;
+        final shift =
+            columns?.shifts[item.unit.toInt()] ??
+            (item.unit.toInt() == unit ? 0 : spread!.textShift);
         return ReaderSelection(
           range.start.toInt() + shift,
           range.end.toInt() + shift,

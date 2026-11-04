@@ -83,6 +83,7 @@ class PagePainter extends CustomPainter {
     required this.annotations,
     this.currentUnit = 0,
     this.spread,
+    this.columns,
     this.paintContent = true,
   });
 
@@ -101,6 +102,7 @@ class PagePainter extends CustomPainter {
   /// The PDF spread the surface spans, whose second page's area highlights
   /// are painted too, each page's beside the other.
   final ReaderPdfSpread? spread;
+  final PdfStripScreen? columns;
   final bool paintContent;
 
   @override
@@ -124,6 +126,21 @@ class PagePainter extends CustomPainter {
     }
     for (final annotation in annotations) {
       final unit = annotation.unit.toInt();
+      if (columns case final screen? when annotation.textRange == null) {
+        _paintBands(canvas, [
+          for (final piece in screen.pieces.where((p) => p.page == unit))
+            for (final rect
+                in annotation.rectangles ?? <FlutterSelectionRect>[])
+              if (PdfStripSelection.mapRect(piece, rect) case final mapped?)
+                Rect.fromLTRB(
+                  mapped.left,
+                  mapped.top,
+                  mapped.right,
+                  mapped.bottom,
+                ),
+        ], _highlightColor(annotation.color));
+        continue;
+      }
       if ((unit != currentUnit && unit != spread?.facingUnit) ||
           annotation.textRange != null) {
         continue;
@@ -224,6 +241,7 @@ class PagePainter extends CustomPainter {
       oldDelegate.fit != fit ||
       oldDelegate.currentUnit != currentUnit ||
       oldDelegate.spread != spread ||
+      oldDelegate.columns != columns ||
       oldDelegate.savedSelections != savedSelections ||
       oldDelegate.annotations != annotations;
 }

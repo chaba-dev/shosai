@@ -18,6 +18,10 @@ import 'package:shosai_flutter/reader/pdf/engine.dart'
     show pdfMaxBitmapDimension, pdfMaxBitmapPixels;
 import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
+import 'package:shosai_flutter/reader/view.dart'
+    show PagePainter, SurfaceTransform;
+
+import '../test/support/reference_documents.dart';
 
 /// Production PDFium, controller, settings and gestures. Runs on Linux, not a
 /// browser approximation of a native reader. Artifacts are opt-in.
@@ -203,6 +207,510 @@ void main() {
     skip: Platform.environment['RESNET_PDF'] == null,
   );
 
+  PagePainter? painting(WidgetTester tester) => tester
+      .widgetList<CustomPaint>(find.byType(CustomPaint))
+      .map((paint) => paint.painter)
+      .whereType<PagePainter>()
+      .firstOrNull;
+
+  testWidgets(
+    'phone defaults, explicit choices and larger screens stay distinct',
+    (tester) async {
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final directory = await Directory.systemTemp.createTemp('shosai-fit-');
+      for (final scenario in [
+        (
+          width: 440.0,
+          file: 'thrift',
+          fit: null,
+          columns: true,
+          widthFit: false,
+        ),
+        (
+          width: 440.0,
+          file: 'scanned',
+          fit: null,
+          columns: false,
+          widthFit: true,
+        ),
+        (
+          width: 440.0,
+          file: 'thrift',
+          fit: FlutterPdfFit.fitPage,
+          columns: false,
+          widthFit: false,
+        ),
+        (
+          width: 440.0,
+          file: 'thrift',
+          fit: FlutterPdfFit.fitWidth,
+          columns: false,
+          widthFit: true,
+        ),
+        (
+          width: 820.0,
+          file: 'thrift',
+          fit: null,
+          columns: false,
+          widthFit: false,
+        ),
+        (
+          width: 1280.0,
+          file: 'thrift',
+          fit: null,
+          columns: false,
+          widthFit: false,
+        ),
+      ]) {
+        tester.view.physicalSize = Size(scenario.width * 2, 1800);
+        final bridge = await createApplicationBridge(
+          applicationSupportDirectory: () async => directory,
+        );
+        await tester.pumpWidget(
+          ShosaiShell(
+            home: ReaderScreen(
+              key: UniqueKey(),
+              bridge: bridge,
+              initialPath: File(
+                'fixtures/pdf-columns/${scenario.file}.pdf',
+              ).absolute.path,
+              initialSettings: FlutterReaderSettings(
+                continuous: false,
+                theme: 'light',
+                epubFontSize: 18,
+                epubLineSpacing: 1.6,
+                pdfZoom: 0,
+                pdfFit: scenario.fit,
+                twoPages: false,
+                zonesHintDismissed: true,
+              ),
+            ),
+          ),
+        );
+        await until(
+          tester,
+          () =>
+              painting(tester) != null &&
+              (painting(tester)!.columns != null) == scenario.columns,
+        );
+        if (!scenario.columns) {
+          expect(
+            painting(tester)!.fit,
+            scenario.widthFit ? BoxFit.fitWidth : BoxFit.contain,
+            reason: '$scenario',
+          );
+        }
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      }
+      await closeApplicationCores();
+      await directory.delete(recursive: true);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Columns keeps original marks and page-height place across fits and reopen',
+    (tester) async {
+      tester.view.physicalSize = const Size(880, 1800);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final directory = await Directory.systemTemp.createTemp('shosai-place-');
+      final path = '${directory.path}/Thrift.pdf';
+      await File('fixtures/pdf-columns/thrift.pdf').copy(path);
+      var bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      final cancellation = bridge.createCancellation();
+      await bridge.importPaths(
+        pathKeys: [path],
+        managed: false,
+        cancellationId: cancellation,
+      );
+      final book = (await bridge.libraryPage(
+        limit: 10,
+        offset: 0,
+        cancellationId: cancellation,
+      )).books.single;
+      bridge.releaseCancellation(id: cancellation);
+      Future<void> open() async {
+        await tester.pumpWidget(
+          ShosaiShell(
+            home: RepaintBoundary(
+              key: captureKey,
+              child: ReaderScreen(
+                key: UniqueKey(),
+                bridge: bridge,
+                initialPath: path,
+                initialBookId: book.bookId,
+                initialSettings: const FlutterReaderSettings(
+                  continuous: false,
+                  theme: 'light',
+                  epubFontSize: 18,
+                  epubLineSpacing: 1.6,
+                  pdfZoom: 0,
+                  pdfFit: FlutterPdfFit.columns,
+                  twoPages: false,
+                  zonesHintDismissed: true,
+                ),
+              ),
+            ),
+          ),
+        );
+        await until(tester, () => painting(tester)?.columns != null);
+      }
+
+      Future<void> fit(String value) async {
+        final button = find.byKey(ValueKey('reader-typography-$value'));
+        if (button.hitTestable().evaluate().isEmpty) {
+          final header = find.byKey(const ValueKey('reader-header-typography'));
+          if (header.hitTestable().evaluate().isEmpty) {
+            await tester.tapAt(
+              tester.getCenter(
+                find.byKey(const ValueKey('reader-page-tap-area')),
+              ),
+            );
+            await tester.pump(const Duration(milliseconds: 350));
+            await tester.pumpAndSettle();
+          }
+          await tester.tap(header);
+          await tester.pumpAndSettle();
+        }
+        final before = painting(tester);
+        await tester.tap(button);
+        await until(
+          tester,
+          () =>
+              painting(tester) != before &&
+              (value == 'columns'
+                  ? painting(tester)?.columns != null
+                  : painting(tester)?.columns == null &&
+                        painting(tester)!.surface.width >= 612),
+        );
+        await tester.tapAt(const Offset(10, 100));
+        await tester.pumpAndSettle();
+      }
+
+      Offset point(double x, double y) {
+        final paint = painting(tester)!;
+        final box = tester.getRect(
+          find.byKey(const ValueKey('reader-selection-surface')),
+        );
+        final transform = SurfaceTransform.create(
+          paint.fit,
+          Size(paint.surface.width, paint.surface.height),
+          box.size,
+        );
+        final rect = transform.toDestinationRect(Rect.fromLTWH(x, y, 0, 0));
+        return box.topLeft + rect.topLeft;
+      }
+
+      await open();
+      await fit('fit-page');
+      await until(tester, () => painting(tester)?.columns == null);
+      final surface = painting(tester)!.surface;
+      // Deliberately choose the right column, not the page's first text.
+      final tap = point(surface.width * 430 / 612, surface.height * 350 / 792);
+      await tester.tapAt(tap);
+      await tester.pump(const Duration(milliseconds: 70));
+      await tester.tapAt(tap);
+      await until(tester, () => painting(tester)?.columns != null);
+      final first = painting(tester)!.columns!.pieces.first;
+      expect(first.page, 0);
+      expect(first.source.left, greaterThanOrEqualTo(317));
+      // Thrift's loose boxes overlap slightly within this paragraph. Entry
+      // starts above that indivisible row, just like a normal screen break.
+      expect(first.source.top, closeTo(310.648, .2));
+      await capture('columns-right-column-entry');
+      final endpoints = painting(tester)!.surface.endpoints;
+      // The fit controls leave chrome visible. Select below its overlay, not
+      // a character hidden underneath the header at the strip's top edge.
+      final from = endpoints.firstWhere((e) => e.rect.top > 120);
+      final to = endpoints.firstWhere(
+        (e) => e.offset > from.offset + BigInt.from(10),
+      );
+      Offset center(FlutterSelectionEndpoint e) => point(
+        (e.rect.left + e.rect.right) / 2,
+        (e.rect.top + e.rect.bottom) / 2,
+      );
+      final drag = await tester.startGesture(
+        center(from),
+        kind: ui.PointerDeviceKind.mouse,
+      );
+      await drag.moveTo(center(to));
+      await drag.up();
+      await tester.pumpAndSettle();
+      final selected = painting(tester)!;
+      expect(selected.anchor, isNot(selected.focus));
+      final start = selected.anchor! < selected.focus!
+          ? selected.anchor!
+          : selected.focus!;
+      final end = selected.anchor! > selected.focus!
+          ? selected.anchor!
+          : selected.focus!;
+      await capture('columns-selection');
+      await tester.tap(find.byKey(const ValueKey('selection-note')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('reader-note-editor-field')),
+        'Original right column',
+      );
+      await tester.tap(find.text('Save').last);
+      await until(tester, () => painting(tester)!.annotations.isNotEmpty);
+      final mark = painting(tester)!.annotations.single;
+      expect(mark.unit, BigInt.zero);
+      expect(mark.textRange!.start.toInt(), start);
+      expect(mark.textRange!.end.toInt(), end);
+      expect(mark.body, 'Original right column');
+      expect(painting(tester)!.savedSelections.single.start, start);
+      await capture('columns-note-highlight');
+      final top = painting(tester)!.columns!.pieces.first.source.top;
+      await fit('fit-width');
+      await until(tester, () => painting(tester)?.columns == null);
+      final scroll = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byKey(const ValueKey('reader-vertical-scroll-1-0')),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      expect(
+        scroll.pixels,
+        closeTo((top * 440 / 612).clamp(0, scroll.maxScrollExtent), 2),
+      );
+      await fit('columns');
+      expect(
+        painting(tester)!.columns!.pieces.first.source.left,
+        greaterThanOrEqualTo(317),
+      );
+      expect(
+        painting(tester)!.columns!.pieces.first.source.top,
+        closeTo(top, 1),
+      );
+      final stateCancellation = bridge.createCancellation();
+      final saved = await bridge.loadReadingState(
+        bookId: book.bookId,
+        cancellationId: stateCancellation,
+      );
+      bridge.releaseCancellation(id: stateCancellation);
+      expect(saved!.unit, BigInt.zero);
+      expect(saved.pdfY, closeTo(top, 1));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await open();
+      final restored = painting(tester)!.columns!.pieces.first;
+      expect(restored.source.left, greaterThanOrEqualTo(317));
+      expect(restored.source.top, closeTo(top, 1));
+      expect(
+        painting(tester)!.annotations.single.body,
+        'Original right column',
+      );
+      await capture('columns-restored-place');
+      // Double-tap leaves Columns for the original fitted page, never 2x.
+      final centerOfStrip = tester.getCenter(
+        find.byKey(const ValueKey('reader-selection-surface')),
+      );
+      await tester.tapAt(centerOfStrip);
+      await tester.pump(const Duration(milliseconds: 70));
+      await tester.tapAt(centerOfStrip);
+      await until(
+        tester,
+        () =>
+            painting(tester)?.columns == null &&
+            painting(tester)!.surface.width >= 612,
+      );
+      expect(painting(tester)!.fit, BoxFit.contain);
+      await capture('columns-return-to-page');
+      await fit('columns');
+      Future<void> header(String action) async {
+        final button = find.byKey(ValueKey('reader-header-$action'));
+        if (button.hitTestable().evaluate().isEmpty) {
+          await tester.tapAt(
+            tester.getCenter(
+              find.byKey(const ValueKey('reader-page-tap-area')),
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 350));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(button);
+        await tester.pumpAndSettle();
+      }
+
+      await header('notes');
+      final note = find.byKey(ValueKey('reader-annotation-${mark.id}-open'));
+      await until(tester, () => note.hitTestable().evaluate().isNotEmpty);
+      await tester.tap(note);
+      await until(
+        tester,
+        () =>
+            painting(tester)!.anchor == start && painting(tester)!.focus == end,
+      );
+      expect(
+        painting(tester)!.columns!.pieces.first.source.left,
+        greaterThanOrEqualTo(317),
+      );
+      await capture('columns-note-jump');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await header('search');
+      await tester.pumpAndSettle();
+      final beforeSearch = painting(tester)!.columns;
+      await tester.enterText(
+        find.byKey(const ValueKey('reader-search-input')),
+        'protocol',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await until(
+        tester,
+        () =>
+            painting(tester)!.columns != beforeSearch &&
+            painting(tester)!.anchor != null &&
+            painting(tester)!.focus != painting(tester)!.anchor,
+      );
+      final hit = painting(tester)!;
+      final text = String.fromCharCodes(
+        hit.surface.text.runes.skip(hit.anchor!).take(hit.focus! - hit.anchor!),
+      );
+      expect(text.toLowerCase(), 'protocol');
+      final visibleHit = hit.surface.endpoints.firstWhere(
+        (e) =>
+            e.rangeStart.toInt() <= hit.anchor! &&
+            e.rangeEnd.toInt() > hit.anchor!,
+      );
+      final hitCenter = center(visibleHit);
+      expect(
+        hitCenter.dy,
+        greaterThan(
+          tester.getRect(find.byKey(const ValueKey('reader-header'))).bottom,
+        ),
+      );
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('selection-actions')))
+            .contains(hitCenter),
+        isFalse,
+      );
+      await capture('columns-search-hit');
+      await tester.tap(find.byKey(const ValueKey('reader-search-close')));
+      await tester.pumpAndSettle();
+      for (
+        var step = 0;
+        step < 12 && painting(tester)!.columns!.topPage == 0;
+        step++
+      ) {
+        final before = painting(tester)!.columns;
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await until(tester, () => painting(tester)!.columns != before);
+      }
+      final later = painting(tester)!.columns!.pieces.first;
+      expect(later.page, greaterThan(0));
+      final laterCancellation = bridge.createCancellation();
+      final laterSaved = await bridge.loadReadingState(
+        bookId: book.bookId,
+        cancellationId: laterCancellation,
+      );
+      bridge.releaseCancellation(id: laterCancellation);
+      expect(laterSaved!.unit.toInt(), later.page);
+      expect(laterSaved.pdfY, closeTo(later.source.top, .01));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await open();
+      final laterRestored = painting(tester)!.columns!.pieces.first;
+      expect(laterRestored.page, later.page);
+      expect(laterRestored.source.top, closeTo(later.source.top, 1));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      await directory.delete(recursive: true);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'PDF link areas map through a strip piece to the original destination',
+    (tester) async {
+      tester.view.physicalSize = const Size(880, 1800);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-strip-link-',
+      );
+      final path = '${directory.path}/Reference.pdf';
+      await File(path).writeAsBytes(referencePdf());
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          home: RepaintBoundary(
+            key: captureKey,
+            child: ReaderScreen(
+              bridge: bridge,
+              initialPath: path,
+              initialSettings: const FlutterReaderSettings(
+                continuous: false,
+                theme: 'light',
+                epubFontSize: 18,
+                epubLineSpacing: 1.6,
+                pdfZoom: 0,
+                pdfFit: FlutterPdfFit.columns,
+                twoPages: false,
+                zonesHintDismissed: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await until(tester, () => painting(tester)?.columns != null);
+      final piece = painting(tester)!.columns!.pieces.first;
+      final local = piece.fromPage(
+        100,
+        260,
+      ); // Named Footnote 1 link, page points.
+      final box = tester.getRect(
+        find.byKey(const ValueKey('reader-selection-surface')),
+      );
+      await tester.tapAt(box.topLeft + Offset(local.x, local.y));
+      await tester.pump(const Duration(milliseconds: 350));
+      await until(
+        tester,
+        () => find
+            .byKey(const ValueKey('reader-reference-peek'))
+            .evaluate()
+            .isNotEmpty,
+      );
+      expect(find.textContaining('Quiet is the old name'), findsOneWidget);
+      await capture('columns-link-peek');
+      await tester.tap(find.byKey(const ValueKey('reader-reference-go-to')));
+      await until(tester, () => painting(tester)!.columns!.topPage == 1);
+      expect(
+        painting(tester)!.columns!.pieces.first.source.top,
+        greaterThan(600),
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      await directory.delete(recursive: true);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Columns reads the real Thrift paper across screens and pages', (
     tester,
   ) async {
@@ -258,6 +766,7 @@ void main() {
     final area = find.byKey(const ValueKey('reader-page-tap-area'));
     final rect = tester.getRect(area);
     await tester.tapAt(rect.center);
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
     await tester.pumpAndSettle();
@@ -301,6 +810,7 @@ void main() {
     // Middle reveals Display without advancing.
     before = image();
     await tester.tapAt(rect.center);
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
     expect(image(), same(before));
     await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
@@ -348,6 +858,7 @@ void main() {
       await tester.pumpAndSettle();
       await capture('columns-progress-${progress.name}');
       await tester.tapAt(rect.center);
+      await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
       await tester.pumpAndSettle();
@@ -402,6 +913,7 @@ void main() {
         .evaluate()
         .isEmpty) {
       await tester.tapAt(rect.center);
+      await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
     }
     await tester.tap(find.byKey(const ValueKey('reader-header-typography')));

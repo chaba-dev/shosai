@@ -34,6 +34,7 @@ const _settings = FlutterReaderSettings(
   epubFontSize: 18,
   epubLineSpacing: 1.6,
   pdfZoom: 0,
+  pdfFit: FlutterPdfFit.fitPage,
   twoPages: false,
   zonesHintDismissed: true,
 );
@@ -319,6 +320,7 @@ void main() {
       find.byKey(const ValueKey('reader-selection-surface')),
     );
     await tester.tapAt(Offset(rect.left + rect.width * .9, rect.center.dy));
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.pump();
     expect(curl, findsOneWidget);
     expect(_place(tester), 'page 2 of 5');
@@ -349,6 +351,7 @@ void main() {
     final before = await place();
     final rect = tester.getRect(_stage);
     await tester.tapAt(Offset(rect.left + rect.width * .9, rect.center.dy));
+    await tester.pump(const Duration(milliseconds: 300));
     for (var frame = 0; frame < 20 && curl.evaluate().isEmpty; frame++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 5)),
@@ -400,6 +403,7 @@ void main() {
     final before = await shadow();
     final rect = tester.getRect(_stage);
     await tester.tapAt(Offset(rect.left + rect.width * .9, rect.center.dy));
+    await tester.pump(const Duration(milliseconds: 300));
     for (var frame = 0; frame < 20 && curl.evaluate().isEmpty; frame++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 5)),

@@ -90,24 +90,8 @@ class _DocumentViewState extends State<_DocumentView> {
     final actionFocus = widget.actionFocus;
     final l10n = AppLocalizations.of(context);
     final title = document.title ?? l10n.readerUntitledDocument;
-    if (model.columnsPresentation) {
-      return CallbackShortcuts(
-        bindings: readerPageKeys(model, dispatch, arrows: true),
-        child: Focus(
-          focusNode: readerFocus,
-          autofocus: true,
-          child: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: (event) {
-              if (event.kind != ui.PointerDeviceKind.mouse ||
-                  (event.buttons & 1) != 0) {
-                readerFocus.requestFocus();
-              }
-            },
-            child: _ReaderColumns(model: model, dispatch: dispatch),
-          ),
-        ),
-      );
+    if (model.columnsPresentation && model.pdfColumns == null) {
+      return const Center(child: CircularProgressIndicator());
     }
     final page = image;
     // Link annotations do not depend on text extraction. A scanned PDF, or
@@ -395,22 +379,28 @@ class _DocumentViewState extends State<_DocumentView> {
                                   }
                                 },
                                 child: _animatePage(
-                                  _ReachableSelectableSurface(
-                                    contentKey: _contentKey,
-                                    onContentGeometryChanged:
-                                        _bumpContentGeometry,
-                                    presentationKey: ValueKey(
-                                      model.continuousPresentation
-                                          ? 'reader-continuous-presentation'
-                                          : 'reader-paginated-presentation',
-                                    ),
-                                    document: document,
-                                    surface: surface,
-                                    image: page,
-                                    epubPage: model.epubPage,
-                                    model: model,
-                                    dispatch: dispatch,
-                                  ),
+                                  model.columnsPresentation
+                                      ? _ReaderColumns(
+                                          model: model,
+                                          dispatch: dispatch,
+                                          contentKey: _contentKey,
+                                        )
+                                      : _ReachableSelectableSurface(
+                                          contentKey: _contentKey,
+                                          onContentGeometryChanged:
+                                              _bumpContentGeometry,
+                                          presentationKey: ValueKey(
+                                            model.continuousPresentation
+                                                ? 'reader-continuous-presentation'
+                                                : 'reader-paginated-presentation',
+                                          ),
+                                          document: document,
+                                          surface: surface,
+                                          image: page,
+                                          epubPage: model.epubPage,
+                                          model: model,
+                                          dispatch: dispatch,
+                                        ),
                                 ),
                               ),
                             ),

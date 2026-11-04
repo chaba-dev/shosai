@@ -365,6 +365,21 @@ final class ReaderPdfLinkTapped extends ReaderMessage {
   final ReaderPageTapped? pageTap;
 }
 
+/// A double tap in the rendered selection surface's coordinate frame.
+final class ReaderPdfDoubleTapped extends ReaderMessage {
+  const ReaderPdfDoubleTapped(this.x, this.y);
+  final double x;
+  final double y;
+}
+
+/// The top of a scrolled PDF viewport, in original page points.
+final class ReaderPdfViewportChanged extends ReaderMessage {
+  const ReaderPdfViewportChanged(this.generation, this.revision, this.y);
+  final int generation;
+  final int revision;
+  final double y;
+}
+
 final class ReaderReferenceDismissed extends ReaderMessage {
   const ReaderReferenceDismissed();
 }
@@ -907,6 +922,8 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     required this.restorationFailed,
     this.restorationError,
     this.offset,
+    this.pdfY,
+    this.defaultPdfFit,
     this.toolError,
     this.returnPoints = const [],
     this.match,
@@ -924,6 +941,8 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final bool restorationFailed;
   final String? restorationError;
   final int? offset;
+  final double? pdfY;
+  final ReaderRasterFit? defaultPdfFit;
   final String? toolError;
 
   /// The return points the book opens with: where it was left, when it
