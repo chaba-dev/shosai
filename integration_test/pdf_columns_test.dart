@@ -114,6 +114,17 @@ void main() {
     await tester.tapAt(rect.center, kind: ui.PointerDeviceKind.mouse);
     await tester.pumpAndSettle();
     await capture('columns-enlarged');
+    before = image();
+    final beforePan = tester.getTopLeft(raster).dx;
+    await tester.fling(area, const Offset(-180, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(image(), same(before), reason: 'An enlarged column pans, not steps');
+    expect(tester.getTopLeft(raster).dx, lessThan(beforePan));
+    await capture('columns-enlarged-panned');
+    await tester.fling(area, const Offset(180, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(image(), same(before));
+    expect(tester.getTopLeft(raster).dx, closeTo(beforePan, 1));
     await tester.tapAt(rect.center);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('reader-header-typography')));
