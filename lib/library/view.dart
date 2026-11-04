@@ -151,7 +151,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     confirmRemoval: _confirmRemoval,
     pickImport: _pickImport,
     openBook: _openBook,
-    drainReaderSaves: ReaderController.drainBookWrites,
+    drainReaderSaves: _drainReaderSaves,
     manageConnections: _manageLocations,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
@@ -563,6 +563,20 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       }
     }
     if (failure != null) throw failure;
+  }
+
+  Future<void> _drainReaderSaves(int bookId) async {
+    await ReaderController.drainBookWrites(bookId);
+    // The other shown books have drained in _openBook. Read every open book's
+    // current record, not just the filtered/paged collection reloaded next.
+    // Finish saving the tab list first so a just-opened tab is included too.
+    await _shell.openBooksSaved;
+    if (!mounted) return;
+    final saved = await _sessionRecords.loadOpenBooks();
+    if (!mounted || saved == null) return;
+    _shell.dispatch(
+      ShellLibraryBooksChanged([for (final open in saved.books) open.book]),
+    );
   }
 
   /// Presents the reader inside the shell: the rail beside it on desktop and
