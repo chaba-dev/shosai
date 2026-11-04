@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:crypto/crypto.dart';
@@ -12,8 +13,11 @@ import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/controller.dart'
     show ReaderDisplayChange, ReaderPlace;
+import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart'
     show pdfMaxBitmapDimension, pdfMaxBitmapPixels;
+import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
+import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 /// Production PDFium, controller, settings and gestures. Runs on Linux, not a
 /// browser approximation of a native reader. Artifacts are opt-in.
@@ -78,6 +82,126 @@ void main() {
     await left.up();
     await right.up();
   }
+
+  testWidgets(
+    'ResNet diagram keeps its three headers across the page boundary',
+    (tester) async {
+      tester.view.physicalSize = const Size(880, 1800);
+      tester.view.devicePixelRatio = 2;
+      tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+      addTearDown(tester.view.reset);
+      final original = Platform.environment['RESNET_PDF']!;
+      expect(
+        sha256.convert(await File(original).readAsBytes()).toString(),
+        '1e0651b6810ecba34a3dbc5b5b0209226f889004607c1f203540a48d64e5a93a',
+      );
+      final pdf = await PdfrxPdfEngine().open(original);
+      final geometry = await pdf.pageGeometry(3);
+      await pdf.dispose();
+      final headers = geometry.lines
+          .where((line) => {995, 1002, 1558}.contains(line.start))
+          .toList();
+      expect(headers, hasLength(3));
+      final directory = await Directory.systemTemp.createTemp('resnet-strip-');
+      final path = '${directory.path}/ResNet.pdf';
+      await File(original).copy(path);
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          home: RepaintBoundary(
+            key: captureKey,
+            child: ReaderScreen(
+              bridge: bridge,
+              initialPath: path,
+              initialSettings: const FlutterReaderSettings(
+                continuous: false,
+                theme: 'light',
+                epubFontSize: 18,
+                epubLineSpacing: 1.6,
+                pdfZoom: 0,
+                pdfFit: FlutterPdfFit.columns,
+                twoPages: false,
+                zonesHintDismissed: true,
+                animations: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await until(tester, () => raster.evaluate().isNotEmpty);
+      var steps = 0;
+      while (tester.widget<Text>(folioText).data != 'page 4 of 12' &&
+          steps++ < 40) {
+        await capture('resnet-before-diagram');
+        final before = tester.widget<RawImage>(raster).image;
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await until(
+          tester,
+          () => tester.widget<RawImage>(raster).image != before,
+        );
+      }
+      expect(tester.widget<Text>(folioText).data, 'page 4 of 12');
+      await capture('resnet-diagram-with-headers');
+      final image = tester.widget<RawImage>(raster).image!;
+      final stripHeight = tester.getSize(raster).height;
+      expect(stripHeight, closeTo(775, 1));
+      expect([image.width, image.height], [824, (stripHeight * 2).ceil()]);
+      expect(tester.getTopLeft(folio).dy, greaterThanOrEqualTo(59));
+      expect(tester.getBottomRight(raster).dy, lessThanOrEqualTo(866));
+      final object = analyzePdfColumns([geometry]).single.regions.singleWhere(
+        (region) =>
+            region.kind == PdfRegionKind.figure &&
+            region.bounds.contains(
+              const PdfRect(51.045, 92.112, 284.799, 618.042),
+            ),
+      );
+      final bounds = object.bounds;
+      expect(
+        headers.every((label) => bounds.contains(label.bounds)),
+        isTrue,
+        reason: 'The figure crop must include its three network headers',
+      );
+      final scale = math.min(
+        412 / bounds.width,
+        (stripHeight - 28) / bounds.height,
+      );
+      final pixels = (await image.toByteData())!.buffer.asUint8List();
+      int ink(PdfRect box) {
+        final left = (412 - bounds.width * scale) / 2;
+        final x0 = ((left + (box.left - bounds.left) * scale) * 2).floor();
+        final x1 = ((left + (box.right - bounds.left) * scale) * 2).ceil();
+        final y0 = ((28 + (box.top - bounds.top) * scale) * 2).floor();
+        final y1 = ((28 + (box.bottom - bounds.top) * scale) * 2).ceil();
+        var count = 0;
+        for (var y = y0; y < y1; y++) {
+          for (var x = x0; x < x1; x++) {
+            if (pixels[(y * image.width + x) * 4] < 128) count++;
+          }
+        }
+        return count;
+      }
+
+      for (final label in headers) {
+        expect(
+          ink(label.bounds),
+          greaterThan(20),
+          reason: 'Every network header must be painted above its diagram',
+        );
+      }
+      expect(
+        ink(const PdfRect(51.045, 605, 284.799, 618.042)),
+        greaterThan(50),
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      await directory.delete(recursive: true);
+      expect(tester.takeException(), isNull);
+    },
+    skip: Platform.environment['RESNET_PDF'] == null,
+  );
 
   testWidgets('Columns reads the real Thrift paper across screens and pages', (
     tester,

@@ -116,6 +116,17 @@ the increase button disabled. Figure/table and fallback-page detail pinch is
 separate from Size and always requests fresh clipped PDF pixels.
 The strip may cross a column or page boundary within a screen.
 
+Figure headers must travel with their whole diagram, not survive as an orphan
+row in the previous screen. The pinned ResNet page-4 regression traverses the
+412 × 775 strip and checks all three network headers with the complete figure,
+its normal fitted scale, and the adjacent screen. Exact-once ink conservation
+alone is not pagination acceptance. The corrected grouping leaves a measured
+588.3px (75.9%) preceding blank tail: the 747px figure plus its 28px page band
+cannot fit that remainder without changing scale or order. The orphan labels
+are resolved, but this large deferral tail remains an explicit visual-acceptance
+question, not a no-huge-tail pass. Rebalancing earlier text windows would be a
+separate pagination change; this regression does not silently introduce it.
+
 The reader controller loads geometry on demand with three initial pages for
 recurring-head sampling, retains nearby geometry, and renders each crop through
 `PdfEngineDocument.render(page, scale, clip: rect)`. The returned raster's
