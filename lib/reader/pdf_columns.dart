@@ -67,7 +67,7 @@ extension on ReaderController {
         )
         .firstOrNull;
     final offset = endpoint?.rangeStart.toInt();
-    _emit(_model.copyWith(pdfY: y, readingOffset: offset));
+    _emit(_model.copyWith(pdfY: y, pdfX: null, readingOffset: offset));
     final savedOffset = _model.readingLocation.offset;
     final bookId = _model.document?.bookId;
     if (bookId != null) {
@@ -203,7 +203,9 @@ extension on ReaderController {
               ? _model.readingLocation.offset
               : null),
       length: length,
-      x: x,
+      // A figure has no canonical text offset. Keep its original horizontal
+      // anchor across page fits/reopen rather than guessing from height alone.
+      x: x ?? (_model.pdfColumns == null && !locate ? _model.pdfX : null),
       locate: locate || _model.pdfColumns == null,
     );
     _columnsIntent = intent;
@@ -237,7 +239,7 @@ extension on ReaderController {
       strip: strip,
       offset: intent.offset,
       length: length,
-      x: x,
+      x: intent.x,
       locate: intent.locate,
     );
     _referenceEffects.add(effect);
@@ -619,6 +621,7 @@ extension on ReaderController {
         pdfColumns: message.screen,
         pdfColumnSelection: message.selection,
         pdfY: first.source.top,
+        pdfX: (first.source.left + first.source.right) / 2,
         pageImage: message.image,
         pdfSpread: null,
         readingPage: null,
@@ -658,6 +661,7 @@ extension on ReaderController {
           offset: offset == null ? null : BigInt.from(offset),
           zoom: message.layout.scale,
           pdfY: first.source.top,
+          pdfX: _model.pdfX,
           progress: _bookProgress(_model),
         ),
       );

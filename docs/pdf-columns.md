@@ -196,14 +196,24 @@ not alter application rendering or the project's graphics dependencies.
 ## PR3 place and interaction integration
 
 Reading state now stores an optional `pdfY` in original rotated-page points
-(SQLite migration 14, `reading_state.pdf_y`). Existing positions without a
-height still open at their page. Columns saves the first visible piece's page
-and height, plus its first visible canonical character offset to distinguish
-the left and right columns at the same height. Fit changes retain that place;
+(SQLite migration 14, `reading_state.pdf_y`) and an optional horizontal anchor
+`pdfX` (migration 15, `reading_state.pdf_x`). Existing positions without a
+height still open at their page. Columns saves the first visible piece's page,
+height and horizontal center in original page points. A canonical character
+offset remains the primary text anchor; the horizontal coordinate distinguishes
+a textless figure from another column at the same height. Fit changes retain that place;
 fit-width scrolling updates it through a generation/revision-guarded message.
 A page that already fits vertically need not scroll to retain its place.
 Entry and restoration normalize overlapping physical lines to a stable boundary,
 so repeated fit changes cannot creep upward one line at a time.
+
+`right-column-figure.pdf` is a generated, first-party real PDF with left-column
+body text beside a tall raster figure at x317–556, y190–730. The native reader
+regressions enter a completely textless figure screen at y350 and check both
+Columns → Fit page → Columns and a fresh core reopen. Before the horizontal
+anchor, both restore to left-column x54; with it both retain x317 and y350.
+The before/after screenshots and moving-pointer fit round-trip recording are
+captured on Linux, not a phone runtime.
 
 The strip selection surface keeps each visible page's complete canonical text
 but maps only the visible geometry through `PdfStripPiece.fromPage`. A page is

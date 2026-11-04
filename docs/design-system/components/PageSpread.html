@@ -64,6 +64,15 @@ body { margin: 0; background: var(--canvas); }
   <div class="sh-stage columns">
     <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns3-selection.jpg" aria-label="Native Linux Columns selection and note recording"><source src="images/columns3-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop: pointer selection, note/highlight and fit changes.</figcaption></figure>
   </div>
+  <div class="cap">PDF · textless right-column figure · durable page-space restoration</div>
+  <div class="sh-stage columns" aria-label="Textless figure restoration regression">
+    <figure><img src="images/columns3-figure-before.jpg" alt="Before fix: restoring the figure incorrectly shows left-column body text"><figcaption>Before: both fit switching and reopening confuse a textless right-column figure with left-column text at the same height (x54 instead of x317).</figcaption></figure>
+    <figure><img src="images/columns3-figure-fit.jpg" alt="After fix: the gray raster figure survives a Fit page and Columns round-trip"><figcaption>After fit switching: original-page x+y keeps the same figure, without relying on a text offset or a region index.</figcaption></figure>
+    <figure><img src="images/columns3-figure-reopen.jpg" alt="After fix: reopening retains the same textless gray raster figure"><figcaption>After a fresh core reopen: x317, y350 and no visible text endpoints. Real Linux/PDFium; generated first-party PDF.</figcaption></figure>
+  </div>
+  <div class="sh-stage columns">
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns3-figure-fit.jpg" aria-label="Native Linux textless figure fit round-trip"><source src="images/columns3-figure-linux.mp4" type="video/mp4"></video><figcaption>Real moving pointer changes Columns → Fit page → Columns while retaining the textless figure's original place.</figcaption></figure>
+  </div>
   <div class="cap">Two-page spread · EPUB · Paper · left to right</div>
   <div class="sh-stage">
     <div class="sh-spread" id="en">

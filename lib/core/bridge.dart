@@ -956,6 +956,9 @@ class FlutterReadingState {
   /// Height from the rotated PDF page's top in page points.
   final double? pdfY;
 
+  /// Horizontal original-page anchor for textless pieces sharing a height.
+  final double? pdfX;
+
   /// The last unit in view when it is past [unit], as on a PDF spread; the
   /// library progress counts it as read. Not part of the restored position.
   final BigInt? lastUnit;
@@ -969,12 +972,14 @@ class FlutterReadingState {
     this.offset,
     required this.zoom,
     this.pdfY,
+    this.pdfX,
     this.lastUnit,
     this.progress,
   });
 
   @override
-  int get hashCode => Object.hash(unit, offset, zoom, pdfY, lastUnit, progress);
+  int get hashCode =>
+      Object.hash(unit, offset, zoom, pdfY, pdfX, lastUnit, progress);
 
   @override
   bool operator ==(Object other) =>
@@ -985,6 +990,7 @@ class FlutterReadingState {
           offset == other.offset &&
           zoom == other.zoom &&
           pdfY == other.pdfY &&
+          pdfX == other.pdfX &&
           lastUnit == other.lastUnit &&
           progress == other.progress;
 }

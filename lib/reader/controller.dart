@@ -2016,6 +2016,7 @@ final class ReaderController implements Listenable {
           restorationError: restorationError,
           offset: unit == restoredUnit ? restoredOffset : null,
           pdfY: place == null ? restored?.pdfY : null,
+          pdfX: place == null ? restored?.pdfX : null,
           defaultPdfFit: defaultPdfFit,
           toolError: toolError,
           // A book opened at a note or search hit returns to where it was
@@ -2187,6 +2188,7 @@ final class ReaderController implements Listenable {
         unit: message.unit,
         readingOffset: message.offset,
         pdfY: message.pdfY,
+        pdfX: message.pdfX,
         bookmarks: message.bookmarks,
         layout: message.layout,
         relayoutPending: requestedLayout != message.layout,
@@ -5295,6 +5297,7 @@ final class ReaderController implements Listenable {
       readingOffset = _model.readingOffset;
     }
     double? pdfY = _model.pdfY;
+    double? pdfX = _model.pdfX;
     if (_pdfDocument != null && (changedPage || explicitLocation)) {
       final endpoint = message.surface?.endpoints
           .where((e) => e.rangeEnd.toInt() > (readingOffset ?? 0))
@@ -5302,12 +5305,14 @@ final class ReaderController implements Listenable {
       pdfY = readingOffset == null || endpoint == null
           ? 0
           : endpoint.rect.top / message.layout.scale;
+      pdfX = null;
     }
     _emit(
       _model.copyWith(
         unit: message.unit,
         readingOffset: readingOffset,
         pdfY: pdfY,
+        pdfX: pdfX,
         locationRequestRevision: _model.locationRequestRevision + 1,
         // The more panel's page input follows the reader's location, the way
         // the pinned reference syncs `page_input` on navigation (RD-10).
@@ -5371,6 +5376,7 @@ final class ReaderController implements Listenable {
           offset: offset == null ? null : BigInt.from(offset),
           zoom: message.layout.scale,
           pdfY: _model.pdfY,
+          pdfX: _model.pdfX,
           progress: _bookProgress(_model),
           lastUnit: lastUnit != null && lastUnit > unit
               ? BigInt.from(lastUnit)
@@ -7441,6 +7447,7 @@ final class ReaderController implements Listenable {
       pdfColumns: null,
       pdfColumnSelection: null,
       pdfY: null,
+      pdfX: null,
       pdfRightToLeft: false,
       readingPage: null,
       selectionSurface: null,

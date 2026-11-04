@@ -468,6 +468,10 @@ CREATE TABLE library_source_previews (
 ALTER TABLE reading_state ADD COLUMN pdf_y REAL
     CHECK (pdf_y IS NULL OR (pdf_y >= 0 AND pdf_y <= 1e300));
 '''),
+  Migration(15, 'PDF horizontal reading anchor', '''
+ALTER TABLE reading_state ADD COLUMN pdf_x REAL
+    CHECK (pdf_x IS NULL OR (pdf_x >= 0 AND pdf_x <= 1e300));
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

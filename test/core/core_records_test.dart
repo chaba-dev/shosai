@@ -1068,6 +1068,7 @@ void main() {
         offset: BigInt.from(7),
         zoom: 1.5,
         pdfY: 287.25,
+        pdfX: 436.5,
       ),
       unitCount: BigInt.from(4),
     );
@@ -1082,6 +1083,7 @@ void main() {
         offset: BigInt.from(7),
         zoom: 1.5,
         pdfY: 287.25,
+        pdfX: 436.5,
       ),
     );
 

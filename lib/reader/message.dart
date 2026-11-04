@@ -923,6 +923,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     this.restorationError,
     this.offset,
     this.pdfY,
+    this.pdfX,
     this.defaultPdfFit,
     this.toolError,
     this.returnPoints = const [],
@@ -942,6 +943,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final String? restorationError;
   final int? offset;
   final double? pdfY;
+  final double? pdfX;
   final ReaderRasterFit? defaultPdfFit;
   final String? toolError;
 

@@ -469,6 +469,7 @@ final class ReaderModel {
     this.pdfColumns,
     this.pdfColumnSelection,
     this.pdfY,
+    this.pdfX,
     this.pdfRightToLeft = false,
     this.readingPage,
     this.locationRequestRevision = 0,
@@ -570,6 +571,9 @@ final class ReaderModel {
 
   /// Saved height in the original PDF page, independent of the current fit.
   final double? pdfY;
+
+  /// Horizontal anchor in page points, disambiguating textless columns.
+  final double? pdfX;
 
   /// Whether the open PDF reads right to left (its viewer preferences say
   /// `/Direction /R2L`).
@@ -784,6 +788,7 @@ final class ReaderModel {
     Object? pdfColumns = _unchanged,
     Object? pdfColumnSelection = _unchanged,
     Object? pdfY = _unchanged,
+    Object? pdfX = _unchanged,
     bool? pdfRightToLeft,
     Object? readingPage = _unchanged,
     int? locationRequestRevision,
@@ -871,6 +876,7 @@ final class ReaderModel {
           ? this.pdfColumnSelection
           : pdfColumnSelection as PdfStripSelection?,
       pdfY: identical(pdfY, _unchanged) ? this.pdfY : pdfY as double?,
+      pdfX: identical(pdfX, _unchanged) ? this.pdfX : pdfX as double?,
       pdfRightToLeft: pdfRightToLeft ?? this.pdfRightToLeft,
       readingPage: identical(readingPage, _unchanged)
           ? this.readingPage

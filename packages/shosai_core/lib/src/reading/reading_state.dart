@@ -13,6 +13,7 @@ final class ReadingPosition {
     this.offset,
     this.zoom = 1,
     this.pdfY,
+    this.pdfX,
   });
 
   final int unit;
@@ -22,16 +23,20 @@ final class ReadingPosition {
   /// Height from the rotated PDF page's top, in original points, not pixels.
   final double? pdfY;
 
+  /// Horizontal page-space anchor, including when the visible piece has no text.
+  final double? pdfX;
+
   @override
   bool operator ==(Object other) =>
       other is ReadingPosition &&
       other.unit == unit &&
       other.offset == offset &&
       other.zoom == zoom &&
-      other.pdfY == pdfY;
+      other.pdfY == pdfY &&
+      other.pdfX == pdfX;
 
   @override
-  int get hashCode => Object.hash(unit, offset, zoom, pdfY);
+  int get hashCode => Object.hash(unit, offset, zoom, pdfY, pdfX);
 
   @override
   String toString() => 'ReadingPosition($unit, $offset, $zoom)';
@@ -102,6 +107,11 @@ void _validate(ReadingPosition position) {
       'The PDF height must be finite and nonnegative.',
     );
   }
+  if (position.pdfX case final x? when !x.isFinite || x < 0) {
+    throw const CoreException.invalidRequest(
+      'The PDF horizontal anchor must be finite and nonnegative.',
+    );
+  }
   if (position.unit < 0 || (position.offset ?? 0) < 0) {
     throw const CoreException.invalidRequest(
       'The reading position must not be negative.',
@@ -118,7 +128,7 @@ ReadingPosition? _load(Database db, int bookId) {
   final hash = bookContentHash(db, bookId);
   final row = db
       .select(
-        '''SELECT unit, location_offset, zoom, pdf_y FROM reading_state
+        '''SELECT unit, location_offset, zoom, pdf_y, pdf_x FROM reading_state
        WHERE content_hash = ?''',
         [hash],
       )
@@ -129,21 +139,30 @@ ReadingPosition? _load(Database db, int bookId) {
     offset: row.columnAt(1) as int?,
     zoom: row.columnAt(2) as double,
     pdfY: row.columnAt(3) as double?,
+    pdfX: row.columnAt(4) as double?,
   );
 }
 
 void _save(Database db, int bookId, ReadingPosition position, double progress) {
   final hash = bookContentHash(db, bookId);
   db.execute(
-    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom, pdf_y)
-       VALUES (?, ?, ?, ?, ?)
+    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom, pdf_y, pdf_x)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(content_hash) DO UPDATE SET
          unit = excluded.unit,
          location_offset = excluded.location_offset,
          zoom = excluded.zoom,
          pdf_y = excluded.pdf_y,
+         pdf_x = excluded.pdf_x,
          updated_at = excluded.updated_at''',
-    [hash, position.unit, position.offset, position.zoom, position.pdfY],
+    [
+      hash,
+      position.unit,
+      position.offset,
+      position.zoom,
+      position.pdfY,
+      position.pdfX,
+    ],
   );
   db.execute(
     '''UPDATE books SET progress = ?,

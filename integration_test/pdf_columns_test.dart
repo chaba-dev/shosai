@@ -213,6 +213,148 @@ void main() {
       .whereType<PagePainter>()
       .firstOrNull;
 
+  for (final reopen in [false, true]) {
+    testWidgets('a textless right-column figure keeps its place after '
+        '${reopen ? 'reopen' : 'a fit round-trip'}', (tester) async {
+      tester.view.physicalSize = const Size(880, 1100);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final directory = await Directory.systemTemp.createTemp('shosai-figure-');
+      final path = '${directory.path}/Figure.pdf';
+      await File('fixtures/pdf-columns/right-column-figure.pdf').copy(path);
+      var bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await closeApplicationCores();
+        await directory.delete(recursive: true);
+      });
+      final cancellation = bridge.createCancellation();
+      await bridge.importPaths(
+        pathKeys: [path],
+        managed: false,
+        cancellationId: cancellation,
+      );
+      final book = (await bridge.libraryPage(
+        limit: 10,
+        offset: 0,
+        cancellationId: cancellation,
+      )).books.single;
+      bridge.releaseCancellation(id: cancellation);
+      Future<void> open(FlutterPdfFit fit) async {
+        await tester.pumpWidget(
+          ShosaiShell(
+            home: RepaintBoundary(
+              key: captureKey,
+              child: ReaderScreen(
+                key: UniqueKey(),
+                bridge: bridge,
+                initialPath: path,
+                initialBookId: book.bookId,
+                initialSettings: FlutterReaderSettings(
+                  continuous: false,
+                  theme: 'light',
+                  epubFontSize: 18,
+                  epubLineSpacing: 1.6,
+                  pdfZoom: 0,
+                  pdfFit: fit,
+                  twoPages: false,
+                  zonesHintDismissed: true,
+                ),
+              ),
+            ),
+          ),
+        );
+        await until(
+          tester,
+          () =>
+              painting(tester) != null &&
+              (painting(tester)!.columns != null) ==
+                  (fit == FlutterPdfFit.columns),
+        );
+      }
+
+      Future<void> fit(String value) async {
+        final header = find.byKey(const ValueKey('reader-header-typography'));
+        if (header.hitTestable().evaluate().isEmpty) {
+          await tester.tapAt(
+            tester.getCenter(
+              find.byKey(const ValueKey('reader-page-tap-area')),
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 350));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(header);
+        await tester.pumpAndSettle();
+        final before = painting(tester);
+        await tester.tap(find.byKey(ValueKey('reader-typography-$value')));
+        await until(
+          tester,
+          () =>
+              painting(tester) != null &&
+              painting(tester) != before &&
+              (painting(tester)!.columns != null) == (value == 'columns'),
+        );
+        await tester.tapAt(const Offset(10, 100));
+        await tester.pumpAndSettle();
+      }
+
+      await open(FlutterPdfFit.fitPage);
+      final paint = painting(tester)!;
+      final box = tester.getRect(
+        find.byKey(const ValueKey('reader-selection-surface')),
+      );
+      final transform = SurfaceTransform.create(
+        paint.fit,
+        Size(paint.surface.width, paint.surface.height),
+        box.size,
+      );
+      final target =
+          box.topLeft +
+          transform
+              .toDestinationRect(
+                Rect.fromLTWH(
+                  paint.surface.width * 436 / 612,
+                  paint.surface.height * 350 / 792,
+                  0,
+                  0,
+                ),
+              )
+              .topLeft;
+      await tester.tapAt(target);
+      await tester.pump(const Duration(milliseconds: 70));
+      await tester.tapAt(target);
+      await until(tester, () => painting(tester)?.columns != null);
+      final first = painting(tester)!.columns!.pieces.first;
+      expect(first.source.left, 317);
+      expect(first.source.top, closeTo(350, 1));
+      expect(painting(tester)!.surface.endpoints, isEmpty);
+      await capture('figure-before-${reopen ? 'reopen' : 'fit'}');
+      if (reopen) {
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await closeApplicationCores();
+        bridge = await createApplicationBridge(
+          applicationSupportDirectory: () async => directory,
+        );
+        await open(FlutterPdfFit.columns);
+      } else {
+        await fit('fit-page');
+        await fit('columns');
+      }
+      final restored = painting(tester)!.columns!.pieces.first;
+      await capture('figure-after-${reopen ? 'reopen' : 'fit'}');
+      expect(restored.source.left, 317);
+      expect(restored.source.top, closeTo(first.source.top, .01));
+      expect(painting(tester)!.surface.endpoints, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets(
     'phone defaults, explicit choices and larger screens stay distinct',
     (tester) async {
