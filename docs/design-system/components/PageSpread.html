@@ -47,6 +47,12 @@ body { margin: 0; background: var(--canvas); }
     <figure><img src="images/columns-figure-ja.jpg" alt="Japanese reader folio and a mixed text/figure strip inside top and bottom safe insets"><figcaption>The controller fills the safe content box, not the area behind the cutout or home indicator. Figures and tables fit indivisibly. First-party fixture: a gray raster figure with an overlaid text label.</figcaption></figure>
     <figure><img src="images/columns-figure-pinched-ja.jpg" alt="A crisp enlarged fixture figure inside the Japanese reader"><figcaption>Pinch a figure or a fallback page for new PDF pixels, not a magnified strip bitmap. Pan in both axes; pinch back to the same screen.</figcaption></figure>
   </div>
+  <div class="cap">Columns · detail admission · native Linux at DPR 3</div>
+  <div class="sh-stage columns" aria-label="Columns high-density detail limits">
+    <figure><img src="images/columns-admission-fit.png" alt="Fit-width scan shows both complete columns of synthetic black raster marks"><figcaption>First-party scan control at fit width. Pinching back from detail restores pixel-identical strip content and screen history.</figcaption></figure>
+    <figure><img src="images/columns-admission-area.png" alt="Sharp enlarged scan marks after a capped five-times pinch and two-axis pan"><figcaption>A 5× request stops below 40 million pixels, including device density and outward crop rounding. Pan shows newly rendered PDF pixels, never an enlarged strip bitmap.</figcaption></figure>
+    <figure><img src="images/columns-admission-edge.png" alt="Tall scan detail after reaching the 16384-pixel edge limit and panning"><figcaption>Tall fallback detail stops at the 16,384px edge limit. Extremely tall regions that cannot admit enlargement retain their crisp strip rather than shrink, blur or fail.</figcaption></figure>
+  </div>
   <div class="cap">Two-page spread · EPUB · Paper · left to right</div>
   <div class="sh-stage">
     <div class="sh-spread" id="en">
