@@ -105,6 +105,7 @@ PdfStripScreen layoutPdfColumnScreen({
   required double height,
   double zoom = 1,
   double topInset = 0,
+  double? columnWidth,
 }) {
   final pieces = <PdfStripPiece>[];
   final separators = <PdfStripSeparator>[];
@@ -113,6 +114,7 @@ PdfStripScreen layoutPdfColumnScreen({
   int? needsPage;
   zoom = zoom.clamp(.5, 1);
   final contentWidth = width;
+  columnWidth ??= typicalPdfColumnWidth(pages.values.map((p) => p.columns));
   while (cursor.page < pageCount && top < height - .01) {
     final page = pages[cursor.page];
     if (page == null) {
@@ -150,18 +152,10 @@ PdfStripScreen layoutPdfColumnScreen({
       PdfRegionKind.column => width * zoom,
       _ => width * math.min(1, zoom),
     };
-    // A short caption/paragraph is still part of a column. Its tighter ink
-    // crop must not enlarge its font relative to the surrounding body text.
+    // Body columns share the sampled document scale, not their ink crop's
+    // width. An inset abstract or overflowing code line must not resize text.
     final fittedWidth = region.kind == PdfRegionKind.column
-        ? regions
-              .where(
-                (r) =>
-                    r.kind == PdfRegionKind.column &&
-                    r.bounds.left < bounds.right &&
-                    r.bounds.right > bounds.left,
-              )
-              .map((r) => r.bounds.width)
-              .reduce(math.max)
+        ? columnWidth ?? bounds.width
         : bounds.width;
     var scale = fitWidth / fittedWidth;
     if (region.kind == PdfRegionKind.figure) {
@@ -241,10 +235,9 @@ PdfStripScreen layoutPdfColumnScreen({
         page: cursor.page,
         region: cursor.region,
         source: PdfRect(bounds.left, y, bounds.right, end),
-        left:
-            ((region.kind == PdfRegionKind.column ? contentWidth : width) -
-                bounds.width * scale) /
-            2,
+        // Rare overflow clips at the trailing edge of the strip raster. Keep
+        // line starts visible and the full source geometry for anchors/marks.
+        left: math.max(0, (width - bounds.width * scale) / 2),
         top: top,
         scale: scale,
         zoomable:

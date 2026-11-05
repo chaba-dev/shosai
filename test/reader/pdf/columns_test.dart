@@ -143,6 +143,33 @@ void main() {
     ]);
   });
 
+  test('only rotated side-margin furniture is omitted from columns', () {
+    for (final (left, height, vertical, omitted) in [
+      (18.0, 550.0, true, true),
+      (580.0, 550.0, true, true),
+      (18.0, 550.0, false, false), // Tall is not evidence of rotation.
+      (70.0, 550.0, true, false), // Interior vertical text survives.
+      (18.0, 50.0, true, false), // Short diagram labels survive.
+    ]) {
+      final stamp = PdfTextLine(
+        bounds: PdfRect(left, 100, left + 12, 100 + height),
+        text: 'Side text',
+        start: 100,
+        end: 109,
+        isVertical: vertical,
+      );
+      final result = analyzePdfColumns([
+        page([...columns(120), stamp]),
+      ]).single;
+      expect(result.columnCount, 2);
+      expect(result.regions.expand((r) => r.lines).contains(stamp), !omitted);
+      if (omitted) {
+        expect(result.regions.first.bounds.left, 53);
+        expect(result.regions.first.bounds.right, 294);
+      }
+    }
+  });
+
   test(
     'recurring margin heads and changing folios drop, body repeats stay',
     () {

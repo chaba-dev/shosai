@@ -162,6 +162,7 @@ List<PdfTextLine> buildPdfTextLines(
             text: text,
             start: start,
             end: end,
+            isVertical: vertical,
           ),
         );
       }

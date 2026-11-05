@@ -62,6 +62,26 @@ void main() {
       (100, 100, 120),
       (0, 130, 10),
     ]);
+    expect(lines.every((l) => !l.isVertical), isTrue);
+    final rotated = buildPdfTextLines(
+      [
+        for (var i = 0; i < 4; i++)
+          PdfCharacterSample(
+            index: i,
+            codePoint: 65 + i,
+            generated: false,
+            visible: true,
+            deviceBounds: PdfDeviceBounds(18, 100 + i * 10, 30, 110 + i * 10),
+            baseline: const PdfBaselineProbe(0, -1024),
+          ),
+      ],
+      scale: 1,
+      width: 200,
+      height: 200,
+    ).single;
+    expect(rotated.isVertical, isTrue);
+    expect(rotated.text, 'ABCD');
+    expect((rotated.start, rotated.end), (0, 4));
   });
 
   test(
