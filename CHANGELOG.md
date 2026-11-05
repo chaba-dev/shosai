@@ -130,6 +130,7 @@ All notable changes to this project will be documented in this file.
 - *(pdf)* Analyze columns into ordered page regions (#289)
 - *(reader)* Add PDF Columns reading mode (#290)
 - *(reader)* Preserve place and interactions in PDF Columns (#291)
+- *(reader)* Honor continuous reading in PDF Columns (#301)
 
 ### 🐛 Bug Fixes
 
@@ -197,6 +198,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Blend PDF Columns into one themed sheet (#295)
 - *(reader)* Honor saved PDF fit choices (#294)
 - *(reader)* Keep Aa PDF fit choices per paper (#302)
+- *(reader)* Enlarge Columns figures and respect turn-zone taps (#299)
 
 ### 🚜 Refactor
 
