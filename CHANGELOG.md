@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-04
+## [0.1.0] - 2026-11-05
 
 ### 🚀 Features
 
@@ -127,6 +127,9 @@ All notable changes to this project will be documented in this file.
 - *(library)* One-row phone header, Add books by platform, no folders on mobile (#279)
 - *(library)* Show the covers of unopened EPUBs on the shelf (#286)
 - *(library)* Show the first page of unopened PDFs on the shelf (#287)
+- *(pdf)* Analyze columns into ordered page regions (#289)
+- *(reader)* Add PDF Columns reading mode (#290)
+- *(reader)* Preserve place and interactions in PDF Columns (#291)
 
 ### 🐛 Bug Fixes
 
