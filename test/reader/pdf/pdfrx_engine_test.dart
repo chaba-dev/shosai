@@ -243,7 +243,8 @@ void main() {
       final bodyWidth = typicalPdfColumnWidth(
         analyzePdfColumns(pages.take(3).toList()),
       )!;
-      expect(bodyWidth, closeTo(241, 1));
+      // Justified body ink is about 239pt; each side keeps a 3pt raster guard.
+      expect(bodyWidth, closeTo(239 + 2 * 3, 1));
       final metadata = {
         for (var p = 0; p < pages.length; p++)
           p: PdfStripPage(pages[p], results[p]),
