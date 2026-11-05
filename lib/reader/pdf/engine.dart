@@ -16,6 +16,8 @@ import 'dart:typed_data';
 
 import 'package:shosai_flutter/core/bridge.dart';
 
+import 'page_geometry.dart';
+
 /// Maximum PDF input size the engine opens.
 const int pdfMaxInputBytes = 512 * 1024 * 1024;
 
@@ -90,6 +92,11 @@ abstract interface class PdfEngineDocument {
 
   /// Extracted text of [page], one scalar per PDFium character.
   Future<String> pageText(int page);
+
+  /// Physical lines, images and other painted-object coverage in rotated
+  /// visible page points. Unknown coverage is explicit for safe fallback.
+  /// Independent of render scale; callers own the returned immutable values.
+  Future<PdfPageGeometry> pageGeometry(int page);
 
   /// Searches the whole document for [query], case-insensitively.
   Future<List<FlutterSearchMatch>> search(String query);
