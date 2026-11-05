@@ -73,6 +73,7 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
                             screen,
                             colors.foreground,
                             _pan,
+                            model.layout.width - 2 * pdfStripSideInset,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -195,10 +196,16 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
 }
 
 class _ColumnsOutlinePainter extends CustomPainter {
-  const _ColumnsOutlinePainter(this.screen, this.ink, this.pan);
+  const _ColumnsOutlinePainter(
+    this.screen,
+    this.ink,
+    this.pan,
+    this.viewportWidth,
+  );
   final PdfStripScreen screen;
   final Color ink;
   final Offset pan;
+  final double viewportWidth;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -219,7 +226,7 @@ class _ColumnsOutlinePainter extends CustomPainter {
         piece.top,
         piece.width,
         piece.height,
-      ).intersect(pan & Size(strip.width, strip.height));
+      ).intersect(pan & Size(viewportWidth, strip.height));
       if (visible.isEmpty) continue;
       final first = piece.toPage(visible.left, visible.top);
       final last = piece.toPage(visible.right, visible.bottom);
@@ -240,5 +247,6 @@ class _ColumnsOutlinePainter extends CustomPainter {
   bool shouldRepaint(_ColumnsOutlinePainter oldDelegate) =>
       screen != oldDelegate.screen ||
       ink != oldDelegate.ink ||
-      pan != oldDelegate.pan;
+      pan != oldDelegate.pan ||
+      viewportWidth != oldDelegate.viewportWidth;
 }

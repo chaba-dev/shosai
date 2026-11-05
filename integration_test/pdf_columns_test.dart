@@ -127,9 +127,11 @@ void main() {
       );
       await until(tester, () => raster.evaluate().isNotEmpty);
       for (var step = 0; step < 4; step++) {
-        final rect = tester.getRect(raster);
-        expect(rect.left, greaterThanOrEqualTo(16));
-        expect(430 - rect.right, greaterThanOrEqualTo(16));
+        final rect = tester.getRect(
+          find.ancestor(of: raster, matching: find.byType(ClipRect)).first,
+        );
+        expect(rect.left, 16);
+        expect(430 - rect.right, 16);
         // Return to touch presentation after the keyboard page step.
         final touch = await tester.startGesture(rect.center);
         await touch.cancel();
@@ -356,6 +358,7 @@ void main() {
         final regions = analyzePdfColumns(geometry);
         await pdf.dispose();
         double? bodyScale;
+        var checkedOverflow = false;
         final bodyPages = <int>{};
         for (var turn = 0; turn < paper.turns; turn++) {
           final screen = painting(tester)!.columns!;
@@ -377,6 +380,83 @@ void main() {
           expect(tester.getTopLeft(folio).dy, greaterThanOrEqualTo(59));
           expect(tester.getBottomRight(raster).dy, lessThanOrEqualTo(866));
           await capture('${paper.name}-body-$turn');
+          if (paper.name == 'thrift' && !checkedOverflow) {
+            const viewportWidth = 440 - 2 * 16.0;
+            final overflow = screen.pieces
+                .where(
+                  (
+                    piece,
+                  ) => regions[piece.page].regions[piece.region].lines.any(
+                    (line) =>
+                        line.bounds.top >= piece.source.top &&
+                        line.bounds.bottom <= piece.source.bottom &&
+                        piece.fromPage(line.bounds.right, line.bounds.top).x >
+                            viewportWidth + 20,
+                  ),
+                )
+                .firstOrNull;
+            if (overflow != null) {
+              checkedOverflow = true;
+              expect(
+                screen.width,
+                greaterThanOrEqualTo(overflow.left + overflow.width),
+              );
+              final image = tester.widget<RawImage>(raster).image!;
+              final pixels = (await image.toByteData())!.buffer.asUint8List();
+              final density = image.width / screen.width;
+              var trailingInk = 0;
+              for (
+                var y = (overflow.top * density).ceil();
+                y < ((overflow.top + overflow.height) * density).floor();
+                y++
+              ) {
+                for (
+                  var x = (viewportWidth * density).ceil();
+                  x < image.width;
+                  x++
+                ) {
+                  final offset = (y * image.width + x) * 4;
+                  if (pixels[offset] < 200) trailingInk++;
+                }
+              }
+              expect(
+                trailingInk,
+                greaterThan(20),
+                reason:
+                    'overflow ink must exist in the composed raster, not just source geometry',
+              );
+              await capture('thrift-overflow-leading');
+              final origin = tester.getTopLeft(raster);
+              await tester.timedDragFrom(
+                Offset(350, origin.dy + 180),
+                const Offset(-200, 0),
+                const Duration(milliseconds: 600),
+              );
+              await tester.pumpAndSettle();
+              expect(
+                painting(tester)!.columns,
+                same(screen),
+                reason: 'a pan must not also turn the page',
+              );
+              final panned = tester.getRect(raster);
+              expect(panned.left, lessThan(origin.dx - 20));
+              expect(
+                panned.right,
+                closeTo(440 - 16, 1),
+                reason: 'the entire trailing edge can be revealed',
+              );
+              await capture('thrift-overflow-trailing');
+              // Returning to the leading edge also pans without turning.
+              await tester.timedDragFrom(
+                Offset(150, origin.dy + 180),
+                const Offset(200, 0),
+                const Duration(milliseconds: 600),
+              );
+              await tester.pumpAndSettle();
+              expect(painting(tester)!.columns, same(screen));
+              expect(tester.getTopLeft(raster).dx, closeTo(origin.dx, 1));
+            }
+          }
           if (turn + 1 == paper.turns) break;
           final before = tester.widget<RawImage>(raster).image;
           await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
@@ -385,6 +465,7 @@ void main() {
             () => tester.widget<RawImage>(raster).image != before,
           );
         }
+        if (paper.name == 'thrift') expect(checkedOverflow, isTrue);
         expect(bodyPages, containsAll([paper.page, paper.page + 1]));
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
@@ -1395,7 +1476,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-in')));
     await until(tester, () => image() != before);
     expect(find.text('100% · max'), findsOneWidget);
-    expect(tester.getSize(raster).width, rect.width - 32);
+    final viewport = tester.getRect(
+      find.ancestor(of: raster, matching: find.byType(ClipRect)).first,
+    );
+    expect(viewport.width, rect.width - 32);
+    expect(tester.getSize(raster).width, greaterThanOrEqualTo(viewport.width));
     await tester.tapAt(const Offset(10, 100));
     await tester.pumpAndSettle();
     before = image();
@@ -1416,7 +1501,15 @@ void main() {
     await until(tester, () => image() != before);
     await capture('columns-return');
     before = image();
+    final overflows = tester.getSize(raster).width > viewport.width;
     await tester.fling(area, const Offset(-180, 0), 1000);
+    await tester.pumpAndSettle();
+    if (overflows) {
+      expect(image(), same(before), reason: 'first reveal the trailing crop');
+      expect(tester.getRect(raster).right, closeTo(viewport.right, 1));
+      // At the trailing edge, a fresh outward swipe advances the strip.
+      await tester.fling(area, const Offset(-180, 0), 1000);
+    }
     await until(tester, () => image() != before);
     expect(place(), 'page 1 of 8');
     // Middle reveals Display without advancing.

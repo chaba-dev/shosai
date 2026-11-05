@@ -415,13 +415,21 @@ void main() {
         height: 130,
       );
       expect(screen.pieces, isNotEmpty);
-      expect(screen.width, 204);
+      expect(screen.width, greaterThanOrEqualTo(204));
+      for (final piece in screen.pieces) {
+        expect(piece.left, greaterThanOrEqualTo(0));
+        expect(piece.left + piece.width, lessThanOrEqualTo(screen.width));
+      }
       pieces.addAll(screen.pieces);
       cursor = screen.next;
     }
     expect(pieces.map((p) => p.scale).toSet(), {2});
     final overflow = pieces.firstWhere((p) => p.page == 0 && p.region == 1);
-    expect(overflow.left, 0, reason: 'clip the trailing edge, not line starts');
+    expect(
+      overflow.left,
+      0,
+      reason: 'start at the leading edge before panning',
+    );
     expect(overflow.width, 264, reason: 'retain source ink without shrinking');
     for (final entry in pages.entries) {
       for (var r = 0; r < entry.value.columns.regions.length; r++) {

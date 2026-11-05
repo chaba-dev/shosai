@@ -82,10 +82,11 @@ If those pages contain only front matter or fallbacks, the first time body
 columns are needed the reader extends sampling in document order to the first
 analyzable body page. That width is retained for the open document; direct opens
 and reopens find the same page. Pure fallback documents do not trigger a scan.
-Rare code-line overflow clips at the strip's trailing edge rather than shrinking
-the column. Source rectangles and PDFium offsets remain intact for marks and
-saved places. Original embedded font differences, such as BERT's smaller
-abstract type, are not restyled.
+Rare code-line overflow retains its full crop and raster at the document scale.
+Horizontal panning reveals the trailing ink without also turning the screen;
+a fresh outward swipe at the edge can advance. Source rectangles and PDFium
+offsets remain intact for marks and saved places. Original embedded font
+differences, such as BERT's smaller abstract type, are not restyled.
 
 The facts include `vertical: true` only for lines with a sampled vertical
 baseline. This is not inferred from a tall box. Interior vertical text and

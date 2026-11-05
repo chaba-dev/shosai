@@ -116,7 +116,7 @@ PdfStripScreen layoutPdfColumnScreen({
   var top = topInset;
   int? needsPage;
   zoom = zoom.clamp(.5, 1);
-  final contentWidth = width;
+  var contentWidth = width;
   columnWidth ??= typicalPdfColumnWidth(pages.values.map((p) => p.columns));
   while (cursor.page < pageCount && top < height - .01) {
     final page = pages[cursor.page];
@@ -252,8 +252,8 @@ PdfStripScreen layoutPdfColumnScreen({
         page: cursor.page,
         region: cursor.region,
         source: PdfRect(bounds.left, y, bounds.right, end),
-        // Rare overflow clips at the trailing edge of the strip raster. Keep
-        // line starts visible and the full source geometry for anchors/marks.
+        // Start wide crops at their leading edge. The raster and scroll extent
+        // retain all trailing ink at the same document scale.
         left: math.max(0, (width - bounds.width * scale) / 2),
         top: top,
         scale: scale,
@@ -262,6 +262,7 @@ PdfStripScreen layoutPdfColumnScreen({
             region.kind == PdfRegionKind.figure,
       ),
     );
+    contentWidth = math.max(contentWidth, pieces.last.left + pieces.last.width);
     top += (end - y) * scale;
     cursor = end < bounds.bottom
         ? PdfStripPosition(cursor.page, region: cursor.region, y: end)
