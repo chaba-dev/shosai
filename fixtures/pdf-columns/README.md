@@ -36,7 +36,7 @@ qpdf --deterministic-id original.pdf --pages . 1-5 -- arxiv-first-five.pdf
 Thrift's first page is Letter (612 × 792pt): body columns approximately
 x54–293 and x317–556. The title's ink is around y24–104; PDFium's loose glyph
 boxes start at y20.458 and end at y103.322. Physical lines use tight painted
-glyph bounds, while selection retains loose boxes; region crops add 1pt of
+glyph bounds, while selection retains loose boxes; region crops add 3pt of
 raster padding, limited by neighboring crops' whitespace midpoints. This
 exposes real inter-row gaps without cutting off antialiasing at crop edges.
 

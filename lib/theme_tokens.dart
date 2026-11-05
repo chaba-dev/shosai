@@ -270,6 +270,10 @@ abstract final class ShosaiTokens {
   /// the Bookshelf look, D1 paper)
   static const colorPagePaperLink = Color(0xFF174EA6);
 
+  /// `color.pagePdfWhite` — Design system (docs/design-system/tokens.json,
+  /// the Bookshelf look, D1 paper)
+  static const colorPagePdfWhite = Color(0xFFFFFFFF);
+
   /// `color.pageSepia` — Design system (docs/design-system/tokens.json, the
   /// Bookshelf look, D1 paper)
   static const colorPageSepia = Color(0xFFF5EBD6);

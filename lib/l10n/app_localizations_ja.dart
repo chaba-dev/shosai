@@ -1013,6 +1013,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsPdfZoom => 'PDF のズーム';
 
   @override
+  String get settingsPdfAutomatic => '自動';
+
+  @override
   String settingsCustomZoom(int percentage) {
     return '$percentage%（カスタム）';
   }

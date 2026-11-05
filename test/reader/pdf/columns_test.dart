@@ -22,6 +22,37 @@ PdfPageGeometry page(
 }) => PdfPageGeometry(width: 612, height: 792, lines: lines, images: images);
 
 void main() {
+  test(
+    'crop padding keeps glyph edges, clips to page and splits close gaps',
+    () {
+      final body = columns(120);
+      final result = analyzePdfColumns([page(body)]).single;
+      expect(result.columnCount, 2);
+      final left = result.regions.first.bounds;
+      expect(
+        [left.left, left.top, left.right, left.bottom],
+        [51, 117, 296, 169],
+      );
+      expect(result.regions.first.lines.first.bounds.left, 54);
+
+      final edge = analyzePdfColumns([
+        page([line('Edge', 1, 1, 610)]),
+      ]).single.regions.single.bounds;
+      expect([edge.left, edge.top, edge.right, edge.bottom], [0, 0, 612, 14]);
+
+      final close = analyzePdfColumns([
+        page([...body, line('Heading', 100, 170, 400), ...columns(184)]),
+      ]).single;
+      expect(close.columnCount, 2);
+      for (final region in close.regions) {
+        for (final other in close.regions) {
+          if (identical(region, other)) continue;
+          expect(region.bounds.overlaps(other.bounds), isFalse);
+        }
+      }
+    },
+  );
+
   test('bands top-to-bottom, columns between bands, figures own regions', () {
     final input = page(
       [
@@ -219,7 +250,7 @@ void main() {
         ],
       ]),
     ];
-    final sizes = [(612, 792), (504, 144), (504, 48), (504, 248)];
+    final sizes = [(612, 792), (508, 148), (508, 52), (508, 252)];
     for (var p = 0; p < inputs.length; p++) {
       final input = inputs[p];
       final result = analyzePdfColumns([input]).single;

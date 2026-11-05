@@ -39,8 +39,8 @@ can break screens between lines and map selection through an offset and scale.
 Figure/table regions are **indivisible** in this stack; their physical lines
 are selection geometry, not safe-break promises. PR2 fits them to a screen and
 provides crisp detail pinch for figures and fallback pages. Region bounds add
-1pt raster padding, limited at neighboring whitespace midpoints, separately
-from the tight line bounds used for screen cuts.
+3pt raster padding, clipped to the page and limited at neighboring whitespace
+midpoints, separately from the tight line bounds used for screen cuts.
 
 Detection is conservative: gutters need three lines per side, a minimum
 12pt/1.2-line-height gap, overlapping vertical extent, and substantial column
@@ -138,9 +138,13 @@ document remains alive until its outstanding render/decode effects drain.
 `ReaderModel.pdfColumns` exposes the current immutable screen for PR3.
 `PdfStripPiece.toPage` / `fromPage` map between strip-content logical pixels and
 rotated original-page points. The view adds `pdfStripHeaderHeight` (32 pt) and
-`pdfStripSideInset` (14 pt) outside that space, all within stable device safe
-insets. Both axes' scroll offsets in detail mode must also be accounted for by
-interaction adapters. `PdfStripPiece.zoomable` identifies figure/page pieces;
+`pdfStripSideInset` (16 pt) outside that space, all within stable device safe
+insets. The side inset is text padding inside one continuous sheet, not a
+gutter. Paper leaves the PDF pixels unchanged and uses a white sheet through
+the home area; Sepia and Night use the same ground as filtered PDF white.
+Gaps between crops and around column rules share that sheet; page bands may
+remain tinted. Both axes' scroll offsets in detail mode must also be accounted
+for by interaction adapters. `PdfStripPiece.zoomable` identifies figure/page pieces;
 `PdfStripScreen.detailZoom` and `strip` preserve the original cursor while a
 pinch renders the whole safe region. Pinching back to fit returns to that
 screen without changing Size or navigation history. Detail scale is bounded

@@ -137,20 +137,42 @@ class _SettingsPage extends StatelessWidget {
                       ),
                       _SettingField(
                         label: l10n.settingsPdfZoom,
-                        child: ShadSelect<double>(
-                          initialValue: value.pdfZoom,
+                        child: ShadSelect<Object>(
+                          initialValue:
+                              value.pdfFit ??
+                              switch (value.pdfZoom) {
+                                -1 => FlutterPdfFit.fitWidth,
+                                final zoom => zoom,
+                              },
                           options: [
-                            ShadOption(
-                              value: 0,
+                            ShadOption<Object>(
+                              value: 0.0,
+                              child: Text(l10n.settingsPdfAutomatic),
+                            ),
+                            ShadOption<Object>(
+                              value: FlutterPdfFit.columns,
+                              child: Text(l10n.readerColumns),
+                            ),
+                            ShadOption<Object>(
+                              value: FlutterPdfFit.fitPage,
                               child: Text(l10n.readerFitPage),
                             ),
-                            ShadOption(
-                              value: -1,
+                            ShadOption<Object>(
+                              value: FlutterPdfFit.fitWidth,
                               child: Text(l10n.readerFitWidth),
                             ),
-                            const ShadOption(value: 1, child: Text('100%')),
-                            const ShadOption(value: 1.5, child: Text('150%')),
-                            const ShadOption(value: 2, child: Text('200%')),
+                            const ShadOption<Object>(
+                              value: 1.0,
+                              child: Text('100%'),
+                            ),
+                            const ShadOption<Object>(
+                              value: 1.5,
+                              child: Text('150%'),
+                            ),
+                            const ShadOption<Object>(
+                              value: 2.0,
+                              child: Text('200%'),
+                            ),
                             if (!const [
                               0.0,
                               -1.0,
@@ -158,7 +180,7 @@ class _SettingsPage extends StatelessWidget {
                               1.5,
                               2.0,
                             ].contains(value.pdfZoom))
-                              ShadOption(
+                              ShadOption<Object>(
                                 value: value.pdfZoom,
                                 child: Text(
                                   l10n.settingsCustomZoom(
@@ -170,8 +192,12 @@ class _SettingsPage extends StatelessWidget {
                           selectedOptionBuilder: (context, pdfZoom) =>
                               Text(_pdfZoomLabel(pdfZoom, l10n)),
                           onChanged: (pdfZoom) {
-                            if (pdfZoom != null) {
-                              onChanged(value.copyWith(pdfZoom: pdfZoom));
+                            if (pdfZoom is FlutterPdfFit) {
+                              onChanged(value.copyWith(pdfFit: pdfZoom));
+                            } else if (pdfZoom is double) {
+                              onChanged(
+                                value.copyWith(pdfFit: null, pdfZoom: pdfZoom),
+                              );
                             }
                           },
                         ),
@@ -188,14 +214,16 @@ class _SettingsPage extends StatelessWidget {
   }
 }
 
-String _pdfZoomLabel(double pdfZoom, AppLocalizations l10n) =>
+String _pdfZoomLabel(Object pdfZoom, AppLocalizations l10n) =>
     switch (pdfZoom) {
-      0 => l10n.readerFitPage,
-      -1 => l10n.readerFitWidth,
+      0 => l10n.settingsPdfAutomatic,
+      FlutterPdfFit.columns => l10n.readerColumns,
+      FlutterPdfFit.fitPage => l10n.readerFitPage,
+      FlutterPdfFit.fitWidth => l10n.readerFitWidth,
       1 => '100%',
       1.5 => '150%',
       2 => '200%',
-      _ => l10n.settingsCustomZoom((pdfZoom * 100).round()),
+      _ => l10n.settingsCustomZoom(((pdfZoom as double) * 100).round()),
     };
 
 class _SettingField extends StatelessWidget {

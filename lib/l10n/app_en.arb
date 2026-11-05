@@ -1129,6 +1129,8 @@
   "settingsEpubTextSize": "EPUB text size",
   "settingsEpubLineSpacing": "EPUB line spacing",
   "settingsPdfZoom": "PDF zoom",
+  "settingsPdfAutomatic": "Automatic",
+  "@settingsPdfAutomatic": {"description": "PDF fit with no explicit choice: phones detect columns, while larger screens keep page fit."},
   "settingsCustomZoom": "{percentage}% (custom)",
   "@settingsCustomZoom": {"placeholders": {"percentage": {"type": "int"}}},
   "libraryDeleteManagedTitle": "Delete managed copy?",

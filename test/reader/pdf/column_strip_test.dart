@@ -3,12 +3,13 @@ import 'package:shosai_flutter/reader/pdf/column_strip.dart';
 import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 
-PdfTextLine line(double top, double bottom) => PdfTextLine(
-  bounds: PdfRect(20, top, 120, bottom),
-  text: 'Original text',
-  start: 0,
-  end: 13,
-);
+PdfTextLine line(double top, double bottom, {String text = 'Original text'}) =>
+    PdfTextLine(
+      bounds: PdfRect(20, top, 120, bottom),
+      text: text,
+      start: 0,
+      end: text.length,
+    );
 
 PdfStripPage page(List<PdfReadingRegion> regions, {int columns = 2}) =>
     PdfStripPage(
@@ -67,6 +68,48 @@ void main() {
       final mapped = piece.fromPage(73, 32);
       final restored = piece.toPage(mapped.x, mapped.y);
       expect(restored, (x: 73.0, y: 32.0));
+
+      final carriedLines = [
+        line(0, 8),
+        line(10, 40),
+        line(20, 22),
+        line(30, 35),
+        line(40, 50),
+        line(51, 59),
+        line(61, 69),
+      ];
+      final carriedPages = {
+        0: page([
+          PdfReadingRegion(
+            kind: PdfRegionKind.column,
+            bounds: const PdfRect(20, 0, 120, 69),
+            lines: carriedLines,
+          ),
+        ]),
+      };
+      final crops = <PdfRect>[];
+      var cursor = const PdfStripPosition(0);
+      for (var screen = 0; screen < 2; screen++) {
+        final layout = layoutPdfColumnScreen(
+          pages: carriedPages,
+          pageCount: 1,
+          start: cursor,
+          width: 100,
+          height: 50.5,
+        );
+        final crop = layout.pieces.single.source;
+        expect(crop.top, crops.isEmpty ? 0 : crops.last.bottom);
+        crops.add(crop);
+        cursor = layout.next;
+      }
+      expect(cursor.page, 1);
+      for (final physicalLine in carriedLines) {
+        expect(
+          crops.where((crop) => crop.contains(physicalLine.bounds)),
+          hasLength(1),
+          reason: 'Repeated carries must keep each overlapping line whole once',
+        );
+      }
     },
   );
 
@@ -146,7 +189,12 @@ void main() {
   test(
     'a paragraph first row carries forward but ordinary rows fill the screen',
     () {
-      final rows = [line(0, 8), line(10, 18), line(30, 38), line(40, 48)];
+      final rows = [
+        line(0, 8),
+        line(10, 18, text: '2.4 Measurements continue in the same paragraph'),
+        line(30, 38),
+        line(40, 48),
+      ];
       PdfStripScreen screen(double height) => layoutPdfColumnScreen(
         pages: {
           0: page([
@@ -163,7 +211,11 @@ void main() {
         height: height,
       );
       expect(screen(39).pieces.single.source.bottom, 24);
-      expect(screen(19).pieces.single.source.bottom, 18.5);
+      expect(
+        screen(19).pieces.single.source.bottom,
+        18.5,
+        reason: 'Numbering without a block gap must not carry an ordinary row',
+      );
       expect(screen(48).next.page, 1);
       final heading = layoutPdfColumnScreen(
         pages: {
@@ -216,6 +268,31 @@ void main() {
         reason: 'A new block cannot leave just its first row in a tail',
       );
       expect(newBlock.next.region, 1);
+      final headingBlock = layoutPdfColumnScreen(
+        pages: {
+          0: page([
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(20, 0, 120, 30),
+            ),
+            PdfReadingRegion(
+              kind: PdfRegionKind.column,
+              bounds: const PdfRect(20, 45, 120, 89),
+              lines: [line(45, 53), line(61, 69), line(71, 79), line(81, 89)],
+            ),
+          ]),
+        },
+        pageCount: 1,
+        start: const PdfStripPosition(0),
+        width: 100,
+        height: 67,
+      );
+      expect(
+        headingBlock.pieces.length,
+        1,
+        reason: 'Carrying the first body row must also carry its heading',
+      );
+      expect(headingBlock.next.region, 1);
     },
   );
 

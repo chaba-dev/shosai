@@ -1866,6 +1866,12 @@ abstract class AppLocalizations {
   /// **'PDF zoom'**
   String get settingsPdfZoom;
 
+  /// PDF fit with no explicit choice: phones detect columns, while larger screens keep page fit.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic'**
+  String get settingsPdfAutomatic;
+
   /// No description provided for @settingsCustomZoom.
   ///
   /// In en, this message translates to:
