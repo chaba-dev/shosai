@@ -19,10 +19,16 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
   Offset _pan = Offset.zero;
 
   @override
+  void initState() {
+    super.initState();
+    _pan = Offset(0, widget.model.pdfColumns?.viewportTop ?? 0);
+  }
+
+  @override
   void didUpdateWidget(_ReaderColumns oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.model.pdfColumns != widget.model.pdfColumns) {
-      _pan = Offset.zero;
+      _pan = Offset(0, widget.model.pdfColumns?.viewportTop ?? 0);
     }
   }
 
@@ -36,8 +42,22 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
       return const Center(child: CircularProgressIndicator());
     }
     final l10n = AppLocalizations.of(context);
-    final first = screen.topPage + 1;
-    final last = screen.pieces.last.page + 1;
+    final viewportHeight = screen.viewportHeight ?? screen.height;
+    final visiblePages = screen.continuous
+        ? <int>{
+            for (final piece in screen.pieces)
+              if (piece.top + piece.height > _pan.dy &&
+                  piece.top < _pan.dy + viewportHeight)
+                piece.page,
+            for (final separator in screen.separators)
+              if (separator.page != null &&
+                  separator.top >= _pan.dy &&
+                  separator.top + 28 <= _pan.dy + viewportHeight)
+                separator.page!,
+          }
+        : screen.pieces.map((p) => p.page).toSet();
+    final first = visiblePages.reduce(math.min) + 1;
+    final last = visiblePages.reduce(math.max) + 1;
     final total = model.document!.logicalUnitCount.toInt();
     final label = first == last
         ? l10n.readerQuietPageOf(first, total)
@@ -132,7 +152,9 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
                   child: _ReaderPageGestures(
                     // Each new screen starts at its fitted band/column edge,
                     // not at a horizontal pan inherited from the last column.
-                    key: ValueKey(screen),
+                    key: screen.continuous
+                        ? ValueKey('columns-continuous-${model.generation}')
+                        : ValueKey(screen),
                     model: model,
                     dispatch: widget.dispatch,
                     fittedZoom: null,
@@ -241,23 +263,32 @@ class _ColumnsOutlinePainter extends CustomPainter {
     );
     canvas.save();
     canvas.clipRect(page);
-    for (final piece in screen.pieces.where((p) => p.page == screen.topPage)) {
+    final visiblePage = screen.continuous
+        ? screen.visiblePage(pan.dy, screen.viewportHeight!)
+        : screen.topPage;
+    final pageSize =
+        screen.pageSizes[visiblePage] ??
+        (width: screen.pageWidth, height: screen.pageHeight);
+    for (final piece in screen.pieces.where((p) => p.page == visiblePage)) {
       final strip = screen.strip ?? screen;
-      final visible = Rect.fromLTWH(
-        piece.left,
-        piece.top,
-        piece.width,
-        piece.height,
-      ).intersect(pan & Size(strip.width, strip.height));
+      final visible =
+          Rect.fromLTWH(
+            piece.left,
+            piece.top,
+            piece.width,
+            piece.height,
+          ).intersect(
+            pan & Size(strip.width, strip.viewportHeight ?? strip.height),
+          );
       if (visible.isEmpty) continue;
       final first = piece.toPage(visible.left, visible.top);
       final last = piece.toPage(visible.right, visible.bottom);
       canvas.drawRect(
         Rect.fromLTRB(
-          page.left + first.x / screen.pageWidth * page.width,
-          page.top + first.y / screen.pageHeight * page.height,
-          page.left + last.x / screen.pageWidth * page.width,
-          page.top + last.y / screen.pageHeight * page.height,
+          page.left + first.x / pageSize.width * page.width,
+          page.top + first.y / pageSize.height * page.height,
+          page.left + last.x / pageSize.width * page.width,
+          page.top + last.y / pageSize.height * page.height,
         ),
         Paint()..color = ink.withValues(alpha: .45),
       );

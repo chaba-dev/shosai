@@ -1125,7 +1125,7 @@
   "readerZonesLeftward": "This book turns leftward.\nTap the sides to turn, the middle for controls. You can also swipe. Tap anywhere to begin.",
   "settingsReaderTheme": "Reader theme",
   "settingsContinuousReading": "Continuous reading",
-  "settingsContinuousReadingHint": "Vertical books always turn pages.",
+  "settingsContinuousReadingHint": "Scroll horizontal books and PDF Columns. Vertical books turn pages.",
   "settingsEpubTextSize": "EPUB text size",
   "settingsEpubLineSpacing": "EPUB line spacing",
   "settingsPdfZoom": "PDF zoom",

@@ -317,3 +317,18 @@ Those interactions are covered separately by the native suite above.
 (3 skipped), EPUB 178, core 266 and PDFium hook 7. Both render-harness runs pass
 170 tests (2 skipped), produce 145 identical captures and retain zero golden
 drift. No golden baselines change.
+
+## Continuous Columns turning
+
+Screens remains the default. The saved Continuous setting scrolls the same
+original-page strip, including its page bands and column rules. A single touch
+in either outer quarter steps by the visible screen height minus one physical
+line of overlap; left/right follow the PDF's declared reading direction. The
+middle half toggles chrome, including over figures. A finished selection takes
+the first tap to dismiss, without scrolling. PageUp/PageDown use the same stride.
+
+PDF has no CSS line height: the overlap uses the median advance between
+nonoverlapping physical rows at the current crop scale. A figure borrows nearby
+body rows; a wholly textless scan retains 16 logical points. Steps clamp to the
+document's ends and retain their original-page height for saving/reopening.
+Continuous EPUB's native scrolling contract is unchanged.

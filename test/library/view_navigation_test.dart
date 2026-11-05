@@ -1467,7 +1467,10 @@ void main() {
           }
           if (locale == 'ja') {
             expect(find.text('連続スクロール'), findsOneWidget);
-            expect(find.text('縦書きの本は常にページ単位で表示します。'), findsOneWidget);
+            expect(
+              find.text('横書きの本とPDFの段組みをスクロールします。縦書きの本はページ単位で表示します。'),
+              findsOneWidget,
+            );
             expect(find.text('EPUB の文字サイズ'), findsOneWidget);
             expect(find.text('EPUB の行間'), findsOneWidget);
             expect(find.text('PDF のズーム'), findsOneWidget);

@@ -110,13 +110,18 @@ Uint8List referencePdf({int rotation = 0, bool cropped = false}) {
 
 /// Three single-column front-matter pages, then two differently sized bodies.
 /// First-party Courier text makes cache-dependent column fitting observable.
-Uint8List columnsAfterFrontMatterPdf() {
+Uint8List columnsAfterFrontMatterPdf({
+  bool rightToLeft = false,
+  bool tallFigure = false,
+}) {
   final objects = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Catalog /Pages 2 0 R '
+        '/ViewerPreferences << /Direction /${rightToLeft ? 'R2L' : 'L2R'} >> >>',
     '<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R] /Count 5 >>',
     '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>',
   ];
   for (var page = 0; page < 5; page++) {
+    final tall = tallFigure && page == 3;
     final contents = StringBuffer();
     for (final x in page < 3 ? [54] : [54, 330]) {
       for (var row = 0; row < 42; row++) {
@@ -126,11 +131,14 @@ Uint8List columnsAfterFrontMatterPdf() {
                 page == 3 ? 28 : 34,
                 'x',
               );
-        contents.writeln('BT /F1 10 Tf $x ${700 - row * 14} Td ($text) Tj ET');
+        contents.writeln(
+          'BT /F1 10 Tf $x ${(tall ? 4900 : 700) - row * 14} Td ($text) Tj ET',
+        );
       }
     }
+    if (tall) contents.writeln('q 0.8 g 54 100 240 4000 re f Q');
     objects.addAll([
-      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 ${tall ? 5000 : 792}] '
           '/Resources << /Font << /F1 3 0 R >> >> '
           '/Contents ${objects.length + 2} 0 R >>',
       '<< /Length ${contents.length} >>\nstream\n${contents}endstream',

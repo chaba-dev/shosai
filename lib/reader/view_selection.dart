@@ -688,7 +688,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   void _pdfScrolled() {
     if (_revealing) return;
     final screen = widget.columnsScreen;
-    if (screen?.strip != null &&
+    if ((screen?.strip != null || screen?.continuous == true) &&
         _horizontal.hasClients &&
         _vertical.hasClients) {
       widget.dispatch(
@@ -718,7 +718,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   void _revealPdfPlace() {
     final screen = widget.columnsScreen;
     final detail = screen?.strip != null;
-    if (!detail && widget.pdfScrollScale == null || widget.model.relayoutBusy) {
+    final continuous = screen?.continuous == true;
+    if (!detail && !continuous && widget.pdfScrollScale == null ||
+        widget.model.relayoutBusy) {
       return;
     }
     final generation = widget.model.generation;
@@ -731,13 +733,17 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
           widget.model.locationRequestRevision != revision ||
           widget.model.relayoutBusy ||
           !_vertical.hasClients ||
-          (detail
+          (detail || continuous
               ? !identical(screen, widget.columnsScreen) ||
                     !_horizontal.hasClients
               : widget.pdfScrollScale == null)) {
         return;
       }
-      if (detail) {
+      if (continuous) {
+        _vertical.jumpTo(
+          screen!.viewportTop.clamp(0.0, _vertical.position.maxScrollExtent),
+        );
+      } else if (detail) {
         final piece = screen!.pieces.single;
         final point = piece.fromPage(widget.model.pdfX!, widget.model.pdfY!);
         _horizontal.jumpTo(
@@ -758,7 +764,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         );
       }
       _revealing = false;
-      if (detail) _pdfScrolled();
+      if (detail || continuous) _pdfScrolled();
     });
   }
 
@@ -788,6 +794,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     if (oldWidget.model.locationRequestRevision !=
             widget.model.locationRequestRevision ||
         oldWidget.pdfScrollScale != widget.pdfScrollScale ||
+        oldWidget.columnsScreen != widget.columnsScreen ||
         oldWidget.model.relayoutBusy && !widget.model.relayoutBusy) {
       _revealPdfPlace();
     }
@@ -1002,6 +1009,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
           behavior: widget.fittedZoom == null && widget.columnsScreen == null
               ? ScrollConfiguration.of(context)
               : ScrollConfiguration.of(context).copyWith(
+                  scrollbars: widget.columnsScreen?.continuous == true
+                      ? false
+                      : null,
                   dragDevices: {...ScrollConfiguration.of(context).dragDevices}
                     ..remove(ui.PointerDeviceKind.touch),
                 ),
