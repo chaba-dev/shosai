@@ -12,7 +12,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/controller.dart'
-    show ReaderDisplayChange, ReaderPlace;
+    show ReaderDisplayChange, ReaderPlace, ReaderPlaceRequests;
 import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart'
     show pdfMaxBitmapDimension, pdfMaxBitmapPixels;
@@ -311,6 +311,93 @@ void main() {
       skip: paper.path == null,
     );
   }
+
+  testWidgets('body scale after front matter survives jumps and reopen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(880, 1800);
+    tester.view.devicePixelRatio = 2;
+    tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+    addTearDown(tester.view.reset);
+    final directory = await Directory.systemTemp.createTemp('front-matter-');
+    final path = '${directory.path}/front-matter.pdf';
+    await File(path).writeAsBytes(columnsAfterFrontMatterPdf());
+    final pdf = await PdfrxPdfEngine().open(path);
+    final regions = analyzePdfColumns([
+      for (var p = 0; p < pdf.pageCount; p++) await pdf.pageGeometry(p),
+    ]);
+    await pdf.dispose();
+    expect(regions.map((page) => page.columnCount), [0, 0, 0, 2, 2]);
+    final requests = ReaderPlaceRequests();
+    addTearDown(requests.dispose);
+
+    Future<void> open(int page) async {
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          locale: const Locale('ja'),
+          home: RepaintBoundary(
+            key: captureKey,
+            child: ReaderScreen(
+              bridge: bridge,
+              initialPath: path,
+              initialPlace: ReaderPlace(page),
+              placeRequests: requests,
+              initialSettings: const FlutterReaderSettings(
+                continuous: false,
+                theme: 'light',
+                epubFontSize: 18,
+                epubLineSpacing: 1.6,
+                pdfZoom: 0,
+                pdfFit: FlutterPdfFit.columns,
+                twoPages: false,
+                zonesHintDismissed: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await until(tester, () => raster.evaluate().isNotEmpty);
+    }
+
+    Future<void> jump(int page) async {
+      final before = tester.widget<RawImage>(raster).image;
+      requests.go(ReaderPlace(page));
+      await until(
+        tester,
+        () => tester.widget<RawImage>(raster).image != before,
+      );
+      expect(painting(tester)!.columns!.topPage, page);
+    }
+
+    await open(3);
+    final scale = painting(tester)!.columns!.pieces.first.scale;
+    await capture('front-matter-first-body');
+    await jump(4);
+    expect(painting(tester)!.columns!.pieces.first.scale, scale);
+    await capture('front-matter-later-body');
+    await jump(3);
+    expect(painting(tester)!.columns!.pieces.first.scale, scale);
+    await jump(0);
+    final fallback = painting(tester)!.columns!;
+    expect(
+      fallback.pieces.first.scale,
+      fallback.width / fallback.pieces.first.source.width,
+    );
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await closeApplicationCores();
+    await open(4);
+    expect(painting(tester)!.columns!.pieces.first.scale, scale);
+    await capture('front-matter-direct-open');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await closeApplicationCores();
+    await directory.delete(recursive: true);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final scenario in [
     (reopen: false, detail: false, scan: false),

@@ -78,6 +78,10 @@ padding) in the first three pages, then the median crop within 5% of that width
 to accommodate ordinary glyph overhangs, as one document-wide fit width. Titles,
 figures and rotated side-margin furniture do not vote. The same sample is used
 after turns, jumps and reopens; loading a later page cannot change the scale.
+If those pages contain only front matter or fallbacks, the first time body
+columns are needed the reader extends sampling in document order to the first
+analyzable body page. That width is retained for the open document; direct opens
+and reopens find the same page. Pure fallback documents do not trigger a scan.
 Rare code-line overflow clips at the strip's trailing edge rather than shrinking
 the column. Source rectangles and PDFium offsets remain intact for marks and
 saved places. Original embedded font differences, such as BERT's smaller

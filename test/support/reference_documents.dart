@@ -107,3 +107,49 @@ Uint8List referencePdf({int rotation = 0, bool cropped = false}) {
   );
   return Uint8List.fromList(ascii.encode(pdf.toString()));
 }
+
+/// Three single-column front-matter pages, then two differently sized bodies.
+/// First-party Courier text makes cache-dependent column fitting observable.
+Uint8List columnsAfterFrontMatterPdf() {
+  final objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R] /Count 5 >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>',
+  ];
+  for (var page = 0; page < 5; page++) {
+    final contents = StringBuffer();
+    for (final x in page < 3 ? [54] : [54, 330]) {
+      for (var row = 0; row < 42; row++) {
+        final text = page < 3
+            ? 'Front matter page ${page + 1}, row $row'
+            : 'Body row ${row.toString().padLeft(2, '0')}'.padRight(
+                page == 3 ? 28 : 34,
+                'x',
+              );
+        contents.writeln('BT /F1 10 Tf $x ${700 - row * 14} Td ($text) Tj ET');
+      }
+    }
+    objects.addAll([
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+          '/Resources << /Font << /F1 3 0 R >> >> '
+          '/Contents ${objects.length + 2} 0 R >>',
+      '<< /Length ${contents.length} >>\nstream\n${contents}endstream',
+    ]);
+  }
+  final pdf = StringBuffer('%PDF-1.7\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i++) {
+    offsets.add(pdf.length);
+    pdf.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xref = pdf.length;
+  pdf.write('xref\n0 ${objects.length + 1}\n0000000000 65535 f \n');
+  for (final offset in offsets) {
+    pdf.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  pdf.write(
+    'trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n'
+    'startxref\n$xref\n%%EOF\n',
+  );
+  return Uint8List.fromList(ascii.encode(pdf.toString()));
+}

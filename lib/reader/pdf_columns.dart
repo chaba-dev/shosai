@@ -8,6 +8,7 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
     this.screen,
     this.image,
     this.pages,
+    this.columnWidth,
     this.back,
     this.selection,
     this.annotations,
@@ -21,6 +22,7 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
   final PdfStripScreen screen;
   final ui.Image image;
   final Map<int, PdfStripPage> pages;
+  final double? columnWidth;
   final List<PdfStripPosition> back;
   final PdfStripSelection selection;
   final List<FlutterAnnotation> annotations;
@@ -353,12 +355,14 @@ extension on ReaderController {
       }
       // Use the same bounded sample on every turn/reopen, independent of the
       // target page and which later pages happen to be cached.
-      final columnWidth = typicalPdfColumnWidth(
-        analyzePdfColumns(
-          samples.values.toList(),
-          rightToLeft: pdf.rightToLeft,
-        ),
-      );
+      var columnWidth =
+          _columnsWidth ??
+          typicalPdfColumnWidth(
+            analyzePdfColumns(
+              samples.values.toList(),
+              rightToLeft: pdf.rightToLeft,
+            ),
+          );
       Future<bool> load(int p) async {
         if (pages.containsKey(p)) return true;
         PdfPageGeometry geometry;
@@ -389,6 +393,18 @@ extension on ReaderController {
 
       Future<PdfStripScreen?> window(PdfStripPosition start) async {
         while (current()) {
+          if (columnWidth == null &&
+              pages.values.any((page) => page.columns.columnCount >= 2)) {
+            // Front matter may leave the fixed sample without body columns.
+            // Once a body is needed, find the first analyzable one in document
+            // order, never whichever later page happened to enter the cache.
+            // Pure fallback documents do not trigger this forward search.
+            for (var p = 0; p < pdf.pageCount; p++) {
+              if (!await load(p)) return null;
+              columnWidth = typicalPdfColumnWidth([pages[p]!.columns]);
+              if (columnWidth != null) break;
+            }
+          }
           final screen = layoutPdfColumnScreen(
             pages: pages,
             pageCount: pdf.pageCount,
@@ -629,6 +645,7 @@ extension on ReaderController {
           screen,
           owned,
           pages,
+          columnWidth,
           back,
           selection,
           annotations,
@@ -665,6 +682,7 @@ extension on ReaderController {
         (_columnsIntent?.retainDetailPlace ?? false) &&
         message.screen.strip != null;
     _columnsIntent = null;
+    _columnsWidth = message.columnWidth;
     final old = _model.pageImage;
     _columnsPages
       ..clear()
