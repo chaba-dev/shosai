@@ -317,6 +317,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void didUpdateWidget(ReaderScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final settings = widget.initialSettings;
+    if (_controllerInitialized &&
+        settings != null &&
+        oldWidget.initialSettings?.continuous != settings.continuous) {
+      _controller.dispatch(
+        ReaderTypographyChanged(continuous: settings.continuous),
+      );
+    }
     if (_controllerInitialized &&
         widget.initialSettings?.zonesHintDismissed == true &&
         !_controller.model.zonesHintDismissed) {

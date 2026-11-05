@@ -1064,7 +1064,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsContinuousReadingHint =>
-      'Vertical books always turn pages.';
+      'Scroll horizontal books and PDF Columns. Vertical books turn pages.';
 
   @override
   String get settingsEpubTextSize => 'EPUB text size';

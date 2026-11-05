@@ -446,6 +446,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
     this.twoPages,
     this.animations,
     this.progress,
+    this.continuous,
   });
 
   final double? fontSize;
@@ -458,6 +459,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
   final bool? twoPages;
   final bool? animations;
   final FlutterReaderProgress? progress;
+  final bool? continuous;
 }
 
 /// Requests the Markdown export of the current book's bookmarks (RD-08).

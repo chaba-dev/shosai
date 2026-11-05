@@ -1845,7 +1845,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsContinuousReadingHint.
   ///
   /// In en, this message translates to:
-  /// **'Vertical books always turn pages.'**
+  /// **'Scroll horizontal books and PDF Columns. Vertical books turn pages.'**
   String get settingsContinuousReadingHint;
 
   /// No description provided for @settingsEpubTextSize.

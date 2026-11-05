@@ -649,7 +649,12 @@ void main() {
     expect(find.text('Cancel'), findsNothing);
     expect(find.text('Reader theme'), findsOneWidget);
     expect(find.text('Continuous reading'), findsOneWidget);
-    expect(find.text('Vertical books always turn pages.'), findsOneWidget);
+    expect(
+      find.text(
+        'Scroll horizontal books and PDF Columns. Vertical books turn pages.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('EPUB text size'), findsOneWidget);
     expect(find.text('EPUB line spacing'), findsOneWidget);
     expect(find.text('PDF zoom'), findsOneWidget);

@@ -403,7 +403,7 @@ final class ReaderController implements Listenable {
   double _typographyFontSize;
   double _typographyLineSpacing;
   String _typographyTheme;
-  final bool _typographyContinuous;
+  bool _typographyContinuous;
   bool _typographyTwoPages;
   bool _typographyAnimations;
   FlutterReaderProgress _typographyProgress;
@@ -1452,7 +1452,13 @@ final class ReaderController implements Listenable {
           final strip = message.screen.strip ?? message.screen;
           _hideChrome();
           _requestColumns(
-            strip.start,
+            message.screen.continuous
+                ? PdfStripPosition(_model.unit, y: _model.pdfY)
+                : strip.continuous
+                ? message.screen.start
+                : strip.start,
+            x: message.screen.continuous ? _model.pdfX : null,
+            locate: message.screen.continuous,
             detail: message.zoom <= 1.03
                 ? null
                 : (
@@ -3603,6 +3609,9 @@ final class ReaderController implements Listenable {
       _typographyAnimations = animations;
     }
     if (message.progress case final progress?) _typographyProgress = progress;
+    if (message.continuous case final continuous?) {
+      _typographyContinuous = continuous;
+    }
     // The settings the library keeps are saved as they change, so the next
     // book opens with them too.
     final ReaderDisplayChange change = (
@@ -3654,10 +3663,19 @@ final class ReaderController implements Listenable {
     if (document?.format == FlutterBookFormat.pdf &&
         after.rasterFit == ReaderRasterFit.columns) {
       if (before.rasterFit != after.rasterFit ||
-          before.rasterZoom != after.rasterZoom) {
+          before.rasterZoom != after.rasterZoom ||
+          before.continuous != after.continuous) {
         _columnsBack.clear();
         _discardPdfLeaves();
-        _refreshColumns();
+        if (before.continuous != after.continuous) {
+          _requestColumns(
+            PdfStripPosition(_model.readingLocation.unit, y: _model.pdfY),
+            x: _model.pdfX,
+            locate: true,
+          );
+        } else {
+          _refreshColumns();
+        }
       }
       return;
     }
@@ -3690,6 +3708,7 @@ final class ReaderController implements Listenable {
             before.epubLineSpacing == after.epubLineSpacing &&
             before.rasterZoom == after.rasterZoom &&
             before.rasterFit == after.rasterFit &&
+            before.continuous == after.continuous &&
             !themeChanged)) {
       return;
     }
