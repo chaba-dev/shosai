@@ -9,6 +9,11 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
     this.image,
     this.pages,
     this.back,
+    this.selection,
+    this.annotations,
+    this.annotationError,
+    this.targetOffset,
+    this.targetLength,
   );
   final int generation;
   final int revision;
@@ -17,6 +22,11 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
   final ui.Image image;
   final Map<int, PdfStripPage> pages;
   final List<PdfStripPosition> back;
+  final PdfStripSelection selection;
+  final List<FlutterAnnotation> annotations;
+  final String? annotationError;
+  final int? targetOffset;
+  final int? targetLength;
 }
 
 final class _ReaderColumnsFailed extends ReaderMessage {
@@ -31,11 +41,164 @@ final class _ReaderColumnsFinished extends ReaderMessage {
 }
 
 extension on ReaderController {
+  void _columnsViewportChanged(ReaderColumnsViewportChanged message) {
+    final screen = message.screen;
+    if (!identical(screen, _model.pdfColumns) ||
+        screen.strip == null ||
+        _model.relayoutBusy ||
+        _closing ||
+        _suspended) {
+      return;
+    }
+    final piece = screen.pieces.single;
+    final visible = ui.Rect.fromLTWH(
+      piece.left,
+      piece.top,
+      piece.width,
+      piece.height,
+    ).intersect(message.viewport);
+    if (visible.isEmpty) return;
+    final point = piece.toPage(visible.center.dx, visible.top);
+    if (_model.pdfX == point.x && _model.pdfY == point.y) return;
+    final selection = _model.pdfColumnSelection!;
+    final endpoint = selection.surface.endpoints.where((e) {
+      final rect = e.rect;
+      return rect.left < visible.right &&
+          rect.right > visible.left &&
+          rect.top < visible.bottom &&
+          rect.bottom > visible.top;
+    }).firstOrNull;
+    final offset = endpoint == null
+        ? null
+        : selection.location(endpoint.offset.toInt()).offset;
+    _emit(_model.copyWith(pdfX: point.x, pdfY: point.y, readingOffset: offset));
+    final bookId = _model.document?.bookId;
+    if (bookId != null) {
+      _queueReadingStateSave(
+        bookId,
+        _model.document!.logicalUnitCount,
+        FlutterReadingState(
+          unit: BigInt.from(piece.page),
+          offset: offset == null ? null : BigInt.from(offset),
+          pdfX: point.x,
+          pdfY: point.y,
+          zoom: _model.layout.scale,
+          progress: _bookProgress(_model),
+        ),
+      );
+    }
+  }
+
+  void _pdfViewportChanged(ReaderPdfViewportChanged message) {
+    final pdf = _pdfDocument;
+    if (pdf == null ||
+        message.generation != _model.generation ||
+        message.revision != _model.locationRequestRevision ||
+        _model.columnsPresentation ||
+        _model.relayoutBusy ||
+        _closing ||
+        _suspended ||
+        !message.y.isFinite) {
+      return;
+    }
+    final location = _model.readingLocation;
+    final y = message.y.clamp(0.0, pdf.pageSize(location.unit).height);
+    if (_model.pdfY == y) return;
+    final surface = _model.selectionSurface;
+    final endpoint = surface?.endpoints
+        .where(
+          (e) =>
+              e.rect.bottom / _model.layout.scale >= y &&
+              (_model.pdfSpread?.unitOf(e.rangeStart.toInt(), _model.unit) ??
+                      _model.unit) ==
+                  location.unit,
+        )
+        .firstOrNull;
+    final offset = endpoint?.rangeStart.toInt();
+    _emit(_model.copyWith(pdfY: y, pdfX: null, readingOffset: offset));
+    final savedOffset = _model.readingLocation.offset;
+    final bookId = _model.document?.bookId;
+    if (bookId != null) {
+      _queueReadingStateSave(
+        bookId,
+        _model.document!.logicalUnitCount,
+        FlutterReadingState(
+          unit: BigInt.from(location.unit),
+          offset: savedOffset == null ? null : BigInt.from(savedOffset),
+          pdfY: y,
+          zoom: _model.layout.scale,
+          progress: _bookProgress(_model),
+        ),
+      );
+    }
+  }
+
+  void _pdfDoubleTapped(double x, double y) {
+    if (!_canPeek || !x.isFinite || !y.isFinite) return;
+    if (_model.columnsPresentation || _rasterFit == ReaderRasterFit.manual) {
+      _typographyChanged(
+        const ReaderTypographyChanged(rasterFit: ReaderRasterFit.fitPage),
+      );
+      return;
+    }
+    final pdf = _pdfDocument;
+    if (pdf == null) return;
+    var page = _model.unit;
+    final spread = _model.pdfSpread;
+    final scale = _model.layout.scale;
+    if (spread != null &&
+        x >= spread.facingLeft &&
+        x < spread.facingLeft + pdf.pageSize(spread.facingUnit).width * scale) {
+      page = spread.facingUnit;
+    }
+    final px = (x - (spread?.leftOf(page, _model.unit) ?? 0)) / scale;
+    final py = y / scale;
+    final size = pdf.pageSize(page);
+    if (px < 0 || px > size.width || py < 0 || py > size.height) return;
+    // Enter directly with the tap's original page coordinate, not a 2x bitmap.
+    _typographyChanged(
+      const ReaderTypographyChanged(rasterFit: ReaderRasterFit.columns),
+    );
+    _readingStatePersistenceBlocked = false;
+    _requestColumns(PdfStripPosition(page, y: py), x: px, locate: true);
+  }
+
   bool _isCurrentColumns(int generation, int revision) =>
       _isCurrent(generation) &&
       !_suspended &&
       revision == _columnsRevision &&
       _rasterFit == ReaderRasterFit.columns;
+
+  /// Every passive refresh replays a pending destination or the saved place.
+  /// In particular, deferred annotation/open effects must not drop its height.
+  void _refreshColumns() {
+    final pending = _columnsIntent;
+    final screen = _model.pdfColumns;
+    final piece = screen?.strip == null ? null : screen!.pieces.single;
+    _requestColumns(
+      pending?.position ??
+          screen?.start ??
+          PdfStripPosition(_model.readingLocation.unit, y: _model.pdfY),
+      back: pending?.back,
+      previous: pending?.previous ?? false,
+      offset: pending?.offset,
+      length: pending?.length,
+      x: pending?.x,
+      locate: pending?.locate ?? false,
+      detail: pending != null
+          ? pending.detail
+          : piece == null
+          ? null
+          : (
+              page: piece.page,
+              region: piece.region,
+              zoom: screen!.detailZoom,
+              baseScale: piece.scale / screen.detailZoom,
+            ),
+      strip: pending != null ? pending.strip : screen?.strip,
+      retainDetailPlace: pending?.retainDetailPlace ?? piece != null,
+    );
+  }
 
   void _columnsStep(int delta) {
     final screen = _model.pdfColumns;
@@ -49,8 +212,10 @@ extension on ReaderController {
     }
     if (delta > 0) {
       if (screen.next.page >= _pdfDocument!.pageCount) return;
+      _readingStatePersistenceBlocked = false;
       _requestColumns(screen.next, back: [..._columnsBack, screen.start]);
     } else if (_columnsBack.isNotEmpty) {
+      _readingStatePersistenceBlocked = false;
       _requestColumns(
         _columnsBack.last,
         back: _columnsBack.sublist(0, _columnsBack.length - 1),
@@ -58,6 +223,7 @@ extension on ReaderController {
     } else if (screen.start.page > 0 ||
         screen.start.region > 0 ||
         screen.start.y != null) {
+      _readingStatePersistenceBlocked = false;
       _requestColumns(screen.start, previous: true);
     }
   }
@@ -68,11 +234,17 @@ extension on ReaderController {
     bool previous = false,
     ({int page, int region, double zoom, double baseScale})? detail,
     PdfStripScreen? strip,
+    bool retainDetailPlace = false,
+    int? offset,
+    int? length,
+    double? x,
+    bool locate = false,
   }) {
     final pdf = _pdfDocument;
     final height = _epubViewportHeight;
     if (pdf == null ||
         _model.busy ||
+        _model.annotationOperations.isNotEmpty ||
         _closing ||
         _suspended ||
         height == null ||
@@ -82,6 +254,27 @@ extension on ReaderController {
     }
     final generation = _model.generation;
     final revision = ++_columnsRevision;
+    // Viewport changes during an effect replay this destination, not the
+    // previous screen. This matters when entering at a tapped column or hit.
+    final intent = (
+      position: position,
+      back: List<PdfStripPosition>.unmodifiable(back ?? _columnsBack),
+      previous: previous,
+      offset:
+          offset ??
+          (x == null && _model.pdfColumns == null
+              ? _model.readingLocation.offset
+              : null),
+      length: length,
+      // A figure has no canonical text offset. Keep its original horizontal
+      // anchor across page fits/reopen rather than guessing from height alone.
+      x: x ?? (_model.pdfColumns == null && !locate ? _model.pdfX : null),
+      locate: locate || _model.pdfColumns == null,
+      detail: detail,
+      strip: strip,
+      retainDetailPlace: retainDetailPlace,
+    );
+    _columnsIntent = intent;
     // A whole-page render started before a fit switch cannot overwrite a
     // strip screen when it finishes. The same effect drain retains the PDF.
     _layoutRevision++;
@@ -106,10 +299,14 @@ extension on ReaderController {
       _devicePixelRatio,
       _rasterZoom,
       position,
-      back ?? List.of(_columnsBack),
-      previous: previous,
+      intent.back,
+      previous: intent.previous,
       detail: detail,
       strip: strip,
+      offset: intent.offset,
+      length: length,
+      x: intent.x,
+      locate: intent.locate,
     );
     _referenceEffects.add(effect);
     unawaited(effect.then((_) => _referenceEffects.remove(effect)));
@@ -128,6 +325,10 @@ extension on ReaderController {
     required bool previous,
     required ({int page, int region, double zoom, double baseScale})? detail,
     required PdfStripScreen? strip,
+    required int? offset,
+    required int? length,
+    required double? x,
+    required bool locate,
   }) async {
     bool current() => _isCurrentColumns(generation, revision);
     final pages = Map<int, PdfStripPage>.of(_columnsPages);
@@ -135,7 +336,10 @@ extension on ReaderController {
     ui.PictureRecorder? recorder;
     ui.Picture? picture;
     ui.Image? owned;
+    BigInt? cancellation;
+    final document = _model.document!;
     try {
+      cancellation = _bridge.createCancellation();
       // Three pages establish repeated/alternating heads without scanning a
       // large document before its first screen. Other geometry loads on demand.
       final samples = <int, PdfPageGeometry>{};
@@ -184,6 +388,11 @@ extension on ReaderController {
             width: math.max(1, layout.width - 2 * pdfStripSideInset),
             height: math.max(1, height - pdfStripHeaderHeight),
             zoom: zoom,
+            // A jumped-to range must clear the overlaid toolbar and capsule.
+            // Reserve space in layout, not by hiding part of the raster.
+            topInset: length == null
+                ? 0
+                : math.min(96, math.max(1, height - pdfStripHeaderHeight) / 3),
           );
           final needed = screen.needsPage;
           if (needed == null) return screen;
@@ -192,6 +401,51 @@ extension on ReaderController {
         return null;
       }
 
+      if (locate) {
+        if (!await load(position.page)) return;
+        final regions = pages[position.page]!.columns.regions;
+        var region = 0;
+        if (offset != null) {
+          final found = regions.indexWhere(
+            (r) => r.lines.any((l) => l.start <= offset && offset < l.end),
+          );
+          if (found >= 0) region = found;
+        } else if (position.y != null) {
+          final found = regions.indexWhere(
+            (r) =>
+                (x == null || x >= r.bounds.left && x <= r.bounds.right) &&
+                position.y! >= r.bounds.top &&
+                position.y! <= r.bounds.bottom,
+          );
+          if (found >= 0) region = found;
+        }
+        final bounds = regions[region].bounds;
+        var y = position.y;
+        if (y == null && offset != null) {
+          y = regions[region].lines
+              .where((l) => l.start <= offset && offset < l.end)
+              .firstOrNull
+              ?.bounds
+              .top;
+        }
+        if (y != null) {
+          y = y.clamp(bounds.top, bounds.bottom);
+          // Match screen breaks: overlapping physical boxes are indivisible.
+          // Reach a fixed point so fit switches/reopens cannot creep upward
+          // one overlapping line at a time.
+          var moved = true;
+          while (moved) {
+            moved = false;
+            for (final line in regions[region].lines) {
+              if (line.bounds.top < y! && line.bounds.bottom > y) {
+                y = line.bounds.top;
+                moved = true;
+              }
+            }
+          }
+        }
+        position = PdfStripPosition(position.page, region: region, y: y);
+      }
       PdfStripScreen? screen;
       if (previous) {
         // After an explicit page jump there may be no navigation history.
@@ -294,6 +548,29 @@ extension on ReaderController {
           );
         }
       }
+      final surfaces = <int, FlutterSelectionSurface>{};
+      for (final page in screen.pieces.map((p) => p.page).toSet()) {
+        try {
+          surfaces[page] = await pdf.selectionSurface(page, 1);
+        } catch (_) {
+          // Textless pieces retain links and area marks through their transform.
+        }
+        if (!current()) return;
+      }
+      final selection = PdfStripSelection(screen, surfaces);
+      List<FlutterAnnotation> annotations = const [];
+      String? annotationError;
+      try {
+        annotations = await _records.listAnnotations(
+          document: document,
+          text: _readerText(document, cancellation, pdf: pdf),
+          scale: 1,
+          cancellationId: cancellation,
+        );
+      } catch (error) {
+        annotationError = _describeError(error);
+      }
+      if (!current()) return;
       final size = pdfBitmapSizeFor(
         PdfPageSize(screen.width, screen.height),
         density,
@@ -344,6 +621,11 @@ extension on ReaderController {
           owned,
           pages,
           back,
+          selection,
+          annotations,
+          annotationError,
+          offset,
+          length,
         ),
       );
       owned = null;
@@ -352,6 +634,7 @@ extension on ReaderController {
         _ReaderColumnsFailed(generation, revision, _describeError(error)),
       );
     } finally {
+      if (cancellation != null) _bridge.releaseCancellation(id: cancellation);
       if (recorder != null && recorder.isRecording) {
         recorder.endRecording().dispose();
       }
@@ -369,6 +652,10 @@ extension on ReaderController {
       message.image.dispose();
       return;
     }
+    final retainDetailPlace =
+        (_columnsIntent?.retainDetailPlace ?? false) &&
+        message.screen.strip != null;
+    _columnsIntent = null;
     final old = _model.pageImage;
     _columnsPages
       ..clear()
@@ -381,18 +668,71 @@ extension on ReaderController {
     _columnsBack
       ..clear()
       ..addAll(message.back);
+    final first = message.screen.pieces.first;
+    final endpoint = message.selection.surface.endpoints
+        .where(
+          (e) =>
+              message.selection.location(e.offset.toInt()).page == first.page &&
+              e.rect.top < first.top + first.height &&
+              e.rect.bottom > first.top,
+        )
+        .firstOrNull;
+    final offset = retainDetailPlace
+        ? _model.readingLocation.offset
+        : endpoint == null
+        ? null
+        : message.selection.location(endpoint.offset.toInt()).offset;
+    // A passive detail render keeps the visible page point, not the region
+    // origin. Initial detail entry instead starts at its actual visible center.
+    final y = retainDetailPlace ? _model.pdfY! : first.source.top;
+    final x = retainDetailPlace
+        ? _model.pdfX!
+        : message.screen.strip == null
+        ? (first.source.left + first.source.right) / 2
+        : first
+              .toPage(
+                first.left +
+                    math.min(
+                          first.width,
+                          message.layout.width - 2 * pdfStripSideInset,
+                        ) /
+                        2,
+                first.top,
+              )
+              .x;
+    final target = message.targetOffset == null
+        ? null
+        : message.targetOffset! + (message.selection.shifts[first.page] ?? 0);
+    _referenceRevision++;
+    _selectionRevision++;
     _emit(
       _model.copyWith(
         pdfColumns: message.screen,
+        pdfColumnSelection: message.selection,
+        pdfY: y,
+        pdfX: x,
         pageImage: message.image,
         pdfSpread: null,
         readingPage: null,
         unit: message.screen.topPage,
-        readingOffset: null,
-        selectionSurface: null,
-        selectionPhase: ReaderSelectionPhase.idle,
-        anchor: null,
-        focus: null,
+        readingOffset: offset,
+        selectionSurface: _freezeSurface(message.selection.surface),
+        annotations: message.annotations,
+        annotationsReady: message.annotationError == null,
+        annotationError: message.annotationError,
+        savedSelections: _savedSelections(
+          message.annotations,
+          first.page,
+          null,
+          message.selection,
+        ),
+        selectionPhase: message.targetLength == null
+            ? ReaderSelectionPhase.idle
+            : ReaderSelectionPhase.selected,
+        anchor: message.targetLength == null ? null : target,
+        focus: message.targetLength == null
+            ? null
+            : target! + message.targetLength!,
         layout: message.layout,
         relayoutBusy: false,
         relayoutPending: false,
@@ -400,6 +740,21 @@ extension on ReaderController {
         relayoutError: null,
       ),
     );
+    final bookId = _model.document?.bookId;
+    if (bookId != null) {
+      _queueReadingStateSave(
+        bookId,
+        _model.document!.logicalUnitCount,
+        FlutterReadingState(
+          unit: BigInt.from(first.page),
+          offset: offset == null ? null : BigInt.from(offset),
+          zoom: message.layout.scale,
+          pdfY: y,
+          pdfX: x,
+          progress: _bookProgress(_model),
+        ),
+      );
+    }
     if (old != null) _frameScheduler(old.dispose);
   }
 }

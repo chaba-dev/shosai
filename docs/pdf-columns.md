@@ -1,10 +1,10 @@
-# PDF Columns — region analysis (stack PR1)
+# PDF Columns — geometry, strip and reader integration
 
 Acceptance source: [RFD 12, Papers on phones and revised Decisions](https://github.com/chaba-dev/rfds/blob/d9fae4eb30607b4620d09441c6d08b4cbab64425/rfd/0012/README.adoc),
 [rfds PR #16](https://github.com/chaba-dev/rfds/pull/16).
 
 PR1 supplies the nonvisual foundation. PR2 adds the Columns reading mode and
-explicit Display preference described below; PR3 integrates durable place,
+explicit Display preference described below; PR3 adds durable place,
 selection/marks/search/links, double-tap entry and phone defaults. PR1's
 unchanged-reader screenshots are not evidence of the PR2 Columns UI.
 
@@ -192,3 +192,108 @@ The orb's pinned Mesa 26 cannot expose GLX on Xvfb; the desktop recording used
 Nix's `github:NixOS/nixpkgs/nixos-25.05#mesa` (25.0.7), its EGL vendor, driver
 directory and library path, with software GL. This capture-only workaround does
 not alter application rendering or the project's graphics dependencies.
+
+## PR3 place and interaction integration
+
+Reading state now stores an optional `pdfY` in original rotated-page points
+(SQLite migration 14, `reading_state.pdf_y`) and an optional horizontal anchor
+`pdfX` (migration 15, `reading_state.pdf_x`). Existing positions without a
+height still open at their page. Columns saves the first visible piece's page,
+height and horizontal center in original page points. A canonical character
+offset remains the primary text anchor; the horizontal coordinate distinguishes
+a textless figure from another column at the same height. Fit changes retain that place;
+fit-width scrolling updates it through a generation/revision-guarded message.
+A page that already fits vertically need not scroll to retain its place.
+Entry and restoration normalize overlapping physical lines to a stable boundary,
+so repeated fit changes cannot creep upward one line at a time.
+
+`right-column-figure.pdf` is a generated, first-party real PDF with left-column
+body text beside a tall raster figure at x317–556, y190–730. The native reader
+regressions enter a completely textless figure screen at y350 and check both
+Columns → Fit page → Columns and a fresh core reopen. Before the horizontal
+anchor, both restore to left-column x54; with it both retain the right figure
+and y350. Current PR1 geometry adds a 1pt raster guard (source x316).
+Additional regressions pinch sharply, pan in both axes under injected safe
+insets, and verify the persisted page-space point against measured raster
+movement before switching fits or reopening. A detail viewport message is
+guarded by its adopted screen identity; textless viewports keep x+y without
+inventing a text offset. Pending detail requests survive viewport refresh.
+DPR 3 scan regressions repeat both restoration paths after a capped 5× pinch;
+the durable point uses the admitted scale, not the requested gesture ratio.
+Those cases also resize the passive detail viewport before switching fits or
+reopening. Rerenders retain the visible original-page point; both scroll axes
+restore after layout before reporting a new viewport, never saving an interim
+region origin or a half-restored pan.
+The screenshots and real moving-pointer recordings are captured on Linux,
+not a phone runtime.
+
+The strip selection surface keeps each visible page's complete canonical text
+but maps only the visible geometry through `PdfStripPiece.fromPage`. A page is
+shifted once, even when it appears in several crops. Saved text marks and search
+hits use those same offsets; area marks clip in original page space. A selection
+crossing pages saves one original-page annotation per intersected page, never
+strip pixels. Link hits select the containing piece and use `toPage` before the
+existing PDF destination/peek flow. Notes and search jumps enter the region that
+contains their original character range. A targeted range reserves leading
+space for the overlaid toolbar and selection capsule, accounted for in the
+line-safe screen layout, so the hit is visible rather than covered by controls.
+Both detail scroll offsets belong to the rendered content's transform, outside
+the original-page geometry. Selection actions measure that transform after
+frame layout, so reparenting under new scroll/preview ancestors cannot read an
+unlaid-out transform. Native tests select and activate links after both-axis
+panning, retaining canonical page-local offsets and destinations.
+
+Touch double-tap is handled on the actual selectable surface: a fitted page
+opens Columns at the tapped column; Columns returns to Fit page, not 2x. A
+pending entry/jump is replayed across viewport changes, rather than replaced
+by the old screen's position. The single-tap delay is the gesture recognizer's
+normal double-tap window; mouse selection and touch long-press remain available.
+
+On a phone with no explicit fit choice and the legacy default zoom, the
+controller samples up to the first three pages. Any detected two-column page
+selects Columns; otherwise it selects Fit width. It does not persist that
+inferred default as an explicit choice. Saved fits and legacy width/manual
+choices win; larger screens retain Fit page with optional Columns.
+
+The native Linux integration test covers right-column entry, selection and
+canonical note storage, fit changes, reopen, note/search jumps, later-page
+restoration, and link peeks/destinations alongside PR2's strip tests. The
+asymmetric selection adapter test covers two crops of one page and another page
+at a different scale, including horizontal and vertical carets. Core tests cover
+the height's storage, validation, reopen and clearing. The PageSpread preview
+includes the actual native captures and desktop recording for this integration.
+Android and macOS are not certified by Linux evidence; real iPhone verification
+belongs to Darwin. No macOS golden baseline is changed here; any such change
+requires regeneration and verification on the Darwin Mac mini.
+
+### Grouped-figure successor validation
+
+PR3 is restacked on PR2 `824ab48bcf3827381aa618855cc74aab7517075c`,
+including PR1 `6e4dc3ba40482dc497a9607514cd22fafb741f51` and main
+`9fa9a52f0a5f15f2cc48e2f61c56cc796b2f6fc1`. PR3's interaction and
+persistence implementation is unchanged from its reviewed resize fix. The
+combined native Linux suite passes 16 scenarios, including the new real-ResNet
+header/diagram regression and both-axis detail pan, resize, fit and reopen.
+
+The inspected native [preceding screen](design-system/components/images/columns3-resnet-tail.jpg)
+and [complete grouped diagram](design-system/components/images/columns3-resnet-diagram.jpg)
+confirm the headers are no longer stranded. They do **not** establish the
+no-huge-tail acceptance rule: this 412 × 775 probe still leaves 588.285px
+(75.9%) blank before the diagram. The separate Mac runtime at 412 × 774 leaves
+566.156px (73.15%) blank, as reported by the upstream owner. These are distinct
+viewports and measurements, not contradictory results. Cumulative sign-off
+remains withheld pending the Darwin/Puck tail-policy decision; historical
+approval of PR3's resize fix is not approval of this successor.
+
+The [fresh Linux pointer recording](design-system/components/images/columns3-successor-linux.mp4)
+shows selection, a yellow highlight, Columns → Fit page → Columns and the
+retained original-text mark on this restack. A temporary bootstrap only opened
+Thrift in disposable storage through the production shell, reader and PDFium;
+it did not substitute geometry or reader widgets. This desktop recording has
+no injected device safe insets and does not certify touch, resize or a phone.
+Those interactions are covered separately by the native suite above.
+
+`make check-fmt lint test` passes: scripts 110 (6 skipped), Flutter 1471
+(3 skipped), EPUB 178, core 266 and PDFium hook 7. Both render-harness runs pass
+170 tests (2 skipped), produce 145 identical captures and retain zero golden
+drift. No golden baselines change.

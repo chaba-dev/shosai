@@ -102,6 +102,28 @@ def main():
         b"/C0 [0 0 0] /C1 [0 0.3 0.8] /N 1 >> /Extend [false false] >>",
     ])
 
+    # A textless right-column figure overlaps the left body's page heights.
+    # Its interior fills a phone screen: page+y cannot identify its column.
+    content = bytearray()
+    for row in range(46):
+        content.extend(b"BT /F1 10 Tf 54 %d Td " % (682 - row * 13))
+        content.extend(b"(Left body line %02d has ordinary reading text.) Tj ET\n" % row)
+    for row in range(5):
+        content.extend(b"BT /F1 10 Tf 317 %d Td " % (682 - row * 13))
+        content.extend(b"(Right column line %02d before the figure.) Tj ET\n" % row)
+    content.extend(b"q 239 0 0 540 317 62 cm /Im Do Q\n")
+    write("right-column-figure.pdf", [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> /XObject << /Im 5 0 R >> >> "
+        b"/Contents 6 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        stream(bytes([70, 125, 180, 225]),
+               b"/Type /XObject /Subtype /Image /Width 2 /Height 2 "
+               b"/ColorSpace /DeviceGray /BitsPerComponent 8"),
+        stream(content),
+    ])
 
 if __name__ == "__main__":
     main()

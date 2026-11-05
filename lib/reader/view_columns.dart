@@ -2,9 +2,14 @@ part of 'view.dart';
 
 /// Original page pixels on paper, with navigation furniture outside the crop.
 class _ReaderColumns extends StatefulWidget {
-  const _ReaderColumns({required this.model, required this.dispatch});
+  const _ReaderColumns({
+    required this.model,
+    required this.dispatch,
+    required this.contentKey,
+  });
   final ReaderModel model;
   final void Function(ReaderMessage) dispatch;
+  final Key contentKey;
 
   @override
   State<_ReaderColumns> createState() => _ReaderColumnsState();
@@ -158,6 +163,18 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
                                               ),
                                             ),
                                     ),
+                                  Positioned.fill(
+                                    child: _SelectableSurface(
+                                      key: widget.contentKey,
+                                      surface: model.selectionSurface!,
+                                      image: null,
+                                      epubPage: null,
+                                      model: model,
+                                      fit: BoxFit.fill,
+                                      dispatch: widget.dispatch,
+                                      paintContent: false,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),

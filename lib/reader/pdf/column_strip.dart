@@ -104,11 +104,12 @@ PdfStripScreen layoutPdfColumnScreen({
   required double width,
   required double height,
   double zoom = 1,
+  double topInset = 0,
 }) {
   final pieces = <PdfStripPiece>[];
   final separators = <PdfStripSeparator>[];
   var cursor = start;
-  var top = 0.0;
+  var top = topInset;
   int? needsPage;
   zoom = zoom.clamp(.5, 1);
   final contentWidth = width;
@@ -181,8 +182,8 @@ PdfStripScreen layoutPdfColumnScreen({
       rowBottom = math.max(rowBottom, line.bounds.bottom);
       tallestLine = math.max(tallestLine, rowBottom - rowTop);
     }
-    if (tallestLine * scale > height - gap) {
-      scale = (height - gap) / tallestLine;
+    if (tallestLine * scale > height - topInset - gap) {
+      scale = (height - topInset - gap) / tallestLine;
     }
     var end = math.min(bounds.bottom, y + (height - top - gap) / scale);
     if (end < bounds.bottom && region.kind != PdfRegionKind.figure) {

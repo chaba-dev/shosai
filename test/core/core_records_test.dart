@@ -1067,6 +1067,8 @@ void main() {
         unit: BigInt.one,
         offset: BigInt.from(7),
         zoom: 1.5,
+        pdfY: 287.25,
+        pdfX: 436.5,
       ),
       unitCount: BigInt.from(4),
     );
@@ -1076,7 +1078,13 @@ void main() {
     );
     expect(
       state,
-      FlutterReadingState(unit: BigInt.one, offset: BigInt.from(7), zoom: 1.5),
+      FlutterReadingState(
+        unit: BigInt.one,
+        offset: BigInt.from(7),
+        zoom: 1.5,
+        pdfY: 287.25,
+        pdfX: 436.5,
+      ),
     );
 
     final bookmark = await bridge.toggleBookmark(

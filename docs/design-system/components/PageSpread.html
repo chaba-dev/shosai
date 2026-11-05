@@ -53,6 +53,32 @@ body { margin: 0; background: var(--canvas); }
     <figure><img src="images/columns-admission-area.png" alt="Sharp enlarged scan marks after a capped five-times pinch and two-axis pan"><figcaption>A 5× request stops below 40 million pixels, including device density and outward crop rounding. Pan shows newly rendered PDF pixels, never an enlarged strip bitmap.</figcaption></figure>
     <figure><img src="images/columns-admission-edge.png" alt="Tall scan detail after reaching the 16384-pixel edge limit and panning"><figcaption>Tall fallback detail stops at the 16,384px edge limit. Extremely tall regions that cannot admit enlargement retain their crisp strip rather than shrink, blur or fail.</figcaption></figure>
   </div>
+  <div class="cap">PDF · Columns · selection and saved place · stack PR3</div>
+  <div class="sh-stage columns" aria-label="Native Columns interaction integration">
+    <figure><img src="images/columns3-selection.jpg" alt="Native right-column text selection with its highlight and note actions"><figcaption>Selection uses the original page's character range through the crop's offset and scale.</figcaption></figure>
+    <figure><img src="images/columns3-restored.jpg" alt="Reopened right-column reading place with its yellow note highlight"><figcaption>Reopen keeps the original page and height, the right column and its note highlight.</figcaption></figure>
+    <figure><img src="images/columns3-page.jpg" alt="Original fitted PDF page with the same right-column note highlight"><figcaption>A double tap returns to Fit page. The note remains on its original text; returning to Columns preserves the place.</figcaption></figure>
+    <figure><img src="images/columns3-search.jpg" alt="Search result selected in its fitted original-page column"><figcaption>Search and note jumps enter the region containing their canonical page range.</figcaption></figure>
+  </div>
+  <p class="columns-note">Actual Linux/PDFium captures, not Android or iPhone evidence. Touch double-taps and durable reopen are exercised in the native integration test. The refreshed desktop recording below uses a real moving mouse to select, highlight and change fit, with injected safe insets. Phones with no saved choice detect the first three pages; saved choices always win. macOS goldens are unchanged and any future baseline change requires the Darwin Mac mini.</p>
+  <div class="sh-stage columns">
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns3-selection.jpg" aria-label="Native Linux Columns selection and highlight recording"><source src="images/columns3-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop: real pointer selection, highlight and Fit page.</figcaption></figure>
+  </div>
+  <div class="cap">Columns · detail interactions and saved visible place · corrected stack</div>
+  <div class="sh-stage columns" aria-label="Columns detail pan interaction and restoration">
+    <figure><img src="images/columns3-detail-selection.jpg" alt="Text selected in a sharp detail raster after horizontal and vertical panning"><figcaption>Selection and link areas follow both detail pan offsets. The action capsule uses the settled content transform, including safe insets and the fixed header.</figcaption></figure>
+    <figure><img src="images/columns3-detail-place.jpg" alt="Panned interior of a textless right-column figure"><figcaption>Detail panning updates the saved original-page x+y point, not just the whole figure's top edge.</figcaption></figure>
+    <figure><img src="images/columns3-detail-reopen.jpg" alt="Fresh-core reopen retains the right-column figure after detail panning"><figcaption>Fresh-core reopen and a fit round-trip retain that visible figure location. Detail zoom itself stays transient; Columns returns at fit.</figcaption></figure>
+  </div>
+  <div class="cap">PDF · textless right-column figure · durable page-space restoration</div>
+  <div class="sh-stage columns" aria-label="Textless figure restoration regression">
+    <figure><img src="images/columns3-figure-before.jpg" alt="Before fix: restoring the figure incorrectly shows left-column body text"><figcaption>Before: both fit switching and reopening confuse a textless right-column figure with left-column text at the same height (x54 instead of x317).</figcaption></figure>
+    <figure><img src="images/columns3-figure-fit.jpg" alt="After fix: the gray raster figure survives a Fit page and Columns round-trip"><figcaption>After fit switching: original-page x+y keeps the same figure, without relying on a text offset or a region index.</figcaption></figure>
+    <figure><img src="images/columns3-figure-reopen.jpg" alt="After fix: reopening retains the same textless gray raster figure"><figcaption>After a fresh core reopen: x317, y350 and no visible text endpoints. Real Linux/PDFium; generated first-party PDF.</figcaption></figure>
+  </div>
+  <div class="sh-stage columns">
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns3-figure-fit.jpg" aria-label="Native Linux textless figure fit round-trip"><source src="images/columns3-figure-linux.mp4" type="video/mp4"></video><figcaption>Real moving pointer changes Columns → Fit page → Columns while retaining the textless figure's original place.</figcaption></figure>
+  </div>
   <div class="cap">Two-page spread · EPUB · Paper · left to right</div>
   <div class="sh-stage">
     <div class="sh-spread" id="en">

@@ -1492,7 +1492,9 @@ void main() {
             return _realReader(
               bridge,
               book,
-              settings,
+              (settings ?? harnessReaderSettings).copyWith(
+                pdfFit: FlutterPdfFit.fitPage,
+              ),
               path,
               bookId,
               locatorChanged,

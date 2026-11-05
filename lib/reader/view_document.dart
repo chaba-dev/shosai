@@ -33,6 +33,7 @@ class _DocumentViewState extends State<_DocumentView> {
   /// the same space the [CustomSingleChildLayout] delegate receives.
   final GlobalKey _overlayKey = GlobalKey(debugLabel: 'reader overlay');
   Rect? _selectionBounds;
+  Rect _selectionTarget = Rect.zero;
 
   /// Bumped whenever the rendered content geometry changes — a scroll or a
   /// content resize — so the action overlay re-reads the transform that
@@ -90,24 +91,8 @@ class _DocumentViewState extends State<_DocumentView> {
     final actionFocus = widget.actionFocus;
     final l10n = AppLocalizations.of(context);
     final title = document.title ?? l10n.readerUntitledDocument;
-    if (model.columnsPresentation) {
-      return CallbackShortcuts(
-        bindings: readerPageKeys(model, dispatch, arrows: true),
-        child: Focus(
-          focusNode: readerFocus,
-          autofocus: true,
-          child: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: (event) {
-              if (event.kind != ui.PointerDeviceKind.mouse ||
-                  (event.buttons & 1) != 0) {
-                readerFocus.requestFocus();
-              }
-            },
-            child: _ReaderColumns(model: model, dispatch: dispatch),
-          ),
-        ),
-      );
+    if (model.columnsPresentation && model.pdfColumns == null) {
+      return const Center(child: CircularProgressIndicator());
     }
     final page = image;
     // Link annotations do not depend on text extraction. A scanned PDF, or
@@ -209,7 +194,7 @@ class _DocumentViewState extends State<_DocumentView> {
                   onNotification: (notification) {
                     if (notification is ScrollUpdateNotification ||
                         notification is ScrollMetricsNotification) {
-                      _bumpContentGeometry();
+                      _measureSelectionBounds(_ReaderChromeBounds.of(context));
                     }
                     return false;
                   },
@@ -395,22 +380,30 @@ class _DocumentViewState extends State<_DocumentView> {
                                   }
                                 },
                                 child: _animatePage(
-                                  _ReachableSelectableSurface(
-                                    contentKey: _contentKey,
-                                    onContentGeometryChanged:
-                                        _bumpContentGeometry,
-                                    presentationKey: ValueKey(
-                                      model.continuousPresentation
-                                          ? 'reader-continuous-presentation'
-                                          : 'reader-paginated-presentation',
-                                    ),
-                                    document: document,
-                                    surface: surface,
-                                    image: page,
-                                    epubPage: model.epubPage,
-                                    model: model,
-                                    dispatch: dispatch,
-                                  ),
+                                  model.columnsPresentation
+                                      ? _ReaderColumns(
+                                          model: model,
+                                          dispatch: dispatch,
+                                          contentKey: _contentKey,
+                                        )
+                                      : _ReachableSelectableSurface(
+                                          contentKey: _contentKey,
+                                          onContentGeometryChanged: () =>
+                                              _measureSelectionBounds(
+                                                _ReaderChromeBounds.of(context),
+                                              ),
+                                          presentationKey: ValueKey(
+                                            model.continuousPresentation
+                                                ? 'reader-continuous-presentation'
+                                                : 'reader-paginated-presentation',
+                                          ),
+                                          document: document,
+                                          surface: surface,
+                                          image: page,
+                                          epubPage: model.epubPage,
+                                          model: model,
+                                          dispatch: dispatch,
+                                        ),
                                 ),
                               ),
                             ),
@@ -427,11 +420,7 @@ class _DocumentViewState extends State<_DocumentView> {
                             builder: (context, revision, child) =>
                                 CustomSingleChildLayout(
                                   delegate: _SelectionActionsLayout(
-                                    target: _selectionActionsTarget(
-                                      surface,
-                                      model,
-                                      constraints.biggest,
-                                    ),
+                                    target: _selectionTarget,
                                     bounds:
                                         (_selectionBounds ??
                                                 (Offset.zero &
@@ -470,8 +459,18 @@ class _DocumentViewState extends State<_DocumentView> {
       final bounds =
           chrome?.availableRect(overlay, overlay.size) ??
           (Offset.zero & overlay.size);
-      if (_selectionBounds != bounds) {
+      final model = widget.model;
+      final surface = model.selectionSurface;
+      // A new Columns screen can reparent the content under scroll/preview
+      // transforms. Read that complete transform only after frame layout.
+      final target =
+          surface == null ||
+              model.selectionPhase != ReaderSelectionPhase.selected
+          ? Rect.zero
+          : _selectionActionsTarget(surface, model, overlay.size);
+      if (_selectionBounds != bounds || _selectionTarget != target) {
         _selectionBounds = bounds;
+        _selectionTarget = target;
         _bumpContentGeometry();
       }
     });

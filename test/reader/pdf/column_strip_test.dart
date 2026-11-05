@@ -86,7 +86,8 @@ void main() {
         pageCount: 1,
         start: const PdfStripPosition(0),
         width: 200,
-        height: 50,
+        height: 65,
+        topInset: 15,
       );
       expect(screen.pieces.single.scale, .625);
       final source = screen.pieces.single.source;
@@ -94,6 +95,7 @@ void main() {
         [source.left, source.top, source.right, source.bottom],
         [20, 10, 120, 90],
       );
+      expect(screen.pieces.single.top, 15);
       expect(screen.pieces.single.height, 50);
       expect(screen.next.y, 90);
     },

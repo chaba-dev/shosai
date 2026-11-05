@@ -33,6 +33,7 @@ import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/pdf/spread.dart';
 import 'package:shosai_flutter/reader/pdf/column_strip.dart';
+import 'package:shosai_flutter/reader/pdf/column_selection.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
@@ -428,6 +429,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           View.of(context).devicePixelRatio,
         ),
         baseScale: View.of(context).devicePixelRatio,
+        autoPdfFit:
+            ShellLayout.forWidth(MediaQuery.sizeOf(context).width) ==
+                ShellLayout.phone &&
+            widget.initialSettings?.pdfFit == null &&
+            (widget.initialSettings?.pdfZoom ?? 0) == 0,
         zonesHintDismissed: widget.initialSettings?.zonesHintDismissed ?? false,
         systemBars: (shown) {
           if (defaultTargetPlatform == TargetPlatform.android) {

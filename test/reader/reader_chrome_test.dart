@@ -358,7 +358,14 @@ Widget _reader({
     documentPicker: documentPicker,
     initialPath: initialPath,
     initialBookId: initialBookId,
-    initialSettings: settings?.copyWith(zonesHintDismissed: true),
+    // These chrome fixtures exercise page fit; automatic phone detection is
+    // covered against real documents by the Columns integration test.
+    initialSettings: settings?.copyWith(
+      zonesHintDismissed: true,
+      pdfFit:
+          settings.pdfFit ??
+          (settings.pdfZoom == 0 ? FlutterPdfFit.fitPage : null),
+    ),
     progressSource: progressSource,
     onDisplayChanged: onDisplayChanged,
     debugPathEntry: debugPathEntry,
@@ -826,8 +833,9 @@ void main() {
       },
     );
 
-    testWidgets('a tap in a PDF turn zone turns without waiting for a '
-        'double tap', (tester) async {
+    testWidgets('a PDF turn-zone tap waits for a possible Columns double tap', (
+      tester,
+    ) async {
       _setView(tester, const Size(390, 800));
       await _open(
         tester,
@@ -842,6 +850,8 @@ void main() {
       await tester.tapAt(Offset(surface.right - 20, surface.center.dy));
       // Well inside the 300 ms double-tap timeout.
       await tester.pump(const Duration(milliseconds: 50));
+      expect(folio(), 'page 1 of 3');
+      await tester.pump(const Duration(milliseconds: 300));
       for (var frame = 0; frame < 20 && folio() != 'page 2 of 3'; frame++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 5)),

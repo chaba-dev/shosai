@@ -671,6 +671,8 @@ final class CoreRecords implements ShosaiRecords {
                 ? null
                 : BigInt.from(position.offset!),
             zoom: position.zoom,
+            pdfY: position.pdfY,
+            pdfX: position.pdfX,
           );
   });
 
@@ -686,6 +688,8 @@ final class CoreRecords implements ShosaiRecords {
         unit: value.unit.toInt(),
         offset: value.offset?.toInt(),
         zoom: value.zoom,
+        pdfY: value.pdfY,
+        pdfX: value.pdfX,
       ),
       unitCount: unitCount.toInt(),
       lastUnit: value.lastUnit?.toInt(),

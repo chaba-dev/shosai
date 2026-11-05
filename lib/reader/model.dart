@@ -467,6 +467,9 @@ final class ReaderModel {
     this.epubPage,
     this.pdfSpread,
     this.pdfColumns,
+    this.pdfColumnSelection,
+    this.pdfY,
+    this.pdfX,
     this.pdfRightToLeft = false,
     this.readingPage,
     this.locationRequestRevision = 0,
@@ -564,6 +567,13 @@ final class ReaderModel {
   /// The rendered Columns screen; source points and affine transforms stay
   /// available independently of the composed raster for reader interactions.
   final PdfStripScreen? pdfColumns;
+  final PdfStripSelection? pdfColumnSelection;
+
+  /// Saved height in the original PDF page, independent of the current fit.
+  final double? pdfY;
+
+  /// Horizontal anchor in page points, disambiguating textless columns.
+  final double? pdfX;
 
   /// Whether the open PDF reads right to left (its viewer preferences say
   /// `/Direction /R2L`).
@@ -776,6 +786,9 @@ final class ReaderModel {
     Object? epubPage = _unchanged,
     Object? pdfSpread = _unchanged,
     Object? pdfColumns = _unchanged,
+    Object? pdfColumnSelection = _unchanged,
+    Object? pdfY = _unchanged,
+    Object? pdfX = _unchanged,
     bool? pdfRightToLeft,
     Object? readingPage = _unchanged,
     int? locationRequestRevision,
@@ -859,6 +872,11 @@ final class ReaderModel {
       pdfColumns: identical(pdfColumns, _unchanged)
           ? this.pdfColumns
           : pdfColumns as PdfStripScreen?,
+      pdfColumnSelection: identical(pdfColumnSelection, _unchanged)
+          ? this.pdfColumnSelection
+          : pdfColumnSelection as PdfStripSelection?,
+      pdfY: identical(pdfY, _unchanged) ? this.pdfY : pdfY as double?,
+      pdfX: identical(pdfX, _unchanged) ? this.pdfX : pdfX as double?,
       pdfRightToLeft: pdfRightToLeft ?? this.pdfRightToLeft,
       readingPage: identical(readingPage, _unchanged)
           ? this.readingPage
