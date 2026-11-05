@@ -267,6 +267,34 @@ void main() {
       expect(bodyPieces.last.scale, bodyPieces.first.scale);
       expect(bodyPieces.last.width, greaterThan(412));
       expect(bodyPieces.last.left, 0);
+      // The device-reported p7 line must belong to an actual region, not just
+      // survive in page geometry while its trailing ink is lost in the strip.
+      final reported = pages[6].lines.singleWhere(
+        (line) => line.text.contains('libevent and the TFramed'),
+      );
+      expect(reported.text, contains('TFramedTransport'));
+      final owners = results[6].regions.where(
+        (region) => region.lines.contains(reported),
+      );
+      expect(owners, hasLength(1));
+      expect(owners.single.bounds.contains(reported.bounds), isTrue);
+      final region = results[6].regions.indexOf(owners.single);
+      final screen = layoutPdfColumnScreen(
+        pages: metadata,
+        pageCount: pages.length,
+        start: PdfStripPosition(6, region: region, y: reported.bounds.top),
+        width: 412,
+        height: 775,
+        columnWidth: bodyWidth,
+      );
+      final piece = screen.pieces.first;
+      expect(piece.source.contains(reported.bounds), isTrue);
+      expect(piece.scale, bodyPieces.first.scale);
+      expect(
+        piece.fromPage(reported.bounds.right, reported.bounds.bottom).x,
+        lessThanOrEqualTo(screen.width),
+        reason: 'the complete reported line must fit inside the raster',
+      );
       // Former loose-box chains on exactly the device-reported pages/blocks.
       for (final (p, top, bottom, count) in [
         (0, 339, 378, 4),

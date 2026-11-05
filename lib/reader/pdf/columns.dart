@@ -47,7 +47,8 @@ double? typicalPdfColumnWidth(Iterable<PdfColumnPage> pages) {
     for (final region in columns)
       for (final line in region.lines)
         if (!line.isVertical)
-          math.min(region.bounds.width, line.bounds.width + 2),
+          math.min(region.bounds.right, line.bounds.right + _cropPadding) -
+              math.max(region.bounds.left, line.bounds.left - _cropPadding),
   ];
   if (widths.isEmpty) widths.addAll(columns.map((r) => r.bounds.width));
   if (widths.isEmpty) return null;

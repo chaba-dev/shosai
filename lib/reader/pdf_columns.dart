@@ -595,14 +595,6 @@ extension on ReaderController {
               if (columnWidth != null) break;
             }
           }
-          final width = math.max(1.0, layout.width - 2 * pdfStripSideInset);
-          final viewportHeight = math.max(1.0, height - pdfStripHeaderHeight);
-          final rasterHeight =
-              math.min(
-                pdfMaxBitmapDimension / density,
-                pdfMaxBitmapPixels / (width * density).ceil() / density,
-              ) -
-              1;
           final screen = _typographyContinuous
               ? layoutPdfColumnWindow(
                   pages: pages,
@@ -613,13 +605,7 @@ extension on ReaderController {
                   zoom: zoom,
                   columnWidth: columnWidth,
                   topInset: length == null ? 0 : math.min(96, height / 3),
-                  overscan: math.max(
-                    0,
-                    math.min(
-                      viewportHeight,
-                      (rasterHeight - viewportHeight) / 2,
-                    ),
-                  ),
+                  density: density,
                 )
               : layoutPdfColumnScreen(
                   pages: pages,

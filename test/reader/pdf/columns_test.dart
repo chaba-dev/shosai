@@ -34,6 +34,7 @@ void main() {
         [51, 117, 296, 169],
       );
       expect(result.regions.first.lines.first.bounds.left, 54);
+      expect(typicalPdfColumnWidth([result]), 239 + 2 * 3);
 
       final edge = analyzePdfColumns([
         page([line('Edge', 1, 1, 610)]),
@@ -172,6 +173,30 @@ void main() {
       '1:0',
       '2:0',
     ]);
+  });
+
+  test('typical width includes only the crop guard available to each line', () {
+    for (final (crop, x, expected) in [
+      (const PdfRect(0, 0, 150, 100), 1.0, 104.0),
+      (const PdfRect(50, 0, 200, 100), 97.0, 106.0),
+      (const PdfRect(50, 0, 200, 100), 99.0, 104.0),
+    ]) {
+      final region = PdfReadingRegion(
+        kind: PdfRegionKind.column,
+        bounds: crop,
+        lines: [
+          for (var n = 0; n < 6; n++) line('Body$n', x, n * 12, 100),
+          line('Rare overflow', crop.left + 1, 80, 148),
+        ],
+      );
+      expect(
+        typicalPdfColumnWidth([
+          PdfColumnPage(columnCount: 2, regions: [region]),
+        ]),
+        expected,
+        reason: '3pt guards stop at the page edge or crop midpoint',
+      );
+    }
   });
 
   test('only rotated side-margin furniture is omitted from columns', () {
