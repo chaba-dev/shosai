@@ -932,6 +932,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     this.pdfY,
     this.pdfX,
     this.defaultPdfFit,
+    this.pdfFitOverride,
     this.toolError,
     this.returnPoints = const [],
     this.match,
@@ -952,6 +953,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final double? pdfY;
   final double? pdfX;
   final ReaderRasterFit? defaultPdfFit;
+  final FlutterPdfFit? pdfFitOverride;
   final String? toolError;
 
   /// The return points the book opens with: where it was left, when it

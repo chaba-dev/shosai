@@ -673,6 +673,9 @@ final class CoreRecords implements ShosaiRecords {
             zoom: position.zoom,
             pdfY: position.pdfY,
             pdfX: position.pdfX,
+            pdfFit: position.pdfFit == null
+                ? null
+                : FlutterPdfFit.values.byName(position.pdfFit!.name),
           );
   });
 
@@ -690,6 +693,9 @@ final class CoreRecords implements ShosaiRecords {
         zoom: value.zoom,
         pdfY: value.pdfY,
         pdfX: value.pdfX,
+        pdfFit: value.pdfFit == null
+            ? null
+            : PdfFit.values.byName(value.pdfFit!.name),
       ),
       unitCount: unitCount.toInt(),
       lastUnit: value.lastUnit?.toInt(),

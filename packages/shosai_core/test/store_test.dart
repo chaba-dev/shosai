@@ -63,6 +63,41 @@ void main() {
     expect(await Preferences(second).get('kept'), 'yes');
   });
 
+  test(
+    'per-paper fit migration preserves existing positions and defaults',
+    () async {
+      final directory = tempDataDirectory();
+      final path = '${directory.path}/library.sqlite3';
+      final old = await Store.open(
+        path,
+        migrations: schemaMigrations.where((m) => m.version <= 15).toList(),
+      );
+      await old.transaction((db) {
+        db.execute(
+          "INSERT INTO preferences (key, value) VALUES ('reader.pdf_fit', 'fitWidth')",
+        );
+        db.execute('''INSERT INTO reading_state
+        (content_hash, unit, location_offset, zoom, pdf_y, pdf_x)
+        VALUES (printf('%064d', 0), 4, 17, 1.5, 28.5, 316.0)''');
+      });
+      await old.close();
+      final upgraded = await Store.open(path);
+      addTearDown(upgraded.close);
+      expect(await Preferences(upgraded).get('reader.pdf_fit'), 'fitWidth');
+      expect(
+        await upgraded.read((db) {
+          final row = db
+              .select(
+                'SELECT unit, location_offset, zoom, pdf_y, pdf_x, pdf_fit FROM reading_state',
+              )
+              .single;
+          return [for (var i = 0; i < 6; i++) row.columnAt(i)];
+        }),
+        [4, 17, 1.5, 28.5, 316.0, null],
+      );
+    },
+  );
+
   test('later migrations apply in order on an older database', () async {
     final directory = tempDataDirectory();
     final path = '${directory.path}/library.sqlite3';
