@@ -43,12 +43,16 @@ final class PdfTextLine {
     required this.text,
     required this.start,
     required this.end,
+    this.isVertical = false,
   });
 
   /// Painted glyph union, not the loose selection boxes. Physical rows can
   /// therefore expose genuine whitespace cuts even when loose boxes overlap.
   final PdfRect bounds;
   final String text;
+
+  /// Orientation of the sampled baseline after page rotation, not box shape.
+  final bool isVertical;
 
   /// Half-open PDFium character indices, identical to selection/search offsets.
   final int start;

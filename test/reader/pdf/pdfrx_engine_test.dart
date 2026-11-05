@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_flutter/reader/pdf/column_strip.dart';
 import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
@@ -237,10 +238,34 @@ void main() {
         for (var p = 0; p < document.pageCount; p++)
           await document.pageGeometry(p),
       ];
-      expect(
-        analyzePdfColumns(pages).map((p) => p.columnCount),
-        List.filled(8, 2),
-      );
+      final results = analyzePdfColumns(pages);
+      expect(results.map((p) => p.columnCount), List.filled(8, 2));
+      final bodyWidth = typicalPdfColumnWidth(
+        analyzePdfColumns(pages.take(3).toList()),
+      )!;
+      expect(bodyWidth, closeTo(241, 1));
+      final metadata = {
+        for (var p = 0; p < pages.length; p++)
+          p: PdfStripPage(pages[p], results[p]),
+      };
+      // Page 7's overflowing code used to shrink only its right column.
+      final bodyPieces = [
+        for (var r = 0; r < results[6].regions.length; r++)
+          if (results[6].regions[r].kind == PdfRegionKind.column)
+            layoutPdfColumnScreen(
+              pages: metadata,
+              pageCount: pages.length,
+              start: PdfStripPosition(6, region: r),
+              width: 412,
+              height: 775,
+              columnWidth: bodyWidth,
+            ).pieces.first,
+      ];
+      expect(bodyPieces, hasLength(2));
+      expect(bodyPieces.first.scale, 412 / bodyWidth);
+      expect(bodyPieces.last.scale, bodyPieces.first.scale);
+      expect(bodyPieces.last.width, greaterThan(412));
+      expect(bodyPieces.last.left, 0);
       // Former loose-box chains on exactly the device-reported pages/blocks.
       for (final (p, top, bottom, count) in [
         (0, 339, 378, 4),

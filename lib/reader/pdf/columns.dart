@@ -34,6 +34,39 @@ final class PdfColumnPage {
   final List<PdfReadingRegion> regions;
 }
 
+/// One body width for a document's representative sample, in page points.
+/// The upper quartile keeps ragged paragraph endings and inset abstracts from
+/// enlarging body text, without letting rare overflowing code/equations shrink
+/// it. Bands, figures and margin furniture do not vote. Include crop padding.
+double? typicalPdfColumnWidth(Iterable<PdfColumnPage> pages) {
+  final columns = pages
+      .expand((p) => p.regions)
+      .where((r) => r.kind == PdfRegionKind.column)
+      .toList();
+  final widths = [
+    for (final region in columns)
+      for (final line in region.lines)
+        if (!line.isVertical)
+          math.min(region.bounds.width, line.bounds.width + 2),
+  ];
+  if (widths.isEmpty) widths.addAll(columns.map((r) => r.bounds.width));
+  if (widths.isEmpty) return null;
+  widths.sort();
+  final lineWidth = widths[(widths.length * .75).floor()];
+  // Justified lines have slightly different glyph starts/overhangs. Prefer an
+  // actual crop near the typical line width so ordinary ink and its padding
+  // fit too, but do not admit inset abstracts or unusually wide code crops.
+  final crops =
+      columns
+          .map((r) => r.bounds.width)
+          .where(
+            (width) => width >= lineWidth * .95 && width <= lineWidth * 1.05,
+          )
+          .toList()
+        ..sort();
+  return crops.isEmpty ? lineWidth : crops[crops.length ~/ 2];
+}
+
 /// Analyzes a document (or a representative page sample) without mutating it.
 /// The output has one entry per input page, in the same order. Fallback bounds
 /// trim only proven empty margins; unknown painted coverage keeps the page.
@@ -53,7 +86,24 @@ List<PdfColumnPage> analyzePdfColumns(
     for (var p = 0; p < pages.length; p++)
       _analyzePage(
         pages[p],
-        pages[p].lines.where((line) => !recurring[p].contains(line)).toList(),
+        pages[p].lines.where((line) {
+          // A sideways arXiv stamp is margin furniture, not a tall body row.
+          // Keep vertical text inside the reading area and all horizontal text,
+          // even when its ink box happens to be tall and narrow.
+          final sideStamp =
+              line.isVertical &&
+              line.bounds.height > pages[p].height * .25 &&
+              (line.bounds.right <= pages[p].width * .1 ||
+                  line.bounds.left >= pages[p].width * .9) &&
+              pages[p].lines.any(
+                (body) =>
+                    !body.isVertical &&
+                    body.bounds.width > pages[p].width * .2 &&
+                    (body.bounds.left > line.bounds.right ||
+                        body.bounds.right < line.bounds.left),
+              );
+          return !sideStamp && !recurring[p].contains(line);
+        }).toList(),
         rightToLeft,
       ),
   ]);

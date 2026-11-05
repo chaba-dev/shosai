@@ -351,6 +351,14 @@ extension on ReaderController {
         }
         if (!current()) return;
       }
+      // Use the same bounded sample on every turn/reopen, independent of the
+      // target page and which later pages happen to be cached.
+      final columnWidth = typicalPdfColumnWidth(
+        analyzePdfColumns(
+          samples.values.toList(),
+          rightToLeft: pdf.rightToLeft,
+        ),
+      );
       Future<bool> load(int p) async {
         if (pages.containsKey(p)) return true;
         PdfPageGeometry geometry;
@@ -388,6 +396,7 @@ extension on ReaderController {
             width: math.max(1, layout.width - 2 * pdfStripSideInset),
             height: math.max(1, height - pdfStripHeaderHeight),
             zoom: zoom,
+            columnWidth: columnWidth,
             // A jumped-to range must clear the overlaid toolbar and capsule.
             // Reserve space in layout, not by hiding part of the raster.
             topInset: length == null

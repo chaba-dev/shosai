@@ -213,6 +213,105 @@ void main() {
       .whereType<PagePainter>()
       .firstOrNull;
 
+  for (final paper in [
+    (
+      name: 'thrift',
+      page: 6,
+      turns: 6,
+      path: 'fixtures/pdf-columns/thrift.pdf',
+    ),
+    (name: 'bert', page: 0, turns: 5, path: Platform.environment['BERT_PDF']),
+    (
+      name: 'resnet',
+      page: 0,
+      turns: 5,
+      path: Platform.environment['RESNET_PDF'],
+    ),
+  ]) {
+    testWidgets(
+      '${paper.name}: body scale survives column and page turns',
+      (tester) async {
+        tester.view.physicalSize = const Size(880, 1800);
+        tester.view.devicePixelRatio = 2;
+        tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+        addTearDown(tester.view.reset);
+        final directory = await Directory.systemTemp.createTemp('body-scale-');
+        final path = '${directory.path}/${paper.name}.pdf';
+        await File(paper.path!).copy(path);
+        final bridge = await createApplicationBridge(
+          applicationSupportDirectory: () async => directory,
+        );
+        await tester.pumpWidget(
+          ShosaiShell(
+            locale: const Locale('ja'),
+            home: RepaintBoundary(
+              key: captureKey,
+              child: ReaderScreen(
+                bridge: bridge,
+                initialPath: path,
+                initialPlace: ReaderPlace(paper.page),
+                initialSettings: const FlutterReaderSettings(
+                  continuous: false,
+                  theme: 'light',
+                  epubFontSize: 18,
+                  epubLineSpacing: 1.6,
+                  pdfZoom: 0,
+                  pdfFit: FlutterPdfFit.columns,
+                  twoPages: false,
+                  zonesHintDismissed: true,
+                ),
+              ),
+            ),
+          ),
+        );
+        await until(tester, () => raster.evaluate().isNotEmpty);
+        final pdf = await PdfrxPdfEngine().open(path);
+        final geometry = [
+          for (var p = 0; p < pdf.pageCount; p++) await pdf.pageGeometry(p),
+        ];
+        final regions = analyzePdfColumns(geometry);
+        await pdf.dispose();
+        double? bodyScale;
+        final bodyPages = <int>{};
+        for (var turn = 0; turn < paper.turns; turn++) {
+          final screen = painting(tester)!.columns!;
+          for (final piece in screen.pieces) {
+            if (regions[piece.page].regions[piece.region].kind !=
+                PdfRegionKind.column) {
+              continue;
+            }
+            bodyScale ??= piece.scale;
+            expect(
+              piece.scale,
+              bodyScale,
+              reason:
+                  '${paper.name}: one body scale, including the first column',
+            );
+            expect(piece.scale, inInclusiveRange(1.65, 1.95));
+            bodyPages.add(piece.page);
+          }
+          expect(tester.getTopLeft(folio).dy, greaterThanOrEqualTo(59));
+          expect(tester.getBottomRight(raster).dy, lessThanOrEqualTo(866));
+          await capture('${paper.name}-body-$turn');
+          if (turn + 1 == paper.turns) break;
+          final before = tester.widget<RawImage>(raster).image;
+          await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+          await until(
+            tester,
+            () => tester.widget<RawImage>(raster).image != before,
+          );
+        }
+        expect(bodyPages, containsAll([paper.page, paper.page + 1]));
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await closeApplicationCores();
+        await directory.delete(recursive: true);
+        expect(tester.takeException(), isNull);
+      },
+      skip: paper.path == null,
+    );
+  }
+
   for (final scenario in [
     (reopen: false, detail: false, scan: false),
     (reopen: true, detail: false, scan: false),
