@@ -438,6 +438,49 @@ void main() {
     },
   );
 
+  test(
+    'PDF fit is global and survives other Display changes and restart',
+    () async {
+      final bridge = _StubLibraryBridge();
+      var controller = _controller(bridge);
+      controller.dispatch(const LibraryStarted());
+      await _settle();
+      bridge.pages.single.complete(
+        FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+      );
+      await _settle();
+
+      controller.dispatch(
+        const LibraryDisplayChanged(pdfFit: FlutterPdfFit.columns),
+      );
+      await _settle();
+      controller.dispatch(
+        LibrarySettingsChanged(
+          controller.model.settings!.copyWith(pdfFit: FlutterPdfFit.fitPage),
+        ),
+      );
+      controller.dispatch(const LibraryDisplayChanged(theme: 'sepia'));
+      await _settle();
+      expect(bridge.storedSettings.pdfFit, FlutterPdfFit.fitPage);
+
+      controller.dispose();
+      await _settle();
+      final reopenedBridge = _StubLibraryBridge()
+        ..storedSettings = bridge.storedSettings;
+      controller = _controller(reopenedBridge);
+      controller.dispatch(const LibraryStarted());
+      await _settle();
+      reopenedBridge.pages.single.complete(
+        FlutterLibraryPage(books: [_book(2, 'Another Book')], hasMore: false),
+      );
+      await _settle();
+      expect(controller.model.settings?.pdfFit, FlutterPdfFit.fitPage);
+      expect(controller.model.settings?.theme, 'sepia');
+      controller.dispose();
+      await _settle();
+    },
+  );
+
   test('the reader\'s theme, text size and line spacing are saved', () async {
     final bridge = _StubLibraryBridge();
     final controller = _controller(bridge);

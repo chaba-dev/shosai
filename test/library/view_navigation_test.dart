@@ -238,10 +238,18 @@ void main() {
     double textScale = 1,
     List<FlutterLibraryBook>? books,
     Locale? locale,
+    FlutterReaderSettings settings = const FlutterReaderSettings(
+      continuous: false,
+      theme: 'light',
+      epubFontSize: 18,
+      epubLineSpacing: 1.6,
+      pdfZoom: 0,
+    ),
   }) async {
     final bridge = HarnessBridge(
       books: books ?? harnessLibraryBooks(),
       covers: harnessCovers(),
+      settings: settings,
     );
     final view = HarnessView(size: size, textScale: textScale);
     view.apply(tester);
@@ -1357,6 +1365,73 @@ void main() {
   });
 
   group('interface localization', () {
+    for (final initial in [null, FlutterPdfFit.columns]) {
+      testWidgets(
+        'Japanese Settings PDF fit replaces $initial with an explicit choice',
+        (tester) async {
+          final bridge = await pumpLibrary(
+            tester,
+            const Size(1280, 1000),
+            locale: const Locale('ja'),
+            settings: harnessReaderSettings.copyWith(pdfFit: initial),
+          );
+          await tester.tap(navigationEntry('設定'));
+          await tester.pumpAndSettle();
+          final select = find.descendant(
+            of: find.byWidgetPredicate(
+              (widget) =>
+                  widget is Column &&
+                  widget.children.any(
+                    (child) => child is Text && child.data == 'PDF のズーム',
+                  ),
+            ),
+            matching: find.byWidgetPredicate((widget) => widget is ShadSelect),
+          );
+          await tester.ensureVisible(select);
+          expect(
+            find.descendant(
+              of: select,
+              matching: find.text(initial == null ? '自動' : '段組み'),
+            ),
+            findsOneWidget,
+          );
+          await captureHarnessArtifact(
+            tester,
+            'fit-settings-${initial?.name ?? 'automatic'}',
+          );
+          await tester.tap(select);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('ページに合わせる').last);
+          await tester.pumpAndSettle();
+          expect(bridge.savedSettings?.pdfFit, FlutterPdfFit.fitPage);
+          await captureHarnessArtifact(tester, 'fit-settings-page');
+
+          await tester.tap(select);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('幅に合わせる').last);
+          await tester.pumpAndSettle();
+          expect(bridge.savedSettings?.pdfFit, FlutterPdfFit.fitWidth);
+          await captureHarnessArtifact(tester, 'fit-settings-width');
+
+          await tester.tap(select);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('100%').last);
+          await tester.pumpAndSettle();
+          expect(bridge.savedSettings?.pdfFit, isNull);
+          expect(bridge.savedSettings?.pdfZoom, 1);
+          await captureHarnessArtifact(tester, 'fit-settings-manual');
+
+          await tester.tap(select);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('自動').last);
+          await tester.pumpAndSettle();
+          expect(bridge.savedSettings?.pdfFit, isNull);
+          expect(bridge.savedSettings?.pdfZoom, 0);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
     for (final (locale, settings, paper, sepia, night) in const [
       ('en', 'Settings', 'Paper', 'Sepia', 'Night'),
       ('ja', '設定', '紙', 'セピア', '夜'),
@@ -1396,7 +1471,7 @@ void main() {
             expect(find.text('EPUB の文字サイズ'), findsOneWidget);
             expect(find.text('EPUB の行間'), findsOneWidget);
             expect(find.text('PDF のズーム'), findsOneWidget);
-            expect(find.text('ページに合わせる'), findsOneWidget);
+            expect(find.text('自動'), findsOneWidget);
           }
           await captureHarnessArtifact(tester, 'localized-settings-$locale');
         },

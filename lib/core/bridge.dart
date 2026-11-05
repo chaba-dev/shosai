@@ -866,7 +866,8 @@ class FlutterReaderSettings {
   final double epubLineSpacing;
   final double pdfZoom;
 
-  /// Null until a reader explicitly chooses a PDF fit in Display.
+  /// Global Display choice; null uses the legacy [pdfZoom] value and permits
+  /// automatic phone fitting only at its untouched zero default.
   final FlutterPdfFit? pdfFit;
 
   /// The Pages setting: two pages side by side where there is room for them.
@@ -890,13 +891,16 @@ class FlutterReaderSettings {
     this.librarySort = FlutterLibrarySort.recent,
   });
 
+  static const _samePdfFit = Object();
+
+  /// Omit [pdfFit] to keep the choice; pass null when choosing a manual zoom.
   FlutterReaderSettings copyWith({
     bool? continuous,
     String? theme,
     double? epubFontSize,
     double? epubLineSpacing,
     double? pdfZoom,
-    FlutterPdfFit? pdfFit,
+    Object? pdfFit = _samePdfFit,
     bool? twoPages,
     bool? animations,
     FlutterReaderProgress? progress,
@@ -908,7 +912,9 @@ class FlutterReaderSettings {
     epubFontSize: epubFontSize ?? this.epubFontSize,
     epubLineSpacing: epubLineSpacing ?? this.epubLineSpacing,
     pdfZoom: pdfZoom ?? this.pdfZoom,
-    pdfFit: pdfFit ?? this.pdfFit,
+    pdfFit: identical(pdfFit, _samePdfFit)
+        ? this.pdfFit
+        : pdfFit as FlutterPdfFit?,
     twoPages: twoPages ?? this.twoPages,
     animations: animations ?? this.animations,
     progress: progress ?? this.progress,
