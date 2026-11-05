@@ -195,8 +195,8 @@ void main() {
       expect(result.columnCount, 2);
       expect(result.regions.expand((r) => r.lines).contains(stamp), !omitted);
       if (omitted) {
-        expect(result.regions.first.bounds.left, 53);
-        expect(result.regions.first.bounds.right, 294);
+        expect(result.regions.first.bounds.left, 54 - 3);
+        expect(result.regions.first.bounds.right, 54 + 239 + 3);
       }
     }
   });
