@@ -8,7 +8,7 @@ plugins {
 }
 
 // Flutter passes both --dart-define and --dart-define-from-file here. Keep
-// the SDK callback scheme aligned with Dart, including fork registrations.
+// the browser callback scheme aligned with Dart, including fork registrations.
 val dartDefines = (project.findProperty("dart-defines") as? String)
     .orEmpty().split(",").filter { it.isNotEmpty() }.associate {
         val value = String(Base64.getDecoder().decode(it), Charsets.UTF_8)
@@ -31,7 +31,6 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
-    buildFeatures { buildConfig = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
 
     sourceSets.configureEach {
@@ -52,11 +51,8 @@ android {
         // Debug and profile builds (Flutter's profile type starts from debug)
         // are told apart from the released app on the launcher.
         manifestPlaceholders["appLabel"] = "Shōsai Dev"
-        manifestPlaceholders["dropboxKey"] = dropboxKey
-        buildConfigField("String", "DROPBOX_APP_KEY", "\"$dropboxKey\"")
-        // AppAuth is used only on iOS. Android Google authorization uses GIS,
-        // never this plugin's custom-scheme redirect receiver.
-        manifestPlaceholders["appAuthRedirectScheme"] = "dev.shosai.unused-appauth"
+        // Dropbox uses AppAuth's browser callback. Google still uses GIS.
+        manifestPlaceholders["appAuthRedirectScheme"] = "db-$dropboxKey"
     }
 
     buildTypes {
@@ -74,8 +70,6 @@ flutter {
 }
 
 dependencies {
-    // Last SDK supporting API 21+ / Java 17; 7.1+ requires API 26, 8.x Java 21.
-    implementation("com.dropbox.core:dropbox-android-sdk:7.0.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
 }

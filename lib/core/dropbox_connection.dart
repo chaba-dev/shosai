@@ -11,16 +11,17 @@ import 'package:crypto/crypto.dart';
 import 'package:shosai_core/shosai_core.dart';
 
 import 'connection_credentials.dart';
+import 'dropbox_authorization.dart';
 import 'dropbox_location.dart';
 import 'library_connection.dart';
 
-/// Desktop uses no-redirect PKCE; mobile adapters use Dropbox's native SDKs.
-/// Both hand renewable credentials to the same per-connection vault lifecycle.
+/// Desktop uses no-redirect PKCE; mobile uses a browser callback with AppAuth.
+/// Dart exchanges both codes into the same per-connection vault lifecycle.
 final class DropboxConnectionProvider implements ConnectionProvider {
   DropboxConnectionProvider({
     required this.credentials,
     this.authorize,
-    this.authorizeNative,
+    this.authorizeRedirect,
     this.clientId = defaultClientId,
     Uri? tokenEndpoint,
     this.api,
@@ -37,8 +38,10 @@ final class DropboxConnectionProvider implements ConnectionProvider {
 
   final ConnectionCredentialStore credentials;
   final Future<String?> Function(Uri authorization)? authorize;
-  final Future<Map<String, dynamic>?> Function(String clientId)?
-  authorizeNative;
+  final Future<({String code, String verifier, String redirect})?> Function(
+    String clientId,
+  )?
+  authorizeRedirect;
   final String clientId;
   final Uri tokenEndpoint;
   final Uri? api;
@@ -50,14 +53,14 @@ final class DropboxConnectionProvider implements ConnectionProvider {
 
   @override
   Future<LibraryConnection?> setup(String connectionId) async {
-    if (clientId.isEmpty || (authorize == null && authorizeNative == null)) {
+    if (clientId.isEmpty || (authorize == null && authorizeRedirect == null)) {
       throw const CoreException(
         CoreErrorKind.unsupported,
         'This build needs a registered Dropbox app key.',
       );
     }
-    final tokens = await (authorizeNative != null
-        ? authorizeNative!(clientId)
+    final tokens = await (authorizeRedirect != null
+        ? _authorizeRedirect()
         : _authorizeDesktop());
     if (tokens == null) return null;
     final refresh = tokens['refresh_token'];
@@ -84,6 +87,17 @@ final class DropboxConnectionProvider implements ConnectionProvider {
     return connection;
   }
 
+  Future<Map<String, dynamic>?> _authorizeRedirect() async {
+    final result = await authorizeRedirect!(clientId);
+    if (result == null) return null;
+    return _token({
+      'grant_type': 'authorization_code',
+      'code': result.code,
+      'code_verifier': result.verifier,
+      'redirect_uri': result.redirect,
+    });
+  }
+
   Future<Map<String, dynamic>?> _authorizeDesktop() async {
     final verifier = _random();
     final authorization = Uri.https('www.dropbox.com', '/oauth2/authorize', {
@@ -94,7 +108,7 @@ final class DropboxConnectionProvider implements ConnectionProvider {
       'code_challenge': base64Url
           .encode(sha256.convert(ascii.encode(verifier)).bytes)
           .replaceAll('=', ''),
-      'scope': 'files.metadata.read files.content.read files.content.write',
+      'scope': dropboxScopes.join(' '),
     });
     final code = await authorize!(authorization);
     if (code == null) return null;
