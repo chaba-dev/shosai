@@ -389,6 +389,7 @@ void main() {
                       animations: false,
                       progress: null,
                       zonesHintDismissed: null,
+                      pdfFit: null,
                     )),
                     child: const Text('One page'),
                   ),
@@ -1491,7 +1492,9 @@ void main() {
             return _realReader(
               bridge,
               book,
-              settings,
+              (settings ?? harnessReaderSettings).copyWith(
+                pdfFit: FlutterPdfFit.fitPage,
+              ),
               path,
               bookId,
               locatorChanged,

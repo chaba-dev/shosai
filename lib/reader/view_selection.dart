@@ -527,6 +527,13 @@ class _ReachableSelectableSurface extends StatelessWidget {
         ) => _ReaderPageGestures(
           model: model,
           dispatch: dispatch,
+          pdfScrollScale:
+              document.format == FlutterBookFormat.pdf && fit != BoxFit.contain
+              ? model.layout.scale *
+                    (fit == BoxFit.fitWidth
+                        ? constraints.maxWidth / surface.width
+                        : 1)
+              : null,
           fittedZoom: document.format == FlutterBookFormat.pdf
               ? model.typography.rasterZoom *
                     SurfaceTransform.create(
@@ -633,15 +640,20 @@ class _ReachableSelectableSurface extends StatelessWidget {
 /// to handle wheel/trackpad input without competing for touch pinches.
 class _ReaderPageGestures extends StatefulWidget {
   const _ReaderPageGestures({
+    super.key,
     required this.model,
     required this.dispatch,
     required this.fittedZoom,
     required this.builder,
+    this.columnsScreen,
+    this.pdfScrollScale,
   });
 
   final ReaderModel model;
   final void Function(ReaderMessage) dispatch;
   final double? fittedZoom;
+  final PdfStripScreen? columnsScreen;
+  final double? pdfScrollScale;
   final Widget Function(ScrollController, ScrollController) builder;
 
   @override
@@ -659,8 +671,96 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   double _startZoom = 1;
   double _startSpan = 1;
   double _previewScale = 1;
+  PdfStripPiece? _columnsZoomPiece;
+  bool get _canZoom => widget.fittedZoom != null || _columnsZoomPiece != null;
   bool _multiTouch = false;
   bool _cancelled = false;
+  bool _revealing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _horizontal.addListener(_pdfScrolled);
+    _vertical.addListener(_pdfScrolled);
+    _revealPdfPlace();
+  }
+
+  void _pdfScrolled() {
+    if (_revealing) return;
+    final screen = widget.columnsScreen;
+    if (screen?.strip != null &&
+        _horizontal.hasClients &&
+        _vertical.hasClients) {
+      widget.dispatch(
+        ReaderColumnsViewportChanged(
+          screen!,
+          Rect.fromLTWH(
+            _horizontal.offset,
+            _vertical.offset,
+            _horizontal.position.viewportDimension,
+            _vertical.position.viewportDimension,
+          ),
+        ),
+      );
+      return;
+    }
+    final scale = widget.pdfScrollScale;
+    if (scale == null || !_vertical.hasClients) return;
+    widget.dispatch(
+      ReaderPdfViewportChanged(
+        widget.model.generation,
+        widget.model.locationRequestRevision,
+        _vertical.offset / scale,
+      ),
+    );
+  }
+
+  void _revealPdfPlace() {
+    final screen = widget.columnsScreen;
+    final detail = screen?.strip != null;
+    if (!detail && widget.pdfScrollScale == null || widget.model.relayoutBusy) {
+      return;
+    }
+    final generation = widget.model.generation;
+    final revision = widget.model.locationRequestRevision;
+    // Do not durably report origin or a half-restored two-axis viewport.
+    _revealing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          widget.model.generation != generation ||
+          widget.model.locationRequestRevision != revision ||
+          widget.model.relayoutBusy ||
+          !_vertical.hasClients ||
+          (detail
+              ? !identical(screen, widget.columnsScreen) ||
+                    !_horizontal.hasClients
+              : widget.pdfScrollScale == null)) {
+        return;
+      }
+      if (detail) {
+        final piece = screen!.pieces.single;
+        final point = piece.fromPage(widget.model.pdfX!, widget.model.pdfY!);
+        _horizontal.jumpTo(
+          (point.x - _horizontal.position.viewportDimension / 2).clamp(
+            0.0,
+            _horizontal.position.maxScrollExtent,
+          ),
+        );
+        _vertical.jumpTo(
+          point.y.clamp(0.0, _vertical.position.maxScrollExtent),
+        );
+      } else {
+        _vertical.jumpTo(
+          ((widget.model.pdfY ?? 0) * widget.pdfScrollScale!).clamp(
+            0.0,
+            _vertical.position.maxScrollExtent,
+          ),
+        );
+      }
+      _revealing = false;
+      if (detail) _pdfScrolled();
+    });
+  }
 
   @override
   void dispose() {
@@ -685,6 +785,12 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   @override
   void didUpdateWidget(_ReaderPageGestures oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.model.locationRequestRevision !=
+            widget.model.locationRequestRevision ||
+        oldWidget.pdfScrollScale != widget.pdfScrollScale ||
+        oldWidget.model.relayoutBusy && !widget.model.relayoutBusy) {
+      _revealPdfPlace();
+    }
     if (_startedPage != _page) {
       _startedPage = null;
       _previewScale = 1;
@@ -704,12 +810,24 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     }
     if (_multiTouch) {
       turn?.release(complete: false);
-      if (widget.fittedZoom != null && (scale - 1).abs() >= .03) {
-        widget.dispatch(ReaderTypographyChanged(zoom: _startZoom * scale));
+      if (_canZoom && (scale - 1).abs() >= .03) {
+        final screen = widget.columnsScreen;
+        if (screen != null) {
+          widget.dispatch(
+            ReaderColumnsDetailRequested(
+              screen,
+              _columnsZoomPiece!,
+              _startZoom * scale,
+            ),
+          );
+        } else {
+          widget.dispatch(ReaderTypographyChanged(zoom: _startZoom * scale));
+        }
       }
       return;
     }
-    if (model.continuousPresentation ||
+    if ((widget.columnsScreen?.detailZoom ?? 1) > 1 ||
+        model.continuousPresentation ||
         _readerFit(model.typography) != BoxFit.contain ||
         _distance.dx.abs() < 18 ||
         _distance.dx.abs() < _distance.dy.abs() * 1.5) {
@@ -720,7 +838,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     final total = model.document?.logicalUnitCount.toInt() ?? 0;
     if (_canStepPage(model, delta, total)) {
       final velocity = _velocity?.getVelocity().pixelsPerSecond.dx ?? 0;
-      if (turn != null) {
+      if (turn != null && !model.columnsPresentation) {
         turn.release(
           complete:
               turn.pastMidpoint ||
@@ -774,41 +892,8 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       _ReaderTurnScope.of(context)?.release(complete: false);
       setState(() => _previewScale = 1);
     },
-    child: RawGestureDetector(
-      excludeFromSemantics: true,
-      behavior: HitTestBehavior.opaque,
-      gestures: {
-        if (widget.fittedZoom != null && _enabled)
-          _ReaderZoomDoubleTap:
-              GestureRecognizerFactoryWithHandlers<_ReaderZoomDoubleTap>(
-                () => _ReaderZoomDoubleTap(
-                  supportedDevices: const {ui.PointerDeviceKind.touch},
-                ),
-                (recognizer) => recognizer
-                  ..allows = _zoomsOnDoubleTap
-                  ..onDoubleTap = _zoomOnDoubleTap,
-              ),
-      },
-      child: _scaleGestures(context),
-    ),
+    child: _scaleGestures(context),
   );
-
-  /// A double tap zooms only where a single tap does not turn the page: in
-  /// the quiet page's outer quarters, a waiting double-tap recognizer would
-  /// hold every tap there for the double-tap timeout before the page turns.
-  bool _zoomsOnDoubleTap(PointerDownEvent event) {
-    final tap = _ReaderPageTapScope.tap(context, event.position, event.kind);
-    return tap == null || !readerTapTurns(widget.model, tap);
-  }
-
-  void _zoomOnDoubleTap() {
-    if (!_enabled) return;
-    widget.dispatch(
-      widget.model.typography.rasterFit == ReaderRasterFit.manual
-          ? const ReaderTypographyChanged(rasterFit: ReaderRasterFit.fitPage)
-          : ReaderTypographyChanged(zoom: widget.fittedZoom! * 2),
-    );
-  }
 
   Widget _scaleGestures(BuildContext context) => GestureDetector(
     supportedDevices: const {ui.PointerDeviceKind.touch},
@@ -816,7 +901,32 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     behavior: HitTestBehavior.opaque,
     onScaleStart: (details) {
       if (_startedPage != null) return;
-      _startZoom = widget.fittedZoom ?? 1;
+      final screen = widget.columnsScreen;
+      _columnsZoomPiece = null;
+      if (screen != null) {
+        // In detail, even a short figure's surrounding paper belongs to that
+        // figure: a pinch on the blank area must still return to the strip.
+        if (screen.strip != null) _columnsZoomPiece = screen.pieces.single;
+        final point =
+            details.localFocalPoint +
+            Offset(
+              _horizontal.hasClients ? _horizontal.offset : 0,
+              _vertical.hasClients ? _vertical.offset : 0,
+            );
+        for (final piece in screen.pieces) {
+          if (piece.zoomable &&
+              Rect.fromLTWH(
+                piece.left,
+                piece.top,
+                piece.width,
+                piece.height,
+              ).contains(point)) {
+            _columnsZoomPiece = piece;
+            break;
+          }
+        }
+      }
+      _startZoom = screen?.detailZoom ?? widget.fittedZoom ?? 1;
       _startedPage = _enabled && !_cancelled ? _page : null;
     },
     onScaleUpdate: (details) {
@@ -832,7 +942,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
           _distance.dx.abs() >= _distance.dy.abs() * 1.5) {
         turn?.drag(_distance.dx);
       }
-      if (!_multiTouch && widget.fittedZoom != null && _enabled) {
+      if (!_multiTouch &&
+          (widget.fittedZoom != null || widget.columnsScreen != null) &&
+          _enabled) {
         for (final (controller, delta) in [
           (_horizontal, details.focalPointDelta.dx),
           (_vertical, details.focalPointDelta.dy),
@@ -849,14 +961,19 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       }
       if (_pointers.length == 2 &&
           _startSpan > 0 &&
-          widget.fittedZoom != null &&
+          _canZoom &&
           _startedPage == _page &&
           _enabled) {
         final scale =
             (_pointers.values.first - _pointers.values.last).distance /
             _startSpan;
         setState(
-          () => _previewScale = (_startZoom * scale).clamp(.25, 5) / _startZoom,
+          () => _previewScale =
+              (_startZoom * scale).clamp(
+                widget.columnsScreen == null ? .25 : 1,
+                5,
+              ) /
+              _startZoom,
         );
       }
     },
@@ -876,11 +993,13 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     child: ClipRect(
       clipBehavior: _previewScale == 1 ? Clip.none : Clip.hardEdge,
       child: Transform.scale(
-        scale: _previewScale,
+        // Columns detail adopts freshly clipped PDF pixels after the pinch;
+        // it never magnifies the old strip bitmap, even as a preview.
+        scale: widget.columnsScreen == null ? _previewScale : 1,
         child: ScrollConfiguration(
           // Only the inner PDF owner pans its scroll controllers itself.
           // A furniture fallback must preserve descendant touch scrolling.
-          behavior: widget.fittedZoom == null
+          behavior: widget.fittedZoom == null && widget.columnsScreen == null
               ? ScrollConfiguration.of(context)
               : ScrollConfiguration.of(context).copyWith(
                   dragDevices: {...ScrollConfiguration.of(context).dragDevices}
@@ -1128,6 +1247,7 @@ class _SelectableSurface extends StatefulWidget {
     required this.model,
     required this.fit,
     required this.dispatch,
+    this.paintContent = true,
   });
 
   final FlutterSelectionSurface surface;
@@ -1138,6 +1258,7 @@ class _SelectableSurface extends StatefulWidget {
   final ReaderModel model;
   final BoxFit fit;
   final void Function(ReaderMessage) dispatch;
+  final bool paintContent;
 
   @override
   State<_SelectableSurface> createState() => _SelectableSurfaceState();
@@ -1150,12 +1271,14 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
   /// activates it (the evaluated prototype's policy). A drag is a selection
   /// gesture and never activates a link.
   static const double _tapSlop = 6;
+  Offset _doubleTap = Offset.zero;
 
   int? _touchPointer;
 
   /// The pointer that may still become a tap, and where it went down.
   int? _tapPointer;
   Offset? _tapOrigin;
+  bool _tapDismissesSelection = false;
   final Set<int> _tapPointers = {};
 
   /// Starts a tap candidate for a primary press.
@@ -1170,6 +1293,8 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     if (!primary) return;
     _tapPointer = event.pointer;
     _tapOrigin = event.localPosition;
+    _tapDismissesSelection =
+        widget.model.selectionPhase == ReaderSelectionPhase.selected;
   }
 
   /// Drops the candidate once the press travels past [_tapSlop].
@@ -1208,11 +1333,13 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     // A touch tap anywhere on the page leaves a finished selection, as Esc
     // does; the capsule has no Cancel. (A mouse press already cancels on
     // pointer down.) It neither follows a link nor turns the page.
-    if (details.kind != ui.PointerDeviceKind.mouse &&
-        widget.model.selectionPhase == ReaderSelectionPhase.selected) {
+    if (details.kind != ui.PointerDeviceKind.mouse && _tapDismissesSelection) {
       widget.dispatch(const ReaderSelectionCancelled());
       return;
     }
+    // Keyboard selection may have started while this single tap waited for
+    // a possible second tap. It must not dismiss or navigate that selection.
+    if (widget.model.selectionPhase != ReaderSelectionPhase.idle) return;
     final pageTap = _ReaderPageTapScope.tap(
       context,
       details.globalPosition,
@@ -1372,117 +1499,146 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             }
             if (_touchPointer == event.pointer) _touchPointer = null;
           },
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            // The document semantics owns its guarded selection action. A
-            // coordinate-based link tap is not a document-wide a11y action.
-            excludeFromSemantics: true,
-            // Let the gesture arena distinguish a tap from PDF double-tap
-            // zoom, a pinch, a page swipe, and a long-press selection first.
-            onTapUp: (details) => _endTapCandidate(details, transform),
-            onTapCancel: _clearTapCandidate,
-            onLongPressStart: (details) {
-              // A long press is a selection gesture, never a link tap.
-              _clearTapCandidate();
-              final pointer = _touchPointer;
-              final value = endpoint(details.localPosition);
-              if (pointer == null || value == null) return;
-              final source = transform.toSource(details.localPosition);
-              widget.dispatch(
-                ReaderSelectionPointerStarted(
-                  pointer,
-                  value.offset.toInt(),
-                  rangeStart: value.rangeStart.toInt(),
-                  rangeEnd: value.rangeEnd.toInt(),
-                  x: source.dx,
-                  y: source.dy,
-                ),
-              );
+          child: RawGestureDetector(
+            gestures: {
+              _ReaderPdfDoubleTap:
+                  GestureRecognizerFactoryWithHandlers<_ReaderPdfDoubleTap>(
+                    () => _ReaderPdfDoubleTap(
+                      supportedDevices: const {ui.PointerDeviceKind.touch},
+                    ),
+                    (recognizer) => recognizer
+                      ..enabled = () {
+                        return widget.model.document?.format ==
+                                FlutterBookFormat.pdf &&
+                            widget.model.selectionPhase ==
+                                ReaderSelectionPhase.idle;
+                      }
+                      ..onDoubleTapDown = (details) {
+                        _doubleTap = transform.toSource(details.localPosition);
+                      }
+                      ..onDoubleTap = () => widget.dispatch(
+                        ReaderPdfDoubleTapped(_doubleTap.dx, _doubleTap.dy),
+                      ),
+                  ),
             },
-            onLongPressMoveUpdate: (details) {
-              final pointer = _touchPointer;
-              final value = endpoint(details.localPosition, nearest: true);
-              if (pointer == null || value == null) return;
-              final source = transform.toSource(
-                details.localPosition,
-                clamp: true,
-              );
-              widget.dispatch(
-                ReaderSelectionPointerMoved(
-                  pointer,
-                  value.offset.toInt(),
-                  x: source.dx,
-                  y: source.dy,
-                ),
-              );
-            },
-            onLongPressEnd: (_) {
-              final pointer = _touchPointer;
-              if (pointer != null) {
-                widget.dispatch(ReaderSelectionPointerEnded(pointer));
-              }
-              _touchPointer = null;
-            },
-            onLongPressCancel: () {
-              final pointer = _touchPointer;
-              if (pointer != null) {
-                widget.dispatch(ReaderSelectionPointerCancelled(pointer));
-              }
-              _touchPointer = null;
-            },
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // A PDF page lies on the stage like the EPUB page's paper,
-                // with `shadow-page` under the raster; a phone page is
-                // full-bleed and has none.
-                if (pdfPageShadow)
-                  Positioned.fromRect(
-                    rect: transform.destination,
-                    child: DecoratedBox(
-                      key: const ValueKey('reader-pdf-page-shadow'),
-                      decoration: BoxDecoration(
-                        boxShadow: _readerPageShadow(ShellPalette.of(context)),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              // The document semantics owns its guarded selection action. A
+              // coordinate-based link tap is not a document-wide a11y action.
+              excludeFromSemantics: true,
+              // Let the gesture arena distinguish a tap from PDF double-tap
+              // zoom, a pinch, a page swipe, and a long-press selection first.
+              onTapUp: (details) => _endTapCandidate(details, transform),
+              onTapCancel: _clearTapCandidate,
+              onLongPressStart: (details) {
+                // A long press is a selection gesture, never a link tap.
+                _clearTapCandidate();
+                final pointer = _touchPointer;
+                final value = endpoint(details.localPosition);
+                if (pointer == null || value == null) return;
+                final source = transform.toSource(details.localPosition);
+                widget.dispatch(
+                  ReaderSelectionPointerStarted(
+                    pointer,
+                    value.offset.toInt(),
+                    rangeStart: value.rangeStart.toInt(),
+                    rangeEnd: value.rangeEnd.toInt(),
+                    x: source.dx,
+                    y: source.dy,
+                  ),
+                );
+              },
+              onLongPressMoveUpdate: (details) {
+                final pointer = _touchPointer;
+                final value = endpoint(details.localPosition, nearest: true);
+                if (pointer == null || value == null) return;
+                final source = transform.toSource(
+                  details.localPosition,
+                  clamp: true,
+                );
+                widget.dispatch(
+                  ReaderSelectionPointerMoved(
+                    pointer,
+                    value.offset.toInt(),
+                    x: source.dx,
+                    y: source.dy,
+                  ),
+                );
+              },
+              onLongPressEnd: (_) {
+                final pointer = _touchPointer;
+                if (pointer != null) {
+                  widget.dispatch(ReaderSelectionPointerEnded(pointer));
+                }
+                _touchPointer = null;
+              },
+              onLongPressCancel: () {
+                final pointer = _touchPointer;
+                if (pointer != null) {
+                  widget.dispatch(ReaderSelectionPointerCancelled(pointer));
+                }
+                _touchPointer = null;
+              },
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // A PDF page lies on the stage like the EPUB page's paper,
+                  // with `shadow-page` under the raster; a phone page is
+                  // full-bleed and has none.
+                  if (pdfPageShadow && widget.paintContent)
+                    Positioned.fromRect(
+                      rect: transform.destination,
+                      child: DecoratedBox(
+                        key: const ValueKey('reader-pdf-page-shadow'),
+                        decoration: BoxDecoration(
+                          boxShadow: _readerPageShadow(
+                            ShellPalette.of(context),
+                          ),
+                        ),
                       ),
                     ),
+                  if (widget.paintContent)
+                    RepaintBoundary(
+                      key: const ValueKey('reader-page-paint'),
+                      child: KeyedSubtree(
+                        key: ValueKey('reader-fit-${widget.fit.name}'),
+                        child: CustomPaint(painter: contentPainter),
+                      ),
+                    ),
+                  CustomPaint(
+                    painter: PagePainter(
+                      image: widget.image,
+                      surface: widget.surface,
+                      backgroundColor: pageColors(
+                        widget.model.typography.theme,
+                      ).background,
+                      foregroundColor: pageColors(
+                        widget.model.typography.theme,
+                      ).foreground,
+                      recolorImage:
+                          widget.model.document?.format ==
+                          FlutterBookFormat.epub,
+                      fit: widget.fit,
+                      anchor: widget.model.anchor,
+                      focus: widget.model.focus,
+                      savedSelections: widget.model.savedSelections,
+                      annotations: widget.model.annotations
+                          .where(
+                            (item) =>
+                                item.unit.toInt() == widget.model.unit ||
+                                item.unit.toInt() ==
+                                    widget.model.pdfSpread?.facingUnit ||
+                                widget.model.columnsPresentation,
+                          )
+                          .toList(growable: false),
+                      currentUnit: widget.model.unit,
+                      spread: widget.model.pdfSpread,
+                      columns: widget.model.pdfColumns,
+                      paintContent: false,
+                    ),
                   ),
-                RepaintBoundary(
-                  key: const ValueKey('reader-page-paint'),
-                  child: KeyedSubtree(
-                    key: ValueKey('reader-fit-${widget.fit.name}'),
-                    child: CustomPaint(painter: contentPainter),
-                  ),
-                ),
-                CustomPaint(
-                  painter: PagePainter(
-                    image: widget.image,
-                    surface: widget.surface,
-                    backgroundColor: pageColors(
-                      widget.model.typography.theme,
-                    ).background,
-                    foregroundColor: pageColors(
-                      widget.model.typography.theme,
-                    ).foreground,
-                    recolorImage:
-                        widget.model.document?.format == FlutterBookFormat.epub,
-                    fit: widget.fit,
-                    anchor: widget.model.anchor,
-                    focus: widget.model.focus,
-                    savedSelections: widget.model.savedSelections,
-                    annotations: widget.model.annotations
-                        .where(
-                          (item) =>
-                              item.unit.toInt() == widget.model.unit ||
-                              item.unit.toInt() ==
-                                  widget.model.pdfSpread?.facingUnit,
-                        )
-                        .toList(growable: false),
-                    currentUnit: widget.model.unit,
-                    spread: widget.model.pdfSpread,
-                    paintContent: false,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -1491,14 +1647,14 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
   }
 }
 
-/// PDF double-tap zoom that never joins the arena for a pointer [allows]
-/// refuses, so a tap there resolves at once.
-class _ReaderZoomDoubleTap extends DoubleTapGestureRecognizer {
-  _ReaderZoomDoubleTap({super.supportedDevices});
+/// Keep the recognizer installed while selection changes. Disposing a pending
+/// double tap during a build would release its held single tap during build.
+class _ReaderPdfDoubleTap extends DoubleTapGestureRecognizer {
+  _ReaderPdfDoubleTap({super.supportedDevices});
 
-  bool Function(PointerDownEvent event)? allows;
+  bool Function()? enabled;
 
   @override
   bool isPointerAllowed(PointerDownEvent event) =>
-      super.isPointerAllowed(event) && (allows?.call(event) ?? true);
+      super.isPointerAllowed(event) && (enabled?.call() ?? false);
 }

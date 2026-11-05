@@ -15,10 +15,70 @@ body { margin: 0; background: var(--canvas); }
 .pg .sh-page__folio { margin-top: 18px; }
 .ja { width: 500px; height: 720px; padding: 48px 60px 32px; }
 .ja .sh-page__body { font-family: var(--font-book); }
+.columns { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.columns figure { width: 330px; max-width: 100%; margin: 0; }
+.columns img { display: block; width: 100%; height: auto; border: 1px solid var(--border); }
+.columns figcaption, .columns-note { font-size: 12px; line-height: 18px; color: var(--ink-muted); }
+.columns figcaption { margin-top: 8px; }
+.columns-note { padding: 0 32px 24px; max-width: 920px; }
 </style>
 </head>
 <body>
 <div class="sh">
+  <div class="cap">PDF · Columns · native Linux reader at 440 × 900 pt · original page pixels, not text reflow</div>
+  <div class="sh-stage columns" aria-label="PDF Columns reading surfaces">
+    <figure><img src="images/columns-title.jpg" alt="First screen: fitted title band above a larger fitted column, with page 1 of 8 and visible-area outline"><figcaption>Wider title bands shrink to fit. Columns use their own fitted scale. The 12 × 15 pt outline marks the visible original-page area.</figcaption></figure>
+    <figure><img src="images/columns-next.jpg" alt="Next screen continues the first column and crosses to the next at a short muted rule"><figcaption>One screen later. Breaks fall between physical lines; a short muted rule marks the column change.</figcaption></figure>
+    <figure><img src="images/columns-page-band.jpg" alt="A screen spanning PDF pages, with an explicit page range in the folio and a new-page band"><figcaption>The strip continues across pages. The folio names every visible page as an explicit range, so a page cannot go unnamed between screens.</figcaption></figure>
+  </div>
+  <p class="columns-note">Captured by <code>integration_test/pdf_columns_test.dart</code>, not a browser imitation of the reader. Quiet outer zones and swipes move one screen; the middle reveals chrome. Page animations slides the strip, never curls it; off or reduced motion changes instantly. Scans and uncertain layouts stay at fit width. Paper: Slee, Agarwal and Kwiatkowski, <em>Thrift: Scalable Cross-Language Services Implementation</em> (2007), Apache Thrift; see <a href="../../../fixtures/pdf-columns/README.md">source, license and attribution</a>.</p>
+  <div class="cap">Columns · Display progress · native Linux header crops</div>
+  <div class="sh-stage columns" aria-label="Columns progress settings">
+    <figure><img src="images/columns-progress-page.jpg" alt="Page progress shows the visible original page or page range and the outline above the PDF"><figcaption>Page: every visible original page (a range when needed), with the top page's visible-area outline.</figcaption></figure>
+    <figure><img src="images/columns-progress-percent.jpg" alt="Percent progress shows 13% above the same PDF crop without a page outline"><figcaption>Percent: the existing book-wide percentage, without an outline.</figcaption></figure>
+    <figure><img src="images/columns-progress-off.jpg" alt="Progress Off leaves a quiet empty header above the same PDF crop"><figcaption>Off: neither folio nor outline. Reserved space stays fixed, so the document does not move.</figcaption></figure>
+  </div>
+  <div class="sh-stage columns">
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns-title.jpg" aria-label="Native Linux Columns interaction recording"><source src="images/columns-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop, two excerpts: the 100% Size cap and smaller size, then keyboard screen steps and chrome. Injected safe insets in a narrow desktop window, not an Android device.</figcaption></figure>
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns-title.jpg" aria-label="Native Linux Columns progress preference recording"><source src="images/columns-progress-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop: Progress changes from Page to Percent to Off and back to Page, without moving the PDF crop.</figcaption></figure>
+  </div>
+  <div class="cap">Columns · cutout-safe layout and sharp detail · native Linux with injected safe insets</div>
+  <div class="sh-stage columns" aria-label="Columns safe areas and detail pinch">
+    <figure><img src="images/columns-figure-ja.jpg" alt="Japanese reader folio and a mixed text/figure strip inside top and bottom safe insets"><figcaption>The controller fills the safe content box, not the area behind the cutout or home indicator. Figures and tables fit indivisibly. First-party fixture: a gray raster figure with an overlaid text label.</figcaption></figure>
+    <figure><img src="images/columns-figure-pinched-ja.jpg" alt="A crisp enlarged fixture figure inside the Japanese reader"><figcaption>Pinch a figure or a fallback page for new PDF pixels, not a magnified strip bitmap. Pan in both axes; pinch back to the same screen.</figcaption></figure>
+  </div>
+  <div class="cap">Columns · detail admission · native Linux at DPR 3</div>
+  <div class="sh-stage columns" aria-label="Columns high-density detail limits">
+    <figure><img src="images/columns-admission-fit.png" alt="Fit-width scan shows both complete columns of synthetic black raster marks"><figcaption>First-party scan control at fit width. Pinching back from detail restores pixel-identical strip content and screen history.</figcaption></figure>
+    <figure><img src="images/columns-admission-area.png" alt="Sharp enlarged scan marks after a capped five-times pinch and two-axis pan"><figcaption>A 5× request stops below 40 million pixels, including device density and outward crop rounding. Pan shows newly rendered PDF pixels, never an enlarged strip bitmap.</figcaption></figure>
+    <figure><img src="images/columns-admission-edge.png" alt="Tall scan detail after reaching the 16384-pixel edge limit and panning"><figcaption>Tall fallback detail stops at the 16,384px edge limit. Extremely tall regions that cannot admit enlargement retain their crisp strip rather than shrink, blur or fail.</figcaption></figure>
+  </div>
+  <div class="cap">PDF · Columns · selection and saved place · stack PR3</div>
+  <div class="sh-stage columns" aria-label="Native Columns interaction integration">
+    <figure><img src="images/columns3-selection.jpg" alt="Native right-column text selection with its highlight and note actions"><figcaption>Selection uses the original page's character range through the crop's offset and scale.</figcaption></figure>
+    <figure><img src="images/columns3-restored.jpg" alt="Reopened right-column reading place with its yellow note highlight"><figcaption>Reopen keeps the original page and height, the right column and its note highlight.</figcaption></figure>
+    <figure><img src="images/columns3-page.jpg" alt="Original fitted PDF page with the same right-column note highlight"><figcaption>A double tap returns to Fit page. The note remains on its original text; returning to Columns preserves the place.</figcaption></figure>
+    <figure><img src="images/columns3-search.jpg" alt="Search result selected in its fitted original-page column"><figcaption>Search and note jumps enter the region containing their canonical page range.</figcaption></figure>
+  </div>
+  <p class="columns-note">Actual Linux/PDFium captures, not Android or iPhone evidence. Touch double-taps and durable reopen are exercised in the native integration test. The refreshed desktop recording below uses a real moving mouse to select, highlight and change fit, with injected safe insets. Phones with no saved choice detect the first three pages; saved choices always win. macOS goldens are unchanged and any future baseline change requires the Darwin Mac mini.</p>
+  <div class="sh-stage columns">
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns3-selection.jpg" aria-label="Native Linux Columns selection and highlight recording"><source src="images/columns3-linux.mp4" type="video/mp4"></video><figcaption>Native Linux desktop: real pointer selection, highlight and Fit page.</figcaption></figure>
+  </div>
+  <div class="cap">Columns · detail interactions and saved visible place · corrected stack</div>
+  <div class="sh-stage columns" aria-label="Columns detail pan interaction and restoration">
+    <figure><img src="images/columns3-detail-selection.jpg" alt="Text selected in a sharp detail raster after horizontal and vertical panning"><figcaption>Selection and link areas follow both detail pan offsets. The action capsule uses the settled content transform, including safe insets and the fixed header.</figcaption></figure>
+    <figure><img src="images/columns3-detail-place.jpg" alt="Panned interior of a textless right-column figure"><figcaption>Detail panning updates the saved original-page x+y point, not just the whole figure's top edge.</figcaption></figure>
+    <figure><img src="images/columns3-detail-reopen.jpg" alt="Fresh-core reopen retains the right-column figure after detail panning"><figcaption>Fresh-core reopen and a fit round-trip retain that visible figure location. Detail zoom itself stays transient; Columns returns at fit.</figcaption></figure>
+  </div>
+  <div class="cap">PDF · textless right-column figure · durable page-space restoration</div>
+  <div class="sh-stage columns" aria-label="Textless figure restoration regression">
+    <figure><img src="images/columns3-figure-before.jpg" alt="Before fix: restoring the figure incorrectly shows left-column body text"><figcaption>Before: both fit switching and reopening confuse a textless right-column figure with left-column text at the same height (x54 instead of x317).</figcaption></figure>
+    <figure><img src="images/columns3-figure-fit.jpg" alt="After fix: the gray raster figure survives a Fit page and Columns round-trip"><figcaption>After fit switching: original-page x+y keeps the same figure, without relying on a text offset or a region index.</figcaption></figure>
+    <figure><img src="images/columns3-figure-reopen.jpg" alt="After fix: reopening retains the same textless gray raster figure"><figcaption>After a fresh core reopen: x317, y350 and no visible text endpoints. Real Linux/PDFium; generated first-party PDF.</figcaption></figure>
+  </div>
+  <div class="sh-stage columns">
+    <figure><video controls preload="metadata" width="330" style="max-width:100%" poster="images/columns3-figure-fit.jpg" aria-label="Native Linux textless figure fit round-trip"><source src="images/columns3-figure-linux.mp4" type="video/mp4"></video><figcaption>Real moving pointer changes Columns → Fit page → Columns while retaining the textless figure's original place.</figcaption></figure>
+  </div>
   <div class="cap">Two-page spread · EPUB · Paper · left to right</div>
   <div class="sh-stage">
     <div class="sh-spread" id="en">

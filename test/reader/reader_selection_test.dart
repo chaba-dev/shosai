@@ -125,13 +125,14 @@ class _SelectionBridge extends HarnessBridge {
   }
 }
 
-/// PDF fit page (`0`), the reader's default zoom.
+/// Explicit PDF fit page, independent of automatic phone defaults.
 const _pdfFitPage = FlutterReaderSettings(
   continuous: false,
   theme: 'light',
   epubFontSize: 18,
   epubLineSpacing: 1.6,
   pdfZoom: 0,
+  pdfFit: FlutterPdfFit.fitPage,
 );
 
 /// PDF fit width (`-1` is the reader's fit-width sentinel; `1` would be manual

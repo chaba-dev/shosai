@@ -16,6 +16,8 @@ import 'dart:typed_data';
 
 import 'package:shosai_flutter/core/bridge.dart';
 
+import 'page_geometry.dart';
+
 /// Maximum PDF input size the engine opens.
 const int pdfMaxInputBytes = 512 * 1024 * 1024;
 
@@ -83,13 +85,20 @@ abstract interface class PdfEngineDocument {
   PdfBitmapSize bitmapSize(int page, double scale);
 
   /// Renders [page] at [scale] as straight (non-premultiplied) RGBA pixels.
-  Future<PdfRenderedPage> render(int page, double scale);
+  /// With [clip], allocates only that rectangle in rotated page points. The
+  /// returned [PdfRenderedPage.source] includes outward pixel rounding.
+  Future<PdfRenderedPage> render(int page, double scale, {PdfRect? clip});
 
   /// Builds the selection surface for [page] rendered at [scale].
   Future<FlutterSelectionSurface> selectionSurface(int page, double scale);
 
   /// Extracted text of [page], one scalar per PDFium character.
   Future<String> pageText(int page);
+
+  /// Physical lines, images and other painted-object coverage in rotated
+  /// visible page points. Unknown coverage is explicit for safe fallback.
+  /// Independent of render scale; callers own the returned immutable values.
+  Future<PdfPageGeometry> pageGeometry(int page);
 
   /// Searches the whole document for [query], case-insensitively.
   Future<List<FlutterSearchMatch>> search(String query);
@@ -138,10 +147,14 @@ final class PdfRenderedPage {
     required this.width,
     required this.height,
     required this.pixels,
+    this.source,
   });
 
   final int width;
   final int height;
+
+  /// Actual page-point area of a clipped raster, including rounded edge pixels.
+  final PdfRect? source;
 
   /// Straight RGBA pixels, row-major, `width * height * 4` bytes.
   final Uint8List pixels;
@@ -227,13 +240,44 @@ final class PdfEngineException implements Exception {
   String toString() => message;
 }
 
-/// Computes the bitmap size for a page, with the retained core's limits.
-PdfBitmapSize pdfBitmapSizeFor(PdfPageSize size, double scale) {
+/// Computes an admitted page/crop bitmap, including PDFium's outward rounding.
+/// A crop need not admit the virtual full page, but its native dimensions must
+/// still fit signed integers. Callers can preflight without allocating pixels.
+PdfBitmapSize pdfBitmapSizeFor(
+  PdfPageSize size,
+  double scale, {
+  PdfRect? clip,
+}) {
   if (!scale.isFinite || scale <= 0) {
     throw const PdfEngineException('page scale must be finite and positive');
   }
-  final width = (size.width * scale).ceilToDouble();
-  final height = (size.height * scale).ceilToDouble();
+  var width = (size.width * scale).ceilToDouble();
+  var height = (size.height * scale).ceilToDouble();
+  if (clip != null) {
+    if (!clip.left.isFinite ||
+        !clip.top.isFinite ||
+        !clip.right.isFinite ||
+        !clip.bottom.isFinite ||
+        clip.left < 0 ||
+        clip.top < 0 ||
+        clip.right > size.width ||
+        clip.bottom > size.height) {
+      throw const PdfEngineException('PDF crop is outside the page');
+    }
+    if (!width.isFinite ||
+        !height.isFinite ||
+        width > 0x7fffffff ||
+        height > 0x7fffffff) {
+      throw const PdfEngineLimitException(
+        'PDF render scale exceeds native limits',
+      );
+    }
+    final sx = width / size.width;
+    final sy = height / size.height;
+    width = (clip.right * sx).ceilToDouble() - (clip.left * sx).floorToDouble();
+    height =
+        (clip.bottom * sy).ceilToDouble() - (clip.top * sy).floorToDouble();
+  }
   if (!width.isFinite ||
       !height.isFinite ||
       width < 1 ||

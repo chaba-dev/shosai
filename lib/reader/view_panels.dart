@@ -923,6 +923,20 @@ class _ReaderDisplayPanel extends StatelessWidget {
                   _ReaderSegmented(
                     segments: [
                       (
+                        key: const ValueKey('reader-typography-columns'),
+                        icon: null,
+                        label: l10n.readerColumns,
+                        selected:
+                            typography.rasterFit == ReaderRasterFit.columns,
+                        onPressed: enabled
+                            ? () => dispatch(
+                                const ReaderTypographyChanged(
+                                  rasterFit: ReaderRasterFit.columns,
+                                ),
+                              )
+                            : null,
+                      ),
+                      (
                         key: const ValueKey('reader-typography-fit-width'),
                         icon: null,
                         label: l10n.readerFitWidth,
@@ -957,7 +971,11 @@ class _ReaderDisplayPanel extends StatelessWidget {
                     increaseKey: const ValueKey('reader-typography-zoom-in'),
                     decreaseLabel: l10n.readerZoomOut,
                     increaseLabel: l10n.readerZoomIn,
-                    value: '${(typography.rasterZoom * 100).round()}%',
+                    value:
+                        typography.rasterFit == ReaderRasterFit.columns &&
+                            typography.rasterZoom >= 1
+                        ? l10n.readerColumnsSizeMaximum
+                        : '${(typography.rasterZoom * 100).round()}%',
                     onDecrease: enabled
                         ? () => dispatch(
                             ReaderTypographyChanged(
@@ -965,7 +983,10 @@ class _ReaderDisplayPanel extends StatelessWidget {
                             ),
                           )
                         : null,
-                    onIncrease: enabled
+                    onIncrease:
+                        enabled &&
+                            (typography.rasterFit != ReaderRasterFit.columns ||
+                                typography.rasterZoom < 1)
                         ? () => dispatch(
                             ReaderTypographyChanged(
                               zoom: typography.rasterZoom + 0.25,

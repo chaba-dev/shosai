@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:shosai_flutter/reader/pdf/engine.dart';
+import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 
 /// A fake rendered page: [width] × [height] pixels a fake keeps behind
@@ -137,7 +138,12 @@ final class BridgePdfDocument implements PdfEngineDocument {
       pdfBitmapSizeFor(pageSize(page), scale);
 
   @override
-  Future<PdfRenderedPage> render(int page, double scale) async {
+  Future<PdfRenderedPage> render(
+    int page,
+    double scale, {
+    PdfRect? clip,
+  }) async {
+    if (clip != null) throw UnsupportedError('Legacy bridge fake has no crops');
     final rendered = await _engine.renderPage(
       document: _engine.pdfEngineHandle,
       page: BigInt.from(page),
@@ -172,6 +178,14 @@ final class BridgePdfDocument implements PdfEngineDocument {
   @override
   Future<String> pageText(int page) async =>
       (await selectionSurface(page, 1)).text;
+
+  @override
+  Future<PdfPageGeometry> pageGeometry(int page) async => PdfPageGeometry(
+    width: pageSize(page).width,
+    height: pageSize(page).height,
+    lines: const [],
+    images: const [],
+  );
 
   @override
   Future<List<FlutterSearchMatch>> search(String query) =>

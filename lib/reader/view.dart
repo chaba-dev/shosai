@@ -32,6 +32,8 @@ import 'package:shosai_flutter/reader/epub/continuous.dart';
 import 'package:shosai_flutter/reader/epub/flow.dart';
 import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/pdf/spread.dart';
+import 'package:shosai_flutter/reader/pdf/column_strip.dart';
+import 'package:shosai_flutter/reader/pdf/column_selection.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
@@ -41,6 +43,7 @@ part 'painting.dart';
 part 'view_chrome.dart';
 part 'view_dialogs.dart';
 part 'view_document.dart';
+part 'view_columns.dart';
 part 'view_notes.dart';
 part 'view_panels.dart';
 part 'view_page_turn.dart';
@@ -426,6 +429,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           View.of(context).devicePixelRatio,
         ),
         baseScale: View.of(context).devicePixelRatio,
+        autoPdfFit:
+            ShellLayout.forWidth(MediaQuery.sizeOf(context).width) ==
+                ShellLayout.phone &&
+            widget.initialSettings?.pdfFit == null &&
+            (widget.initialSettings?.pdfZoom ?? 0) == 0,
         zonesHintDismissed: widget.initialSettings?.zonesHintDismissed ?? false,
         systemBars: (shown) {
           if (defaultTargetPlatform == TargetPlatform.android) {
@@ -746,13 +754,14 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// The reader-local typography the controller starts from.
   ///
-  /// The legacy `pdfZoom` sentinel (0 = fit page, -1 = fit width, >0 = manual
-  /// scale) maps onto the typed [ReaderRasterFit]; the codec that replaces the
-  /// sentinel is 5A/6B.
+  /// A saved explicit fit wins; otherwise the legacy `pdfZoom` sentinel
+  /// (0 = fit page, -1 = fit width, >0 = manual scale) remains compatible.
   ReaderTypographyPresentation _initialTypography(double baseScale) {
     final settings = widget.initialSettings;
     final zoom = settings?.pdfZoom ?? 0;
-    final fit = zoom == 0
+    final fit = settings?.pdfFit != null
+        ? ReaderRasterFit.values.byName(settings!.pdfFit!.name)
+        : zoom == 0
         ? ReaderRasterFit.fitPage
         : zoom == -1
         ? ReaderRasterFit.fitWidth
@@ -764,7 +773,11 @@ class _ReaderScreenState extends State<ReaderScreen>
       epubFontSize: settings?.epubFontSize ?? 18,
       epubLineSpacing: settings?.epubLineSpacing ?? 1.5,
       rasterFit: fit,
-      rasterZoom: fit == ReaderRasterFit.manual ? zoom : baseScale,
+      rasterZoom: fit == ReaderRasterFit.columns
+          ? 1
+          : fit == ReaderRasterFit.manual
+          ? zoom
+          : baseScale,
       twoPages: settings?.twoPages ?? true,
       animations: settings?.animations ?? true,
       progress: settings?.progress ?? FlutterReaderProgress.page,

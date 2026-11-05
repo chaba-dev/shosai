@@ -227,9 +227,9 @@ final class ReaderPageInputPresentation {
 
 /// Typed raster fit for PDF (RD-09).
 ///
-/// The persisted preference codec that replaces the legacy `pdfZoom` sentinel
-/// is 5A/6B work; 4C presents and applies the value locally.
-enum ReaderRasterFit { fitPage, fitWidth, manual }
+/// Explicit choices are persisted separately from the legacy `pdfZoom`
+/// sentinel so an unset preference remains distinguishable from a saved fit.
+enum ReaderRasterFit { columns, fitPage, fitWidth, manual }
 
 /// Mode-specific typography presentation (RD-09).
 ///
@@ -258,9 +258,8 @@ final class ReaderTypographyPresentation {
   final double epubLineSpacing;
   final ReaderRasterFit rasterFit;
 
-  /// The effective raster scale: the manual zoom for [ReaderRasterFit.manual]
-  /// and the reader's base density for the fit modes. Applying a real fit-page
-  /// or fit-width computation from page geometry is 5A/6B.
+  /// Manual raster scale, base density for whole-page fit modes, or the size
+  /// multiplier relative to a fitted column for [ReaderRasterFit.columns].
   final double rasterZoom;
 
   /// The Pages setting: two pages side by side where the stage has room for
@@ -467,6 +466,10 @@ final class ReaderModel {
     this.pageImage,
     this.epubPage,
     this.pdfSpread,
+    this.pdfColumns,
+    this.pdfColumnSelection,
+    this.pdfY,
+    this.pdfX,
     this.pdfRightToLeft = false,
     this.readingPage,
     this.locationRequestRevision = 0,
@@ -561,6 +564,17 @@ final class ReaderModel {
   /// null for one page. [selectionSurface] and [pageImage] then span both.
   final ReaderPdfSpread? pdfSpread;
 
+  /// The rendered Columns screen; source points and affine transforms stay
+  /// available independently of the composed raster for reader interactions.
+  final PdfStripScreen? pdfColumns;
+  final PdfStripSelection? pdfColumnSelection;
+
+  /// Saved height in the original PDF page, independent of the current fit.
+  final double? pdfY;
+
+  /// Horizontal anchor in page points, disambiguating textless columns.
+  final double? pdfX;
+
   /// Whether the open PDF reads right to left (its viewer preferences say
   /// `/Direction /R2L`).
   final bool pdfRightToLeft;
@@ -604,7 +618,12 @@ final class ReaderModel {
   /// Follows the installed EPUB page, so a page laid out for the paginated
   /// reader is never presented as a continuous one.
   bool get continuousPresentation =>
-      typography.continuous && (epubPage?.continuous ?? true);
+      !columnsPresentation &&
+      typography.continuous &&
+      (epubPage?.continuous ?? true);
+  bool get columnsPresentation =>
+      document?.format == FlutterBookFormat.pdf &&
+      typography.rasterFit == ReaderRasterFit.columns;
   final FlutterSelectionSurface? selectionSurface;
   final ReaderSelectionPhase selectionPhase;
   final int? anchor;
@@ -766,6 +785,10 @@ final class ReaderModel {
     Object? pageImage = _unchanged,
     Object? epubPage = _unchanged,
     Object? pdfSpread = _unchanged,
+    Object? pdfColumns = _unchanged,
+    Object? pdfColumnSelection = _unchanged,
+    Object? pdfY = _unchanged,
+    Object? pdfX = _unchanged,
     bool? pdfRightToLeft,
     Object? readingPage = _unchanged,
     int? locationRequestRevision,
@@ -846,6 +869,14 @@ final class ReaderModel {
       pdfSpread: identical(pdfSpread, _unchanged)
           ? this.pdfSpread
           : pdfSpread as ReaderPdfSpread?,
+      pdfColumns: identical(pdfColumns, _unchanged)
+          ? this.pdfColumns
+          : pdfColumns as PdfStripScreen?,
+      pdfColumnSelection: identical(pdfColumnSelection, _unchanged)
+          ? this.pdfColumnSelection
+          : pdfColumnSelection as PdfStripSelection?,
+      pdfY: identical(pdfY, _unchanged) ? this.pdfY : pdfY as double?,
+      pdfX: identical(pdfX, _unchanged) ? this.pdfX : pdfX as double?,
       pdfRightToLeft: pdfRightToLeft ?? this.pdfRightToLeft,
       readingPage: identical(readingPage, _unchanged)
           ? this.readingPage

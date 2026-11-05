@@ -450,6 +450,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerFitWidth => '幅に合わせる';
 
   @override
+  String get readerColumns => '段組み';
+
+  @override
+  String get readerColumnsSizeMaximum => '100% · 最大';
+
+  @override
   String get readerFitPage => 'ページに合わせる';
 
   @override

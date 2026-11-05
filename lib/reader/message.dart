@@ -365,6 +365,28 @@ final class ReaderPdfLinkTapped extends ReaderMessage {
   final ReaderPageTapped? pageTap;
 }
 
+/// A double tap in the rendered selection surface's coordinate frame.
+final class ReaderPdfDoubleTapped extends ReaderMessage {
+  const ReaderPdfDoubleTapped(this.x, this.y);
+  final double x;
+  final double y;
+}
+
+/// The top of a scrolled PDF viewport, in original page points.
+final class ReaderPdfViewportChanged extends ReaderMessage {
+  const ReaderPdfViewportChanged(this.generation, this.revision, this.y);
+  final int generation;
+  final int revision;
+  final double y;
+}
+
+/// The visible rectangle in an adopted Columns detail raster's frame.
+final class ReaderColumnsViewportChanged extends ReaderMessage {
+  const ReaderColumnsViewportChanged(this.screen, this.viewport);
+  final PdfStripScreen screen;
+  final ui.Rect viewport;
+}
+
 final class ReaderReferenceDismissed extends ReaderMessage {
   const ReaderReferenceDismissed();
 }
@@ -397,6 +419,15 @@ final class ReaderPageInputChanged extends ReaderMessage {
 /// without navigating on invalid input.
 final class ReaderPageInputSubmitted extends ReaderMessage {
   const ReaderPageInputSubmitted();
+}
+
+/// Pinches an indivisible figure or fallback page without changing column Size.
+/// The screen identity rejects gestures completed against an obsolete crop.
+final class ReaderColumnsDetailRequested extends ReaderMessage {
+  const ReaderColumnsDetailRequested(this.screen, this.piece, this.zoom);
+  final PdfStripScreen screen;
+  final PdfStripPiece piece;
+  final double zoom;
 }
 
 /// Changes reader-local typography presentation (RD-09).
@@ -898,6 +929,9 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     required this.restorationFailed,
     this.restorationError,
     this.offset,
+    this.pdfY,
+    this.pdfX,
+    this.defaultPdfFit,
     this.toolError,
     this.returnPoints = const [],
     this.match,
@@ -915,6 +949,9 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final bool restorationFailed;
   final String? restorationError;
   final int? offset;
+  final double? pdfY;
+  final double? pdfX;
+  final ReaderRasterFit? defaultPdfFit;
   final String? toolError;
 
   /// The return points the book opens with: where it was left, when it

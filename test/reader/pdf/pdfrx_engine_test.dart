@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
+import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 import '../../support/reference_documents.dart';
@@ -40,6 +42,309 @@ Future<String> _pdfWith(String catalogExtra) async {
 
 void main() {
   final engine = PdfrxPdfEngine();
+
+  test('crop admission includes outward rounding at area and edge limits', () {
+    final exactArea = pdfBitmapSizeFor(const PdfPageSize(5000, 8000), 1);
+    expect(exactArea.width * exactArea.height, 40000000);
+    expect(
+      () => pdfBitmapSizeFor(
+        const PdfPageSize(6000, 9000),
+        1,
+        clip: const PdfRect(.2, .2, 5000.2, 8000.2),
+      ),
+      throwsA(isA<PdfEngineLimitException>()),
+      reason: 'Outward rounding requires 5001 × 8001, not 5000 × 8000',
+    );
+    final exactEdge = pdfBitmapSizeFor(
+      const PdfPageSize(20000, 3),
+      1,
+      clip: const PdfRect(0, 0, 16384, 1),
+    );
+    expect([exactEdge.width, exactEdge.height], [16384, 1]);
+    expect(
+      () => pdfBitmapSizeFor(
+        const PdfPageSize(20000, 3),
+        1,
+        clip: const PdfRect(.2, .2, 16384.2, 1.2),
+      ),
+      throwsA(isA<PdfEngineLimitException>()),
+      reason: 'The virtual page is legal, but the crop rounds to 16385 wide',
+    );
+  });
+
+  test('clipped renders match full-page pixels at fitted density', () async {
+    final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+    addTearDown(document.dispose);
+    const scale = 2.0;
+    final full = await document.render(0, scale);
+    final crop = await document.render(
+      0,
+      scale,
+      clip: const PdfRect(53.8, 130.2, 293.3, 350.7),
+    );
+    final source = crop.source!;
+    expect(crop.width, 480);
+    expect(crop.height, 442);
+    expect(source.left, 53.5);
+    expect(source.top, 130);
+    final x = (source.left * scale).round();
+    final y = (source.top * scale).round();
+    for (var row = 0; row < crop.height; row++) {
+      expect(
+        crop.pixels.sublist(row * crop.width * 4, (row + 1) * crop.width * 4),
+        full.pixels.sublist(
+          ((y + row) * full.width + x) * 4,
+          ((y + row) * full.width + x + crop.width) * 4,
+        ),
+      );
+    }
+    // A tiny high-density crop must not allocate an inadmissible full bitmap.
+    final detail = await document.render(
+      0,
+      30,
+      clip: const PdfRect(54, 130, 64, 140),
+    );
+    expect([detail.width, detail.height], [300, 300]);
+    // Noninteger virtual-page sizing must agree with the actual engine crop.
+    final rounded = await document.render(
+      0,
+      2.013,
+      clip: const PdfRect(53.8, 130.2, 293.3, 350.7),
+    );
+    expect([rounded.width, rounded.height], [483, 445]);
+  });
+
+  test(
+    'column regions retain vector ink and own overlaid image labels',
+    () async {
+      final document = await engine.open(
+        'fixtures/pdf-columns/content-preservation.pdf',
+      );
+      addTearDown(document.dispose);
+      for (var p = 0; p < 4; p++) {
+        final geometry = await document.pageGeometry(p);
+        final result = analyzePdfColumns([geometry]).single;
+        final raster = await document.render(p, 1);
+        var missing = 0;
+        var duplicated = 0;
+        var painted = 0;
+        for (var y = 0; y < raster.height; y++) {
+          for (var x = 0; x < raster.width; x++) {
+            final offset = (y * raster.width + x) * 4;
+            if (raster.pixels[offset] >= 245 &&
+                raster.pixels[offset + 1] >= 245 &&
+                raster.pixels[offset + 2] >= 245) {
+              continue;
+            }
+            painted++;
+            final crops = result.regions.where((r) {
+              final b = r.bounds;
+              return x + .5 >= b.left &&
+                  x + .5 < b.right &&
+                  y + .5 >= b.top &&
+                  y + .5 < b.bottom;
+            }).length;
+            if (crops == 0) missing++;
+            if (crops > 1) duplicated++;
+          }
+        }
+        expect(
+          painted,
+          greaterThan(16000),
+          reason: 'real painted figure, page $p',
+        );
+        expect(
+          missing,
+          0,
+          reason: 'every painted pixel survives region crops, page $p',
+        );
+        expect(
+          duplicated,
+          0,
+          reason: 'no figure/label ink appears twice, page $p',
+        );
+        expect(result.columnCount, 2);
+        expect(
+          result.regions.where((r) => r.kind == PdfRegionKind.figure),
+          hasLength(1),
+          reason: 'vector/shading figures keep neighboring text columns',
+        );
+        if (p == 2) {
+          final figure = result.regions.singleWhere(
+            (r) => r.kind == PdfRegionKind.figure,
+          );
+          expect(figure.lines.single.text, 'Overlaid label');
+          expect(
+            result.regions.expand((r) => r.lines),
+            hasLength(geometry.lines.length),
+          );
+          expect(result.regions.map((r) => r.kind), [
+            PdfRegionKind.column,
+            PdfRegionKind.figure,
+            PdfRegionKind.column,
+            PdfRegionKind.column,
+          ]);
+        }
+      }
+    },
+  );
+
+  test(
+    'Thrift Letter title band, measured columns and stable text offsets',
+    () async {
+      final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+      addTearDown(document.dispose);
+      final geometry = await document.pageGeometry(0);
+      expect([geometry.width, geometry.height], [612, 792]);
+      final result = analyzePdfColumns([geometry]).single;
+      expect(result.columnCount, 2);
+      final title = result.regions.first;
+      expect(title.kind, PdfRegionKind.band);
+      // Tight painted bounds follow RFD's y24..104 title, with raster padding.
+      expect(title.bounds.top, closeTo(24, 4));
+      expect(title.bounds.bottom, closeTo(104, 1));
+      final columns = result.regions
+          .where((r) => r.kind == PdfRegionKind.column)
+          .toList();
+      expect(columns.first.bounds.left, closeTo(53, .1));
+      expect(columns.first.bounds.right, closeTo(294, .5));
+      expect(columns.last.bounds.left, closeTo(316, .1));
+      expect(columns.last.bounds.right, closeTo(557, .5));
+      expect(
+        result.regions.where((r) => r.kind == PdfRegionKind.figure),
+        hasLength(geometry.images.length),
+      );
+      final text = (await document.pageText(0)).runes.toList();
+      for (final line in geometry.lines) {
+        expect(
+          line.text,
+          String.fromCharCodes(text.sublist(line.start, line.end)),
+        );
+      }
+      expect(
+        result.regions.expand((r) => r.lines).toSet(),
+        geometry.lines.toSet(),
+      );
+    },
+  );
+
+  test(
+    'every Thrift page splits; physical rows expose real safe cuts',
+    () async {
+      final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+      addTearDown(document.dispose);
+      final pages = [
+        for (var p = 0; p < document.pageCount; p++)
+          await document.pageGeometry(p),
+      ];
+      expect(
+        analyzePdfColumns(pages).map((p) => p.columnCount),
+        List.filled(8, 2),
+      );
+      // Former loose-box chains on exactly the device-reported pages/blocks.
+      for (final (p, top, bottom, count) in [
+        (0, 339, 378, 4),
+        (3, 403, 450, 5),
+        (2, 549, 578, 3),
+      ]) {
+        final rows =
+            pages[p].lines
+                .where(
+                  (l) =>
+                      l.bounds.left < 60 &&
+                      l.bounds.top >= top &&
+                      l.bounds.top < bottom,
+                )
+                .toList()
+              ..sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
+        expect(rows, hasLength(count), reason: 'Thrift page ${p + 1}');
+        for (var n = 1; n < rows.length; n++) {
+          expect(
+            rows[n].bounds.top - rows[n - 1].bounds.bottom,
+            greaterThan(1),
+          );
+        }
+        final text = (await document.pageText(p)).runes.toList();
+        for (final row in rows) {
+          expect(
+            row.text,
+            String.fromCharCodes(text.sublist(row.start, row.end)),
+          );
+        }
+      }
+    },
+  );
+
+  test('licensed ACM two-column and arXiv single-column corpus', () async {
+    for (final (file, expected) in [
+      ('acm-chi.pdf', 2),
+      ('arxiv-first-five.pdf', 0),
+    ]) {
+      final document = await engine.open('fixtures/pdf-columns/$file');
+      try {
+        final pages = <PdfPageGeometry>[
+          for (var p = 0; p < 5; p++) await document.pageGeometry(p),
+        ];
+        final results = analyzePdfColumns(pages);
+        for (final result in results.take(3)) {
+          // The arXiv blank verso and vertical identifier must not make columns.
+          expect(result.columnCount, expected, reason: file);
+        }
+        if (expected == 2) {
+          expect(results.first.regions.first.kind, PdfRegionKind.band);
+          expect(
+            results[2].regions
+                .expand((r) => r.lines)
+                .any((l) => l.text.startsWith('Exploring the Experiences')),
+            isFalse,
+            reason: 'recurring running head, not body text',
+          );
+        }
+      } finally {
+        await document.dispose();
+      }
+    }
+  });
+
+  test('image-only scan falls back to the complete page', () async {
+    final document = await engine.open('fixtures/pdf-columns/scanned.pdf');
+    addTearDown(document.dispose);
+    final geometry = await document.pageGeometry(0);
+    expect(geometry.lines, isEmpty);
+    expect(geometry.images, hasLength(1));
+    final result = analyzePdfColumns([geometry]).single;
+    expect(result.columnCount, 0);
+    expect(result.regions.single.kind, PdfRegionKind.page);
+    expect(result.regions.single.bounds.width, 612);
+    expect(result.regions.single.bounds.height, 792);
+  });
+
+  test('nested image bounds match rotated, cropped rendered pixels', () async {
+    final document = await engine.open(
+      'fixtures/pdf-columns/transformed-images.pdf',
+    );
+    addTearDown(document.dispose);
+    final expected = [
+      [100.0, 491.0, 120.0, 551.0],
+      [201.0, 100.0, 261.0, 120.0],
+      [472.0, 201.0, 492.0, 261.0],
+      [491.0, 472.0, 551.0, 492.0],
+    ];
+    for (var p = 0; p < 4; p++) {
+      final geometry = await document.pageGeometry(p);
+      final rect = geometry.images.single;
+      expect([rect.left, rect.top, rect.right, rect.bottom], expected[p]);
+      expect(geometry.lines.single.text, 'Geometry control');
+      final rendered = await document.render(p, 1);
+      final x = ((rect.left + rect.right) / 2).floor();
+      final y = ((rect.top + rect.bottom) / 2).floor();
+      expect(
+        rendered.pixels[(y * rendered.width + x) * 4],
+        0,
+        reason: 'the predicted image rectangle must contain the black image',
+      );
+    }
+  });
 
   for (final fixture in [
     (
