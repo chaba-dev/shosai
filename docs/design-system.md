@@ -118,6 +118,11 @@ chrome mapping; it does not change the library's application theme.
 | Sepia | `page-sepia` | `page-sepia-ink` | `page-sepia-link` |
 | Night | `page-night` | `page-night-ink` | `page-night-link` |
 
+Paper PDFs keep their original pixels. Columns uses `page-pdf-white` behind
+the whole strip, including gaps and internal padding, so white crops blend
+into one sheet. Sepia and Night use their filtered page ground instead; PDF
+navigation furniture may keep the page theme's tint.
+
 Highlights use the `hl-*` fills (yellow, green, blue, pink, purple) at 40% so ink stays legible on every page theme; the matching solid `swatch-*` tokens draw swatches and note dots. `selection` is the live drag selection, `search-hit` and `search-current` mark matches on the page, and `mark` marks matched words in the chrome's result lists. Highlight colours carry no meaning of their own.
 
 ## Typography

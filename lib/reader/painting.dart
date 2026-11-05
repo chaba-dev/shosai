@@ -316,7 +316,7 @@ void _paintPageContent(
 Color _pdfSheetColor(String? theme) {
   final colors = pageColors(theme);
   return _pdfPageColorFilter(colors.background, colors.foreground) == null
-      ? const Color(0xffffffff)
+      ? ShosaiTokens.colorPagePdfWhite
       : colors.background;
 }
 
