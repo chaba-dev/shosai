@@ -259,7 +259,7 @@ void main() {
   );
 
   test(
-    'short fragments share their column scale, not the opposite column width',
+    'short fragments and opposite columns share the document body scale',
     () {
       final screen = layoutPdfColumnScreen(
         pages: {
@@ -283,10 +283,87 @@ void main() {
         width: 200,
         height: 300,
       );
-      expect(screen.pieces.map((p) => p.scale), [2, 2, 2.5]);
-      expect(screen.pieces.map((p) => p.width), [200, 100, 200]);
+      expect(screen.pieces.map((p) => p.scale), [2, 2, 2]);
+      expect(screen.pieces.map((p) => p.width), [200, 100, 160]);
     },
   );
+
+  test('an overflowing line and an inset abstract do not resize body text', () {
+    PdfReadingRegion body(double left, double width, {bool overflow = false}) =>
+        PdfReadingRegion(
+          kind: PdfRegionKind.column,
+          bounds: PdfRect(left, 10, left + width, 100),
+          lines: [
+            for (var i = 0; i < 6; i++)
+              PdfTextLine(
+                bounds: PdfRect(
+                  left,
+                  10 + i * 15,
+                  left + (overflow && i == 2 ? width : 100),
+                  20 + i * 15,
+                ),
+                text: 'Body $i',
+                start: i * 10,
+                end: i * 10 + 6,
+              ),
+          ],
+        );
+    final pages = {
+      0: page([body(20, 102), body(160, 132, overflow: true)]),
+      1: page([
+        PdfReadingRegion(
+          kind: PdfRegionKind.column,
+          bounds: const PdfRect(30, 10, 122, 40),
+          lines: [
+            for (final y in [10.0, 30.0])
+              PdfTextLine(
+                bounds: PdfRect(30, y, 120, y + 10),
+                text: 'Abstract',
+                start: 0,
+                end: 8,
+              ),
+          ],
+        ),
+        body(170, 102),
+      ]),
+    };
+    var cursor = const PdfStripPosition(0);
+    final pieces = <PdfStripPiece>[];
+    while (cursor.page < 2) {
+      final screen = layoutPdfColumnScreen(
+        pages: pages,
+        pageCount: 2,
+        start: cursor,
+        width: 204,
+        height: 130,
+      );
+      expect(screen.pieces, isNotEmpty);
+      expect(screen.width, 204);
+      pieces.addAll(screen.pieces);
+      cursor = screen.next;
+    }
+    expect(pieces.map((p) => p.scale).toSet(), {2});
+    final overflow = pieces.firstWhere((p) => p.page == 0 && p.region == 1);
+    expect(overflow.left, 0, reason: 'clip the trailing edge, not line starts');
+    expect(overflow.width, 264, reason: 'retain source ink without shrinking');
+    for (final entry in pages.entries) {
+      for (var r = 0; r < entry.value.columns.regions.length; r++) {
+        for (final row in entry.value.columns.regions[r].lines) {
+          expect(
+            pieces.where(
+              (p) =>
+                  p.page == entry.key &&
+                  p.region == r &&
+                  p.source.top <= row.bounds.top &&
+                  p.source.bottom >= row.bounds.bottom,
+            ),
+            hasLength(1),
+            reason: 'each physical row belongs to exactly one screen',
+          );
+        }
+      }
+    }
+  });
 
   test(
     'missing next-page geometry is explicit and the cursor makes progress',

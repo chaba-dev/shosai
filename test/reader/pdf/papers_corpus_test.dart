@@ -19,6 +19,13 @@ const _papers = [
     sha: '1e0651b6810ecba34a3dbc5b5b0209226f889004607c1f203540a48d64e5a93a',
   ),
   (
+    name: 'bert',
+    pages:
+        1, // First-page abstract/body/stamp regression, not the entire paper.
+    columns: 2,
+    sha: '5692a5514787a8c6727b4ff3b726a3385798bc68e12138d1d4af83947e2acf6e',
+  ),
+  (
     name: 'attention',
     pages: 15,
     columns: 0,
@@ -47,6 +54,7 @@ Map<String, Object> _facts(PdfPageGeometry page) => {
             : sha256.convert(utf8.encode(line.text)).toString(),
         'start': line.start,
         'end': line.end,
+        if (line.isVertical) 'vertical': true,
       },
   ],
   'images': page.images.map(_box).toList(),
@@ -71,7 +79,7 @@ void main() {
           );
           final document = await PdfrxPdfEngine().open(original);
           addTearDown(document.dispose);
-          for (var p = 0; p < document.pageCount; p++) {
+          for (var p = 0; p < paper.pages; p++) {
             pages.add(await document.pageGeometry(p));
           }
           final facts = {
@@ -150,6 +158,7 @@ void main() {
                       text: l['text'],
                       start: l['start'],
                       end: l['end'],
+                      isVertical: l['vertical'] == true,
                     ),
                 ],
                 images: [for (final b in p['images']) _rect(b)],
@@ -200,6 +209,15 @@ void main() {
           );
           for (final line in pages[p].lines) {
             if (kept.contains(line)) continue;
+            if (line.isVertical) {
+              expect(
+                line.bounds.right <= pages[p].width * .1 ||
+                    line.bounds.left >= pages[p].width * .9,
+                isTrue,
+                reason: 'only rotated side-margin furniture may be omitted',
+              );
+              continue;
+            }
             expect(line.text.trim(), '${p + 1}');
             expect(line.bounds.top, greaterThan(pages[p].height * .9));
           }
@@ -222,7 +240,8 @@ void main() {
                 reason: 'real body gutter, not gaps inside a table/plot',
               );
             }
-            if ([0, 1, 2, 3, 4, 5, 6, 7, 10, 11].contains(p)) {
+            if (paper.name == 'resnet' &&
+                [0, 1, 2, 3, 4, 5, 6, 7, 10, 11].contains(p)) {
               expect(
                 result.regions.any((r) => r.kind == PdfRegionKind.figure),
                 isTrue,
@@ -235,6 +254,64 @@ void main() {
               lessThan(pages[p].width),
             );
           }
+        }
+        if (paper.columns == 2) {
+          final columnWidth = typicalPdfColumnWidth(
+            analyzePdfColumns(pages.take(3).toList()),
+          )!;
+          expect(columnWidth, inInclusiveRange(215, 245));
+          final metadata = {
+            for (var p = 0; p < pages.length; p++)
+              p: PdfStripPage(pages[p], results[p]),
+          };
+          var cursor = const PdfStripPosition(0);
+          final pieces = <PdfStripPiece>[];
+          for (var n = 0; cursor.page < pages.length && n < 200; n++) {
+            final screen = layoutPdfColumnScreen(
+              pages: metadata,
+              pageCount: pages.length,
+              start: cursor,
+              width: 412,
+              height: 775,
+              columnWidth: columnWidth,
+            );
+            expect(screen.pieces, isNotEmpty);
+            for (final piece in screen.pieces) {
+              if (results[piece.page].regions[piece.region].kind ==
+                  PdfRegionKind.column) {
+                expect(
+                  piece.scale,
+                  412 / columnWidth,
+                  reason: '${paper.name} p${piece.page + 1} body scale',
+                );
+              }
+            }
+            pieces.addAll(screen.pieces);
+            cursor = screen.next;
+          }
+          expect(cursor.page, pages.length);
+          for (var p = 0; p < pages.length; p++) {
+            for (var r = 0; r < results[p].regions.length; r++) {
+              for (final line in results[p].regions[r].lines) {
+                expect(
+                  pieces.where(
+                    (piece) =>
+                        piece.page == p &&
+                        piece.region == r &&
+                        piece.source.contains(line.bounds),
+                  ),
+                  hasLength(1),
+                  reason:
+                      '${paper.name} p${p + 1}: no split/repeated/skipped rows',
+                );
+              }
+            }
+          }
+          // ignore: avoid_print
+          print(
+            '${paper.name}: document body width=$columnWidth; '
+            '${pieces.length} intact pieces, one body scale',
+          );
         }
         if (paper.name == 'resnet') {
           // The Mac-reported page-4 network headers are three labels on one

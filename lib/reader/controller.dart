@@ -172,6 +172,7 @@ final class ReaderController implements Listenable {
   PdfEngineDocument? _pdfDocument;
   int _columnsRevision = 0;
   final Map<int, PdfStripPage> _columnsPages = {};
+  double? _columnsWidth;
   final List<PdfStripPosition> _columnsBack = [];
   ({
     PdfStripPosition position,
@@ -7436,6 +7437,7 @@ final class ReaderController implements Listenable {
   void _releaseModelResources({bool publish = false}) {
     _columnsRevision++;
     _columnsPages.clear();
+    _columnsWidth = null;
     _columnsBack.clear();
     _columnsIntent = null;
     _clearTurnPreview();
