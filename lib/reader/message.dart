@@ -4,7 +4,8 @@ sealed class ReaderMessage {
   const ReaderMessage();
 }
 
-/// A non-link tap across the page or spread, measured from physical left.
+/// A page-zone tap across the page or spread, measured from physical left.
+/// Touch turn zones take precedence over in-text links.
 final class ReaderPageTapped extends ReaderMessage {
   const ReaderPageTapped(this.fraction, {required this.touch});
   final double fraction;

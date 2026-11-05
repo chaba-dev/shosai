@@ -1345,6 +1345,12 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
       details.globalPosition,
       details.kind,
     );
+    // On touch, the outer quarters are navigation even over a reference.
+    // Keep the middle half and pointer clicks available for following links.
+    if (pageTap != null && readerTapTurns(widget.model, pageTap)) {
+      widget.dispatch(pageTap);
+      return;
+    }
     final page = widget.epubPage;
     final source = transform.toSource(position);
     if (page == null) {

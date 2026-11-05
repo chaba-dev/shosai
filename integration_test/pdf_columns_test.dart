@@ -1295,7 +1295,11 @@ void main() {
               .contains(box.topLeft + Offset(local.x, local.y)),
           isTrue,
         );
-        await tester.tapAt(box.topLeft + Offset(local.x, local.y));
+        // This destination check includes a link in a touch turn zone.
+        await tester.tapAt(
+          box.topLeft + Offset(local.x, local.y),
+          kind: ui.PointerDeviceKind.mouse,
+        );
         await tester.pump(const Duration(milliseconds: 350));
         await until(
           tester,

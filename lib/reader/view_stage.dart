@@ -434,8 +434,8 @@ class _ReaderSpreadGutter extends StatelessWidget {
   );
 }
 
-/// Shares page coordinates with the selectable surface. Links and long presses
-/// keep their own gestures; only a completed non-link tap reaches this scope.
+/// Shares page coordinates with the selectable surface. Long presses retain
+/// selection; completed touch taps in turn zones outrank in-text links.
 class _ReaderPageTapScope extends StatefulWidget {
   const _ReaderPageTapScope({
     required this.model,
