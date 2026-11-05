@@ -1457,8 +1457,26 @@ void main() {
       expect(first.page, 0);
       expect(first.source.left, closeTo(314.04, .02));
       // PR1 now exposes physical ink rows rather than the loose paragraph
-      // union. Entry keeps the tapped row, not the earlier paragraph start.
-      expect(first.source.top, closeTo(342.276, .2));
+      // union. Keep up to 3pt of whitespace before the tapped row's ink,
+      // not the earlier paragraph start or a cut through its antialiasing.
+      final pdf = await PdfrxPdfEngine().open(path);
+      final geometry = await pdf.pageGeometry(0);
+      await pdf.dispose();
+      final row = geometry.lines.singleWhere(
+        (line) =>
+            line.bounds.left > 300 && (line.bounds.top - 342.276).abs() < .01,
+      );
+      final precedingBottom = geometry.lines
+          .where(
+            (line) =>
+                line.bounds.left > 300 && line.bounds.bottom <= row.bounds.top,
+          )
+          .map((line) => line.bounds.bottom)
+          .reduce(math.max);
+      expect(
+        first.source.top,
+        math.max(row.bounds.top - 3, (precedingBottom + row.bounds.top) / 2),
+      );
       await capture('columns-right-column-entry');
       final endpoints = painting(tester)!.surface.endpoints;
       // The fit controls leave chrome visible. Select below its overlay, not
@@ -1551,6 +1569,37 @@ void main() {
         'Original right column',
       );
       await capture('columns-restored-place');
+      final restoredScreen = painting(tester)!.columns!;
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+      await until(tester, () => painting(tester)!.columns != restoredScreen);
+      final previousScreen = painting(tester)!.columns!;
+      expect(
+        (
+          previousScreen.next.page,
+          previousScreen.next.region,
+          previousScreen.next.y,
+        ),
+        (
+          restoredScreen.start.page,
+          restoredScreen.start.region,
+          restoredScreen.start.y,
+        ),
+      );
+      expect(previousScreen.pieces.last.source.bottom, restored.source.top);
+      await capture('columns-before-restored-place');
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+      await until(tester, () => painting(tester)!.columns != previousScreen);
+      expect(
+        painting(tester)!.columns!.pieces.first.source.top,
+        restored.source.top,
+      );
+      final returnedCancellation = bridge.createCancellation();
+      final returnedState = await bridge.loadReadingState(
+        bookId: book.bookId,
+        cancellationId: returnedCancellation,
+      );
+      bridge.releaseCancellation(id: returnedCancellation);
+      expect(returnedState!.pdfY, restored.source.top);
       // Double-tap leaves Columns for the original fitted page, never 2x.
       final centerOfStrip = tester.getCenter(
         find.byKey(const ValueKey('reader-selection-surface')),

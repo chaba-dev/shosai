@@ -10,6 +10,7 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
     this.pages,
     this.columnWidth,
     this.back,
+    this.ahead,
     this.selection,
     this.annotations,
     this.annotationError,
@@ -25,6 +26,7 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
   final Map<int, PdfStripPage> pages;
   final double? columnWidth;
   final List<PdfStripPosition> back;
+  final List<PdfStripPosition> ahead;
   final PdfStripSelection selection;
   final List<FlutterAnnotation> annotations;
   final String? annotationError;
@@ -268,6 +270,7 @@ extension on ReaderController {
           screen?.start ??
           PdfStripPosition(_model.readingLocation.unit, y: _model.pdfY),
       back: pending?.back,
+      ahead: pending?.ahead,
       previous: pending?.previous ?? false,
       offset: pending?.offset,
       length: pending?.length,
@@ -402,12 +405,19 @@ extension on ReaderController {
     if (delta > 0) {
       if (screen.next.page >= _pdfDocument!.pageCount) return;
       _readingStatePersistenceBlocked = false;
-      _requestColumns(screen.next, back: [..._columnsBack, screen.start]);
+      _requestColumns(
+        screen.next,
+        back: [..._columnsBack, screen.start],
+        ahead: _columnsAhead.isEmpty
+            ? const []
+            : _columnsAhead.sublist(0, _columnsAhead.length - 1),
+      );
     } else if (_columnsBack.isNotEmpty) {
       _readingStatePersistenceBlocked = false;
       _requestColumns(
         _columnsBack.last,
         back: _columnsBack.sublist(0, _columnsBack.length - 1),
+        ahead: [..._columnsAhead, screen.start],
       );
     } else if (screen.start.page > 0 ||
         screen.start.region > 0 ||
@@ -420,6 +430,7 @@ extension on ReaderController {
   void _requestColumns(
     PdfStripPosition position, {
     List<PdfStripPosition>? back,
+    List<PdfStripPosition>? ahead,
     bool previous = false,
     ({int page, int region, double zoom, double baseScale})? detail,
     PdfStripScreen? strip,
@@ -449,6 +460,7 @@ extension on ReaderController {
     final intent = (
       position: position,
       back: List<PdfStripPosition>.unmodifiable(back ?? _columnsBack),
+      ahead: List<PdfStripPosition>.unmodifiable(ahead ?? _columnsAhead),
       previous: previous,
       offset:
           offset ??
@@ -493,6 +505,7 @@ extension on ReaderController {
       _rasterZoom,
       position,
       intent.back,
+      ahead: intent.ahead,
       previous: intent.previous,
       detail: detail,
       strip: strip,
@@ -516,6 +529,7 @@ extension on ReaderController {
     double zoom,
     PdfStripPosition position,
     List<PdfStripPosition> back, {
+    required List<PdfStripPosition> ahead,
     required bool previous,
     required ({int page, int region, double zoom, double baseScale})? detail,
     required PdfStripScreen? strip,
@@ -615,6 +629,7 @@ extension on ReaderController {
                   height: math.max(1, height - pdfStripHeaderHeight),
                   zoom: zoom,
                   columnWidth: columnWidth,
+                  stop: previous ? position : ahead.lastOrNull,
                   // A jumped-to range must clear the overlaid toolbar and capsule.
                   // Reserve space in layout, not by hiding part of the raster.
                   topInset: length == null
@@ -673,6 +688,23 @@ extension on ReaderController {
               }
             }
           }
+          if (!_typographyContinuous &&
+              regions[region].lines.any((line) => line.bounds.top == y)) {
+            // Tight glyph boxes omit raster antialiasing. Put an anchored row
+            // in preceding whitespace, with at most the crop's 3pt ink guard.
+            // A large blank gap must not pull a footnote destination upward.
+            final before = regions[region].lines.where(
+              (line) => line.bounds.bottom <= y!,
+            );
+            y = math.max(
+              y! - 3,
+              before.isEmpty
+                  ? bounds.top
+                  : (before.map((line) => line.bounds.bottom).reduce(math.max) +
+                            y) /
+                        2,
+            );
+          }
         }
         position = PdfStripPosition(position.page, region: region, y: y);
       }
@@ -687,16 +719,11 @@ extension on ReaderController {
           if (candidate == null || candidate.pieces.isEmpty) return;
           screen = candidate;
           final next = candidate.next;
-          final reached =
-              next.page > position.page ||
-              next.page == position.page &&
-                  (next.region > position.region ||
-                      next.region == position.region &&
-                          (next.y ?? -1) >= (position.y ?? -1));
-          if (reached) break;
+          if (next.compareTo(position) >= 0) break;
           back.add(cursor);
           cursor = next;
         }
+        ahead = [...ahead, position];
       } else {
         screen = await window(position);
       }
@@ -856,6 +883,7 @@ extension on ReaderController {
           pages,
           columnWidth,
           back,
+          ahead,
           selection,
           annotations,
           annotationError,
@@ -958,6 +986,9 @@ extension on ReaderController {
     _columnsBack
       ..clear()
       ..addAll(message.back);
+    _columnsAhead
+      ..clear()
+      ..addAll(message.ahead);
     final viewportTop = screen.viewportTop;
     final first = screen.pieces.firstWhere(
       (p) => p.top + p.height > viewportTop,

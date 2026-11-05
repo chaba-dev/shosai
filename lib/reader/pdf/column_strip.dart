@@ -16,11 +16,22 @@ const pdfStripSideInset = 16.0;
 final _numberedHeading = RegExp(r'^\d+(?:\.\d+)*\.?\s+\p{L}', unicode: true);
 
 /// A stable cursor in the ordered strip. [y] is in original page points.
-final class PdfStripPosition {
+final class PdfStripPosition implements Comparable<PdfStripPosition> {
   const PdfStripPosition(this.page, {this.region = 0, this.y});
   final int page;
   final int region;
   final double? y;
+
+  @override
+  int compareTo(PdfStripPosition other) {
+    final pageOrder = page.compareTo(other.page);
+    if (pageOrder != 0) return pageOrder;
+    final regionOrder = region.compareTo(other.region);
+    if (regionOrder != 0) return regionOrder;
+    return (y ?? double.negativeInfinity).compareTo(
+      other.y ?? double.negativeInfinity,
+    );
+  }
 }
 
 final class PdfStripPage {
@@ -158,6 +169,7 @@ PdfStripScreen layoutPdfColumnScreen({
   double topInset = 0,
   double? columnWidth,
   bool continuous = false,
+  PdfStripPosition? stop,
 }) {
   final pieces = <PdfStripPiece>[];
   final separators = <PdfStripSeparator>[];
@@ -168,6 +180,7 @@ PdfStripScreen layoutPdfColumnScreen({
   var contentWidth = width;
   columnWidth ??= typicalPdfColumnWidth(pages.values.map((p) => p.columns));
   while (cursor.page < pageCount && top < height - .01) {
+    if (stop != null && cursor.compareTo(stop) >= 0) break;
     final page = pages[cursor.page];
     if (page == null) {
       needsPage = cursor.page;
@@ -181,6 +194,13 @@ PdfStripScreen layoutPdfColumnScreen({
     final region = regions[cursor.region];
     final bounds = region.bounds;
     final y = cursor.y ?? bounds.top;
+    final stopY = cursor.page == stop?.page && cursor.region == stop?.region
+        ? stop?.y
+        : null;
+    if (stopY != null && y >= stopY) {
+      cursor = stop!;
+      break;
+    }
     final newPage = cursor.region == 0 && cursor.y == null && cursor.page > 0;
     final previous = cursor.region > 0 ? regions[cursor.region - 1] : null;
     final newColumn =
@@ -232,7 +252,10 @@ PdfStripScreen layoutPdfColumnScreen({
       scale = (height - topInset - gap) / tallestLine;
     }
     var end = math.min(bounds.bottom, y + (height - top - gap) / scale);
+    final atStop = stopY != null && end >= stopY;
+    if (atStop) end = stopY;
     if (!continuous &&
+        !atStop &&
         end < bounds.bottom &&
         region.kind != PdfRegionKind.figure) {
       // Moving the cut upward repeatedly handles overlapping line boxes.
@@ -313,6 +336,12 @@ PdfStripScreen layoutPdfColumnScreen({
     );
     contentWidth = math.max(contentWidth, pieces.last.left + pieces.last.width);
     top += (end - y) * scale;
+    if (atStop) {
+      // A restored screen already starts at this safe physical-row boundary.
+      // Do not carry text across it or repeat any of that screen's rows.
+      cursor = stop!;
+      break;
+    }
     cursor = end < bounds.bottom
         ? PdfStripPosition(cursor.page, region: cursor.region, y: end)
         : cursor.region + 1 < regions.length
