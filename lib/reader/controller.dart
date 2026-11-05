@@ -1447,6 +1447,7 @@ final class ReaderController implements Listenable {
         if (identical(message.screen, _model.pdfColumns) &&
             message.piece.zoomable &&
             message.screen.pieces.contains(message.piece) &&
+            (message.screen.strip != null || !_model.chromePinned) &&
             _canPeek) {
           final strip = message.screen.strip ?? message.screen;
           _hideChrome();

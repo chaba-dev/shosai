@@ -151,7 +151,9 @@ pinch renders the whole safe region. Tapping a figure/table opens 2× detail;
 pinch adjusts it independently of Size. Detail hides the reading chrome on
 entry, disables page-turn taps, and reserves a 44 pt safe-area header for its
 Close control (also available with Progress off). Hover leaves it exposed;
-middle taps still reveal controls. Close, Escape with no selection, or pinching
+middle taps still reveal controls. Pinned chrome (such as Search or Notes)
+blocks initial enlargement, but never blocks returning from existing detail.
+Close, Escape with no selection, or pinching
 back to fit returns to the same strip screen without changing Size or navigation
 history. Whole-page fallbacks keep ordinary taps for page navigation and links;
 their enlargement remains pinch-only. In-text links in touch turn zones no

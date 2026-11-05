@@ -1949,6 +1949,37 @@ void main() {
             (pixel ~/ fittedWidth) / 2 + 40,
           );
       await capture('columns-figure-ja');
+      final beforeSearch = painting(tester)!.columns;
+      await tester.tap(folio);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+      await until(tester, () => painting(tester)!.columns != beforeSearch);
+      final pinned = painting(tester)!.columns!;
+      final figure = pinned.pieces.singleWhere(
+        (piece) => piece.kind == PdfRegionKind.figure,
+      );
+      final pinnedCenter =
+          tester.getTopLeft(raster) +
+          Offset(
+            figure.left + figure.width / 2,
+            figure.top + figure.height / 2,
+          );
+      await tester.tapAt(pinnedCenter);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(
+        painting(tester)!.columns!.strip,
+        isNull,
+        reason: 'Pinned Search must not cover a newly opened detail Close',
+      );
+      await pinch(tester, pinnedCenter, 30, 60);
+      await tester.pumpAndSettle();
+      expect(painting(tester)!.columns, same(pinned));
+      expect(find.byKey(const ValueKey('reader-search-close')), findsOneWidget);
+      await capture('columns-figure-search-pinned-ja');
+      await tester.tap(find.byKey(const ValueKey('reader-search-close')));
+      await until(tester, () => painting(tester)!.columns != pinned);
       await tester.tapAt(center);
       await tester.pump(const Duration(milliseconds: 350));
       await until(tester, () => painting(tester)!.columns!.strip != null);
@@ -1967,9 +1998,22 @@ void main() {
       expect(enlarged.width, greaterThan(fittedWidth * 1.8));
       expect(tester.widget<Text>(folioText).data, '4 ページ中 3 ページ');
       await capture('columns-figure-pinched-ja');
+      await tester.tap(folio);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      final beforeDetailSearch = painting(tester)!.columns;
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+      await until(
+        tester,
+        () => painting(tester)!.columns != beforeDetailSearch,
+      );
       final area = find.byKey(const ValueKey('reader-page-tap-area'));
       await pinch(tester, tester.getCenter(area), 90, 40);
       await until(tester, () => painting(tester)!.columns!.strip == null);
+      final pinnedReturn = painting(tester)!.columns;
+      expect(find.byKey(const ValueKey('reader-search-close')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('reader-search-close')));
+      await until(tester, () => painting(tester)!.columns != pinnedReturn);
       await tester.tap(folio);
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
