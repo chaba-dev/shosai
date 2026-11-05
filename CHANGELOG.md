@@ -258,6 +258,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Bound continuous EPUB tests by work, not wall-clock time (#204)
 - *(library)* Cover first-screen local and Drive PDF progress (#298)
 - *(reader)* Cover restored Columns long-press selection (#300)
+- *(pdf)* Align column assertions with crop guards (#303)
 
 ### ⚙️ Miscellaneous Tasks
 
