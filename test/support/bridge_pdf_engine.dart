@@ -138,7 +138,12 @@ final class BridgePdfDocument implements PdfEngineDocument {
       pdfBitmapSizeFor(pageSize(page), scale);
 
   @override
-  Future<PdfRenderedPage> render(int page, double scale) async {
+  Future<PdfRenderedPage> render(
+    int page,
+    double scale, {
+    PdfRect? clip,
+  }) async {
+    if (clip != null) throw UnsupportedError('Legacy bridge fake has no crops');
     final rendered = await _engine.renderPage(
       document: _engine.pdfEngineHandle,
       page: BigInt.from(page),

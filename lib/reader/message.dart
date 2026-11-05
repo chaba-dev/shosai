@@ -399,6 +399,15 @@ final class ReaderPageInputSubmitted extends ReaderMessage {
   const ReaderPageInputSubmitted();
 }
 
+/// Pinches an indivisible figure or fallback page without changing column Size.
+/// The screen identity rejects gestures completed against an obsolete crop.
+final class ReaderColumnsDetailRequested extends ReaderMessage {
+  const ReaderColumnsDetailRequested(this.screen, this.piece, this.zoom);
+  final PdfStripScreen screen;
+  final PdfStripPiece piece;
+  final double zoom;
+}
+
 /// Changes reader-local typography presentation (RD-09).
 ///
 /// The controller clamps the supplied values and hands global Display changes

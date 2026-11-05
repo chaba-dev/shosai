@@ -3,11 +3,10 @@
 Acceptance source: [RFD 12, Papers on phones and revised Decisions](https://github.com/chaba-dev/rfds/blob/d9fae4eb30607b4620d09441c6d08b4cbab64425/rfd/0012/README.adoc),
 [rfds PR #16](https://github.com/chaba-dev/rfds/pull/16).
 
-This is the nonvisual foundation, not the Columns reading mode. Nothing in
-the app calls the analyzer yet, so existing PDF opening, rendering, selection
-and Display behavior must stay unchanged. PR2 builds the view; PR3 integrates
-it into the reader. Do not treat screenshots of the existing reader as evidence
-that Columns is already available.
+PR1 supplies the nonvisual foundation. PR2 adds the Columns reading mode and
+explicit Display preference described below; PR3 integrates durable place,
+selection/marks/search/links, double-tap entry and phone defaults. PR1's
+unchanged-reader screenshots are not evidence of the PR2 Columns UI.
 
 ## Contract for the successors
 
@@ -74,7 +73,7 @@ fields; constructing a text/image-only copy discards the safety contract.
 | 5. Turning | No behavior changed; PR2/PR3 wire zones/swipes and slide/no-animation, never curl the strip. |
 | 6. Place | Geometry stays in page points; PR3 persists page + height and restores both modes with the page-outline indicator. |
 | 7. Selection, marks, search, links | Original character ranges preserved; PR2/PR3 apply piece offset/scale to existing page-space surfaces. |
-| 8. Getting there | PR3 adds Columns/Fit width/Fit page and double-tap entry/exit. |
+| 8. Getting there | PR2 adds/persists Columns/Fit width/Fit page; PR3 adds double-tap entry/exit. |
 | 9. Default | Column counts support first-page sampling; PR3 chooses phone defaults and preserves the reader's saved choice. |
 | 10. Fall-back | Figure/table pages keep columns. No text/no gutter uses safe trimmed page bounds; unknown coverage retains the full page. PR2 owns fit width and crisp pinch. |
 
@@ -102,3 +101,94 @@ Run `make lint`, `make test`, and the existing production-shell golden harness.
 This PR changes no golden baselines. If a later stack PR changes macOS
 goldens, regenerate and verify them on the **Mac mini**; Linux cannot certify
 macOS text rasterization.
+
+## PR2 strip and integration seam
+
+`layoutPdfColumnScreen` consumes nearby `PdfStripPage` metadata and returns an
+immutable `PdfStripScreen`: start/next cursors, visible original-page crops,
+column/page separators and the next missing page's index. Text rows that overlap
+are never split at a screen edge. Paragraphs break at physical rows, with
+heading/first-row carry protection. Bands and no-column fallback pages fit the
+viewport width; figures/tables fit indivisibly to one screen. Shared Size steps
+scale columns from 50% to 100% of their fitted width; short fragments keep their
+column's scale rather than magnifying their fonts. The maximum is labeled and
+the increase button disabled. Figure/table and fallback-page detail pinch is
+separate from Size and always requests fresh clipped PDF pixels.
+The strip may cross a column or page boundary within a screen.
+
+Figure headers must travel with their whole diagram, not survive as an orphan
+row in the previous screen. The pinned ResNet page-4 regression traverses the
+412 × 775 strip and checks all three network headers with the complete figure,
+its normal fitted scale, and the adjacent screen. Exact-once ink conservation
+alone is not pagination acceptance. The corrected grouping leaves a measured
+588.3px (75.9%) preceding blank tail: the 747px figure plus its 28px page band
+cannot fit that remainder without changing scale or order. The orphan labels
+are resolved, but this large deferral tail remains an explicit visual-acceptance
+question, not a no-huge-tail pass. Rebalancing earlier text windows would be a
+separate pagination change; this regression does not silently introduce it.
+
+The reader controller loads geometry on demand with three initial pages for
+recurring-head sampling, retains nearby geometry, and renders each crop through
+`PdfEngineDocument.render(page, scale, clip: rect)`. The returned raster's
+`source` includes outward pixel rounding. The controller trims that rounding
+when composing a screen at display density; no full-page bitmap is enlarged.
+Generation and operation revisions guard every asynchronous adoption, and the
+document remains alive until its outstanding render/decode effects drain.
+
+`ReaderModel.pdfColumns` exposes the current immutable screen for PR3.
+`PdfStripPiece.toPage` / `fromPage` map between strip-content logical pixels and
+rotated original-page points. The view adds `pdfStripHeaderHeight` (32 pt) and
+`pdfStripSideInset` (14 pt) outside that space, all within stable device safe
+insets. Both axes' scroll offsets in detail mode must also be accounted for by
+interaction adapters. `PdfStripPiece.zoomable` identifies figure/page pieces;
+`PdfStripScreen.detailZoom` and `strip` preserve the original cursor while a
+pinch renders the whole safe region. Pinching back to fit returns to that
+screen without changing Size or navigation history. Detail scale is bounded
+by the existing 40-million-pixel / 16384px edge admission, for both the outward-
+rounded source crop and composed canvas at device density. `detailZoom` stores
+the admitted ratio, not the unclamped gesture request. Extremely tall fallback
+regions that cannot admit a whole-region enlargement retain their crisp strip.
+A screen can contain
+more than one page, so mapping must select the hit piece, not assume model.unit
+applies to every point. These transforms do not themselves implement selection
+or durable restoration.
+
+The explicit fit is `FlutterReaderSettings.pdfFit` / core `PdfFit`, persisted as
+`reader.pdf_fit`; null means no explicit choice, allowing PR3's phone default
+without erasing a saved choice. The existing `pdfZoom` remains for compatibility.
+PR2 does not implement page+y persistence, double-tap entry, phone auto-selection
+or annotation/link/search coordinate integration.
+
+## PR2 native evidence and checks
+
+The [PageSpread preview](design-system/components/PageSpread.html) contains
+native Linux screenshots of the fitted title/column, column rule and cross-page
+band, plus two real desktop recording excerpts: the maximum/submaximum Size
+controls, then keyboard screen steps and chrome. The revised captures include
+injected 59pt top / 34pt bottom safe insets. Japanese mixed-figure and sharp-detail
+captures use the first-party labeled-raster fixture.
+[DisplaySettings](design-system/components/DisplaySettings.html)
+also includes the native narrow-window sheet. These are Linux at 440 × 900
+logical pixels, not an Android device or a browser reader simulation.
+
+`flutter test -d linux integration_test/pdf_columns_test.dart` exercises real
+PDFium with Thrift: touch outer-zone steps, middle-zone chrome, swipe and backward
+navigation, every-page range naming, safe cutout/home insets, maximum/submaximum
+Size, explicit fit callbacks, 200 ms slide-on/instant-off, reduced motion,
+fit-width scan fallback, and crisp figure/page pinch with two-axis panning.
+The DPR 3 scan controls cover below/above area and edge admission, an exceptionally
+tall fallback, and pixel-identical return to a noninitial strip cursor with
+backward/forward history. The mixed figure test also runs the Japanese UI. Set
+`SHOSAI_COLUMNS_ARTIFACTS` to capture the repaint-boundary PNGs. Unit tests cover
+line-safe windows (including indivisible overlapping tall rows), transforms,
+band sizing, page/column separators and missing-page loading. Engine crop tests
+compare every pixel with a full render and exercise an otherwise inadmissible
+high-density page through a small crop.
+
+PR2 passed `make lint`, `make test`, and the production-shell render harness
+(11 goldens, zero drift). No golden baselines changed. macOS and Android were
+not run; any macOS golden changes in follow-up work require the Darwin Mac mini.
+The orb's pinned Mesa 26 cannot expose GLX on Xvfb; the desktop recording used
+Nix's `github:NixOS/nixpkgs/nixos-25.05#mesa` (25.0.7), its EGL vendor, driver
+directory and library path, with software GL. This capture-only workaround does
+not alter application rendering or the project's graphics dependencies.

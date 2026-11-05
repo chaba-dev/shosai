@@ -74,6 +74,7 @@ final class LibraryDisplayChanged extends LibraryMessage {
     this.animations,
     this.progress,
     this.zonesHintDismissed,
+    this.pdfFit,
   });
   final String? theme;
   final double? fontSize;
@@ -82,6 +83,7 @@ final class LibraryDisplayChanged extends LibraryMessage {
   final bool? animations;
   final FlutterReaderProgress? progress;
   final bool? zonesHintDismissed;
+  final FlutterPdfFit? pdfFit;
 }
 
 /// Save the settings again after their last write failed.

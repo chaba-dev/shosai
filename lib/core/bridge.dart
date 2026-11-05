@@ -857,12 +857,17 @@ class FlutterOpenRequest {
 /// shelf lists books in.
 enum FlutterReaderProgress { page, percent, off }
 
+enum FlutterPdfFit { columns, fitWidth, fitPage }
+
 class FlutterReaderSettings {
   final bool continuous;
   final String theme;
   final double epubFontSize;
   final double epubLineSpacing;
   final double pdfZoom;
+
+  /// Null until a reader explicitly chooses a PDF fit in Display.
+  final FlutterPdfFit? pdfFit;
 
   /// The Pages setting: two pages side by side where there is room for them.
   final bool twoPages;
@@ -877,6 +882,7 @@ class FlutterReaderSettings {
     required this.epubFontSize,
     required this.epubLineSpacing,
     required this.pdfZoom,
+    this.pdfFit,
     this.twoPages = true,
     this.animations = true,
     this.progress = FlutterReaderProgress.page,
@@ -890,6 +896,7 @@ class FlutterReaderSettings {
     double? epubFontSize,
     double? epubLineSpacing,
     double? pdfZoom,
+    FlutterPdfFit? pdfFit,
     bool? twoPages,
     bool? animations,
     FlutterReaderProgress? progress,
@@ -901,6 +908,7 @@ class FlutterReaderSettings {
     epubFontSize: epubFontSize ?? this.epubFontSize,
     epubLineSpacing: epubLineSpacing ?? this.epubLineSpacing,
     pdfZoom: pdfZoom ?? this.pdfZoom,
+    pdfFit: pdfFit ?? this.pdfFit,
     twoPages: twoPages ?? this.twoPages,
     animations: animations ?? this.animations,
     progress: progress ?? this.progress,
@@ -915,6 +923,7 @@ class FlutterReaderSettings {
       epubFontSize.hashCode ^
       epubLineSpacing.hashCode ^
       pdfZoom.hashCode ^
+      pdfFit.hashCode ^
       twoPages.hashCode ^
       animations.hashCode ^
       progress.hashCode ^
@@ -931,6 +940,7 @@ class FlutterReaderSettings {
           epubFontSize == other.epubFontSize &&
           epubLineSpacing == other.epubLineSpacing &&
           pdfZoom == other.pdfZoom &&
+          pdfFit == other.pdfFit &&
           twoPages == other.twoPages &&
           animations == other.animations &&
           progress == other.progress &&

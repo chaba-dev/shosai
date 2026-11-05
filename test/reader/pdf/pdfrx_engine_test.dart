@@ -43,6 +43,77 @@ Future<String> _pdfWith(String catalogExtra) async {
 void main() {
   final engine = PdfrxPdfEngine();
 
+  test('crop admission includes outward rounding at area and edge limits', () {
+    final exactArea = pdfBitmapSizeFor(const PdfPageSize(5000, 8000), 1);
+    expect(exactArea.width * exactArea.height, 40000000);
+    expect(
+      () => pdfBitmapSizeFor(
+        const PdfPageSize(6000, 9000),
+        1,
+        clip: const PdfRect(.2, .2, 5000.2, 8000.2),
+      ),
+      throwsA(isA<PdfEngineLimitException>()),
+      reason: 'Outward rounding requires 5001 × 8001, not 5000 × 8000',
+    );
+    final exactEdge = pdfBitmapSizeFor(
+      const PdfPageSize(20000, 3),
+      1,
+      clip: const PdfRect(0, 0, 16384, 1),
+    );
+    expect([exactEdge.width, exactEdge.height], [16384, 1]);
+    expect(
+      () => pdfBitmapSizeFor(
+        const PdfPageSize(20000, 3),
+        1,
+        clip: const PdfRect(.2, .2, 16384.2, 1.2),
+      ),
+      throwsA(isA<PdfEngineLimitException>()),
+      reason: 'The virtual page is legal, but the crop rounds to 16385 wide',
+    );
+  });
+
+  test('clipped renders match full-page pixels at fitted density', () async {
+    final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+    addTearDown(document.dispose);
+    const scale = 2.0;
+    final full = await document.render(0, scale);
+    final crop = await document.render(
+      0,
+      scale,
+      clip: const PdfRect(53.8, 130.2, 293.3, 350.7),
+    );
+    final source = crop.source!;
+    expect(crop.width, 480);
+    expect(crop.height, 442);
+    expect(source.left, 53.5);
+    expect(source.top, 130);
+    final x = (source.left * scale).round();
+    final y = (source.top * scale).round();
+    for (var row = 0; row < crop.height; row++) {
+      expect(
+        crop.pixels.sublist(row * crop.width * 4, (row + 1) * crop.width * 4),
+        full.pixels.sublist(
+          ((y + row) * full.width + x) * 4,
+          ((y + row) * full.width + x + crop.width) * 4,
+        ),
+      );
+    }
+    // A tiny high-density crop must not allocate an inadmissible full bitmap.
+    final detail = await document.render(
+      0,
+      30,
+      clip: const PdfRect(54, 130, 64, 140),
+    );
+    expect([detail.width, detail.height], [300, 300]);
+    // Noninteger virtual-page sizing must agree with the actual engine crop.
+    final rounded = await document.render(
+      0,
+      2.013,
+      clip: const PdfRect(53.8, 130.2, 293.3, 350.7),
+    );
+    expect([rounded.width, rounded.height], [483, 445]);
+  });
+
   test(
     'column regions retain vector ink and own overlaid image labels',
     () async {

@@ -633,15 +633,18 @@ class _ReachableSelectableSurface extends StatelessWidget {
 /// to handle wheel/trackpad input without competing for touch pinches.
 class _ReaderPageGestures extends StatefulWidget {
   const _ReaderPageGestures({
+    super.key,
     required this.model,
     required this.dispatch,
     required this.fittedZoom,
     required this.builder,
+    this.columnsScreen,
   });
 
   final ReaderModel model;
   final void Function(ReaderMessage) dispatch;
   final double? fittedZoom;
+  final PdfStripScreen? columnsScreen;
   final Widget Function(ScrollController, ScrollController) builder;
 
   @override
@@ -659,6 +662,8 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   double _startZoom = 1;
   double _startSpan = 1;
   double _previewScale = 1;
+  PdfStripPiece? _columnsZoomPiece;
+  bool get _canZoom => widget.fittedZoom != null || _columnsZoomPiece != null;
   bool _multiTouch = false;
   bool _cancelled = false;
 
@@ -704,12 +709,24 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     }
     if (_multiTouch) {
       turn?.release(complete: false);
-      if (widget.fittedZoom != null && (scale - 1).abs() >= .03) {
-        widget.dispatch(ReaderTypographyChanged(zoom: _startZoom * scale));
+      if (_canZoom && (scale - 1).abs() >= .03) {
+        final screen = widget.columnsScreen;
+        if (screen != null) {
+          widget.dispatch(
+            ReaderColumnsDetailRequested(
+              screen,
+              _columnsZoomPiece!,
+              _startZoom * scale,
+            ),
+          );
+        } else {
+          widget.dispatch(ReaderTypographyChanged(zoom: _startZoom * scale));
+        }
       }
       return;
     }
-    if (model.continuousPresentation ||
+    if ((widget.columnsScreen?.detailZoom ?? 1) > 1 ||
+        model.continuousPresentation ||
         _readerFit(model.typography) != BoxFit.contain ||
         _distance.dx.abs() < 18 ||
         _distance.dx.abs() < _distance.dy.abs() * 1.5) {
@@ -720,7 +737,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     final total = model.document?.logicalUnitCount.toInt() ?? 0;
     if (_canStepPage(model, delta, total)) {
       final velocity = _velocity?.getVelocity().pixelsPerSecond.dx ?? 0;
-      if (turn != null) {
+      if (turn != null && !model.columnsPresentation) {
         turn.release(
           complete:
               turn.pastMidpoint ||
@@ -816,7 +833,32 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     behavior: HitTestBehavior.opaque,
     onScaleStart: (details) {
       if (_startedPage != null) return;
-      _startZoom = widget.fittedZoom ?? 1;
+      final screen = widget.columnsScreen;
+      _columnsZoomPiece = null;
+      if (screen != null) {
+        // In detail, even a short figure's surrounding paper belongs to that
+        // figure: a pinch on the blank area must still return to the strip.
+        if (screen.strip != null) _columnsZoomPiece = screen.pieces.single;
+        final point =
+            details.localFocalPoint +
+            Offset(
+              _horizontal.hasClients ? _horizontal.offset : 0,
+              _vertical.hasClients ? _vertical.offset : 0,
+            );
+        for (final piece in screen.pieces) {
+          if (piece.zoomable &&
+              Rect.fromLTWH(
+                piece.left,
+                piece.top,
+                piece.width,
+                piece.height,
+              ).contains(point)) {
+            _columnsZoomPiece = piece;
+            break;
+          }
+        }
+      }
+      _startZoom = screen?.detailZoom ?? widget.fittedZoom ?? 1;
       _startedPage = _enabled && !_cancelled ? _page : null;
     },
     onScaleUpdate: (details) {
@@ -832,7 +874,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
           _distance.dx.abs() >= _distance.dy.abs() * 1.5) {
         turn?.drag(_distance.dx);
       }
-      if (!_multiTouch && widget.fittedZoom != null && _enabled) {
+      if (!_multiTouch &&
+          (widget.fittedZoom != null || widget.columnsScreen != null) &&
+          _enabled) {
         for (final (controller, delta) in [
           (_horizontal, details.focalPointDelta.dx),
           (_vertical, details.focalPointDelta.dy),
@@ -849,14 +893,19 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       }
       if (_pointers.length == 2 &&
           _startSpan > 0 &&
-          widget.fittedZoom != null &&
+          _canZoom &&
           _startedPage == _page &&
           _enabled) {
         final scale =
             (_pointers.values.first - _pointers.values.last).distance /
             _startSpan;
         setState(
-          () => _previewScale = (_startZoom * scale).clamp(.25, 5) / _startZoom,
+          () => _previewScale =
+              (_startZoom * scale).clamp(
+                widget.columnsScreen == null ? .25 : 1,
+                5,
+              ) /
+              _startZoom,
         );
       }
     },
@@ -876,11 +925,13 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     child: ClipRect(
       clipBehavior: _previewScale == 1 ? Clip.none : Clip.hardEdge,
       child: Transform.scale(
-        scale: _previewScale,
+        // Columns detail adopts freshly clipped PDF pixels after the pinch;
+        // it never magnifies the old strip bitmap, even as a preview.
+        scale: widget.columnsScreen == null ? _previewScale : 1,
         child: ScrollConfiguration(
           // Only the inner PDF owner pans its scroll controllers itself.
           // A furniture fallback must preserve descendant touch scrolling.
-          behavior: widget.fittedZoom == null
+          behavior: widget.fittedZoom == null && widget.columnsScreen == null
               ? ScrollConfiguration.of(context)
               : ScrollConfiguration.of(context).copyWith(
                   dragDevices: {...ScrollConfiguration.of(context).dragDevices}

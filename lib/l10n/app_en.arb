@@ -672,6 +672,9 @@
     "description": "NEW: no Iced string. The raster zoom-in control's accessible label (RD-09)."
   },
   "readerFitWidth": "Fit width",
+  "readerColumns": "Columns",
+  "@readerColumns": { "description": "PDF reading mode showing original page pieces in column reading order." },
+  "readerColumnsSizeMaximum": "100% · max",
   "@readerFitWidth": {
     "description": "Iced reference key: fit-width."
   },

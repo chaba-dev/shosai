@@ -60,6 +60,7 @@ bool _readerShowsSpread(
 ) {
   final typography = model.typography;
   if (layout == ShellLayout.phone ||
+      model.columnsPresentation ||
       !typography.twoPages ||
       model.continuousPresentation ||
       area.maxWidth < ShosaiTokens.sizeSpreadMinWidth ||
@@ -201,6 +202,15 @@ class _ReaderStage extends StatelessWidget {
               // under the page or spread, on every device. The line's row is
               // there while the book opens too, so the first page is
               // rendered for the box it is then shown in.
+              : model.columnsPresentation
+              ? Padding(
+                  key: const ValueKey('reader-columns-safe-area'),
+                  // Stable cutout/home insets, as on the quiet EPUB page.
+                  // Keep the layout reporter inside: the controller must fill
+                  // the safe content box, not render lines behind system UI.
+                  padding: MediaQuery.viewPaddingOf(context),
+                  child: content,
+                )
               : document != null || model.busy
               ? Column(
                   children: [
@@ -525,6 +535,7 @@ class _ReaderFolio extends StatelessWidget {
   const _ReaderFolio({
     required this.model,
     this.ordinal,
+    this.lastOrdinal,
     this.numbered = false,
     this.muted = false,
   });
@@ -534,6 +545,7 @@ class _ReaderFolio extends StatelessWidget {
   /// number, null while it is still being counted; otherwise null means the
   /// first page in view.
   final int? ordinal;
+  final int? lastOrdinal;
   final bool numbered;
   final bool muted;
 
@@ -555,8 +567,13 @@ class _ReaderFolio extends StatelessWidget {
       _ when model.document?.format != FlutterBookFormat.pdf =>
         l10n.readerPageNumber(page),
       // One line under a PDF spread names both of its pages.
-      _ => switch ((ordinal, progress.lastOrdinal)) {
-        (null, final int last) => l10n.readerQuietPagesOf(page, last, total),
+      _ => switch (lastOrdinal ??
+          (ordinal == null ? progress.lastOrdinal : null)) {
+        final int last when last != page => l10n.readerQuietPagesOf(
+          page,
+          last,
+          total,
+        ),
         _ => l10n.readerQuietPageOf(page, total),
       },
     };

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_flutter/reader/pdf/column_strip.dart';
 import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
@@ -234,6 +235,83 @@ void main() {
               lessThan(pages[p].width),
             );
           }
+        }
+        if (paper.name == 'resnet') {
+          // The Mac-reported page-4 network headers are three labels on one
+          // physical row, not a separate paragraph. Exact-once ink alone
+          // allowed that row to be stranded before the full-height diagram.
+          const headerOffsets = {995, 1002, 1558};
+          final headers = pages[3].lines
+              .where((line) => headerOffsets.contains(line.start))
+              .toList();
+          expect(headers, hasLength(3));
+          const diagram = PdfRect(51.045, 92.112, 284.799, 618.042);
+          final metadata = {
+            for (var p = 0; p < pages.length; p++)
+              p: PdfStripPage(pages[p], results[p]),
+          };
+          final screens = <PdfStripScreen>[];
+          var cursor = const PdfStripPosition(0);
+          while (cursor.page < pages.length && screens.length < 100) {
+            final screen = layoutPdfColumnScreen(
+              pages: metadata,
+              pageCount: pages.length,
+              start: cursor,
+              width: 412,
+              height: 775,
+            );
+            expect(screen.pieces, isNotEmpty);
+            screens.add(screen);
+            cursor = screen.next;
+          }
+          expect(cursor.page, pages.length);
+          final diagramScreen = screens.singleWhere(
+            (screen) => screen.pieces.any(
+              (piece) => piece.page == 3 && piece.source.contains(diagram),
+            ),
+          );
+          final object = diagramScreen.pieces.singleWhere(
+            (piece) => piece.page == 3 && piece.source.contains(diagram),
+          );
+          expect(
+            headers.every((line) => object.source.contains(line.bounds)),
+            isTrue,
+            reason: 'VGG/plain/residual headers must travel with the diagram',
+          );
+          for (final screen in screens.where((s) => s != diagramScreen)) {
+            expect(
+              screen.pieces.any(
+                (piece) =>
+                    piece.page == 3 &&
+                    headers.any((line) => piece.source.overlaps(line.bounds)),
+              ),
+              isFalse,
+              reason: 'No labels-only screen before or after the figure',
+            );
+          }
+          final standalone = layoutPdfColumnScreen(
+            pages: metadata,
+            pageCount: pages.length,
+            start: PdfStripPosition(3, region: object.region),
+            width: 412,
+            height: 775,
+          );
+          expect(object.scale, standalone.pieces.first.scale);
+          expect(object.source.contains(diagram), isTrue);
+          final preceding = screens[screens.indexOf(diagramScreen) - 1];
+          final last = preceding.pieces.last;
+          final tail = 775 - last.top - last.height;
+          expect(
+            object.height,
+            greaterThan(tail),
+            reason: 'Defer the intact figure, never shrink it into the tail',
+          );
+          // ignore: avoid_print
+          print(
+            'ResNet p4: headers+diagram screen ${screens.indexOf(diagramScreen)}, '
+            'height=${object.height}, scale=${object.scale}; '
+            'preceding tail=$tail (${(tail / 775 * 100).toStringAsFixed(1)}%)',
+          );
         }
       },
     );

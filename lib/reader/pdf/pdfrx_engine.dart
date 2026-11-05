@@ -178,14 +178,30 @@ final class _PdfrxDocument implements PdfEngineDocument {
       pdfBitmapSizeFor(pageSize(page), scale);
 
   @override
-  Future<PdfRenderedPage> render(int page, double scale) async {
+  Future<PdfRenderedPage> render(
+    int page,
+    double scale, {
+    PdfRect? clip,
+  }) async {
     final loaded = _page(page);
-    final size = bitmapSize(page, scale);
+    // Validate the allocation, not the virtual full page: a high-zoom screen
+    // crop must not allocate (or reject) an enormous offscreen page bitmap.
+    final requested = pdfBitmapSizeFor(pageSize(page), scale, clip: clip);
+    final fullWidth = (loaded.width * scale).ceil();
+    final fullHeight = (loaded.height * scale).ceil();
+    final sx = fullWidth / loaded.width;
+    final sy = fullHeight / loaded.height;
+    final x = clip == null ? 0 : (clip.left * sx).floor();
+    final y = clip == null ? 0 : (clip.top * sy).floor();
+    final width = requested.width;
+    final height = requested.height;
     final image = await loaded.render(
-      width: size.width,
-      height: size.height,
-      fullWidth: size.width.toDouble(),
-      fullHeight: size.height.toDouble(),
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      fullWidth: fullWidth.toDouble(),
+      fullHeight: fullHeight.toDouble(),
       flags: _lcdText | _reverseByteOrder,
     );
     if (image == null) {
@@ -196,6 +212,9 @@ final class _PdfrxDocument implements PdfEngineDocument {
         width: image.width,
         height: image.height,
         pixels: Uint8List.fromList(image.pixels),
+        source: clip == null
+            ? null
+            : PdfRect(x / sx, y / sy, (x + width) / sx, (y + height) / sy),
       );
     } finally {
       image.dispose();
