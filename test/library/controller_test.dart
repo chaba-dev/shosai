@@ -439,7 +439,7 @@ void main() {
   );
 
   test(
-    'PDF fit is global and survives other Display changes and restart',
+    'Settings PDF default survives other Display changes and restart',
     () async {
       final bridge = _StubLibraryBridge();
       var controller = _controller(bridge);
@@ -451,7 +451,9 @@ void main() {
       await _settle();
 
       controller.dispatch(
-        const LibraryDisplayChanged(pdfFit: FlutterPdfFit.columns),
+        LibrarySettingsChanged(
+          controller.model.settings!.copyWith(pdfFit: FlutterPdfFit.columns),
+        ),
       );
       await _settle();
       controller.dispatch(

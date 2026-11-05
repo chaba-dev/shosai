@@ -472,6 +472,10 @@ ALTER TABLE reading_state ADD COLUMN pdf_y REAL
 ALTER TABLE reading_state ADD COLUMN pdf_x REAL
     CHECK (pdf_x IS NULL OR (pdf_x >= 0 AND pdf_x <= 1e300));
 '''),
+  Migration(16, 'per-paper PDF fit', '''
+ALTER TABLE reading_state ADD COLUMN pdf_fit TEXT
+    CHECK (pdf_fit IS NULL OR pdf_fit IN ('columns', 'fitWidth', 'fitPage'));
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

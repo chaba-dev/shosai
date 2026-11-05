@@ -4,6 +4,7 @@ library;
 import '../errors.dart';
 import '../library/records.dart';
 import '../store/store.dart';
+import 'reader_settings.dart';
 
 /// A reading position: a unit (PDF page or EPUB spine item), an optional
 /// offset within it (an EPUB character offset), and the zoom.
@@ -14,6 +15,7 @@ final class ReadingPosition {
     this.zoom = 1,
     this.pdfY,
     this.pdfX,
+    this.pdfFit,
   });
 
   final int unit;
@@ -26,6 +28,9 @@ final class ReadingPosition {
   /// Horizontal page-space anchor, including when the visible piece has no text.
   final double? pdfX;
 
+  /// This paper's explicit Aa choice; null inherits the Settings default.
+  final PdfFit? pdfFit;
+
   @override
   bool operator ==(Object other) =>
       other is ReadingPosition &&
@@ -33,10 +38,11 @@ final class ReadingPosition {
       other.offset == offset &&
       other.zoom == zoom &&
       other.pdfY == pdfY &&
-      other.pdfX == pdfX;
+      other.pdfX == pdfX &&
+      other.pdfFit == pdfFit;
 
   @override
-  int get hashCode => Object.hash(unit, offset, zoom, pdfY, pdfX);
+  int get hashCode => Object.hash(unit, offset, zoom, pdfY, pdfX, pdfFit);
 
   @override
   String toString() => 'ReadingPosition($unit, $offset, $zoom)';
@@ -128,7 +134,7 @@ ReadingPosition? _load(Database db, int bookId) {
   final hash = bookContentHash(db, bookId);
   final row = db
       .select(
-        '''SELECT unit, location_offset, zoom, pdf_y, pdf_x FROM reading_state
+        '''SELECT unit, location_offset, zoom, pdf_y, pdf_x, pdf_fit FROM reading_state
        WHERE content_hash = ?''',
         [hash],
       )
@@ -140,20 +146,22 @@ ReadingPosition? _load(Database db, int bookId) {
     zoom: row.columnAt(2) as double,
     pdfY: row.columnAt(3) as double?,
     pdfX: row.columnAt(4) as double?,
+    pdfFit: PdfFit.values.asNameMap()[row.columnAt(5)],
   );
 }
 
 void _save(Database db, int bookId, ReadingPosition position, double progress) {
   final hash = bookContentHash(db, bookId);
   db.execute(
-    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom, pdf_y, pdf_x)
-       VALUES (?, ?, ?, ?, ?, ?)
+    '''INSERT INTO reading_state (content_hash, unit, location_offset, zoom, pdf_y, pdf_x, pdf_fit)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(content_hash) DO UPDATE SET
          unit = excluded.unit,
          location_offset = excluded.location_offset,
          zoom = excluded.zoom,
          pdf_y = excluded.pdf_y,
          pdf_x = excluded.pdf_x,
+         pdf_fit = excluded.pdf_fit,
          updated_at = excluded.updated_at''',
     [
       hash,
@@ -162,6 +170,7 @@ void _save(Database db, int bookId, ReadingPosition position, double progress) {
       position.zoom,
       position.pdfY,
       position.pdfX,
+      position.pdfFit?.name,
     ],
   );
   db.execute(

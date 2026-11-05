@@ -754,8 +754,9 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// The reader-local typography the controller starts from.
   ///
-  /// A saved explicit fit wins; otherwise the legacy `pdfZoom` sentinel
-  /// (0 = fit page, -1 = fit width, >0 = manual scale) remains compatible.
+  /// Seeds the Settings default; the controller restores a paper's Aa override
+  /// after opening it. Legacy `pdfZoom` (0 = fit page, -1 = fit width,
+  /// >0 = manual scale) remains compatible.
   ReaderTypographyPresentation _initialTypography(double baseScale) {
     final settings = widget.initialSettings;
     final zoom = settings?.pdfZoom ?? 0;

@@ -866,7 +866,8 @@ class FlutterReaderSettings {
   final double epubLineSpacing;
   final double pdfZoom;
 
-  /// Global Display choice; null uses the legacy [pdfZoom] value and permits
+  /// Global Settings default; a paper's saved Aa fit takes precedence.
+  /// Null uses the legacy [pdfZoom] value and permits
   /// automatic phone fitting only at its untouched zero default.
   final FlutterPdfFit? pdfFit;
 
@@ -965,6 +966,9 @@ class FlutterReadingState {
   /// Horizontal original-page anchor for textless pieces sharing a height.
   final double? pdfX;
 
+  /// This paper's Aa choice; null inherits the global Settings default.
+  final FlutterPdfFit? pdfFit;
+
   /// The last unit in view when it is past [unit], as on a PDF spread; the
   /// library progress counts it as read. Not part of the restored position.
   final BigInt? lastUnit;
@@ -979,13 +983,14 @@ class FlutterReadingState {
     required this.zoom,
     this.pdfY,
     this.pdfX,
+    this.pdfFit,
     this.lastUnit,
     this.progress,
   });
 
   @override
   int get hashCode =>
-      Object.hash(unit, offset, zoom, pdfY, pdfX, lastUnit, progress);
+      Object.hash(unit, offset, zoom, pdfY, pdfX, pdfFit, lastUnit, progress);
 
   @override
   bool operator ==(Object other) =>
@@ -997,6 +1002,7 @@ class FlutterReadingState {
           zoom == other.zoom &&
           pdfY == other.pdfY &&
           pdfX == other.pdfX &&
+          pdfFit == other.pdfFit &&
           lastUnit == other.lastUnit &&
           progress == other.progress;
 }
