@@ -172,6 +172,7 @@ final class ReaderController implements Listenable {
   PdfEngineDocument? _pdfDocument;
   int _columnsRevision = 0;
   final Map<int, PdfStripPage> _columnsPages = {};
+  ({PdfStripScreen screen, double top})? _columnsViewport;
   double? _columnsWidth;
   final List<PdfStripPosition> _columnsBack = [];
   ({
@@ -7461,6 +7462,7 @@ final class ReaderController implements Listenable {
   void _releaseModelResources({bool publish = false}) {
     _columnsRevision++;
     _columnsPages.clear();
+    _columnsViewport = null;
     _columnsWidth = null;
     _columnsBack.clear();
     _columnsIntent = null;
@@ -7987,13 +7989,13 @@ Future<ui.Image?> _noEpubImage(Uint8List bytes) async => null;
 /// to the reader's base family.
 Future<void> _noEpubFont(String family, Uint8List bytes) async {}
 
-/// Whether [tap] turns the page: a touch in the outer quarter of the page or
-/// spread, while pages are turned rather than scrolled. The middle half shows
-/// the chrome.
+/// Whether [tap] steps the page: a touch in an outer quarter turns a screen,
+/// or scrolls Continuous PDF Columns. Continuous EPUB keeps native scrolling.
+/// The middle half always shows the chrome.
 bool readerTapTurns(ReaderModel model, ReaderPageTapped tap) =>
     tap.touch &&
     model.document != null &&
     !model.chromePinned &&
     model.selectionPhase == ReaderSelectionPhase.idle &&
-    !model.continuousPresentation &&
+    (!model.continuousPresentation || model.columnsPresentation) &&
     (tap.fraction < .25 || tap.fraction >= .75);

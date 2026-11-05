@@ -13,6 +13,8 @@ import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/pdf/column_strip.dart';
 import 'package:shosai_flutter/shell/view.dart';
 
+import '../test/support/reference_documents.dart';
+
 /// Real PDFium, records and reader gestures on a packaged host. An absolute
 /// fixture path also lets the iOS simulator read the host's test corpus.
 void main() {
@@ -60,6 +62,271 @@ void main() {
     await File(
       '$captureDirectory/$name.png',
     ).writeAsBytes(data!.buffer.asUint8List());
+  }
+
+  for (final rtl in [false, true]) {
+    testWidgets('Continuous edge taps keep one line overlap (RTL $rtl)', (
+      tester,
+    ) async {
+      await binding.setSurfaceSize(const Size(440, 900));
+      addTearDown(() => binding.setSurfaceSize(null));
+      final directory = await Directory.systemTemp.createTemp('columns-taps-');
+      final path = '${directory.path}/Steps.pdf';
+      await File(
+        path,
+      ).writeAsBytes(columnsAfterFrontMatterPdf(rightToLeft: rtl));
+      var bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      final cancellation = bridge.createCancellation();
+      await bridge.importPaths(
+        pathKeys: [path],
+        managed: false,
+        cancellationId: cancellation,
+      );
+      final book = (await bridge.libraryPage(
+        limit: 10,
+        offset: 0,
+        cancellationId: cancellation,
+      )).books.single;
+      bridge.releaseCancellation(id: cancellation);
+      final raster = find.byKey(const ValueKey('reader-columns-raster'));
+      final area = find.byKey(const ValueKey('reader-page-tap-area'));
+      PagePainter painter() => tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((w) => w.painter)
+          .whereType<PagePainter>()
+          .single;
+      PdfStripScreen screen() => painter().columns!;
+      Future<void> until(bool Function() ready) async {
+        for (var i = 0; i < 400 && !ready(); i++) {
+          await tester.pump(const Duration(milliseconds: 30));
+        }
+        expect(ready(), isTrue);
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> singleTap(Offset point) async {
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.tapAt(point);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+      }
+
+      final captureKey = GlobalKey();
+      Widget app() => ShosaiShell(
+        home: RepaintBoundary(
+          key: captureKey,
+          child: ReaderScreen(
+            bridge: bridge,
+            initialPath: path,
+            initialBookId: book.bookId,
+            initialSettings: const FlutterReaderSettings(
+              continuous: true,
+              theme: 'light',
+              epubFontSize: 18,
+              epubLineSpacing: 1.6,
+              pdfZoom: 0,
+              pdfFit: FlutterPdfFit.columns,
+              twoPages: false,
+              zonesHintDismissed: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(app());
+      await until(() => raster.evaluate().isNotEmpty);
+      final initial = screen();
+      final first = initial.pieces.first;
+      final rect = tester.getRect(area);
+      final forward = Offset(
+        rect.left + rect.width * (rtl ? .125 : .875),
+        rect.center.dy,
+      );
+      final backward = Offset(
+        rect.left + rect.width * (rtl ? .875 : .125),
+        rect.center.dy,
+      );
+      double anchorY() {
+        final piece = screen().pieces.firstWhere(
+          (p) => p.page == first.page && p.region == first.region,
+        );
+        return tester.getTopLeft(raster).dy +
+            piece.fromPage(first.source.left, first.source.top).y;
+      }
+
+      final origin = anchorY();
+      await singleTap(backward);
+      await tester.pumpAndSettle();
+      expect(screen(), same(initial));
+      await singleTap(forward);
+      await until(() => screen() != initial);
+      // The authored PDF advances every row by exactly 14 original points.
+      final stride = initial.viewportHeight! - 14 * first.scale;
+      expect(origin - anchorY(), closeTo(stride, 1));
+      await captureView(captureKey, 'continuous-edge-forward-$rtl');
+      final advanced = screen();
+      await singleTap(backward);
+      await until(() => screen() != advanced);
+      expect(anchorY(), closeTo(origin, 1));
+
+      // A turn-zone tap dismisses an active selection, without scrolling it.
+      final surfaceOrigin = tester.getTopLeft(
+        find.byKey(const ValueKey('reader-selection-surface')),
+      );
+      Offset center(FlutterSelectionEndpoint e) =>
+          surfaceOrigin +
+          Offset(
+            (e.rect.left + e.rect.right) / 2,
+            (e.rect.top + e.rect.bottom) / 2,
+          );
+      final visible = painter().surface.endpoints
+          .where((e) => rect.deflate(100).contains(center(e)))
+          .toList();
+      final from = visible.first;
+      final to = visible.firstWhere(
+        (e) => e.offset > from.offset + BigInt.from(10),
+      );
+      final mouse = await tester.startGesture(
+        center(from),
+        kind: ui.PointerDeviceKind.mouse,
+      );
+      await mouse.moveTo(center(to));
+      await mouse.up();
+      await tester.pumpAndSettle();
+      expect(painter().anchor, isNot(painter().focus));
+      final selected = screen();
+      await singleTap(forward);
+      await tester.pumpAndSettle();
+      expect(screen(), same(selected));
+      expect(painter().anchor, painter().focus);
+      await singleTap(forward);
+      await until(() => screen() != selected);
+
+      // Save and reopen after a tap, not only after a drag.
+      await ReaderController.drainBookWrites(book.bookId.toInt());
+      final c = bridge.createCancellation();
+      final saved = (await bridge.loadReadingState(
+        bookId: book.bookId,
+        cancellationId: c,
+      ))!;
+      bridge.releaseCancellation(id: c);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(app());
+      await until(() => raster.evaluate().isNotEmpty);
+      final piece = screen().pieces.firstWhere(
+        (p) =>
+            p.page == saved.unit.toInt() &&
+            p.source.top <= saved.pdfY! &&
+            p.source.bottom >= saved.pdfY!,
+      );
+      final restoredY =
+          tester.getTopLeft(raster).dy +
+          piece.fromPage(saved.pdfX!, saved.pdfY!).y;
+      expect(restoredY, closeTo(origin, 1));
+
+      bool atEnd() =>
+          screen().next.page == 5 &&
+          screen().viewportTop + screen().viewportHeight! >=
+              screen().height - .01;
+      final testedSeparators = <bool>{};
+      for (var i = 0; i < 30 && !atEnd(); i++) {
+        for (final separator in screen().separators) {
+          final pageBand = separator.page != null;
+          if (testedSeparators.contains(pageBand)) continue;
+          final scrollable = tester
+              .stateList<ScrollableState>(
+                find.descendant(of: area, matching: find.byType(Scrollable)),
+              )
+              .singleWhere((s) => s.position.axis == Axis.vertical);
+          final target = separator.top + (pageBand ? 14 : 8);
+          if (target < 0 || target > scrollable.position.maxScrollExtent) {
+            continue;
+          }
+          // Set up an exact origin halfway through the unpainted separator;
+          // the actions under test remain real outer-quarter single taps.
+          scrollable.position.jumpTo(target);
+          await tester.pumpAndSettle();
+          final viewport = tester.getRect(
+            find
+                .ancestor(
+                  of: raster,
+                  matching: find.byType(SingleChildScrollView),
+                )
+                .first,
+          );
+          final reference = screen().pieces.firstWhere(
+            (p) =>
+                tester.getTopLeft(raster).dy + p.top + p.height > viewport.top,
+          );
+          double referenceY() =>
+              tester.getTopLeft(raster).dy +
+              screen().pieces
+                  .firstWhere(
+                    (p) =>
+                        p.page == reference.page &&
+                        p.region == reference.region,
+                  )
+                  .fromPage(reference.source.left, reference.source.top)
+                  .y;
+          final gap =
+              tester.getTopLeft(raster).dy + reference.top - viewport.top;
+          expect(gap, closeTo(pageBand ? 14 : 8, 1));
+          final beforeY = referenceY();
+          final distance = screen().viewportHeight! - 14 * reference.scale;
+          final before = screen();
+          await singleTap(forward);
+          await until(() => screen() != before);
+          expect(
+            beforeY - referenceY(),
+            closeTo(distance, 1),
+            reason:
+                'band=$pageBand page=${reference.page} region=${reference.region} '
+                'target=$target max=${scrollable.position.maxScrollExtent} '
+                'before=${before.viewportTop}/${before.height} next=${before.next.page}',
+          );
+          final after = screen();
+          await singleTap(backward);
+          await until(() => screen() != after);
+          expect(referenceY(), closeTo(beforeY, 1));
+          final returned = screen();
+          await singleTap(backward);
+          await until(() => screen() != returned);
+          expect(referenceY() - beforeY, closeTo(distance, 1));
+          testedSeparators.add(pageBand);
+          break;
+        }
+        final previous = screen();
+        await singleTap(forward);
+        await until(() => screen() != previous);
+      }
+      expect(testedSeparators, {false, true});
+      expect(atEnd(), isTrue);
+      final last = screen();
+      for (var i = 0; i < 3; i++) {
+        await singleTap(forward);
+        await tester.pumpAndSettle();
+        expect(screen(), same(last));
+      }
+      await captureView(captureKey, 'continuous-edge-end-$rtl');
+      for (var i = 0; i < 30; i++) {
+        if (screen().start.page == 0 && screen().viewportTop <= .01) break;
+        final previous = screen();
+        await singleTap(backward);
+        await until(() => screen() != previous);
+      }
+      expect(anchorY(), closeTo(origin, 1));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      await directory.delete(recursive: true);
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testWidgets(
@@ -362,12 +629,14 @@ void main() {
     },
   );
 
-  for (final mode in ['short', 'figure', 'refused']) {
+  for (final mode in ['short', 'figure', 'refused', 'tall', 'shorts']) {
     testWidgets(
       switch (mode) {
         'short' => 'PageDown is harmless on a short continuous PDF',
         'figure' =>
           'Continuous figure detail returns to its visible strip position',
+        'tall' => 'Tall figure interior keeps nearby body line overlap',
+        'shorts' => 'Continuous taps span many short landscape pages',
         _ =>
           'Refused detail keeps the continuous strip and its visible position',
       },
@@ -381,7 +650,35 @@ void main() {
         final source = File(
           '$fixtureRoot/pdf-columns/${mode == 'figure' ? 'right-column-figure' : 'scanned'}.pdf',
         );
-        if (mode == 'refused') {
+        if (mode == 'shorts') {
+          // Thirty original, textless landscape pages, each 100/400 as tall
+          // as its fitted width. Several pages fit within one scroll stride.
+          final objects = [
+            '<< /Type /Catalog /Pages 2 0 R >>',
+            '<< /Type /Pages /Kids [${[for (var p = 3; p < 33; p++) '$p 0 R'].join(' ')}] /Count 30 >>',
+            for (var p = 0; p < 30; p++)
+              '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 100] >>',
+          ];
+          final pdf = StringBuffer('%PDF-1.7\n');
+          final offsets = <int>[];
+          for (var i = 0; i < objects.length; i++) {
+            offsets.add(pdf.length);
+            pdf.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+          }
+          final xref = pdf.length;
+          pdf.write('xref\n0 ${objects.length + 1}\n0000000000 65535 f \n');
+          for (final offset in offsets) {
+            pdf.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+          }
+          pdf.write(
+            'trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n$xref\n%%EOF\n',
+          );
+          await File(path).writeAsString(pdf.toString());
+        } else if (mode == 'tall') {
+          await File(
+            path,
+          ).writeAsBytes(columnsAfterFrontMatterPdf(tallFigure: true));
+        } else if (mode == 'refused') {
           // Equal-length replacements preserve xref/stream lengths. This
           // tall fallback admits crisp viewport crops, but not whole detail.
           await File(path).writeAsBytes(
@@ -426,6 +723,11 @@ void main() {
               child: ReaderScreen(
                 bridge: bridge,
                 initialPath: path,
+                initialPlace: switch (mode) {
+                  'tall' => const ReaderPlace(3),
+                  'shorts' => const ReaderPlace(20),
+                  _ => null,
+                },
                 initialSettings: const FlutterReaderSettings(
                   continuous: true,
                   theme: 'light',
@@ -442,12 +744,101 @@ void main() {
         );
         await until(() => screen()?.continuous == true);
         final raster = find.byKey(const ValueKey('reader-columns-raster'));
-        if (mode == 'short') {
+        if (mode == 'shorts') {
+          final area = find.byKey(const ValueKey('reader-page-tap-area'));
+          final rect = tester.getRect(area);
+          double origin() {
+            final first = screen()!.pieces.first;
+            return first.page * (screen()!.width / 4 + 28) +
+                first.source.top * screen()!.width / 400 -
+                first.top +
+                screen()!.viewportTop;
+          }
+
+          final initial = origin();
+          final stride = screen()!.viewportHeight! - 16;
+          var expected = initial;
+          for (final forward in [false, false, true, true]) {
+            final previous = screen();
+            await tester.pump(const Duration(milliseconds: 350));
+            await tester.tapAt(
+              Offset(
+                rect.left + rect.width * (forward ? .875 : .125),
+                rect.center.dy,
+              ),
+            );
+            await tester.pump(const Duration(milliseconds: 350));
+            await until(() => screen() != previous);
+            expected += forward ? stride : -stride;
+            expect(origin(), closeTo(expected, 1));
+            expect(
+              screen()!.height,
+              lessThanOrEqualTo(3 * screen()!.viewportHeight!),
+            );
+          }
+          expect(origin(), closeTo(initial, 1));
+        } else if (mode == 'tall') {
+          final body = screen()!.pieces.firstWhere(
+            (p) => p.page == 3 && !p.zoomable,
+          );
+          final stride = screen()!.viewportHeight! - 14 * body.scale;
+          for (
+            var i = 0;
+            i < 20 && !screen()!.pieces.every((p) => p.zoomable);
+            i++
+          ) {
+            final previous = screen();
+            await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+            await until(() => screen() != previous);
+          }
+          expect(
+            screen()!.pieces.every((p) => p.zoomable),
+            isTrue,
+            reason: 'No body crop remains anywhere in the overscan window',
+          );
+          final figure = screen()!.pieces.single;
+          double pointY() =>
+              tester.getTopLeft(raster).dy +
+              screen()!.pieces
+                  .firstWhere(
+                    (p) => p.page == figure.page && p.region == figure.region,
+                  )
+                  .fromPage(figure.source.left, figure.source.top)
+                  .y;
+          final area = find.byKey(const ValueKey('reader-page-tap-area'));
+          final rect = tester.getRect(area);
+          final origin = pointY();
+          for (final fraction in [.875, .125]) {
+            final previous = screen();
+            await tester.pump(const Duration(milliseconds: 350));
+            await tester.tapAt(
+              Offset(rect.left + rect.width * fraction, rect.center.dy),
+            );
+            await tester.pump(const Duration(milliseconds: 350));
+            await until(() => screen() != previous);
+            expect(
+              pointY(),
+              closeTo(fraction > .5 ? origin - stride : origin, 1),
+            );
+          }
+          await captureView(captureKey, 'continuous-tall-figure-overlap');
+        } else if (mode == 'short') {
           final initial = screen();
           final last = initial!.pieces.last;
           expect(last.top + last.height, lessThan(initial.viewportHeight!));
+          final rect = tester.getRect(
+            find.byKey(const ValueKey('reader-page-tap-area')),
+          );
           for (var i = 0; i < 4; i++) {
             await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+            await tester.pump(const Duration(milliseconds: 350));
+            await tester.tapAt(
+              Offset(
+                rect.left + rect.width * (i.isEven ? .125 : .875),
+                rect.center.dy,
+              ),
+            );
+            await tester.pump(const Duration(milliseconds: 350));
             await tester.pumpAndSettle();
           }
           expect(screen(), same(initial));
@@ -468,6 +859,75 @@ void main() {
           // Pan within the installed window, not just to its initial anchor.
           await tester.drag(area, const Offset(0, -80));
           await tester.pumpAndSettle();
+          if (mode == 'figure') {
+            final viewport = tester.getRect(
+              find
+                  .ancestor(
+                    of: raster,
+                    matching: find.byWidgetPredicate(
+                      (w) =>
+                          w is SingleChildScrollView &&
+                          w.scrollDirection == Axis.vertical,
+                    ),
+                  )
+                  .first,
+            );
+            Future<void> alignFigure() async {
+              final figure = screen()!.pieces.firstWhere((p) => p.zoomable);
+              final top = tester.getTopLeft(raster).dy + figure.top;
+              await tester.drag(area, Offset(0, viewport.top - top));
+              await tester.pumpAndSettle();
+            }
+
+            Future<void> single(Offset point) async {
+              await tester.pump(const Duration(milliseconds: 350));
+              await tester.tapAt(point);
+              await tester.pump(const Duration(milliseconds: 350));
+              await tester.pumpAndSettle();
+            }
+
+            await alignFigure();
+            expect(visibleFigure().height, greaterThan(500));
+            final fitted = screen();
+            await single(viewport.center);
+            expect(screen(), same(fitted));
+            expect(
+              find
+                  .byKey(const ValueKey('reader-header-typography'))
+                  .hitTestable(),
+              findsOneWidget,
+            );
+            await captureView(captureKey, 'continuous-figure-middle-chrome');
+            await single(viewport.center);
+            final figure = screen()!.pieces.firstWhere((p) => p.zoomable);
+            double pointY() =>
+                tester.getTopLeft(raster).dy +
+                screen()!.pieces
+                    .firstWhere(
+                      (p) => p.page == figure.page && p.region == figure.region,
+                    )
+                    .fromPage(figure.source.left, figure.source.top)
+                    .y;
+            final startY = pointY();
+            final rect = tester.getRect(area);
+            await single(
+              Offset(rect.left + rect.width * .875, viewport.center.dy),
+            );
+            await until(() => screen() != fitted);
+            expect(screen()!.continuous, isTrue);
+            expect(screen()!.strip, isNull);
+            final forwardY = pointY();
+            expect(forwardY, lessThan(startY - 50));
+            await captureView(captureKey, 'continuous-figure-edge-forward');
+            final advanced = screen();
+            await single(
+              Offset(rect.left + rect.width * .125, viewport.center.dy),
+            );
+            await until(() => screen() != advanced);
+            expect(screen()!.continuous, isTrue);
+            expect(pointY(), greaterThan(forwardY + 50));
+            await alignFigure();
+          }
           final before = screen()!;
           final origin = tester.getTopLeft(raster).dy;
           final piece = before.pieces.firstWhere((p) => p.zoomable);
@@ -496,6 +956,39 @@ void main() {
             reason: 'detail must not return to overscan at $origin',
           );
           await captureView(captureKey, 'continuous-$mode-detail-return');
+          if (mode == 'figure') {
+            // Exercise #299's revised zoom contract on the continuous stack,
+            // not only its Screens tests or this scenario's pinch path.
+            final middle = visibleFigure().center;
+            await tester.tapAt(middle);
+            await tester.pump(const Duration(milliseconds: 100));
+            await tester.tapAt(middle);
+            await until(() => screen()?.strip != null);
+            final close = find.byKey(
+              const ValueKey('reader-columns-detail-close'),
+            );
+            expect(close.hitTestable(), findsOneWidget);
+            await captureView(
+              captureKey,
+              'continuous-figure-double-tap-detail',
+            );
+            if (demo) {
+              await tester.runAsync(
+                () => Future<void>.delayed(const Duration(seconds: 2)),
+              );
+            }
+            await tester.tap(close);
+            await until(() => screen()?.continuous == true);
+            final returned = screen()!.pieces.firstWhere(
+              (p) => p.page == piece.page && p.region == piece.region,
+            );
+            expect(
+              tester.getTopLeft(raster).dy +
+                  returned.fromPage(piece.source.left, piece.source.top).y,
+              closeTo(y, 1),
+            );
+            await captureView(captureKey, 'continuous-figure-close-return');
+          }
         }
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
