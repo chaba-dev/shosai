@@ -4,7 +4,8 @@ sealed class ReaderMessage {
   const ReaderMessage();
 }
 
-/// A non-link tap across the page or spread, measured from physical left.
+/// A page-zone tap across the page or spread, measured from physical left.
+/// Touch turn zones take precedence over in-text links.
 final class ReaderPageTapped extends ReaderMessage {
   const ReaderPageTapped(this.fraction, {required this.touch});
   final double fraction;
@@ -421,7 +422,7 @@ final class ReaderPageInputSubmitted extends ReaderMessage {
   const ReaderPageInputSubmitted();
 }
 
-/// Pinches an indivisible figure or fallback page without changing column Size.
+/// Enlarges a figure/table or fallback page without changing column Size.
 /// The screen identity rejects gestures completed against an obsolete crop.
 final class ReaderColumnsDetailRequested extends ReaderMessage {
   const ReaderColumnsDetailRequested(this.screen, this.piece, this.zoom);
@@ -445,6 +446,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
     this.twoPages,
     this.animations,
     this.progress,
+    this.continuous,
   });
 
   final double? fontSize;
@@ -457,6 +459,7 @@ final class ReaderTypographyChanged extends ReaderMessage {
   final bool? twoPages;
   final bool? animations;
   final FlutterReaderProgress? progress;
+  final bool? continuous;
 }
 
 /// Requests the Markdown export of the current book's bookmarks (RD-08).

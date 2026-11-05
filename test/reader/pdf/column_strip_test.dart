@@ -23,6 +23,102 @@ PdfStripPage page(List<PdfReadingRegion> regions, {int columns = 2}) =>
     );
 
 void main() {
+  test('backward continuous steps admit enough short preceding pages', () {
+    final short = page([
+      PdfReadingRegion(
+        kind: PdfRegionKind.page,
+        bounds: const PdfRect(0, 0, 400, 100),
+      ),
+    ], columns: 0);
+    final retained = {for (var p = 18; p < 30; p++) p: short};
+    PdfStripScreen window(PdfStripPosition position) {
+      while (true) {
+        final result = layoutPdfColumnWindow(
+          pages: retained,
+          pageCount: 30,
+          position: position,
+          width: 400,
+          height: 800,
+        );
+        if (result.needsPage == null) return result;
+        retained[result.needsPage!] = short;
+      }
+    }
+
+    double origin(PdfStripScreen screen) {
+      final first = screen.pieces.first;
+      // Authored 100px pages with 28px bands; independently known strip origin.
+      return first.page * 128 +
+          first.source.top -
+          first.top +
+          screen.viewportTop;
+    }
+
+    var screen = window(const PdfStripPosition(20, y: 50));
+    expect(origin(screen), closeTo(20 * 128 + 50, .001));
+    for (var i = 0; i < 3; i++) {
+      final before = origin(screen);
+      final target = screen.viewportTop - (800 - 16);
+      final piece = screen.pieces.firstWhere((p) => p.top + p.height > target);
+      screen = window(
+        PdfStripPosition(
+          piece.page,
+          region: piece.region,
+          y: piece.toPage(piece.left, target).y,
+        ),
+      );
+      expect(before - origin(screen), closeTo(784, .001));
+      expect(screen.height, lessThanOrEqualTo(2400));
+    }
+    expect(retained.keys.any((page) => page < 18), isTrue);
+  });
+
+  test('continuous windows keep tall figures and headings in the strip', () {
+    final pages = {
+      0: page([
+        PdfReadingRegion(
+          kind: PdfRegionKind.column,
+          bounds: const PdfRect(20, 10, 120, 55),
+          lines: [line(10, 20), line(24, 35), line(30, 40), line(45, 55)],
+        ),
+        PdfReadingRegion(
+          kind: PdfRegionKind.figure,
+          bounds: const PdfRect(180, 0, 280, 400),
+        ),
+      ]),
+      1: page([
+        PdfReadingRegion(
+          kind: PdfRegionKind.column,
+          bounds: const PdfRect(20, 0, 120, 200),
+        ),
+      ]),
+    };
+    PdfStripScreen window(PdfStripPosition position) => layoutPdfColumnWindow(
+      pages: pages,
+      pageCount: 2,
+      position: position,
+      width: 200,
+      height: 150,
+    );
+    final first = window(const PdfStripPosition(0));
+    expect(first.continuous, isTrue);
+    expect(first.pieces.first.source.bottom, 55);
+    expect(first.pieces[1].top, 106); // 90pt of text, then the 16pt rule.
+    expect(first.pieces[1].scale, 2); // No shrinking a tall figure to a screen.
+    expect(first.separators.single.page, isNull);
+    expect(first.height, 300);
+    final later = window(const PdfStripPosition(0, region: 1, y: 380));
+    expect(later.height, lessThanOrEqualTo(450));
+    final figure = later.pieces.firstWhere((p) => p.region == 1 && p.page == 0);
+    final original = figure.toPage(figure.left, later.viewportTop);
+    expect(original.y, closeTo(380, .001));
+    expect(later.separators.single.page, 1);
+    expect(later.visiblePage(later.viewportTop, 150), 1);
+    final tail = later.pieces.last;
+    final mapped = tail.fromPage(73, 32);
+    expect(tail.toPage(mapped.x, mapped.y), (x: 73.0, y: 32.0));
+  });
+
   test(
     'screens break between overlapping physical lines without losing ink',
     () {

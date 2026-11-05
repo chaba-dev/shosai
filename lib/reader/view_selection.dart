@@ -688,7 +688,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   void _pdfScrolled() {
     if (_revealing) return;
     final screen = widget.columnsScreen;
-    if (screen?.strip != null &&
+    if ((screen?.strip != null || screen?.continuous == true) &&
         _horizontal.hasClients &&
         _vertical.hasClients) {
       widget.dispatch(
@@ -718,7 +718,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   void _revealPdfPlace() {
     final screen = widget.columnsScreen;
     final detail = screen?.strip != null;
-    if (!detail && widget.pdfScrollScale == null || widget.model.relayoutBusy) {
+    final continuous = screen?.continuous == true;
+    if (!detail && !continuous && widget.pdfScrollScale == null ||
+        widget.model.relayoutBusy) {
       return;
     }
     final generation = widget.model.generation;
@@ -731,13 +733,17 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
           widget.model.locationRequestRevision != revision ||
           widget.model.relayoutBusy ||
           !_vertical.hasClients ||
-          (detail
+          (detail || continuous
               ? !identical(screen, widget.columnsScreen) ||
                     !_horizontal.hasClients
               : widget.pdfScrollScale == null)) {
         return;
       }
-      if (detail) {
+      if (continuous) {
+        _vertical.jumpTo(
+          screen!.viewportTop.clamp(0.0, _vertical.position.maxScrollExtent),
+        );
+      } else if (detail) {
         final piece = screen!.pieces.single;
         final point = piece.fromPage(widget.model.pdfX!, widget.model.pdfY!);
         _horizontal.jumpTo(
@@ -758,7 +764,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         );
       }
       _revealing = false;
-      if (detail) _pdfScrolled();
+      if (detail || continuous) _pdfScrolled();
     });
   }
 
@@ -788,6 +794,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
     if (oldWidget.model.locationRequestRevision !=
             widget.model.locationRequestRevision ||
         oldWidget.pdfScrollScale != widget.pdfScrollScale ||
+        oldWidget.columnsScreen != widget.columnsScreen ||
         oldWidget.model.relayoutBusy && !widget.model.relayoutBusy) {
       _revealPdfPlace();
     }
@@ -1002,6 +1009,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
           behavior: widget.fittedZoom == null && widget.columnsScreen == null
               ? ScrollConfiguration.of(context)
               : ScrollConfiguration.of(context).copyWith(
+                  scrollbars: widget.columnsScreen?.continuous == true
+                      ? false
+                      : null,
                   dragDevices: {...ScrollConfiguration.of(context).dragDevices}
                     ..remove(ui.PointerDeviceKind.touch),
                 ),
@@ -1267,9 +1277,8 @@ class _SelectableSurface extends StatefulWidget {
 class _SelectableSurfaceState extends State<_SelectableSurface> {
   /// Movement past this many logical pixels turns a press into a drag.
   ///
-  /// A press that never travels further is a tap, and a tap on a painted link
-  /// activates it (the evaluated prototype's policy). A drag is a selection
-  /// gesture and never activates a link.
+  /// A press that never travels further is a tap. Objects and turn zones
+  /// resolve before painted links; a drag selects and never activates a link.
   static const double _tapSlop = 6;
   Offset _doubleTap = Offset.zero;
 
@@ -1316,7 +1325,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     _tapOrigin = null;
   }
 
-  /// Activates a painted link under a completed tap, if there is one.
+  /// Resolves a tap on a turn zone, figure's paper or painted link.
   ///
   /// EPUB uses its painted link geometry; PDF defers annotation lookup to the
   /// controller, which owns classification and destination resolution.
@@ -1345,8 +1354,34 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
       details.globalPosition,
       details.kind,
     );
-    final page = widget.epubPage;
     final source = transform.toSource(position);
+    // On touch, the outer quarters are navigation even over a reference.
+    // Keep the middle half and pointer clicks available for following links.
+    if (pageTap != null && readerTapTurns(widget.model, pageTap)) {
+      widget.dispatch(pageTap);
+      return;
+    }
+    final screen = widget.model.pdfColumns;
+    if (pageTap != null &&
+        pageTap.touch &&
+        screen != null &&
+        screen.strip == null) {
+      for (final piece in screen.pieces) {
+        if (piece.kind == PdfRegionKind.figure &&
+            Rect.fromLTWH(
+              piece.left,
+              piece.top,
+              piece.width,
+              piece.height,
+            ).contains(source)) {
+          // Even an all-figure screen needs a middle single tap for chrome.
+          // Inspection belongs to double tap or pinch, not ordinary page taps.
+          widget.dispatch(pageTap);
+          return;
+        }
+      }
+    }
+    final page = widget.epubPage;
     if (page == null) {
       if (widget.model.document?.format == FlutterBookFormat.pdf) {
         widget.dispatch(

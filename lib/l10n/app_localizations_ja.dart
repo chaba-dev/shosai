@@ -1001,7 +1001,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsContinuousReading => '連続スクロール';
 
   @override
-  String get settingsContinuousReadingHint => '縦書きの本は常にページ単位で表示します。';
+  String get settingsContinuousReadingHint =>
+      '横書きの本とPDFの段組みをスクロールします。縦書きの本はページ単位で表示します。';
 
   @override
   String get settingsEpubTextSize => 'EPUB の文字サイズ';

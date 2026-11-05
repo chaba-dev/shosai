@@ -289,7 +289,7 @@
   "readerZonesLeftward": "この本は左へめくります。\n左右をタップでページ、中央でメニュー。スワイプでもめくれます。タップして始める。",
   "settingsReaderTheme": "読書テーマ",
   "settingsContinuousReading": "連続スクロール",
-  "settingsContinuousReadingHint": "縦書きの本は常にページ単位で表示します。",
+  "settingsContinuousReadingHint": "横書きの本とPDFの段組みをスクロールします。縦書きの本はページ単位で表示します。",
   "settingsEpubTextSize": "EPUB の文字サイズ",
   "settingsEpubLineSpacing": "EPUB の行間",
   "settingsPdfZoom": "PDF のズーム",

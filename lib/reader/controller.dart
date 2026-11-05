@@ -177,6 +177,7 @@ final class ReaderController implements Listenable {
   PdfEngineDocument? _pdfDocument;
   int _columnsRevision = 0;
   final Map<int, PdfStripPage> _columnsPages = {};
+  ({PdfStripScreen screen, double top})? _columnsViewport;
   double? _columnsWidth;
   final List<PdfStripPosition> _columnsBack = [];
   ({
@@ -408,7 +409,7 @@ final class ReaderController implements Listenable {
   double _typographyFontSize;
   double _typographyLineSpacing;
   String _typographyTheme;
-  final bool _typographyContinuous;
+  bool _typographyContinuous;
   bool _typographyTwoPages;
   bool _typographyAnimations;
   FlutterReaderProgress _typographyProgress;
@@ -712,6 +713,9 @@ final class ReaderController implements Listenable {
         _touchPointers.remove(message.pointer);
         _scheduleChromeHide();
       case ReaderPointerMoved():
+        // Detail's Close occupies the same safe header as the toolbar.
+        // Hover must not cover it; a middle tap can still reveal controls.
+        if (_model.pdfColumns?.strip != null) return;
         if (!_model.chromeVisible || !_model.pointerChrome) {
           _emit(_model.copyWith(chromeVisible: true, pointerChrome: true));
         }
@@ -1448,10 +1452,18 @@ final class ReaderController implements Listenable {
         if (identical(message.screen, _model.pdfColumns) &&
             message.piece.zoomable &&
             message.screen.pieces.contains(message.piece) &&
-            !_model.relayoutBusy) {
+            (message.screen.strip != null || !_model.chromePinned) &&
+            _canPeek) {
           final strip = message.screen.strip ?? message.screen;
+          _hideChrome();
           _requestColumns(
-            strip.start,
+            message.screen.continuous
+                ? PdfStripPosition(_model.unit, y: _model.pdfY)
+                : strip.continuous
+                ? message.screen.start
+                : strip.start,
+            x: message.screen.continuous ? _model.pdfX : null,
+            locate: message.screen.continuous,
             detail: message.zoom <= 1.03
                 ? null
                 : (
@@ -3611,6 +3623,9 @@ final class ReaderController implements Listenable {
       _typographyAnimations = animations;
     }
     if (message.progress case final progress?) _typographyProgress = progress;
+    if (message.continuous case final continuous?) {
+      _typographyContinuous = continuous;
+    }
     // The settings the library keeps are saved as they change, so the next
     // book opens with them too.
     final ReaderDisplayChange change = (
@@ -3679,10 +3694,19 @@ final class ReaderController implements Listenable {
     if (document?.format == FlutterBookFormat.pdf &&
         after.rasterFit == ReaderRasterFit.columns) {
       if (before.rasterFit != after.rasterFit ||
-          before.rasterZoom != after.rasterZoom) {
+          before.rasterZoom != after.rasterZoom ||
+          before.continuous != after.continuous) {
         _columnsBack.clear();
         _discardPdfLeaves();
-        _refreshColumns();
+        if (before.continuous != after.continuous) {
+          _requestColumns(
+            PdfStripPosition(_model.readingLocation.unit, y: _model.pdfY),
+            x: _model.pdfX,
+            locate: true,
+          );
+        } else {
+          _refreshColumns();
+        }
       }
       return;
     }
@@ -3715,6 +3739,7 @@ final class ReaderController implements Listenable {
             before.epubLineSpacing == after.epubLineSpacing &&
             before.rasterZoom == after.rasterZoom &&
             before.rasterFit == after.rasterFit &&
+            before.continuous == after.continuous &&
             !themeChanged)) {
       return;
     }
@@ -7468,6 +7493,7 @@ final class ReaderController implements Listenable {
   void _releaseModelResources({bool publish = false}) {
     _columnsRevision++;
     _columnsPages.clear();
+    _columnsViewport = null;
     _columnsWidth = null;
     _columnsBack.clear();
     _columnsIntent = null;
@@ -7994,13 +8020,13 @@ Future<ui.Image?> _noEpubImage(Uint8List bytes) async => null;
 /// to the reader's base family.
 Future<void> _noEpubFont(String family, Uint8List bytes) async {}
 
-/// Whether [tap] turns the page: a touch in the outer quarter of the page or
-/// spread, while pages are turned rather than scrolled. The middle half shows
-/// the chrome.
+/// Whether [tap] steps the page: a touch in an outer quarter turns a screen,
+/// or scrolls Continuous PDF Columns. Continuous EPUB keeps native scrolling.
+/// The middle half always shows the chrome.
 bool readerTapTurns(ReaderModel model, ReaderPageTapped tap) =>
     tap.touch &&
     model.document != null &&
     !model.chromePinned &&
     model.selectionPhase == ReaderSelectionPhase.idle &&
-    !model.continuousPresentation &&
+    (!model.continuousPresentation || model.columnsPresentation) &&
     (tap.fraction < .25 || tap.fraction >= .75);

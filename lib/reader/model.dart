@@ -617,10 +617,9 @@ final class ReaderModel {
   ///
   /// Follows the installed EPUB page, so a page laid out for the paginated
   /// reader is never presented as a continuous one.
-  bool get continuousPresentation =>
-      !columnsPresentation &&
-      typography.continuous &&
-      (epubPage?.continuous ?? true);
+  bool get continuousPresentation => columnsPresentation
+      ? (pdfColumns?.continuous ?? typography.continuous)
+      : typography.continuous && (epubPage?.continuous ?? true);
   bool get columnsPresentation =>
       document?.format == FlutterBookFormat.pdf &&
       typography.rasterFit == ReaderRasterFit.columns;

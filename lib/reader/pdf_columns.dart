@@ -46,13 +46,17 @@ extension on ReaderController {
   void _columnsViewportChanged(ReaderColumnsViewportChanged message) {
     final screen = message.screen;
     if (!identical(screen, _model.pdfColumns) ||
-        screen.strip == null ||
+        (!screen.continuous && screen.strip == null) ||
         _model.relayoutBusy ||
         _closing ||
         _suspended) {
       return;
     }
-    final piece = screen.pieces.single;
+    _columnsViewport = (screen: screen, top: message.viewport.top);
+    final piece = screen.pieces.firstWhere(
+      (p) => p.top + p.height > message.viewport.top,
+    );
+    final page = piece.page;
     final visible = ui.Rect.fromLTWH(
       piece.left,
       piece.top,
@@ -61,7 +65,11 @@ extension on ReaderController {
     ).intersect(message.viewport);
     if (visible.isEmpty) return;
     final point = piece.toPage(visible.center.dx, visible.top);
-    if (_model.pdfX == point.x && _model.pdfY == point.y) return;
+    if (_model.unit == page &&
+        _model.pdfX == point.x &&
+        _model.pdfY == point.y) {
+      return;
+    }
     final selection = _model.pdfColumnSelection!;
     final endpoint = selection.surface.endpoints.where((e) {
       final rect = e.rect;
@@ -73,7 +81,14 @@ extension on ReaderController {
     final offset = endpoint == null
         ? null
         : selection.location(endpoint.offset.toInt()).offset;
-    _emit(_model.copyWith(pdfX: point.x, pdfY: point.y, readingOffset: offset));
+    _emit(
+      _model.copyWith(
+        unit: page,
+        pdfX: point.x,
+        pdfY: point.y,
+        readingOffset: offset,
+      ),
+    );
     final bookId = _model.document?.bookId;
     if (bookId != null) {
       _queueReadingStateSave(
@@ -89,6 +104,36 @@ extension on ReaderController {
           progress: _bookProgress(_model),
         ),
       );
+    }
+    if (screen.continuous &&
+        _model.selectionPhase == ReaderSelectionPhase.idle) {
+      final first = screen.pieces.first;
+      final bounds =
+          _columnsPages[first.page]!.columns.regions[first.region].bounds;
+      final before =
+          first.page > 0 ||
+          first.region > 0 ||
+          first.source.top > bounds.top + .01;
+      final after = screen.next.page < _pdfDocument!.pageCount;
+      final threshold =
+          math.min(
+            message.viewport.height,
+            screen.height - message.viewport.height,
+          ) *
+          .25;
+      if (before && message.viewport.top < threshold ||
+          after && message.viewport.bottom > screen.height - threshold) {
+        final topPiece = screen.pieces.firstWhere(
+          (p) => p.top + p.height > message.viewport.top,
+        );
+        _requestColumns(
+          PdfStripPosition(
+            topPiece.page,
+            region: topPiece.region,
+            y: topPiece.toPage(topPiece.left, message.viewport.top).y,
+          ),
+        );
+      }
     }
   }
 
@@ -139,6 +184,26 @@ extension on ReaderController {
 
   void _pdfDoubleTapped(double x, double y) {
     if (!_canPeek || !x.isFinite || !y.isFinite) return;
+    final screen = _model.pdfColumns;
+    if (screen != null) {
+      for (final piece in screen.pieces) {
+        if (piece.kind == PdfRegionKind.figure &&
+            (screen.strip != null ||
+                x >= piece.left &&
+                    x < piece.left + piece.width &&
+                    y >= piece.top &&
+                    y < piece.top + piece.height)) {
+          dispatch(
+            ReaderColumnsDetailRequested(
+              screen,
+              piece,
+              screen.strip == null ? 2 : 1,
+            ),
+          );
+          return;
+        }
+      }
+    }
     if (_model.columnsPresentation || _rasterFit == ReaderRasterFit.manual) {
       _typographyChanged(
         const ReaderTypographyChanged(rasterFit: ReaderRasterFit.fitPage),
@@ -181,14 +246,17 @@ extension on ReaderController {
     final piece = screen?.strip == null ? null : screen!.pieces.single;
     _requestColumns(
       pending?.position ??
+          (screen?.continuous == true
+              ? PdfStripPosition(_model.readingLocation.unit, y: _model.pdfY)
+              : null) ??
           screen?.start ??
           PdfStripPosition(_model.readingLocation.unit, y: _model.pdfY),
       back: pending?.back,
       previous: pending?.previous ?? false,
       offset: pending?.offset,
       length: pending?.length,
-      x: pending?.x,
-      locate: pending?.locate ?? false,
+      x: pending?.x ?? (screen?.continuous == true ? _model.pdfX : null),
+      locate: pending?.locate ?? screen?.continuous ?? false,
       detail: pending != null
           ? pending.detail
           : piece == null
@@ -212,6 +280,102 @@ extension on ReaderController {
         _model.relayoutBusy ||
         _closing ||
         _suspended) {
+      return;
+    }
+    if (screen.continuous) {
+      // A separator has no durable page point. Keep its exact viewport origin
+      // separately from the first visible content point saved for reopening.
+      final viewport = _columnsViewport;
+      final currentTop = identical(viewport?.screen, screen)
+          ? viewport!.top
+          : screen.viewportTop;
+      final current = screen.pieces.firstWhere(
+        (p) => p.top + p.height > currentTop,
+      );
+      // PDF has no CSS line height. Use the median physical row advance at
+      // the current crop's scale; figures borrow nearby body rows. Textless
+      // scans retain a 16pt overlap rather than losing the edge entirely.
+      var overlap = 16.0;
+      final nearbyPages = _columnsPages.keys.toList()
+        ..sort(
+          (a, b) =>
+              (a - current.page).abs().compareTo((b - current.page).abs()),
+        );
+      for (final candidate in [
+        for (final piece in [
+          current,
+          ...screen.pieces.where((p) => p != current),
+        ])
+          (
+            region: _columnsPages[piece.page]!.columns.regions[piece.region],
+            scale: piece.scale,
+          ),
+        // A tall figure can fill the entire raster window. Retained nearby
+        // body geometry still supplies its pitch at the same strip scale.
+        for (final page in nearbyPages)
+          for (final region in _columnsPages[page]!.columns.regions)
+            (
+              region: region,
+              scale:
+                  screen.width *
+                  (region.kind == PdfRegionKind.page
+                      ? 1
+                      : _rasterZoom.clamp(.5, 1)) /
+                  (region.kind == PdfRegionKind.column
+                      ? _columnsWidth ?? region.bounds.width
+                      : region.bounds.width),
+            ),
+      ]) {
+        final region = candidate.region;
+        if (region.kind == PdfRegionKind.figure) continue;
+        final rows = region.lines.where((line) => !line.isVertical).toList()
+          ..sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
+        if (rows.isEmpty) continue;
+        final tops = <double>[];
+        var bottom = double.negativeInfinity;
+        for (final row in rows) {
+          if (row.bounds.top >= bottom) tops.add(row.bounds.top);
+          bottom = math.max(bottom, row.bounds.bottom);
+        }
+        final advances = [
+          for (var i = 1; i < tops.length; i++) tops[i] - tops[i - 1],
+        ]..sort();
+        overlap =
+            (advances.isEmpty
+                ? rows.first.bounds.height
+                : advances[advances.length ~/ 2]) *
+            candidate.scale;
+        break;
+      }
+      final stride = math.max(1.0, screen.viewportHeight! - overlap);
+      final first = screen.pieces.first;
+      final bounds =
+          _columnsPages[first.page]!.columns.regions[first.region].bounds;
+      final before =
+          first.page > 0 ||
+          first.region > 0 ||
+          first.source.top > bounds.top + .01;
+      // Raster-window edges are not document limits. Extrapolated page points
+      // let the next window center on the full step, including across a band.
+      final last = screen.pieces.last;
+      final end = last.top + last.height;
+      final top = (currentTop + delta * stride)
+          .clamp(
+            before ? -stride : 0.0,
+            screen.next.page < _pdfDocument!.pageCount
+                ? end - .001
+                : math.max(0.0, end - screen.viewportHeight!),
+          )
+          .toDouble();
+      if ((top - currentTop).abs() < .01) return;
+      final piece = screen.pieces.firstWhere((p) => p.top + p.height > top);
+      _requestColumns(
+        PdfStripPosition(
+          piece.page,
+          region: piece.region,
+          y: piece.toPage(piece.left, top).y,
+        ),
+      );
       return;
     }
     if (delta > 0) {
@@ -397,30 +561,56 @@ extension on ReaderController {
         while (current()) {
           if (columnWidth == null &&
               pages.values.any((page) => page.columns.columnCount >= 2)) {
-            // Front matter may leave the fixed sample without body columns.
-            // Once a body is needed, find the first analyzable one in document
-            // order, never whichever later page happened to enter the cache.
-            // Pure fallback documents do not trigger this forward search.
+            // Preserve the document's stable sampled body width in both modes.
             for (var p = 0; p < pdf.pageCount; p++) {
               if (!await load(p)) return null;
               columnWidth = typicalPdfColumnWidth([pages[p]!.columns]);
               if (columnWidth != null) break;
             }
           }
-          final screen = layoutPdfColumnScreen(
-            pages: pages,
-            pageCount: pdf.pageCount,
-            start: start,
-            width: math.max(1, layout.width - 2 * pdfStripSideInset),
-            height: math.max(1, height - pdfStripHeaderHeight),
-            zoom: zoom,
-            columnWidth: columnWidth,
-            // A jumped-to range must clear the overlaid toolbar and capsule.
-            // Reserve space in layout, not by hiding part of the raster.
-            topInset: length == null
-                ? 0
-                : math.min(96, math.max(1, height - pdfStripHeaderHeight) / 3),
-          );
+          final width = math.max(1.0, layout.width - 2 * pdfStripSideInset);
+          final viewportHeight = math.max(1.0, height - pdfStripHeaderHeight);
+          final rasterHeight =
+              math.min(
+                pdfMaxBitmapDimension / density,
+                pdfMaxBitmapPixels / (width * density).ceil() / density,
+              ) -
+              1;
+          final screen = _typographyContinuous
+              ? layoutPdfColumnWindow(
+                  pages: pages,
+                  pageCount: pdf.pageCount,
+                  position: start,
+                  width: math.max(1, layout.width - 2 * pdfStripSideInset),
+                  height: math.max(1, height - pdfStripHeaderHeight),
+                  zoom: zoom,
+                  columnWidth: columnWidth,
+                  topInset: length == null ? 0 : math.min(96, height / 3),
+                  overscan: math.max(
+                    0,
+                    math.min(
+                      viewportHeight,
+                      (rasterHeight - viewportHeight) / 2,
+                    ),
+                  ),
+                )
+              : layoutPdfColumnScreen(
+                  pages: pages,
+                  pageCount: pdf.pageCount,
+                  start: start,
+                  width: math.max(1, layout.width - 2 * pdfStripSideInset),
+                  height: math.max(1, height - pdfStripHeaderHeight),
+                  zoom: zoom,
+                  columnWidth: columnWidth,
+                  // A jumped-to range must clear the overlaid toolbar and capsule.
+                  // Reserve space in layout, not by hiding part of the raster.
+                  topInset: length == null
+                      ? 0
+                      : math.min(
+                          96,
+                          math.max(1, height - pdfStripHeaderHeight) / 3,
+                        ),
+                );
           final needed = screen.needsPage;
           if (needed == null) return screen;
           if (!await load(needed)) return null;
@@ -460,7 +650,7 @@ extension on ReaderController {
           // Match screen breaks: overlapping physical boxes are indivisible.
           // Reach a fixed point so fit switches/reopens cannot creep upward
           // one overlapping line at a time.
-          var moved = true;
+          var moved = !_typographyContinuous;
           while (moved) {
             moved = false;
             for (final line in regions[region].lines) {
@@ -510,7 +700,10 @@ extension on ReaderController {
           1.0,
           layout.width - 2 * pdfStripSideInset,
         );
-        final availableHeight = math.max(1.0, height - pdfStripHeaderHeight);
+        final availableHeight = math.max(
+          1.0,
+          height - pdfStripDetailHeaderHeight,
+        );
         bool admits(double scale) {
           try {
             // The source crop can gain pixels from the virtual page's ceil
@@ -552,7 +745,8 @@ extension on ReaderController {
         // its already-crisp screen strip rather than shrink/upscale or fail.
         if (scale > detail.baseScale * 1.03) {
           screen = PdfStripScreen(
-            start: screen.start,
+            // Detail returns to the visible cursor, not its overscan start.
+            start: position,
             next: screen.next,
             width: math.max(availableWidth, bounds.width * scale),
             height: math.max(availableHeight, bounds.height * scale),
@@ -566,7 +760,7 @@ extension on ReaderController {
                 left: math.max(0, (availableWidth - bounds.width * scale) / 2),
                 top: 0,
                 scale: scale,
-                zoomable: true,
+                kind: region.kind,
               ),
             ],
             separators: const [],
@@ -685,25 +879,34 @@ extension on ReaderController {
         message.screen.strip != null;
     _columnsIntent = null;
     _columnsWidth = message.columnWidth;
+    _columnsViewport = (
+      screen: message.screen,
+      top: message.screen.viewportTop,
+    );
     final old = _model.pageImage;
     _columnsPages
       ..clear()
       ..addEntries(
         message.pages.entries.where(
           (entry) =>
-              entry.key < 3 || (entry.key - message.screen.topPage).abs() <= 2,
+              entry.key < 3 ||
+              (entry.key - message.screen.topPage).abs() <= 2 ||
+              message.screen.pieces.any((piece) => piece.page == entry.key),
         ),
       );
     _columnsBack
       ..clear()
       ..addAll(message.back);
-    final first = message.screen.pieces.first;
+    final viewportTop = message.screen.viewportTop;
+    final first = message.screen.pieces.firstWhere(
+      (p) => p.top + p.height > viewportTop,
+    );
     final endpoint = message.selection.surface.endpoints
         .where(
           (e) =>
               message.selection.location(e.offset.toInt()).page == first.page &&
               e.rect.top < first.top + first.height &&
-              e.rect.bottom > first.top,
+              e.rect.bottom > math.max(first.top, viewportTop),
         )
         .firstOrNull;
     final offset = retainDetailPlace
@@ -713,11 +916,11 @@ extension on ReaderController {
         : message.selection.location(endpoint.offset.toInt()).offset;
     // A passive detail render keeps the visible page point, not the region
     // origin. Initial detail entry instead starts at its actual visible center.
-    final y = retainDetailPlace ? _model.pdfY! : first.source.top;
+    final y = retainDetailPlace
+        ? _model.pdfY!
+        : first.toPage(first.left, math.max(first.top, viewportTop)).y;
     final x = retainDetailPlace
         ? _model.pdfX!
-        : message.screen.strip == null
-        ? (first.source.left + first.source.right) / 2
         : first
               .toPage(
                 first.left +
@@ -743,7 +946,7 @@ extension on ReaderController {
         pageImage: message.image,
         pdfSpread: null,
         readingPage: null,
-        unit: message.screen.topPage,
+        unit: first.page,
         readingOffset: offset,
         selectionSurface: _freezeSurface(message.selection.surface),
         annotations: message.annotations,
