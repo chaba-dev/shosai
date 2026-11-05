@@ -279,11 +279,13 @@ PdfColumnPage _analyzePage(
 
 // Keep raster antialiasing at crop edges without widening the physical line
 // boxes used for screen cuts. Neighboring crops meet at whitespace midpoints.
+const _cropPadding = 3.0;
+
 PdfRect _padded(PdfRect r, PdfPageGeometry page) => PdfRect(
-  math.max(0, r.left - 1),
-  math.max(0, r.top - 1),
-  math.min(page.width, r.right + 1),
-  math.min(page.height, r.bottom + 1),
+  math.max(0, r.left - _cropPadding),
+  math.max(0, r.top - _cropPadding),
+  math.min(page.width, r.right + _cropPadding),
+  math.min(page.height, r.bottom + _cropPadding),
 );
 
 List<PdfReadingRegion> _padRegions(
@@ -301,13 +303,15 @@ List<PdfReadingRegion> _padRegions(
     for (final other in regions) {
       if (identical(region, other)) continue;
       final b = other.bounds;
-      if (r.left - 1 < b.right + 1 && r.right + 1 > b.left - 1) {
+      if (r.left - _cropPadding < b.right + _cropPadding &&
+          r.right + _cropPadding > b.left - _cropPadding) {
         if (r.bottom <= b.top) {
           bottom = math.min(bottom, (r.bottom + b.top) / 2);
         }
         if (r.top >= b.bottom) top = math.max(top, (r.top + b.bottom) / 2);
       }
-      if (r.top - 1 < b.bottom + 1 && r.bottom + 1 > b.top - 1) {
+      if (r.top - _cropPadding < b.bottom + _cropPadding &&
+          r.bottom + _cropPadding > b.top - _cropPadding) {
         if (r.right <= b.left) right = math.min(right, (r.right + b.left) / 2);
         if (r.left >= b.right) left = math.max(left, (r.left + b.right) / 2);
       }

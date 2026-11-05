@@ -6,9 +6,9 @@ import 'dart:math' as math;
 import 'columns.dart';
 import 'page_geometry.dart';
 
-// Furniture outside the strip's coordinate space, shared by controller/view.
+// Insets inside the sheet but outside strip coordinates, shared by controller/view.
 const pdfStripHeaderHeight = 32.0;
-const pdfStripSideInset = 14.0;
+const pdfStripSideInset = 16.0;
 
 // Numbered headings can use smaller painted glyphs than their body text.
 final _numberedHeading = RegExp(r'^\d+(?:\.\d+)*\.?\s+\p{L}', unicode: true);
