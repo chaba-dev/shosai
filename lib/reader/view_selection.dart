@@ -1267,9 +1267,8 @@ class _SelectableSurface extends StatefulWidget {
 class _SelectableSurfaceState extends State<_SelectableSurface> {
   /// Movement past this many logical pixels turns a press into a drag.
   ///
-  /// A press that never travels further is a tap, and a tap on a painted link
-  /// activates it (the evaluated prototype's policy). A drag is a selection
-  /// gesture and never activates a link.
+  /// A press that never travels further is a tap. Objects and turn zones
+  /// resolve before painted links; a drag selects and never activates a link.
   static const double _tapSlop = 6;
   Offset _doubleTap = Offset.zero;
 
@@ -1316,7 +1315,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     _tapOrigin = null;
   }
 
-  /// Activates a painted link under a completed tap, if there is one.
+  /// Resolves a tap on an inspectable piece, turn zone or painted link.
   ///
   /// EPUB uses its painted link geometry; PDF defers annotation lookup to the
   /// controller, which owns classification and destination resolution.
@@ -1345,6 +1344,24 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
       details.globalPosition,
       details.kind,
     );
+    final source = transform.toSource(position);
+    final screen = widget.model.pdfColumns;
+    if (screen != null && screen.strip == null) {
+      for (final piece in screen.pieces) {
+        if (piece.kind == PdfRegionKind.figure &&
+            Rect.fromLTWH(
+              piece.left,
+              piece.top,
+              piece.width,
+              piece.height,
+            ).contains(source)) {
+          // A table/figure is an object to inspect, even in a turn zone.
+          // Whole-page fallbacks keep ordinary page taps and pinch-only zoom.
+          widget.dispatch(ReaderColumnsDetailRequested(screen, piece, 2));
+          return;
+        }
+      }
+    }
     // On touch, the outer quarters are navigation even over a reference.
     // Keep the middle half and pointer clicks available for following links.
     if (pageTap != null && readerTapTurns(widget.model, pageTap)) {
@@ -1352,7 +1369,6 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
       return;
     }
     final page = widget.epubPage;
-    final source = transform.toSource(position);
     if (page == null) {
       if (widget.model.document?.format == FlutterBookFormat.pdf) {
         widget.dispatch(

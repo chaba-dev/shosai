@@ -206,10 +206,6 @@ class _DocumentViewState extends State<_DocumentView> {
                           bindings: {
                             ...readerPageKeys(model, dispatch, arrows: true),
                             const SingleActivator(
-                              LogicalKeyboardKey.escape,
-                            ): () =>
-                                dispatch(const ReaderSelectionCancelled()),
-                            const SingleActivator(
                               LogicalKeyboardKey.enter,
                             ): () =>
                                 dispatch(const ReaderSelectionCommitted()),

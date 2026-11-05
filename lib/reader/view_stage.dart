@@ -480,8 +480,15 @@ class _ReaderPageTapScopeState extends State<_ReaderPageTapScope> {
       ReaderPageTapped? tap(Offset global, ui.PointerDeviceKind? kind) {
         if (!_active) return null;
         final box = context.findRenderObject()! as RenderBox;
+        final fraction = box.globalToLocal(global).dx / box.size.width;
+        // Detail owns pan/pinch instead of page turns. Its middle still
+        // reveals controls, and links retain their original-page mapping.
+        if (widget.model.pdfColumns?.strip != null &&
+            (fraction < .25 || fraction >= .75)) {
+          return null;
+        }
         return ReaderPageTapped(
-          box.globalToLocal(global).dx / box.size.width,
+          fraction,
           touch:
               kind != ui.PointerDeviceKind.mouse &&
               kind != ui.PointerDeviceKind.trackpad,

@@ -422,7 +422,7 @@ final class ReaderPageInputSubmitted extends ReaderMessage {
   const ReaderPageInputSubmitted();
 }
 
-/// Pinches an indivisible figure or fallback page without changing column Size.
+/// Enlarges a figure/table or fallback page without changing column Size.
 /// The screen identity rejects gestures completed against an obsolete crop.
 final class ReaderColumnsDetailRequested extends ReaderMessage {
   const ReaderColumnsDetailRequested(this.screen, this.piece, this.zoom);

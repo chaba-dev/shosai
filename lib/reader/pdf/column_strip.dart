@@ -8,6 +8,7 @@ import 'page_geometry.dart';
 
 // Insets inside the sheet but outside strip coordinates, shared by controller/view.
 const pdfStripHeaderHeight = 32.0;
+const pdfStripDetailHeaderHeight = 44.0;
 const pdfStripSideInset = 16.0;
 
 // Numbered headings can use smaller painted glyphs than their body text.
@@ -37,7 +38,7 @@ final class PdfStripPiece {
     required this.left,
     required this.top,
     required this.scale,
-    this.zoomable = false,
+    this.kind = PdfRegionKind.column,
   });
   final int page;
   final int region;
@@ -45,7 +46,10 @@ final class PdfStripPiece {
   final double left;
   final double top;
   final double scale;
-  final bool zoomable;
+  final PdfRegionKind kind;
+
+  bool get zoomable =>
+      kind == PdfRegionKind.page || kind == PdfRegionKind.figure;
 
   double get width => source.width * scale;
   double get height => source.height * scale;
@@ -257,9 +261,7 @@ PdfStripScreen layoutPdfColumnScreen({
         left: math.max(0, (width - bounds.width * scale) / 2),
         top: top,
         scale: scale,
-        zoomable:
-            region.kind == PdfRegionKind.page ||
-            region.kind == PdfRegionKind.figure,
+        kind: region.kind,
       ),
     );
     top += (end - y) * scale;

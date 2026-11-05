@@ -34,6 +34,7 @@ import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/pdf/spread.dart';
 import 'package:shosai_flutter/reader/pdf/column_strip.dart';
 import 'package:shosai_flutter/reader/pdf/column_selection.dart';
+import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
@@ -1480,8 +1481,17 @@ class _ReaderContentPane extends StatelessWidget {
     // reader's page steps, escape and copy behavior.
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            dispatch(const ReaderSelectionCancelled()),
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          final screen = model.pdfColumns;
+          if (screen?.strip != null &&
+              model.selectionPhase == ReaderSelectionPhase.idle) {
+            dispatch(
+              ReaderColumnsDetailRequested(screen!, screen.pieces.single, 1),
+            );
+          } else {
+            dispatch(const ReaderSelectionCancelled());
+          }
+        },
         const SingleActivator(LogicalKeyboardKey.keyC, control: true): () =>
             dispatch(const ReaderSelectionCopyRequested()),
         const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () =>

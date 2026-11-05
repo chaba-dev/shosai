@@ -707,6 +707,9 @@ final class ReaderController implements Listenable {
         _touchPointers.remove(message.pointer);
         _scheduleChromeHide();
       case ReaderPointerMoved():
+        // Detail's Close occupies the same safe header as the toolbar.
+        // Hover must not cover it; a middle tap can still reveal controls.
+        if (_model.pdfColumns?.strip != null) return;
         if (!_model.chromeVisible || !_model.pointerChrome) {
           _emit(_model.copyWith(chromeVisible: true, pointerChrome: true));
         }
@@ -1444,8 +1447,9 @@ final class ReaderController implements Listenable {
         if (identical(message.screen, _model.pdfColumns) &&
             message.piece.zoomable &&
             message.screen.pieces.contains(message.piece) &&
-            !_model.relayoutBusy) {
+            _canPeek) {
           final strip = message.screen.strip ?? message.screen;
+          _hideChrome();
           _requestColumns(
             strip.start,
             detail: message.zoom <= 1.03
