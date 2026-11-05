@@ -737,6 +737,9 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
               ? !identical(screen, widget.columnsScreen) ||
                     !_horizontal.hasClients
               : widget.pdfScrollScale == null)) {
+        // An aborted reveal must not keep suppressing scroll reports; the
+        // next busy-to-idle transition re-attempts it through didUpdateWidget.
+        _revealing = false;
         return;
       }
       if (continuous) {
