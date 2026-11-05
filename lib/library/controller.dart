@@ -285,7 +285,7 @@ class LibraryController implements Listenable {
           animations: message.animations,
           progress: message.progress,
           zonesHintDismissed: message.zonesHintDismissed,
-          pdfFit: message.pdfFit,
+          pdfFit: message.pdfFit ?? settings.pdfFit,
         );
         if (changed == settings) return;
         _emit(_model.copyWith(settings: changed));
@@ -314,6 +314,7 @@ class LibraryController implements Listenable {
               epubFontSize: edited.epubFontSize,
               epubLineSpacing: edited.epubLineSpacing,
               pdfZoom: edited.pdfZoom,
+              pdfFit: edited.pdfFit,
             ),
           ),
         );

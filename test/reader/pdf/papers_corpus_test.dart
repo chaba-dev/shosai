@@ -160,6 +160,14 @@ void main() {
           }
         }
         expect(pages, hasLength(paper.pages));
+        expect(
+          analyzePdfColumns(
+            pages.take(3).toList(),
+          ).any((page) => page.columnCount >= 2),
+          paper.columns >= 2,
+          reason:
+              '${paper.name}: phone default uses only the first three pages',
+        );
         final results = analyzePdfColumns(pages);
         if (paper.name == 'resnet') {
           // Page 4's three network headers must travel with the diagram, not

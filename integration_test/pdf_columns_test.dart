@@ -466,6 +466,36 @@ void main() {
         ),
         (
           width: 440.0,
+          file: 'arxiv-first-five',
+          fit: null,
+          columns: false,
+          widthFit: true,
+        ),
+        (
+          width: 440.0,
+          file: 'arxiv-first-five',
+          fit: FlutterPdfFit.columns,
+          columns: true,
+          widthFit: false,
+        ),
+        if (Platform.environment['ATTENTION_PDF'] != null) ...[
+          (
+            width: 440.0,
+            file: 'attention',
+            fit: null,
+            columns: false,
+            widthFit: true,
+          ),
+          (
+            width: 440.0,
+            file: 'attention',
+            fit: FlutterPdfFit.fitPage,
+            columns: false,
+            widthFit: false,
+          ),
+        ],
+        (
+          width: 440.0,
           file: 'thrift',
           fit: FlutterPdfFit.fitPage,
           columns: false,
@@ -494,26 +524,46 @@ void main() {
         ),
       ]) {
         tester.view.physicalSize = Size(scenario.width * 2, 1800);
-        final bridge = await createApplicationBridge(
+        var bridge = await createApplicationBridge(
           applicationSupportDirectory: () async => directory,
         );
+        await bridge.saveReaderSettings(
+          value: FlutterReaderSettings(
+            continuous: false,
+            theme: 'light',
+            epubFontSize: 18,
+            epubLineSpacing: 1.6,
+            pdfZoom: 0,
+            pdfFit: scenario.fit,
+            twoPages: false,
+            zonesHintDismissed: true,
+          ),
+        );
+        bridge.dispose();
+        await closeApplicationCores();
+        bridge = await createApplicationBridge(
+          applicationSupportDirectory: () async => directory,
+        );
+        final cancellation = bridge.createCancellation();
+        final settings = await bridge.loadReaderSettings(
+          cancellationId: cancellation,
+        );
+        bridge.releaseCancellation(id: cancellation);
+        expect(settings.pdfFit, scenario.fit);
         await tester.pumpWidget(
           ShosaiShell(
-            home: ReaderScreen(
-              key: UniqueKey(),
-              bridge: bridge,
-              initialPath: File(
-                'fixtures/pdf-columns/${scenario.file}.pdf',
-              ).absolute.path,
-              initialSettings: FlutterReaderSettings(
-                continuous: false,
-                theme: 'light',
-                epubFontSize: 18,
-                epubLineSpacing: 1.6,
-                pdfZoom: 0,
-                pdfFit: scenario.fit,
-                twoPages: false,
-                zonesHintDismissed: true,
+            home: RepaintBoundary(
+              key: captureKey,
+              child: ReaderScreen(
+                key: UniqueKey(),
+                bridge: bridge,
+                initialPath:
+                    Platform
+                        .environment['${scenario.file.toUpperCase()}_PDF'] ??
+                    File(
+                      'fixtures/pdf-columns/${scenario.file}.pdf',
+                    ).absolute.path,
+                initialSettings: settings,
               ),
             ),
           ),
@@ -531,6 +581,9 @@ void main() {
             reason: '$scenario',
           );
         }
+        await capture(
+          'fit-${scenario.file}-${scenario.fit?.name ?? 'default'}-${scenario.width.toInt()}',
+        );
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
       }

@@ -293,6 +293,7 @@
   "settingsEpubTextSize": "EPUB の文字サイズ",
   "settingsEpubLineSpacing": "EPUB の行間",
   "settingsPdfZoom": "PDF のズーム",
+  "settingsPdfAutomatic": "自動",
   "settingsCustomZoom": "{percentage}%（カスタム）",
   "libraryDeleteManagedTitle": "アプリ内のコピーも削除しますか？",
   "libraryDeleteManagedBody": "「{title}」をライブラリから削除し、アプリ内に保存したファイルも削除します。",
