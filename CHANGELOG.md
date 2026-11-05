@@ -196,6 +196,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Keep PDF headings with following text (#297)
 - *(reader)* Blend PDF Columns into one themed sheet (#295)
 - *(reader)* Honor saved PDF fit choices (#294)
+- *(reader)* Keep Aa PDF fit choices per paper (#302)
 
 ### 🚜 Refactor
 
