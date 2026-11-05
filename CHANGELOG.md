@@ -193,6 +193,9 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Finish quiet-page turns, heads and Back placement (#284)
 - *(library)* Keep Japanese reading status and shelf progress consistent (#293)
 - *(reader)* Keep document columns at a consistent text size (#296)
+- *(reader)* Keep PDF headings with following text (#297)
+- *(reader)* Blend PDF Columns into one themed sheet (#295)
+- *(reader)* Honor saved PDF fit choices (#294)
 
 ### 🚜 Refactor
 
@@ -254,6 +257,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Settle continuous EPUB tests with frames only (#183)
 - *(reader)* Bound continuous EPUB tests by work, not wall-clock time (#204)
 - *(library)* Cover first-screen local and Drive PDF progress (#298)
+- *(reader)* Cover restored Columns long-press selection (#300)
 
 ### ⚙️ Miscellaneous Tasks
 
