@@ -87,6 +87,90 @@ void main() {
     await right.up();
   }
 
+  for (final (theme, paper) in [
+    ('light', [255, 255, 255]),
+    ('sepia', [245, 235, 214]),
+    ('dark', [31, 31, 36]),
+  ]) {
+    testWidgets('Columns sheet is continuous in $theme', (tester) async {
+      tester.view.physicalSize = const Size(1290, 2796);
+      tester.view.devicePixelRatio = 3;
+      tester.view.viewPadding = const FakeViewPadding(top: 177, bottom: 102);
+      addTearDown(tester.view.reset);
+      final directory = await Directory.systemTemp.createTemp('columns-sheet-');
+      final path = '${directory.path}/Thrift.pdf';
+      await File('fixtures/pdf-columns/thrift.pdf').copy(path);
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          home: RepaintBoundary(
+            key: captureKey,
+            child: ReaderScreen(
+              bridge: bridge,
+              initialPath: path,
+              initialSettings: FlutterReaderSettings(
+                continuous: false,
+                theme: theme,
+                epubFontSize: 18,
+                epubLineSpacing: 1.6,
+                pdfZoom: 0,
+                pdfFit: FlutterPdfFit.columns,
+                twoPages: false,
+                zonesHintDismissed: true,
+                animations: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await until(tester, () => raster.evaluate().isNotEmpty);
+      for (var step = 0; step < 4; step++) {
+        final rect = tester.getRect(raster);
+        expect(rect.left, greaterThanOrEqualTo(16));
+        expect(430 - rect.right, greaterThanOrEqualTo(16));
+        // Return to touch presentation after the keyboard page step.
+        final touch = await tester.startGesture(rect.center);
+        await touch.cancel();
+        await tester.pump();
+        final boundary =
+            captureKey.currentContext!.findRenderObject()
+                as RenderRepaintBoundary;
+        final image = await boundary.toImage();
+        final bytes = (await image.toByteData())!.buffer.asUint8List();
+        List<int> pixel(int x, int y) => bytes.sublist(
+          (y * image.width + x) * 4,
+          (y * image.width + x) * 4 + 3,
+        );
+        // Both gutters, the blank top of the PDF crop, and the home area
+        // share a sheet; cream Paper and incorrectly inverted Night fail.
+        // Leave the keyboard focus outline out of the paper measurement.
+        for (final x in [3, 15, 414, 426]) {
+          for (var y = rect.top.ceil() + 3; y < image.height - 3; y++) {
+            expect(pixel(x, y), paper, reason: '$theme margin at $x,$y');
+          }
+        }
+        expect(pixel(215, rect.top.ceil() + 1), paper);
+        image.dispose();
+        await capture('sheet-$theme-$step');
+        if (step < 3) {
+          final before = tester.widget<RawImage>(raster).image;
+          await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+          await until(
+            tester,
+            () => tester.widget<RawImage>(raster).image != before,
+          );
+        }
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await closeApplicationCores();
+      await directory.delete(recursive: true);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets(
     'ResNet diagram keeps its three headers across the page boundary',
     (tester) async {
@@ -151,7 +235,7 @@ void main() {
       final image = tester.widget<RawImage>(raster).image!;
       final stripHeight = tester.getSize(raster).height;
       expect(stripHeight, closeTo(775, 1));
-      expect([image.width, image.height], [824, (stripHeight * 2).ceil()]);
+      expect([image.width, image.height], [816, (stripHeight * 2).ceil()]);
       expect(tester.getTopLeft(folio).dy, greaterThanOrEqualTo(59));
       expect(tester.getBottomRight(raster).dy, lessThanOrEqualTo(866));
       final object = analyzePdfColumns([geometry]).single.regions.singleWhere(
@@ -168,12 +252,12 @@ void main() {
         reason: 'The figure crop must include its three network headers',
       );
       final scale = math.min(
-        412 / bounds.width,
+        408 / bounds.width,
         (stripHeight - 28) / bounds.height,
       );
       final pixels = (await image.toByteData())!.buffer.asUint8List();
       int ink(PdfRect box) {
-        final left = (412 - bounds.width * scale) / 2;
+        final left = (408 - bounds.width * scale) / 2;
         final x0 = ((left + (box.left - bounds.left) * scale) * 2).floor();
         final x1 = ((left + (box.right - bounds.left) * scale) * 2).ceil();
         final y0 = ((28 + (box.top - bounds.top) * scale) * 2).floor();
@@ -349,8 +433,8 @@ void main() {
       await tester.tapAt(target);
       await until(tester, () => painting(tester)?.columns != null);
       final first = painting(tester)!.columns!.pieces.first;
-      // PR1 keeps a one-point guard around the figure's x317 painted edge.
-      expect(first.source.left, scenario.scan ? 0 : 316);
+      // The crop keeps a three-point guard around the figure's x317 ink edge.
+      expect(first.source.left, scenario.scan ? 0 : 314);
       expect(first.source.top, closeTo(350, 1));
       expect(painting(tester)!.surface.endpoints, isEmpty);
       await capture('$fixture-before-${reopen ? 'reopen' : 'fit'}');
@@ -435,7 +519,7 @@ void main() {
       }
       final restored = painting(tester)!.columns!.pieces.first;
       await capture('$fixture-after-${reopen ? 'reopen' : 'fit'}');
-      expect(restored.source.left, scenario.scan ? 0 : 316);
+      expect(restored.source.left, scenario.scan ? 0 : 314);
       expect(restored.source.top, closeTo(expectedY, .01));
       expect(painting(tester)!.surface.endpoints, isEmpty);
       expect(tester.takeException(), isNull);
@@ -649,7 +733,7 @@ void main() {
       await until(tester, () => painting(tester)?.columns != null);
       final first = painting(tester)!.columns!.pieces.first;
       expect(first.page, 0);
-      expect(first.source.left, closeTo(316.04, .02));
+      expect(first.source.left, closeTo(314.04, .02));
       // PR1 now exposes physical ink rows rather than the loose paragraph
       // union. Entry keeps the tapped row, not the earlier paragraph start.
       expect(first.source.top, closeTo(342.276, .2));
@@ -716,7 +800,7 @@ void main() {
       await fit('columns');
       expect(
         painting(tester)!.columns!.pieces.first.source.left,
-        closeTo(316.04, .02),
+        closeTo(314.04, .02),
       );
       expect(
         painting(tester)!.columns!.pieces.first.source.top,
@@ -738,7 +822,7 @@ void main() {
       );
       await open();
       final restored = painting(tester)!.columns!.pieces.first;
-      expect(restored.source.left, closeTo(316.04, .02));
+      expect(restored.source.left, closeTo(314.04, .02));
       expect(restored.source.top, closeTo(top, 1));
       expect(
         painting(tester)!.annotations.single.body,
@@ -787,7 +871,7 @@ void main() {
       );
       expect(
         painting(tester)!.columns!.pieces.first.source.left,
-        closeTo(316.04, .02),
+        closeTo(314.04, .02),
       );
       await capture('columns-note-jump');
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -1072,7 +1156,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-in')));
     await until(tester, () => image() != before);
     expect(find.text('100% · max'), findsOneWidget);
-    expect(tester.getSize(raster).width, rect.width - 28);
+    expect(tester.getSize(raster).width, rect.width - 32);
     await tester.tapAt(const Offset(10, 100));
     await tester.pumpAndSettle();
     before = image();
@@ -1288,7 +1372,7 @@ void main() {
         final box = tester.getSize(
           find.byKey(const ValueKey('reader-page-tap-area')),
         );
-        expect(tester.getSize(raster).width, box.width - 28);
+        expect(tester.getSize(raster).width, box.width - 32);
         final area = find.byKey(const ValueKey('reader-page-tap-area'));
         final rect = tester.getRect(area);
         if (pageWidth != 612) {
@@ -1369,7 +1453,7 @@ void main() {
             tester,
             () => tester.widget<RawImage>(raster).image != enlarged,
           );
-          expect(tester.getSize(raster).width, box.width - 28);
+          expect(tester.getSize(raster).width, box.width - 32);
           expect(
             await pixels(tester.widget<RawImage>(raster).image!),
             fittedPixels,

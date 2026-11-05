@@ -52,10 +52,11 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
       filterQuality: FilterQuality.high,
     );
     return ColoredBox(
-      color: colors.background,
+      color: _pdfSheetColor(model.typography.theme),
       child: Column(
         children: [
-          SizedBox(
+          Container(
+            color: colors.background,
             height: pdfStripHeaderHeight,
             child: model.typography.progress == FlutterReaderProgress.off
                 ? null

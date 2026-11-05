@@ -203,13 +203,16 @@ class _ReaderStage extends StatelessWidget {
               // there while the book opens too, so the first page is
               // rendered for the box it is then shown in.
               : model.columnsPresentation
-              ? Padding(
-                  key: const ValueKey('reader-columns-safe-area'),
-                  // Stable cutout/home insets, as on the quiet EPUB page.
-                  // Keep the layout reporter inside: the controller must fill
-                  // the safe content box, not render lines behind system UI.
-                  padding: MediaQuery.viewPaddingOf(context),
-                  child: content,
+              ? ColoredBox(
+                  // Extend the sheet under the home area too; only content
+                  // clears safe insets. Side padding is inside this sheet.
+                  color: _pdfSheetColor(model.typography.theme),
+                  child: Padding(
+                    key: const ValueKey('reader-columns-safe-area'),
+                    // Keep the layout reporter inside the stable safe box.
+                    padding: MediaQuery.viewPaddingOf(context),
+                    child: content,
+                  ),
                 )
               : document != null || model.busy
               ? Column(

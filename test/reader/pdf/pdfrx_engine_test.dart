@@ -202,14 +202,14 @@ void main() {
       expect(title.kind, PdfRegionKind.band);
       // Tight painted bounds follow RFD's y24..104 title, with raster padding.
       expect(title.bounds.top, closeTo(24, 4));
-      expect(title.bounds.bottom, closeTo(104, 1));
+      expect(title.bounds.bottom, closeTo(106, 1));
       final columns = result.regions
           .where((r) => r.kind == PdfRegionKind.column)
           .toList();
-      expect(columns.first.bounds.left, closeTo(53, .1));
-      expect(columns.first.bounds.right, closeTo(294, .5));
-      expect(columns.last.bounds.left, closeTo(316, .1));
-      expect(columns.last.bounds.right, closeTo(557, .5));
+      expect(columns.first.bounds.left, closeTo(51, .1));
+      expect(columns.first.bounds.right, closeTo(296, .5));
+      expect(columns.last.bounds.left, closeTo(314, .1));
+      expect(columns.last.bounds.right, closeTo(559, .5));
       expect(
         result.regions.where((r) => r.kind == PdfRegionKind.figure),
         hasLength(geometry.images.length),

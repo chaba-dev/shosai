@@ -6,9 +6,9 @@ import 'dart:math' as math;
 import 'columns.dart';
 import 'page_geometry.dart';
 
-// Furniture outside the strip's coordinate space, shared by controller/view.
+// Insets inside the sheet but outside strip coordinates, shared by controller/view.
 const pdfStripHeaderHeight = 32.0;
-const pdfStripSideInset = 14.0;
+const pdfStripSideInset = 16.0;
 
 /// A stable cursor in the ordered strip. [y] is in original page points.
 final class PdfStripPosition {

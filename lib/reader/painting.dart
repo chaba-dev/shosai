@@ -312,6 +312,14 @@ void _paintPageContent(
   }
 }
 
+// Paper preserves PDF white. The other sheets match the filter's white output.
+Color _pdfSheetColor(String? theme) {
+  final colors = pageColors(theme);
+  return _pdfPageColorFilter(colors.background, colors.foreground) == null
+      ? const Color(0xffffffff)
+      : colors.background;
+}
+
 /// PDF pixels keep their geometry and alpha. Paper is the original raster;
 /// Sepia maps its RGB channels between the page ink and paper. Night reverses
 /// luminance while retaining chroma (rather than turning colours into their
