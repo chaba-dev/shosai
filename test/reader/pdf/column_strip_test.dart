@@ -68,6 +68,48 @@ void main() {
       final mapped = piece.fromPage(73, 32);
       final restored = piece.toPage(mapped.x, mapped.y);
       expect(restored, (x: 73.0, y: 32.0));
+
+      final carriedLines = [
+        line(0, 8),
+        line(10, 40),
+        line(20, 22),
+        line(30, 35),
+        line(40, 50),
+        line(51, 59),
+        line(61, 69),
+      ];
+      final carriedPages = {
+        0: page([
+          PdfReadingRegion(
+            kind: PdfRegionKind.column,
+            bounds: const PdfRect(20, 0, 120, 69),
+            lines: carriedLines,
+          ),
+        ]),
+      };
+      final crops = <PdfRect>[];
+      var cursor = const PdfStripPosition(0);
+      for (var screen = 0; screen < 2; screen++) {
+        final layout = layoutPdfColumnScreen(
+          pages: carriedPages,
+          pageCount: 1,
+          start: cursor,
+          width: 100,
+          height: 50.5,
+        );
+        final crop = layout.pieces.single.source;
+        expect(crop.top, crops.isEmpty ? 0 : crops.last.bottom);
+        crops.add(crop);
+        cursor = layout.next;
+      }
+      expect(cursor.page, 1);
+      for (final physicalLine in carriedLines) {
+        expect(
+          crops.where((crop) => crop.contains(physicalLine.bounds)),
+          hasLength(1),
+          reason: 'Repeated carries must keep each overlapping line whole once',
+        );
+      }
     },
   );
 

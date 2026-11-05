@@ -221,6 +221,15 @@ PdfStripScreen layoutPdfColumnScreen({
                 last.bounds.height > next.bounds.height * 1.15 ||
                 (beforeGap > last.bounds.height * .3 &&
                     _numberedHeading.hasMatch(last.text.trimLeft())))) {
+          // An earlier tall line can span the immediately preceding line.
+          // Carrying must not undo the safe physical-row cut established above.
+          if (rows.any(
+            (line) =>
+                line.bounds.top < last.bounds.top &&
+                line.bounds.bottom > last.bounds.top,
+          )) {
+            break;
+          }
           end = last.bounds.top;
           visible.removeLast();
         } else {
