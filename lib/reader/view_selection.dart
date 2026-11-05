@@ -1315,7 +1315,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     _tapOrigin = null;
   }
 
-  /// Resolves a tap on an inspectable piece, turn zone or painted link.
+  /// Resolves a tap on a turn zone, figure's paper or painted link.
   ///
   /// EPUB uses its painted link geometry; PDF defers annotation lookup to the
   /// controller, which owns classification and destination resolution.
@@ -1345,8 +1345,17 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
       details.kind,
     );
     final source = transform.toSource(position);
+    // On touch, the outer quarters are navigation even over a reference.
+    // Keep the middle half and pointer clicks available for following links.
+    if (pageTap != null && readerTapTurns(widget.model, pageTap)) {
+      widget.dispatch(pageTap);
+      return;
+    }
     final screen = widget.model.pdfColumns;
-    if (screen != null && screen.strip == null) {
+    if (pageTap != null &&
+        pageTap.touch &&
+        screen != null &&
+        screen.strip == null) {
       for (final piece in screen.pieces) {
         if (piece.kind == PdfRegionKind.figure &&
             Rect.fromLTWH(
@@ -1355,18 +1364,12 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
               piece.width,
               piece.height,
             ).contains(source)) {
-          // A table/figure is an object to inspect, even in a turn zone.
-          // Whole-page fallbacks keep ordinary page taps and pinch-only zoom.
-          widget.dispatch(ReaderColumnsDetailRequested(screen, piece, 2));
+          // Even an all-figure screen needs a middle single tap for chrome.
+          // Inspection belongs to double tap or pinch, not ordinary page taps.
+          widget.dispatch(pageTap);
           return;
         }
       }
-    }
-    // On touch, the outer quarters are navigation even over a reference.
-    // Keep the middle half and pointer clicks available for following links.
-    if (pageTap != null && readerTapTurns(widget.model, pageTap)) {
-      widget.dispatch(pageTap);
-      return;
     }
     final page = widget.epubPage;
     if (page == null) {

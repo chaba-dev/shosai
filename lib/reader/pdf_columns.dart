@@ -137,6 +137,26 @@ extension on ReaderController {
 
   void _pdfDoubleTapped(double x, double y) {
     if (!_canPeek || !x.isFinite || !y.isFinite) return;
+    final screen = _model.pdfColumns;
+    if (screen != null) {
+      for (final piece in screen.pieces) {
+        if (piece.kind == PdfRegionKind.figure &&
+            (screen.strip != null ||
+                x >= piece.left &&
+                    x < piece.left + piece.width &&
+                    y >= piece.top &&
+                    y < piece.top + piece.height)) {
+          dispatch(
+            ReaderColumnsDetailRequested(
+              screen,
+              piece,
+              screen.strip == null ? 2 : 1,
+            ),
+          );
+          return;
+        }
+      }
+    }
     if (_model.columnsPresentation || _rasterFit == ReaderRasterFit.manual) {
       _typographyChanged(
         const ReaderTypographyChanged(rasterFit: ReaderRasterFit.fitPage),
