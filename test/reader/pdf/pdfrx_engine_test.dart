@@ -300,6 +300,65 @@ void main() {
     },
   );
 
+  for (final (page, title) in [
+    (1, '2.2 Structs'),
+    (1, '2.4 Exceptions'),
+    (3, '5. Versioning'),
+    (5, '7.2 Generated Structs'),
+    (6, '7.6 Thread, Runnable, and shared ptr'),
+  ]) {
+    test('Thrift page ${page + 1}: $title keeps its following text', () async {
+      final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+      addTearDown(document.dispose);
+      final geometry = await document.pageGeometry(page);
+      final columns = analyzePdfColumns([geometry]).single;
+      final heading = geometry.lines.singleWhere((line) => line.text == title);
+      final region = columns.regions.indexWhere(
+        (region) => region.lines.contains(heading),
+      );
+      final rows = columns.regions[region].lines.toList()
+        ..sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
+      final index = rows.indexOf(heading);
+      final body = rows[index + 1];
+      final secondBody = rows[index + 2];
+      final prior = rows[index - 1];
+      final startY = rows[index - 3].bounds.top - 1;
+      final pages = {0: PdfStripPage(geometry, columns)};
+      // Cut both after the heading and after its first body row: carrying the
+      // latter alone used to expose the heading without checking it again.
+      for (final cut in [
+        (heading.bounds.bottom + body.bounds.top) / 2,
+        (body.bounds.bottom + secondBody.bounds.top) / 2,
+      ]) {
+        final first = layoutPdfColumnScreen(
+          pages: pages,
+          pageCount: 1,
+          start: PdfStripPosition(0, region: region, y: startY),
+          width: columns.regions[region].bounds.width,
+          height: cut - startY,
+        );
+        expect(first.pieces, isNotEmpty);
+        expect(
+          first.pieces.single.source.contains(heading.bounds),
+          isFalse,
+          reason: 'Neither cut may strand $title (cut=$cut)',
+        );
+        expect(first.pieces.single.source.contains(prior.bounds), isTrue);
+        final next = layoutPdfColumnScreen(
+          pages: pages,
+          pageCount: 1,
+          start: first.next,
+          width: columns.regions[region].bounds.width,
+          height: 300,
+        );
+        expect(next.pieces.first.source.contains(heading.bounds), isTrue);
+        expect(next.pieces.first.source.contains(body.bounds), isTrue);
+        expect(next.pieces.first.source.contains(secondBody.bounds), isTrue);
+        expect(next.pieces.first.source.top, first.pieces.single.source.bottom);
+      }
+    });
+  }
+
   test('licensed ACM two-column and arXiv single-column corpus', () async {
     for (final (file, expected) in [
       ('acm-chi.pdf', 2),

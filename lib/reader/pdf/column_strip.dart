@@ -10,6 +10,9 @@ import 'page_geometry.dart';
 const pdfStripHeaderHeight = 32.0;
 const pdfStripSideInset = 14.0;
 
+// Numbered headings can use smaller painted glyphs than their body text.
+final _numberedHeading = RegExp(r'^\d+(?:\.\d+)*\.?\s+\p{L}', unicode: true);
+
 /// A stable cursor in the ordered strip. [y] is in original page points.
 final class PdfStripPosition {
   const PdfStripPosition(this.page, {this.region = 0, this.y});
@@ -193,29 +196,43 @@ PdfStripScreen layoutPdfColumnScreen({
         }
       }
       // Carry a paragraph's first row or a heading with its following text.
-      // Geometry, not punctuation or language, identifies the larger gap
-      // before a new block. Never move all rows off an otherwise empty screen.
+      // Numbering supplements geometry when a heading is body-sized. Recheck
+      // the exposed row after carrying text, so its heading cannot be orphaned.
+      // Never move all rows off an otherwise empty screen.
       final visible = rows
           .where((l) => l.bounds.top >= y && l.bounds.bottom <= end)
           .toList();
-      if (pieces.isNotEmpty && cursor.y == null && visible.length == 1) {
-        // Do not start a new block with just one row in the previous tail.
-        break;
-      }
-      if (visible.length > 1) {
+      while (visible.length > 1) {
         final last = visible.last;
         final index = rows.indexOf(last);
-        if (index + 1 < rows.length) {
-          final prior = visible[visible.length - 2];
-          final next = rows[index + 1];
-          final beforeGap = last.bounds.top - prior.bounds.bottom;
-          final afterGap = next.bounds.top - last.bounds.bottom;
-          if (beforeGap >= 0 &&
-              (beforeGap > math.max(last.bounds.height * .3, afterGap * 1.5) ||
-                  last.bounds.height > next.bounds.height * 1.15)) {
-            end = last.bounds.top;
+        if (index + 1 >= rows.length) break;
+        final prior = visible[visible.length - 2];
+        final next = rows[index + 1];
+        final beforeGap = last.bounds.top - prior.bounds.bottom;
+        final afterGap = next.bounds.top - last.bounds.bottom;
+        if (beforeGap >= 0 &&
+            (beforeGap > math.max(last.bounds.height * .3, afterGap * 1.5) ||
+                last.bounds.height > next.bounds.height * 1.15 ||
+                (beforeGap > last.bounds.height * .3 &&
+                    _numberedHeading.hasMatch(last.text.trimLeft())))) {
+          // An earlier tall line can span the immediately preceding line.
+          // Carrying must not undo the safe physical-row cut established above.
+          if (rows.any(
+            (line) =>
+                line.bounds.top < last.bounds.top &&
+                line.bounds.bottom > last.bounds.top,
+          )) {
+            break;
           }
+          end = last.bounds.top;
+          visible.removeLast();
+        } else {
+          break;
         }
+      }
+      if (pieces.isNotEmpty && cursor.y == null && visible.length == 1) {
+        // Also applies when carrying a body row exposed the block's heading.
+        break;
       }
       final before = region.lines.where((line) => line.bounds.bottom <= end);
       if (before.isNotEmpty) {
