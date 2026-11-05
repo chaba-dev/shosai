@@ -1267,9 +1267,8 @@ class _SelectableSurface extends StatefulWidget {
 class _SelectableSurfaceState extends State<_SelectableSurface> {
   /// Movement past this many logical pixels turns a press into a drag.
   ///
-  /// A press that never travels further is a tap, and a tap on a painted link
-  /// activates it (the evaluated prototype's policy). A drag is a selection
-  /// gesture and never activates a link.
+  /// A press that never travels further is a tap. Objects and turn zones
+  /// resolve before painted links; a drag selects and never activates a link.
   static const double _tapSlop = 6;
   Offset _doubleTap = Offset.zero;
 
@@ -1316,7 +1315,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
     _tapOrigin = null;
   }
 
-  /// Activates a painted link under a completed tap, if there is one.
+  /// Resolves a tap on a turn zone, figure's paper or painted link.
   ///
   /// EPUB uses its painted link geometry; PDF defers annotation lookup to the
   /// controller, which owns classification and destination resolution.
@@ -1345,8 +1344,34 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
       details.globalPosition,
       details.kind,
     );
-    final page = widget.epubPage;
     final source = transform.toSource(position);
+    // On touch, the outer quarters are navigation even over a reference.
+    // Keep the middle half and pointer clicks available for following links.
+    if (pageTap != null && readerTapTurns(widget.model, pageTap)) {
+      widget.dispatch(pageTap);
+      return;
+    }
+    final screen = widget.model.pdfColumns;
+    if (pageTap != null &&
+        pageTap.touch &&
+        screen != null &&
+        screen.strip == null) {
+      for (final piece in screen.pieces) {
+        if (piece.kind == PdfRegionKind.figure &&
+            Rect.fromLTWH(
+              piece.left,
+              piece.top,
+              piece.width,
+              piece.height,
+            ).contains(source)) {
+          // Even an all-figure screen needs a middle single tap for chrome.
+          // Inspection belongs to double tap or pinch, not ordinary page taps.
+          widget.dispatch(pageTap);
+          return;
+        }
+      }
+    }
+    final page = widget.epubPage;
     if (page == null) {
       if (widget.model.document?.format == FlutterBookFormat.pdf) {
         widget.dispatch(

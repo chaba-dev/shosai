@@ -91,6 +91,14 @@ void main() {
     await right.up();
   }
 
+  Future<void> doubleTap(WidgetTester tester, Offset point) async {
+    await tester.tapAt(point);
+    await tester.pump(const Duration(milliseconds: 70));
+    await tester.tapAt(point);
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+  }
+
   for (final (theme, paper) in [
     ('light', [255, 255, 255]),
     ('sepia', [245, 235, 214]),
@@ -487,6 +495,215 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final table in [
+    (number: 1, page: 4, x: 300.0, y: 140.0),
+    (number: 10, page: 10, x: 300.0, y: 225.0),
+    (number: 11, page: 10, x: 300.0, y: 315.0),
+  ]) {
+    testWidgets(
+      'ResNet Table ${table.number} keeps page taps and double taps into detail',
+      (tester) async {
+        tester.view.physicalSize = const Size(860, 1864);
+        tester.view.devicePixelRatio = 2;
+        tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+        addTearDown(tester.view.reset);
+        final directory = await Directory.systemTemp.createTemp(
+          'resnet-table-',
+        );
+        final path = '${directory.path}/ResNet.pdf';
+        await File(Platform.environment['RESNET_PDF']!).copy(path);
+        final bridge = await createApplicationBridge(
+          applicationSupportDirectory: () async => directory,
+        );
+        final requests = ReaderPlaceRequests();
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox());
+          await tester.pumpAndSettle();
+          await closeApplicationCores();
+          await directory.delete(recursive: true);
+        });
+        await tester.pumpWidget(
+          ShosaiShell(
+            locale: const Locale('ja'),
+            home: RepaintBoundary(
+              key: captureKey,
+              child: ReaderScreen(
+                bridge: bridge,
+                initialPath: path,
+                initialPlace: ReaderPlace(table.page),
+                placeRequests: requests,
+                initialSettings: FlutterReaderSettings(
+                  continuous: false,
+                  theme: 'light',
+                  epubFontSize: 18,
+                  epubLineSpacing: 1.6,
+                  pdfZoom: 0,
+                  pdfFit: FlutterPdfFit.columns,
+                  twoPages: false,
+                  zonesHintDismissed: true,
+                  progress: table.number == 11
+                      ? FlutterReaderProgress.off
+                      : FlutterReaderProgress.page,
+                ),
+              ),
+            ),
+          ),
+        );
+        await until(tester, () => painting(tester)?.columns != null);
+        final strip = painting(tester)!.columns!;
+        bool atStart() {
+          final start = painting(tester)!.columns!.start;
+          return (start.page, start.region, start.y) ==
+              (strip.start.page, strip.start.region, strip.start.y);
+        }
+
+        final piece = strip.pieces.singleWhere(
+          (p) =>
+              p.page == table.page &&
+              p.source.contains(
+                PdfRect(table.x, table.y, table.x + 1, table.y + 1),
+              ),
+        );
+        expect(piece.zoomable, isTrue);
+        final original = sha256.convert(
+          (await tester.widget<RawImage>(raster).image!.toByteData())!.buffer
+              .asUint8List(),
+        );
+        final point = piece.fromPage(table.x, table.y);
+        await capture('resnet-table-${table.number}-strip-ja');
+        final middle = tester.getTopLeft(raster) + Offset(point.x, point.y);
+        await tester.tapAt(middle);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(
+          painting(tester)!.columns!.strip,
+          isNull,
+          reason:
+              'A middle single tap over a table must reveal chrome, not zoom',
+        );
+        expect(
+          find.byKey(const ValueKey('reader-header-search')).hitTestable(),
+          findsOneWidget,
+        );
+        await capture('resnet-table-${table.number}-chrome-ja');
+        await tester.tapAt(middle);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        final area = tester.getRect(
+          find.byKey(const ValueKey('reader-page-tap-area')),
+        );
+        for (final fraction in [.9, .1]) {
+          final edge = Offset(area.left + area.width * fraction, middle.dy);
+          final local = edge - tester.getTopLeft(raster);
+          expect(
+            Rect.fromLTWH(
+              piece.left,
+              piece.top,
+              piece.width,
+              piece.height,
+            ).contains(local),
+            isTrue,
+            reason: 'The page-turn tap must land on the actual table piece',
+          );
+          await tester.tapAt(edge);
+          await tester.pump(const Duration(milliseconds: 350));
+          await until(tester, () => !atStart());
+          final turned = painting(tester)!.columns!;
+          expect(turned.strip, isNull);
+          if (fraction > .5) {
+            expect(
+              (turned.start.page, turned.start.region, turned.start.y),
+              (strip.next.page, strip.next.region, strip.next.y),
+            );
+          } else {
+            expect(turned.topPage, lessThan(strip.topPage));
+          }
+          // A reverse turn from an explicit jump reconstructs the preceding
+          // page's windows; its inverse need not have the jump's boundary.
+          requests.go(ReaderPlace(table.page));
+          await until(tester, atStart);
+        }
+        await doubleTap(tester, middle);
+        await until(tester, () => painting(tester)!.columns!.strip != null);
+        final detail = painting(tester)!.columns!;
+        expect(detail.pieces.single.page, table.page);
+        expect(detail.pieces.single.region, piece.region);
+        expect(detail.detailZoom, closeTo(2, .01));
+        expect(
+          find.byKey(const ValueKey('reader-columns-detail-close')),
+          findsOneWidget,
+        );
+        await capture('resnet-table-${table.number}-detail-ja');
+        if (table.number == 11) {
+          // A short table leaves paper below it. Double tap there must return
+          // to the strip too, rather than switching the whole document's fit.
+          await doubleTap(tester, const Offset(215, 800));
+          await until(tester, () => painting(tester)!.columns?.strip == null);
+          expect(painting(tester)!.columns, isNotNull);
+          expect(atStart(), isTrue);
+          await doubleTap(tester, middle);
+          await until(tester, () => painting(tester)!.columns!.strip != null);
+        }
+        await pinch(
+          tester,
+          tester.getCenter(find.byKey(const ValueKey('reader-page-tap-area'))),
+          30,
+          60,
+        );
+        await until(tester, () => painting(tester)!.columns!.detailZoom > 2.5);
+        final enlarged = painting(tester)!.columns;
+        for (final x in [25.0, 430 * .75]) {
+          await tester.tapAt(Offset(x, 800));
+          await tester.pump(const Duration(milliseconds: 350));
+          await tester.pumpAndSettle();
+          expect(painting(tester)!.columns, same(enlarged));
+        }
+        final beforePan = tester.getTopLeft(raster);
+        await tester.fling(
+          find.byKey(const ValueKey('reader-page-tap-area')),
+          const Offset(-100, 0),
+          700,
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(raster).dx, lessThan(beforePan.dx - 50));
+        final close = find.byKey(const ValueKey('reader-columns-detail-close'));
+        expect(tester.getSize(close).shortestSide, greaterThanOrEqualTo(44));
+        expect(tester.getTopLeft(close).dy, greaterThanOrEqualTo(59));
+        final mouse = await tester.createGesture(
+          kind: ui.PointerDeviceKind.mouse,
+        );
+        await mouse.addPointer(location: const Offset(200, 600));
+        await mouse.moveTo(tester.getCenter(close));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(
+          find.byKey(const ValueKey('reader-header-search')).hitTestable(),
+          findsNothing,
+          reason: 'Hover must not put the toolbar on top of detail Close',
+        );
+        expect(close.hitTestable(), findsOneWidget);
+        await mouse.removePointer();
+        await tester.tap(close);
+        await until(tester, () => painting(tester)!.columns!.strip == null);
+        final returned = painting(tester)!.columns!;
+        expect(
+          (returned.start.page, returned.start.region, returned.start.y),
+          (strip.start.page, strip.start.region, strip.start.y),
+        );
+        expect(
+          sha256.convert(
+            (await tester.widget<RawImage>(raster).image!.toByteData())!.buffer
+                .asUint8List(),
+          ),
+          original,
+          reason: 'Closing detail restores the exact composed strip pixels',
+        );
+        await capture('resnet-table-${table.number}-returned-ja');
+        expect(tester.takeException(), isNull);
+      },
+      skip: Platform.environment['RESNET_PDF'] == null,
+    );
+  }
+
   for (final scenario in [
     (reopen: false, detail: false, scan: false),
     (reopen: true, detail: false, scan: false),
@@ -573,11 +790,7 @@ void main() {
       Future<void> fit(String value) async {
         final header = find.byKey(const ValueKey('reader-header-typography'));
         if (header.hitTestable().evaluate().isEmpty) {
-          await tester.tapAt(
-            tester.getCenter(
-              find.byKey(const ValueKey('reader-page-tap-area')),
-            ),
-          );
+          await tester.tap(folio);
           await tester.pump(const Duration(milliseconds: 350));
           await tester.pumpAndSettle();
         }
@@ -627,6 +840,33 @@ void main() {
       expect(first.source.left, scenario.scan ? 0 : 314);
       expect(first.source.top, closeTo(350, 1));
       expect(painting(tester)!.surface.endpoints, isEmpty);
+      if (!scenario.scan && !scenario.detail && !reopen) {
+        final strip = painting(tester)!.columns!;
+        expect(strip.pieces.single.kind, PdfRegionKind.figure);
+        final middle = tester.getCenter(raster);
+        await tester.tapAt(middle);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(painting(tester)!.columns!.strip, isNull);
+        expect(
+          find.byKey(const ValueKey('reader-header-typography')).hitTestable(),
+          findsOneWidget,
+          reason: 'An all-figure screen still needs a middle tap for chrome',
+        );
+        await capture('all-figure-middle-chrome');
+        await doubleTap(tester, middle);
+        await until(tester, () => painting(tester)!.columns!.strip != null);
+        await doubleTap(
+          tester,
+          tester.getCenter(find.byKey(const ValueKey('reader-page-tap-area'))),
+        );
+        await until(tester, () => painting(tester)!.columns!.strip == null);
+        final returned = painting(tester)!.columns!.start;
+        expect(
+          (returned.page, returned.region, returned.y),
+          (strip.start.page, strip.start.region, strip.start.y),
+        );
+      }
       await capture('$fixture-before-${reopen ? 'reopen' : 'fit'}');
       var expectedY = first.source.top;
       if (scenario.detail) {
@@ -1458,7 +1698,11 @@ void main() {
               .contains(box.topLeft + Offset(local.x, local.y)),
           isTrue,
         );
-        await tester.tapAt(box.topLeft + Offset(local.x, local.y));
+        // This destination check includes a link in a touch turn zone.
+        await tester.tapAt(
+          box.topLeft + Offset(local.x, local.y),
+          kind: ui.PointerDeviceKind.mouse,
+        );
         await tester.pump(const Duration(milliseconds: 350));
         await until(
           tester,
@@ -1896,7 +2140,7 @@ void main() {
   }
 
   testWidgets(
-    'a figure in a mixed strip pinches sharply without changing Size',
+    'a figure in a mixed strip double taps and pinches without changing Size',
     (tester) async {
       tester.view.physicalSize = const Size(880, 1800);
       tester.view.devicePixelRatio = 2;
@@ -1969,22 +2213,68 @@ void main() {
             (pixel ~/ fittedWidth) / 2 + 40,
           );
       await capture('columns-figure-ja');
-      await pinch(tester, center, 30, 60);
-      await until(
-        tester,
-        () => tester.widget<RawImage>(raster).image != fitted,
+      final beforeSearch = painting(tester)!.columns;
+      await tester.tap(folio);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
+      await until(tester, () => painting(tester)!.columns != beforeSearch);
+      final pinned = painting(tester)!.columns!;
+      final figure = pinned.pieces.singleWhere(
+        (piece) => piece.kind == PdfRegionKind.figure,
       );
+      final pinnedCenter =
+          tester.getTopLeft(raster) +
+          Offset(
+            figure.left + figure.width / 2,
+            figure.top + figure.height / 2,
+          );
+      await doubleTap(tester, pinnedCenter);
+      expect(
+        painting(tester)!.columns!.strip,
+        isNull,
+        reason: 'Pinned Search must not cover a newly opened detail Close',
+      );
+      await pinch(tester, pinnedCenter, 30, 60);
+      await tester.pumpAndSettle();
+      expect(painting(tester)!.columns, same(pinned));
+      expect(find.byKey(const ValueKey('reader-search-close')), findsOneWidget);
+      await capture('columns-figure-search-pinned-ja');
+      await tester.tap(find.byKey(const ValueKey('reader-search-close')));
+      await until(tester, () => painting(tester)!.columns != pinned);
+      await doubleTap(tester, center);
+      await until(tester, () => painting(tester)!.columns!.strip != null);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await until(tester, () => painting(tester)!.columns!.strip == null);
+      await doubleTap(tester, center);
+      await until(tester, () => painting(tester)!.columns!.strip != null);
+      await tester.tap(
+        find.byKey(const ValueKey('reader-columns-detail-close')),
+      );
+      await until(tester, () => painting(tester)!.columns!.strip == null);
+      await pinch(tester, center, 30, 60);
+      await until(tester, () => painting(tester)!.columns!.strip != null);
       final enlarged = tester.widget<RawImage>(raster).image!;
       expect(enlarged.width, greaterThan(fittedWidth * 1.8));
       expect(tester.widget<Text>(folioText).data, '4 ページ中 3 ページ');
       await capture('columns-figure-pinched-ja');
-      final area = find.byKey(const ValueKey('reader-page-tap-area'));
-      await pinch(tester, tester.getCenter(area), 90, 40);
+      await tester.tap(folio);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      final beforeDetailSearch = painting(tester)!.columns;
+      await tester.tap(find.byKey(const ValueKey('reader-header-search')));
       await until(
         tester,
-        () => tester.widget<RawImage>(raster).image != enlarged,
+        () => painting(tester)!.columns != beforeDetailSearch,
       );
-      await tester.tapAt(tester.getCenter(area));
+      final area = find.byKey(const ValueKey('reader-page-tap-area'));
+      await pinch(tester, tester.getCenter(area), 90, 40);
+      await until(tester, () => painting(tester)!.columns!.strip == null);
+      final pinnedReturn = painting(tester)!.columns;
+      expect(find.byKey(const ValueKey('reader-search-close')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('reader-search-close')));
+      await until(tester, () => painting(tester)!.columns != pinnedReturn);
+      await tester.tap(folio);
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('reader-header-typography')));

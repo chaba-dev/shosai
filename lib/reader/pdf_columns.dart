@@ -139,6 +139,26 @@ extension on ReaderController {
 
   void _pdfDoubleTapped(double x, double y) {
     if (!_canPeek || !x.isFinite || !y.isFinite) return;
+    final screen = _model.pdfColumns;
+    if (screen != null) {
+      for (final piece in screen.pieces) {
+        if (piece.kind == PdfRegionKind.figure &&
+            (screen.strip != null ||
+                x >= piece.left &&
+                    x < piece.left + piece.width &&
+                    y >= piece.top &&
+                    y < piece.top + piece.height)) {
+          dispatch(
+            ReaderColumnsDetailRequested(
+              screen,
+              piece,
+              screen.strip == null ? 2 : 1,
+            ),
+          );
+          return;
+        }
+      }
+    }
     if (_model.columnsPresentation || _rasterFit == ReaderRasterFit.manual) {
       _typographyChanged(
         const ReaderTypographyChanged(rasterFit: ReaderRasterFit.fitPage),
@@ -510,7 +530,10 @@ extension on ReaderController {
           1.0,
           layout.width - 2 * pdfStripSideInset,
         );
-        final availableHeight = math.max(1.0, height - pdfStripHeaderHeight);
+        final availableHeight = math.max(
+          1.0,
+          height - pdfStripDetailHeaderHeight,
+        );
         bool admits(double scale) {
           try {
             // The source crop can gain pixels from the virtual page's ceil
@@ -566,7 +589,7 @@ extension on ReaderController {
                 left: math.max(0, (availableWidth - bounds.width * scale) / 2),
                 top: 0,
                 scale: scale,
-                zoomable: true,
+                kind: region.kind,
               ),
             ],
             separators: const [],

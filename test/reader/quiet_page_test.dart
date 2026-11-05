@@ -10,10 +10,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/reader/controller.dart'
     show ReaderDisplayChange, ReaderPlace;
+import 'package:shosai_flutter/reader/epub/content.dart';
+import 'package:shosai_flutter/reader/epub/surface.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/shell/view.dart';
 
+import '../support/epub_navigation_fixture.dart';
 import '../support/production_shell_harness.dart';
 
 class _Book extends HarnessBridge {
@@ -57,6 +60,7 @@ Future<_Book> _open(
   double ratio = 1,
   bool longChapter = false,
   ReaderPlace? place,
+  Uint8List? epubBytes,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = ratio;
@@ -67,6 +71,7 @@ Future<_Book> _open(
       'fixtures/epub-layout/long-chapter.epub',
     ).readAsBytesSync();
   }
+  if (epubBytes != null) bridge.epubBytes = epubBytes;
   final reader = ReaderScreen(
     key: UniqueKey(),
     bridge: bridge,
@@ -1244,7 +1249,37 @@ void main() {
     );
   });
 
-  testWidgets('a refused PDF link never becomes a page-zone tap', (
+  testWidgets('PDF turn zones outrank links; middle and mouse still peek', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      const Size(390, 844),
+      links: [
+        const PdfPageLink(rects: [PdfLinkRect(0, 0, 612, 792)], page: 3),
+      ],
+    );
+    await _tap(tester, .85);
+    expect(_place(tester), 'page 2 of 5');
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsNothing);
+    await _tap(tester, .15);
+    expect(_place(tester), 'page 1 of 5');
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsNothing);
+    await _tap(tester, .5);
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('reader-reference-close')));
+    await tester.pumpAndSettle();
+    final rect = tester.getRect(_stage);
+    await tester.tapAt(
+      Offset(rect.left + rect.width * .85, rect.center.dy),
+      kind: ui.PointerDeviceKind.mouse,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsOneWidget);
+    expect(_status(tester), '20% · page 1 of 5');
+  });
+
+  testWidgets('a refused PDF middle link never becomes a page-zone tap', (
     tester,
   ) async {
     await _open(
@@ -1257,9 +1292,61 @@ void main() {
         ),
       ],
     );
-    await _tap(tester, .85);
+    await _tap(tester, .5);
     expect(_status(tester), '20% · page 1 of 5');
     expect(_toolbar.hitTestable(), findsNothing);
+  });
+
+  testWidgets('EPUB turn zones outrank in-text references', (tester) async {
+    await _open(
+      tester,
+      const Size(430, 932),
+      path: '/books/references.epub',
+      epubBytes: buildTestEpub(
+        chapters: {
+          'OPS/Text/chapter-1.xhtml':
+              '<p><a href="#target">${'Fig. 2 reference text. ' * 1000}</a></p>'
+              '<h1 id="target">Destination</h1>',
+        },
+        nav:
+            '<ol><li><a href="../Text/chapter-1.xhtml">References</a></li></ol>',
+      ),
+    );
+    ReaderEpubPage page() => tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<ReaderEpubPageContentPainter>()
+        .single
+        .page;
+    Future<void> tapReference(double fraction) async {
+      final box = tester.renderObject<RenderBox>(
+        find.byKey(const ValueKey('reader-page-paint')),
+      );
+      final transform = SurfaceTransform.create(
+        BoxFit.contain,
+        page().box.size,
+        box.size,
+      );
+      final point = Offset(box.size.width * fraction, box.size.height * .35);
+      expect(
+        pageLinkAt(page().page, page().box, transform.toSource(point)),
+        isNotNull,
+        reason: 'The tested tap must land on painted reference text',
+      );
+      await tester.tapAt(box.localToGlobal(point));
+      await tester.pumpAndSettle();
+    }
+
+    final first = page().canonicalStart;
+    await tapReference(.85);
+    expect(page().canonicalStart, greaterThan(first));
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsNothing);
+    await tapReference(.15);
+    expect(page().canonicalStart, first);
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsNothing);
+    await tapReference(.5);
+    expect(find.byKey(const ValueKey('reader-reference-peek')), findsOneWidget);
+    expect(page().canonicalStart, first);
   });
 
   for (final rtl in [false, true]) {

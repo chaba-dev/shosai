@@ -434,8 +434,8 @@ class _ReaderSpreadGutter extends StatelessWidget {
   );
 }
 
-/// Shares page coordinates with the selectable surface. Links and long presses
-/// keep their own gestures; only a completed non-link tap reaches this scope.
+/// Shares page coordinates with the selectable surface. Long presses retain
+/// selection; completed touch taps in turn zones outrank in-text links.
 class _ReaderPageTapScope extends StatefulWidget {
   const _ReaderPageTapScope({
     required this.model,
@@ -480,8 +480,15 @@ class _ReaderPageTapScopeState extends State<_ReaderPageTapScope> {
       ReaderPageTapped? tap(Offset global, ui.PointerDeviceKind? kind) {
         if (!_active) return null;
         final box = context.findRenderObject()! as RenderBox;
+        final fraction = box.globalToLocal(global).dx / box.size.width;
+        // Detail owns pan/pinch instead of page turns. Its middle still
+        // reveals controls, and links retain their original-page mapping.
+        if (widget.model.pdfColumns?.strip != null &&
+            (fraction < .25 || fraction >= .75)) {
+          return null;
+        }
         return ReaderPageTapped(
-          box.globalToLocal(global).dx / box.size.width,
+          fraction,
           touch:
               kind != ui.PointerDeviceKind.mouse &&
               kind != ui.PointerDeviceKind.trackpad,

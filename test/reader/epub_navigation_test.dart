@@ -259,7 +259,9 @@ void main() {
   Future<void> tapLink(WidgetTester tester, String href) async {
     final point = linkTapPoint(tester, href);
     expect(point, isNotNull, reason: 'the link $href is painted on this page');
-    await tester.tapAt(point!);
+    // These checks exercise link destinations, including links in turn zones.
+    // Touch-zone precedence is covered by quiet_page_test.dart.
+    await tester.tapAt(point!, kind: ui.PointerDeviceKind.mouse);
     await settleNative(tester);
   }
 

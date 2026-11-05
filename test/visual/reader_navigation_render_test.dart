@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_epub/shosai_epub.dart';
@@ -202,7 +204,8 @@ void main() {
       }
     }
     expect(point, isNotNull, reason: 'the cross-chapter link is painted');
-    await tester.tapAt(point!);
+    // The captured state is a link destination, even in a touch turn zone.
+    await tester.tapAt(point!, kind: ui.PointerDeviceKind.mouse);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('reader-reference-peek')), findsOneWidget);
     expect(harness.savedReadingStates.last.unit.toInt(), 0);

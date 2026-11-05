@@ -51,16 +51,19 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
       fit: BoxFit.fill,
       filterQuality: FilterQuality.high,
     );
+    final detail = screen.strip != null;
     return ColoredBox(
       color: _pdfSheetColor(model.typography.theme),
       child: Column(
         children: [
           Container(
             color: colors.background,
-            height: pdfStripHeaderHeight,
-            child: model.typography.progress == FlutterReaderProgress.off
-                ? null
-                : Row(
+            height: detail ? pdfStripDetailHeaderHeight : pdfStripHeaderHeight,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (model.typography.progress != FlutterReaderProgress.off)
+                  Row(
                     key: const ValueKey('reader-columns-folio'),
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -84,6 +87,32 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
                       ),
                     ],
                   ),
+                if (detail)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: SizedBox.square(
+                      dimension: pdfStripDetailHeaderHeight,
+                      child: _ReaderEdgeButton(
+                        semanticsKey: const ValueKey(
+                          'reader-columns-detail-close',
+                        ),
+                        icon: LucideIcons.x,
+                        semanticsLabel: l10n.readerReferenceClose,
+                        color: colors.foreground,
+                        onPressed: model.relayoutBusy
+                            ? null
+                            : () => widget.dispatch(
+                                ReaderColumnsDetailRequested(
+                                  screen,
+                                  screen.pieces.single,
+                                  1,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
           Expanded(
             child: Padding(

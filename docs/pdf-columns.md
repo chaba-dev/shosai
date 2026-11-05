@@ -144,12 +144,27 @@ gutter. Paper leaves the PDF pixels unchanged and uses a white sheet through
 the home area; Sepia and Night use the same ground as filtered PDF white.
 Gaps between crops and around column rules share that sheet; page bands may
 remain tinted. Both axes' scroll offsets in detail mode must also be accounted
-for by interaction adapters. `PdfStripPiece.zoomable` identifies figure/page pieces;
+for by interaction adapters. `PdfStripPiece.kind` distinguishes figure/table
+objects from whole-page fallbacks; both are `zoomable`, but only objects open
+on double tap.
 `PdfStripScreen.detailZoom` and `strip` preserve the original cursor while a
-pinch renders the whole safe region. Pinching back to fit returns to that
-screen without changing Size or navigation history. Detail scale is bounded
-by the existing 40-million-pixel / 16384px edge admission, for both the outward-
-rounded source crop and composed canvas at device density. `detailZoom` stores
+pinch renders the whole safe region. Double-tapping a figure/table opens 2×
+detail; pinch adjusts it independently of Size. Detail hides the reading chrome
+on entry, disables page-turn taps, and reserves a 44 pt safe-area header for its
+Close control (also available with Progress off). Hover leaves it exposed;
+middle taps still reveal controls. Pinned chrome (such as Search or Notes)
+blocks initial enlargement, but never blocks returning from existing detail.
+Close, a figure double tap, Escape with no selection, or pinching
+back to fit returns to the same strip screen without changing Size or navigation
+history. Whole-page fallbacks keep ordinary taps for page navigation and links;
+their enlargement remains pinch-only. Single touch taps over figures/tables
+retain the page contract: outer quarters turn, middle half reveals chrome,
+including all-figure screens. In-text links in touch turn zones no longer
+intercept page turns, for both EPUB and PDF; middle text links and mouse clicks
+still follow links. Non-figure double-tap fit/Columns switching is unchanged.
+Detail scale is bounded by the existing 40-million-pixel / 16384px edge
+admission, for both the outward-rounded source crop and composed canvas at
+device density. `detailZoom` stores
 the admitted ratio, not the unclamped gesture request. Extremely tall fallback
 regions that cannot admit a whole-region enlargement retain their crisp strip.
 A screen can contain
@@ -248,9 +263,10 @@ unlaid-out transform. Native tests select and activate links after both-axis
 panning, retaining canonical page-local offsets and destinations.
 
 Touch double-tap is handled on the actual selectable surface: a fitted page
-opens Columns at the tapped column; Columns returns to Fit page, not 2x. A
-pending entry/jump is replayed across viewport changes, rather than replaced
-by the old screen's position. The single-tap delay is the gesture recognizer's
+opens Columns at the tapped column; Columns text returns to Fit page, not 2x.
+Figures/tables instead toggle sharp detail, without taking single taps from
+page turns or chrome. A pending entry/jump is replayed across viewport changes,
+rather than replaced by the old screen's position. The single-tap delay is the gesture recognizer's
 normal double-tap window; mouse selection and touch long-press remain available.
 
 On a phone with no explicit fit choice and the legacy default zoom, the
