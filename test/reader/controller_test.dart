@@ -27,6 +27,23 @@ class _ReferenceBridge extends HarnessBridge {
   ];
 }
 
+class _PaperFitBridge extends HarnessBridge {
+  final positions = <int, FlutterReadingState>{};
+
+  @override
+  Future<FlutterReadingState?> loadReadingState({
+    required int bookId,
+    required BigInt cancellationId,
+  }) async => positions[bookId];
+
+  @override
+  Future<void> saveReadingState({
+    required int bookId,
+    required FlutterReadingState value,
+    required BigInt unitCount,
+  }) async => positions[bookId] = value;
+}
+
 class _ReaderBridge
     with BridgePdfEngine, BridgeRecords
     implements FlutterBridge {
@@ -63,6 +80,74 @@ ReaderController _controller({FlutterBridge? bridge}) => ReaderController(
 );
 
 void main() {
+  testWidgets(
+    'reusing a reader restores each paper fit without changing the default',
+    (tester) async {
+      final bridge = _PaperFitBridge();
+      final changes = <ReaderDisplayChange>[];
+      final controller = ReaderController(
+        bridge: bridge,
+        initialTypography: const ReaderTypographyPresentation(
+          format: FlutterBookFormat.pdf,
+          continuous: false,
+          theme: 'light',
+          epubFontSize: 18,
+          epubLineSpacing: 1.5,
+          rasterFit: ReaderRasterFit.fitWidth,
+          rasterZoom: 1,
+        ),
+        displaySink: changes.add,
+        decoder: (pixels, {required width, required height}) async {
+          final recorder = ui.PictureRecorder();
+          ui.Canvas(recorder);
+          final picture = recorder.endRecording();
+          final image = await picture.toImage(1, 1);
+          picture.dispose();
+          return image;
+        },
+      );
+      addTearDown(controller.dispose);
+      Future<void> ready() async {
+        for (var i = 0; i < 100; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          if (!controller.model.busy &&
+              !controller.model.relayoutBusy &&
+              controller.model.pageImage != null) {
+            return;
+          }
+        }
+        fail('PDF did not become ready: ${controller.model.error}');
+      }
+
+      controller.dispatch(
+        const ReaderOpenRequested('/first.pdf', bookId: 9001),
+      );
+      await ready();
+      expect(controller.model.typography.rasterFit, ReaderRasterFit.fitWidth);
+      controller.dispatch(
+        const ReaderTypographyChanged(rasterFit: ReaderRasterFit.fitPage),
+      );
+      await ready();
+      await ReaderController.drainBookWrites(9001);
+      expect(bridge.positions[9001]?.pdfFit, FlutterPdfFit.fitPage);
+      expect(changes, isEmpty);
+      controller.dispatch(
+        const ReaderOpenRequested('/second.pdf', bookId: 9002),
+      );
+      await ready();
+      expect(controller.model.typography.rasterFit, ReaderRasterFit.fitWidth);
+      await ReaderController.drainBookWrites(9002);
+      expect(bridge.positions[9002]?.pdfFit, isNull);
+      controller.dispatch(
+        const ReaderOpenRequested('/first.pdf', bookId: 9001),
+      );
+      await ready();
+      expect(controller.model.typography.rasterFit, ReaderRasterFit.fitPage);
+      controller.dispose();
+      await tester.pumpAndSettle();
+    },
+  );
+
   for (final action in [
     'keep',
     'show',

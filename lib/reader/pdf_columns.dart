@@ -84,6 +84,7 @@ extension on ReaderController {
           offset: offset == null ? null : BigInt.from(offset),
           pdfX: point.x,
           pdfY: point.y,
+          pdfFit: _pdfFitOverride,
           zoom: _model.layout.scale,
           progress: _bookProgress(_model),
         ),
@@ -128,6 +129,7 @@ extension on ReaderController {
           unit: BigInt.from(location.unit),
           offset: savedOffset == null ? null : BigInt.from(savedOffset),
           pdfY: y,
+          pdfFit: _pdfFitOverride,
           zoom: _model.layout.scale,
           progress: _bookProgress(_model),
         ),
@@ -778,6 +780,7 @@ extension on ReaderController {
           zoom: message.layout.scale,
           pdfY: y,
           pdfX: x,
+          pdfFit: _pdfFitOverride,
           progress: _bookProgress(_model),
         ),
       );

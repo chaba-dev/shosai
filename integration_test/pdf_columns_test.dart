@@ -12,7 +12,11 @@ import 'package:integration_test/integration_test.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/controller.dart'
-    show ReaderDisplayChange, ReaderPlace, ReaderPlaceRequests;
+    show
+        ReaderController,
+        ReaderDisplayChange,
+        ReaderPlace,
+        ReaderPlaceRequests;
 import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/reader/pdf/engine.dart'
     show pdfMaxBitmapDimension, pdfMaxBitmapPixels;
@@ -711,6 +715,165 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('Aa fit belongs to a paper, not the Settings default', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(880, 1800);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    final directory = await Directory.systemTemp.createTemp('paper-fit-');
+    var admin = await createApplicationBridge(
+      applicationSupportDirectory: () async => directory,
+    );
+    final token = admin.createCancellation();
+    await admin.importPaths(
+      pathKeys: [
+        File('fixtures/pdf-columns/thrift.pdf').absolute.path,
+        File('fixtures/pdf-columns/arxiv-first-five.pdf').absolute.path,
+      ],
+      managed: false,
+      cancellationId: token,
+    );
+    final books = (await admin.libraryPage(
+      limit: 10,
+      offset: 0,
+      cancellationId: token,
+    )).books;
+    admin.releaseCancellation(id: token);
+    expect(books, hasLength(2));
+    final paper = books.singleWhere(
+      (book) => book.pathKey.endsWith('thrift.pdf'),
+    );
+    final other = books.singleWhere((book) => book.bookId != paper.bookId);
+    final globalChanges = <ReaderDisplayChange>[];
+    Future<FlutterReaderSettings> settings() async {
+      final id = admin.createCancellation();
+      final value = await admin.loadReaderSettings(cancellationId: id);
+      admin.releaseCancellation(id: id);
+      return value;
+    }
+
+    Future<FlutterReadingState?> position(FlutterLibraryBook book) async {
+      await ReaderController.drainBookWrites(book.bookId);
+      final id = admin.createCancellation();
+      final value = await admin.loadReadingState(
+        bookId: book.bookId,
+        cancellationId: id,
+      );
+      admin.releaseCancellation(id: id);
+      return value;
+    }
+
+    Future<void> defaultFit(FlutterPdfFit fit) async =>
+        admin.saveReaderSettings(
+          value: (await settings()).copyWith(
+            pdfFit: fit,
+            twoPages: false,
+            zonesHintDismissed: true,
+            animations: false,
+          ),
+        );
+    Future<void> closePaper() async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      for (final book in books) {
+        await ReaderController.drainBookWrites(book.bookId);
+      }
+    }
+
+    Future<void> open(FlutterLibraryBook book, FlutterPdfFit expected) async {
+      await closePaper();
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          locale: const Locale('ja'),
+          home: RepaintBoundary(
+            key: captureKey,
+            child: ReaderScreen(
+              key: UniqueKey(),
+              bridge: bridge,
+              initialPath: book.pathKey,
+              initialBookId: book.bookId,
+              initialSettings: await settings(),
+              onDisplayChanged: globalChanges.add,
+            ),
+          ),
+        ),
+      );
+      await until(tester, () => painting(tester) != null);
+      expect(
+        painting(tester)!.columns != null,
+        expected == FlutterPdfFit.columns,
+      );
+      if (expected != FlutterPdfFit.columns) {
+        expect(
+          painting(tester)!.fit,
+          expected == FlutterPdfFit.fitWidth ? BoxFit.fitWidth : BoxFit.contain,
+        );
+      }
+    }
+
+    await defaultFit(FlutterPdfFit.fitWidth);
+    await open(paper, FlutterPdfFit.fitWidth);
+    for (final fit in [
+      FlutterPdfFit.fitWidth,
+      FlutterPdfFit.columns,
+      FlutterPdfFit.fitPage,
+    ]) {
+      final defaultBefore = (await settings()).pdfFit;
+      final typography = find.byKey(const ValueKey('reader-header-typography'));
+      if (typography.hitTestable().evaluate().isEmpty) {
+        await tester.tapAt(
+          tester.getCenter(find.byKey(const ValueKey('reader-page-tap-area'))),
+        );
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(typography.hitTestable());
+      await tester.pumpAndSettle();
+      final key = switch (fit) {
+        FlutterPdfFit.columns => 'columns',
+        FlutterPdfFit.fitWidth => 'fit-width',
+        FlutterPdfFit.fitPage => 'fit-page',
+      };
+      await tester.tap(find.byKey(ValueKey('reader-typography-$key')));
+      await tester.pumpAndSettle();
+      await capture('paper-override-${fit.name}');
+      await closePaper();
+      final saved = await position(paper);
+      expect(saved?.pdfFit, fit);
+      expect(globalChanges, isEmpty, reason: 'Aa must never edit Settings');
+      expect((await settings()).pdfFit, defaultBefore);
+      final inherited = fit == FlutterPdfFit.columns
+          ? FlutterPdfFit.fitPage
+          : FlutterPdfFit.columns;
+      await defaultFit(inherited);
+      await open(other, inherited);
+      await closePaper();
+      expect(
+        (await position(other))?.pdfFit,
+        isNull,
+        reason: 'Passive reading must not pin the default',
+      );
+      admin.dispose();
+      await closeApplicationCores();
+      admin = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await open(paper, fit);
+      expect((await settings()).pdfFit, inherited);
+      expect((await position(paper))?.unit, saved?.unit);
+      await capture('paper-restored-${fit.name}');
+    }
+    await closePaper();
+    admin.dispose();
+    await closeApplicationCores();
+    await directory.delete(recursive: true);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'phone defaults, explicit choices and larger screens stay distinct',
@@ -1431,10 +1594,10 @@ void main() {
     await capture('columns-display');
     await tester.tap(find.byKey(const ValueKey('reader-typography-fit-width')));
     await until(tester, () => raster.evaluate().isEmpty);
-    expect(saved.last.pdfFit, FlutterPdfFit.fitWidth);
+    expect(saved, isEmpty, reason: 'Aa fit is not a global Display change');
     await tester.tap(find.byKey(const ValueKey('reader-typography-columns')));
     await until(tester, () => image() != null);
-    expect(saved.last.pdfFit, FlutterPdfFit.columns);
+    expect(saved, isEmpty, reason: 'Aa fit is not a global Display change');
     for (final progress in [
       FlutterReaderProgress.off,
       FlutterReaderProgress.percent,

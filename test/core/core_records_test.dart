@@ -1069,6 +1069,7 @@ void main() {
         zoom: 1.5,
         pdfY: 287.25,
         pdfX: 436.5,
+        pdfFit: FlutterPdfFit.columns,
       ),
       unitCount: BigInt.from(4),
     );
@@ -1084,6 +1085,7 @@ void main() {
         zoom: 1.5,
         pdfY: 287.25,
         pdfX: 436.5,
+        pdfFit: FlutterPdfFit.columns,
       ),
     );
 

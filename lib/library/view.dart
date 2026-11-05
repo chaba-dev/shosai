@@ -728,7 +728,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 animations: change.animations,
                 progress: change.progress,
                 zonesHintDismissed: change.zonesHintDismissed,
-                pdfFit: change.pdfFit,
               ),
             );
           }

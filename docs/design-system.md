@@ -294,7 +294,7 @@ Head, then scope and count, then the book note and groups per section in reading
 | Progress | **Page** (default), **Percent**, **Off**: what the folio shows while the chrome is hidden | Same, for the place under a PDF's page or spread |
 | Page animations | A switch, on by default: pages curl over; off, the page changes at once | Whole pages curl; Columns screens slide. Off or reduced motion changes instantly |
 
-Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom is kept per book; the explicit PDF fit choice (Columns, Fit width or Fit page), theme, text size, line spacing, Pages, Progress and Page animations are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
+Theme tiles preview the page colours and take a 2 px `accent` ring when chosen. Changes apply live. Zoom and the explicit Aa PDF fit choice (Columns, Fit width or Fit page) are kept per paper; choosing a fit in Aa never changes the global Settings default. A paper without an Aa override inherits Settings, including later default changes. Theme, text size, line spacing, Pages, Progress and Page animations are saved as the settings every book opens with, and Typeface is one choice for the whole application. Writing direction is not a setting. On phones the popover is a bottom sheet and Pages is hidden in portrait.
 
 **PDF Columns.** A strip of original PDF crops, not reflowed text: full-width
 bands and figures alternate with ordered columns, including declared
@@ -327,7 +327,8 @@ keeps it. A double tap on a fitted column opens
 Columns there; a double tap in Columns returns to Fit page. Phones without a
 saved fit choice sample the first three pages: two or more columns opens
 Columns, otherwise Fit width. Tablets and desktops keep Fit page unless the
-reader chooses otherwise. A saved Display choice always wins.
+reader chooses otherwise. A paper's saved Aa choice wins over the Settings default;
+without an override, Settings applies, including its Automatic phone detection.
 
 Column Size never forces horizontal panning. Pinch a figure, table or genuine
 no-column fallback page for detail: the controller renders its safe original

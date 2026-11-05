@@ -145,6 +145,8 @@ final class ReaderController implements Listenable {
        _typographyProgress = initialTypography.progress,
        _rasterFit = initialTypography.rasterFit,
        _rasterZoom = initialTypography.rasterZoom,
+       _defaultPdfFit = initialTypography.rasterFit,
+       _defaultPdfZoom = initialTypography.rasterZoom,
        _baseScale = baseScale ?? initialTypography.rasterZoom,
        _requestedLayout = ReaderLayout(
          scale: initialScale,
@@ -164,6 +166,9 @@ final class ReaderController implements Listenable {
   final PageDecoder _decoder;
   final PdfEngine _pdfEngine;
   final bool autoPdfFit;
+  final ReaderRasterFit _defaultPdfFit;
+  final double _defaultPdfZoom;
+  FlutterPdfFit? _pdfFitOverride;
   bool _pdfChoiceExplicit = false;
 
   /// The engine document behind the current PDF, owned with the model's
@@ -762,7 +767,6 @@ final class ReaderController implements Listenable {
               animations: null,
               progress: null,
               zonesHintDismissed: true,
-              pdfFit: null,
             ));
           }
           final generation = _model.generation;
@@ -1724,6 +1728,10 @@ final class ReaderController implements Listenable {
 
     _recoveryPath = path;
     _recoveryBookId = message.bookId;
+    _pdfChoiceExplicit = false;
+    _pdfFitOverride = null;
+    _rasterFit = _defaultPdfFit;
+    _rasterZoom = _defaultPdfZoom;
     final generation = _model.generation + 1;
     for (final cancellation in _relayoutCancellations) {
       _bridge.cancel(id: cancellation);
@@ -1966,8 +1974,11 @@ final class ReaderController implements Listenable {
       final restoredOffset = place == null
           ? restored?.offset?.toInt()
           : place.offset;
-      ReaderRasterFit? defaultPdfFit;
-      if (pdf != null && autoPdfFit) {
+      final pdfFitOverride = pdf == null ? null : restored?.pdfFit;
+      ReaderRasterFit? defaultPdfFit = pdfFitOverride == null
+          ? null
+          : ReaderRasterFit.values.byName(pdfFitOverride.name);
+      if (pdf != null && autoPdfFit && pdfFitOverride == null) {
         final sample = <PdfPageGeometry>[];
         for (var page = 0; page < math.min(3, pdf.pageCount); page++) {
           try {
@@ -2024,6 +2035,7 @@ final class ReaderController implements Listenable {
           pdfY: place == null ? restored?.pdfY : null,
           pdfX: place == null ? restored?.pdfX : null,
           defaultPdfFit: defaultPdfFit,
+          pdfFitOverride: pdfFitOverride,
           toolError: toolError,
           // A book opened at a note or search hit returns to where it was
           // left, or, opened from another book, to that book.
@@ -2171,6 +2183,7 @@ final class ReaderController implements Listenable {
       return;
     }
     _pdfDocument = message.pdfDocument;
+    if (!_pdfChoiceExplicit) _pdfFitOverride = message.pdfFitOverride;
     if (message.defaultPdfFit case final fit? when !_pdfChoiceExplicit) {
       _rasterFit = fit;
       _rasterZoom = fit == ReaderRasterFit.columns ? 1 : _baseScale;
@@ -3568,8 +3581,8 @@ final class ReaderController implements Listenable {
   ///
   /// Font size, line spacing and zoom are clamped to the pinned ranges; a
   /// layout-affecting change is applied through the guarded relayout path so a
-  /// failed layout reports through the existing error surface. Global Display
-  /// changes, including explicit PDF fit choices, go to the settings sink.
+  /// failed layout reports through the existing error surface. PDF fit is
+  /// saved with this paper's position; other Display changes use Settings.
   void _typographyChanged(ReaderTypographyChanged message) {
     if (_closing) return;
     final document = _model.document;
@@ -3614,19 +3627,13 @@ final class ReaderController implements Listenable {
           ? null
           : _typographyProgress,
       zonesHintDismissed: null,
-      pdfFit:
-          message.rasterFit == null ||
-              message.rasterFit == ReaderRasterFit.manual
-          ? null
-          : FlutterPdfFit.values.byName(message.rasterFit!.name),
     );
     if (change.theme != null ||
         change.fontSize != null ||
         change.lineSpacing != null ||
         change.twoPages != null ||
         change.animations != null ||
-        change.progress != null ||
-        change.pdfFit != null) {
+        change.progress != null) {
       _displaySink(change);
     }
     if (message.rasterFit case final fit?) {
@@ -3634,6 +3641,29 @@ final class ReaderController implements Listenable {
       _rasterFit = fit;
       if (fit != ReaderRasterFit.manual) {
         _rasterZoom = fit == ReaderRasterFit.columns ? 1 : _baseScale;
+        if (document?.format == FlutterBookFormat.pdf) {
+          _pdfFitOverride = FlutterPdfFit.values.byName(fit.name);
+          if (document!.bookId case final bookId?) {
+            final location = _model.readingLocation;
+            // Save even when the chosen fit already matches the inherited
+            // default, and before an asynchronous rerender can fail.
+            _queueReadingStateSave(
+              bookId,
+              document.logicalUnitCount,
+              FlutterReadingState(
+                unit: BigInt.from(location.unit),
+                offset: location.offset == null
+                    ? null
+                    : BigInt.from(location.offset!),
+                zoom: _model.layout.scale,
+                pdfY: _model.pdfY,
+                pdfX: _model.pdfX,
+                pdfFit: _pdfFitOverride,
+                progress: _bookProgress(_model),
+              ),
+            );
+          }
+        }
       }
     }
     if (message.zoom case final zoom?) {
@@ -5383,6 +5413,7 @@ final class ReaderController implements Listenable {
           zoom: message.layout.scale,
           pdfY: _model.pdfY,
           pdfX: _model.pdfX,
+          pdfFit: _pdfFitOverride,
           progress: _bookProgress(_model),
           lastUnit: lastUnit != null && lastUnit > unit
               ? BigInt.from(lastUnit)

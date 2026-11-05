@@ -84,7 +84,6 @@ typedef ReaderDisplayChange = ({
   bool? animations,
   FlutterReaderProgress? progress,
   bool? zonesHintDismissed,
-  FlutterPdfFit? pdfFit,
 });
 
 /// Saves the Display settings the reader changes.
