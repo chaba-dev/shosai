@@ -333,6 +333,7 @@ void main() {
     (1, '2.2 Structs'),
     (1, '2.4 Exceptions'),
     (3, '5. Versioning'),
+    (3, '5.2 Isset'),
     (5, '7.2 Generated Structs'),
     (6, '7.6 Thread, Runnable, and shared ptr'),
   ]) {
@@ -385,8 +386,122 @@ void main() {
         expect(next.pieces.first.source.contains(secondBody.bounds), isTrue);
         expect(next.pieces.first.source.top, first.pieces.single.source.bottom);
       }
+      for (final target in [body, secondBody]) {
+        final restored = layoutPdfColumnScreen(
+          pages: pages,
+          pageCount: 1,
+          start: PdfStripPosition(0, region: region, y: target.bounds.top),
+          width: columns.regions[region].bounds.width,
+          height: 300,
+          locate: true,
+        );
+        final crop = restored.pieces.first.source;
+        expect(crop.contains(heading.bounds), isTrue);
+        expect(crop.contains(target.bounds), isTrue);
+        expect(
+          crop.top,
+          inInclusiveRange(prior.bounds.bottom, heading.bounds.top),
+        );
+        final reopened = layoutPdfColumnScreen(
+          pages: pages,
+          pageCount: 1,
+          start: restored.start,
+          width: columns.regions[region].bounds.width,
+          height: 300,
+          locate: true,
+        );
+        expect(reopened.pieces.first.source.top, crop.top);
+      }
     });
   }
+
+  test('Isset restore shares a heading-safe row boundary', () async {
+    final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+    addTearDown(document.dispose);
+    final geometry = await document.pageGeometry(3);
+    final columns = analyzePdfColumns([geometry]).single;
+    final heading = geometry.lines.singleWhere(
+      (line) => line.text == '5.2 Isset',
+    );
+    final region = columns.regions.indexWhere((r) => r.lines.contains(heading));
+    final rows = columns.regions[region].lines.toList()
+      ..sort((a, b) => a.bounds.top.compareTo(b.bounds.top));
+    final index = rows.indexOf(heading);
+    final body = rows[index + 1];
+    // The old body-row guard stranded the heading. Both adjacent screens
+    // must now agree on an earlier break, without losing or repeating a row.
+    expect(heading.bounds.bottom, lessThan(348.636));
+    expect(body.bounds.top, closeTo(351.636, .001));
+    const place = PdfStripPosition(3, region: 1, y: 348.636);
+    expect(region, place.region);
+    for (final width in [358.0, 398.0, 408.0]) {
+      final pages = {3: PdfStripPage(geometry, columns)};
+      final restored = layoutPdfColumnScreen(
+        pages: pages,
+        pageCount: 4,
+        start: place,
+        width: width,
+        height: 775,
+        locate: true,
+      );
+      expect(restored.pieces.first.source.contains(heading.bounds), isTrue);
+      expect(restored.pieces.first.source.contains(body.bounds), isTrue);
+      final prior = layoutPdfColumnScreen(
+        pages: pages,
+        pageCount: 4,
+        start: PdfStripPosition(
+          3,
+          region: region,
+          y: rows[index - 3].bounds.top - 1,
+        ),
+        width: width,
+        height: 775,
+        stop: restored.start,
+      );
+      final reopened = layoutPdfColumnScreen(
+        pages: pages,
+        pageCount: 4,
+        start: restored.start,
+        width: width,
+        height: 775,
+        locate: true,
+      );
+      expect(prior.next, same(restored.start));
+      expect(prior.pieces.last.source.bottom, restored.pieces.first.source.top);
+      expect(reopened.start.y, restored.start.y);
+      expect(
+        reopened.pieces.first.source.top,
+        restored.pieces.first.source.top,
+      );
+      for (final row in rows.where(
+        (r) =>
+            r.bounds.top >= prior.pieces.first.source.top &&
+            r.bounds.bottom <= restored.pieces.last.source.bottom,
+      )) {
+        expect(
+          [
+            ...prior.pieces,
+            ...restored.pieces,
+          ].where((p) => p.source.contains(row.bounds)),
+          hasLength(1),
+          reason: 'width=$width: ${row.text} must have exactly one owner',
+        );
+      }
+    }
+    for (final height in [27.0, 37.0]) {
+      final short = layoutPdfColumnScreen(
+        pages: {3: PdfStripPage(geometry, columns)},
+        pageCount: 4,
+        start: place,
+        width: columns.regions[region].bounds.width,
+        columnWidth: columns.regions[region].bounds.width,
+        height: height,
+        locate: true,
+      );
+      expect(short.pieces.first.source.contains(body.bounds), isTrue);
+      expect(short.pieces.first.source.contains(heading.bounds), height == 37);
+    }
+  });
 
   test('licensed ACM two-column and arXiv single-column corpus', () async {
     for (final (file, expected) in [
