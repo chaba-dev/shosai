@@ -132,6 +132,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Preserve place and interactions in PDF Columns (#291)
 - *(reader)* Honor continuous reading in PDF Columns (#301)
 - *(dropbox)* Replace mobile SDK sign-in with browser OAuth (#308)
+- *(android)* Add an adaptive launcher icon with the 書 mark (#307)
 
 ### 🐛 Bug Fixes
 
@@ -202,6 +203,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Enlarge Columns figures and respect turn-zone taps (#299)
 - *(reader)* Keep the reading place across PDF strip refills and run fixture-backed tests on devices (#305)
 - *(reader)* Preserve column overflow and restored screen boundaries (#306)
+- *(library)* Prioritize the reader over source previews (#309)
 
 ### 🚜 Refactor
 
