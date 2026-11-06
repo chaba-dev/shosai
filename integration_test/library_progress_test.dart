@@ -58,6 +58,13 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final captureKey = GlobalKey();
 
+  // Absolute fixture root for device and simulator runs; host runs keep the
+  // repository-relative default. See pdf_columns_continuous_test.dart.
+  const fixtureRoot = String.fromEnvironment(
+    'SHOSAI_FIXTURES',
+    defaultValue: 'fixtures',
+  );
+
   Future<void> capture(String name) async {
     final artifacts = Platform.environment['SHOSAI_PROGRESS_ARTIFACTS'];
     if (artifacts == null) return;
@@ -84,7 +91,7 @@ void main() {
           final bridge = owner.bridge();
           final records = recordsOf(bridge);
           final path = '${directory.path}/Thrift.pdf';
-          await File('fixtures/pdf-columns/thrift.pdf').copy(path);
+          await File('$fixtureRoot/pdf-columns/thrift.pdf').copy(path);
           if (drive) {
             final bytes = await File(path).readAsBytes();
             final server = await HttpServer.bind(
