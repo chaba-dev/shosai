@@ -180,9 +180,11 @@ final class ReaderController implements Listenable {
   ({PdfStripScreen screen, double top})? _columnsViewport;
   double? _columnsWidth;
   final List<PdfStripPosition> _columnsBack = [];
+  final List<PdfStripPosition> _columnsAhead = [];
   ({
     PdfStripPosition position,
     List<PdfStripPosition> back,
+    List<PdfStripPosition> ahead,
     bool previous,
     int? offset,
     int? length,
@@ -2415,7 +2417,10 @@ final class ReaderController implements Listenable {
           height != null && oldHeight != height ||
           pixelRatioChanged;
       _requestedLayout = layout;
-      if (changed) _columnsBack.clear();
+      if (changed) {
+        _columnsBack.clear();
+        _columnsAhead.clear();
+      }
       if (changed || _model.pdfColumns == null && !_model.relayoutBusy) {
         _refreshColumns();
       }
@@ -3183,6 +3188,7 @@ final class ReaderController implements Listenable {
           !_closing &&
           !_suspended) {
         _columnsBack.clear();
+        _columnsAhead.clear();
         _readingStatePersistenceBlocked = false;
         _requestColumns(
           PdfStripPosition(unit),
@@ -3698,6 +3704,7 @@ final class ReaderController implements Listenable {
           before.rasterZoom != after.rasterZoom ||
           before.continuous != after.continuous) {
         _columnsBack.clear();
+        _columnsAhead.clear();
         _discardPdfLeaves();
         if (before.continuous != after.continuous) {
           _requestColumns(
@@ -7497,6 +7504,7 @@ final class ReaderController implements Listenable {
     _columnsViewport = null;
     _columnsWidth = null;
     _columnsBack.clear();
+    _columnsAhead.clear();
     _columnsIntent = null;
     _clearTurnPreview();
     final pageImage = _model.pageImage;

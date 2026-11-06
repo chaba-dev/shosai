@@ -145,9 +145,11 @@ void main() {
       );
       await until(tester, () => raster.evaluate().isNotEmpty);
       for (var step = 0; step < 4; step++) {
-        final rect = tester.getRect(raster);
-        expect(rect.left, greaterThanOrEqualTo(16));
-        expect(430 - rect.right, greaterThanOrEqualTo(16));
+        final rect = tester.getRect(
+          find.ancestor(of: raster, matching: find.byType(ClipRect)).first,
+        );
+        expect(rect.left, 16);
+        expect(430 - rect.right, 16);
         // Return to touch presentation after the keyboard page step.
         final touch = await tester.startGesture(rect.center);
         await touch.cancel();
@@ -374,6 +376,7 @@ void main() {
         final regions = analyzePdfColumns(geometry);
         await pdf.dispose();
         double? bodyScale;
+        var checkedOverflow = false;
         final bodyPages = <int>{};
         for (var turn = 0; turn < paper.turns; turn++) {
           final screen = painting(tester)!.columns!;
@@ -395,6 +398,76 @@ void main() {
           expect(tester.getTopLeft(folio).dy, greaterThanOrEqualTo(59));
           expect(tester.getBottomRight(raster).dy, lessThanOrEqualTo(866));
           await capture('${paper.name}-body-$turn');
+          if (paper.name == 'thrift' && !checkedOverflow) {
+            final reported = geometry[6].lines.singleWhere(
+              (line) => line.text.contains('libevent and the TFramed'),
+            );
+            final overflow = screen.pieces
+                .where(
+                  (piece) =>
+                      piece.page == 6 && piece.source.contains(reported.bounds),
+                )
+                .firstOrNull;
+            if (overflow != null) {
+              checkedOverflow = true;
+              const viewportWidth = 440 - 2 * 16.0;
+              final right = overflow.fromPage(
+                reported.bounds.right,
+                reported.bounds.bottom,
+              );
+              expect(right.x, greaterThan(viewportWidth + 20));
+              expect(right.x, lessThanOrEqualTo(screen.width));
+              final image = tester.widget<RawImage>(raster).image!;
+              final pixels = (await image.toByteData())!.buffer.asUint8List();
+              final density = image.width / screen.width;
+              final top = overflow
+                  .fromPage(reported.bounds.left, reported.bounds.top)
+                  .y;
+              var trailingInk = 0;
+              for (
+                var y = (top * density).ceil();
+                y < (right.y * density).floor();
+                y++
+              ) {
+                for (
+                  var x = (viewportWidth * density).ceil();
+                  x < (right.x * density).floor();
+                  x++
+                ) {
+                  if (pixels[(y * image.width + x) * 4] < 200) trailingInk++;
+                }
+              }
+              expect(
+                trailingInk,
+                greaterThan(20),
+                reason:
+                    'the reported p7 line retains actual trailing raster ink',
+              );
+              await capture('thrift-overflow-leading');
+              final origin = tester.getTopLeft(raster);
+              await tester.timedDragFrom(
+                Offset(350, origin.dy + 180),
+                const Offset(-200, 0),
+                const Duration(milliseconds: 600),
+              );
+              await tester.pumpAndSettle();
+              expect(
+                painting(tester)!.columns,
+                same(screen),
+                reason: 'revealing overflow must not also turn the page',
+              );
+              expect(tester.getRect(raster).right, closeTo(440 - 16, 1));
+              await capture('thrift-overflow-trailing');
+              await tester.timedDragFrom(
+                Offset(150, origin.dy + 180),
+                const Offset(200, 0),
+                const Duration(milliseconds: 600),
+              );
+              await tester.pumpAndSettle();
+              expect(painting(tester)!.columns, same(screen));
+              expect(tester.getTopLeft(raster).dx, closeTo(origin.dx, 1));
+            }
+          }
           if (turn + 1 == paper.turns) break;
           final before = tester.widget<RawImage>(raster).image;
           await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
@@ -403,6 +476,7 @@ void main() {
             () => tester.widget<RawImage>(raster).image != before,
           );
         }
+        if (paper.name == 'thrift') expect(checkedOverflow, isTrue);
         expect(bodyPages, containsAll([paper.page, paper.page + 1]));
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
@@ -1383,8 +1457,26 @@ void main() {
       expect(first.page, 0);
       expect(first.source.left, closeTo(314.04, .02));
       // PR1 now exposes physical ink rows rather than the loose paragraph
-      // union. Entry keeps the tapped row, not the earlier paragraph start.
-      expect(first.source.top, closeTo(342.276, .2));
+      // union. Keep up to 3pt of whitespace before the tapped row's ink,
+      // not the earlier paragraph start or a cut through its antialiasing.
+      final pdf = await PdfrxPdfEngine().open(path);
+      final geometry = await pdf.pageGeometry(0);
+      await pdf.dispose();
+      final row = geometry.lines.singleWhere(
+        (line) =>
+            line.bounds.left > 300 && (line.bounds.top - 342.276).abs() < .01,
+      );
+      final precedingBottom = geometry.lines
+          .where(
+            (line) =>
+                line.bounds.left > 300 && line.bounds.bottom <= row.bounds.top,
+          )
+          .map((line) => line.bounds.bottom)
+          .reduce(math.max);
+      expect(
+        first.source.top,
+        math.max(row.bounds.top - 3, (precedingBottom + row.bounds.top) / 2),
+      );
       await capture('columns-right-column-entry');
       final endpoints = painting(tester)!.surface.endpoints;
       // The fit controls leave chrome visible. Select below its overlay, not
@@ -1477,6 +1569,37 @@ void main() {
         'Original right column',
       );
       await capture('columns-restored-place');
+      final restoredScreen = painting(tester)!.columns!;
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+      await until(tester, () => painting(tester)!.columns != restoredScreen);
+      final previousScreen = painting(tester)!.columns!;
+      expect(
+        (
+          previousScreen.next.page,
+          previousScreen.next.region,
+          previousScreen.next.y,
+        ),
+        (
+          restoredScreen.start.page,
+          restoredScreen.start.region,
+          restoredScreen.start.y,
+        ),
+      );
+      expect(previousScreen.pieces.last.source.bottom, restored.source.top);
+      await capture('columns-before-restored-place');
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+      await until(tester, () => painting(tester)!.columns != previousScreen);
+      expect(
+        painting(tester)!.columns!.pieces.first.source.top,
+        restored.source.top,
+      );
+      final returnedCancellation = bridge.createCancellation();
+      final returnedState = await bridge.loadReadingState(
+        bookId: book.bookId,
+        cancellationId: returnedCancellation,
+      );
+      bridge.releaseCancellation(id: returnedCancellation);
+      expect(returnedState!.pdfY, restored.source.top);
       // Double-tap leaves Columns for the original fitted page, never 2x.
       final centerOfStrip = tester.getCenter(
         find.byKey(const ValueKey('reader-selection-surface')),
@@ -1808,7 +1931,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-typography-zoom-in')));
     await until(tester, () => image() != before);
     expect(find.text('100% · max'), findsOneWidget);
-    expect(tester.getSize(raster).width, rect.width - 32);
+    final viewport = tester.getRect(
+      find.ancestor(of: raster, matching: find.byType(ClipRect)).first,
+    );
+    expect(viewport.width, rect.width - 32);
+    expect(tester.getSize(raster).width, greaterThanOrEqualTo(viewport.width));
     await tester.tapAt(const Offset(10, 100));
     await tester.pumpAndSettle();
     before = image();
@@ -1829,7 +1956,14 @@ void main() {
     await until(tester, () => image() != before);
     await capture('columns-return');
     before = image();
+    final overflows = tester.getSize(raster).width > viewport.width;
     await tester.fling(area, const Offset(-180, 0), 1000);
+    await tester.pumpAndSettle();
+    if (overflows) {
+      expect(image(), same(before), reason: 'first reveal the trailing crop');
+      expect(tester.getRect(raster).right, closeTo(viewport.right, 1));
+      await tester.fling(area, const Offset(-180, 0), 1000);
+    }
     await until(tester, () => image() != before);
     expect(place(), 'page 1 of 8');
     // Middle reveals Display without advancing.

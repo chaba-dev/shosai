@@ -676,6 +676,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
   bool _multiTouch = false;
   bool _cancelled = false;
   bool _revealing = false;
+  bool _pannedColumns = false;
 
   @override
   void initState() {
@@ -836,7 +837,8 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       }
       return;
     }
-    if ((widget.columnsScreen?.detailZoom ?? 1) > 1 ||
+    if (_pannedColumns ||
+        (widget.columnsScreen?.detailZoom ?? 1) > 1 ||
         model.continuousPresentation ||
         _readerFit(model.typography) != BoxFit.contain ||
         _distance.dx.abs() < 18 ||
@@ -869,6 +871,7 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
       if (_pointers.isEmpty) {
         _cancelled = false;
         _multiTouch = false;
+        _pannedColumns = false;
         _distance = Offset.zero;
         _origin = event.position;
         _velocity = VelocityTracker.withKind(event.kind)
@@ -946,6 +949,10 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         turn?.release(complete: false);
       } else if (_startedPage == _page &&
           _enabled &&
+          !_pannedColumns &&
+          !(widget.columnsScreen != null &&
+              _horizontal.hasClients &&
+              _horizontal.position.maxScrollExtent > 0) &&
           !widget.model.continuousPresentation &&
           _readerFit(widget.model.typography) == BoxFit.contain &&
           _distance.dx.abs() >= 18 &&
@@ -961,12 +968,18 @@ class _ReaderPageGesturesState extends State<_ReaderPageGestures> {
         ]) {
           if (!controller.hasClients) continue;
           final position = controller.position;
-          controller.jumpTo(
-            (position.pixels - delta).clamp(
-              position.minScrollExtent,
-              position.maxScrollExtent,
-            ),
+          final target = (position.pixels - delta).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
           );
+          // Revealing overflow is not also a page turn. A fresh outward swipe
+          // at the edge can still advance, including after a tiny overhang.
+          if (widget.columnsScreen != null &&
+              controller == _horizontal &&
+              target != position.pixels) {
+            _pannedColumns = true;
+          }
+          controller.jumpTo(target);
         }
       }
       if (_pointers.length == 2 &&
