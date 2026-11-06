@@ -56,6 +56,7 @@ final class _Dropbox {
   Completer<void>? wait;
   Completer<void>? arrived;
   String? challenge;
+  String? redirect;
   List<List<Map<String, dynamic>>>? recursivePages;
   List<List<Map<String, dynamic>>> _pages = [];
   bool repeatCursor = false;
@@ -103,7 +104,11 @@ final class _Dropbox {
             challenge,
           );
           expect(form.containsKey('client_secret'), false);
-          expect(form.containsKey('redirect_uri'), false);
+          if (redirect == null) {
+            expect(form.containsKey('redirect_uri'), false);
+          } else {
+            expect(form['redirect_uri'], redirect);
+          }
         }
         if (revoked) {
           request.response.statusCode = 400;
@@ -275,11 +280,7 @@ Future<List<int>> readAll(Stream<List<int>> stream) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = _NativeHttp();
-  const nativeAuthorization = DropboxAuthorization(
-    cancellationTitle: 'Dropbox の接続をキャンセルしますか？',
-    cancelAction: '接続をキャンセル',
-    keepWaitingAction: '待機を続ける',
-  );
+  const browserAuthorization = DropboxAuthorization();
   late _Dropbox fixture;
   setUp(() async {
     fixture = _Dropbox();
@@ -288,47 +289,66 @@ void main() {
   tearDown(() => fixture.close());
 
   test(
-    'native handshake uses isolated vault entries and existing renewal',
+    'browser code exchange uses PKCE, isolated vault entries and renewal',
     () async {
-      const channel = MethodChannel('dev.shosai/dropbox_authorization');
+      const channel = MethodChannel('crossingthestreams.io/flutter_appauth');
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       var authorizations = 0;
       messenger.setMockMethodCallHandler(channel, (call) async {
         expect(call.method, 'authorize');
-        expect(call.arguments, {
-          'clientId': 'fixture-native-key',
-          'cancellationTitle': 'Dropbox の接続をキャンセルしますか？',
-          'cancelAction': '接続をキャンセル',
-          'keepWaitingAction': '待機を続ける',
+        final args = call.arguments as Map;
+        expect(args['clientId'], 'fixture-browser-key');
+        expect(args['redirectUrl'], 'db-fixture-browser-key://2/token');
+        expect(args['serviceConfiguration'], {
+          'authorizationEndpoint': 'https://www.dropbox.com/oauth2/authorize',
+          'tokenEndpoint': 'https://api.dropboxapi.com/oauth2/token',
+          'endSessionEndpoint': null,
         });
+        expect(args['scopes'], [
+          'files.metadata.read',
+          'files.content.read',
+          'files.content.write',
+        ]);
+        expect(args['additionalParameters'], {'token_access_type': 'offline'});
+        expect(args['externalUserAgent'], 0); // Non-ephemeral browser session.
         authorizations++;
-        return {
-          'access_token': 'native-access-$authorizations',
-          'refresh_token': 'native-refresh-$authorizations',
-          'expires_in': 14400,
-        };
+        final verifier = 'browser-verifier-$authorizations';
+        fixture.challenge = base64UrlEncode(
+          sha256.convert(ascii.encode(verifier)).bytes,
+        ).replaceAll('=', '');
+        return {'authorizationCode': 'test-code', 'codeVerifier': verifier};
       });
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       final provider = DropboxConnectionProvider(
         credentials: fixture.credentials,
-        clientId: 'fixture-native-key',
-        authorizeNative: nativeAuthorization.authorize,
+        clientId: 'fixture-browser-key',
+        authorizeRedirect: browserAuthorization.authorize,
         authorize: (_) =>
             throw StateError('Mobile must not request code entry'),
         tokenEndpoint: fixture.root.resolve('oauth2/token'),
         api: fixture.root,
         content: fixture.root,
       );
+      fixture.redirect = 'db-fixture-browser-key://2/token';
       final first = (await provider.setup('one'))!;
       final second = (await provider.setup('two'))!;
-      expect(fixture.tokenForms, isEmpty); // SDK already exchanged the code.
+      expect(fixture.tokenForms, [
+        for (var attempt = 1; attempt <= 2; attempt++)
+          {
+            'client_id': 'fixture-browser-key',
+            'grant_type': 'authorization_code',
+            'code': 'test-code',
+            'code_verifier': 'browser-verifier-$attempt',
+            'redirect_uri': 'db-fixture-browser-key://2/token',
+          },
+      ]);
       expect(fixture.credentials.values.values.toSet(), {
-        'native-refresh-1',
-        'native-refresh-2',
+        'refresh-1',
+        'refresh-2',
       });
-      expect(jsonEncode(first.toJson()), isNot(contains('native-refresh')));
-      expect(jsonEncode(first.toJson()), isNot(contains('native-access')));
+      expect(jsonEncode(first.toJson()), isNot(contains('refresh-')));
+      expect(jsonEncode(first.toJson()), isNot(contains('access-')));
       final reopened = DropboxConnectionProvider(
         credentials: fixture.credentials,
         clientId: '', // Persisted mobile grants also renew without new setup.
@@ -336,24 +356,27 @@ void main() {
         api: fixture.root,
       );
       expect((await (await reopened.open(first)).stat('id:book')).size, 7);
-      expect(fixture.tokenForms.single, {
-        'client_id': 'fixture-native-key',
+      expect(fixture.tokenForms.last, {
+        'client_id': 'fixture-browser-key',
         'grant_type': 'refresh_token',
-        'refresh_token': 'native-refresh-1',
+        'refresh_token': 'refresh-1',
       });
       await reopened.release(first);
-      expect(fixture.credentials.values.values.toList(), ['native-refresh-2']);
+      expect(fixture.credentials.values.values.toList(), ['refresh-2']);
       expect((await (await provider.open(second)).stat('id:book')).size, 7);
     },
   );
 
   test(
-    'native cancel, incomplete grant and safe errors never persist access',
+    'browser cancellation, incomplete response and safe errors save nothing',
     () async {
-      const channel = MethodChannel('dev.shosai/dropbox_authorization');
+      const channel = MethodChannel('crossingthestreams.io/flutter_appauth');
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      Object? response;
+      Object? response = PlatformException(
+        code: 'authorize_failed',
+        details: {'user_did_cancel': 'true'},
+      );
       messenger.setMockMethodCallHandler(channel, (_) async {
         if (response is PlatformException) throw response;
         return response;
@@ -361,41 +384,34 @@ void main() {
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       final provider = DropboxConnectionProvider(
         credentials: fixture.credentials,
-        clientId: 'fixture-native-key',
-        authorizeNative: nativeAuthorization.authorize,
+        clientId: 'fixture-browser-key',
+        authorizeRedirect: browserAuthorization.authorize,
       );
       expect(await provider.setup('cancelled'), null);
-      response = PlatformException(
-        code: 'timeout',
-        message: 'private callback',
-      );
-      expect(await provider.setup('expired'), null);
       for (final invalid in [
-        {'access_token': 'short-lived', 'expires_in': 14400},
-        {'access_token': '', 'refresh_token': 'refresh', 'expires_in': 14400},
-        {'access_token': 'access', 'refresh_token': 'refresh', 'expires_in': 0},
+        {'authorizationCode': 'test-code'},
+        {'authorizationCode': '', 'codeVerifier': 'verifier'},
+        {'authorizationCode': 'test-code', 'codeVerifier': ''},
       ]) {
         response = invalid;
         await expectLater(
           provider.setup('invalid'),
-          throwsA(isA<CoreException>()),
+          throwsA(failure(LocationFailure.revoked)),
         );
       }
       response = PlatformException(
-        code: 'authorization',
+        code: 'authorize_failed',
         message: 'private callback',
+        details: {'error_description': 'private callback'},
       );
       await expectLater(
         provider.setup('failed'),
-        throwsA(failure(LocationFailure.revoked)),
-      );
-      response = PlatformException(
-        code: 'offline',
-        details: 'private callback',
-      );
-      await expectLater(
-        provider.setup('offline'),
-        throwsA(failure(LocationFailure.offline)),
+        throwsA(
+          allOf(
+            failure(LocationFailure.revoked),
+            predicate((Object e) => !e.toString().contains('private callback')),
+          ),
+        ),
       );
       expect(fixture.credentials.values, isEmpty);
       expect(fixture.tokenForms, isEmpty);
