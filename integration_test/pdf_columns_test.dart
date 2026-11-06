@@ -2158,7 +2158,9 @@ void main() {
         'shosai-columns-figure-',
       );
       final path = '${directory.path}/Figure.pdf';
-      await File('$fixtureRoot/pdf-columns/content-preservation.pdf').copy(path);
+      await File(
+        '$fixtureRoot/pdf-columns/content-preservation.pdf',
+      ).copy(path);
       final bridge = await createApplicationBridge(
         applicationSupportDirectory: () async => directory,
       );
