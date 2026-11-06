@@ -54,7 +54,13 @@ final class _Location implements LibraryLocation {
     active += 1;
     if (active > mostActive) mostActive = active;
     try {
-      if (gate case final gate?) await gate.future;
+      if (gate case final gate?) {
+        await Future.any([
+          gate.future,
+          if (cancellation != null) cancellation.whenCancelled,
+        ]);
+        cancellation.throwIfCancelled();
+      }
       yield* folder.read(
         key,
         start: start,
@@ -105,11 +111,18 @@ class _SourceBridge extends HarnessBridge implements LibraryFoldersHost {
   _SourceBridge(this.folders);
   @override
   final LibraryFolders folders;
+
+  Completer<FlutterLibraryBook>? admission;
+  CancellationToken? admissionCancellation;
+
   @override
   Future<FlutterLibraryBook> admitSourceFile(
     LibrarySourceFile file, {
     CancellationToken? cancellation,
-  }) => throw StateError('No content reads');
+  }) {
+    admissionCancellation = cancellation;
+    return admission?.future ?? (throw StateError('No content reads'));
+  }
 }
 
 /// A connected directory of books, served through [location].
@@ -166,10 +179,10 @@ final class _Fixture {
   }
 }
 
-/// A one-page PDF whose content stream is about 200 KiB.
-List<int> _heavyPdf() {
+/// A one-page PDF whose content stream can exceed pdfrx's in-memory threshold.
+List<int> _heavyPdf({int padding = 200 * 1024}) {
   final content = StringBuffer('0.1 0.6 0.3 rg 0 0 300 400 re f\n');
-  while (content.length < 200 * 1024) {
+  while (content.length < padding) {
     content.write('% ${'x' * 76}\n');
   }
   final objects = [
@@ -199,7 +212,227 @@ List<int> _heavyPdf() {
 LibrarySourceFile _named(List<LibrarySourceFile> files, String name) =>
     files.singleWhere((file) => file.entry.name == name);
 
+const _readerBook = FlutterLibraryBook(
+  bookId: 1,
+  title: 'Thrift',
+  format: FlutterBookFormat.pdf,
+  pathKey: 'fixtures/pdf-columns/thrift.pdf',
+  managed: false,
+  progress: 0,
+  dateAdded: '2026-11-06',
+);
+
+Future<void> _until(
+  bool Function() ready, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!ready() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+  expect(ready(), isTrue);
+}
+
 void main() {
+  test(
+    'reader renders ahead of a 264-file native PDF preview backlog',
+    () async {
+      final engine = PdfrxPdfEngine();
+      final document = await engine.open('fixtures/pdf-columns/thrift.pdf');
+      final expected = await document.render(1, .3);
+      final bytes = _heavyPdf(padding: 400 * 1024);
+      final fixture = await _Fixture.create(
+        const {},
+        bytes: {for (var i = 0; i < 264; i++) 'book$i.pdf': bytes},
+        previewers: {BookFormat.pdf: PdfEnginePreviewer(engine)},
+      );
+      final gate = fixture.location.gate = Completer<void>();
+      final bridge = _SourceBridge(fixture.folders);
+      final reader = Completer<void>();
+      final rendered = Completer<void>();
+      final saves = Completer<void>();
+      var draining = false;
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => null,
+        openBook: (_) async {
+          // Use the same real PDFium worker as the unopened source previews.
+          final opened = await engine.open('fixtures/pdf-columns/thrift.pdf');
+          try {
+            await opened.render(0, .3);
+            final turn = await opened.render(1, .3);
+            expect(turn.pixels, expected.pixels);
+            rendered.complete();
+            await reader.future;
+          } finally {
+            await opened.dispose();
+          }
+        },
+        drainReaderSaves: (_) {
+          draining = true;
+          return saves.future;
+        },
+      );
+      try {
+        controller.dispatch(const LibraryStarted());
+        await _until(() => controller.model.loaded && !controller.model.busy);
+        // A >256 KiB source takes the native ranged-read path: PDFium is now
+        // waiting on our withheld I/O, not just a Dart-side preview queue.
+        await _until(() => fixture.location.active > 0);
+        final reads = fixture.location.reads;
+        controller.dispatch(const LibraryBookOpened(_readerBook));
+        await rendered.future.timeout(const Duration(seconds: 2));
+        expect(gate.isCompleted, isFalse);
+        await _until(() => fixture.location.active == 0);
+
+        // Foregrounding or reloading the hidden shelf must not restart work.
+        controller.dispatch(const LibraryResumed());
+        controller.dispatch(const LibraryRefreshed());
+        await _until(() => !controller.model.loading);
+        expect(fixture.location.reads, reads);
+        expect(
+          controller.model.sourceFiles.every((f) => f.previewable),
+          isTrue,
+        );
+
+        reader.complete();
+        await _until(() => draining);
+        expect(fixture.location.reads, reads);
+        expect(fixture.location.active, 0);
+        saves.complete();
+        await _until(() => !controller.model.busy);
+        await _until(() => fixture.location.active > 0);
+        fixture.location.gate = null;
+        gate.complete();
+        // Every remaining source eventually gets a preview, not just the first
+        // few repeatedly restarted whenever reading ends.
+        await _until(
+          () => controller.model.sourceFiles.every((f) => f.preview != null),
+          timeout: const Duration(seconds: 30),
+        );
+        expect(
+          await LibraryLocations(fixture.store).previews(),
+          hasLength(264),
+        );
+      } finally {
+        controller.dispose();
+        if (!reader.isCompleted) reader.complete();
+        if (!saves.isCompleted) saves.complete();
+        fixture.location.gate = null;
+        if (!gate.isCompleted) gate.complete();
+        await _until(() => bridge.isDisposed);
+        await document.dispose();
+        expect(fixture.location.active, 0);
+      }
+    },
+  );
+
+  for (final outcome in [
+    'source opened',
+    'source cancelled',
+    'source failed',
+    'source disposed',
+    'reader failed',
+    'save failed',
+    'disposed',
+  ]) {
+    test('preview lifecycle after $outcome', () async {
+      final fixture = await _Fixture.create({
+        for (var i = 0; i < 6; i++) 'book$i.epub': 'fixtures/sample.epub',
+      });
+      final gate = fixture.location.gate = Completer<void>();
+      final bridge = _SourceBridge(fixture.folders);
+      final admission = bridge.admission = Completer<FlutterLibraryBook>();
+      final reader = Completer<void>();
+      var opened = false;
+      var releasedDuringHandoff = false;
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => null,
+        openBook: (_) async {
+          opened = true;
+          await reader.future;
+          if (outcome == 'reader failed') throw StateError('reader failure');
+        },
+        drainReaderSaves: (_) async {
+          if (outcome == 'save failed') throw StateError('save failure');
+        },
+      );
+      controller.addListener(() {
+        if (outcome == 'source opened' &&
+            admission.isCompleted &&
+            !reader.isCompleted &&
+            !controller.model.busy) {
+          releasedDuringHandoff = true;
+        }
+      });
+      try {
+        controller.dispatch(const LibraryStarted());
+        await _until(() => controller.model.loaded && !controller.model.busy);
+        await _until(() => fixture.location.active > 0);
+        final reads = fixture.location.reads;
+        final source = outcome.startsWith('source');
+        controller.dispatch(
+          source
+              ? LibrarySourceFileOpened(controller.model.sourceFiles.first)
+              : const LibraryBookOpened(_readerBook),
+        );
+        await _until(() => fixture.location.active == 0);
+        expect(fixture.location.reads, reads);
+        expect(await LibraryLocations(fixture.store).previews(), isEmpty);
+
+        if (outcome == 'source cancelled') {
+          controller.dispatch(const LibraryOperationCancelled());
+          expect(bridge.admissionCancellation!.isCancelled, isTrue);
+          admission.complete(_readerBook);
+        } else if (outcome == 'source failed') {
+          admission.completeError(StateError('admission failure'));
+        } else if (outcome == 'source disposed') {
+          controller.dispose();
+          admission.complete(_readerBook);
+        } else {
+          if (source) admission.complete(_readerBook);
+          await _until(() => opened);
+          expect(releasedDuringHandoff, isFalse);
+          if (outcome == 'disposed') controller.dispose();
+          reader.complete();
+        }
+
+        if (outcome.endsWith('disposed')) {
+          await _until(() => bridge.isDisposed);
+          expect(fixture.location.reads, reads);
+          expect(opened, outcome == 'disposed');
+        } else {
+          await _until(() => !controller.model.busy);
+          expect(
+            opened,
+            outcome != 'source cancelled' && outcome != 'source failed',
+          );
+          expect(
+            controller.model.error,
+            outcome.endsWith('failed') ? isNotNull : isNull,
+          );
+          await _until(() => fixture.location.active > 0);
+          fixture.location.gate = null;
+          gate.complete();
+          await _until(
+            () => controller.model.sourceFiles.every((f) => f.preview != null),
+          );
+        }
+      } finally {
+        controller.dispose();
+        if (!admission.isCompleted) admission.complete(_readerBook);
+        if (!reader.isCompleted) reader.complete();
+        fixture.location.gate = null;
+        if (!gate.isCompleted) gate.complete();
+        await _until(() => bridge.isDisposed);
+        expect(fixture.location.active, 0);
+      }
+    });
+  }
+
   test('unopened EPUBs get their own title, author and cover', () async {
     final fixture = await _Fixture.create({
       'book.epub': 'fixtures/sample.epub',
