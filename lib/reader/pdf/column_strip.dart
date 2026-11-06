@@ -4,6 +4,7 @@ library;
 import 'dart:math' as math;
 
 import 'columns.dart';
+import 'engine.dart';
 import 'page_geometry.dart';
 
 // Insets inside the sheet but outside strip coordinates, shared by controller/view.
@@ -15,11 +16,22 @@ const pdfStripSideInset = 16.0;
 final _numberedHeading = RegExp(r'^\d+(?:\.\d+)*\.?\s+\p{L}', unicode: true);
 
 /// A stable cursor in the ordered strip. [y] is in original page points.
-final class PdfStripPosition {
+final class PdfStripPosition implements Comparable<PdfStripPosition> {
   const PdfStripPosition(this.page, {this.region = 0, this.y});
   final int page;
   final int region;
   final double? y;
+
+  @override
+  int compareTo(PdfStripPosition other) {
+    final pageOrder = page.compareTo(other.page);
+    if (pageOrder != 0) return pageOrder;
+    final regionOrder = region.compareTo(other.region);
+    if (regionOrder != 0) return regionOrder;
+    return (y ?? double.negativeInfinity).compareTo(
+      other.y ?? double.negativeInfinity,
+    );
+  }
 }
 
 final class PdfStripPage {
@@ -157,6 +169,7 @@ PdfStripScreen layoutPdfColumnScreen({
   double topInset = 0,
   double? columnWidth,
   bool continuous = false,
+  PdfStripPosition? stop,
 }) {
   final pieces = <PdfStripPiece>[];
   final separators = <PdfStripSeparator>[];
@@ -164,9 +177,10 @@ PdfStripScreen layoutPdfColumnScreen({
   var top = topInset;
   int? needsPage;
   zoom = zoom.clamp(.5, 1);
-  final contentWidth = width;
+  var contentWidth = width;
   columnWidth ??= typicalPdfColumnWidth(pages.values.map((p) => p.columns));
   while (cursor.page < pageCount && top < height - .01) {
+    if (stop != null && cursor.compareTo(stop) >= 0) break;
     final page = pages[cursor.page];
     if (page == null) {
       needsPage = cursor.page;
@@ -180,6 +194,13 @@ PdfStripScreen layoutPdfColumnScreen({
     final region = regions[cursor.region];
     final bounds = region.bounds;
     final y = cursor.y ?? bounds.top;
+    final stopY = cursor.page == stop?.page && cursor.region == stop?.region
+        ? stop?.y
+        : null;
+    if (stopY != null && y >= stopY) {
+      cursor = stop!;
+      break;
+    }
     final newPage = cursor.region == 0 && cursor.y == null && cursor.page > 0;
     final previous = cursor.region > 0 ? regions[cursor.region - 1] : null;
     final newColumn =
@@ -231,7 +252,10 @@ PdfStripScreen layoutPdfColumnScreen({
       scale = (height - topInset - gap) / tallestLine;
     }
     var end = math.min(bounds.bottom, y + (height - top - gap) / scale);
+    final atStop = stopY != null && end >= stopY;
+    if (atStop) end = stopY;
     if (!continuous &&
+        !atStop &&
         end < bounds.bottom &&
         region.kind != PdfRegionKind.figure) {
       // Moving the cut upward repeatedly handles overlapping line boxes.
@@ -302,15 +326,22 @@ PdfStripScreen layoutPdfColumnScreen({
         page: cursor.page,
         region: cursor.region,
         source: PdfRect(bounds.left, y, bounds.right, end),
-        // Rare overflow clips at the trailing edge of the strip raster. Keep
-        // line starts visible and the full source geometry for anchors/marks.
+        // Start wide crops at their leading edge. The raster and scroll extent
+        // retain all trailing ink at the same document scale.
         left: math.max(0, (width - bounds.width * scale) / 2),
         top: top,
         scale: scale,
         kind: region.kind,
       ),
     );
+    contentWidth = math.max(contentWidth, pieces.last.left + pieces.last.width);
     top += (end - y) * scale;
+    if (atStop) {
+      // A restored screen already starts at this safe physical-row boundary.
+      // Do not carry text across it or repeat any of that screen's rows.
+      cursor = stop!;
+      break;
+    }
     cursor = end < bounds.bottom
         ? PdfStripPosition(cursor.page, region: cursor.region, y: end)
         : cursor.region + 1 < regions.length
@@ -346,6 +377,7 @@ PdfStripScreen layoutPdfColumnWindow({
   double topInset = 0,
   double? columnWidth,
   double? overscan,
+  double density = 1,
 }) {
   final lead = overscan ?? height;
   var firstPage = math.max(0, position.page - 1);
@@ -417,6 +449,36 @@ PdfStripScreen layoutPdfColumnWindow({
       ),
     );
   }
+  final contentWidth = pieces.fold(
+    width,
+    (w, p) => math.max(w, p.left + p.width),
+  );
+  final rasterHeight =
+      math.min(
+        pdfMaxBitmapDimension / density,
+        pdfMaxBitmapPixels / (contentWidth * density).ceil() / density,
+      ) -
+      1;
+  final admittedLead = math.max(
+    0.0,
+    math.min(lead, (rasterHeight - height) / 2),
+  );
+  if (admittedLead < lead) {
+    // Overflow keeps its crop and scale; only optional vertical overscan gives
+    // way to the actual composed raster's width at this device density.
+    return layoutPdfColumnWindow(
+      pages: pages,
+      pageCount: pageCount,
+      position: position,
+      width: width,
+      height: height,
+      zoom: zoom,
+      topInset: topInset,
+      columnWidth: columnWidth,
+      overscan: admittedLead,
+      density: density,
+    );
+  }
   final first = pieces.first;
   final last = pieces.last;
   final lastRegion = pages[last.page]!.columns.regions[last.region];
@@ -433,7 +495,7 @@ PdfStripScreen layoutPdfColumnWindow({
       y: first.source.top,
     ),
     next: next,
-    width: width,
+    width: contentWidth,
     height: math.max(height, to - from),
     pageWidth: page.width,
     pageHeight: page.height,

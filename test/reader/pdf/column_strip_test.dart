@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/reader/pdf/column_strip.dart';
 import 'package:shosai_flutter/reader/pdf/columns.dart';
+import 'package:shosai_flutter/reader/pdf/engine.dart';
 import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 
 PdfTextLine line(double top, double bottom, {String text = 'Original text'}) =>
@@ -23,6 +24,36 @@ PdfStripPage page(List<PdfReadingRegion> regions, {int columns = 2}) =>
     );
 
 void main() {
+  test('continuous overflow reduces overscan, not crop or document scale', () {
+    final wide = page([
+      PdfReadingRegion(
+        kind: PdfRegionKind.column,
+        bounds: const PdfRect(0, 0, 120, 400),
+      ),
+    ]);
+    final screen = layoutPdfColumnWindow(
+      pages: {for (var p = 0; p < 20; p++) p: wide},
+      pageCount: 20,
+      position: const PdfStripPosition(10, y: 200),
+      width: 1248,
+      height: 1500,
+      columnWidth: 100,
+      density: 3,
+    );
+    expect(screen.needsPage, isNull);
+    expect(screen.width, closeTo(1497.6, .001));
+    final bitmap = pdfBitmapSizeFor(
+      PdfPageSize(screen.width, screen.height),
+      3,
+    );
+    expect(bitmap.width * bitmap.height, lessThanOrEqualTo(40000000));
+    expect(screen.height, lessThan(3560));
+    expect(screen.pieces.every((p) => p.scale == 12.48), isTrue);
+    expect(screen.pieces.every((p) => p.source.width == 120), isTrue);
+    final anchor = screen.pieces.singleWhere((p) => p.page == 10);
+    expect(anchor.toPage(0, screen.viewportTop).y, closeTo(200, .001));
+  });
+
   test('backward continuous steps admit enough short preceding pages', () {
     final short = page([
       PdfReadingRegion(
@@ -511,13 +542,21 @@ void main() {
         height: 130,
       );
       expect(screen.pieces, isNotEmpty);
-      expect(screen.width, 204);
+      expect(screen.width, greaterThanOrEqualTo(204));
+      for (final piece in screen.pieces) {
+        expect(piece.left, greaterThanOrEqualTo(0));
+        expect(piece.left + piece.width, lessThanOrEqualTo(screen.width));
+      }
       pieces.addAll(screen.pieces);
       cursor = screen.next;
     }
     expect(pieces.map((p) => p.scale).toSet(), {2});
     final overflow = pieces.firstWhere((p) => p.page == 0 && p.region == 1);
-    expect(overflow.left, 0, reason: 'clip the trailing edge, not line starts');
+    expect(
+      overflow.left,
+      0,
+      reason: 'start at the leading edge before panning',
+    );
     expect(overflow.width, 264, reason: 'retain source ink without shrinking');
     for (final entry in pages.entries) {
       for (var r = 0; r < entry.value.columns.regions.length; r++) {

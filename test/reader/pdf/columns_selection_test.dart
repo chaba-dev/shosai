@@ -159,6 +159,62 @@ void main() {
         } else {
           savedTop = piece.source.top;
         }
+        if (restored) {
+          final restoredScreen = paint.columns!;
+          await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+          await until(
+            tester,
+            () => painting(tester)!.columns != restoredScreen,
+          );
+          final previous = painting(tester)!.columns!;
+          expect(previous.next.page, restoredScreen.start.page);
+          expect(previous.next.region, restoredScreen.start.region);
+          expect(previous.next.y, restoredScreen.start.y);
+          expect(
+            previous.pieces.last.source.bottom,
+            piece.source.top,
+            reason: 'the previous crop ends exactly at the restored crop',
+          );
+          final regionRows = geometry.lines.where(
+            (row) =>
+                row.bounds.left >= piece.source.left &&
+                row.bounds.right <= piece.source.right &&
+                row.bounds.top >= previous.pieces.last.source.top &&
+                row.bounds.bottom <= piece.source.bottom,
+          );
+          expect(regionRows.length, greaterThan(10));
+          for (final row in regionRows) {
+            expect(
+              [
+                ...previous.pieces,
+                ...restoredScreen.pieces,
+              ].where((p) => p.source.contains(row.bounds)),
+              hasLength(1),
+              reason:
+                  'each original physical row occurs exactly once: ${row.text}',
+            );
+          }
+          // Traverse farther back and then forward twice: the arbitrary
+          // restored boundary must survive history, not only the first turn.
+          await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+          await until(tester, () => painting(tester)!.columns != previous);
+          final earlier = painting(tester)!.columns;
+          await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+          await until(tester, () => painting(tester)!.columns != earlier);
+          expect(painting(tester)!.columns!.next.y, restoredScreen.start.y);
+          final returnedPrevious = painting(tester)!.columns;
+          await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+          await until(
+            tester,
+            () => painting(tester)!.columns != returnedPrevious,
+          );
+          final returned = painting(tester)!.columns!;
+          expect(returned.start.page, restoredScreen.start.page);
+          expect(returned.start.region, restoredScreen.start.region);
+          expect(returned.start.y, restoredScreen.start.y);
+          expect(returned.pieces.first.source.top, piece.source.top);
+          expect(returned.pieces.first.source.bottom, piece.source.bottom);
+        }
         final rows =
             geometry.lines
                 .where(
