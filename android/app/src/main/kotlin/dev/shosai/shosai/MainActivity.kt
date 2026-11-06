@@ -613,7 +613,6 @@ class MainActivity : FlutterActivity() {
         DocumentImportChannel.attach(this, flutterEngine)
         OpenedDocumentsChannel.attach(flutterEngine)
         FolderLocations.attach(this, flutterEngine)
-        DropboxAuthorization.attach(this, flutterEngine)
         ReaderSystemBars.attach(this, flutterEngine)
     }
 
@@ -640,7 +639,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         ReaderSystemBars.detach(this)
-        DropboxAuthorization.detach(this, isChangingConfigurations)
         FolderLocations.detach(this, isChangingConfigurations)
         DocumentImportChannel.detach(this, isChangingConfigurations)
         super.onDestroy()

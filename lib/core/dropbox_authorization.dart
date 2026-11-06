@@ -1,42 +1,55 @@
-/// Native Dropbox app authorization, with the SDK's browser fallback.
+/// Browser-only mobile authorization. Dart owns the code exchange and vault.
 library;
 
 import 'dart:io';
 
-import 'package:flutter/services.dart';
+import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:shosai_core/shosai_core.dart';
 
-final class DropboxAuthorization {
-  const DropboxAuthorization({
-    required this.cancellationTitle,
-    required this.cancelAction,
-    required this.keepWaitingAction,
-  });
+const dropboxScopes = [
+  'files.metadata.read',
+  'files.content.read',
+  'files.content.write',
+];
 
-  final String cancellationTitle;
-  final String cancelAction;
-  final String keepWaitingAction;
+final class DropboxAuthorization {
+  const DropboxAuthorization();
 
   static bool get supported => Platform.isIOS || Platform.isAndroid;
-  static const _channel = MethodChannel('dev.shosai/dropbox_authorization');
 
-  Future<Map<String, dynamic>?> authorize(String clientId) async {
+  Future<({String code, String verifier, String redirect})?> authorize(
+    String clientId,
+  ) async {
+    final redirect = 'db-$clientId://2/token';
     try {
-      return await _channel.invokeMapMethod<String, dynamic>('authorize', {
-        'clientId': clientId,
-        'cancellationTitle': cancellationTitle,
-        'cancelAction': cancelAction,
-        'keepWaitingAction': keepWaitingAction,
-      });
-    } on PlatformException catch (error) {
-      // Never expose SDK errors, which can contain callback URLs or tokens.
-      // Expiring an unfinished setup does not revoke an existing grant.
-      if (error.code == 'timeout') return null;
-      throw LocationException(
-        error.code == 'offline'
-            ? LocationFailure.offline
-            : LocationFailure.revoked,
+      // AppAuth generates S256 PKCE and state and validates the callback. Keep
+      // its default non-ephemeral browser session so cookies can be reused.
+      final result = await const FlutterAppAuth().authorize(
+        AuthorizationRequest(
+          clientId,
+          redirect,
+          serviceConfiguration: const AuthorizationServiceConfiguration(
+            authorizationEndpoint: 'https://www.dropbox.com/oauth2/authorize',
+            tokenEndpoint: 'https://api.dropboxapi.com/oauth2/token',
+          ),
+          scopes: dropboxScopes,
+          additionalParameters: {'token_access_type': 'offline'},
+        ),
       );
+      final code = result.authorizationCode;
+      final verifier = result.codeVerifier;
+      if (code == null ||
+          code.isEmpty ||
+          verifier == null ||
+          verifier.isEmpty) {
+        throw const LocationException(LocationFailure.revoked);
+      }
+      return (code: code, verifier: verifier, redirect: redirect);
+    } on FlutterAppAuthUserCancelledException {
+      return null;
+    } on FlutterAppAuthPlatformException {
+      // Raw platform errors may contain callback URLs and authorization codes.
+      throw const LocationException(LocationFailure.revoked);
     }
   }
 }

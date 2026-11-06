@@ -56,7 +56,6 @@ PODS:
   - PromisesSwift (2.4.1):
     - PromisesObjC (= 2.4.1)
   - RecaptchaInterop (101.0.0)
-  - SwiftyDropbox (10.2.4)
   - url_launcher_ios (0.0.1):
     - Flutter
 
@@ -68,7 +67,6 @@ DEPENDENCIES:
   - google_sign_in_ios (from `.symlinks/plugins/google_sign_in_ios/darwin`)
   - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - pdfium_flutter (from `.symlinks/plugins/pdfium_flutter/darwin`)
-  - SwiftyDropbox (= 10.2.4)
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 SPEC REPOS:
@@ -82,7 +80,6 @@ SPEC REPOS:
     - PromisesObjC
     - PromisesSwift
     - RecaptchaInterop
-    - SwiftyDropbox
 
 EXTERNAL SOURCES:
   file_selector_ios:
@@ -119,9 +116,8 @@ SPEC CHECKSUMS:
   PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
   PromisesSwift: 217dea0fd5d2ad65222a109c48698add13cc1c5b
   RecaptchaInterop: 11e0b637842dfb48308d242afc3f448062325aba
-  SwiftyDropbox: 3dbb9cb3dc28220e6b7b492d97b9160730e5ca81
   url_launcher_ios: bb13df5870e8c4234ca12609d04010a21be43dfa
 
-PODFILE CHECKSUM: 552a5294be16d9b7d70a2c266e3cce7313299ab5
+PODFILE CHECKSUM: b1db55fcee09ead5d1b95a9ff3fdc425ba297345
 
 COCOAPODS: 1.16.2
