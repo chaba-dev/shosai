@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- brand-cream and brand-navy (docs/design-system/tokens.json). -->
+    <color name="ic_launcher_background">#F3E4CC</color>
+    <color name="ic_launcher_mark">#2D3848</color>
+</resources>

@@ -403,6 +403,16 @@ configurations. Resize the supplied artwork for the platform catalogs with
 `.agents/dev python3 scripts/resize-dev-icons.py`. This does not redraw or
 recolor it; macOS adds its existing transparent margins and corner mask.
 
+On Android 8 and later the launcher icon is adaptive
+(`android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml`): the mark from
+`shosai-mark.svg` as a vector foreground at 0.54 scale on the 108 dp canvas
+(ring outer radius 24.3 dp, inside the 33 dp safe zone) over a flat background,
+with the same vector as the themed (monochrome) layer. Release takes
+`brand-navy` on `brand-cream`; `src/dev/res/values/ic_launcher.xml` inverts the
+two colours for Debug and Profile. The square PNGs remain only for Android 7 and
+older; without the adaptive icon, Pixel and other launchers shrink them into a
+white circle.
+
 In the interface the mark is `sh-mark`: 30 px, the ring a 2 px border in `brand-mark`, the character in Noto Serif JP at weight 900, beside the wordmark *Shōsai* in `ed-wordmark` (`sh-wordmark`) at the head of the sidebar; the rail keeps the mark alone. Keep clear space of at least a quarter of the mark’s width on every side, and do not set the mark smaller than 16 px. Always write the name with its macron: Shōsai. Never recolour, outline, shade or redraw the mark; the ring and the character always move together.
 
 ## Motion

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Debug and profile builds invert the release icon: brand-cream on
+         brand-navy, matching assets/shosai-dev-icon.png. -->
+    <color name="ic_launcher_background">#2D3848</color>
+    <color name="ic_launcher_mark">#F3E4CC</color>
+</resources>

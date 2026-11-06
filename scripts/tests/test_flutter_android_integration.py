@@ -45,6 +45,42 @@ class FlutterAndroidIntegrationTest(unittest.TestCase):
             dark = resources / "dev/res" / light.relative_to(resources / "main/res")
             self.assertNotEqual(dark.read_bytes(), light.read_bytes())
 
+    def test_launcher_icon_is_adaptive_with_the_logo_mark(self):
+        # Without an adaptive icon, Android 8+ launchers shrink the square PNG
+        # into a white circle. Debug and profile builds invert the colours.
+        android = "{http://schemas.android.com/apk/res/android}"
+        resources = ROOT / "android/app/src"
+        icon = ET.parse(resources / "main/res/mipmap-anydpi-v26/ic_launcher.xml")
+        layers = {
+            layer.tag: layer.get(android + "drawable") for layer in icon.getroot()
+        }
+        self.assertEqual(layers, {
+            "background": "@color/ic_launcher_background",
+            "foreground": "@drawable/ic_launcher_foreground",
+            "monochrome": "@drawable/ic_launcher_foreground",
+        })
+
+        foreground = ET.parse(resources / "main/res/drawable/ic_launcher_foreground.xml")
+        mark = ET.parse(ROOT / "assets/logo/shosai-mark.svg")
+        svg_path = mark.find("{http://www.w3.org/2000/svg}path").get("d")
+        self.assertIn(svg_path, [
+            path.get(android + "pathData") for path in foreground.iter("path")
+        ])
+
+        def colours(source_set):
+            values = ET.parse(resources / source_set / "res/values/ic_launcher.xml")
+            return {c.get("name"): c.text.lower() for c in values.iter("color")}
+
+        release, development = colours("main"), colours("dev")
+        self.assertEqual(release, {
+            "ic_launcher_background": "#f3e4cc",
+            "ic_launcher_mark": "#2d3848",
+        })
+        self.assertEqual(development, {
+            "ic_launcher_background": release["ic_launcher_mark"],
+            "ic_launcher_mark": release["ic_launcher_background"],
+        })
+
     def test_debug_manifest_allows_network_access(self):
         manifest = ROOT / "android/app/src/debug/AndroidManifest.xml"
 
