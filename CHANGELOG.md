@@ -131,6 +131,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Add PDF Columns reading mode (#290)
 - *(reader)* Preserve place and interactions in PDF Columns (#291)
 - *(reader)* Honor continuous reading in PDF Columns (#301)
+- *(dropbox)* Replace mobile SDK sign-in with browser OAuth (#308)
 
 ### 🐛 Bug Fixes
 
