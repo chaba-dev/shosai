@@ -200,6 +200,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Keep Aa PDF fit choices per paper (#302)
 - *(reader)* Enlarge Columns figures and respect turn-zone taps (#299)
 - *(reader)* Keep the reading place across PDF strip refills and run fixture-backed tests on devices (#305)
+- *(reader)* Preserve column overflow and restored screen boundaries (#306)
 
 ### 🚜 Refactor
 
