@@ -141,94 +141,105 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
                 horizontal: pdfStripSideInset,
               ),
               child: ClipRect(
-                child: NotificationListener<ScrollNotification>(
-                  onNotification: (notification) {
-                    final metrics = notification.metrics;
-                    final pan = metrics.axis == Axis.horizontal
-                        ? Offset(metrics.pixels, _pan.dy)
-                        : Offset(_pan.dx, metrics.pixels);
-                    if (pan != _pan) setState(() => _pan = pan);
-                    return false;
-                  },
-                  child: _ReaderPageGestures(
-                    // Each new screen starts at its fitted band/column edge,
-                    // not at a horizontal pan inherited from the last column.
-                    key: screen.continuous
-                        ? ValueKey('columns-continuous-${model.generation}')
-                        : ValueKey(screen),
-                    model: model,
-                    dispatch: widget.dispatch,
-                    fittedZoom: null,
-                    columnsScreen: screen,
-                    builder: (horizontal, vertical) => SingleChildScrollView(
-                      controller: horizontal,
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: screen.width,
-                        child: SingleChildScrollView(
-                          controller: vertical,
-                          child: SizedBox(
-                            height: screen.height,
-                            child: Semantics(
-                              label: label,
-                              image: true,
-                              child: Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: filter == null
-                                        ? raster
-                                        : ColorFiltered(
-                                            colorFilter: filter,
-                                            child: raster,
-                                          ),
-                                  ),
-                                  for (final separator in screen.separators)
-                                    Positioned(
-                                      top: separator.top,
-                                      left: 0,
-                                      right: 0,
-                                      height: separator.page == null ? 16 : 28,
-                                      child: separator.page == null
-                                          ? Center(
-                                              child: SizedBox(
-                                                width: 32,
-                                                child: Divider(
-                                                  height: 1,
-                                                  color: colors.foreground
-                                                      .withValues(alpha: .25),
-                                                ),
-                                              ),
-                                            )
-                                          : ColoredBox(
-                                              color: colors.foreground
-                                                  .withValues(alpha: .04),
-                                              child: Center(
-                                                child: Text(
-                                                  l10n.readerPageNumber(
-                                                    separator.page! + 1,
-                                                  ),
-                                                  style: _readerFolioStyle(
-                                                    model,
-                                                    color: colors.foreground
-                                                        .withValues(alpha: .6),
-                                                  ),
-                                                ),
-                                              ),
+                child: CustomPaint(
+                  foregroundPainter: _ColumnsOverflowPainter(
+                    screen,
+                    _pan,
+                    _pdfSheetColor(model.typography.theme),
+                  ),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      final metrics = notification.metrics;
+                      final pan = metrics.axis == Axis.horizontal
+                          ? Offset(metrics.pixels, _pan.dy)
+                          : Offset(_pan.dx, metrics.pixels);
+                      if (pan != _pan) setState(() => _pan = pan);
+                      return false;
+                    },
+                    child: _ReaderPageGestures(
+                      // Each new screen starts at its fitted band/column edge,
+                      // not at a horizontal pan inherited from the last column.
+                      key: screen.continuous
+                          ? ValueKey('columns-continuous-${model.generation}')
+                          : ValueKey(screen),
+                      model: model,
+                      dispatch: widget.dispatch,
+                      fittedZoom: null,
+                      columnsScreen: screen,
+                      builder: (horizontal, vertical) => SingleChildScrollView(
+                        controller: horizontal,
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: screen.width,
+                          child: SingleChildScrollView(
+                            controller: vertical,
+                            child: SizedBox(
+                              height: screen.height,
+                              child: Semantics(
+                                label: label,
+                                image: true,
+                                child: Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: filter == null
+                                          ? raster
+                                          : ColorFiltered(
+                                              colorFilter: filter,
+                                              child: raster,
                                             ),
                                     ),
-                                  Positioned.fill(
-                                    child: _SelectableSurface(
-                                      key: widget.contentKey,
-                                      surface: model.selectionSurface!,
-                                      image: null,
-                                      epubPage: null,
-                                      model: model,
-                                      fit: BoxFit.fill,
-                                      dispatch: widget.dispatch,
-                                      paintContent: false,
+                                    for (final separator in screen.separators)
+                                      Positioned(
+                                        top: separator.top,
+                                        left: 0,
+                                        right: 0,
+                                        height: separator.page == null
+                                            ? 16
+                                            : 28,
+                                        child: separator.page == null
+                                            ? Center(
+                                                child: SizedBox(
+                                                  width: 32,
+                                                  child: Divider(
+                                                    height: 1,
+                                                    color: colors.foreground
+                                                        .withValues(alpha: .25),
+                                                  ),
+                                                ),
+                                              )
+                                            : ColoredBox(
+                                                color: colors.foreground
+                                                    .withValues(alpha: .04),
+                                                child: Center(
+                                                  child: Text(
+                                                    l10n.readerPageNumber(
+                                                      separator.page! + 1,
+                                                    ),
+                                                    style: _readerFolioStyle(
+                                                      model,
+                                                      color: colors.foreground
+                                                          .withValues(
+                                                            alpha: .6,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                      ),
+                                    Positioned.fill(
+                                      child: _SelectableSurface(
+                                        key: widget.contentKey,
+                                        surface: model.selectionSurface!,
+                                        image: null,
+                                        epubPage: null,
+                                        model: model,
+                                        fit: BoxFit.fill,
+                                        dispatch: widget.dispatch,
+                                        paintContent: false,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -244,6 +255,63 @@ class _ReaderColumnsState extends State<_ReaderColumns> {
       ),
     );
   }
+}
+
+class _ColumnsOverflowPainter extends CustomPainter {
+  const _ColumnsOverflowPainter(this.screen, this.pan, this.paper);
+
+  final PdfStripScreen screen;
+  final Offset pan;
+  final Color paper;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fadeWidth = math.min(16.0, size.width / 2);
+    for (final piece in screen.pieces) {
+      final top = math.max(0.0, piece.top - pan.dy);
+      final bottom = math.min(size.height, piece.top + piece.height - pan.dy);
+      if (bottom <= top ||
+          piece.left + piece.width <= pan.dx ||
+          piece.left >= pan.dx + size.width) {
+        continue;
+      }
+      for (final leading in [true, false]) {
+        final remaining = leading
+            ? pan.dx - piece.left
+            : piece.left + piece.width - pan.dx - size.width;
+        if (remaining <= .01) continue;
+        final rect = Rect.fromLTWH(
+          leading ? 0 : size.width - fadeWidth,
+          top,
+          fadeWidth,
+          bottom - top,
+        );
+        // Paint only the piece with hidden content, above the themed raster
+        // and selection. Neither the raster nor its hit geometry is changed.
+        final edge = paper.withValues(
+          alpha: .65 * (remaining / fadeWidth).clamp(0, 1),
+        );
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..shader = LinearGradient(
+              colors: [paper.withValues(alpha: 0), edge],
+              begin: leading ? Alignment.centerRight : Alignment.centerLeft,
+              end: leading ? Alignment.centerLeft : Alignment.centerRight,
+            ).createShader(rect),
+        );
+      }
+    }
+  }
+
+  @override
+  bool? hitTest(Offset position) => false;
+
+  @override
+  bool shouldRepaint(_ColumnsOverflowPainter oldDelegate) =>
+      screen != oldDelegate.screen ||
+      pan != oldDelegate.pan ||
+      paper != oldDelegate.paper;
 }
 
 class _ColumnsOutlinePainter extends CustomPainter {
