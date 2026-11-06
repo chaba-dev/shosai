@@ -101,6 +101,10 @@ class LibraryController implements Listenable {
   /// number: a completion from a replaced pass is ignored.
   CancellationToken? _previewCancellation;
   int _previewPass = 0;
+
+  /// Includes source admission and save draining, not just the reader route.
+  /// PDF previews share the reader's PDFium worker and must yield to it.
+  bool _readerActive = false;
   Timer? _searchTimer;
   int _loadRevision = 0;
   int _queryRevision = 0;
@@ -368,7 +372,9 @@ class LibraryController implements Listenable {
         _openSource(message.file);
       case _LibrarySourceFileAdmitted():
         if (!_closing && message.revision == _adapterRevision) {
-          _open(message.book);
+          // Transfer to the reader before admission releases its busy effect,
+          // so queued platform intake cannot steal the handoff.
+          _openReader(message.book);
         }
       case LibraryBookRemovalRequested():
         _requestRemoval(message.book);
@@ -515,6 +521,7 @@ class LibraryController implements Listenable {
       case LibraryManagedDeletionNoticeDismissed():
         _emit(_model.copyWith(managedFileDeletionPending: false));
       case _LibraryReaderClosed():
+        _readerActive = false;
         if (_closing) break;
         if (message.error case final error?) {
           _emit(_model.copyWith(error: error));
@@ -718,20 +725,22 @@ class LibraryController implements Listenable {
     );
   }
 
-  /// Reads the title, author and cover of the shelf's unopened EPUBs in the
-  /// background, a few at a time. A later load replaces the pass, and the
-  /// shelf never waits for it: each preview updates its card as it lands.
+  /// Reads unopened files in the background only while the shelf is in use.
+  /// Cancelling the pass also cancels its ranged I/O, releasing PDFium's
+  /// worker if it is waiting for cloud bytes. A native call already executing
+  /// finishes cooperatively; no further previews are admitted while reading.
   void _previewSources(List<LibrarySourceFile> files) {
     _previewCancellation?.cancel();
     _previewCancellation = null;
+    final pass = ++_previewPass;
     final host = _bridge;
     if (_closing ||
+        _readerActive ||
         host is! LibraryFoldersHost ||
         !files.any((file) => file.previewable)) {
       return;
     }
     final folders = (host as LibraryFoldersHost).folders;
-    final pass = ++_previewPass;
     final cancellation = _previewCancellation = CancellationToken();
     _activeEffects += 1;
     unawaited(() async {
@@ -1108,6 +1117,12 @@ class LibraryController implements Listenable {
 
   void _open(FlutterLibraryBook book) {
     if (_closing || _model.busy) return;
+    _openReader(book);
+  }
+
+  void _openReader(FlutterLibraryBook book) {
+    _readerActive = true;
+    _previewSources(const []);
     _beginEffect();
     unawaited(() async {
       try {
@@ -1125,29 +1140,36 @@ class LibraryController implements Listenable {
   void _openSource(LibrarySourceFile file) {
     final host = _bridge;
     if (_closing || _model.busy || host is! LibraryFoldersHost) return;
+    _readerActive = true;
+    _previewSources(const []);
     final revision = ++_adapterRevision;
     final cancellation = _sourceCancellation = CancellationToken();
     _beginEffect();
     unawaited(() async {
-      FlutterLibraryBook? book;
       try {
-        book = await (host as LibraryFoldersHost).admitSourceFile(
+        final book = await (host as LibraryFoldersHost).admitSourceFile(
           file,
           cancellation: cancellation,
         );
         cancellation.throwIfCancelled();
+        dispatch(_LibrarySourceFileAdmitted(book, revision));
       } catch (error) {
-        book = null;
-        if (_ownsAdapter(revision)) {
-          dispatch(_LibraryReaderClosed(safeError(error, _localizations())));
-        }
+        // A cancelled admission must resume previews too, without presenting
+        // cancellation as a reader error. This still owns the busy effect,
+        // so another reader cannot have started before this completion.
+        dispatch(
+          _LibraryReaderClosed(
+            _ownsAdapter(revision) && !cancellation.isCancelled
+                ? safeError(error, _localizations())
+                : null,
+          ),
+        );
       } finally {
         if (identical(_sourceCancellation, cancellation)) {
           _sourceCancellation = null;
         }
         dispatch(const _LibraryEffectFinished());
       }
-      if (book != null) dispatch(_LibrarySourceFileAdmitted(book, revision));
     }());
   }
 
