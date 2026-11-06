@@ -31,6 +31,12 @@ import '../test/support/reference_documents.dart';
 /// browser approximation of a native reader. Artifacts are opt-in.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  // Absolute fixture root for device and simulator runs; host runs keep the
+  // repository-relative default. See pdf_columns_continuous_test.dart.
+  const fixtureRoot = String.fromEnvironment(
+    'SHOSAI_FIXTURES',
+    defaultValue: 'fixtures',
+  );
   final captureKey = GlobalKey();
   final raster = find.byKey(const ValueKey('reader-columns-raster'));
   final folio = find.byKey(const ValueKey('reader-columns-folio'));
@@ -111,7 +117,7 @@ void main() {
       addTearDown(tester.view.reset);
       final directory = await Directory.systemTemp.createTemp('columns-sheet-');
       final path = '${directory.path}/Thrift.pdf';
-      await File('fixtures/pdf-columns/thrift.pdf').copy(path);
+      await File('$fixtureRoot/pdf-columns/thrift.pdf').copy(path);
       final bridge = await createApplicationBridge(
         applicationSupportDirectory: () async => directory,
       );
@@ -314,7 +320,7 @@ void main() {
       name: 'thrift',
       page: 6,
       turns: 6,
-      path: 'fixtures/pdf-columns/thrift.pdf',
+      path: '$fixtureRoot/pdf-columns/thrift.pdf',
     ),
     (name: 'bert', page: 0, turns: 5, path: Platform.environment['BERT_PDF']),
     (
@@ -732,7 +738,7 @@ void main() {
       final directory = await Directory.systemTemp.createTemp('shosai-figure-');
       final path = '${directory.path}/Figure.pdf';
       final fixture = scenario.scan ? 'scanned' : 'right-column-figure';
-      await File('fixtures/pdf-columns/$fixture.pdf').copy(path);
+      await File('$fixtureRoot/pdf-columns/$fixture.pdf').copy(path);
       var bridge = await createApplicationBridge(
         applicationSupportDirectory: () async => directory,
       );
@@ -969,8 +975,8 @@ void main() {
     final token = admin.createCancellation();
     await admin.importPaths(
       pathKeys: [
-        File('fixtures/pdf-columns/thrift.pdf').absolute.path,
-        File('fixtures/pdf-columns/arxiv-first-five.pdf').absolute.path,
+        File('$fixtureRoot/pdf-columns/thrift.pdf').absolute.path,
+        File('$fixtureRoot/pdf-columns/arxiv-first-five.pdf').absolute.path,
       ],
       managed: false,
       cancellationId: token,
@@ -1234,7 +1240,7 @@ void main() {
                     Platform
                         .environment['${scenario.file.toUpperCase()}_PDF'] ??
                     File(
-                      'fixtures/pdf-columns/${scenario.file}.pdf',
+                      '$fixtureRoot/pdf-columns/${scenario.file}.pdf',
                     ).absolute.path,
                 initialSettings: settings,
               ),
@@ -1275,7 +1281,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final directory = await Directory.systemTemp.createTemp('shosai-place-');
       final path = '${directory.path}/Thrift.pdf';
-      await File('fixtures/pdf-columns/thrift.pdf').copy(path);
+      await File('$fixtureRoot/pdf-columns/thrift.pdf').copy(path);
       var bridge = await createApplicationBridge(
         applicationSupportDirectory: () async => directory,
       );
@@ -1741,7 +1747,7 @@ void main() {
     addTearDown(tester.view.resetViewPadding);
     final directory = await Directory.systemTemp.createTemp('shosai-columns-');
     final path = '${directory.path}/Thrift.pdf';
-    await File('fixtures/pdf-columns/thrift.pdf').copy(path);
+    await File('$fixtureRoot/pdf-columns/thrift.pdf').copy(path);
     final bridge = await createApplicationBridge(
       applicationSupportDirectory: () async => directory,
     );
@@ -1977,7 +1983,7 @@ void main() {
         // Narrow pages are tall fallback controls without another binary fixture.
         final width = pageWidth.toString().padLeft(3, '0');
         final source = latin1.decode(
-          await File('fixtures/pdf-columns/scanned.pdf').readAsBytes(),
+          await File('$fixtureRoot/pdf-columns/scanned.pdf').readAsBytes(),
         );
         await File(path).writeAsBytes(
           latin1.encode(
@@ -2152,7 +2158,9 @@ void main() {
         'shosai-columns-figure-',
       );
       final path = '${directory.path}/Figure.pdf';
-      await File('fixtures/pdf-columns/content-preservation.pdf').copy(path);
+      await File(
+        '$fixtureRoot/pdf-columns/content-preservation.pdf',
+      ).copy(path);
       final bridge = await createApplicationBridge(
         applicationSupportDirectory: () async => directory,
       );

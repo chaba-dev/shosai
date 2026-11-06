@@ -14,6 +14,12 @@ import 'package:shosai_flutter/main.dart';
 /// flutter test -d linux integration_test/opened_documents_test.dart
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  // Absolute fixture root for device and simulator runs; host runs keep the
+  // repository-relative default. See pdf_columns_continuous_test.dart.
+  const fixtureRoot = String.fromEnvironment(
+    'SHOSAI_FIXTURES',
+    defaultValue: 'fixtures',
+  );
 
   testWidgets(
     'opened EPUB and PDF become durable managed library books',
@@ -25,8 +31,8 @@ void main() {
       // composition and native-cleanup protocol against its real Dart core.
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final originalEpub = File('fixtures/sample.epub').absolute;
-      final originalPdf = File('fixtures/sample.pdf').absolute;
+      final originalEpub = File('$fixtureRoot/sample.epub').absolute;
+      final originalPdf = File('$fixtureRoot/sample.pdf').absolute;
       final epub = await originalEpub.copy('${directory.path}/arrival.epub');
       final pdf = await originalPdf.copy('${directory.path}/arrival.pdf');
       const channel = MethodChannel('dev.shosai/opened_documents');

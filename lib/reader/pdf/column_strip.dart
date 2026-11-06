@@ -107,6 +107,26 @@ final class PdfStripScreen {
   final double viewportTop;
   final double? viewportHeight;
   final Map<int, ({double width, double height})> pageSizes;
+
+  /// The same window re-anchored so its viewport starts at [top]. Used when a
+  /// passive refill must preserve the reading point it raced against.
+  PdfStripScreen withViewportTop(double top) => PdfStripScreen(
+    start: start,
+    next: next,
+    width: width,
+    height: height,
+    pageWidth: pageWidth,
+    pageHeight: pageHeight,
+    pieces: pieces,
+    separators: separators,
+    needsPage: needsPage,
+    strip: strip,
+    detailZoom: detailZoom,
+    continuous: continuous,
+    viewportTop: top,
+    viewportHeight: viewportHeight,
+    pageSizes: pageSizes,
+  );
   int get topPage => pieces.first.page;
 
   /// The page occupying most of the viewport, not the overscan raster.

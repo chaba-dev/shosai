@@ -15,6 +15,7 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
     this.annotationError,
     this.targetOffset,
     this.targetLength,
+    this.passive,
   );
   final int generation;
   final int revision;
@@ -29,6 +30,10 @@ final class _ReaderColumnsLoaded extends ReaderMessage {
   final String? annotationError;
   final int? targetOffset;
   final int? targetLength;
+
+  /// Whether the load only served scrolling already in progress, whose
+  /// completion must re-anchor to the reader's live place.
+  final bool passive;
 }
 
 final class _ReaderColumnsFailed extends ReaderMessage {
@@ -47,15 +52,21 @@ extension on ReaderController {
     final screen = message.screen;
     if (!identical(screen, _model.pdfColumns) ||
         (!screen.continuous && screen.strip == null) ||
-        _model.relayoutBusy ||
         _closing ||
         _suspended) {
       return;
     }
-    _columnsViewport = (screen: screen, top: message.viewport.top);
-    final piece = screen.pieces.firstWhere(
-      (p) => p.top + p.height > message.viewport.top,
-    );
+    // A refill in flight does not invalidate the strip on screen: the reader
+    // keeps scrolling and its live place must keep being reported and saved.
+    // The completed refill re-anchors to this latest point instead of the one
+    // captured when it was requested. Only the next overscan request waits.
+    final refilling = _model.relayoutBusy;
+    // A scroll can arrive measured against a superseded window's extents.
+    final top = message.viewport.top
+        .clamp(0.0, math.max(0.0, screen.height - .01))
+        .toDouble();
+    _columnsViewport = (screen: screen, top: top);
+    final piece = screen.pieces.firstWhere((p) => p.top + p.height > top);
     final page = piece.page;
     final visible = ui.Rect.fromLTWH(
       piece.left,
@@ -105,7 +116,8 @@ extension on ReaderController {
         ),
       );
     }
-    if (screen.continuous &&
+    if (!refilling &&
+        screen.continuous &&
         _model.selectionPhase == ReaderSelectionPhase.idle) {
       final first = screen.pieces.first;
       final bounds =
@@ -124,14 +136,15 @@ extension on ReaderController {
       if (before && message.viewport.top < threshold ||
           after && message.viewport.bottom > screen.height - threshold) {
         final topPiece = screen.pieces.firstWhere(
-          (p) => p.top + p.height > message.viewport.top,
+          (p) => p.top + p.height > top,
         );
         _requestColumns(
           PdfStripPosition(
             topPiece.page,
             region: topPiece.region,
-            y: topPiece.toPage(topPiece.left, message.viewport.top).y,
+            y: topPiece.toPage(topPiece.left, top).y,
           ),
+          passive: true,
         );
       }
     }
@@ -240,6 +253,9 @@ extension on ReaderController {
 
   /// Every passive refresh replays a pending destination or the saved place.
   /// In particular, deferred annotation/open effects must not drop its height.
+  /// A pending passive refill is replayed without its passive tag: after a
+  /// layout or size change the reading point is still the anchor to rebuild
+  /// around, so the completion may legitimately re-anchor the reader.
   void _refreshColumns() {
     final pending = _columnsIntent;
     final screen = _model.pdfColumns;
@@ -367,7 +383,12 @@ extension on ReaderController {
                 : math.max(0.0, end - screen.viewportHeight!),
           )
           .toDouble();
-      if ((top - currentTop).abs() < .01) return;
+      if ((top - currentTop).abs() < 1.0) {
+        // A window's piece-anchored top can sit a fraction of a pixel short of
+        // the scrollable end. Reloading the same window for that slack would
+        // only churn the screen identity, so refuse sub-pixel steps.
+        return;
+      }
       final piece = screen.pieces.firstWhere((p) => p.top + p.height > top);
       _requestColumns(
         PdfStripPosition(
@@ -407,6 +428,7 @@ extension on ReaderController {
     int? length,
     double? x,
     bool locate = false,
+    bool passive = false,
   }) {
     final pdf = _pdfDocument;
     final height = _epubViewportHeight;
@@ -441,6 +463,9 @@ extension on ReaderController {
       detail: detail,
       strip: strip,
       retainDetailPlace: retainDetailPlace,
+      // Overscan refills serve scrolling that continues while they load, so
+      // their completion must re-anchor to the reader's live place.
+      passive: passive,
     );
     _columnsIntent = intent;
     // A whole-page render started before a fit switch cannot overwrite a
@@ -475,6 +500,7 @@ extension on ReaderController {
       length: length,
       x: intent.x,
       locate: intent.locate,
+      passive: intent.passive,
     );
     _referenceEffects.add(effect);
     unawaited(effect.then((_) => _referenceEffects.remove(effect)));
@@ -497,6 +523,7 @@ extension on ReaderController {
     required int? length,
     required double? x,
     required bool locate,
+    required bool passive,
   }) async {
     bool current() => _isCurrentColumns(generation, revision);
     final pages = Map<int, PdfStripPage>.of(_columnsPages);
@@ -848,6 +875,7 @@ extension on ReaderController {
           annotationError,
           offset,
           length,
+          passive,
         ),
       );
       owned = null;
@@ -878,11 +906,58 @@ extension on ReaderController {
         (_columnsIntent?.retainDetailPlace ?? false) &&
         message.screen.strip != null;
     _columnsIntent = null;
+    var screen = message.screen;
+    // A passive refill raced scrolling that continued while it loaded. Anchor
+    // the loaded window to the content point the viewport shows now, instead
+    // of yanking the reader back to the point captured at request time.
+    if (message.passive && _model.pdfColumns != null) {
+      final current = _model.pdfColumns!;
+      final viewport = _columnsViewport;
+      if (identical(viewport?.screen, current)) {
+        final top = viewport!.top
+            .clamp(0.0, math.max(0.0, current.height - .01))
+            .toDouble();
+        final piece = current.pieces.firstWhere((p) => p.top + p.height > top);
+        final point = piece.toPage(piece.left, top);
+        // The live point usually lands inside a piece the new window covers.
+        // When it does not (scrolled past the window during the load, or into
+        // a separator band), anchor at the nearest covered content instead of
+        // the request-time point, so the post-jump scroll report still
+        // converges with a fresh refill instead of yanking back.
+        PdfStripPiece? target;
+        var distance = double.infinity;
+        for (final candidate in screen.pieces) {
+          if (candidate.page != piece.page ||
+              candidate.region != piece.region) {
+            continue;
+          }
+          final candidateDistance =
+              candidate.source.top <= point.y &&
+                  candidate.source.bottom >= point.y
+              ? 0.0
+              : math.min(
+                  (point.y - candidate.source.top).abs(),
+                  (point.y - candidate.source.bottom).abs(),
+                );
+          if (candidateDistance < distance) {
+            distance = candidateDistance;
+            target = candidate;
+            if (candidateDistance == 0) break;
+          }
+        }
+        if (target != null) {
+          final maxTop = math.max(
+            0.0,
+            screen.height - (screen.viewportHeight ?? 0),
+          );
+          screen = screen.withViewportTop(
+            target.fromPage(point.x, point.y).y.clamp(0.0, maxTop).toDouble(),
+          );
+        }
+      }
+    }
     _columnsWidth = message.columnWidth;
-    _columnsViewport = (
-      screen: message.screen,
-      top: message.screen.viewportTop,
-    );
+    _columnsViewport = (screen: screen, top: screen.viewportTop);
     final old = _model.pageImage;
     _columnsPages
       ..clear()
@@ -890,15 +965,15 @@ extension on ReaderController {
         message.pages.entries.where(
           (entry) =>
               entry.key < 3 ||
-              (entry.key - message.screen.topPage).abs() <= 2 ||
-              message.screen.pieces.any((piece) => piece.page == entry.key),
+              (entry.key - screen.topPage).abs() <= 2 ||
+              screen.pieces.any((piece) => piece.page == entry.key),
         ),
       );
     _columnsBack
       ..clear()
       ..addAll(message.back);
-    final viewportTop = message.screen.viewportTop;
-    final first = message.screen.pieces.firstWhere(
+    final viewportTop = screen.viewportTop;
+    final first = screen.pieces.firstWhere(
       (p) => p.top + p.height > viewportTop,
     );
     final endpoint = message.selection.surface.endpoints
@@ -939,7 +1014,7 @@ extension on ReaderController {
     _selectionRevision++;
     _emit(
       _model.copyWith(
-        pdfColumns: message.screen,
+        pdfColumns: screen,
         pdfColumnSelection: message.selection,
         pdfY: y,
         pdfX: x,

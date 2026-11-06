@@ -106,6 +106,18 @@ void main() {
         await tester.pumpAndSettle();
       }
 
+      // A passive overscan refill legitimately replaces the screen object with
+      // equivalent content while it serves scrolling. Identity-based assertions
+      // must run against a strip whose pending loads have landed.
+      Future<void> settle() async {
+        for (var i = 0, stable = 0; i < 250 && stable < 8; i++) {
+          final previous = screen();
+          await tester.pump(const Duration(milliseconds: 60));
+          stable = identical(screen(), previous) ? stable + 1 : 0;
+        }
+        await tester.pumpAndSettle();
+      }
+
       Future<void> singleTap(Offset point) async {
         await tester.pump(const Duration(milliseconds: 350));
         await tester.tapAt(point);
@@ -136,6 +148,7 @@ void main() {
       );
       await tester.pumpWidget(app());
       await until(() => raster.evaluate().isNotEmpty);
+      await settle();
       final initial = screen();
       final first = initial.pieces.first;
       final rect = tester.getRect(area);
@@ -161,13 +174,16 @@ void main() {
       expect(screen(), same(initial));
       await singleTap(forward);
       await until(() => screen() != initial);
+      await settle();
       // The authored PDF advances every row by exactly 14 original points.
       final stride = initial.viewportHeight! - 14 * first.scale;
       expect(origin - anchorY(), closeTo(stride, 1));
       await captureView(captureKey, 'continuous-edge-forward-$rtl');
+      await settle();
       final advanced = screen();
       await singleTap(backward);
       await until(() => screen() != advanced);
+      await settle();
       expect(anchorY(), closeTo(origin, 1));
 
       // A turn-zone tap dismisses an active selection, without scrolling it.
@@ -195,6 +211,7 @@ void main() {
       await mouse.up();
       await tester.pumpAndSettle();
       expect(painter().anchor, isNot(painter().focus));
+      await settle();
       final selected = screen();
       await singleTap(forward);
       await tester.pumpAndSettle();
@@ -202,6 +219,7 @@ void main() {
       expect(painter().anchor, painter().focus);
       await singleTap(forward);
       await until(() => screen() != selected);
+      await settle();
 
       // Save and reopen after a tap, not only after a drag.
       await ReaderController.drainBookWrites(book.bookId.toInt());
@@ -279,9 +297,11 @@ void main() {
           expect(gap, closeTo(pageBand ? 14 : 8, 1));
           final beforeY = referenceY();
           final distance = screen().viewportHeight! - 14 * reference.scale;
+          await settle();
           final before = screen();
           await singleTap(forward);
           await until(() => screen() != before);
+          await settle();
           expect(
             beforeY - referenceY(),
             closeTo(distance, 1),
@@ -293,10 +313,12 @@ void main() {
           final after = screen();
           await singleTap(backward);
           await until(() => screen() != after);
+          await settle();
           expect(referenceY(), closeTo(beforeY, 1));
           final returned = screen();
           await singleTap(backward);
           await until(() => screen() != returned);
+          await settle();
           expect(referenceY() - beforeY, closeTo(distance, 1));
           testedSeparators.add(pageBand);
           break;
@@ -304,9 +326,11 @@ void main() {
         final previous = screen();
         await singleTap(forward);
         await until(() => screen() != previous);
+        await settle();
       }
       expect(testedSeparators, {false, true});
       expect(atEnd(), isTrue);
+      await settle();
       final last = screen();
       for (var i = 0; i < 3; i++) {
         await singleTap(forward);
@@ -319,6 +343,7 @@ void main() {
         final previous = screen();
         await singleTap(backward);
         await until(() => screen() != previous);
+        await settle();
       }
       expect(anchorY(), closeTo(origin, 1));
       await tester.pumpWidget(const SizedBox());
@@ -393,6 +418,9 @@ void main() {
       }
 
       Future<FlutterReadingState> saved() async {
+        // The persisted place is written asynchronously; flush the queue so a
+        // read observes the place the strip shows now.
+        await ReaderController.drainBookWrites(book.bookId.toInt());
         final cancellation = bridge.createCancellation();
         try {
           for (var i = 0; i < 100; i++) {
@@ -523,9 +551,25 @@ void main() {
       var sawRule = false;
       var sawPage = false;
       var checkedBoundary = false;
-      for (var i = 0; i < 100; i++) {
-        final top =
-            rect.top + 59 + pdfStripHeaderHeight - tester.getTopLeft(raster).dy;
+      // The strip's canvas coordinate at the viewport's top edge is the
+      // vertical scroll view's top on screen minus the raster widget's top:
+      // the window canvas begins at the raster widget's top edge.
+      final verticalScroll = find
+          .ancestor(
+            of: raster,
+            matching: find.byWidgetPredicate(
+              (w) =>
+                  w is SingleChildScrollView &&
+                  w.scrollDirection == Axis.vertical,
+            ),
+          )
+          .first;
+      double viewportCanvasTop() =>
+          tester.getTopLeft(verticalScroll).dy - tester.getTopLeft(raster).dy;
+      // The strip window slides about a viewport of content per overscan
+      // refill, so crossing the whole document takes many drags.
+      for (var i = 0; i < 400; i++) {
+        final top = viewportCanvasTop();
         final first = screen()!.pieces.firstWhere(
           (p) => p.top + p.height > top,
         );
@@ -557,7 +601,7 @@ void main() {
 
           expect(
             visibleHeight(),
-            closeTo(rect.top + 59 + pdfStripHeaderHeight, 1),
+            closeTo(tester.getTopLeft(verticalScroll).dy, 1),
           );
           continuous.value = false;
           await until(() => screen()?.continuous == false);
@@ -566,7 +610,7 @@ void main() {
           // Screens aligns the same physical row; it must not drop the tail.
           expect(
             visibleHeight(),
-            closeTo(rect.top + 59 + pdfStripHeaderHeight, 30),
+            closeTo(tester.getTopLeft(verticalScroll).dy, 30),
           );
           checkedBoundary = true;
         }
@@ -715,6 +759,18 @@ void main() {
           await tester.pumpAndSettle();
         }
 
+        // A passive overscan refill legitimately replaces the screen object
+        // with equivalent content while it serves scrolling. Identity-based
+        // assertions must run against a strip whose pending loads have landed.
+        Future<void> settle() async {
+          for (var i = 0, stable = 0; i < 250 && stable < 8; i++) {
+            final previous = screen();
+            await tester.pump(const Duration(milliseconds: 60));
+            stable = identical(screen(), previous) ? stable + 1 : 0;
+          }
+          await tester.pumpAndSettle();
+        }
+
         final captureKey = GlobalKey();
         await tester.pumpWidget(
           ShosaiShell(
@@ -769,6 +825,7 @@ void main() {
             );
             await tester.pump(const Duration(milliseconds: 350));
             await until(() => screen() != previous);
+            await settle();
             expected += forward ? stride : -stride;
             expect(origin(), closeTo(expected, 1));
             expect(
@@ -790,6 +847,7 @@ void main() {
             final previous = screen();
             await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
             await until(() => screen() != previous);
+            await settle();
           }
           expect(
             screen()!.pieces.every((p) => p.zoomable),
@@ -816,6 +874,7 @@ void main() {
             );
             await tester.pump(const Duration(milliseconds: 350));
             await until(() => screen() != previous);
+            await settle();
             expect(
               pointY(),
               closeTo(fraction > .5 ? origin - stride : origin, 1),
@@ -823,6 +882,7 @@ void main() {
           }
           await captureView(captureKey, 'continuous-tall-figure-overlap');
         } else if (mode == 'short') {
+          await settle();
           final initial = screen();
           final last = initial!.pieces.last;
           expect(last.top + last.height, lessThan(initial.viewportHeight!));
@@ -888,6 +948,7 @@ void main() {
 
             await alignFigure();
             expect(visibleFigure().height, greaterThan(500));
+            await settle();
             final fitted = screen();
             await single(viewport.center);
             expect(screen(), same(fitted));
@@ -914,20 +975,24 @@ void main() {
               Offset(rect.left + rect.width * .875, viewport.center.dy),
             );
             await until(() => screen() != fitted);
+            await settle();
             expect(screen()!.continuous, isTrue);
             expect(screen()!.strip, isNull);
             final forwardY = pointY();
             expect(forwardY, lessThan(startY - 50));
             await captureView(captureKey, 'continuous-figure-edge-forward');
+            await settle();
             final advanced = screen();
             await single(
               Offset(rect.left + rect.width * .125, viewport.center.dy),
             );
             await until(() => screen() != advanced);
+            await settle();
             expect(screen()!.continuous, isTrue);
             expect(pointY(), greaterThan(forwardY + 50));
             await alignFigure();
           }
+          await settle();
           final before = screen()!;
           final origin = tester.getTopLeft(raster).dy;
           final piece = before.pieces.firstWhere((p) => p.zoomable);
@@ -937,12 +1002,15 @@ void main() {
           await pinch(tester, visibleFigure().center, 30, 90);
           if (mode == 'refused') {
             await until(() => screen() != before);
+            await settle();
             expect(screen()!.continuous, isTrue);
             expect(screen()!.strip, isNull);
           } else {
             await until(() => screen()?.strip != null);
+            await settle();
             await pinch(tester, tester.getRect(area).center, 90, 25);
             await until(() => screen()?.continuous == true);
+            await settle();
           }
           final restored = screen()!.pieces.firstWhere(
             (p) => p.page == piece.page && p.region == piece.region,
