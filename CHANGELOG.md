@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-05
+## [0.1.0] - 2026-11-06
 
 ### 🚀 Features
 
@@ -199,6 +199,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Honor saved PDF fit choices (#294)
 - *(reader)* Keep Aa PDF fit choices per paper (#302)
 - *(reader)* Enlarge Columns figures and respect turn-zone taps (#299)
+- *(reader)* Keep the reading place across PDF strip refills and run fixture-backed tests on devices (#305)
 
 ### 🚜 Refactor
 
