@@ -159,6 +159,11 @@ Future<EpubInspection> inspectEpubRanges(
   return EpubInspection(
     title: package.title,
     author: package.author,
+    contributors: package.contributors,
+    identifiers: package.identifiers,
+    language: package.language,
+    edition: package.edition,
+    volume: package.volume,
     coverPath: cover == null ? null : package.coverPath,
     coverMediaType: cover == null ? null : package.coverMediaType,
     cover: cover,

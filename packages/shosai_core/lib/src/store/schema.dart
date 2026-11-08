@@ -476,6 +476,36 @@ ALTER TABLE reading_state ADD COLUMN pdf_x REAL
 ALTER TABLE reading_state ADD COLUMN pdf_fit TEXT
     CHECK (pdf_fit IS NULL OR pdf_fit IN ('columns', 'fitWidth', 'fitPage'));
 '''),
+  Migration(17, 'reversible edition shelf', '''
+ALTER TABLE books ADD COLUMN publication_metadata TEXT;
+ALTER TABLE books ADD COLUMN display_name TEXT;
+ALTER TABLE library_source_previews ADD COLUMN publication_metadata TEXT;
+-- Cached previews predate publication facts; reread them through the existing
+-- bounded background preview pass. No source file or user record is removed.
+DELETE FROM library_source_previews;
+CREATE TABLE shelf_editions (
+    id TEXT PRIMARY KEY NOT NULL,
+    preferred_key TEXT
+) STRICT;
+CREATE TABLE shelf_members (
+    file_key TEXT PRIMARY KEY NOT NULL,
+    edition_id TEXT NOT NULL REFERENCES shelf_editions(id),
+    manual INTEGER NOT NULL DEFAULT 0 CHECK (manual IN (0, 1))
+) STRICT;
+CREATE INDEX shelf_members_edition_idx ON shelf_members(edition_id);
+CREATE TABLE annotation_projections (
+    annotation_id TEXT NOT NULL REFERENCES annotations(id),
+    target_hash TEXT NOT NULL,
+    resolver TEXT NOT NULL,
+    resolution TEXT NOT NULL CHECK (resolution IN ('recovered', 'ambiguous', 'orphaned')),
+    fragments TEXT NOT NULL,
+    PRIMARY KEY(annotation_id, target_hash, resolver)
+) STRICT;
+'''),
+  Migration(18, 'edition source folder evidence', '''
+ALTER TABLE library_source_files ADD COLUMN folder_name TEXT;
+ALTER TABLE books ADD COLUMN source_folder TEXT;
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

@@ -261,7 +261,18 @@ class EpubInspection {
     required this.coverPath,
     required this.coverMediaType,
     required this.cover,
+    this.contributors = const [],
+    this.identifiers = const [],
+    this.language,
+    this.edition,
+    this.volume,
   });
+
+  final List<String> contributors;
+  final List<String> identifiers;
+  final String? language;
+  final String? edition;
+  final String? volume;
 
   /// `dc:title`, or null when the package has none.
   final String? title;
@@ -317,6 +328,11 @@ EpubInspection inspectEpubBytes(
   return EpubInspection(
     title: package.title,
     author: package.author,
+    contributors: package.contributors,
+    identifiers: package.identifiers,
+    language: package.language,
+    edition: package.edition,
+    volume: package.volume,
     coverPath: coverPath,
     coverMediaType: coverMediaType,
     cover: cover,
@@ -332,7 +348,18 @@ class EpubPackageInspection {
     required this.author,
     required this.coverPath,
     required this.coverMediaType,
+    this.contributors = const [],
+    this.identifiers = const [],
+    this.language,
+    this.edition,
+    this.volume,
   });
+
+  final List<String> contributors;
+  final List<String> identifiers;
+  final String? language;
+  final String? edition;
+  final String? volume;
 
   /// `dc:title`, or null when the package has none.
   final String? title;
@@ -414,9 +441,44 @@ EpubPackageInspection inspectEpubPackage(List<int> opf, String opfPath) {
   return EpubPackageInspection(
     title: metadataValue('title'),
     author: metadataValue('creator'),
+    contributors: List.unmodifiable(
+      metadata?.descendants
+              .whereType<XmlElement>()
+              .where((e) => e.name.local == 'creator')
+              .map((e) => e.innerText.trim())
+              .where((e) => e.isNotEmpty) ??
+          const <String>[],
+    ),
+    identifiers: List.unmodifiable(
+      metadata?.descendants
+              .whereType<XmlElement>()
+              .where((e) => e.name.local == 'identifier')
+              .map((e) => e.innerText.trim())
+              .where((e) => e.isNotEmpty) ??
+          const <String>[],
+    ),
+    language: metadataValue('language'),
+    edition: _publicationMeta(metadata, {'schema:bookEdition', 'edition'}),
+    volume: _publicationMeta(metadata, {'volume'}),
     coverPath: coverPath,
     coverMediaType: coverPath == null ? null : mediaType,
   );
+}
+
+String? _publicationMeta(XmlElement? metadata, Set<String> names) {
+  for (final element
+      in metadata?.descendants.whereType<XmlElement>() ??
+          const <XmlElement>[]) {
+    if (element.name.local != 'meta' ||
+        !names.contains(
+          element.getAttribute('property') ?? element.getAttribute('name'),
+        )) {
+      continue;
+    }
+    final value = (element.getAttribute('content') ?? element.innerText).trim();
+    if (value.isNotEmpty) return value;
+  }
+  return null;
 }
 
 /// Decode the archive and apply the entry-count, entry-size, aggregate-size,

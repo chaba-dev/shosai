@@ -280,6 +280,7 @@ class LibraryCollection extends StatelessWidget {
     this.sortBooks,
     required this.openBook,
     this.openSourceFile,
+    this.openEdition,
     required this.openNotes,
     required this.removeBook,
     this.keepBook,
@@ -301,6 +302,7 @@ class LibraryCollection extends StatelessWidget {
   final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<LibrarySourceFile>? openSourceFile;
+  final void Function(BookEdition, bool choose)? openEdition;
 
   /// The hero's Notes action: the Notes place.
   final VoidCallback openNotes;
@@ -350,6 +352,7 @@ class LibraryCollection extends StatelessWidget {
       sortBooks: sortBooks,
       openBook: openBook,
       openSourceFile: openSourceFile,
+      openEdition: openEdition,
       openNotes: openNotes,
       removeBook: removeBook,
       keepBook: keepBook,
@@ -553,6 +556,7 @@ class _LibraryGrid extends StatefulWidget {
     required this.sortBooks,
     required this.openBook,
     required this.openSourceFile,
+    required this.openEdition,
     required this.openNotes,
     required this.removeBook,
     required this.keepBook,
@@ -568,6 +572,7 @@ class _LibraryGrid extends StatefulWidget {
   final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<LibrarySourceFile>? openSourceFile;
+  final void Function(BookEdition, bool choose)? openEdition;
   final VoidCallback openNotes;
   final ValueChanged<FlutterLibraryBook> removeBook;
   final ValueChanged<FlutterLibraryBook>? keepBook;
@@ -645,8 +650,15 @@ class _LibraryGridState extends State<_LibraryGrid> {
     final padding = _collectionPadding(layout);
     final spacing = _sectionSpacing(layout);
     final loadingMore = widget.model.loadingMore;
-    final items = <Object>[...widget.model.books, ...widget.model.sourceFiles];
-    if (widget.model.sourceFiles.isNotEmpty &&
+    final items = <Object>[
+      ...?widget.model.editions,
+      if (widget.model.editions == null) ...[
+        ...widget.model.books,
+        ...widget.model.sourceFiles,
+      ],
+    ];
+    if (widget.model.editions == null &&
+        widget.model.sourceFiles.isNotEmpty &&
         widget.model.sort != FlutterLibrarySort.recent) {
       String title(Object item) => switch (item) {
         FlutterLibraryBook() => item.title,
@@ -729,6 +741,21 @@ class _LibraryGridState extends State<_LibraryGrid> {
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final item = items[index];
+                      if (item is BookEdition) {
+                        return _EditionCard(
+                          edition: item,
+                          model: widget.model,
+                          shelf: shelf,
+                          loadCover: widget.loadCover,
+                          loadSourceCover: widget.loadSourceCover,
+                          onOpen: widget.model.busy
+                              ? null
+                              : () => widget.openEdition?.call(item, false),
+                          onChoose: widget.model.busy
+                              ? null
+                              : () => widget.openEdition?.call(item, true),
+                        );
+                      }
                       if (item is LibrarySourceFile) {
                         final file = item;
                         return _SourceFileCard(

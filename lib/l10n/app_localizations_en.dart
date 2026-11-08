@@ -1344,4 +1344,87 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get locationAuthorizationReturned =>
       'Authorization response received. Return to Shōsai to check whether the connection completed. You may close this browser tab.';
+
+  @override
+  String get editionReadAs => 'Read as…';
+
+  @override
+  String get editionPickerExplanation =>
+      'Choose a file for this edition. Shōsai remembers your choice; each file keeps its own reading position.';
+
+  @override
+  String get editionLastUsed => 'Last used';
+
+  @override
+  String get readerAnnotationOtherFile => 'Not placed in this file';
+
+  @override
+  String get readerAnnotationOpenOriginal => 'Open original file';
+
+  @override
+  String get readerAnnotationIncomplete =>
+      'Matching could not finish; the original is unchanged';
+
+  @override
+  String get editionOnDevice => 'On this device';
+
+  @override
+  String get editionFileActions => 'File actions';
+
+  @override
+  String get editionSeparate => 'Separate from group';
+
+  @override
+  String get editionGroupWith => 'Group with…';
+
+  @override
+  String get editionGroupExplanation =>
+      'Choose another entry for the same edition. Notes are shared; original files and reading positions stay separate. You can separate the files again.';
+
+  @override
+  String get editionPossibleMatches => 'Possible matches';
+
+  @override
+  String editionReviewMatches(int count) {
+    return 'Review possible matches ($count)';
+  }
+
+  @override
+  String get editionMatchExplanation =>
+      'These entries may be the same edition. Check the files before grouping; notes will be shared. Original files and reading positions stay separate. You can separate them again.';
+
+  @override
+  String get editionMatchTitle => 'Matching title';
+
+  @override
+  String get editionMatchFilename => 'Matching filename';
+
+  @override
+  String get editionMatchFolder => 'Matching book folder';
+
+  @override
+  String get editionMatchIsbn => 'Matching ISBN';
+
+  @override
+  String get editionMatchConflict =>
+      'Title or author differs — check the edition';
+
+  @override
+  String get editionSourceChanged =>
+      'This file changed since it was listed. Refresh the library and try again.';
+
+  @override
+  String get editionAddedSeparately =>
+      'The verified file couldn\'t be confirmed as part of this group. It was added separately; your original files and notes are unchanged.';
+
+  @override
+  String editionLocations(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count locations',
+      one: '1 location',
+    );
+    return '$_temp0';
+  }
 }

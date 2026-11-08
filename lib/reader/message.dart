@@ -854,6 +854,13 @@ final class ReaderAnnotationNavigated extends ReaderMessage {
   final String id;
 }
 
+final class ReaderAnnotationOriginalOpened extends ReaderMessage {
+  const ReaderAnnotationOriginalOpened(this.book, this.id, {this.note = false});
+  final FlutterLibraryBook book;
+  final String id;
+  final bool note;
+}
+
 final class ReaderAnnotationAssociationRequested extends ReaderMessage {
   const ReaderAnnotationAssociationRequested();
 }

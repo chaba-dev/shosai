@@ -3,8 +3,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:shosai_core/shosai_core.dart' as core;
+import 'package:shosai_flutter/core/core_records.dart';
+import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
@@ -24,6 +28,129 @@ import 'library_progress_test.dart' as library_progress;
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   library_progress.main();
+
+  testWidgets(
+    'grouped EPUB and PDF share one highlight through the real engines',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync('shosai-editions-');
+      final data = await ShosaiCore.open(
+        directory.path,
+        pdfEngine: PdfrxPdfEngine(),
+      );
+      final bridge = ApplicationBridge(data);
+      addTearDown(() async {
+        bridge.dispose();
+        await bridge.drain();
+        await data.close();
+        directory.deleteSync(recursive: true);
+      });
+      final epub = File('${directory.path}/hello.epub')
+        ..writeAsBytesSync(_helloEpub());
+      final pdf = File('${directory.path}/hello.pdf')
+        ..writeAsBytesSync(_helloPdf());
+      final imported = await bridge.importPaths(
+        pathKeys: [epub.path, pdf.path],
+        managed: false,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(imported.imported, BigInt.two);
+      final shelf = core.LibraryEditions(data.store);
+      final separate = (await shelf.page(sources: [])).editions;
+      expect(
+        separate.length,
+        2,
+        reason: 'Missing publication facts require confirmation',
+      );
+      await shelf.group(separate[1].id, separate[0].id, sources: []);
+      final edition = (await shelf.page(sources: [])).editions.single;
+      expect(edition.files.length, 2);
+      final epubBook = imported.items
+          .singleWhere((i) => i.book?.format == FlutterBookFormat.epub)
+          .book!;
+      final pdfBook = imported.items
+          .singleWhere((i) => i.book?.format == FlutterBookFormat.pdf)
+          .book!;
+      final epubDocument = await bridge.openLibraryBook(
+        bookId: epubBook.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      final pdfDocument = await bridge.openLibraryBook(
+        bookId: pdfBook.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      final created = await bridge.createAnnotation(
+        document: epubDocument.handle,
+        unit: BigInt.zero,
+        start: BigInt.zero,
+        end: BigInt.from(5),
+        displayScale: 1,
+        color: FlutterHighlightColor.yellow,
+        body: 'One thought, either format',
+        cancellationId: bridge.createCancellation(),
+      );
+      final [mapped] = await bridge.listAnnotations(
+        document: pdfDocument.handle,
+        scale: 1,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(mapped.id, created.id);
+      expect(mapped.resolution, FlutterAnnotationResolution.recovered);
+      expect(mapped.fragments, [(unit: 0, start: 0, end: 5)]);
+      final reverse = await bridge.createAnnotation(
+        document: pdfDocument.handle,
+        unit: BigInt.zero,
+        start: BigInt.zero,
+        end: BigInt.from(5),
+        displayScale: 1,
+        color: FlutterHighlightColor.green,
+        cancellationId: bridge.createCancellation(),
+      );
+      final inEpub = await bridge.listAnnotations(
+        document: epubDocument.handle,
+        scale: 1,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(
+        inEpub.singleWhere((a) => a.id == reverse.id).resolution,
+        FlutterAnnotationResolution.recovered,
+      );
+      expect(
+        (await data.annotations.libraryNotes()).books.single.notes.length,
+        2,
+      );
+      bridge.releaseDocument(handle: epubDocument.handle);
+      bridge.releaseDocument(handle: pdfDocument.handle);
+      await tester.pumpWidget(
+        ShosaiApp(productBridgeFactory: () => ApplicationBridge(data)),
+      );
+      for (
+        var attempt = 0;
+        attempt < 100 &&
+            tester
+                    .widgetList<LibraryCollection>(
+                      find.byType(LibraryCollection),
+                    )
+                    .firstOrNull
+                    ?.model
+                    .editions ==
+                null;
+        attempt++
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(
+        tester
+            .widget<LibraryCollection>(find.byType(LibraryCollection))
+            .model
+            .editions!
+            .single
+            .files
+            .length,
+        2,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('the packaged PDFium and SQLite serve import, open and render', (
     tester,

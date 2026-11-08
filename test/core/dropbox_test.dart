@@ -443,6 +443,11 @@ void main() {
       final pages = await location.listRecursive().toList();
       expect(pages.first, isEmpty);
       expect(pages.last.map((item) => item.depth), [0, 1, 2]);
+      expect(pages.last.map((item) => item.entry.folderName), [
+        null,
+        'books',
+        'sub',
+      ]);
       expect(fixture.calls, [
         '/files/list_folder',
         '/files/list_folder/continue',

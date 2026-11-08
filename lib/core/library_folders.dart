@@ -20,6 +20,12 @@ abstract interface class LibraryFoldersHost {
   });
 }
 
+/// Admission cannot reuse an earlier decision when its evidence changed.
+enum EditionAdmissionConflict implements Exception {
+  sourceChanged,
+  addedSeparately,
+}
+
 /// A discovered file is not yet an identified book. Only opening it reads its
 /// bytes and associates its content identity with this device-local locator.
 final class LibrarySourceFile {
@@ -344,6 +350,7 @@ final class LibraryFolders {
           location,
           grant.directory,
           cancellation,
+          grant.directoryLabel,
         )) {
           cancellation.throwIfCancelled();
           for (final item in page) {
@@ -527,6 +534,7 @@ final class LibraryFolders {
     LibraryLocation location,
     String? root,
     CancellationToken? cancellation,
+    String? rootName,
   ) async* {
     if (location is RecursiveLibraryLocation) {
       yield* (location as RecursiveLibraryLocation).listRecursive(
@@ -535,7 +543,9 @@ final class LibraryFolders {
       );
       return;
     }
-    final pending = <({String? key, int depth})>[(key: root, depth: 0)];
+    final pending = <({String? key, String? name, int depth})>[
+      (key: root, name: rootName, depth: 0),
+    ];
     final visited = <String?>{};
     while (pending.isNotEmpty) {
       final directory = pending.removeLast();
@@ -557,10 +567,24 @@ final class LibraryFolders {
         );
         yield [
           for (final entry in page.entries)
-            (entry: entry, depth: directory.depth),
+            (
+              entry: LocationEntry(
+                key: entry.key,
+                name: entry.name,
+                isDirectory: entry.isDirectory,
+                size: entry.size,
+                revision: entry.revision,
+                folderName: entry.folderName ?? directory.name,
+              ),
+              depth: directory.depth,
+            ),
         ];
         for (final entry in page.entries.where((e) => e.isDirectory)) {
-          pending.add((key: entry.key, depth: directory.depth + 1));
+          pending.add((
+            key: entry.key,
+            name: entry.name,
+            depth: directory.depth + 1,
+          ));
         }
         cursor = page.nextCursor;
       } while (cursor != null);
@@ -673,9 +697,28 @@ final class LibraryFolders {
     final grant = _grant(id);
     final location = await _provider(grant.provider).open(grant);
     final generation = _generations[id]!;
+    Future<void> verifySource() async {
+      final current = await location.stat(
+        entry.key,
+        cancellation: cancellation,
+      );
+      if (current.isDirectory ||
+          current.name != entry.name ||
+          current.size != entry.size ||
+          current.revision != entry.revision ||
+          (current.folderName != null &&
+              current.folderName != entry.folderName)) {
+        throw EditionAdmissionConflict.sourceChanged;
+      }
+    }
+
+    await verifySource();
+    var grouped = true;
     final book = await _stage(
       location.read(entry.key, cancellation: cancellation),
       (path) async {
+        // Check again after streaming, before import commits an identity.
+        await verifySource();
         final item = await _library.importFile(
           path,
           managed: false,
@@ -690,23 +733,32 @@ final class LibraryFolders {
         // An explicit local import already owns this content. Adding the
         // same book from a folder is a duplicate, not permission to replace
         // its working local source with a dependency on that folder grant.
-        await _locations.admit(id, generation, entry, book.contentHash);
-        if (book.path != canonicalBookPath(path) &&
+        final local =
+            book.path != canonicalBookPath(path) &&
             (await _locations.copies(book.contentHash)).isEmpty &&
-            await File(book.path).exists()) {
-          return book;
+            await File(book.path).exists();
+        if (!local) {
+          // Import's commit is the cancellation boundary. Finish its
+          // association even if cancellation arrives after that commit.
+          await _locations.locate(book.contentHash, (
+            locationId: id,
+            key: entry.key,
+          ), generation: generation);
+          await _cache.withFile(
+            book,
+            () => File(path).openRead(),
+            (_) async {},
+          );
         }
-        // Import's commit is the cancellation boundary. Finish its association
-        // even if cancellation arrives immediately after that commit.
-        await _locations.locate(book.contentHash, (
-          locationId: id,
-          key: entry.key,
-        ), generation: generation);
-        await _cache.withFile(
-          book,
-          () => File(path).openRead(),
-          (_) async {},
-          cancellation: cancellation,
+        // Resolve any provisional grouping only after ownership is safe.
+        // A rejected group or budget must not strand a committed book at
+        // the staging path that _stage removes when this callback returns.
+        grouped = await _locations.admit(
+          id,
+          generation,
+          entry,
+          book.contentHash,
+          inheritPreview: entry.revision != null,
         );
         return (await _library.get(book.id))!;
       },
@@ -718,6 +770,7 @@ final class LibraryFolders {
         (file) => file.locationId != id || file.entry.key != entry.key,
       ),
     );
+    if (!grouped) throw EditionAdmissionConflict.addedSeparately;
     return book;
   });
 
