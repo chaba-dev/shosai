@@ -1545,8 +1545,9 @@ class LibraryBookCard extends StatelessWidget {
             style: shosaiInterfaceStyleForText(metaStyle, status),
           );
     // The tag follows the status, or takes the next run where it does not
-    // fit, so neither cuts the other.
-    final tag = open && !removing
+    // fit, so neither cuts the other. An unavailable book cannot be read, so
+    // its stale reader tab does not count as open.
+    final tag = open && !removing && !book.unavailable
         ? Text(
             l10n.cardOpenTag,
             maxLines: 1,
