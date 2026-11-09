@@ -843,6 +843,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get locationAddGoogleDrive => 'Google Drive を接続';
 
   @override
+  String get locationReconnect => '再接続';
+
+  @override
+  String get locationReconnectDescription =>
+      '同じ Google アカウントで再度ログインしてください。読み込み元フォルダ、本、ノート、しおりはそのまま残ります。';
+
+  @override
   String get locationGoogleDriveRegistrationRequired =>
       'このビルドでは Google Drive が設定されていません。アプリの配布元による Google OAuth の設定が必要です。';
 

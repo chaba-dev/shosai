@@ -249,6 +249,8 @@
   "locationUseFolder": "このフォルダを使用",
   "locationAddFolder": "フォルダを接続",
   "locationAddGoogleDrive": "Google Drive を接続",
+  "locationReconnect": "再接続",
+  "locationReconnectDescription": "同じ Google アカウントで再度ログインしてください。読み込み元フォルダ、本、ノート、しおりはそのまま残ります。",
   "locationGoogleDriveRegistrationRequired": "このビルドでは Google Drive が設定されていません。アプリの配布元による Google OAuth の設定が必要です。",
   "locationGoogleDriveTokenRejected": "Google がトークン交換を拒否しました（{error}）。接続は保存されていません。OAuth の登録設定を確認し、もう一度お試しください。",
   "locationGoogleDrivePermissionsIncomplete": "Google から継続的な Drive アクセス権限を取得できませんでした。接続は保存されていません。再試行し、Drive へのアクセスを許可してください。",

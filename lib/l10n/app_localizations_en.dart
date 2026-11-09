@@ -900,6 +900,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locationAddGoogleDrive => 'Connect Google Drive';
 
   @override
+  String get locationReconnect => 'Reconnect';
+
+  @override
+  String get locationReconnectDescription =>
+      'Sign in again with the same Google account. Your source folder, books, notes and bookmarks stay in place.';
+
+  @override
   String get locationGoogleDriveRegistrationRequired =>
       'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.';
 

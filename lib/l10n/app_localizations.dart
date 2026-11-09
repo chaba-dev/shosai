@@ -1566,6 +1566,18 @@ abstract class AppLocalizations {
   /// **'Connect Google Drive'**
   String get locationAddGoogleDrive;
 
+  /// No description provided for @locationReconnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect'**
+  String get locationReconnect;
+
+  /// No description provided for @locationReconnectDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in again with the same Google account. Your source folder, books, notes and bookmarks stay in place.'**
+  String get locationReconnectDescription;
+
   /// No description provided for @locationGoogleDriveRegistrationRequired.
   ///
   /// In en, this message translates to:

@@ -38,6 +38,10 @@ final class FoldersChooseDirectoryRequested extends FoldersMessage {
   const FoldersChooseDirectoryRequested();
 }
 
+final class FoldersReconnectRequested extends FoldersMessage {
+  const FoldersReconnectRequested();
+}
+
 final class FoldersDirectorySaved extends FoldersMessage {
   const FoldersDirectorySaved();
 }
@@ -143,6 +147,9 @@ final class FoldersController extends ChangeNotifier {
   final Future<LibraryConnection?> Function(String id)? _setupGoogleDrive;
   bool get canAddGoogleDrive => _setupGoogleDrive != null;
 
+  bool canReconnect(LibraryConnection grant) =>
+      canAddGoogleDrive && grant.provider == 'google-drive';
+
   /// Whether device folders can be connected here; phones and tablets read
   /// books only from files and storage accounts.
   final bool supportsFolders;
@@ -213,6 +220,37 @@ final class FoldersController extends ChangeNotifier {
       case FoldersSelected():
         if (_model.busy) return;
         _emit(FoldersModel(grants: _model.grants, selected: message.id));
+      case FoldersReconnectRequested():
+        if (_model.busy || _model.pending != null || _model.choosingDirectory) {
+          return;
+        }
+        final previous = _model.grants
+            .where((grant) => grant.id == _model.selected)
+            .firstOrNull;
+        if (previous == null || !canReconnect(previous)) return;
+        _effect((revision, cancellation) async {
+          final authorization = await _setupGoogleDrive!(previous.id);
+          if (authorization != null) {
+            try {
+              cancellation.throwIfCancelled();
+              await _folders.reconnect(
+                previous,
+                authorization,
+                cancellation: cancellation,
+              );
+            } finally {
+              // Adopted credentials are retained; every other completion,
+              // including authorization returning after close, is released.
+              await _discard(authorization);
+            }
+          }
+          cancellation.throwIfCancelled();
+          return _FoldersLoaded(
+            revision,
+            await _folders.list(),
+            selected: previous.id,
+          );
+        });
       case FoldersChooseDirectoryRequested():
         if (_model.busy || _model.selected == null) return;
         _emit(

@@ -282,6 +282,85 @@ final class LibraryFolders {
     _discovered = false;
   });
 
+  /// Replace only authorization, never the source identity, directory or its
+  /// catalog/cache. The caller owns the unused grant until persistence adopts
+  /// it, and must discard it if validation, cancellation or saving fails.
+  Future<void> reconnect(
+    LibraryConnection previous,
+    LibraryConnection authorization, {
+    CancellationToken? cancellation,
+  }) => _serial(() async {
+    cancellation.throwIfCancelled();
+    await _load(cancellation: cancellation);
+    final current = _grant(previous.id);
+    if (!_sameAccess(current, previous) ||
+        current.directory != previous.directory ||
+        authorization.id != current.id ||
+        authorization.provider != current.provider) {
+      throw const CoreException.cancelled();
+    }
+    final next = LibraryConnection(
+      current.id,
+      current.label,
+      current.provider,
+      authorization.configuration,
+      directory: current.directory,
+      directoryLabel: current.directoryLabel,
+    );
+    final provider = _provider(current.provider);
+    final location = await provider.open(next);
+    if (next.directory == null) {
+      // Legacy root connections have no account identifier. Require ownership
+      // of a known file when there is one, rather than adopting another
+      // account's root and reconciling the old books against unrelated files.
+      final keys = await _locations.connectionKeys(current.id);
+      var matched = keys.isEmpty;
+      for (final key in keys) {
+        try {
+          await location.stat(key, cancellation: cancellation);
+          matched = true;
+          break;
+        } on LocationException catch (error) {
+          if (error.failure == LocationFailure.offline) rethrow;
+        }
+      }
+      if (!matched) throw const LocationException(LocationFailure.revoked);
+    }
+    await location.list(
+      directory: next.directory,
+      limit: 1,
+      cancellation: cancellation,
+    );
+    cancellation.throwIfCancelled();
+    final grants = [
+      for (final grant in _grants) grant.id == next.id ? next : grant,
+    ];
+    // Adopt configuration and generation in one transaction. A close after
+    // this commit must not discard the now-durable credential.
+    final generation = await _locations.connect(
+      current.id,
+      current.label,
+      preferences: {
+        'device.library.folders': jsonEncode([
+          for (final grant in grants) grant.toJson(),
+        ]),
+      },
+    );
+    _grants = List.unmodifiable(grants);
+    _generations[current.id] = generation;
+    _cancelPreviews(current.id);
+    _discovered = false;
+    _refreshFailures = Set.unmodifiable(
+      {..._refreshFailures}..remove(current.id),
+    );
+    try {
+      await provider.release(current);
+    } catch (_) {
+      // The replacement is already durable. Failure to delete the obsolete
+      // local credential must not undo it or report a failed authorization.
+    }
+  });
+
   Future<void> configure(String id, {String? directory, String? label}) =>
       _serial(() async {
         await _load();

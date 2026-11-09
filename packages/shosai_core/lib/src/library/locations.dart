@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import '../cancellation.dart';
 import '../errors.dart';
+import '../preferences.dart';
 import '../store/store.dart';
 import 'editions.dart';
 import 'files.dart';
@@ -39,6 +40,21 @@ final class LibraryLocations {
   const LibraryLocations(this._store);
 
   final Store _store;
+
+  /// Existing opaque file keys can identify a root-scoped source when fresh
+  /// authorization cannot read the old account's identity.
+  Future<List<String>> connectionKeys(String id) => _store.read(
+    (db) => [
+      for (final row in db.select(
+        '''SELECT locator_key FROM book_locators WHERE location_id = ?
+           UNION SELECT locator_key FROM library_source_files WHERE location_id = ?
+           UNION SELECT locator_key FROM library_source_admissions WHERE location_id = ?
+           UNION SELECT locator_key FROM library_hidden_source_files WHERE location_id = ?''',
+        [id, id, id, id],
+      ))
+        row.columnAt(0) as String,
+    ],
+  );
 
   /// Metadata is stored per file, not in a size-limited preference value.
   Future<List<({String locationId, LocationEntry entry})>>
@@ -431,10 +447,19 @@ final class LibraryLocations {
     return known;
   });
 
-  Future<int> connect(String id, String label) {
+  /// Adopt a connection generation and its optional preference changes in one
+  /// transaction, so credential replacement cannot leave a half-connected source.
+  Future<int> connect(
+    String id,
+    String label, {
+    Map<String, String> preferences = const {},
+  }) {
     _checkText(id, 1024);
     _checkText(label, 1024);
     return _store.transaction((db) {
+      if (preferences.isNotEmpty) {
+        Preferences.setAllInTransaction(db, preferences);
+      }
       db.execute(
         '''INSERT INTO library_locations (id, label) VALUES (?, ?)
            ON CONFLICT(id) DO UPDATE SET label = excluded.label,

@@ -11,7 +11,9 @@ import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/google_drive_authorization.dart';
 import 'package:shosai_flutter/core/google_drive_connection.dart';
 import 'package:shosai_flutter/core/google_drive_location.dart';
+import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/library/folders_controller.dart';
 
 /// Real HTTP streaming with only the destination changed to a local Drive
 /// fixture. No Google account, registered client or production token is used.
@@ -411,6 +413,336 @@ void main() {
       expect(await oauth.authorize(), isNull);
     },
   );
+
+  for (final (sourceDirectory, localDuplicate) in [
+    (null, false),
+    ('owned-folder', false),
+    (null, true),
+  ]) {
+    test(
+      'Google reconnect preserves the existing ${sourceDirectory ?? 'root'} source and ${localDuplicate ? 'admission-only duplicate' : 'saved books'}',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'drive-reconnect',
+        );
+        final database = '${directory.path}/library.sqlite3';
+        var store = await Store.open(database);
+        final bytes = File(
+          'packages/shosai_core/test/fixtures/sample.epub',
+        ).readAsBytesSync();
+        final credentials = _Credentials();
+        var serial = 0;
+        var mode = 'initial';
+        var revoked = false;
+        Completer<void>? authorizationGate;
+        Completer<void>? validationStarted;
+        Completer<void>? validationGate;
+        final provider = GoogleDriveConnectionProvider(
+          credentials: credentials,
+          authorize: () async {
+            await authorizationGate?.future;
+            return mode == 'cancel'
+                ? null
+                : {'access_token': 'account-${serial++}'};
+          },
+          renew: (value, {bool force = false}) async => value,
+        );
+        late Library library;
+        late LibraryLocations locations;
+        late Preferences preferences;
+        late LibraryFolders folders;
+        void open() {
+          library = Library(
+            store,
+            managedDirectory: '${directory.path}/books',
+            inspectors: {BookFormat.epub: const EpubInspector()},
+          );
+          locations = LibraryLocations(store);
+          preferences = Preferences(store);
+          folders = LibraryFolders(
+            preferences,
+            library,
+            locations,
+            () async => '${directory.path}/stage',
+            BookFileCache(store, '${directory.path}/cache'),
+            providers: [provider],
+          );
+        }
+
+        open();
+        addTearDown(() async {
+          await folders.close();
+          await store.close();
+          await directory.delete(recursive: true);
+        });
+        handler = (request) async {
+          if (mode == 'close-validation') {
+            validationStarted!.complete();
+            await validationGate!.future;
+          }
+          final token = request.headers.value(HttpHeaders.authorizationHeader);
+          if (revoked && token == 'Bearer account-0') {
+            _json(request, {}, status: 401);
+          } else if (mode == 'offline') {
+            _json(request, {}, status: 503);
+          } else if (mode == 'wrong-account' &&
+              request.uri.path != '/drive/v3/files') {
+            _json(request, {}, status: 403);
+          } else if (mode == 'wrong-account') {
+            // Another account's root lists successfully, but owns none of
+            // the original source's keys. Listing alone must not adopt it.
+            _json(request, {
+              'files': [_file('unrelated-book')],
+            });
+          } else if (request.uri.queryParameters['alt'] == 'media') {
+            request.response.add(bytes);
+            await request.response.close();
+          } else if (request.uri.path == '/drive/v3/files') {
+            _json(request, {
+              'files': [
+                _file('book', size: bytes.length),
+                if (!localDuplicate) _file('unopened'),
+              ],
+            });
+          } else {
+            final key = request.uri.path.split('/').last;
+            _json(
+              request,
+              _file(
+                key,
+                mime: key == 'owned-folder'
+                    ? GoogleDriveLocation.folderMime
+                    : null,
+                size: bytes.length,
+              ),
+            );
+          }
+        };
+        await HttpOverrides.runZoned(
+          () async {
+            final previous = (await provider.setup(
+              'drive',
+            ))!.withDirectory(sourceDirectory, 'Reading');
+            final other = (await provider.setup('other'))!;
+            await folders.add(previous);
+            await folders.add(other);
+            final file = (await folders.discover()).firstWhere(
+              (file) => file.locationId == 'drive' && file.entry.key == 'book',
+            );
+            if (localDuplicate) {
+              await library.importFile(
+                'packages/shosai_core/test/fixtures/sample.epub',
+                managed: true,
+              );
+            }
+            final book = await folders.importEntry('drive', file.entry);
+            if (!localDuplicate) await folders.setKept(book.id, true);
+            final kept = (await library.get(book.id))!.keptOnDevice;
+            await Annotations(
+              store,
+            ).createNote(book.id, const BookAnchor(), 'Keep this note');
+            final bookmark = await Bookmarks(
+              store,
+            ).toggle(book.id, 2, offset: 17, title: 'Keep this bookmark');
+            const position = ReadingPosition(unit: 2, offset: 33, zoom: 1.7);
+            await ReadingState(store).save(book.id, position, unitCount: 5);
+            revoked = true;
+            await folders.discover(refresh: true);
+            expect(
+              (await locations.copies(
+                book.contentHash,
+              )).map((copy) => copy.failure),
+              localDuplicate ? [] : [LocationFailure.revoked],
+            );
+            final saved = await preferences.get('device.library.folders');
+            final oldCredentials = Map.of(credentials.values);
+            final catalog = (await locations.catalog())
+                .map((file) => (file.locationId, file.entry.key))
+                .toList();
+            for (final attempt in [
+              'cancel',
+              'vault',
+              'offline',
+              'wrong-account',
+              'save-failure',
+              'generation-failure',
+              'close',
+              'close-validation',
+              'success',
+            ]) {
+              mode = attempt;
+              authorizationGate = attempt == 'close' ? Completer<void>() : null;
+              validationStarted = attempt == 'close-validation'
+                  ? Completer<void>()
+                  : null;
+              validationGate = attempt == 'close-validation'
+                  ? Completer<void>()
+                  : null;
+              credentials.writeFailure = attempt == 'vault'
+                  ? PlatformException(code: 'locked')
+                  : null;
+              final controller = FoldersController(
+                folders: folders,
+                setup: (_) async => null,
+                setupGoogleDrive: (id) async {
+                  final grant = await folders.setup('google-drive', id);
+                  if (grant == null || attempt != 'save-failure') return grant;
+                  return LibraryConnection(
+                    grant.id,
+                    grant.label,
+                    grant.provider,
+                    {
+                      ...grant.configuration,
+                      'oversized': 'x' * maxPreferenceValueBytes,
+                    },
+                  );
+                },
+                confirmRemoval: (_) async => false,
+              )..dispatch(const FoldersStarted());
+              await controller.drain();
+              if (attempt == 'generation-failure') {
+                await store.transaction(
+                  (db) => db.execute('''
+                  CREATE TEMP TRIGGER reconnect_storage_failure
+                  BEFORE UPDATE ON library_locations WHEN OLD.id = 'drive'
+                  BEGIN SELECT RAISE(ABORT, 'fixture generation write failure'); END
+                '''),
+                );
+              }
+              controller.dispatch(const FoldersSelected('drive'));
+              controller.dispatch(const FoldersReconnectRequested());
+              if (attempt == 'close') {
+                controller.dispose();
+                authorizationGate!.complete();
+              } else if (attempt == 'close-validation') {
+                await validationStarted!.future;
+                controller.dispose();
+                validationGate!.complete();
+              }
+              await controller.drain();
+              if (attempt == 'generation-failure') {
+                await store.transaction(
+                  (db) => db.execute('DROP TRIGGER reconnect_storage_failure'),
+                );
+              }
+              if (!attempt.startsWith('close')) {
+                if ([
+                  'vault',
+                  'offline',
+                  'wrong-account',
+                  'save-failure',
+                  'generation-failure',
+                ].contains(attempt)) {
+                  expect(controller.model.error, isNotNull, reason: attempt);
+                } else {
+                  expect(controller.model.error, isNull, reason: attempt);
+                }
+                controller.dispose();
+              }
+              credentials.writeFailure = null;
+              expect((await library.get(book.id))!.keptOnDevice, kept);
+              expect(await ReadingState(store).load(book.id), position);
+              expect(await Bookmarks(store).list(book.id), [bookmark]);
+              expect(
+                (await Annotations(store).summary(book.id)).latest,
+                'Keep this note',
+              );
+              expect(
+                await folders.withBookFile(
+                  book,
+                  (path) => File(path).readAsBytes(),
+                ),
+                bytes,
+              );
+              expect(
+                (await locations.catalog())
+                    .map((file) => (file.locationId, file.entry.key))
+                    .toList(),
+                catalog,
+              );
+              final grants = await folders.list();
+              expect(grants, hasLength(2));
+              expect(grants.last.toJson(), other.toJson());
+              expect(grants.first.id, previous.id);
+              expect(grants.first.directory, previous.directory);
+              expect(grants.first.directoryLabel, previous.directoryLabel);
+              if (attempt != 'success') {
+                expect(
+                  await preferences.get('device.library.folders'),
+                  saved,
+                  reason: attempt,
+                );
+                expect(credentials.values, oldCredentials, reason: attempt);
+                expect(
+                  (await locations.copies(
+                    book.contentHash,
+                  )).map((copy) => copy.failure),
+                  localDuplicate ? [] : [LocationFailure.revoked],
+                );
+              } else {
+                expect(
+                  grants.first.configuration,
+                  isNot(previous.configuration),
+                );
+                expect(credentials.values, hasLength(2));
+                expect(
+                  credentials.values.containsKey(
+                    previous.configuration['credential'],
+                  ),
+                  isFalse,
+                );
+              }
+            }
+            final adopted = await preferences.get('device.library.folders');
+            final superseded = (await provider.setup('drive'))!;
+            await expectLater(
+              folders.reconnect(previous, superseded),
+              throwsA(
+                isA<CoreException>().having(
+                  (error) => error.kind,
+                  'stale authorization',
+                  CoreErrorKind.cancelled,
+                ),
+              ),
+            );
+            await folders.discard(superseded);
+            expect(await preferences.get('device.library.folders'), adopted);
+            expect(credentials.values, hasLength(2));
+            // Reopen the actual store and rebuild the service, not just the dialog.
+            await folders.close();
+            await store.close();
+            store = await Store.open(database);
+            open();
+            final grants = await folders.list();
+            expect(grants, hasLength(2));
+            expect(grants.first.id, 'drive');
+            expect(grants.first.directory, sourceDirectory);
+            expect(
+              (await folders.discover(refresh: true))
+                  .where((file) => file.locationId == 'drive')
+                  .map((file) => file.entry.key),
+              localDuplicate ? [] : ['unopened'],
+            );
+            expect(await ReadingState(store).load(book.id), position);
+            expect(await Bookmarks(store).list(book.id), [bookmark]);
+            expect(
+              (await Annotations(store).summary(book.id)).latest,
+              'Keep this note',
+            );
+            expect(
+              await folders.withBookFile(
+                book,
+                (path) => File(path).readAsBytes(),
+              ),
+              bytes,
+            );
+          },
+          createHttpClient: (context) =>
+              _RedirectClient(native.createHttpClient(context), server.port),
+        );
+      },
+    );
+  }
 
   test(
     'credential generations isolate release and prevent late renewal resurrection',

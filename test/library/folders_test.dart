@@ -27,6 +27,7 @@ final class _FixtureProvider implements ConnectionProvider {
   _FixtureProvider(this.root, {this.id = 'fixture'});
   final String root;
   final released = <String>{};
+  final releasedCredentials = <String>{};
   final releaseCalls = <String, int>{};
   final releaseFailures = <String, Object>{};
   final refreshFailures = <String, Object>{};
@@ -56,7 +57,10 @@ final class _FixtureProvider implements ConnectionProvider {
 
   @override
   Future<LibraryLocation> open(LibraryConnection connection) async {
-    if (released.contains(connection.id)) {
+    final credential = connection.configuration['credential'];
+    if (credential == null
+        ? released.contains(connection.id)
+        : releasedCredentials.contains(credential)) {
       throw const LocationException(LocationFailure.revoked);
     }
     if (locations[connection.id] case final location?) return location;
@@ -76,6 +80,9 @@ final class _FixtureProvider implements ConnectionProvider {
     releaseCalls.update(connection.id, (count) => count + 1, ifAbsent: () => 1);
     if (releaseFailures[connection.id] case final failure?) throw failure;
     released.add(connection.id);
+    if (connection.configuration['credential'] case final credential?) {
+      releasedCredentials.add(credential);
+    }
   }
 }
 
@@ -216,6 +223,163 @@ final class _ReplacingLocation implements LibraryLocation {
 
 void main() {
   setUpAll(loadHarnessFonts);
+  for (final locale in const [Locale('en'), Locale('ja')]) {
+    testWidgets(
+      'Google Reconnect retains its selected source in ${locale.languageCode}',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        final data = (await tester.runAsync(() async {
+          final directory = await Directory.systemTemp.createTemp(
+            'reconnect-ui',
+          );
+          Directory('${directory.path}/Reading').createSync();
+          final store = await Store.open('${directory.path}/library.sqlite3');
+          final provider = _FixtureProvider(directory.path, id: 'google-drive');
+          final folders = LibraryFolders(
+            Preferences(store),
+            Library(store, managedDirectory: '${directory.path}/books'),
+            LibraryLocations(store),
+            () async => '${directory.path}/stage',
+            BookFileCache(store, '${directory.path}/cache'),
+            providers: [provider],
+          );
+          await folders.add(
+            LibraryConnection(
+              'saved',
+              'Google Drive',
+              provider.id,
+              {'root': directory.path, 'credential': 'old'},
+              directory: 'Reading',
+              directoryLabel: 'Reading',
+            ),
+          );
+          return (directory, store, folders);
+        }))!;
+        final (directory, store, folders) = data;
+        var offline = true;
+        Completer<void>? authorizationGate;
+        final controller = FoldersController(
+          folders: folders,
+          setup: (_) async => null,
+          setupGoogleDrive: (id) async {
+            await authorizationGate?.future;
+            if (offline) throw const LocationException(LocationFailure.offline);
+            return LibraryConnection(id, 'Google Drive', 'google-drive', {
+              'root': directory.path,
+              'credential': 'new',
+            });
+          },
+          confirmRemoval: (_) async => false,
+        )..dispatch(const FoldersStarted());
+        addTearDown(() async {
+          controller.dispose();
+          await tester.runAsync(() async {
+            await controller.drain();
+            await store.close();
+            await directory.delete(recursive: true);
+          });
+        });
+        tester.view.physicalSize = locale.languageCode == 'en'
+            ? const Size(390, 844)
+            : const Size(1280, 800);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue =
+            locale.languageCode == 'en' ? Brightness.light : Brightness.dark;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final l10n = await AppLocalizations.delegate.load(locale);
+        await tester.pumpWidget(
+          ShosaiShell(
+            locale: locale,
+            home: RepaintBoundary(
+              key: harnessBoundaryKey,
+              child: LibraryFoldersDialog(controller: controller),
+            ),
+          ),
+        );
+        Future<void> settle() async {
+          for (
+            var attempt = 0;
+            controller.model.busy && attempt < 500;
+            attempt++
+          ) {
+            await tester.pump(const Duration(milliseconds: 16));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          expect(controller.model.busy, isFalse);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+        }
+
+        await settle();
+        expect(find.text(l10n.locationReconnect), findsNothing);
+        await tester.tap(find.text('Google Drive'));
+        await tester.pumpAndSettle();
+        expect(find.text(l10n.locationReconnectDescription), findsOneWidget);
+        await captureHarnessArtifact(
+          tester,
+          'google-reconnect-${locale.languageCode}-ready',
+        );
+        await tester.tap(find.text(l10n.locationReconnect));
+        await settle();
+        expect(find.text(l10n.locationOffline), findsOneWidget);
+        expect(controller.model.selected, 'saved');
+        expect(
+          controller.model.grants.single.configuration['credential'],
+          'old',
+        );
+        await captureHarnessArtifact(
+          tester,
+          'google-reconnect-${locale.languageCode}-error',
+        );
+        offline = false;
+        authorizationGate = Completer<void>();
+        await tester.tap(find.text(l10n.locationReconnect));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(find.byType(LinearProgressIndicator), findsOneWidget);
+        for (final label in [
+          l10n.locationReconnect,
+          l10n.locationChooseFolder,
+        ]) {
+          expect(
+            tester.getSemantics(find.text(label)),
+            isSemantics(
+              isButton: true,
+              hasEnabledState: true,
+              isEnabled: false,
+              hasTapAction: false,
+            ),
+          );
+        }
+        await captureHarnessArtifact(
+          tester,
+          'google-reconnect-${locale.languageCode}-busy',
+        );
+        authorizationGate.complete();
+        await settle();
+        expect(find.text(l10n.locationOffline), findsNothing);
+        expect(controller.model.pending, isNull);
+        expect(controller.model.selected, 'saved');
+        expect(controller.model.choosingDirectory, isFalse);
+        expect(controller.model.grants.single.directory, 'Reading');
+        expect(
+          controller.model.grants.single.configuration['credential'],
+          'new',
+        );
+        await captureHarnessArtifact(
+          tester,
+          'google-reconnect-${locale.languageCode}-complete',
+        );
+        await folders.close();
+        semantics.dispose();
+      },
+    );
+  }
+
   test(
     'admission keeps newly conflicting metadata separate with safe ownership',
     () async {

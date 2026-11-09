@@ -207,9 +207,25 @@ class LibraryFoldersDialog extends StatelessWidget {
                         ),
                         Padding(
                           padding: const EdgeInsets.all(16),
-                          child: Text(l10n.locationSourceDescription),
+                          child: Text(
+                            controller.canReconnect(selected)
+                                ? l10n.locationReconnectDescription
+                                : l10n.locationSourceDescription,
+                          ),
                         ),
+                        if (controller.canReconnect(selected))
+                          ShadButton.outline(
+                            height: shosaiShadButtonHeight(context),
+                            enabled: !model.busy,
+                            onPressed: model.busy
+                                ? null
+                                : () => controller.dispatch(
+                                    const FoldersReconnectRequested(),
+                                  ),
+                            child: Text(l10n.locationReconnect),
+                          ),
                         ShadButton.outline(
+                          enabled: !model.busy,
                           onPressed: model.busy
                               ? null
                               : () => controller.dispatch(
@@ -218,6 +234,7 @@ class LibraryFoldersDialog extends StatelessWidget {
                           child: Text(l10n.locationChooseFolder),
                         ),
                         ShadButton.ghost(
+                          enabled: !model.busy,
                           onPressed: model.busy
                               ? null
                               : () => controller.dispatch(
