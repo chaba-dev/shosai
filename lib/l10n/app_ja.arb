@@ -76,6 +76,7 @@
   "readerContentsSubheading": "章と保存した場所",
   "readerCloseContents": "目次を閉じる",
   "readerChaptersHeading": "章",
+  "readerPageEntry": "{page}ページ",
   "readerChapterNumber": "第{number}章",
   "readerBookmarksHeading": "ブックマーク · {count}",
   "readerNoBookmarks": "ブックマークはありません",

@@ -284,6 +284,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerChaptersHeading => '章';
 
   @override
+  String readerPageEntry(int page) {
+    return '$pageページ';
+  }
+
+  @override
   String readerChapterNumber(int number) {
     return '第$number章';
   }

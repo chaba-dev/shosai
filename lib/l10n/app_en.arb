@@ -427,6 +427,15 @@
   "@readerChaptersHeading": {
     "description": "Iced reference key: chapters."
   },
+  "readerPageEntry": "Page {page}",
+  "@readerPageEntry": {
+    "description": "The page fallback for an untitled Contents entry of a PDF.",
+    "placeholders": {
+      "page": {
+        "type": "int"
+      }
+    }
+  },
   "readerChapterNumber": "Chapter {number}",
   "@readerChapterNumber": {
     "description": "Iced reference key: chapter-number. The chapter fallback for an untitled Contents entry.",

@@ -564,6 +564,12 @@ abstract class AppLocalizations {
   /// **'Chapters'**
   String get readerChaptersHeading;
 
+  /// The page fallback for an untitled Contents entry of a PDF.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {page}'**
+  String readerPageEntry(int page);
+
   /// Iced reference key: chapter-number. The chapter fallback for an untitled Contents entry.
   ///
   /// In en, this message translates to:

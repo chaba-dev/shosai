@@ -295,6 +295,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerChaptersHeading => 'Chapters';
 
   @override
+  String readerPageEntry(int page) {
+    return 'Page $page';
+  }
+
+  @override
   String readerChapterNumber(int number) {
     return 'Chapter $number';
   }
