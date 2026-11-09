@@ -33,6 +33,7 @@ final class _FixtureProvider implements ConnectionProvider {
   final refreshFailures = <String, Object>{};
   final refreshedConfiguration = <String, Map<String, String>>{};
   final locations = <String, LibraryLocation>{};
+  Future<void> Function()? beforeOpen;
 
   @override
   final String id;
@@ -57,6 +58,7 @@ final class _FixtureProvider implements ConnectionProvider {
 
   @override
   Future<LibraryLocation> open(LibraryConnection connection) async {
+    await beforeOpen?.call();
     final credential = connection.configuration['credential'];
     if (credential == null
         ? released.contains(connection.id)
@@ -233,12 +235,20 @@ void main() {
             'reconnect-ui',
           );
           Directory('${directory.path}/Reading').createSync();
+          File(
+            'packages/shosai_core/test/fixtures/sample.epub',
+          ).copySync('${directory.path}/Reading/book.epub');
           final store = await Store.open('${directory.path}/library.sqlite3');
           final provider = _FixtureProvider(directory.path, id: 'google-drive');
+          final locations = LibraryLocations(store);
           final folders = LibraryFolders(
             Preferences(store),
-            Library(store, managedDirectory: '${directory.path}/books'),
-            LibraryLocations(store),
+            Library(
+              store,
+              managedDirectory: '${directory.path}/books',
+              inspectors: {BookFormat.epub: const EpubInspector()},
+            ),
+            locations,
             () async => '${directory.path}/stage',
             BookFileCache(store, '${directory.path}/cache'),
             providers: [provider],
@@ -253,9 +263,14 @@ void main() {
               directoryLabel: 'Reading',
             ),
           );
-          return (directory, store, folders);
+          await folders.importEntry(
+            'saved',
+            (await folders.discover()).single.entry,
+          );
+          await locations.remove('saved');
+          return (directory, store, folders, provider);
         }))!;
-        final (directory, store, folders) = data;
+        final (directory, store, folders, provider) = data;
         var offline = true;
         Completer<void>? authorizationGate;
         final controller = FoldersController(
@@ -373,6 +388,112 @@ void main() {
         await captureHarnessArtifact(
           tester,
           'google-reconnect-${locale.languageCode}-complete',
+        );
+        Future<void> showCheck({bool busy = false}) async {
+          await tester.scrollUntilVisible(
+            find.text(l10n.locationCheckBooks),
+            100,
+            scrollable: find.descendant(
+              of: find.byType(ListView),
+              matching: find.byType(Scrollable),
+            ),
+          );
+          if (busy) {
+            await tester.pump(const Duration(milliseconds: 200));
+          } else {
+            await tester.pumpAndSettle();
+            expect(
+              find.text(l10n.locationCheckBooks).hitTestable(),
+              findsOneWidget,
+            );
+          }
+        }
+
+        await showCheck();
+        await captureHarnessArtifact(
+          tester,
+          'check-books-${locale.languageCode}-ready',
+        );
+        var readOffline = true;
+        Completer<void>? checkGate;
+        addTearDown(() {
+          if (checkGate?.isCompleted == false) checkGate!.complete();
+        });
+        provider.beforeOpen = () async {
+          await checkGate?.future;
+          if (readOffline) {
+            throw const LocationException(LocationFailure.offline);
+          }
+        };
+        await tester.tap(find.text(l10n.locationCheckBooks));
+        await settle();
+        expect(find.text(l10n.locationOffline), findsOneWidget);
+        await showCheck();
+        await captureHarnessArtifact(
+          tester,
+          'check-books-${locale.languageCode}-error',
+        );
+        readOffline = false;
+        await tester.runAsync(() async {
+          final remote = File('${directory.path}/Reading/book.epub');
+          final changed = await remote.readAsBytes();
+          changed[changed.length ~/ 2] ^= 1;
+          await remote.writeAsBytes(changed);
+        });
+        await showCheck();
+        await tester.tap(find.text(l10n.locationCheckBooks));
+        await settle();
+        expect(find.text(l10n.locationCheckBooksResult(0, 1)), findsOneWidget);
+        await showCheck();
+        await captureHarnessArtifact(
+          tester,
+          'check-books-${locale.languageCode}-unavailable',
+        );
+        await tester.runAsync(() async {
+          await File(
+            'packages/shosai_core/test/fixtures/sample.epub',
+          ).copy('${directory.path}/Reading/book.epub');
+        });
+        checkGate = Completer<void>();
+        await showCheck();
+        await tester.tap(find.text(l10n.locationCheckBooks));
+        await tester.pump();
+        await showCheck(busy: true);
+        expect(
+          tester.getSemantics(find.text(l10n.locationCheckBooks)),
+          isSemantics(
+            isButton: true,
+            hasEnabledState: true,
+            isEnabled: false,
+            hasTapAction: false,
+          ),
+        );
+        await captureHarnessArtifact(
+          tester,
+          'check-books-${locale.languageCode}-busy',
+        );
+        checkGate.complete();
+        await settle();
+        expect(find.text(l10n.locationCheckBooksResult(1, 0)), findsOneWidget);
+        expect(controller.model.selected, 'saved');
+        expect(controller.model.grants.single.directory, 'Reading');
+        expect(
+          controller.model.grants.single.configuration['credential'],
+          'new',
+        );
+        await showCheck();
+        await captureHarnessArtifact(
+          tester,
+          'check-books-${locale.languageCode}-verified',
+        );
+        await showCheck();
+        await tester.tap(find.text(l10n.locationCheckBooks));
+        await settle();
+        expect(find.text(l10n.locationCheckBooksEmpty), findsOneWidget);
+        await showCheck();
+        await captureHarnessArtifact(
+          tester,
+          'check-books-${locale.languageCode}-empty',
         );
         await folders.close();
         semantics.dispose();

@@ -1578,6 +1578,30 @@ abstract class AppLocalizations {
   /// **'Sign in again with the same Google account. Your source folder, books, notes and bookmarks stay in place.'**
   String get locationReconnectDescription;
 
+  /// No description provided for @locationCheckBooks.
+  ///
+  /// In en, this message translates to:
+  /// **'Check book access'**
+  String get locationCheckBooks;
+
+  /// No description provided for @locationCheckBooksDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Reads unavailable book links online, including full book contents. Saved copies, notes and bookmarks stay in place.'**
+  String get locationCheckBooksDescription;
+
+  /// No description provided for @locationCheckBooksEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No unavailable book links to check.'**
+  String get locationCheckBooksEmpty;
+
+  /// No description provided for @locationCheckBooksResult.
+  ///
+  /// In en, this message translates to:
+  /// **'Verified: {verified} · Still unavailable: {unavailable}'**
+  String locationCheckBooksResult(int verified, int unavailable);
+
   /// No description provided for @locationGoogleDriveRegistrationRequired.
   ///
   /// In en, this message translates to:

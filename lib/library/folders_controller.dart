@@ -42,6 +42,10 @@ final class FoldersReconnectRequested extends FoldersMessage {
   const FoldersReconnectRequested();
 }
 
+final class FoldersCheckBooksRequested extends FoldersMessage {
+  const FoldersCheckBooksRequested();
+}
+
 final class FoldersDirectorySaved extends FoldersMessage {
   const FoldersDirectorySaved();
 }
@@ -73,11 +77,18 @@ final class FoldersRemoveRequested extends FoldersMessage {
 }
 
 final class _FoldersLoaded extends FoldersMessage {
-  const _FoldersLoaded(this.revision, this.grants, {this.selected, this.then});
+  const _FoldersLoaded(
+    this.revision,
+    this.grants, {
+    this.selected,
+    this.then,
+    this.verification,
+  });
   final int revision;
   final List<LibraryConnection> grants;
   final String? selected;
   final FoldersMessage? then;
+  final ({int verified, int unavailable})? verification;
 }
 
 final class _FoldersListed extends FoldersMessage {
@@ -111,6 +122,7 @@ final class FoldersModel {
     this.choosingDirectory = false,
     this.pending,
     this.saving = false,
+    this.verification,
   });
   final List<LibraryConnection> grants;
   final String? selected;
@@ -122,6 +134,7 @@ final class FoldersModel {
   final bool choosingDirectory;
   final LibraryConnection? pending;
   final bool saving;
+  final ({int verified, int unavailable})? verification;
 }
 
 /// Dialog-local navigation state. Connections and imported content belong to
@@ -251,6 +264,26 @@ final class FoldersController extends ChangeNotifier {
             selected: previous.id,
           );
         });
+      case FoldersCheckBooksRequested():
+        if (_model.busy ||
+            _model.selected == null ||
+            _model.pending != null ||
+            _model.choosingDirectory) {
+          return;
+        }
+        final id = _model.selected!;
+        _effect((revision, cancellation) async {
+          final verification = await _folders.revalidate(
+            id,
+            cancellation: cancellation,
+          );
+          return _FoldersLoaded(
+            revision,
+            await _folders.list(),
+            selected: id,
+            verification: verification,
+          );
+        });
       case FoldersChooseDirectoryRequested():
         if (_model.busy || _model.selected == null) return;
         _emit(
@@ -357,6 +390,7 @@ final class FoldersController extends ChangeNotifier {
           FoldersModel(
             grants: List.unmodifiable(message.grants),
             selected: message.selected,
+            verification: message.verification,
           ),
         );
         if (message.then case final then?) dispatch(then);

@@ -907,6 +907,21 @@ class AppLocalizationsEn extends AppLocalizations {
       'Sign in again with the same Google account. Your source folder, books, notes and bookmarks stay in place.';
 
   @override
+  String get locationCheckBooks => 'Check book access';
+
+  @override
+  String get locationCheckBooksDescription =>
+      'Reads unavailable book links online, including full book contents. Saved copies, notes and bookmarks stay in place.';
+
+  @override
+  String get locationCheckBooksEmpty => 'No unavailable book links to check.';
+
+  @override
+  String locationCheckBooksResult(int verified, int unavailable) {
+    return 'Verified: $verified · Still unavailable: $unavailable';
+  }
+
+  @override
   String get locationGoogleDriveRegistrationRequired =>
       'Google Drive is not configured in this build. The app distributor must configure Google OAuth first.';
 

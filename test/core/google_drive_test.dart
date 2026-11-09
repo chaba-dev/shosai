@@ -498,10 +498,14 @@ void main() {
             request.response.add(bytes);
             await request.response.close();
           } else if (request.uri.path == '/drive/v3/files') {
+            // The independent source must not list the same opaque files:
+            // main now deliberately transfers unchanged admissions when a
+            // replacement connection rediscovers a removed source's files.
+            final prefix = token == 'Bearer account-1' ? 'other-' : '';
             _json(request, {
               'files': [
-                _file('book', size: bytes.length),
-                if (!localDuplicate) _file('unopened'),
+                _file('${prefix}book', size: bytes.length),
+                if (!localDuplicate) _file('${prefix}unopened'),
               ],
             });
           } else {
@@ -736,6 +740,55 @@ void main() {
               ),
               bytes,
             );
+            Future<Map<String, List<List<Object?>>>> snapshot() => store.read(
+              (db) => {
+                for (final table in db.select(
+                  "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+                ))
+                  table['name'] as String: [
+                    for (final row in db.select(
+                      'SELECT * FROM "${table['name']}"',
+                    ))
+                      row.values.toList(),
+                  ],
+              },
+            );
+            for (final kept in [true, false]) {
+              if (!localDuplicate) await folders.setKept(book.id, kept);
+              if (!kept) {
+                mode = 'offline';
+                await folders.discover(refresh: true);
+                mode = 'success';
+              }
+              final before = await snapshot();
+              expect(await folders.revalidate('drive'), (
+                verified: localDuplicate ? 0 : 1,
+                unavailable: 0,
+              ));
+              final after = await snapshot();
+              expect(after.remove('book_locators'), [
+                for (final row in before.remove('book_locators')!)
+                  [...row.take(3), row[1] == 'drive' ? null : row[3]],
+              ]);
+              expect(
+                after,
+                before,
+                reason: 'only verified locator flags may change',
+              );
+              expect(
+                await folders.withBookFile(
+                  book,
+                  (path) => File(path).readAsBytes(),
+                ),
+                bytes,
+              );
+              expect(await ReadingState(store).load(book.id), position);
+              expect(await Bookmarks(store).list(book.id), [bookmark]);
+              expect(
+                (await Annotations(store).summary(book.id)).latest,
+                'Keep this note',
+              );
+            }
           },
           createHttpClient: (context) =>
               _RedirectClient(native.createHttpClient(context), server.port),

@@ -113,6 +113,18 @@ class LibraryFoldersDialog extends StatelessWidget {
                       _ => l10n.locationFailed,
                     }),
                   ),
+                if (model.verification case final verification?)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      verification.verified + verification.unavailable == 0
+                          ? l10n.locationCheckBooksEmpty
+                          : l10n.locationCheckBooksResult(
+                              verification.verified,
+                              verification.unavailable,
+                            ),
+                    ),
+                  ),
                 if (selected != null)
                   Row(
                     children: [
@@ -241,6 +253,20 @@ class LibraryFoldersDialog extends StatelessWidget {
                                   FoldersRemoveRequested(selected.id),
                                 ),
                           child: Text(l10n.locationRemove),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(l10n.locationCheckBooksDescription),
+                        ),
+                        ShadButton.outline(
+                          height: shosaiShadButtonHeight(context),
+                          enabled: !model.busy,
+                          onPressed: model.busy
+                              ? null
+                              : () => controller.dispatch(
+                                  const FoldersCheckBooksRequested(),
+                                ),
+                          child: Text(l10n.locationCheckBooks),
                         ),
                       ] else ...[
                         if (model.error != null)

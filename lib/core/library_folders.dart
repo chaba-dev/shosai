@@ -361,6 +361,27 @@ final class LibraryFolders {
     }
   });
 
+  /// Explicitly verify failed book links online, bypassing cache reads without
+  /// evicting or replacing any payload. No discovery or admission is performed.
+  Future<({int verified, int unavailable})> revalidate(
+    String id, {
+    CancellationToken? cancellation,
+  }) => _serial(() async {
+    cancellation.throwIfCancelled();
+    await _load(cancellation: cancellation);
+    final grant = _grant(id);
+    if (!_scans(grant)) {
+      throw const CoreException.invalidRequest('This source cannot be read.');
+    }
+    final location = await _provider(grant.provider).open(grant);
+    cancellation.throwIfCancelled();
+    return _locations.revalidate(
+      location,
+      _generations[id]!,
+      cancellation: cancellation,
+    );
+  });
+
   Future<void> configure(String id, {String? directory, String? label}) =>
       _serial(() async {
         await _load();

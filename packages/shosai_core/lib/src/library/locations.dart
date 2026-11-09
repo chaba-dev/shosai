@@ -4,6 +4,8 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import '../cancellation.dart';
 import '../errors.dart';
 import '../preferences.dart';
@@ -593,6 +595,63 @@ final class LibraryLocations {
     failure,
   );
 
+  /// Check failed links against their original content identity, without
+  /// admitting files, replacing cached copies or reconciling the catalog.
+  /// Streams full contents with a size bound; only verified, still-current
+  /// links lose their failure. A failed check leaves its old record intact.
+  Future<({int verified, int unavailable})> revalidate(
+    LibraryLocation location,
+    int generation, {
+    CancellationToken? cancellation,
+  }) async {
+    cancellation.throwIfCancelled();
+    final id = location.id;
+    final copies = await _store.read(
+      (db) => [
+        for (final row in db.select(
+          '''SELECT l.content_hash, l.locator_key, b.file_size
+           FROM book_locators l JOIN books b ON b.content_hash = l.content_hash
+           WHERE l.location_id = ? AND l.failure IS NOT NULL
+           ORDER BY l.content_hash, l.locator_key''',
+          [id],
+        ))
+          (
+            hash: row.columnAt(0) as String,
+            key: row.columnAt(1) as String,
+            size: row.columnAt(2) as int,
+          ),
+      ],
+    );
+    var verified = 0;
+    var unavailable = 0;
+    for (final copy in copies) {
+      cancellation.throwIfCancelled();
+      if (!await _store.read((db) => _hasGeneration(db, id, generation))) {
+        throw const CoreException.cancelled();
+      }
+      try {
+        if (!await _matchesContents(location, copy, cancellation)) {
+          unavailable++;
+          continue;
+        }
+        cancellation.throwIfCancelled();
+        if (!await _observed(id, generation, copy.hash, copy.key, null)) {
+          throw const CoreException.cancelled();
+        }
+        verified++;
+      } on LocationException {
+        // One inaccessible file must not erase another file's successful
+        // verification or invalidate a working source's authorization.
+        unavailable++;
+      }
+    }
+    cancellation.throwIfCancelled();
+    if (!await _store.read((db) => _hasGeneration(db, id, generation))) {
+      throw const CoreException.cancelled();
+    }
+    return (verified: verified, unavailable: unavailable);
+  }
+
   /// Read just the requested file/range; record expected availability failures
   /// without removing the book or changing any of its annotations.
   Stream<List<int>> read(
@@ -643,7 +702,7 @@ final class LibraryLocations {
     }
   }
 
-  Future<void> _observed(
+  Future<bool> _observed(
     String id,
     int generation,
     String hash,
@@ -662,7 +721,32 @@ final class LibraryLocations {
         [failure?.name, hash, id, key, id, generation],
       );
     }
+    return db.updatedRows > 0;
   });
+}
+
+// Keep stream callbacks (and their cancellation token) out of the lexical
+// context of StoreBody closures sent to the database isolate.
+Future<bool> _matchesContents(
+  LibraryLocation location,
+  ({String hash, String key, int size}) copy,
+  CancellationToken? cancellation,
+) async {
+  var size = 0;
+  final digest = await sha256
+      .bind(
+        location.read(copy.key, cancellation: cancellation).map((chunk) {
+          cancellation.throwIfCancelled();
+          size += chunk.length;
+          if (size > copy.size) {
+            throw const LocationException(LocationFailure.missing);
+          }
+          return chunk;
+        }),
+      )
+      .single;
+  cancellation.throwIfCancelled();
+  return size == copy.size && digest.toString() == copy.hash;
 }
 
 /// What a removed connection admitted or hid: the file's key, size and

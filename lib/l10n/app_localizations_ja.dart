@@ -850,6 +850,21 @@ class AppLocalizationsJa extends AppLocalizations {
       '同じ Google アカウントで再度ログインしてください。読み込み元フォルダ、本、ノート、しおりはそのまま残ります。';
 
   @override
+  String get locationCheckBooks => '本へのアクセスを確認';
+
+  @override
+  String get locationCheckBooksDescription =>
+      'アクセスできない本のリンクをオンラインで確認し、本の内容全体を読み込みます。保存済みの本、ノート、しおりはそのまま残ります。';
+
+  @override
+  String get locationCheckBooksEmpty => '確認が必要な本のリンクはありません。';
+
+  @override
+  String locationCheckBooksResult(int verified, int unavailable) {
+    return '確認済み：$verified・アクセス不可：$unavailable';
+  }
+
+  @override
   String get locationGoogleDriveRegistrationRequired =>
       'このビルドでは Google Drive が設定されていません。アプリの配布元による Google OAuth の設定が必要です。';
 
