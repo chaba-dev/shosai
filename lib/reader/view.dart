@@ -843,10 +843,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                       // text scale), and a zero height there would collapse the
                       // chrome.
                       LayoutBuilder(
-                        builder: (context, constraints) => Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // The search bar is its own row under the toolbar
+                        builder: (context, constraints) {
+                          final topRows = <Widget>[
+                            // The search bar is its own row above the stage
                             // (RD-11); search is independent of the panels.
                             if (model.searchOpen &&
                                 model.document != null &&
@@ -886,48 +885,72 @@ class _ReaderScreenState extends State<ReaderScreen>
                                   ),
                                 ),
                               ),
-                            Expanded(child: _readerBody(model, layout)),
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxHeight:
-                                    constraints.maxHeight *
-                                    _readerAlertBoundShare,
+                          ];
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // The stage runs under the status bar and its
+                              // toolbar pads for it. A row above the stage
+                              // takes that padding instead, so the stage no
+                              // longer pads for a bar it does not touch.
+                              if (topRows.isNotEmpty)
+                                SafeArea(
+                                  bottom: false,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: topRows,
+                                  ),
+                                ),
+                              Expanded(
+                                child: MediaQuery.removePadding(
+                                  context: context,
+                                  removeTop: topRows.isNotEmpty,
+                                  child: _readerBody(model, layout),
+                                ),
                               ),
-                              child: _ReaderErrorSurfaces(model: model),
-                            ),
-                            if (widget.debugPathEntry) ...[
-                              const SizedBox(height: 12),
-                              // A dev/test-only entry, bounded so a short viewport
-                              // at a scaled interface cannot overflow the reader
-                              // column.
                               ConstrainedBox(
                                 constraints: BoxConstraints(
                                   maxHeight:
                                       constraints.maxHeight *
-                                      _readerDevEntryBoundShare,
+                                      _readerAlertBoundShare,
                                 ),
-                                child: SingleChildScrollView(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: ShosaiTokens.space4,
-                                    ),
-                                    child: _ReaderControls(
-                                      model: model,
-                                      path: _path.value,
-                                      pathFieldKey: _pathFieldKey,
-                                      openFocus: _openFocus,
-                                      open: _open,
-                                      // A single row keeps the dev-only entry short
-                                      // enough not to push the chrome out of a small
-                                      // viewport at a scaled interface.
-                                      horizontal: true,
+                                child: _ReaderErrorSurfaces(model: model),
+                              ),
+                              if (widget.debugPathEntry) ...[
+                                const SizedBox(height: 12),
+                                // A dev/test-only entry, bounded so a short viewport
+                                // at a scaled interface cannot overflow the reader
+                                // column.
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight:
+                                        constraints.maxHeight *
+                                        _readerDevEntryBoundShare,
+                                  ),
+                                  child: SingleChildScrollView(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: ShosaiTokens.space4,
+                                      ),
+                                      child: _ReaderControls(
+                                        model: model,
+                                        path: _path.value,
+                                        pathFieldKey: _pathFieldKey,
+                                        openFocus: _openFocus,
+                                        open: _open,
+                                        // A single row keeps the dev-only entry short
+                                        // enough not to push the chrome out of a small
+                                        // viewport at a scaled interface.
+                                        horizontal: true,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
-                        ),
+                          );
+                        },
                       ),
                 ),
               ),

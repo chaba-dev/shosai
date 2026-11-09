@@ -2044,6 +2044,21 @@ void main() {
       await tester.pump();
       expect(find.byKey(const ValueKey('reader-open-error')), findsOneWidget);
     });
+
+    testWidgets('the open failure alert starts below the status bar', (
+      tester,
+    ) async {
+      _setView(tester, const Size(400, 800));
+      tester.view.padding = const FakeViewPadding(top: 48);
+      final bridge = _ChromeBridge(failOpen: true);
+      await _open(tester, _reader(bridge: bridge));
+
+      final alert = find.byKey(const ValueKey('reader-open-error'));
+      expect(tester.getTopLeft(alert).dy, 48);
+      // The toolbar below it does not pad for the bar a second time.
+      final header = find.byKey(const ValueKey('reader-header'));
+      expect(tester.getTopLeft(header).dy, tester.getBottomLeft(alert).dy);
+    });
   });
 
   testWidgets('T200 leaves the document font size unchanged', (tester) async {
