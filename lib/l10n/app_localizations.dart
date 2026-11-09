@@ -2214,6 +2214,24 @@ abstract class AppLocalizations {
   /// **'The page could not be displayed. Reopen the book and try again.'**
   String get errorRenderFailed;
 
+  /// No description provided for @errorLocationOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'The book’s location is offline. Try again when it is connected.'**
+  String get errorLocationOffline;
+
+  /// No description provided for @errorLocationRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'The book’s location is unavailable. Reconnect the folder to read it.'**
+  String get errorLocationRevoked;
+
+  /// No description provided for @errorLocationMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The book is missing from its location. Your notes are still here.'**
+  String get errorLocationMissing;
+
   /// No description provided for @shellSearchFailed.
   ///
   /// In en, this message translates to:

@@ -788,7 +788,7 @@ void main() {
           isA<FlutterBridgeError>().having(
             (error) => error.kind,
             'kind',
-            FlutterBridgeErrorKind.notFound,
+            FlutterBridgeErrorKind.locationMissing,
           ),
         ),
       );
@@ -948,7 +948,7 @@ void main() {
           isA<FlutterBridgeError>().having(
             (error) => error.kind,
             'kind',
-            FlutterBridgeErrorKind.notFound,
+            FlutterBridgeErrorKind.locationRevoked,
           ),
         ),
       );

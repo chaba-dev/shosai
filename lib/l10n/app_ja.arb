@@ -351,6 +351,9 @@
   "errorMalformed": "本を読み取れません。別のコピーでお試しください。",
   "errorBackendUnavailable": "文書エンジンを利用できません。アプリを再起動して、もう一度お試しください。",
   "errorRenderFailed": "ページを表示できません。本を開き直して、もう一度お試しください。",
+  "errorLocationOffline": "本の保存場所はオフラインです。接続後にもう一度お試しください。",
+  "errorLocationRevoked": "本の保存場所にアクセスできません。フォルダを再接続すると読めます。",
+  "errorLocationMissing": "本が保存場所に見つかりません。ノートは残っています。",
   "shellSearchFailed": "検索を完了できませんでした。もう一度お試しください。",
   "shellNotesFailed": "ノートを読み込めませんでした。もう一度お試しください。",
   "locationAuthorizationReturned": "認証結果を受け取りました。Shōsai に戻り、接続が完了したか確認してください。このタブは閉じてかまいません。"

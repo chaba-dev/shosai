@@ -1242,6 +1242,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get errorRenderFailed => 'ページを表示できません。本を開き直して、もう一度お試しください。';
 
   @override
+  String get errorLocationOffline => '本の保存場所はオフラインです。接続後にもう一度お試しください。';
+
+  @override
+  String get errorLocationRevoked => '本の保存場所にアクセスできません。フォルダを再接続すると読めます。';
+
+  @override
+  String get errorLocationMissing => '本が保存場所に見つかりません。ノートは残っています。';
+
+  @override
   String get shellSearchFailed => '検索を完了できませんでした。もう一度お試しください。';
 
   @override

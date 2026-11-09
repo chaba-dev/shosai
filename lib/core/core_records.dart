@@ -1609,8 +1609,8 @@ final class _LazyPdfText implements ReaderText {
       );
 }
 
-/// Run [body], reporting a core failure as the bridge error the controllers
-/// already present.
+/// Run [body], reporting a location failure as the core error library search
+/// records per book.
 Future<T> _locationErrors<T>(Future<T> Function() body) async {
   try {
     return await body();
@@ -1619,21 +1619,34 @@ Future<T> _locationErrors<T>(Future<T> Function() body) async {
       error.failure == LocationFailure.offline
           ? CoreErrorKind.inaccessible
           : CoreErrorKind.notFound,
-      switch (error.failure) {
-        LocationFailure.offline =>
-          'The book’s location is offline. Try again when it is connected.',
-        LocationFailure.revoked =>
-          'The book’s location is unavailable. Reconnect the folder to read it.',
-        LocationFailure.missing =>
-          'The book is missing from its location. Your notes are still here.',
-      },
+      _locationMessage(error.failure),
     );
   }
 }
 
+String _locationMessage(LocationFailure failure) => switch (failure) {
+  LocationFailure.offline =>
+    'The book’s location is offline. Try again when it is connected.',
+  LocationFailure.revoked =>
+    'The book’s location is unavailable. Reconnect the folder to read it.',
+  LocationFailure.missing =>
+    'The book is missing from its location. Your notes are still here.',
+};
+
 Future<T> _bridgeErrors<T>(Future<T> Function() body) async {
   try {
-    return await _locationErrors(body);
+    return await body();
+  } on LocationException catch (error) {
+    // The controllers present a location failure by its own kind, so the user
+    // learns to reconnect the folder rather than to look for a lost file.
+    throw FlutterBridgeError(
+      kind: switch (error.failure) {
+        LocationFailure.offline => FlutterBridgeErrorKind.locationOffline,
+        LocationFailure.revoked => FlutterBridgeErrorKind.locationRevoked,
+        LocationFailure.missing => FlutterBridgeErrorKind.locationMissing,
+      },
+      message: _locationMessage(error.failure),
+    );
   } on CoreException catch (error) {
     throw FlutterBridgeError(
       kind: switch (error.kind) {

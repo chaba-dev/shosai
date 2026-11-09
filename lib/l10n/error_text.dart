@@ -17,6 +17,9 @@ String localizedErrorText(Object error, AppLocalizations l10n) =>
         FlutterBridgeErrorKind.backendUnavailable =>
           l10n.errorBackendUnavailable,
         FlutterBridgeErrorKind.renderFailed => l10n.errorRenderFailed,
+        FlutterBridgeErrorKind.locationOffline => l10n.errorLocationOffline,
+        FlutterBridgeErrorKind.locationRevoked => l10n.errorLocationRevoked,
+        FlutterBridgeErrorKind.locationMissing => l10n.errorLocationMissing,
       },
       _ => l10n.importOperationFailed,
     };
