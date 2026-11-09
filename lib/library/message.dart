@@ -234,6 +234,7 @@ final class _LibraryMutationCompleted extends LibraryMessage {
     this.refresh = false,
     this.managedFileDeletionPending = false,
     this.notice,
+    this.open,
   });
   final LibraryFailure failure;
   final String? error;
@@ -247,6 +248,13 @@ final class _LibraryMutationCompleted extends LibraryMessage {
   /// it: a completion that arrives after disposal never reports feedback for an
   /// operation whose controller is gone.
   final NoticeRequest? notice;
+
+  /// The book this completed import hands to the reader, or null.
+  ///
+  /// A document opened in Shōsai from another app is imported to be read, so
+  /// the one book it lands (new, or already in the library) opens as if its
+  /// card had been tapped.
+  final FlutterLibraryBook? open;
 }
 
 /// The add-books import effect has unwound.

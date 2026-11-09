@@ -64,6 +64,7 @@ final class LibraryImportSelection {
     this.directory = false,
     this.runner,
     this.cleanup,
+    this.openSingleBook = false,
   }) : connect = null;
 
   /// Add books chose a connection rather than files: nothing is imported, and
@@ -73,7 +74,8 @@ final class LibraryImportSelection {
       managed = false,
       directory = false,
       runner = null,
-      cleanup = null;
+      cleanup = null,
+      openSingleBook = false;
 
   final List<String> paths;
   final bool managed;
@@ -81,6 +83,10 @@ final class LibraryImportSelection {
   final LibraryImportRunner? runner;
   final Future<void> Function()? cleanup;
   final LibraryConnectionKind? connect;
+
+  /// Whether the one book this selection lands opens in the reader: a
+  /// document another app handed to Shōsai is imported to be read now.
+  final bool openSingleBook;
 }
 
 final class LibraryModel {
