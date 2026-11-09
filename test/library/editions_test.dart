@@ -254,17 +254,19 @@ void main() {
   });
 
   for (final state in [
-    (390.0, false),
-    (1024.0, false),
-    (1440.0, false),
-    (1024.0, true),
+    (390.0, false, 1.0),
+    (1024.0, false, 1.0),
+    (1440.0, false, 1.0),
+    (1024.0, true, 1.0),
+    (390.0, false, 2.0),
   ]) {
-    final (width, dark) = state;
-    final suffix = '${width.toInt()}${dark ? '-dark' : ''}';
+    final (width, dark, textScale) = state;
+    final suffix =
+        '${width.toInt()}${dark ? '-dark' : ''}${textScale == 1 ? '' : '-200pct'}';
     testWidgets('production grouped shelf and Quick picker at $suffix', (
       tester,
     ) async {
-      HarnessView(size: Size(width, 900)).apply(tester);
+      HarnessView(size: Size(width, 900), textScale: textScale).apply(tester);
       tester.platformDispatcher.platformBrightnessTestValue = dark
           ? Brightness.dark
           : Brightness.light;
@@ -275,10 +277,21 @@ void main() {
         final edition = (await shelf.page(
           sources: [],
         )).editions.singleWhere((e) => e.files.length == 3);
-        await shelf.prefer(
-          edition.id,
-          core.contentEditionKey('1'.padLeft(64, '0')),
-        );
+        if (textScale == 1) {
+          await shelf.prefer(
+            edition.id,
+            core.contentEditionKey('1'.padLeft(64, '0')),
+          );
+        } else {
+          await data.store.transaction((db) {
+            db.execute(
+              "UPDATE books SET last_read = '2026-11-09T10:00:00Z' WHERE id = 1",
+            );
+            db.execute(
+              "UPDATE books SET last_read = '2026-11-09T11:00:00Z' WHERE id = 2",
+            );
+          });
+        }
       });
       final actions = find.byWidgetPredicate(
         (w) =>
@@ -297,6 +310,15 @@ void main() {
           .model
           .editions!
           .singleWhere((edition) => edition.files.length == 3);
+      final card = find.byKey(ValueKey('edition-${grouped.id}'));
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.text(textScale == 1 ? '23%' : '68%'),
+        ),
+        findsOneWidget,
+        reason: 'Show one file’s progress, never combine positions or reset it',
+      );
       await tester.tap(find.byKey(ValueKey('edition-read-as-${grouped.id}')));
       // The library deliberately keeps its busy indicator while its owned
       // picker is open, so this state has no animation-free settle point.

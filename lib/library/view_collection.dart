@@ -33,6 +33,7 @@ final class LibraryShelf {
     required this.rowGap,
     required this.layout,
     required this.openTag,
+    required this.editionCards,
   });
 
   /// The shelf for [available] px of content width at [layout]: three
@@ -46,6 +47,7 @@ final class LibraryShelf {
     ShellLayout layout,
     double available, {
     bool openTag = false,
+    bool editionCards = false,
   }) {
     final columnGap = switch (layout) {
       ShellLayout.phone => 14.0,
@@ -63,6 +65,7 @@ final class LibraryShelf {
       rowGap: layout == ShellLayout.phone ? 20 : columnGap,
       layout: layout,
       openTag: openTag,
+      editionCards: editionCards,
     );
   }
 
@@ -74,6 +77,9 @@ final class LibraryShelf {
 
   /// Whether the cards keep a line for the *Open* tag.
   final bool openTag;
+
+  /// Edition cards keep their format badges above the per-file reading status.
+  final bool editionCards;
 
   bool get phone => layout == ShellLayout.phone;
 
@@ -149,7 +155,14 @@ double _cardMetadataBox(BuildContext context, LibraryShelf shelf) {
   final tag = shelf.openTag
       ? _cardMetadataRunSpacing + _lineHeight(context, _cardOpenTagStyle)
       : 0.0;
-  return _cardMetadataRuns(context) + tag;
+  // At larger text sizes the two format badges can occupy separate runs.
+  // Keep those runs in addition to the existing status and open-tag budget.
+  final formats = shelf.editionCards
+      ? _lineHeight(context, shellInterfaceStyle(10, 12)) +
+            _cardBadgePaddingVertical * 2 +
+            _cardMetadataRunSpacing
+      : 0.0;
+  return _cardMetadataRuns(context) + formats + tag;
 }
 
 /// The badge and status runs of the meta line.
@@ -685,6 +698,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
         final shelf = LibraryShelf.of(
           layout,
           constraints.maxWidth - padding.horizontal,
+          editionCards: widget.model.editions != null,
           openTag: widget.model.books.any(
             (book) => widget.openBookIds.contains(book.bookId),
           ),
@@ -743,9 +757,15 @@ class _LibraryGridState extends State<_LibraryGrid> {
                       final item = items[index];
                       if (item is BookEdition) {
                         return _EditionCard(
+                          key: ValueKey('edition-${item.id}'),
                           edition: item,
                           model: widget.model,
                           shelf: shelf,
+                          open: item.files.any(
+                            (file) =>
+                                !file.unavailable &&
+                                widget.openBookIds.contains(file.book?.id),
+                          ),
                           loadCover: widget.loadCover,
                           loadSourceCover: widget.loadSourceCover,
                           onOpen: widget.model.busy

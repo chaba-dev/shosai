@@ -2,9 +2,11 @@ part of 'view.dart';
 
 class _EditionCard extends StatelessWidget {
   const _EditionCard({
+    super.key,
     required this.edition,
     required this.model,
     required this.shelf,
+    required this.open,
     required this.loadCover,
     required this.loadSourceCover,
     this.onOpen,
@@ -13,6 +15,7 @@ class _EditionCard extends StatelessWidget {
   final BookEdition edition;
   final LibraryModel model;
   final LibraryShelf shelf;
+  final bool open;
   final bool Function(int) loadCover;
   final bool Function(BookLocator)? loadSourceCover;
   final VoidCallback? onOpen;
@@ -28,8 +31,27 @@ class _EditionCard extends StatelessWidget {
     final source = model.sourceFiles
         .where((s) => s.locator == coverFile.locator)
         .firstOrNull;
-    final progress = edition.preferred?.book?.progress ?? 0.0;
+    var readingFile = edition.preferred ?? file;
+    if (edition.preferred == null) {
+      for (final candidate in edition.files) {
+        if (candidate.book != null &&
+            (readingFile.book == null ||
+                (candidate.book!.lastRead ?? '').compareTo(
+                      readingFile.book!.lastRead ?? '',
+                    ) >
+                    0)) {
+          readingFile = candidate;
+        }
+      }
+    }
+    final progress = readingFile.book?.progress ?? 0.0;
     final palette = ShellPalette.of(context);
+    final l10n = AppLocalizations.of(context);
+    final status = readingFile.unavailable
+        ? l10n.libraryBookUnavailable
+        : readingFile.book == null
+        ? readingFile.source
+        : shellReadingStatus(l10n, progress);
     return Stack(
       children: [
         ShadButton.raw(
@@ -81,17 +103,47 @@ class _EditionCard extends StatelessWidget {
                   height: _cardMetadataBox(context, shelf),
                   child: Align(
                     alignment: AlignmentDirectional.topStart,
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      spacing: _cardMetadataRunSpacing,
                       children: [
-                        for (final format in [BookFormat.epub, BookFormat.pdf])
-                          if (edition.formats.contains(format))
-                            ShellFormatBadge(
-                              format: FlutterBookFormat.values.byName(
-                                format.name,
-                              ),
-                            ),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: _cardMetadataRunSpacing,
+                          children: [
+                            for (final format in [
+                              BookFormat.epub,
+                              BookFormat.pdf,
+                            ])
+                              if (edition.formats.contains(format))
+                                ShellFormatBadge(
+                                  format: FlutterBookFormat.values.byName(
+                                    format.name,
+                                  ),
+                                ),
+                          ],
+                        ),
+                        Text(
+                          status,
+                          maxLines: _cardMetadataWraps(context)
+                              ? _cardMetadataWrappedLines
+                              : 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: shosaiInterfaceStyleForText(
+                            _cardMetaStyle(context),
+                            status,
+                          ),
+                        ),
+                        if (open)
+                          Text(
+                            l10n.cardOpenTag,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: shosaiInterfaceStyleForText(
+                              _cardOpenTagStyle,
+                              l10n.cardOpenTag,
+                            ).copyWith(color: palette.accent),
+                          ),
                       ],
                     ),
                   ),
