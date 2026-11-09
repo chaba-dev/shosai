@@ -476,6 +476,15 @@ enum FlutterBridgeErrorKind {
   limitExceeded,
   backendUnavailable,
   renderFailed,
+
+  /// The book's connected location (a cloud or device folder) is offline.
+  locationOffline,
+
+  /// The folder the book lives in was disconnected or its access revoked.
+  locationRevoked,
+
+  /// The book is gone from its connected location.
+  locationMissing,
 }
 
 class FlutterDocumentHandle {

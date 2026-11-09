@@ -134,6 +134,11 @@ independent connections. To revoke all Shōsai access, use the Google Account
 third-party connections page. A revoked connection requires explicit reconnection;
 network/vault failures can be retried. Existing book identity, notes and kept,
 verified offline bytes remain governed by the core's original cache semantics.
+Reconnecting and choosing a folder lists it again: a file still at the size and
+version it was opened at is its book again, readable from the new connection,
+and a file whose book was removed from the library stays off the shelf. A file
+changed since then is offered as a new candidate while its book stays unavailable
+until it is opened.
 
 Listing and stat fetch bounded metadata pages only. Reads use backpressure and
 exclusive-end ranges; ignored ranges fail rather than downloading the whole book.

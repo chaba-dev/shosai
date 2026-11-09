@@ -295,6 +295,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readerChaptersHeading => 'Chapters';
 
   @override
+  String readerPageEntry(int page) {
+    return 'Page $page';
+  }
+
+  @override
   String readerChapterNumber(int number) {
     return 'Chapter $number';
   }
@@ -1317,6 +1322,18 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get errorRenderFailed =>
       'The page could not be displayed. Reopen the book and try again.';
+
+  @override
+  String get errorLocationOffline =>
+      'The book’s location is offline. Try again when it is connected.';
+
+  @override
+  String get errorLocationRevoked =>
+      'The book’s location is unavailable. Reconnect the folder to read it.';
+
+  @override
+  String get errorLocationMissing =>
+      'The book is missing from its location. Your notes are still here.';
 
   @override
   String get shellSearchFailed => 'Search could not be completed. Try again.';

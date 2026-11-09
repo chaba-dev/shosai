@@ -400,16 +400,17 @@ void main() {
       );
     });
 
-    testWidgets('a non-EPUB document keeps the chapter fallback', (
+    testWidgets('a PDF document names its untitled entries by page', (
       tester,
     ) async {
+      // The harness reports the library book as a PDF.
       final harness = HarnessBridge(unitCount: 3);
       await openReader(tester, harness);
       await settleNative(tester);
       await openContents(tester);
 
-      expect(find.text('Chapter 1'), findsOneWidget);
-      expect(find.text('Chapter 3'), findsOneWidget);
+      expect(find.text('Page 1'), findsOneWidget);
+      expect(find.text('Page 3'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       await drainHarness(tester);

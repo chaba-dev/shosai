@@ -514,6 +514,9 @@ class LibraryController implements Listenable {
               message.failure == LibraryFailure.removal) {
             _load();
           }
+          // Hand off before the import releases its busy effect, as a source
+          // admission does, so queued intake cannot take the reader first.
+          if (message.open case final book?) _openReader(book);
         }
       case _LibraryImportEnded():
         if (_closing) break;
@@ -604,6 +607,7 @@ class LibraryController implements Listenable {
         paths: paths,
         managed: true,
         cleanup: () => _openedDocuments!.discard(paths),
+        openSingleBook: true,
       ),
     );
   }
@@ -976,6 +980,12 @@ class LibraryController implements Listenable {
           successNotice = _importSuccessNotice(report);
         }
         final failure = items.where((item) => item.error != null).firstOrNull;
+        // The book an opened document landed, whether it is new or was already
+        // in the library: the report lists the existing book for a duplicate.
+        final landed = items
+            .map((item) => item.book)
+            .whereType<FlutterLibraryBook>()
+            .toList(growable: false);
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.import,
@@ -987,6 +997,14 @@ class LibraryController implements Listenable {
             cancellation: cancellation,
             refresh: refresh,
             notice: successNotice,
+            open:
+                selection.openSingleBook &&
+                    terminalStatus == null &&
+                    failure == null &&
+                    items.length == 1 &&
+                    landed.length == 1
+                ? landed.single
+                : null,
           ),
         );
         cancellation = null;

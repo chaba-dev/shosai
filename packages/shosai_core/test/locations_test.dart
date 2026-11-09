@@ -213,6 +213,168 @@ void main() {
     );
   });
 
+  test('a reconnected folder lists its opened books as books again', () async {
+    final t = await TempLibrary.create();
+    final book = await t.importBook(t.copyFixture('sample.epub', 'book.epub'));
+    final locations = LibraryLocations(t.store);
+    const copy = LocationEntry(
+      key: 'id:book',
+      name: 'book.epub',
+      isDirectory: false,
+      size: 1234,
+      revision: '3',
+    );
+    const other = LocationEntry(
+      key: 'id:other',
+      name: 'other.epub',
+      isDirectory: false,
+      size: 99,
+      revision: '1',
+    );
+    final first = await locations.connect('first', 'Google Drive');
+    await locations.scan('first', first, [copy, other]);
+    await locations.admit('first', first, copy, book.contentHash);
+    await locations.locate(book.contentHash, (
+      locationId: 'first',
+      key: copy.key,
+    ), generation: first);
+    await locations.remove('first');
+    await locations.clearCatalog('first');
+    expect(
+      (await t.library.get(book.id))!.locationFailure,
+      LocationFailure.revoked,
+    );
+
+    // The same file, unchanged, under a new grant is the book, not a new
+    // candidate beside an unavailable book.
+    final second = await locations.connect('second', 'Google Drive');
+    expect(await locations.scan('second', second, [copy, other]), {copy.key});
+    expect((await locations.catalog()).single.entry.key, other.key);
+    expect((await t.library.get(book.id))!.locationFailure, isNull);
+    final located = (await locations.copies(book.contentHash)).single;
+    expect(located.locator, (locationId: 'second', key: copy.key));
+    expect(located.failure, isNull);
+
+    // A file changed since it was opened is a candidate again; the book stays
+    // unavailable until its bytes are read.
+    await locations.remove('second');
+    await locations.clearCatalog('second');
+    final changed = LocationEntry(
+      key: copy.key,
+      name: copy.name,
+      isDirectory: false,
+      size: copy.size,
+      revision: '4',
+    );
+    final third = await locations.connect('third', 'Google Drive');
+    expect(await locations.scan('third', third, [changed]), isEmpty);
+    expect((await locations.catalog()).single.entry.key, copy.key);
+    expect(
+      (await t.library.get(book.id))!.locationFailure,
+      LocationFailure.revoked,
+    );
+    expect(
+      (await locations.copies(book.contentHash)).single.locator.locationId,
+      'second',
+    );
+  });
+
+  test(
+    'a reconnected folder does not locate a book it only admitted',
+    () async {
+      final t = await TempLibrary.create();
+      final book = await t.importBook(
+        t.copyFixture('sample.epub', 'book.epub'),
+      );
+      final locations = LibraryLocations(t.store);
+      const copy = LocationEntry(
+        key: 'id:book',
+        name: 'book.epub',
+        isDirectory: false,
+        size: 1234,
+        revision: '3',
+      );
+      // A local import owns its content: the folder copy is admitted as a
+      // duplicate, never located.
+      final first = await locations.connect('first', 'Google Drive');
+      await locations.scan('first', first, [copy]);
+      await locations.admit('first', first, copy, book.contentHash);
+      expect(await locations.copies(book.contentHash), isEmpty);
+      await locations.remove('first');
+      await locations.clearCatalog('first');
+
+      final second = await locations.connect('second', 'Google Drive');
+      expect(await locations.scan('second', second, [copy]), {copy.key});
+      expect(await locations.catalog(), isEmpty);
+      expect(await locations.copies(book.contentHash), isEmpty);
+      final kept = (await t.library.get(book.id))!;
+      expect(kept.located, false);
+      expect(kept.locationFailure, isNull);
+    },
+  );
+
+  test('a reconnected folder keeps its removed books off the shelf', () async {
+    final t = await TempLibrary.create();
+    final book = await t.importBook(t.copyFixture('sample.epub', 'book.epub'));
+    final locations = LibraryLocations(t.store);
+    const copy = LocationEntry(
+      key: 'id:book',
+      name: 'book.epub',
+      isDirectory: false,
+      size: 1234,
+      revision: '3',
+    );
+    final first = await locations.connect('first', 'Google Drive');
+    await locations.admit('first', first, copy, book.contentHash);
+    expect((await t.library.remove(book.id)).removed, true);
+    await locations.remove('first');
+    await locations.clearCatalog('first');
+    expect(await locations.hidden(), isEmpty);
+
+    final second = await locations.connect('second', 'Google Drive');
+    expect(await locations.scan('second', second, [copy]), {copy.key});
+    expect(await locations.catalog(), isEmpty);
+    final hidden = (await locations.hidden()).single;
+    expect(hidden.locationId, 'second');
+    expect(hidden.entry.key, copy.key);
+    expect(hidden.contentHash, book.contentHash);
+
+    // Unhidden, the file is offered again from its new connection.
+    await locations.unhide((locationId: 'second', key: copy.key));
+    expect((await locations.catalog()).single.entry.key, copy.key);
+  });
+
+  test('changing a connection’s folder keeps its opened books known', () async {
+    final t = await TempLibrary.create();
+    final book = await t.importBook(t.copyFixture('sample.epub', 'book.epub'));
+    final locations = LibraryLocations(t.store);
+    const copy = LocationEntry(
+      key: 'id:book',
+      name: 'book.epub',
+      isDirectory: false,
+      size: 1234,
+      revision: '3',
+    );
+    final generation = await locations.connect('drive', 'Google Drive');
+    await locations.scan('drive', generation, [copy]);
+    await locations.admit('drive', generation, copy, book.contentHash);
+    await locations.locate(book.contentHash, (
+      locationId: 'drive',
+      key: copy.key,
+    ), generation: generation);
+    // The listing is forgotten with the folder; the book is not.
+    await locations.clearCatalog('drive');
+    expect(await locations.scan('drive', generation, [copy]), {copy.key});
+    expect(await locations.catalog(), isEmpty);
+    expect((await t.library.get(book.id))!.locationFailure, isNull);
+    // A folder without the file loses its admission and marks it missing.
+    expect(await locations.scan('drive', generation, []), isEmpty);
+    expect(
+      (await t.library.get(book.id))!.locationFailure,
+      LocationFailure.missing,
+    );
+  });
+
   test(
     'a removed source book stays off the shelf until its file changes',
     () async {

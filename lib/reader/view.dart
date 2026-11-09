@@ -843,10 +843,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                       // text scale), and a zero height there would collapse the
                       // chrome.
                       LayoutBuilder(
-                        builder: (context, constraints) => Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // The search bar is its own row under the toolbar
+                        builder: (context, constraints) {
+                          final topRows = <Widget>[
+                            // The search bar is its own row above the stage
                             // (RD-11); search is independent of the panels.
                             if (model.searchOpen &&
                                 model.document != null &&
@@ -886,48 +885,72 @@ class _ReaderScreenState extends State<ReaderScreen>
                                   ),
                                 ),
                               ),
-                            Expanded(child: _readerBody(model, layout)),
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxHeight:
-                                    constraints.maxHeight *
-                                    _readerAlertBoundShare,
+                          ];
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // The stage runs under the status bar and its
+                              // toolbar pads for it. A row above the stage
+                              // takes that padding instead, so the stage no
+                              // longer pads for a bar it does not touch.
+                              if (topRows.isNotEmpty)
+                                SafeArea(
+                                  bottom: false,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: topRows,
+                                  ),
+                                ),
+                              Expanded(
+                                child: MediaQuery.removePadding(
+                                  context: context,
+                                  removeTop: topRows.isNotEmpty,
+                                  child: _readerBody(model, layout),
+                                ),
                               ),
-                              child: _ReaderErrorSurfaces(model: model),
-                            ),
-                            if (widget.debugPathEntry) ...[
-                              const SizedBox(height: 12),
-                              // A dev/test-only entry, bounded so a short viewport
-                              // at a scaled interface cannot overflow the reader
-                              // column.
                               ConstrainedBox(
                                 constraints: BoxConstraints(
                                   maxHeight:
                                       constraints.maxHeight *
-                                      _readerDevEntryBoundShare,
+                                      _readerAlertBoundShare,
                                 ),
-                                child: SingleChildScrollView(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: ShosaiTokens.space4,
-                                    ),
-                                    child: _ReaderControls(
-                                      model: model,
-                                      path: _path.value,
-                                      pathFieldKey: _pathFieldKey,
-                                      openFocus: _openFocus,
-                                      open: _open,
-                                      // A single row keeps the dev-only entry short
-                                      // enough not to push the chrome out of a small
-                                      // viewport at a scaled interface.
-                                      horizontal: true,
+                                child: _ReaderErrorSurfaces(model: model),
+                              ),
+                              if (widget.debugPathEntry) ...[
+                                const SizedBox(height: 12),
+                                // A dev/test-only entry, bounded so a short viewport
+                                // at a scaled interface cannot overflow the reader
+                                // column.
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight:
+                                        constraints.maxHeight *
+                                        _readerDevEntryBoundShare,
+                                  ),
+                                  child: SingleChildScrollView(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: ShosaiTokens.space4,
+                                      ),
+                                      child: _ReaderControls(
+                                        model: model,
+                                        path: _path.value,
+                                        pathFieldKey: _pathFieldKey,
+                                        openFocus: _openFocus,
+                                        open: _open,
+                                        // A single row keeps the dev-only entry short
+                                        // enough not to push the chrome out of a small
+                                        // viewport at a scaled interface.
+                                        horizontal: true,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
-                        ),
+                          );
+                        },
                       ),
                 ),
               ),
@@ -1022,6 +1045,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       readerFocus: _readerFocus,
       actionFocus: _actionFocus,
       debugPathEntry: widget.debugPathEntry,
+      bookRequested: widget.initialPath != null || widget.initialBookId != null,
     );
     final openPanel = model.openPanel;
     // A floating panel covers the page: the page leaves keyboard traversal
@@ -1470,12 +1494,17 @@ class _ReaderContentPane extends StatelessWidget {
     required this.readerFocus,
     required this.actionFocus,
     required this.debugPathEntry,
+    required this.bookRequested,
   });
 
   final ReaderModel model;
   final void Function(ReaderMessage) dispatch;
   final FocusNode readerFocus;
   final FocusNode actionFocus;
+
+  /// Whether the screen was opened on a book: without a document, that book
+  /// failed to open, and the body stays empty instead of inviting a path.
+  final bool bookRequested;
 
   /// Whether the dev/test-only path entry is rendered (contract §7.2 item 6:
   /// the production composition renders no raw path field). The no-document
@@ -1520,15 +1549,18 @@ class _ReaderContentPane extends StatelessWidget {
                           AppLocalizations.of(context).readerFallbackTitle,
                     )
                   : document == null
-                  // The no-document body. The app always opens a book from
-                  // the library, so only a bare reader (the debug path entry)
-                  // shows it; it sits on the stage unless a failed EPUB open
-                  // left the page paper in place.
-                  ? WelcomePanel(
-                      color: _readerShowsPaper(model)
-                          ? pageColors(model.typography.theme).foreground
-                          : ShellPalette.of(context).inkMuted,
-                    )
+                  // The no-document body. A bare reader invites a path; a
+                  // reader opened on a book that failed to open leaves the
+                  // stage empty, since its alert and status already say so.
+                  // The panel sits on the stage unless a failed EPUB open left
+                  // the page paper in place.
+                  ? bookRequested
+                        ? const SizedBox.expand()
+                        : WelcomePanel(
+                            color: _readerShowsPaper(model)
+                                ? pageColors(model.typography.theme).foreground
+                                : ShellPalette.of(context).inkMuted,
+                          )
                   : _DocumentView(
                       document: document,
                       image: model.pageImage,

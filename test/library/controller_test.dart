@@ -1303,6 +1303,92 @@ void main() {
     );
   }
 
+  for (final (landed, imported) in [
+    ('a new book', 1),
+    ('a book already in the library', 0),
+  ]) {
+    test(
+      'a document opened from another app lands $landed and opens it',
+      () async {
+        final inbox = await Directory.systemTemp.createTemp('shosai-opened');
+        addTearDown(() => inbox.delete(recursive: true));
+        final file = await File(
+          '${inbox.path}/opened.epub',
+        ).writeAsString('book');
+        final documents = _IncomingDocuments();
+        final bridge = _OpenedImportBridge(imported: imported);
+        final opened = <int>[];
+        final controller = LibraryController(
+          bridge: bridge,
+          confirmRemoval: (_) async => true,
+          pickImport: () async => null,
+          openBook: (book) async => opened.add(book.bookId),
+          drainReaderSaves: (_) async {},
+          openedDocuments: documents,
+        );
+        controller.dispatch(const LibraryStarted());
+        await _settle();
+        bridge.pages.single.complete(
+          const FlutterLibraryPage(books: [], hasMore: false),
+        );
+        await _settle();
+        documents.deliver([file.path]);
+        for (var attempt = 0; opened.isEmpty && attempt < 50; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(bridge.importedPaths, [file.path]);
+        expect(opened, [_OpenedImportBridge.firstBookId]);
+        expect(controller.model.error, isNull);
+        controller.dispose();
+        for (final page in bridge.pages) {
+          if (!page.isCompleted) {
+            page.complete(const FlutterLibraryPage(books: [], hasMore: false));
+          }
+        }
+        await _settle();
+      },
+    );
+  }
+
+  test('documents opened together are imported without opening one', () async {
+    final inbox = await Directory.systemTemp.createTemp('shosai-opened');
+    addTearDown(() => inbox.delete(recursive: true));
+    final files = [
+      for (final name in ['one', 'two'])
+        (await File('${inbox.path}/$name.epub').writeAsString('book')).path,
+    ];
+    final documents = _IncomingDocuments();
+    final bridge = _OpenedImportBridge(imported: 2);
+    final opened = <int>[];
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (book) async => opened.add(book.bookId),
+      drainReaderSaves: (_) async {},
+      openedDocuments: documents,
+    );
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.single.complete(
+      const FlutterLibraryPage(books: [], hasMore: false),
+    );
+    await _settle();
+    documents.deliver(files);
+    for (var attempt = 0; bridge.pages.length < 2 && attempt < 50; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(bridge.importedPaths, files);
+    expect(opened, isEmpty);
+    controller.dispose();
+    for (final page in bridge.pages) {
+      if (!page.isCompleted) {
+        page.complete(const FlutterLibraryPage(books: [], hasMore: false));
+      }
+    }
+    await _settle();
+  });
+
   test('an open effect keeps the book it was dispatched with', () async {
     final bridge = _StubLibraryBridge();
     final opened = <FlutterLibraryBook>[];
@@ -1453,6 +1539,40 @@ class _IncomingImportBridge extends _StubLibraryBridge {
       failed: BigInt.zero,
       cancelled: false,
       items: const [],
+    );
+  }
+}
+
+/// A stub bridge whose import lands every path as a book, counting [imported]
+/// of them as new: the rest were already in the library, and the report names
+/// the existing book for each.
+class _OpenedImportBridge extends _StubLibraryBridge {
+  _OpenedImportBridge({required this.imported});
+
+  static const firstBookId = 100;
+
+  final int imported;
+  final importedPaths = <String>[];
+
+  @override
+  Future<FlutterImportReport> importPaths({
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  }) async {
+    expect(managed, isTrue);
+    importedPaths.addAll(pathKeys);
+    return FlutterImportReport(
+      imported: BigInt.from(imported),
+      failed: BigInt.zero,
+      cancelled: false,
+      items: [
+        for (final (index, path) in pathKeys.indexed)
+          FlutterImportItem(
+            pathKey: path,
+            book: _book(firstBookId + index, 'Opened $index'),
+          ),
+      ],
     );
   }
 }

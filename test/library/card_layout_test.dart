@@ -443,6 +443,61 @@ void main() {
       expect(find.text('Not started'), findsOneWidget);
     });
 
+    testWidgets('an unavailable book is not tagged Open', (tester) async {
+      // A book whose folder is gone can still have a reader tab from before;
+      // its card says Unavailable, and an Open tag beside it would promise a
+      // read that cannot happen.
+      final shelf = LibraryShelf.of(ShellLayout.desktop, 1280, openTag: true);
+      for (final unavailable in [false, true]) {
+        await tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: Builder(
+                  builder: (context) => SizedBox(
+                    width: shelf.columnWidth,
+                    height: libraryCardTileExtent(context, shelf),
+                    child: LibraryBookCard(
+                      book: FlutterLibraryBook(
+                        bookId: 1,
+                        title: 'Walden',
+                        format: FlutterBookFormat.epub,
+                        pathKey: '/books/a.epub',
+                        managed: false,
+                        progress: 0.42,
+                        dateAdded: '2026-09-10',
+                        unavailable: unavailable,
+                      ),
+                      cover: null,
+                      demandRevision: 0,
+                      shelf: shelf,
+                      open: true,
+                      removing: false,
+                      loadCover: (_) => false,
+                      openBook: (_) {},
+                      removeBook: (_) {},
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Open'),
+          unavailable ? findsNothing : findsOneWidget,
+          reason: 'unavailable: $unavailable',
+        );
+        expect(
+          find.text('Unavailable'),
+          unavailable ? findsOneWidget : findsNothing,
+          reason: 'unavailable: $unavailable',
+        );
+      }
+    });
+
     testWidgets('the Open tag and the status stay whole on a phone column', (
       tester,
     ) async {

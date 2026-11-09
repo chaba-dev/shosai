@@ -448,6 +448,27 @@ void main() {
       expect(find.text('25% · page 2'), findsOneWidget);
     });
 
+    testWidgets('an untitled PDF entry is named by its page, not a chapter', (
+      tester,
+    ) async {
+      _setView(tester, const Size(1280, 800));
+      await _open(
+        tester,
+        _reader(
+          bridge: _PanelBridge(unitCount: 4),
+          initialPath: '/books/atlas.pdf',
+          contentsLoader: (_) async => const [
+            ReaderContentsEntry(depth: 0, title: 'Plates', unit: 0),
+            ReaderContentsEntry(depth: 0, unit: 3),
+          ],
+        ),
+      );
+      await _openContents(tester);
+      expect(_inContents('Plates'), findsOneWidget);
+      expect(find.text('Page 4'), findsOneWidget);
+      expect(find.text('Chapter 4'), findsNothing);
+    });
+
     testWidgets('a short window at 200% text scrolls the whole panel and '
         'keeps the page field and close reachable', (tester) async {
       _setView(tester, const Size(1280, 480));

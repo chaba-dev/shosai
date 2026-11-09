@@ -564,6 +564,12 @@ abstract class AppLocalizations {
   /// **'Chapters'**
   String get readerChaptersHeading;
 
+  /// The page fallback for an untitled Contents entry of a PDF.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {page}'**
+  String readerPageEntry(int page);
+
   /// Iced reference key: chapter-number. The chapter fallback for an untitled Contents entry.
   ///
   /// In en, this message translates to:
@@ -2207,6 +2213,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The page could not be displayed. Reopen the book and try again.'**
   String get errorRenderFailed;
+
+  /// No description provided for @errorLocationOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'The book’s location is offline. Try again when it is connected.'**
+  String get errorLocationOffline;
+
+  /// No description provided for @errorLocationRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'The book’s location is unavailable. Reconnect the folder to read it.'**
+  String get errorLocationRevoked;
+
+  /// No description provided for @errorLocationMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The book is missing from its location. Your notes are still here.'**
+  String get errorLocationMissing;
 
   /// No description provided for @shellSearchFailed.
   ///
