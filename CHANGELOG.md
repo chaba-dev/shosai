@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-06
+## [0.1.0] - 2026-11-10
 
 ### 🚀 Features
 
@@ -133,6 +133,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Honor continuous reading in PDF Columns (#301)
 - *(dropbox)* Replace mobile SDK sign-in with browser OAuth (#308)
 - *(android)* Add an adaptive launcher icon with the 書 mark (#307)
+- *(library)* Group book editions and share annotations (#311)
 
 ### 🐛 Bug Fixes
 
@@ -204,6 +205,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Keep the reading place across PDF strip refills and run fixture-backed tests on devices (#305)
 - *(reader)* Preserve column overflow and restored screen boundaries (#306)
 - *(library)* Prioritize the reader over source previews (#309)
+- Resolve the Android release audit findings for v0.1.0 (#310)
 
 ### 🚜 Refactor
 
