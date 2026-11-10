@@ -840,10 +840,10 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       ? _pickAndroidImport()
       : _pickIosImport();
 
-  /// iOS opens the system document picker, which copies each chosen book
-  /// into the app's inbox. The library keeps its own copy, so the inbox
-  /// copies are deleted once the import has run or been declined.
+  /// Own the iOS picker's disposable inputs before waiting for Review.
+  /// Admission still happens only after confirmation.
   Future<LibraryImportSelection?> _pickIosImport() async {
+    final revision = _providerRevision;
     final l10n = AppLocalizations.of(context);
     final paths = (await openFiles(
       acceptedTypeGroups: [
@@ -857,18 +857,37 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       confirmButtonText: l10n.importReviewBooks,
     )).map((file) => file.path).toList(growable: false);
     if (paths.isEmpty) return null;
-    final reviewed = mounted
-        ? await _reviewImport(paths, directory: false, managedOnly: true)
-        : null;
-    if (reviewed == null) {
+    if (!mounted || revision != _providerRevision) {
       await _openedDocuments.discard(paths);
       return null;
     }
-    return LibraryImportSelection(
-      paths: reviewed.paths,
-      managed: true,
-      cleanup: () => _openedDocuments.discard(paths),
-    );
+    final List<String> staged;
+    try {
+      staged = await _openedDocuments.stagePickerCopies(paths);
+    } catch (_) {
+      if (!mounted || revision != _providerRevision) return null;
+      rethrow;
+    } finally {
+      await _openedDocuments.discard(paths);
+    }
+    var handedOff = false;
+    try {
+      // Keep the original selection labels; staging paths are an ownership
+      // detail, not a new source or a library entry.
+      final reviewed = mounted && revision == _providerRevision
+          ? await _reviewImport(paths, directory: false, managedOnly: true)
+          : null;
+      if (reviewed == null || revision != _providerRevision) return null;
+      final selection = LibraryImportSelection(
+        paths: staged,
+        managed: true,
+        cleanup: () => _openedDocuments.discard(staged),
+      );
+      handedOff = true;
+      return selection;
+    } finally {
+      if (!handedOff) await _openedDocuments.discard(staged);
+    }
   }
 
   Future<LibraryImportSelection?> _pickAndroidImport() async {
@@ -1036,6 +1055,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
 
   void _cancelImportAdapter() {
     _providerRevision += 1;
+    _openedDocuments.cancelPickerStaging();
     for (final operation in _providerOperations) {
       unawaited(_androidImport.cancel(operation));
     }
