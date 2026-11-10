@@ -274,21 +274,27 @@ class _ReaderNotesPanel extends StatelessWidget {
     final entries = model.contents.status == ReaderContentsStatus.ready
         ? model.contents.entries
         : const <ReaderContentsEntry>[];
+    bool showPlace(FlutterAnnotationResolution r, bool fromOtherContent) =>
+        !fromOtherContent ||
+        r == FlutterAnnotationResolution.exact ||
+        r == FlutterAnnotationResolution.recovered;
     final placed = <({int unit, int position, Widget Function(String?) card})>[
       for (final note in model.notes)
-        if (note.unit case final unit?)
+        if (note.unit case final unit?
+            when showPlace(note.resolution, note.fromOtherContent))
           (
             unit: unit.toInt(),
             position: note.offset?.toInt() ?? 0,
             card: (_) => _placeNoteCard(l10n, note, enabled, pdf: pdf),
           ),
       for (final annotation in model.annotations)
-        (
-          unit: annotation.unit.toInt(),
-          position: annotation.textRange?.start.toInt() ?? 0,
-          card: (section) =>
-              _highlightCard(l10n, annotation, section, pdf: pdf),
-        ),
+        if (showPlace(annotation.resolution, annotation.fromOtherContent))
+          (
+            unit: annotation.unit.toInt(),
+            position: annotation.textRange?.start.toInt() ?? 0,
+            card: (section) =>
+                _highlightCard(l10n, annotation, section, pdf: pdf),
+          ),
     ];
     // A stable sort: notes and highlights at one place keep their order.
     final order = [for (var i = 0; i < placed.length; i++) i]
@@ -300,7 +306,12 @@ class _ReaderNotesPanel extends StatelessWidget {
       });
     final cards = <Widget>[
       for (final note in model.notes)
-        if (note.unit == null) _placeNoteCard(l10n, note, enabled, pdf: pdf),
+        if (note.unit == null ||
+            !showPlace(note.resolution, note.fromOtherContent))
+          _placeNoteCard(l10n, note, enabled, pdf: pdf),
+      for (final annotation in model.annotations)
+        if (!showPlace(annotation.resolution, annotation.fromOtherContent))
+          _highlightCard(l10n, annotation, null, pdf: pdf),
     ];
     Object? group;
     for (final i in order) {
@@ -346,6 +357,7 @@ class _ReaderNotesPanel extends StatelessWidget {
       FlutterAnnotationResolution.exact ||
       FlutterAnnotationResolution.recovered => true,
       FlutterAnnotationResolution.ambiguous ||
+      FlutterAnnotationResolution.incomplete ||
       FlutterAnnotationResolution.orphaned => false,
     };
     return _ReaderNoteCard(
@@ -358,7 +370,9 @@ class _ReaderNotesPanel extends StatelessWidget {
         size: 14,
       ),
       meta:
-          '${unit == null
+          '${!found && note.fromOtherContent
+              ? l10n.readerAnnotationOtherFile
+              : unit == null
               ? l10n.readerBookNoteTitle
               : pdf
               ? l10n.readerPageNoteAt(unit + 1)
@@ -374,6 +388,15 @@ class _ReaderNotesPanel extends StatelessWidget {
           : () => dispatch(
               ReaderNoteNavigated(unit, offset: note.offset?.toInt()),
             ),
+      onOriginal: !found && note.fromOtherContent && note.originalBook != null
+          ? () => dispatch(
+              ReaderAnnotationOriginalOpened(
+                note.originalBook!,
+                note.id,
+                note: true,
+              ),
+            )
+          : null,
       onSave: (body) => dispatch(ReaderNoteSaved(note.id, body)),
       deleteLabel: l10n.readerDeleteNote,
       onDelete: () => dispatch(ReaderNoteDeleted(note.id)),
@@ -387,7 +410,12 @@ class _ReaderNotesPanel extends StatelessWidget {
     required bool pdf,
   }) {
     final unit = annotation.unit.toInt();
-    final place = pdf
+    final found =
+        annotation.resolution == FlutterAnnotationResolution.exact ||
+        annotation.resolution == FlutterAnnotationResolution.recovered;
+    final place = !found && annotation.fromOtherContent
+        ? l10n.readerAnnotationOtherFile
+        : pdf
         ? l10n.readerPageNumber(unit + 1)
         : section ?? l10n.readerChapterNumber(unit + 1);
     return _ReaderNoteCard(
@@ -404,7 +432,20 @@ class _ReaderNotesPanel extends StatelessWidget {
       clearable: true,
       enabled:
           _readerChromeEnabled(model) && model.annotationOperations.isEmpty,
-      onOpen: () => dispatch(ReaderAnnotationNavigated(annotation.id)),
+      onOpen: !found
+          ? null
+          : () => dispatch(ReaderAnnotationNavigated(annotation.id)),
+      onOriginal:
+          !found &&
+              annotation.fromOtherContent &&
+              annotation.originalBook != null
+          ? () => dispatch(
+              ReaderAnnotationOriginalOpened(
+                annotation.originalBook!,
+                annotation.id,
+              ),
+            )
+          : null,
       onSave: (body) =>
           dispatch(ReaderAnnotationNoteSaved(annotation.id, body)),
       onRecolor: () => dispatch(
@@ -502,6 +543,7 @@ class _ReaderNoteCard extends StatefulWidget {
     this.clearable = false,
     required this.enabled,
     required this.onOpen,
+    this.onOriginal,
     required this.onSave,
     this.onRecolor,
     required this.deleteLabel,
@@ -526,6 +568,7 @@ class _ReaderNoteCard extends StatefulWidget {
 
   /// Opens the card's place; null opens the editor instead.
   final VoidCallback? onOpen;
+  final VoidCallback? onOriginal;
   final void Function(String body) onSave;
   final VoidCallback? onRecolor;
   final String deleteLabel;
@@ -699,6 +742,14 @@ class _ReaderNoteCardState extends State<_ReaderNoteCard> {
                   style: shosaiInterfaceStyleForText(
                     shellInterfaceStyle(14, 20).copyWith(color: palette.ink),
                     widget.body!,
+                  ),
+                ),
+              if (widget.onOriginal case final open? when draft == null)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: ShadButton.ghost(
+                    onPressed: widget.enabled ? open : null,
+                    child: Text(l10n.readerAnnotationOpenOriginal),
                   ),
                 ),
             ],

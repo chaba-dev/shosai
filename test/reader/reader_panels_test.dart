@@ -330,6 +330,72 @@ Future<void> _openTypography(WidgetTester tester) async {
 void main() {
   setUpAll(loadHarnessFonts);
 
+  for (final originalRemoved in [false, true]) {
+    testWidgets(
+      'unplaced edition highlight preserves provenance (original removed: $originalRemoved)',
+      (tester) async {
+        _setView(tester, const Size(1024, 900));
+        const original = FlutterLibraryBook(
+          bookId: 2,
+          title: 'Slow Rivers',
+          format: FlutterBookFormat.pdf,
+          pathKey: '/books/slow-rivers.pdf',
+          managed: false,
+          progress: 0,
+          dateAdded: '2026-10-01',
+        );
+        final bridge = _PanelBridge(unitCount: 3)
+          ..annotations = [
+            FlutterAnnotation(
+              id: 'other-format',
+              unit: BigInt.from(28),
+              resolution: FlutterAnnotationResolution.orphaned,
+              fromOtherContent: true,
+              originalBook: originalRemoved ? null : original,
+              quote: 'The tide keeps the shelves.',
+              color: FlutterHighlightColor.yellow,
+              body: 'One thought, either format.',
+            ),
+          ];
+        final opened = <(int, ReaderPlace?)>[];
+        await _open(
+          tester,
+          _reader(
+            bridge: bridge,
+            initialBookId: 1,
+            placeRequests: ReaderPlaceRequests(
+              openBook: (book, place) => opened.add((book.bookId, place)),
+            ),
+          ),
+        );
+        await _openNotes(tester);
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text('The tide keeps the shelves.'), findsOneWidget);
+        expect(find.textContaining('Chapter 29'), findsNothing);
+        expect(find.textContaining('Not placed in this file'), findsOneWidget);
+        await captureHarnessArtifact(
+          tester,
+          'editions-unplaced-highlight${originalRemoved ? '-removed' : ''}',
+        );
+        if (originalRemoved) {
+          expect(find.text('Open original file'), findsNothing);
+          expect(opened, isEmpty);
+        } else {
+          expect(find.text('Open original file'), findsOneWidget);
+          await tester.tap(find.text('Open original file'));
+          await tester.pump();
+          expect(opened, [
+            (
+              2,
+              const ReaderPlace(0, annotationId: 'other-format', note: false),
+            ),
+          ]);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   for (final panel in ['contents', 'typography', 'notes']) {
     testWidgets(
       'phone $panel sheet expands, collapses and dismisses by dragging',

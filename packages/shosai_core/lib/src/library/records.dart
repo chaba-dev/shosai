@@ -511,8 +511,8 @@ Book _insertBook(
 ) {
   db.execute(
     '''INSERT INTO books (title, author, format, file_path, storage_kind,
-         original_path, content_hash, file_size, cover)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+         original_path, content_hash, file_size, cover, publication_metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
     [
       metadata.title,
       metadata.author,
@@ -523,6 +523,7 @@ Book _insertBook(
       fingerprint.hash,
       fingerprint.size,
       metadata.cover,
+      metadata.publication.encode(),
     ],
   );
   final book = _bookById(db, db.lastInsertRowId)!;

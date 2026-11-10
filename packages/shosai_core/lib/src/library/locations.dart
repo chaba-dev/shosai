@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import '../cancellation.dart';
 import '../errors.dart';
 import '../store/store.dart';
+import 'editions.dart';
 import 'files.dart';
 import 'inspection.dart';
 import 'location.dart';
@@ -44,7 +45,7 @@ final class LibraryLocations {
   catalog() => _store.read(
     (db) => [
       for (final row in db.select(
-        'SELECT location_id, locator_key, name, size, revision FROM library_source_files',
+        'SELECT location_id, locator_key, name, size, revision, folder_name FROM library_source_files',
       ))
         (
           locationId: row.columnAt(0) as String,
@@ -54,6 +55,7 @@ final class LibraryLocations {
             isDirectory: false,
             size: row.columnAt(3) as int?,
             revision: row.columnAt(4) as String?,
+            folderName: row.columnAt(5) as String?,
           ),
         ),
     ],
@@ -115,6 +117,7 @@ final class LibraryLocations {
 
     final title = text(metadata.title);
     final author = text(metadata.author);
+    final publication = metadata.publication.encode();
     final given = metadata.cover;
     final cover = given == null || given.isEmpty || given.length > maxCoverBytes
         ? null
@@ -133,13 +136,22 @@ final class LibraryLocations {
       }
       db.execute(
         '''INSERT INTO library_source_previews
-             (location_id, locator_key, size, revision, title, author, cover)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+             (location_id, locator_key, size, revision, title, author, cover, publication_metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(location_id, locator_key) DO UPDATE SET
              size = excluded.size, revision = excluded.revision,
              title = excluded.title, author = excluded.author,
-             cover = excluded.cover''',
-        [id, entry.key, entry.size, entry.revision, title, author, cover],
+             cover = excluded.cover, publication_metadata = excluded.publication_metadata''',
+        [
+          id,
+          entry.key,
+          entry.size,
+          entry.revision,
+          title,
+          author,
+          cover,
+          publication,
+        ],
       );
       return SourcePreview(
         title: title,
@@ -162,15 +174,34 @@ final class LibraryLocations {
 
   /// Admission is separate from source ownership: a local duplicate keeps its
   /// working local path while this mapping suppresses its source candidate.
-  Future<void> admit(
+  /// Returns false if verified facts rejected the preview's chosen group;
+  /// the file is still admitted, with its content kept separately.
+  /// Disable [inheritPreview] when the adapter cannot verify a source revision.
+  Future<bool> admit(
     String id,
     int generation,
     LocationEntry entry,
-    String hash,
-  ) => _store.transaction((db) {
+    String hash, {
+    bool inheritPreview = true,
+  }) => _store.transaction((db) {
     if (!_hasGeneration(db, id, generation)) {
       throw const LocationException(LocationFailure.revoked);
     }
+    db.execute(
+      '''UPDATE books SET display_name = COALESCE(display_name, ?),
+         source_folder = COALESCE(source_folder, ?) WHERE content_hash = ?''',
+      [entry.name, entry.folderName, hash],
+    );
+    final grouped = admitEditionFile(
+      db,
+      sourceEditionKey(
+        (locationId: id, key: entry.key),
+        entry.size,
+        entry.revision,
+      ),
+      hash,
+      inheritPreview: inheritPreview,
+    );
     db.execute(
       '''INSERT INTO library_source_admissions
           (location_id, locator_key, content_hash, size, revision) VALUES (?, ?, ?, ?, ?)
@@ -201,6 +232,7 @@ final class LibraryLocations {
       'DELETE FROM library_hidden_source_files WHERE content_hash = ?',
       [hash],
     );
+    return grouped;
   });
 
   /// Source files whose books were removed from the library, newest first.
@@ -347,8 +379,17 @@ final class LibraryLocations {
         known.add(entry.key);
       } else {
         db.execute(
-          'INSERT INTO library_source_files (location_id, locator_key, name, size, revision) VALUES (?, ?, ?, ?, ?)',
-          [id, entry.key, entry.name, entry.size, entry.revision],
+          '''INSERT INTO library_source_files
+          (location_id, locator_key, name, size, revision, folder_name)
+          VALUES (?, ?, ?, ?, ?, ?)''',
+          [
+            id,
+            entry.key,
+            entry.name,
+            entry.size,
+            entry.revision,
+            entry.folderName,
+          ],
         );
       }
     }

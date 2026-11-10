@@ -220,6 +220,13 @@ class FlutterAnnotation {
   final String id;
   final BigInt unit;
   final FlutterAnnotationResolution resolution;
+
+  /// Additional target pages/chapters of one logical cross-format highlight.
+  final List<({int unit, int start, int end})> fragments;
+
+  /// Content provenance survives removal of the optional original book.
+  final bool fromOtherContent;
+  final FlutterLibraryBook? originalBook;
   final FlutterAnnotationTextRange? textRange;
   final String? quote;
   final List<FlutterSelectionRect>? rectangles;
@@ -230,6 +237,9 @@ class FlutterAnnotation {
     required this.id,
     required this.unit,
     required this.resolution,
+    this.fragments = const [],
+    this.fromOtherContent = false,
+    this.originalBook,
     this.textRange,
     this.quote,
     this.rectangles,
@@ -242,6 +252,9 @@ class FlutterAnnotation {
       id.hashCode ^
       unit.hashCode ^
       resolution.hashCode ^
+      Object.hashAll(fragments) ^
+      fromOtherContent.hashCode ^
+      originalBook.hashCode ^
       textRange.hashCode ^
       quote.hashCode ^
       rectangles.hashCode ^
@@ -256,6 +269,10 @@ class FlutterAnnotation {
           id == other.id &&
           unit == other.unit &&
           resolution == other.resolution &&
+          fragments.length == other.fragments.length &&
+          fragments.indexed.every((f) => f.$2 == other.fragments[f.$1]) &&
+          fromOtherContent == other.fromOtherContent &&
+          originalBook == other.originalBook &&
           textRange == other.textRange &&
           quote == other.quote &&
           rectangles == other.rectangles &&
@@ -270,6 +287,8 @@ enum FlutterNoteKind { page, book }
 class FlutterNote {
   final String id;
   final FlutterNoteKind kind;
+  final bool fromOtherContent;
+  final FlutterLibraryBook? originalBook;
 
   /// The EPUB spine index or PDF page of a page note; null for a book note.
   final BigInt? unit;
@@ -285,6 +304,8 @@ class FlutterNote {
   const FlutterNote({
     required this.id,
     required this.kind,
+    this.fromOtherContent = false,
+    this.originalBook,
     this.unit,
     this.offset,
     required this.resolution,
@@ -293,8 +314,17 @@ class FlutterNote {
   });
 
   @override
-  int get hashCode =>
-      Object.hash(id, kind, unit, offset, resolution, body, modifiedAt);
+  int get hashCode => Object.hash(
+    id,
+    kind,
+    unit,
+    offset,
+    resolution,
+    body,
+    modifiedAt,
+    fromOtherContent,
+    originalBook,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -302,6 +332,8 @@ class FlutterNote {
       other is FlutterNote &&
           id == other.id &&
           kind == other.kind &&
+          fromOtherContent == other.fromOtherContent &&
+          originalBook == other.originalBook &&
           unit == other.unit &&
           offset == other.offset &&
           resolution == other.resolution &&
@@ -379,7 +411,13 @@ class FlutterAnnotationAssociationSourcePage {
           previousCursor == other.previousCursor;
 }
 
-enum FlutterAnnotationResolution { exact, recovered, ambiguous, orphaned }
+enum FlutterAnnotationResolution {
+  exact,
+  recovered,
+  ambiguous,
+  orphaned,
+  incomplete,
+}
 
 class FlutterAnnotationTextRange {
   final BigInt start;

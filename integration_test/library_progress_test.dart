@@ -344,10 +344,18 @@ void main() {
         return !model.loading && !model.busy;
       }
 
-      Finder card() => find.byWidgetPredicate(
-        (widget) =>
-            widget is LibraryBookCard && widget.book.bookId == book.bookId,
-      );
+      Finder card(int bookId) {
+        final model = tester
+            .widget<LibraryCollection>(find.byType(LibraryCollection))
+            .model;
+        final edition = model.editions!
+            .where(
+              (entry) => entry.files.any((file) => file.book?.id == bookId),
+            )
+            .firstOrNull;
+        return find.byKey(ValueKey('edition-${edition?.id}'));
+      }
+
       PagePainter? page() => tester
           .widgetList<CustomPaint>(find.byType(CustomPaint))
           .map((paint) => paint.painter)
@@ -359,15 +367,14 @@ void main() {
         matching: find.text(text),
       );
 
-      await until(() => libraryReady() && card().evaluate().isNotEmpty);
+      await until(
+        () => libraryReady() && card(book.bookId).evaluate().isNotEmpty,
+      );
       expect(
-        find.descendant(of: card(), matching: find.text('13%')),
+        find.descendant(of: card(book.bookId), matching: find.text('13%')),
         findsOneWidget,
       );
-      final unreadCard = find.byWidgetPredicate(
-        (widget) =>
-            widget is LibraryBookCard && widget.book.bookId == unread.bookId,
-      );
+      final unreadCard = card(unread.bookId);
       await until(
         () => find
             .descendant(of: unreadCard, matching: find.text('開いた本'))
@@ -383,7 +390,7 @@ void main() {
         findsNothing,
       );
       await capture('library-before');
-      await tester.tap(card());
+      await tester.tap(card(book.bookId));
       await until(() => page() != null);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await until(() => page()?.currentUnit == 1);
@@ -393,14 +400,14 @@ void main() {
       await until(libraryReady);
       expect(shelfStatus('67%'), findsOneWidget);
       expect(
-        find.descendant(of: card(), matching: find.text('67%')),
+        find.descendant(of: card(book.bookId), matching: find.text('67%')),
         findsOneWidget,
       );
       await capture('library-after');
 
       // Keep the PDF open, but exclude it from the library's visible results.
       await tester.tap(find.text('EPUB').first);
-      await until(() => libraryReady() && card().evaluate().isEmpty);
+      await until(() => libraryReady() && card(book.bookId).evaluate().isEmpty);
       expect(shelfStatus('67%'), findsOneWidget);
       await tester.tap(
         find.descendant(
@@ -432,7 +439,11 @@ void main() {
         0,
         reason: 'reading the PDF must not change the other tab',
       );
-      expect(card(), findsNothing, reason: 'the EPUB filter is still active');
+      expect(
+        card(book.bookId),
+        findsNothing,
+        reason: 'the EPUB filter is still active',
+      );
       expect(shelfStatus('読了'), findsOneWidget);
       expect(shelfStatus('67%'), findsNothing);
       await capture('filtered-library-after');

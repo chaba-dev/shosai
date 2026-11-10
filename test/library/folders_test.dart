@@ -135,8 +135,281 @@ class _SourceBridge extends HarnessBridge implements LibraryFoldersHost {
   }) => throw StateError('No content reads');
 }
 
+final class _EditionInspector implements BookInspector {
+  const _EditionInspector(this.edition);
+  final String edition;
+
+  @override
+  Future<BookMetadata> inspect(
+    String path, {
+    CancellationToken? cancellation,
+  }) async => BookMetadata(
+    title: 'Agent workflows',
+    author: 'Ada Lee',
+    publication: PublicationMetadata(
+      title: 'Agent workflows',
+      contributors: const ['Ada Lee'],
+      edition: edition,
+    ),
+  );
+}
+
+final class _FailedPreview implements BookPreviewer {
+  @override
+  Future<BookMetadata> preview(
+    LibraryLocation location,
+    LocationEntry entry, {
+    CancellationToken? cancellation,
+  }) => throw const CoreException.limitExceeded('Preview budget exceeded.');
+}
+
+final class _ReplacingLocation implements LibraryLocation {
+  _ReplacingLocation(this.delegate, this.afterRead);
+  final LibraryLocation delegate;
+  final void Function() afterRead;
+  @override
+  String get id => delegate.id;
+  @override
+  Future<LocationPage> list({
+    String? directory,
+    String? cursor,
+    int limit = 100,
+    CancellationToken? cancellation,
+  }) => delegate.list(
+    directory: directory,
+    cursor: cursor,
+    limit: limit,
+    cancellation: cancellation,
+  );
+  @override
+  Future<LocationEntry> stat(String key, {CancellationToken? cancellation}) =>
+      delegate.stat(key, cancellation: cancellation);
+  @override
+  Stream<List<int>> read(
+    String key, {
+    int start = 0,
+    int? end,
+    CancellationToken? cancellation,
+  }) async* {
+    yield* delegate.read(
+      key,
+      start: start,
+      end: end,
+      cancellation: cancellation,
+    );
+    afterRead();
+  }
+
+  @override
+  Future<LocationEntry> write(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) => delegate.write(
+    name,
+    bytes,
+    directory: directory,
+    cancellation: cancellation,
+  );
+}
+
 void main() {
   setUpAll(loadHarnessFonts);
+  test(
+    'admission keeps newly conflicting metadata separate with safe ownership',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-admission',
+      );
+      final store = await Store.open('${directory.path}/library.sqlite3');
+      final source = Directory('${directory.path}/source')..createSync();
+      final file = File(
+        'packages/shosai_core/test/fixtures/sample.epub',
+      ).copySync('${source.path}/Agent_workflows.epub');
+      final firstFile = File(
+        'packages/shosai_core/test/fixtures/sample.pdf',
+      ).copySync('${directory.path}/first.pdf');
+      final library = Library(
+        store,
+        managedDirectory: '${directory.path}/books',
+        inspectors: {
+          BookFormat.pdf: const _EditionInspector('1'),
+          BookFormat.epub: const _EditionInspector('2'),
+        },
+      );
+      final locations = LibraryLocations(store);
+      final cache = BookFileCache(store, '${directory.path}/cache');
+      final staging = '${directory.path}/staged';
+      final folders = LibraryFolders(
+        Preferences(store),
+        library,
+        locations,
+        () async => staging,
+        cache,
+        providers: [_FixtureProvider(source.path)],
+        previewers: {BookFormat.epub: _FailedPreview()},
+      );
+      addTearDown(() async {
+        await folders.close();
+        await store.close();
+        await directory.delete(recursive: true);
+      });
+      final first = (await library.importFile(
+        firstFile.path,
+        managed: false,
+      )).book!;
+      await folders.add(
+        LibraryConnection('src', 'Books', 'fixture', {'root': source.path}),
+      );
+      final offered = await folders.discover();
+      await folders.previewSourceFiles(offered, onPreviewed: (_) {});
+      final failedPreview = (await folders.discover()).single.preview;
+      expect(failedPreview, isNotNull);
+      expect(failedPreview!.title, isNull);
+      final shelf = LibraryEditions(store);
+      final sources = [offered.single.locator];
+      final entries = (await shelf.page(sources: sources)).editions;
+      final original = entries.singleWhere((e) => e.files.single.book != null);
+      final preview = entries.singleWhere(
+        (e) => e.files.single.locator != null,
+      );
+      await shelf.group(preview.id, original.id, sources: sources);
+      await expectLater(
+        folders.importEntry('src', offered.single.entry),
+        throwsA(EditionAdmissionConflict.addedSeparately),
+      );
+      expect(await folders.discover(), isEmpty);
+      expect(await locations.catalog(), isEmpty);
+      expect(Directory(staging).existsSync(), isFalse);
+      final groups = (await shelf.page(sources: [])).editions;
+      expect(groups, hasLength(2));
+      expect(
+        groups.singleWhere((e) => e.id == original.id).files.single.book?.id,
+        first.id,
+      );
+      final admitted = groups
+          .singleWhere((e) => e.id != original.id)
+          .files
+          .single
+          .book!;
+      expect(
+        (await locations.copies(admitted.contentHash)).single.locator,
+        offered.single.locator,
+      );
+      final expected = file.readAsBytesSync();
+      file.deleteSync();
+      expect(
+        await folders.withBookFile(
+          admitted,
+          (path) => File(path).readAsBytes(),
+        ),
+        expected,
+        reason:
+            'a rejected provisional group must not strand its imported bytes at a deleted staging path',
+      );
+    },
+  );
+
+  for (final duringRead in [false, true]) {
+    test(
+      'changed source ${duringRead ? 'during reading' : 'after preview'} cannot inherit a group',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'shosai-stale-admission',
+        );
+        final store = await Store.open('${directory.path}/library.sqlite3');
+        final source = Directory('${directory.path}/source')..createSync();
+        final file = File(
+          'packages/shosai_core/test/fixtures/sample.epub',
+        ).copySync('${source.path}/book.epub');
+        final firstFile = File(
+          'packages/shosai_core/test/fixtures/sample.pdf',
+        ).copySync('${directory.path}/first.pdf');
+        final library = Library(
+          store,
+          managedDirectory: '${directory.path}/books',
+          inspectors: {
+            BookFormat.epub: const EpubInspector(),
+            BookFormat.pdf: const _EditionInspector('1'),
+          },
+        );
+        final locations = LibraryLocations(store);
+        final provider = _FixtureProvider(source.path);
+        final staging = '${directory.path}/staged';
+        final folders = LibraryFolders(
+          Preferences(store),
+          library,
+          locations,
+          () async => staging,
+          BookFileCache(store, '${directory.path}/cache'),
+          providers: [provider],
+        );
+        addTearDown(() async {
+          await folders.close();
+          await store.close();
+          await directory.delete(recursive: true);
+        });
+        await folders.add(
+          LibraryConnection('src', 'Books', 'fixture', {'root': source.path}),
+        );
+        final first = (await library.importFile(
+          firstFile.path,
+          managed: false,
+        )).book!;
+        final offered = await folders.discover();
+        await folders.previewSourceFiles(offered, onPreviewed: (_) {});
+        final shelf = LibraryEditions(store);
+        final entries = (await shelf.page(
+          sources: [offered.single.locator],
+        )).editions;
+        final before = entries.singleWhere(
+          (e) => e.files.single.locator != null,
+        );
+        final original = entries.singleWhere(
+          (e) => e.files.single.book != null,
+        );
+        await shelf.group(
+          original.id,
+          before.id,
+          sources: [offered.single.locator],
+        );
+        await shelf.prefer(before.id, before.files.single.key);
+        void replace() => file.writeAsBytesSync([...file.readAsBytesSync(), 0]);
+        if (duringRead) {
+          provider.locations['src'] = _ReplacingLocation(
+            await FolderLocation.open('src', source.path),
+            replace,
+          );
+        } else {
+          replace();
+        }
+        await expectLater(
+          folders.importEntry('src', offered.single.entry),
+          throwsA(EditionAdmissionConflict.sourceChanged),
+        );
+        expect((await library.page()).books.single.id, first.id);
+        expect(Directory(staging).existsSync(), isFalse);
+        provider.locations.clear();
+        final refreshed = await folders.discover(refresh: true);
+        expect(
+          refreshed.single.entry.revision,
+          isNot(offered.single.entry.revision),
+        );
+        final current = (await shelf.page(
+          sources: [refreshed.single.locator],
+        )).editions.singleWhere((e) => e.files.single.locator != null);
+        expect(current.id, isNot(before.id));
+        expect(current.preferred, isNull);
+        expect(
+          (await folders.importEntry('src', refreshed.single.entry)).id,
+          isPositive,
+        );
+        expect((await shelf.page(sources: [])).bookCount, 2);
+      },
+    );
+  }
+
   test(
     'replaced, cancelled and disposed discovery cannot restore stale activity',
     () async {
@@ -301,6 +574,13 @@ void main() {
       );
       expect(progress.last.sourceCount, 2);
       expect(progress.last.booksFound, 1);
+      expect(
+        (await locations.catalog())
+            .singleWhere((f) => f.locationId == 'fallback')
+            .entry
+            .folderName,
+        'Books',
+      );
       final original = (await locations.catalog())
           .map((f) => '${f.locationId}/${f.entry.key}')
           .toSet();

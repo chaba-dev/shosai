@@ -57,6 +57,7 @@ final class FolderLocation implements LibraryLocation {
     isDirectory: stat.type == FileSystemEntityType.directory,
     size: stat.type == FileSystemEntityType.file ? stat.size : null,
     revision: '${stat.modified.microsecondsSinceEpoch}:${stat.size}',
+    folderName: p.basename(p.dirname(path)),
   );
 
   /// Cursors are enumeration offsets, not snapshots. A caller must restart a

@@ -8,11 +8,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:shosai_core/shosai_core.dart' show BookLocator;
+import 'package:shosai_core/shosai_core.dart'
+    show
+        BookLocator,
+        BookEdition,
+        EditionFile,
+        BookFormat,
+        EditionMatchEvidence;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/library_editions.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/dropbox_authorization.dart';
 import 'package:shosai_flutter/core/dropbox_connection.dart';
@@ -36,6 +43,7 @@ export 'package:shosai_flutter/library/controller.dart';
 
 part 'view_collection.dart';
 part 'view_dialogs.dart';
+part 'view_editions.dart';
 part 'view_navigation.dart';
 
 typedef ProductReaderBuilder =
@@ -151,6 +159,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     confirmRemoval: _confirmRemoval,
     pickImport: _pickImport,
     openBook: _openBook,
+    pickEdition: (edition, format) => _showOwnedDialog<EditionChoice>(
+      (context) => LibraryQuickPicker(edition: edition, format: format),
+    ),
+    groupEdition: (edition, choices) => _showOwnedDialog<String>(
+      (context) => _GroupEditionDialog(edition: edition, choices: choices),
+    ),
     drainReaderSaves: _drainReaderSaves,
     manageConnections: _manageLocations,
     retryProviderCleanup: _androidImport.retryCleanup,
@@ -1422,6 +1436,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
               openSourceFile: (file) =>
                   controller.dispatch(LibrarySourceFileOpened(file)),
+              openEdition: (edition, choose) => controller.dispatch(
+                LibraryEditionOpened(edition, choose: choose),
+              ),
               openNotes: () =>
                   _shell.dispatch(const ShellPlaceSelected(ShellPlace.notes)),
               removeBook: (book) =>

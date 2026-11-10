@@ -93,6 +93,7 @@ final class LibraryModel {
   const LibraryModel({
     this.books = const [],
     this.sourceFiles = const [],
+    this.editions,
     this.covers = const {},
     this.sourceCovers = const {},
     this.coverRevision = 0,
@@ -122,6 +123,8 @@ final class LibraryModel {
 
   final List<FlutterLibraryBook> books;
   final List<LibrarySourceFile> sourceFiles;
+  final List<BookEdition>? editions;
+  int get shelfLength => editions?.length ?? books.length;
   final Map<int, Uint8List> covers;
 
   /// Preview covers of unopened files, by locator.
@@ -200,7 +203,7 @@ final class LibraryModel {
   /// Which composition the collection column shows.
   LibraryCollectionState get collectionState {
     if (loading && !loadingMore) return LibraryCollectionState.loading;
-    if (books.isNotEmpty || sourceFiles.isNotEmpty) {
+    if (editions?.isNotEmpty ?? (books.isNotEmpty || sourceFiles.isNotEmpty)) {
       return LibraryCollectionState.ready;
     }
     if (query.isEmpty && format == null) return LibraryCollectionState.empty;
@@ -221,6 +224,7 @@ final class LibraryModel {
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
     List<LibrarySourceFile>? sourceFiles,
+    Object? editions = _same,
     Map<int, Uint8List>? covers,
     Map<BookLocator, Uint8List>? sourceCovers,
     int? coverRevision,
@@ -249,6 +253,9 @@ final class LibraryModel {
   }) => LibraryModel(
     books: books ?? this.books,
     sourceFiles: sourceFiles ?? this.sourceFiles,
+    editions: identical(editions, _same)
+        ? this.editions
+        : editions as List<BookEdition>?,
     covers: covers ?? this.covers,
     sourceCovers: sourceCovers ?? this.sourceCovers,
     coverRevision: coverRevision ?? this.coverRevision,
