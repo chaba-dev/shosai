@@ -1,6 +1,7 @@
 /// The annotation store's database records.
 library;
 
+import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -9,6 +10,7 @@ import '../library/records.dart';
 import '../store/store.dart';
 import 'annotation.dart';
 import 'quote.dart';
+import 'resolution.dart';
 
 /// A new annotation, validated and ready to insert.
 final class NewAnnotation {
@@ -35,6 +37,7 @@ final class BookAnnotations {
     this.contentHash,
     this.annotations, [
     this.normalization = maxQuoteNormalizationWork,
+    this.sharedContents = const {},
   ]);
 
   final String contentHash;
@@ -43,6 +46,7 @@ final class BookAnnotations {
   /// The listing's normalization allowance left once every stored selector
   /// was checked, for resolving them.
   final int normalization;
+  final Set<String> sharedContents;
 }
 
 /// Annotation queries over the store. Holds nothing but the [Store], so the
@@ -51,6 +55,60 @@ final class AnnotationRecords {
   const AnnotationRecords(this._store);
 
   final Store _store;
+
+  Future<
+    Map<
+      String,
+      ({AnnotationResolution resolution, List<AnnotationFragment> fragments})
+    >
+  >
+  projections(String hash, String resolver, List<String> ids) => _store.read(
+    (db) => {
+      if (ids.isNotEmpty)
+        for (final row in db.select(
+          '''SELECT annotation_id, resolution, fragments
+        FROM annotation_projections WHERE target_hash = ? AND resolver = ?
+        AND annotation_id IN (${_marks(ids.length)})''',
+          [hash, resolver, ...ids],
+        ))
+          row.columnAt(0) as String: (
+            resolution: AnnotationResolution.values.byName(
+              row.columnAt(1) as String,
+            ),
+            fragments: [
+              for (final raw in jsonDecode(row.columnAt(2) as String) as List)
+                (
+                  unit: (raw as List)[0] as int,
+                  start: raw[1] as int,
+                  end: raw[2] as int,
+                ),
+            ],
+          ),
+    },
+  );
+
+  Future<void> saveProjections(
+    String hash,
+    String resolver,
+    List<ResolvedAnnotation> items,
+  ) => _store.transaction((db) {
+    for (final item in items) {
+      if (item.resolution == AnnotationResolution.incomplete) continue;
+      db.execute(
+        '''INSERT OR REPLACE INTO annotation_projections
+          (annotation_id, target_hash, resolver, resolution, fragments) VALUES (?, ?, ?, ?, ?)''',
+        [
+          item.id,
+          hash,
+          resolver,
+          item.resolution.name,
+          jsonEncode([
+            for (final f in item.fragments) [f.unit, f.start, f.end],
+          ]),
+        ],
+      );
+    }
+  });
 
   Future<StoredAnnotation> create(
     AnnotationOwner owner,
@@ -246,7 +304,7 @@ void adoptPendingBookmarkNotes(
     );
   }
   // Over the limits a reader loads, the import fails and the notes wait.
-  _checkSnapshot(db, version.documentId);
+  checkAnnotationSnapshot(db, [hash]);
   db.execute('DELETE FROM pending_bookmark_notes WHERE content_hash = ?', [
     hash,
   ]);
@@ -254,10 +312,9 @@ void adoptPendingBookmarkNotes(
 
 /// Throw unless the document's live annotations are within the snapshot
 /// limits a reader loads at once.
-void _checkSnapshot(Database db, String documentId) {
-  final row = db
-      .select(
-        '''SELECT COUNT(*),
+void _checkSnapshot(Database db, Set<String> ids) {
+  final row = db.select(
+    '''SELECT COUNT(*),
          COALESCE(SUM($annotationBaseBytes
            + length(CAST(a.id AS BLOB))
            + length(CAST(COALESCE(a.body, '') AS BLOB))
@@ -272,16 +329,34 @@ void _checkSnapshot(Database db, String documentId) {
          COALESCE(SUM(COALESCE(length(a.pdf_rectangles), 0) / 16), 0)
        FROM annotations a
        JOIN annotation_document_versions v ON v.id = a.version_id
-       WHERE v.document_id = ? AND a.deleted_at IS NULL''',
-        [documentId],
-      )
-      .single;
+       WHERE v.document_id IN (${_marks(ids.length)}) AND a.deleted_at IS NULL''',
+    ids.toList(),
+  ).single;
   if ((row.columnAt(0) as int) > maxAnnotationsPerDocument ||
       (row.columnAt(1) as int) > maxAnnotationDocumentBytes ||
       (row.columnAt(2) as int) > maxPdfRectanglesPerDocument) {
     throw const CoreException.limitExceeded(
       "The book's annotations exceed what one book may hold.",
     );
+  }
+}
+
+/// Validate a prospective shared snapshot and every edition that shares its
+/// version documents. Call within the mutation's transaction, so rejection
+/// never leaves successfully saved notes that the reader cannot load.
+void checkAnnotationSnapshot(Database db, Iterable<String> hashes) {
+  final documents = {for (final hash in hashes) ..._documentIds(db, hash)};
+  if (documents.isEmpty) return;
+  _checkSnapshot(db, documents);
+  for (final row in db.select(
+    '''SELECT DISTINCT content_hash FROM annotation_document_versions
+    WHERE document_id IN (${_marks(documents.length)})''',
+    documents.toList(),
+  )) {
+    final affected = _documentIds(db, row.columnAt(0) as String);
+    if (!documents.containsAll(affected)) {
+      _checkSnapshot(db, affected);
+    }
   }
 }
 
@@ -350,7 +425,7 @@ StoredAnnotation _create(
       pdf == null ? null : encodeRectangles(pdf.rectangles),
     ],
   );
-  _checkSnapshot(db, version.documentId);
+  checkAnnotationSnapshot(db, [book.hash]);
   return _annotation(
     db.select('$_select WHERE a.id = ?', [id]).single,
     NormalizationAllowance(),
@@ -476,14 +551,15 @@ List<PageRect> decodeRectangles(Uint8List bytes) {
 
 BookAnnotations _list(Database db, AnnotationOwner owner) {
   final book = _owner(db, owner);
-  final version = _version(db, book.hash);
-  if (version == null) return BookAnnotations(book.hash, const []);
+  final documents = _documentIds(db, book.hash);
+  if (documents.isEmpty) return BookAnnotations(book.hash, const []);
+  _checkSnapshot(db, documents);
   final rows = db.select(
     '''$_select
-       WHERE v.document_id = ? AND a.deleted_at IS NULL
+       WHERE v.document_id IN (${_marks(documents.length)}) AND a.deleted_at IS NULL
        ORDER BY a.created_at, a.rowid
        LIMIT ?''',
-    [version.documentId, maxAnnotationsPerDocument + 1],
+    [...documents, maxAnnotationsPerDocument + 1],
   );
   if (rows.length > maxAnnotationsPerDocument) {
     throw const CoreException.limitExceeded(
@@ -493,9 +569,45 @@ BookAnnotations _list(Database db, AnnotationOwner owner) {
   // One allowance for every row: normalizing stored selectors runs on the
   // store's only worker, so a listing may not spend more than one operation.
   final allowance = NormalizationAllowance();
-  return BookAnnotations(book.hash, [
-    for (final row in rows) _annotation(row, allowance),
-  ], allowance.remaining);
+  final shared = {
+    for (final row in db.select(
+      '''SELECT content_hash FROM annotation_document_versions
+    WHERE document_id IN (${_marks(documents.length)}) AND document_id NOT IN
+      (SELECT document_id FROM annotation_document_versions WHERE content_hash = ?)''',
+      [...documents, book.hash],
+    ))
+      row.columnAt(0) as String,
+  };
+  return BookAnnotations(
+    book.hash,
+    [for (final row in rows) _annotation(row, allowance)],
+    allowance.remaining,
+    shared,
+  );
+}
+
+String _marks(int count) => List.filled(count, '?').join(',');
+
+Set<String> _editionHashes(Database db, String hash) => {
+  for (final row in db.select(
+    '''SELECT substr(member.file_key, 6)
+    FROM shelf_members target JOIN shelf_members member ON member.edition_id = target.edition_id
+    WHERE target.file_key = ? AND member.file_key LIKE 'hash:%' ''',
+    ['hash:$hash'],
+  ))
+    row.columnAt(0) as String,
+};
+
+Set<String> _documentIds(Database db, String hash) {
+  final hashes = {hash, ..._editionHashes(db, hash)};
+  return {
+    for (final row in db.select(
+      '''SELECT DISTINCT document_id
+    FROM annotation_document_versions WHERE content_hash IN (${_marks(hashes.length)})''',
+      hashes.toList(),
+    ))
+      row.columnAt(0) as String,
+  };
 }
 
 NotesSummary _summary(Database db, int bookId) {
@@ -503,13 +615,15 @@ NotesSummary _summary(Database db, int bookId) {
       .select('SELECT content_hash FROM books WHERE id = ?', [bookId])
       .firstOrNull
       ?.columnAt(0);
-  final version = hash == null ? null : _version(db, hash as String);
-  if (version == null) return NotesSummary.empty;
-  const live = '''FROM annotations a
+  final documents = hash == null
+      ? <String>{}
+      : _documentIds(db, hash as String);
+  if (documents.isEmpty) return NotesSummary.empty;
+  final live = '''FROM annotations a
        JOIN annotation_document_versions v ON v.id = a.version_id
-       WHERE v.document_id = ? AND a.deleted_at IS NULL''';
+       WHERE v.document_id IN (${_marks(documents.length)}) AND a.deleted_at IS NULL''';
   final count =
-      db.select('SELECT count(*) $live', [version.documentId]).first.columnAt(0)
+      db.select('SELECT count(*) $live', documents.toList()).first.columnAt(0)
           as int;
   final latest = db
       .select(
@@ -517,7 +631,7 @@ NotesSummary _summary(Database db, int bookId) {
              ${_words('a.normalized_exact')}, ${_words('a.body')}) AS words
            $live AND words IS NOT NULL
            ORDER BY a.created_at DESC, a.rowid DESC LIMIT 1''',
-        [version.documentId],
+        documents.toList(),
       )
       .firstOrNull
       ?.columnAt(0);
@@ -537,8 +651,9 @@ const _whiteSpace =
     '12288, 65279)';
 
 /// The live annotation [id] of the book's document, as an update target.
-const _ownedBy = '''id = ? AND deleted_at IS NULL AND version_id IN (
-    SELECT id FROM annotation_document_versions WHERE document_id = ?)''';
+String _ownedBy(int count) =>
+    '''id = ? AND deleted_at IS NULL AND version_id IN (
+    SELECT id FROM annotation_document_versions WHERE document_id IN (${_marks(count)}))''';
 
 bool _update(
   Database db,
@@ -547,28 +662,30 @@ bool _update(
   HighlightColor color,
   String? body,
 ) {
-  final version = _version(db, _owner(db, owner).hash);
-  if (version == null) return false;
+  final hash = _owner(db, owner).hash;
+  final documents = _documentIds(db, hash);
+  if (documents.isEmpty) return false;
   db.execute(
     '''UPDATE annotations SET color = ?, body = ?, modified_at = $_nextModifiedAt
-       WHERE $_ownedBy AND kind = 'highlight' ''',
-    [color.name, body, id, version.documentId],
+       WHERE ${_ownedBy(documents.length)} AND kind = 'highlight' ''',
+    [color.name, body, id, ...documents],
   );
   if (db.updatedRows != 1) return false;
-  _checkSnapshot(db, version.documentId);
+  checkAnnotationSnapshot(db, [hash]);
   return true;
 }
 
 bool _updateNote(Database db, AnnotationOwner owner, String id, String body) {
-  final version = _version(db, _owner(db, owner).hash);
-  if (version == null) return false;
+  final hash = _owner(db, owner).hash;
+  final documents = _documentIds(db, hash);
+  if (documents.isEmpty) return false;
   db.execute(
     '''UPDATE annotations SET body = ?, modified_at = $_nextModifiedAt
-       WHERE $_ownedBy AND kind <> 'highlight' ''',
-    [body, id, version.documentId],
+       WHERE ${_ownedBy(documents.length)} AND kind <> 'highlight' ''',
+    [body, id, ...documents],
   );
   if (db.updatedRows != 1) return false;
-  _checkSnapshot(db, version.documentId);
+  checkAnnotationSnapshot(db, [hash]);
   return true;
 }
 
@@ -583,14 +700,19 @@ LibraryNotesPage _libraryNotes(
   // in the same statement.
   final from = after == null ? offset : 0;
   final books = db.select(
-    '''SELECT $bookColumns,
+    '''WITH candidates AS (SELECT $bookColumns,
          (SELECT v.document_id FROM annotation_document_versions v
-          WHERE v.content_hash = books.content_hash) AS document
+          WHERE v.content_hash = books.content_hash) AS document,
+         row_number() OVER (PARTITION BY coalesce(
+           (SELECT edition_id FROM shelf_members WHERE file_key = 'hash:' || books.content_hash),
+           'book:' || books.id)
+           ORDER BY last_read DESC, date_added DESC, id DESC) AS edition_rank
        FROM books
        WHERE EXISTS (
          SELECT 1 FROM annotation_document_versions dv
          JOIN annotations a ON a.version_id = dv.id
-         WHERE dv.document_id = document AND a.deleted_at IS NULL)
+         WHERE dv.document_id = document AND a.deleted_at IS NULL))
+       SELECT * FROM candidates WHERE edition_rank = 1
        ORDER BY last_read DESC, date_added DESC, id DESC
        LIMIT ? OFFSET ?''',
     [offset - from + limit + 1, from],
@@ -605,14 +727,25 @@ LibraryNotesPage _libraryNotes(
   final page = books.skip(offset - from).toList();
   return LibraryNotesPage([
     for (final row in page.take(limit))
-      BookNotes(bookFromRow(row), noteEntries(db, row['document'] as String)),
+      BookNotes(
+        bookFromRow(row),
+        noteEntries(
+          db,
+          row['document'] as String,
+          documents: _documentIds(db, row['content_hash'] as String),
+        ),
+      ),
   ], hasMore: page.length > limit);
 }
 
 /// The live annotations of document [documentId] as the notes surfaces list
 /// them, in reading order: book notes first, then each unit's annotations by
 /// where they start.
-List<NoteEntry> noteEntries(Database db, String documentId) => [
+List<NoteEntry> noteEntries(
+  Database db,
+  String documentId, {
+  Set<String>? documents,
+}) => [
   for (final row in db.select(
     '''SELECT a.id, a.kind, a.color,
          coalesce(a.original_quote, a.normalized_exact), a.body,
@@ -621,13 +754,17 @@ List<NoteEntry> noteEntries(Database db, String documentId) => [
          a.created_at, a.modified_at
        FROM annotations a
        JOIN annotation_document_versions v ON v.id = a.version_id
-       WHERE v.document_id = ? AND a.deleted_at IS NULL
+       WHERE v.document_id IN (${_marks((documents ?? {documentId}).length)}) AND a.deleted_at IS NULL
        ORDER BY a.kind <> 'book',
          coalesce(a.epub_spine_index, a.pdf_page),
          coalesce(a.epub_scalar_start, a.pdf_char_start, 0),
          a.created_at, a.rowid
        LIMIT ?''',
-    [documentId, maxAnnotationsPerDocument],
+    [
+      ...?documents,
+      if (documents == null) documentId,
+      maxAnnotationsPerDocument,
+    ],
   ))
     NoteEntry(
       id: row.columnAt(0) as String,
@@ -646,12 +783,12 @@ List<NoteEntry> noteEntries(Database db, String documentId) => [
 ];
 
 bool _delete(Database db, AnnotationOwner owner, String id) {
-  final version = _version(db, _owner(db, owner).hash);
-  if (version == null) return false;
+  final documents = _documentIds(db, _owner(db, owner).hash);
+  if (documents.isEmpty) return false;
   db.execute(
     '''UPDATE annotations SET deleted_at = $_now, modified_at = $_nextModifiedAt
-       WHERE $_ownedBy''',
-    [id, version.documentId],
+       WHERE ${_ownedBy(documents.length)}''',
+    [id, ...documents],
   );
   return db.updatedRows == 1;
 }
@@ -740,7 +877,7 @@ AssociationOutcome _associate(Database db, String sourceVersionId, int bookId) {
     db.execute('DELETE FROM annotation_documents WHERE id = ?', [
       sourceDocument,
     ]);
-    _checkSnapshot(db, target.documentId);
+    checkAnnotationSnapshot(db, [book.hash]);
     return AssociationOutcome.associated;
   }
   _checkVersionCapacity(db, [sourceDocument], 1);
@@ -757,7 +894,7 @@ AssociationOutcome _associate(Database db, String sourceVersionId, int bookId) {
       sourceVersionId,
     ],
   );
-  _checkSnapshot(db, sourceDocument);
+  checkAnnotationSnapshot(db, [book.hash]);
   return AssociationOutcome.associated;
 }
 

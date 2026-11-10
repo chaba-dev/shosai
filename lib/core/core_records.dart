@@ -14,6 +14,7 @@ import 'package:shosai_flutter/core/documents.dart';
 import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/core/google_drive_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/library_editions.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -191,6 +192,7 @@ final class PdfEngineInspector implements BookInspector {
         return BookMetadata(
           title: info.title,
           author: info.author,
+          publication: _pdfPublication(info),
           cover: await _pdfCover(document),
         );
       } finally {
@@ -334,7 +336,12 @@ final class PdfEnginePreviewer implements BookPreviewer {
       if (ranges.failure != null || ranges.exceeded) {
         failed(StateError('The first page could not be read.'));
       }
-      return BookMetadata(title: info.title, author: info.author, cover: cover);
+      return BookMetadata(
+        title: info.title,
+        author: info.author,
+        cover: cover,
+        publication: _pdfPublication(info),
+      );
     } finally {
       try {
         await document.dispose();
@@ -756,14 +763,35 @@ final class CoreRecords implements ShosaiRecords {
             text,
             kinds: const {AnnotationKind.highlight},
             cancellation: cancellation,
+            textVersion:
+                libraryTextVersions[BookFormat.values.byName(
+                  document.format.name,
+                )]!,
           )
         : await _core.annotations.list(
             bookId,
             text,
             kinds: const {AnnotationKind.highlight},
             cancellation: cancellation,
+            textVersion:
+                libraryTextVersions[BookFormat.values.byName(
+                  document.format.name,
+                )]!,
           );
-    return [for (final item in resolved) _annotation(item, scale)];
+    final originals = <String, Book?>{};
+    for (final hash in resolved.map((r) => r.annotation.contentHash).toSet()) {
+      originals[hash] = await _core.library.withContent(hash);
+      cancellation.throwIfCancelled();
+    }
+    return [
+      for (final item in resolved)
+        _annotation(
+          item,
+          scale,
+          original: originals[item.annotation.contentHash],
+          targetHash: _content(document).contentHash,
+        ),
+    ];
   });
 
   @override
@@ -870,17 +898,37 @@ final class CoreRecords implements ShosaiRecords {
         text,
         kinds: kinds,
         cancellation: cancellation,
+        textVersion:
+            libraryTextVersions[BookFormat.values.byName(
+              document.format.name,
+            )]!,
       ),
       final bookId => await _core.annotations.list(
         bookId,
         text,
         kinds: kinds,
         cancellation: cancellation,
+        textVersion:
+            libraryTextVersions[BookFormat.values.byName(
+              document.format.name,
+            )]!,
       ),
     };
     // Book notes first, then page notes in reading order; notes at one
     // place stay in the order they were written.
-    final notes = [for (final item in resolved) _note(item)];
+    final originals = <String, Book?>{};
+    for (final hash in resolved.map((r) => r.annotation.contentHash).toSet()) {
+      originals[hash] = await _core.library.withContent(hash);
+      cancellation.throwIfCancelled();
+    }
+    final notes = [
+      for (final item in resolved)
+        _note(
+          item,
+          original: originals[item.annotation.contentHash],
+          targetHash: _content(document).contentHash,
+        ),
+    ];
     int place(BigInt? value) => value?.toInt() ?? -1;
     final order = [for (var i = 0; i < notes.length; i++) i]
       ..sort((i, j) {
@@ -1122,6 +1170,16 @@ FlutterSearchMatch _searchMatch(SearchMatch match) => FlutterSearchMatch(
   contextOffset: BigInt.from(match.contextOffset),
 );
 
+PublicationMetadata _pdfPublication(PdfDocumentInfo info) =>
+    PublicationMetadata(
+      title: info.title,
+      contributors: [?info.author],
+      identifiers: [?info.isbn],
+      language: info.language,
+      edition: info.edition,
+      volume: info.volume,
+    );
+
 /// The bridge the application hands its controllers: the documents it opens
 /// through the Dart engines, and [records] over the Dart core.
 ///
@@ -1129,7 +1187,11 @@ FlutterSearchMatch _searchMatch(SearchMatch match) => FlutterSearchMatch(
 /// releases its documents; [drain] completes when that work has finished.
 /// The core outlives every bridge; its [CoreOwner] closes it.
 final class ApplicationBridge
-    implements FlutterBridge, RecordsHost, LibraryFoldersHost {
+    implements
+        FlutterBridge,
+        RecordsHost,
+        LibraryFoldersHost,
+        LibraryEditionsHost {
   ApplicationBridge(ShosaiCore core)
     : this._(core, OpenDocuments(core.pdfEngine, core.snapshots));
 
@@ -1143,6 +1205,12 @@ final class ApplicationBridge
 
   @override
   LibraryFolders get folders => records._core.folders;
+
+  @override
+  LibraryEditions get editions => LibraryEditions(records._core.store);
+
+  @override
+  FlutterLibraryBook editionBook(Book book) => _libraryBook(book);
 
   @override
   Future<FlutterLibraryBook> admitSourceFile(
@@ -1609,8 +1677,8 @@ final class _LazyPdfText implements ReaderText {
       );
 }
 
-/// Run [body], reporting a core failure as the bridge error the controllers
-/// already present.
+/// Run [body], reporting a location failure as the core error library search
+/// records per book.
 Future<T> _locationErrors<T>(Future<T> Function() body) async {
   try {
     return await body();
@@ -1619,21 +1687,34 @@ Future<T> _locationErrors<T>(Future<T> Function() body) async {
       error.failure == LocationFailure.offline
           ? CoreErrorKind.inaccessible
           : CoreErrorKind.notFound,
-      switch (error.failure) {
-        LocationFailure.offline =>
-          'The book’s location is offline. Try again when it is connected.',
-        LocationFailure.revoked =>
-          'The book’s location is unavailable. Reconnect the folder to read it.',
-        LocationFailure.missing =>
-          'The book is missing from its location. Your notes are still here.',
-      },
+      _locationMessage(error.failure),
     );
   }
 }
 
+String _locationMessage(LocationFailure failure) => switch (failure) {
+  LocationFailure.offline =>
+    'The book’s location is offline. Try again when it is connected.',
+  LocationFailure.revoked =>
+    'The book’s location is unavailable. Reconnect the folder to read it.',
+  LocationFailure.missing =>
+    'The book is missing from its location. Your notes are still here.',
+};
+
 Future<T> _bridgeErrors<T>(Future<T> Function() body) async {
   try {
-    return await _locationErrors(body);
+    return await body();
+  } on LocationException catch (error) {
+    // The controllers present a location failure by its own kind, so the user
+    // learns to reconnect the folder rather than to look for a lost file.
+    throw FlutterBridgeError(
+      kind: switch (error.failure) {
+        LocationFailure.offline => FlutterBridgeErrorKind.locationOffline,
+        LocationFailure.revoked => FlutterBridgeErrorKind.locationRevoked,
+        LocationFailure.missing => FlutterBridgeErrorKind.locationMissing,
+      },
+      message: _locationMessage(error.failure),
+    );
   } on CoreException catch (error) {
     throw FlutterBridgeError(
       kind: switch (error.kind) {
@@ -1704,13 +1785,21 @@ PdfSelection _pdfSelection(
       : PdfSelection(page: page, rectangles: rectangles);
 }
 
-FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
+FlutterAnnotation _annotation(
+  ResolvedAnnotation resolved,
+  double scale, {
+  Book? original,
+  String? targetHash,
+}) {
   final stored = resolved.annotation;
   final (start, end) = (resolved.start, resolved.end);
   return FlutterAnnotation(
     id: stored.id,
-    unit: BigInt.from(stored.anchor.unit!),
+    unit: BigInt.from(resolved.unit!),
     resolution: _resolution(resolved.resolution),
+    fragments: resolved.fragments,
+    fromOtherContent: targetHash != null && stored.contentHash != targetHash,
+    originalBook: original == null ? null : _libraryBook(original),
     textRange: start == null || end == null
         ? null
         : FlutterAnnotationTextRange(
@@ -1734,11 +1823,17 @@ FlutterAnnotation _annotation(ResolvedAnnotation resolved, double scale) {
   );
 }
 
-FlutterNote _note(ResolvedAnnotation resolved) {
+FlutterNote _note(
+  ResolvedAnnotation resolved, {
+  Book? original,
+  String? targetHash,
+}) {
   final stored = resolved.annotation;
-  final unit = stored.anchor.unit;
+  final unit = resolved.unit;
   return FlutterNote(
     id: stored.id,
+    fromOtherContent: targetHash != null && stored.contentHash != targetHash,
+    originalBook: original == null ? null : _libraryBook(original),
     kind: stored.kind == AnnotationKind.bookNote
         ? FlutterNoteKind.book
         : FlutterNoteKind.page,
@@ -1756,6 +1851,7 @@ FlutterAnnotationResolution _resolution(AnnotationResolution resolution) =>
       AnnotationResolution.recovered => FlutterAnnotationResolution.recovered,
       AnnotationResolution.ambiguous => FlutterAnnotationResolution.ambiguous,
       AnnotationResolution.orphaned => FlutterAnnotationResolution.orphaned,
+      AnnotationResolution.incomplete => FlutterAnnotationResolution.incomplete,
     };
 
 HighlightColor _highlightColor(FlutterHighlightColor color) =>

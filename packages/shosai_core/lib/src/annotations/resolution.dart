@@ -24,6 +24,9 @@ enum AnnotationResolution {
 
   /// The quote no longer occurs.
   orphaned,
+
+  /// The bounded target index could not finish; absence is not established.
+  incomplete,
 }
 
 /// A resolved anchor: its resolution and, when it has one, the half-open

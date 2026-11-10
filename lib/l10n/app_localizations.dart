@@ -564,6 +564,12 @@ abstract class AppLocalizations {
   /// **'Chapters'**
   String get readerChaptersHeading;
 
+  /// The page fallback for an untitled Contents entry of a PDF.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {page}'**
+  String readerPageEntry(int page);
+
   /// Iced reference key: chapter-number. The chapter fallback for an untitled Contents entry.
   ///
   /// In en, this message translates to:
@@ -2208,6 +2214,24 @@ abstract class AppLocalizations {
   /// **'The page could not be displayed. Reopen the book and try again.'**
   String get errorRenderFailed;
 
+  /// No description provided for @errorLocationOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'The book’s location is offline. Try again when it is connected.'**
+  String get errorLocationOffline;
+
+  /// No description provided for @errorLocationRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'The book’s location is unavailable. Reconnect the folder to read it.'**
+  String get errorLocationRevoked;
+
+  /// No description provided for @errorLocationMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The book is missing from its location. Your notes are still here.'**
+  String get errorLocationMissing;
+
   /// No description provided for @shellSearchFailed.
   ///
   /// In en, this message translates to:
@@ -2225,6 +2249,138 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Authorization response received. Return to Shōsai to check whether the connection completed. You may close this browser tab.'**
   String get locationAuthorizationReturned;
+
+  /// No description provided for @editionReadAs.
+  ///
+  /// In en, this message translates to:
+  /// **'Read as…'**
+  String get editionReadAs;
+
+  /// No description provided for @editionPickerExplanation.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a file for this edition. Shōsai remembers your choice; each file keeps its own reading position.'**
+  String get editionPickerExplanation;
+
+  /// No description provided for @editionLastUsed.
+  ///
+  /// In en, this message translates to:
+  /// **'Last used'**
+  String get editionLastUsed;
+
+  /// No description provided for @readerAnnotationOtherFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Not placed in this file'**
+  String get readerAnnotationOtherFile;
+
+  /// No description provided for @readerAnnotationOpenOriginal.
+  ///
+  /// In en, this message translates to:
+  /// **'Open original file'**
+  String get readerAnnotationOpenOriginal;
+
+  /// No description provided for @readerAnnotationIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching could not finish; the original is unchanged'**
+  String get readerAnnotationIncomplete;
+
+  /// No description provided for @editionOnDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'On this device'**
+  String get editionOnDevice;
+
+  /// No description provided for @editionFileActions.
+  ///
+  /// In en, this message translates to:
+  /// **'File actions'**
+  String get editionFileActions;
+
+  /// No description provided for @editionSeparate.
+  ///
+  /// In en, this message translates to:
+  /// **'Separate from group'**
+  String get editionSeparate;
+
+  /// No description provided for @editionGroupWith.
+  ///
+  /// In en, this message translates to:
+  /// **'Group with…'**
+  String get editionGroupWith;
+
+  /// No description provided for @editionGroupExplanation.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose another entry for the same edition. Notes are shared; original files and reading positions stay separate. You can separate the files again.'**
+  String get editionGroupExplanation;
+
+  /// No description provided for @editionPossibleMatches.
+  ///
+  /// In en, this message translates to:
+  /// **'Possible matches'**
+  String get editionPossibleMatches;
+
+  /// No description provided for @editionReviewMatches.
+  ///
+  /// In en, this message translates to:
+  /// **'Review possible matches ({count})'**
+  String editionReviewMatches(int count);
+
+  /// No description provided for @editionMatchExplanation.
+  ///
+  /// In en, this message translates to:
+  /// **'These entries may be the same edition. Check the files before grouping; notes will be shared. Original files and reading positions stay separate. You can separate them again.'**
+  String get editionMatchExplanation;
+
+  /// No description provided for @editionMatchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching title'**
+  String get editionMatchTitle;
+
+  /// No description provided for @editionMatchFilename.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching filename'**
+  String get editionMatchFilename;
+
+  /// No description provided for @editionMatchFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching book folder'**
+  String get editionMatchFolder;
+
+  /// No description provided for @editionMatchIsbn.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching ISBN'**
+  String get editionMatchIsbn;
+
+  /// No description provided for @editionMatchConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Title or author differs — check the edition'**
+  String get editionMatchConflict;
+
+  /// No description provided for @editionSourceChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'This file changed since it was listed. Refresh the library and try again.'**
+  String get editionSourceChanged;
+
+  /// No description provided for @editionAddedSeparately.
+  ///
+  /// In en, this message translates to:
+  /// **'The verified file couldn\'t be confirmed as part of this group. It was added separately; your original files and notes are unchanged.'**
+  String get editionAddedSeparately;
+
+  /// No description provided for @editionLocations.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 location} other{{count} locations}}'**
+  String editionLocations(int count);
 }
 
 class _AppLocalizationsDelegate

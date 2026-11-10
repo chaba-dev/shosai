@@ -292,11 +292,11 @@ final class _PdfrxDocument implements PdfEngineDocument {
   @override
   Future<PdfDocumentInfo> info() async {
     if (_disposed) throw const PdfEngineException('PDF document is closed');
-    final (title, author) = await pdfrx.PdfrxEntryFunctions.instance.compute(
+    final info = await pdfrx.PdfrxEntryFunctions.instance.compute(
       _infoOnWorker,
       _handle.address,
     );
-    return PdfDocumentInfo(title: title, author: author);
+    return info;
   }
 
   @override
@@ -468,8 +468,9 @@ pdfium_bindings.PDFium get _pdfium => _workerPdfium ??= pdfium_bindings
   }
 });
 
-/// Runs on pdfrx's worker isolate: the document's title and author.
-(String?, String?) _infoOnWorker(int address) {
+/// Runs on pdfrx's worker isolate: explicit document information, not ISBNs
+/// in page text (which could describe a bibliography or another edition).
+PdfDocumentInfo _infoOnWorker(int address) {
   final pdfium = _pdfium;
   final document = pdfium_bindings.FPDF_DOCUMENT.fromAddress(address);
   String? text(String tag) => using((arena) {
@@ -484,7 +485,14 @@ pdfium_bindings.PDFium get _pdfium => _workerPdfium ??= pdfium_bindings
     ).trim();
     return value.isEmpty ? null : value;
   });
-  return (text('Title'), text('Author'));
+  return PdfDocumentInfo(
+    title: text('Title'),
+    author: text('Author'),
+    isbn: text('ISBN'),
+    language: text('Language'),
+    edition: text('Edition'),
+    volume: text('Volume'),
+  );
 }
 
 /// Runs on pdfrx's worker isolate: whether the viewer preferences'

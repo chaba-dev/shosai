@@ -555,6 +555,8 @@ final class StoredAnnotation {
 }
 
 /// An annotation resolved against the content being read.
+typedef AnnotationFragment = ({int unit, int start, int end});
+
 final class ResolvedAnnotation {
   const ResolvedAnnotation({
     required this.annotation,
@@ -562,6 +564,7 @@ final class ResolvedAnnotation {
     this.start,
     this.end,
     this.rectangles = const [],
+    this.fragments = const [],
   });
 
   final StoredAnnotation annotation;
@@ -576,8 +579,12 @@ final class ResolvedAnnotation {
   /// For a PDF geometry-only anchor that resolved: its page rectangles.
   final List<PageRect> rectangles;
 
+  /// Target-file ranges. The original annotation remains untouched, and one
+  /// logical highlight may span several target pages or chapters.
+  final List<AnnotationFragment> fragments;
+
   String get id => annotation.id;
-  int? get unit => annotation.anchor.unit;
+  int? get unit => fragments.firstOrNull?.unit ?? annotation.anchor.unit;
 
   @override
   bool operator ==(Object other) =>
@@ -586,6 +593,7 @@ final class ResolvedAnnotation {
       other.resolution == resolution &&
       other.start == start &&
       other.end == end &&
+      _listEquals(other.fragments, fragments) &&
       _listEquals(other.rectangles, rectangles);
 
   @override
@@ -594,6 +602,7 @@ final class ResolvedAnnotation {
     resolution,
     start,
     end,
+    Object.hashAll(fragments),
     Object.hashAll(rectangles),
   );
 

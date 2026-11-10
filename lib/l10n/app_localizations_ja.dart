@@ -284,6 +284,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readerChaptersHeading => '章';
 
   @override
+  String readerPageEntry(int page) {
+    return '$pageページ';
+  }
+
+  @override
   String readerChapterNumber(int number) {
     return '第$number章';
   }
@@ -1237,6 +1242,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get errorRenderFailed => 'ページを表示できません。本を開き直して、もう一度お試しください。';
 
   @override
+  String get errorLocationOffline => '本の保存場所はオフラインです。接続後にもう一度お試しください。';
+
+  @override
+  String get errorLocationRevoked => '本の保存場所にアクセスできません。フォルダを再接続すると読めます。';
+
+  @override
+  String get errorLocationMissing => '本が保存場所に見つかりません。ノートは残っています。';
+
+  @override
   String get shellSearchFailed => '検索を完了できませんでした。もう一度お試しください。';
 
   @override
@@ -1245,4 +1259,79 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get locationAuthorizationReturned =>
       '認証結果を受け取りました。Shōsai に戻り、接続が完了したか確認してください。このタブは閉じてかまいません。';
+
+  @override
+  String get editionReadAs => '読む形式を選ぶ…';
+
+  @override
+  String get editionPickerExplanation =>
+      'この版のファイルを選んでください。選択は保存され、読書位置はファイルごとに保持されます。';
+
+  @override
+  String get editionLastUsed => '前回使用';
+
+  @override
+  String get readerAnnotationOtherFile => 'このファイルでは位置を特定できません';
+
+  @override
+  String get readerAnnotationOpenOriginal => '元のファイルを開く';
+
+  @override
+  String get readerAnnotationIncomplete => '照合を完了できませんでした。元の位置は保持されています';
+
+  @override
+  String get editionOnDevice => 'このデバイス内';
+
+  @override
+  String get editionFileActions => 'ファイルの操作';
+
+  @override
+  String get editionSeparate => 'グループから分離';
+
+  @override
+  String get editionGroupWith => '別の本とまとめる…';
+
+  @override
+  String get editionGroupExplanation =>
+      '同じ版の本を選んでください。ノートは共有されますが、元のファイルと読書位置は別々に保持されます。後から分離できます。';
+
+  @override
+  String get editionPossibleMatches => '同じ本の候補';
+
+  @override
+  String editionReviewMatches(int count) {
+    return '同じ本の候補を確認（$count件）';
+  }
+
+  @override
+  String get editionMatchExplanation =>
+      '同じ版の可能性がある本です。まとめるとノートが共有されるため、ファイルを確認してください。元のファイルと読書位置は別々に保持され、後から分離できます。';
+
+  @override
+  String get editionMatchTitle => 'タイトルが一致';
+
+  @override
+  String get editionMatchFilename => 'ファイル名が一致';
+
+  @override
+  String get editionMatchFolder => '本のフォルダが一致';
+
+  @override
+  String get editionMatchIsbn => 'ISBN が一致';
+
+  @override
+  String get editionMatchConflict => 'タイトルまたは著者が異なります。版を確認してください';
+
+  @override
+  String get editionSourceChanged =>
+      '一覧の取得後にファイルが変更されました。ライブラリを更新して、もう一度お試しください。';
+
+  @override
+  String get editionAddedSeparately =>
+      '確認したファイルがこのグループの本か判断できなかったため、別の本として追加しました。元のファイルとノートは変更されていません。';
+
+  @override
+  String editionLocations(int count) {
+    return '$countか所';
+  }
 }

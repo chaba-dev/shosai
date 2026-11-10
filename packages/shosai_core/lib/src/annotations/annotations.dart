@@ -10,6 +10,7 @@ import '../store/store.dart';
 import '../unit_text.dart';
 import 'annotation.dart';
 import 'quote.dart';
+import 'projection.dart';
 import 'records.dart';
 import 'resolution.dart';
 
@@ -29,6 +30,7 @@ final class Annotations {
   Annotations(Store store) : _records = AnnotationRecords(store);
 
   final AnnotationRecords _records;
+  ({String hash, String version, ProjectionText text})? _projectionText;
 
   /// Annotate [selection] in book [bookId].
   Future<ResolvedAnnotation> create(
@@ -171,7 +173,8 @@ final class Annotations {
     UnitTextSource text, {
     Set<AnnotationKind>? kinds,
     CancellationToken? cancellation,
-  }) => _list(LibraryBookOwner(bookId), text, kinds, cancellation);
+    String textVersion = 'unit-text-v1',
+  }) => _list(LibraryBookOwner(bookId), text, kinds, cancellation, textVersion);
 
   /// [content]'s live annotations, as [list] resolves a book's.
   Future<List<ResolvedAnnotation>> listInContent(
@@ -179,25 +182,125 @@ final class Annotations {
     UnitTextSource text, {
     Set<AnnotationKind>? kinds,
     CancellationToken? cancellation,
-  }) => _list(ContentOwner(content), text, kinds, cancellation);
+    String textVersion = 'unit-text-v1',
+  }) => _list(ContentOwner(content), text, kinds, cancellation, textVersion);
 
   Future<List<ResolvedAnnotation>> _list(
     AnnotationOwner owner,
     UnitTextSource text,
     Set<AnnotationKind>? kinds,
     CancellationToken? cancellation,
+    String textVersion,
   ) async {
     // Reading checks every stored selector, so a cancelled listing skips it.
     cancellation.throwIfCancelled();
     var book = await _records.list(owner);
     cancellation.throwIfCancelled();
     if (kinds != null) {
-      book = BookAnnotations(book.contentHash, [
-        for (final annotation in book.annotations)
-          if (kinds.contains(annotation.kind)) annotation,
-      ], book.normalization);
+      book = BookAnnotations(
+        book.contentHash,
+        [
+          for (final annotation in book.annotations)
+            if (kinds.contains(annotation.kind)) annotation,
+        ],
+        book.normalization,
+        book.sharedContents,
+      );
     }
-    return _resolve(book, text, cancellation);
+    final shared = book.annotations
+        .where(
+          (a) =>
+              a.contentHash != book.contentHash &&
+              book.sharedContents.contains(a.contentHash),
+        )
+        .toList();
+    if (shared.isEmpty) return _resolve(book, text, cancellation);
+    final sharedIds = shared.map((a) => a.id).toSet();
+    final local = await _resolve(
+      BookAnnotations(
+        book.contentHash,
+        book.annotations.where((a) => !sharedIds.contains(a.id)).toList(),
+        book.normalization,
+      ),
+      text,
+      cancellation,
+    );
+    final result = {for (final item in local) item.id: item};
+    final quoted = shared.where((a) => a.quote != null).toList();
+    final resolver = 'edition-quote-v1:$textVersion';
+    final saved = await _records.projections(
+      book.contentHash,
+      resolver,
+      quoted.map((a) => a.id).toList(),
+    );
+    cancellation.throwIfCancelled();
+    for (final annotation in shared) {
+      final cached = saved[annotation.id];
+      final fragments = cached?.fragments ?? const <AnnotationFragment>[];
+      result[annotation.id] = ResolvedAnnotation(
+        annotation: annotation,
+        resolution: annotation.anchor is BookAnchor
+            ? AnnotationResolution.exact
+            : cached?.resolution ?? AnnotationResolution.orphaned,
+        start: fragments.firstOrNull?.start,
+        end: fragments.firstOrNull?.end,
+        fragments: fragments,
+      );
+    }
+    final pending = quoted.where((a) => !saved.containsKey(a.id)).toList();
+    if (pending.isNotEmpty) {
+      List<ResolvedAnnotation> mapped;
+      try {
+        var target = _projectionText;
+        if (target == null ||
+            target.hash != book.contentHash ||
+            target.version != textVersion) {
+          target = (
+            hash: book.contentHash,
+            version: textVersion,
+            text: await ProjectionText.read(text, cancellation),
+          );
+          cancellation.throwIfCancelled();
+          _projectionText = target;
+        }
+        mapped = await target.text.project(
+          pending,
+          book.normalization,
+          cancellation,
+        );
+        cancellation.throwIfCancelled();
+        await _records.saveProjections(book.contentHash, resolver, mapped);
+      } on CoreException catch (error) {
+        if (error.kind != CoreErrorKind.limitExceeded) rethrow;
+        mapped = [
+          for (final a in pending)
+            ResolvedAnnotation(
+              annotation: a,
+              resolution: AnnotationResolution.incomplete,
+            ),
+        ];
+      }
+      for (final item in mapped) {
+        result[item.id] = item;
+      }
+    }
+    cancellation.throwIfCancelled();
+    // Membership is reversible even if another window separated it while
+    // this target was being indexed. Never publish a stale relationship.
+    final live = await _records.list(owner);
+    cancellation.throwIfCancelled();
+    return [
+      for (final a in live.annotations)
+        if (result[a.id] case final item?)
+          ResolvedAnnotation(
+            annotation: a,
+            resolution: item.resolution,
+            start: item.start,
+            end: item.end,
+            rectangles: item.rectangles,
+            fragments: item.fragments,
+          ),
+    ];
   }
 
   /// A page of the library's books that have annotations, most recently

@@ -685,7 +685,12 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
         ),
       ),
     ],
-    ReaderContentsStatus.ready => _chapterRows(l10n, contents, dispatch),
+    ReaderContentsStatus.ready => _chapterRows(
+      l10n,
+      contents,
+      dispatch,
+      pages: widget.model.document?.format == FlutterBookFormat.pdf,
+    ),
   };
 
   /// The ready-state chapter rows.
@@ -695,11 +700,15 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
   /// unit keeps the historical `reader-contents-entry-<unit>` key, and later
   /// rows are suffixed. Duplicate sibling keys are a widget error, and the
   /// reveal key must stay unique as well.
+  ///
+  /// An untitled entry is named by its unit: a chapter in an EPUB, a page in a
+  /// PDF ([pages]), whose outline-less fallback entries are its pages.
   List<Widget> _chapterRows(
     AppLocalizations l10n,
     ReaderContentsPresentation contents,
-    void Function(ReaderMessage) dispatch,
-  ) {
+    void Function(ReaderMessage) dispatch, {
+    required bool pages,
+  }) {
     final occurrences = <int, int>{};
     return [
       for (final entry in contents.entries)
@@ -713,9 +722,11 @@ class _ReaderContentsPanelState extends State<_ReaderContentsPanel> {
                 'reader-contents-entry-${entry.unit}-$occurrence',
             },
             entry: entry,
-            label: entry.title.trim().isEmpty
-                ? l10n.readerChapterNumber(entry.unit + 1)
-                : entry.title.trim(),
+            label: switch (entry.title.trim()) {
+              '' when pages => l10n.readerPageEntry(entry.unit + 1),
+              '' => l10n.readerChapterNumber(entry.unit + 1),
+              final title => title,
+            },
             dispatch: dispatch,
           ),
         ),

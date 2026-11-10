@@ -618,6 +618,8 @@ String _annotationResolutionSuffix(
     ' — ${l10n.readerAnnotationAmbiguous}',
   FlutterAnnotationResolution.orphaned =>
     ' — ${l10n.readerAnnotationUnavailable}',
+  FlutterAnnotationResolution.incomplete =>
+    ' — ${l10n.readerAnnotationIncomplete}',
 };
 
 String _colorName(AppLocalizations l10n, FlutterHighlightColor color) =>

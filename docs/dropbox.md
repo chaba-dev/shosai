@@ -123,7 +123,9 @@ be retried. Disconnect deletes only this connection's local credential, not
 the account-wide app authorization or any source files. A kept verified copy
 continues to use the existing cache-first path; books and notes survive removal.
 To withdraw the app's account-wide authorization, use Dropbox's Connected apps
-settings. Reconnect a revoked connection to authorize access again.
+settings. Reconnect a revoked connection to authorize access again; a scan of the
+reconnected folder recognizes files still at the size and revision they were
+opened at and locates their books in the new connection.
 
 Reads stream with backpressure, validate exclusive-end byte ranges and refuse
 an ignored range. Requests own cancellable sockets with a 60-second deadline;

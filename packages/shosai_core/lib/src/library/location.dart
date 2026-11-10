@@ -27,6 +27,7 @@ final class LocationEntry {
     required this.isDirectory,
     this.size,
     this.revision,
+    this.folderName,
   });
 
   final String key;
@@ -36,6 +37,10 @@ final class LocationEntry {
 
   /// Provider version/ETag, for detecting replacement, never content identity.
   final String? revision;
+
+  /// Display name of the containing folder, supplied by discovery, not parsed
+  /// from an opaque provider key. Supporting evidence, never book identity.
+  final String? folderName;
 }
 
 /// One bounded, nonrecursive directory listing.

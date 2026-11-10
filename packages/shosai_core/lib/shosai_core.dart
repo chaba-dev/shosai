@@ -18,6 +18,7 @@ export 'src/annotations/resolution.dart'
 export 'src/cancellation.dart';
 export 'src/errors.dart';
 export 'src/library/book.dart';
+export 'src/library/editions.dart' hide admitEditionFile;
 export 'src/library/file_cache.dart';
 export 'src/library/files.dart';
 export 'src/library/folder_location.dart';

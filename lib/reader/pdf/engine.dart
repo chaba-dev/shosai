@@ -118,11 +118,22 @@ abstract interface class PdfEngineDocument {
 
 /// What the document information dictionary says about the document.
 final class PdfDocumentInfo {
-  const PdfDocumentInfo({this.title, this.author});
+  const PdfDocumentInfo({
+    this.title,
+    this.author,
+    this.isbn,
+    this.language,
+    this.edition,
+    this.volume,
+  });
 
   /// Null when absent or blank.
   final String? title;
   final String? author;
+  final String? isbn;
+  final String? language;
+  final String? edition;
+  final String? volume;
 }
 
 /// Page size in points.

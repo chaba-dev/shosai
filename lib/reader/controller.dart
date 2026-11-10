@@ -630,6 +630,7 @@ final class ReaderController implements Listenable {
           ReaderAnnotationNoteSaved() ||
           ReaderAnnotationDeleted() ||
           ReaderAnnotationNavigated() ||
+          ReaderAnnotationOriginalOpened() ||
           ReaderAnnotationReloadRequested() ||
           ReaderAnnotationAssociationRequested() ||
           ReaderSearchRequested() ||
@@ -1431,6 +1432,11 @@ final class ReaderController implements Listenable {
         unawaited(_deleteAnnotation(message.id));
       case ReaderAnnotationNavigated():
         _jump(() => _navigateAnnotation(message.id));
+      case ReaderAnnotationOriginalOpened():
+        _bookOpener?.call(
+          message.book,
+          ReaderPlace(0, annotationId: message.id, note: message.note),
+        );
       case ReaderAnnotationReloadRequested():
         _annotationReloadRequested();
       case ReaderAnnotationAssociationRequested():
@@ -6307,6 +6313,9 @@ final class ReaderController implements Listenable {
                       id: annotation.id,
                       unit: annotation.unit,
                       resolution: annotation.resolution,
+                      fragments: annotation.fragments,
+                      fromOtherContent: annotation.fromOtherContent,
+                      originalBook: annotation.originalBook,
                       textRange: annotation.textRange,
                       quote: annotation.quote,
                       rectangles: annotation.rectangles,
@@ -7955,6 +7964,23 @@ List<ReaderSelection> _savedSelections(
   PdfStripSelection? columns,
 ]) => List.unmodifiable(
   annotations
+      .expand(
+        (item) => item.fragments.isEmpty
+            ? [item]
+            : [
+                for (final fragment in item.fragments)
+                  FlutterAnnotation(
+                    id: item.id,
+                    unit: BigInt.from(fragment.unit),
+                    resolution: item.resolution,
+                    textRange: FlutterAnnotationTextRange(
+                      start: BigInt.from(fragment.start),
+                      end: BigInt.from(fragment.end),
+                    ),
+                    color: item.color,
+                  ),
+              ],
+      )
       .where(
         (item) =>
             item.textRange != null &&
@@ -8009,6 +8035,9 @@ FlutterAnnotation _freezeAnnotation(FlutterAnnotation annotation) {
     id: annotation.id,
     unit: annotation.unit,
     resolution: annotation.resolution,
+    fragments: List.unmodifiable(annotation.fragments),
+    fromOtherContent: annotation.fromOtherContent,
+    originalBook: annotation.originalBook,
     textRange: annotation.textRange,
     quote: annotation.quote,
     rectangles: annotation.rectangles == null

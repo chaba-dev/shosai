@@ -33,6 +33,7 @@ final class LibraryShelf {
     required this.rowGap,
     required this.layout,
     required this.openTag,
+    required this.editionCards,
   });
 
   /// The shelf for [available] px of content width at [layout]: three
@@ -46,6 +47,7 @@ final class LibraryShelf {
     ShellLayout layout,
     double available, {
     bool openTag = false,
+    bool editionCards = false,
   }) {
     final columnGap = switch (layout) {
       ShellLayout.phone => 14.0,
@@ -63,6 +65,7 @@ final class LibraryShelf {
       rowGap: layout == ShellLayout.phone ? 20 : columnGap,
       layout: layout,
       openTag: openTag,
+      editionCards: editionCards,
     );
   }
 
@@ -74,6 +77,9 @@ final class LibraryShelf {
 
   /// Whether the cards keep a line for the *Open* tag.
   final bool openTag;
+
+  /// Edition cards keep their format badges above the per-file reading status.
+  final bool editionCards;
 
   bool get phone => layout == ShellLayout.phone;
 
@@ -149,7 +155,14 @@ double _cardMetadataBox(BuildContext context, LibraryShelf shelf) {
   final tag = shelf.openTag
       ? _cardMetadataRunSpacing + _lineHeight(context, _cardOpenTagStyle)
       : 0.0;
-  return _cardMetadataRuns(context) + tag;
+  // At larger text sizes the two format badges can occupy separate runs.
+  // Keep those runs in addition to the existing status and open-tag budget.
+  final formats = shelf.editionCards
+      ? _lineHeight(context, shellInterfaceStyle(10, 12)) +
+            _cardBadgePaddingVertical * 2 +
+            _cardMetadataRunSpacing
+      : 0.0;
+  return _cardMetadataRuns(context) + formats + tag;
 }
 
 /// The badge and status runs of the meta line.
@@ -280,6 +293,7 @@ class LibraryCollection extends StatelessWidget {
     this.sortBooks,
     required this.openBook,
     this.openSourceFile,
+    this.openEdition,
     required this.openNotes,
     required this.removeBook,
     this.keepBook,
@@ -301,6 +315,7 @@ class LibraryCollection extends StatelessWidget {
   final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<LibrarySourceFile>? openSourceFile;
+  final void Function(BookEdition, bool choose)? openEdition;
 
   /// The hero's Notes action: the Notes place.
   final VoidCallback openNotes;
@@ -350,6 +365,7 @@ class LibraryCollection extends StatelessWidget {
       sortBooks: sortBooks,
       openBook: openBook,
       openSourceFile: openSourceFile,
+      openEdition: openEdition,
       openNotes: openNotes,
       removeBook: removeBook,
       keepBook: keepBook,
@@ -553,6 +569,7 @@ class _LibraryGrid extends StatefulWidget {
     required this.sortBooks,
     required this.openBook,
     required this.openSourceFile,
+    required this.openEdition,
     required this.openNotes,
     required this.removeBook,
     required this.keepBook,
@@ -568,6 +585,7 @@ class _LibraryGrid extends StatefulWidget {
   final ValueChanged<FlutterLibrarySort>? sortBooks;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<LibrarySourceFile>? openSourceFile;
+  final void Function(BookEdition, bool choose)? openEdition;
   final VoidCallback openNotes;
   final ValueChanged<FlutterLibraryBook> removeBook;
   final ValueChanged<FlutterLibraryBook>? keepBook;
@@ -645,8 +663,15 @@ class _LibraryGridState extends State<_LibraryGrid> {
     final padding = _collectionPadding(layout);
     final spacing = _sectionSpacing(layout);
     final loadingMore = widget.model.loadingMore;
-    final items = <Object>[...widget.model.books, ...widget.model.sourceFiles];
-    if (widget.model.sourceFiles.isNotEmpty &&
+    final items = <Object>[
+      ...?widget.model.editions,
+      if (widget.model.editions == null) ...[
+        ...widget.model.books,
+        ...widget.model.sourceFiles,
+      ],
+    ];
+    if (widget.model.editions == null &&
+        widget.model.sourceFiles.isNotEmpty &&
         widget.model.sort != FlutterLibrarySort.recent) {
       String title(Object item) => switch (item) {
         FlutterLibraryBook() => item.title,
@@ -673,6 +698,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
         final shelf = LibraryShelf.of(
           layout,
           constraints.maxWidth - padding.horizontal,
+          editionCards: widget.model.editions != null,
           openTag: widget.model.books.any(
             (book) => widget.openBookIds.contains(book.bookId),
           ),
@@ -729,6 +755,27 @@ class _LibraryGridState extends State<_LibraryGrid> {
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final item = items[index];
+                      if (item is BookEdition) {
+                        return _EditionCard(
+                          key: ValueKey('edition-${item.id}'),
+                          edition: item,
+                          model: widget.model,
+                          shelf: shelf,
+                          open: item.files.any(
+                            (file) =>
+                                !file.unavailable &&
+                                widget.openBookIds.contains(file.book?.id),
+                          ),
+                          loadCover: widget.loadCover,
+                          loadSourceCover: widget.loadSourceCover,
+                          onOpen: widget.model.busy
+                              ? null
+                              : () => widget.openEdition?.call(item, false),
+                          onChoose: widget.model.busy
+                              ? null
+                              : () => widget.openEdition?.call(item, true),
+                        );
+                      }
                       if (item is LibrarySourceFile) {
                         final file = item;
                         return _SourceFileCard(
@@ -1545,8 +1592,9 @@ class LibraryBookCard extends StatelessWidget {
             style: shosaiInterfaceStyleForText(metaStyle, status),
           );
     // The tag follows the status, or takes the next run where it does not
-    // fit, so neither cuts the other.
-    final tag = open && !removing
+    // fit, so neither cuts the other. An unavailable book cannot be read, so
+    // its stale reader tab does not count as open.
+    final tag = open && !removing && !book.unavailable
         ? Text(
             l10n.cardOpenTag,
             maxLines: 1,

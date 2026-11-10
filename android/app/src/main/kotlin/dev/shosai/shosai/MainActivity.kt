@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
@@ -316,22 +317,8 @@ private object DocumentImportManager {
                 false
             }
 
-    private fun selectionName(uri: Uri, index: Int): String {
-        val candidate = uri.lastPathSegment
-            ?.substringAfterLast(':')
-            ?.substringAfterLast('/')
-            ?: return "Document ${index + 1}"
-        val extension = candidate.substringAfterLast('.', "").lowercase()
-        if (extension !in setOf("pdf", "epub")) return "Document ${index + 1}"
-        val stem = candidate.dropLast(extension.length + 1)
-            .take(60)
-            .map { character ->
-                if (character.isLetterOrDigit() || character in " _-") character else '_'
-            }
-            .joinToString("")
-            .trim(' ', '_')
-        return if (stem.isEmpty()) "Document ${index + 1}" else "$stem.$extension"
-    }
+    private fun selectionName(uri: Uri, index: Int): String =
+        selectionName(resolver, uri, index)
 
     private class AcquisitionCancelled : Exception()
     private class AcquisitionTooLarge : Exception()
@@ -566,6 +553,50 @@ private object OpenedDocumentsChannel {
             },
         )
     }
+}
+
+/**
+ * The name a picked document is imported under: the provider's display name, else the name in the
+ * URI path, else a numbered placeholder. Downloads and cloud providers expose opaque document IDs
+ * in their URIs, so only the display name query shows the real file name.
+ */
+internal fun selectionName(resolver: ContentResolver?, uri: Uri, index: Int): String {
+    val fallback = "Document ${index + 1}"
+    val candidates = listOfNotNull(
+        displayName(resolver, uri),
+        uri.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/'),
+    )
+    return candidates.firstNotNullOfOrNull(::documentFileName) ?: fallback
+}
+
+private fun displayName(resolver: ContentResolver?, uri: Uri): String? {
+    if (resolver == null || uri.scheme != ContentResolver.SCHEME_CONTENT) return null
+    return try {
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (column >= 0 && cursor.moveToFirst() && !cursor.isNull(column)) {
+                cursor.getString(column)
+            } else {
+                null
+            }
+        }
+    } catch (_: RuntimeException) {
+        // Providers may be gone or refuse the query. The URI path then names the document.
+        null
+    }
+}
+
+private fun documentFileName(candidate: String): String? {
+    val extension = candidate.substringAfterLast('.', "").lowercase()
+    if (extension !in setOf("pdf", "epub")) return null
+    val stem = candidate.dropLast(extension.length + 1)
+        .take(60)
+        .map { character ->
+            if (character.isLetterOrDigit() || character in " _-") character else '_'
+        }
+        .joinToString("")
+        .trim(' ', '_')
+    return if (stem.isEmpty()) null else "$stem.$extension"
 }
 
 /** Explicit intents must meet the same contract as the advertised filters. */

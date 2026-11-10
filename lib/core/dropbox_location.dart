@@ -384,6 +384,12 @@ LocationEntry _entry(Map<String, dynamic> value) => LocationEntry(
   isDirectory: value['.tag'] == 'folder',
   size: value['size'] as int?,
   revision: value['rev'] as String?,
+  folderName: switch (value['path_display'] ?? value['path_lower']) {
+    final String path when path.split('/').length > 2 => path.split(
+      '/',
+    )[path.split('/').length - 2],
+    _ => null,
+  },
 );
 
 Future<T> _cancel<T>(Future<T> work, CancellationToken? token) {

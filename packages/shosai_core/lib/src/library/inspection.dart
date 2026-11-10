@@ -9,6 +9,7 @@ import 'package:shosai_epub/shosai_epub.dart';
 
 import '../cancellation.dart';
 import '../errors.dart';
+import 'editions.dart';
 import 'files.dart';
 import 'location.dart';
 
@@ -24,7 +25,14 @@ const maxCoverSourcePixels = 16 * 1024 * 1024;
 
 /// What a format engine reports about a book for the library.
 final class BookMetadata {
-  const BookMetadata({this.title, this.author, this.cover});
+  const BookMetadata({
+    this.title,
+    this.author,
+    this.cover,
+    this.publication = const PublicationMetadata(),
+  });
+
+  final PublicationMetadata publication;
 
   /// The document's own title, or null to use the file name.
   final String? title;
@@ -73,6 +81,7 @@ BookMetadata _inspectEpub(Uint8List bytes, EpubLimits limits) {
   return BookMetadata(
     title: inspection.title,
     author: inspection.author,
+    publication: _publication(inspection),
     cover: switch (inspection.cover) {
       final cover? => coverThumbnail(cover),
       null => null,
@@ -300,9 +309,20 @@ Future<BookMetadata> previewEpub(
   return BookMetadata(
     title: inspection.title,
     author: inspection.author,
+    publication: _publication(inspection),
     cover: cover == null ? null : await _thumbnailOffIsolate(cover),
   );
 }
+
+PublicationMetadata _publication(EpubInspection inspection) =>
+    PublicationMetadata(
+      title: inspection.title,
+      contributors: inspection.contributors,
+      identifiers: inspection.identifiers,
+      language: inspection.language,
+      edition: inspection.edition,
+      volume: inspection.volume,
+    );
 
 /// [coverThumbnail] on another isolate. A closure sends its whole context,
 /// so this one is made where nothing else is in scope.

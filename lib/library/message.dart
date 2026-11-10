@@ -4,6 +4,12 @@ sealed class LibraryMessage {
   const LibraryMessage();
 }
 
+final class LibraryEditionOpened extends LibraryMessage {
+  const LibraryEditionOpened(this.edition, {this.choose = false});
+  final BookEdition edition;
+  final bool choose;
+}
+
 final class LibraryStarted extends LibraryMessage {
   const LibraryStarted();
 }
@@ -166,6 +172,7 @@ final class _LibraryLoaded extends LibraryMessage {
     this.cancellation,
     this.sort,
     this.sourceFiles, {
+    this.editions,
     this.discoveryError,
     this.sourceWarning,
   });
@@ -178,6 +185,7 @@ final class _LibraryLoaded extends LibraryMessage {
   /// The order [page] is listed in.
   final FlutterLibrarySort sort;
   final List<LibrarySourceFile> sourceFiles;
+  final List<BookEdition>? editions;
   final String? discoveryError;
   final String? sourceWarning;
 }
@@ -234,6 +242,7 @@ final class _LibraryMutationCompleted extends LibraryMessage {
     this.refresh = false,
     this.managedFileDeletionPending = false,
     this.notice,
+    this.open,
   });
   final LibraryFailure failure;
   final String? error;
@@ -247,6 +256,13 @@ final class _LibraryMutationCompleted extends LibraryMessage {
   /// it: a completion that arrives after disposal never reports feedback for an
   /// operation whose controller is gone.
   final NoticeRequest? notice;
+
+  /// The book this completed import hands to the reader, or null.
+  ///
+  /// A document opened in Shōsai from another app is imported to be read, so
+  /// the one book it lands (new, or already in the library) opens as if its
+  /// card had been tapped.
+  final FlutterLibraryBook? open;
 }
 
 /// The add-books import effect has unwound.
@@ -271,8 +287,14 @@ final class _LibraryRemovalConfirmed extends LibraryMessage {
 }
 
 final class _LibraryReaderClosed extends LibraryMessage {
-  const _LibraryReaderClosed(this.error);
+  const _LibraryReaderClosed(
+    this.error, {
+    this.next,
+    this.finishAdmission = false,
+  });
   final String? error;
+  final LibraryMessage? next;
+  final bool finishAdmission;
 }
 
 final class _LibraryEffectFinished extends LibraryMessage {
@@ -321,7 +343,9 @@ final class _LibrarySourcePreviewed extends LibraryMessage {
 }
 
 final class _LibrarySourcePreviewsFinished extends LibraryMessage {
-  const _LibrarySourcePreviewsFinished();
+  const _LibrarySourcePreviewsFinished(this.pass, this.changed);
+  final int pass;
+  final bool changed;
 }
 
 final class _LibraryCleanupStatusChanged extends LibraryMessage {

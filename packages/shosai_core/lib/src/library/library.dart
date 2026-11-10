@@ -132,6 +132,9 @@ final class Library {
   /// The book with [id], or null.
   Future<Book?> get(int id) => _records.book(id);
 
+  /// The library file owning these verified bytes, if still admitted.
+  Future<Book?> withContent(String hash) => _records.bookWithContent(hash);
+
   /// The stored cover thumbnail (PNG) of book [id], or null.
   Future<Uint8List?> cover(int id) => _records.cover(id);
 
@@ -424,6 +427,7 @@ final class Library {
     return BookMetadata(
       title: title,
       author: author,
+      publication: metadata.publication,
       cover: cover == null || cover.isEmpty || cover.length > maxCoverBytes
           ? null
           : cover,

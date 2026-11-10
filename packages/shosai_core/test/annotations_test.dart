@@ -98,6 +98,203 @@ void main() {
     annotations = Annotations(t.store);
   });
 
+  Future<BookEdition> groupFiles(int a, int b) async {
+    final shelf = LibraryEditions(t.store);
+    final entries = (await shelf.page(sources: [])).editions;
+    final first = entries.singleWhere(
+      (e) => e.files.any((f) => f.book?.id == a),
+    );
+    final second = entries.singleWhere(
+      (e) => e.files.any((f) => f.book?.id == b),
+    );
+    await shelf.group(second.id, first.id, sources: []);
+    return (await shelf.page(sources: [])).editions.single;
+  }
+
+  test(
+    'one highlight projects across PDF pages, survives restart, and edits both ways',
+    () async {
+      final epub = await book('epub');
+      final pdf = await book('pdf');
+      final edition = await groupFiles(epub, pdf);
+      const chapter = 'Preface 🧭 Café field notes across pages finish. Coda.';
+      final created = await annotations.create(
+        epub,
+        _select(chapter, 'Café field notes across pages'),
+        body: 'Shared thought',
+      );
+      final target = FakeText([
+        const UnitText('Front matter'),
+        const UnitText('Preface 🧭 Cafe\u0301 field notes'),
+        const UnitText('across pages finish. Coda.'),
+      ]);
+      final [mapped] = await annotations.list(pdf, target);
+      expect(mapped.id, created.id);
+      expect(mapped.annotation.anchor, created.annotation.anchor);
+      expect(mapped.resolution, AnnotationResolution.recovered);
+      expect(mapped.fragments, [
+        (unit: 1, start: 10, end: 27),
+        (unit: 2, start: 0, end: 12),
+      ]);
+      final reverse = await annotations.create(
+        pdf,
+        PdfSelection(
+          page: 2,
+          rectangles: _rectangles,
+          text: 'across pages finish. Coda.',
+          start: 13,
+          end: 19,
+        ),
+      );
+      final inEpub = await annotations.list(epub, _epubText(chapter));
+      final back = inEpub.singleWhere((a) => a.id == reverse.id);
+      expect(back.resolution, AnnotationResolution.recovered);
+      expect(back.fragments, [(unit: 0, start: 40, end: 46)]);
+      expect(
+        await annotations.update(
+          pdf,
+          created.id,
+          color: HighlightColor.purple,
+          body: 'Edited from PDF',
+        ),
+        isTrue,
+      );
+      expect(
+        (await annotations.list(
+          epub,
+          _epubText(chapter),
+        )).first.annotation.body,
+        'Edited from PDF',
+      );
+      final reopened = await Store.open(t.store.path);
+      addTearDown(reopened.close);
+      final coldText = FakeText([
+        const UnitText('not read'),
+        const UnitText('not read'),
+        const UnitText('across pages finish. Coda.'),
+      ]);
+      final cold = await Annotations(reopened).list(pdf, coldText);
+      expect(cold.first.fragments, mapped.fragments);
+      // Only the PDF's own annotation needs page 2; the projection needs no text.
+      expect(coldText.requested, [2]);
+      await LibraryEditions(t.store).separate(
+        edition.id,
+        contentEditionKey((await t.library.get(pdf))!.contentHash),
+      );
+      expect(
+        (await annotations.list(epub, _epubText(chapter))).map((a) => a.id),
+        [created.id],
+      );
+      expect(await annotations.delete(pdf, created.id), isFalse);
+      expect((await annotations.list(pdf, target)).single.id, reverse.id);
+    },
+  );
+
+  test(
+    'ambiguous, missing, page-only and geometry-only notes remain unplaced',
+    () async {
+      final epub = await book('epub');
+      final pdf = await book('pdf');
+      await groupFiles(epub, pdf);
+      final repeated = await annotations.create(
+        epub,
+        _select('repeat', 'repeat'),
+      );
+      final missing = await annotations.create(
+        epub,
+        _select('absent', 'absent'),
+      );
+      await annotations.createNote(epub, const BookAnchor(), 'Edition note');
+      await annotations.createNote(
+        epub,
+        const EpubPlaceAnchor(spineIndex: 0, resourcePath: _chapter, offset: 0),
+        'Original chapter',
+      );
+      final mapped = await annotations.list(
+        pdf,
+        FakeText([const UnitText('repeat repeat')]),
+      );
+      expect(
+        mapped.singleWhere((a) => a.id == repeated.id).resolution,
+        AnnotationResolution.ambiguous,
+      );
+      expect(
+        mapped.singleWhere((a) => a.id == missing.id).resolution,
+        AnnotationResolution.orphaned,
+      );
+      expect(
+        mapped
+            .where((a) => a.annotation.kind == AnnotationKind.pageNote)
+            .single
+            .resolution,
+        AnnotationResolution.orphaned,
+      );
+      expect(
+        mapped
+            .where((a) => a.annotation.kind == AnnotationKind.bookNote)
+            .single
+            .resolution,
+        AnnotationResolution.exact,
+      );
+      final geometry = await annotations.create(
+        pdf,
+        const PdfSelection(page: 0, rectangles: _rectangles),
+      );
+      final inEpub = await annotations.list(epub, _epubText('repeat absent'));
+      expect(
+        inEpub.singleWhere((a) => a.id == geometry.id).rectangles,
+        isEmpty,
+      );
+      expect(
+        inEpub.singleWhere((a) => a.id == geometry.id).resolution,
+        AnnotationResolution.orphaned,
+      );
+      expect(await annotations.delete(pdf, repeated.id), isTrue);
+      expect(
+        (await annotations.list(
+          epub,
+          _epubText('repeat'),
+        )).any((a) => a.id == repeated.id),
+        isFalse,
+      );
+      expect((await annotations.summary(pdf)).count, 4);
+    },
+  );
+
+  test(
+    'incomplete cross-format indexing is not persisted as an absent passage',
+    () async {
+      final epub = await book('epub');
+      final pdf = await book('pdf');
+      await groupFiles(epub, pdf);
+      await annotations.create(
+        epub,
+        _select('unique passage', 'unique passage'),
+      );
+      final [limited] = await annotations.list(
+        pdf,
+        FakeText([UnitText('x' * (2 * 1024 * 1024 + 1))]),
+      );
+      expect(limited.resolution, AnnotationResolution.incomplete);
+      final [retried] = await annotations.list(
+        pdf,
+        FakeText([const UnitText('unique passage')]),
+      );
+      expect(retried.resolution, AnnotationResolution.recovered);
+      final cancellation = CancellationToken()..cancel();
+      await expectLater(
+        annotations.list(pdf, FakeText([]), cancellation: cancellation),
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.cancelled,
+          ),
+        ),
+      );
+    },
+  );
+
   group('annotations', () {
     test('an EPUB annotation round trips and updates', () async {
       final bookId = await book('epub');
@@ -1798,6 +1995,161 @@ void main() {
       // A tombstone frees its place.
       await annotations.delete(bookId, first.id);
       await annotations.create(bookId, _select(_text, 'tail'));
+    });
+
+    test('grouping cannot make existing notes unloadable', () async {
+      final a = await book('epub');
+      final b = await book('pdf');
+      for (final id in [a, b]) {
+        final seed = await annotations.createNote(
+          id,
+          const BookAnchor(),
+          'Note',
+        );
+        await t.executeMany(
+          '''INSERT INTO annotations(id, version_id, format, kind, anchor_version, body)
+          SELECT ?, version_id, format, kind, anchor_version, body
+          FROM annotations WHERE id = ?''',
+          [
+            for (var i = 1; i < 600; i++)
+              ['$id-note-$i'.padLeft(36, '0'), seed.id],
+          ],
+        );
+      }
+      await expectLater(
+        groupFiles(a, b),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect(await annotations.list(a, _epubText(_text)), hasLength(600));
+      expect(
+        await annotations.list(b, FakeText([const UnitText(_text)])),
+        hasLength(600),
+      );
+      // Strong metadata must not bypass the same limit during inference.
+      await t.execute('UPDATE books SET publication_metadata = ?', [
+        const PublicationMetadata(
+          title: 'Edition',
+          contributors: ['Ada Lee'],
+          edition: '1',
+          language: 'en',
+        ).encode(),
+      ]);
+      expect((await LibraryEditions(t.store).page(sources: [])).bookCount, 2);
+      // Admitting a known content into a manually grouped preview must use
+      // the same budget, even when the content already has its own notes.
+      final locations = LibraryLocations(t.store);
+      final generation = await locations.connect('source', 'Books');
+      const source = LocationEntry(
+        key: 'copy',
+        name: 'export.pdf',
+        isDirectory: false,
+      );
+      const locator = (locationId: 'source', key: 'copy');
+      await locations.scan('source', generation, [source]);
+      final shelf = LibraryEditions(t.store);
+      final entries = (await shelf.page(sources: [locator])).editions;
+      final preview = entries.singleWhere(
+        (e) => e.files.single.locator != null,
+      );
+      final target = entries.singleWhere((e) => e.files.single.book?.id == a);
+      await shelf.group(preview.id, target.id, sources: [locator]);
+      final other = (await t.library.get(b))!;
+      await expectLater(
+        locations.admit('source', generation, source, other.contentHash),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect((await shelf.page(sources: [locator])).bookCount, 2);
+      expect((await locations.catalog()).single.entry.key, 'copy');
+    });
+
+    test(
+      'shared notes enforce one transactional count and byte budget',
+      () async {
+        final a = await book('epub');
+        final b = await book('pdf');
+        final first = await annotations.createNote(a, const BookAnchor(), 'A');
+        final second = await annotations.createNote(b, const BookAnchor(), 'B');
+        for (final (id, seed) in [(a, first), (b, second)]) {
+          await t.executeMany(
+            '''INSERT INTO annotations(id, version_id, format, kind, anchor_version, body)
+          SELECT ?, version_id, format, kind, anchor_version, body
+          FROM annotations WHERE id = ?''',
+            [
+              for (var i = 1; i < 512; i++)
+                ['$id-note-$i'.padLeft(36, '0'), seed.id],
+            ],
+          );
+        }
+        await groupFiles(a, b);
+        await expectLater(
+          annotations.createNote(a, const BookAnchor(), 'Overflow'),
+          throwsCoreError(CoreErrorKind.limitExceeded),
+        );
+        expect(
+          await annotations.list(b, FakeText([const UnitText(_text)])),
+          hasLength(1024),
+        );
+        await annotations.delete(b, first.id);
+        await annotations.createNote(b, const BookAnchor(), 'Freed space');
+        // Fill each original's byte allowance without exceeding its own cap.
+        // Their shared snapshot must still reject a growth that cannot be read.
+        await t.execute('DELETE FROM annotations WHERE id <> ?', [second.id]);
+        final body = 'x' * maxAnnotationBodyScalars;
+        var count = 0;
+        while (count < 200) {
+          try {
+            await annotations.createNote(
+              count.isEven ? a : b,
+              const BookAnchor(),
+              body,
+            );
+            count++;
+          } on CoreException catch (error) {
+            expect(error.kind, CoreErrorKind.limitExceeded);
+            break;
+          }
+        }
+        expect(count, lessThan(200));
+        await expectLater(
+          annotations.updateNote(a, second.id, '😀' * maxAnnotationBodyScalars),
+          throwsCoreError(CoreErrorKind.limitExceeded),
+        );
+        final listed = await annotations.list(
+          b,
+          FakeText([const UnitText(_text)]),
+        );
+        expect(listed, hasLength(count + 1));
+        expect(
+          listed.singleWhere((note) => note.id == second.id).annotation.body,
+          'B',
+        );
+      },
+    );
+
+    test('shared PDF highlights keep the aggregate rectangle limit', () async {
+      final a = await book('pdf');
+      final b = await book('pdf');
+      final rectangles = List.filled(maxPdfRectangles, _rectangles.single);
+      for (final id in [a, b]) {
+        for (var i = 0; i < 2; i++) {
+          await annotations.create(
+            id,
+            PdfSelection(page: 0, rectangles: rectangles),
+          );
+        }
+      }
+      await groupFiles(a, b);
+      await expectLater(
+        annotations.create(
+          a,
+          const PdfSelection(page: 0, rectangles: _rectangles),
+        ),
+        throwsCoreError(CoreErrorKind.limitExceeded),
+      );
+      expect(
+        await annotations.list(b, FakeText([const UnitText('Page')])),
+        hasLength(4),
+      );
     });
 
     test('the snapshot size limit applies to create and update', () async {

@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import '../cancellation.dart';
 import '../errors.dart';
 import '../store/store.dart';
+import 'editions.dart';
 import 'files.dart';
 import 'inspection.dart';
 import 'location.dart';
@@ -25,8 +26,11 @@ final class SourcePreview {
 }
 
 /// Location records are independent of notes and reading state. Removing a
-/// connection keeps its books and locators, marking them unavailable. Connecting
-/// again never declares old files available until the adapter reads them.
+/// connection keeps its books and locators, marking them unavailable, and
+/// keeps what it admitted and hid. A later connection's scan recognizes a file
+/// listed at the size and revision a removed connection admitted or hid it at,
+/// and takes over that record (see [scan]); any other old file stays
+/// unavailable until the adapter reads it.
 ///
 /// The generation returned by [connect] belongs to one adapter/grant lifetime.
 /// Completions from an older grant cannot restore availability after removal or
@@ -41,7 +45,7 @@ final class LibraryLocations {
   catalog() => _store.read(
     (db) => [
       for (final row in db.select(
-        'SELECT location_id, locator_key, name, size, revision FROM library_source_files',
+        'SELECT location_id, locator_key, name, size, revision, folder_name FROM library_source_files',
       ))
         (
           locationId: row.columnAt(0) as String,
@@ -51,6 +55,7 @@ final class LibraryLocations {
             isDirectory: false,
             size: row.columnAt(3) as int?,
             revision: row.columnAt(4) as String?,
+            folderName: row.columnAt(5) as String?,
           ),
         ),
     ],
@@ -112,6 +117,7 @@ final class LibraryLocations {
 
     final title = text(metadata.title);
     final author = text(metadata.author);
+    final publication = metadata.publication.encode();
     final given = metadata.cover;
     final cover = given == null || given.isEmpty || given.length > maxCoverBytes
         ? null
@@ -130,13 +136,22 @@ final class LibraryLocations {
       }
       db.execute(
         '''INSERT INTO library_source_previews
-             (location_id, locator_key, size, revision, title, author, cover)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+             (location_id, locator_key, size, revision, title, author, cover, publication_metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(location_id, locator_key) DO UPDATE SET
              size = excluded.size, revision = excluded.revision,
              title = excluded.title, author = excluded.author,
-             cover = excluded.cover''',
-        [id, entry.key, entry.size, entry.revision, title, author, cover],
+             cover = excluded.cover, publication_metadata = excluded.publication_metadata''',
+        [
+          id,
+          entry.key,
+          entry.size,
+          entry.revision,
+          title,
+          author,
+          cover,
+          publication,
+        ],
       );
       return SourcePreview(
         title: title,
@@ -146,27 +161,47 @@ final class LibraryLocations {
     });
   }
 
+  /// Forget the connection's listing. Its admissions and hidden files stay:
+  /// they say which listed file is which book, so the next scan of the same
+  /// files, by this connection or one that replaces it, offers no book that
+  /// is already on the shelf. The scan forgets the files it no longer lists.
   Future<void> clearCatalog(String id) => _store.transaction((db) {
     db.execute('DELETE FROM library_source_files WHERE location_id = ?', [id]);
     db.execute('DELETE FROM library_source_previews WHERE location_id = ?', [
-      id,
-    ]);
-    db.execute('DELETE FROM library_source_admissions WHERE location_id = ?', [
       id,
     ]);
   });
 
   /// Admission is separate from source ownership: a local duplicate keeps its
   /// working local path while this mapping suppresses its source candidate.
-  Future<void> admit(
+  /// Returns false if verified facts rejected the preview's chosen group;
+  /// the file is still admitted, with its content kept separately.
+  /// Disable [inheritPreview] when the adapter cannot verify a source revision.
+  Future<bool> admit(
     String id,
     int generation,
     LocationEntry entry,
-    String hash,
-  ) => _store.transaction((db) {
+    String hash, {
+    bool inheritPreview = true,
+  }) => _store.transaction((db) {
     if (!_hasGeneration(db, id, generation)) {
       throw const LocationException(LocationFailure.revoked);
     }
+    db.execute(
+      '''UPDATE books SET display_name = COALESCE(display_name, ?),
+         source_folder = COALESCE(source_folder, ?) WHERE content_hash = ?''',
+      [entry.name, entry.folderName, hash],
+    );
+    final grouped = admitEditionFile(
+      db,
+      sourceEditionKey(
+        (locationId: id, key: entry.key),
+        entry.size,
+        entry.revision,
+      ),
+      hash,
+      inheritPreview: inheritPreview,
+    );
     db.execute(
       '''INSERT INTO library_source_admissions
           (location_id, locator_key, content_hash, size, revision) VALUES (?, ?, ?, ?, ?)
@@ -197,6 +232,7 @@ final class LibraryLocations {
       'DELETE FROM library_hidden_source_files WHERE content_hash = ?',
       [hash],
     );
+    return grouped;
   });
 
   /// Source files whose books were removed from the library, newest first.
@@ -261,6 +297,11 @@ final class LibraryLocations {
   /// candidates again, without changing the old book identity or its notes.
   /// A hidden file (its book removed from the library) stays off the shelf
   /// while its bytes are unchanged; changed or gone, it is forgotten.
+  ///
+  /// A file a removed connection admitted or hid, listed again at the same
+  /// key, size and revision, is the same file reconnected: its record moves to
+  /// this connection, so its book is located here and reads again, or stays
+  /// off the shelf, without being offered as a new candidate.
   Future<Set<String>> scan(
     String id,
     int generation,
@@ -294,19 +335,61 @@ final class LibraryLocations {
           revision: row.columnAt(2) as String?,
         ),
     };
+    // What removed connections admitted or hid, by file key: a file listed
+    // again at the same size and revision is taken over below.
+    final removedAdmitted = {
+      for (final row in db.select(
+        '''SELECT a.locator_key, a.location_id, a.content_hash, a.size, a.revision
+           FROM library_source_admissions a
+           JOIN library_locations l ON l.id = a.location_id AND l.removed = 1''',
+      ))
+        row.columnAt(0) as String: _RemovedRecord(
+          locationId: row.columnAt(1) as String,
+          contentHash: row.columnAt(2) as String,
+          size: row.columnAt(3) as int?,
+          revision: row.columnAt(4) as String?,
+        ),
+    };
+    final removedHidden = {
+      for (final row in db.select(
+        '''SELECT h.locator_key, h.location_id, h.content_hash, h.size,
+                  h.revision, h.hidden_at
+           FROM library_hidden_source_files h
+           JOIN library_locations l ON l.id = h.location_id AND l.removed = 1''',
+      ))
+        row.columnAt(0) as String: _RemovedRecord(
+          locationId: row.columnAt(1) as String,
+          contentHash: row.columnAt(2) as String,
+          size: row.columnAt(3) as int?,
+          revision: row.columnAt(4) as String?,
+          hiddenAt: row.columnAt(5) as String,
+        ),
+    };
     final known = <String>{};
     final present = entries.map((entry) => entry.key).toSet();
     db.execute('DELETE FROM library_source_files WHERE location_id = ?', [id]);
     for (final entry in entries) {
       final previous = admitted[entry.key] ?? hidden[entry.key];
-      if (previous != null &&
+      final unchanged =
+          previous != null &&
           previous.size == entry.size &&
-          previous.revision == entry.revision) {
+          previous.revision == entry.revision;
+      if (unchanged ||
+          _reconnected(db, id, entry, removedAdmitted, removedHidden)) {
         known.add(entry.key);
       } else {
         db.execute(
-          'INSERT INTO library_source_files (location_id, locator_key, name, size, revision) VALUES (?, ?, ?, ?, ?)',
-          [id, entry.key, entry.name, entry.size, entry.revision],
+          '''INSERT INTO library_source_files
+          (location_id, locator_key, name, size, revision, folder_name)
+          VALUES (?, ?, ?, ?, ?, ?)''',
+          [
+            id,
+            entry.key,
+            entry.name,
+            entry.size,
+            entry.revision,
+            entry.folderName,
+          ],
         );
       }
     }
@@ -555,6 +638,104 @@ final class LibraryLocations {
       );
     }
   });
+}
+
+/// What a removed connection admitted or hid: the file's key, size and
+/// revision, the book it was, and when it was hidden.
+class _RemovedRecord {
+  const _RemovedRecord({
+    required this.locationId,
+    required this.contentHash,
+    required this.size,
+    required this.revision,
+    this.hiddenAt,
+  });
+
+  final String locationId;
+  final String contentHash;
+  final int? size;
+  final String? revision;
+  final String? hiddenAt;
+
+  bool matches(LocationEntry entry) =>
+      size == entry.size && revision == entry.revision;
+}
+
+/// Move the record a removed connection kept of [entry], listed by [id] at the
+/// size and revision it was admitted or hidden at, to [id]. An admitted file
+/// keeps its admission; where the removed connection also located its book,
+/// that locator moves to [id] and reads again. A hidden file stays off the
+/// shelf. Reports whether such a record was found.
+bool _reconnected(
+  Database db,
+  String id,
+  LocationEntry entry,
+  Map<String, _RemovedRecord> removedAdmitted,
+  Map<String, _RemovedRecord> removedHidden,
+) {
+  final admission = removedAdmitted[entry.key];
+  if (admission != null && admission.matches(entry)) {
+    db.execute(
+      '''INSERT INTO library_source_admissions
+           (location_id, locator_key, content_hash, size, revision)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(location_id, locator_key) DO UPDATE SET
+           content_hash = excluded.content_hash, size = excluded.size,
+           revision = excluded.revision''',
+      [id, entry.key, admission.contentHash, entry.size, entry.revision],
+    );
+    // Admission and location are separate: a book that was only admitted
+    // from the removed connection (its working source is a local import) is
+    // not made to depend on this one.
+    db.execute(
+      '''INSERT INTO book_locators
+           (content_hash, location_id, locator_key, failure)
+         SELECT content_hash, ?, locator_key, NULL FROM book_locators
+         WHERE content_hash = ? AND location_id = ? AND locator_key = ?
+         ON CONFLICT(content_hash, location_id, locator_key)
+         DO UPDATE SET failure = NULL''',
+      [id, admission.contentHash, admission.locationId, entry.key],
+    );
+    // The file is a book here now, not a hidden file this connection once
+    // knew at other bytes.
+    db.execute(
+      'DELETE FROM library_hidden_source_files WHERE location_id = ? AND locator_key = ?',
+      [id, entry.key],
+    );
+    db.execute(
+      'DELETE FROM library_source_admissions WHERE location_id = ? AND locator_key = ?',
+      [admission.locationId, entry.key],
+    );
+    db.execute(
+      '''DELETE FROM book_locators
+         WHERE content_hash = ? AND location_id = ? AND locator_key = ?''',
+      [admission.contentHash, admission.locationId, entry.key],
+    );
+    return true;
+  }
+  final hidden = removedHidden[entry.key];
+  if (hidden == null || !hidden.matches(entry)) return false;
+  db.execute(
+    '''INSERT INTO library_hidden_source_files
+         (location_id, locator_key, content_hash, size, revision, hidden_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(location_id, locator_key) DO UPDATE SET
+         content_hash = excluded.content_hash, size = excluded.size,
+         revision = excluded.revision, hidden_at = excluded.hidden_at''',
+    [
+      id,
+      entry.key,
+      hidden.contentHash,
+      entry.size,
+      entry.revision,
+      hidden.hiddenAt,
+    ],
+  );
+  db.execute(
+    'DELETE FROM library_hidden_source_files WHERE location_id = ? AND locator_key = ?',
+    [hidden.locationId, entry.key],
+  );
+  return true;
 }
 
 void _connectionFailure(

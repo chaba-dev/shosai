@@ -9,12 +9,14 @@ import 'package:shosai_core/shosai_core.dart'
     show
         BookAnchor,
         FolderLocation,
+        LibraryEditions,
         LocationFailure,
         Preferences,
         maxPreferenceRows,
         maxPreferenceValueBytes,
         maxPreferenceTotalBytes;
 import 'package:shosai_flutter/core/library_connection.dart';
+import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -295,20 +297,23 @@ void main() {
 
       controller.dispatch(const LibraryStarted());
       await loaded();
-      expect(controller.model.sourceFiles.single.entry.name, 'good.pdf');
+      expect(controller.model.editions!.single.displayFile.name, 'good.pdf');
       expect(controller.model.sourceWarning, contains('Deep books'));
       expect(controller.model.sourceWarning, contains('Settings'));
       expect(controller.model.loadError, isNull);
       expect(controller.model.error, isNull);
       controller.dispatch(const LibraryFormatChanged(FlutterBookFormat.epub));
       await loaded();
-      expect(controller.model.sourceFiles, isEmpty);
+      expect(controller.model.editions, isEmpty);
       expect(controller.model.displayError, contains('Deep books'));
       Directory('${broken.path}/nested').deleteSync(recursive: true);
       File('${broken.path}/repaired.epub').writeAsStringSync('metadata only');
       controller.dispatch(const LibraryRetryRequested());
       await loaded();
-      expect(controller.model.sourceFiles.single.entry.name, 'repaired.epub');
+      expect(
+        controller.model.editions!.single.displayFile.name,
+        'repaired.epub',
+      );
       expect(controller.model.sourceWarning, isNull);
       expect(controller.model.loadError, isNull);
     },
@@ -788,7 +793,7 @@ void main() {
           isA<FlutterBridgeError>().having(
             (error) => error.kind,
             'kind',
-            FlutterBridgeErrorKind.notFound,
+            FlutterBridgeErrorKind.locationMissing,
           ),
         ),
       );
@@ -853,7 +858,18 @@ void main() {
           'grant': source.path,
         }),
       );
-      final same = await core.folders.importEntry('new-device-grant', selected);
+      // Restoring the bytes changed the provider revision. An old listing
+      // cannot carry a preview choice across that change; fresh discovery
+      // still recognizes the original content and its notes.
+      await expectLater(
+        core.folders.importEntry('new-device-grant', selected),
+        throwsA(EditionAdmissionConflict.sourceChanged),
+      );
+      final refreshed = await core.folders.browse('new-device-grant');
+      final same = await core.folders.importEntry(
+        'new-device-grant',
+        refreshed.entries.singleWhere((entry) => entry.name == 'chosen.epub'),
+      );
       expect(same.id, book.id);
       expect(
         (await core.annotations.summary(book.id)).latest,
@@ -948,7 +964,7 @@ void main() {
           isA<FlutterBridgeError>().having(
             (error) => error.kind,
             'kind',
-            FlutterBridgeErrorKind.notFound,
+            FlutterBridgeErrorKind.locationRevoked,
           ),
         ),
       );
@@ -1232,6 +1248,136 @@ void main() {
     expect(matches.single.unit, BigInt.one);
     expect(matches.single.offset, BigInt.from(19));
   });
+
+  test('cancelled edition admission resumes unopened-file previews', () async {
+    bridge.dispose();
+    await bridge.drain();
+    await core.close();
+    final engine = _FilePdfEngine();
+    core = await ShosaiCore.open(directory.path, pdfEngine: engine);
+    bridge = ApplicationBridge(core);
+    final source = Directory('${directory.path}/source')..createSync();
+    File(_pdfFixture).copySync('${source.path}/first.pdf');
+    await core.folders.add(
+      LibraryConnection('source', 'Books', 'folder', {
+        'kind': 'path',
+        'grant': source.path,
+      }),
+    );
+    final sources = await core.folders.discover();
+    await core.folders.previewSourceFiles(sources, onPreviewed: (_) {});
+    final opened = <int>[];
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (book) async => opened.add(book.bookId),
+      drainReaderSaves: (_) async {},
+    );
+    addTearDown(() async {
+      controller.dispose();
+      await bridge.drain();
+    });
+    Future<void> until(bool Function() done) async {
+      for (var i = 0; i < 300 && !done(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(done(), isTrue);
+    }
+
+    controller.dispatch(const LibraryStarted());
+    await until(() => controller.model.loaded && !controller.model.busy);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    engine.onOpen = (_) async {
+      entered.complete();
+      await release.future;
+    };
+    controller.dispatch(
+      LibraryEditionOpened(controller.model.editions!.single),
+    );
+    await entered.future;
+    controller.dispatch(const LibraryOperationCancelled());
+    engine.onOpen = null;
+    release.complete();
+    await until(() => !controller.model.busy && !controller.model.loading);
+    File(_pdfFixture).copySync('${source.path}/second.pdf');
+    controller.dispatch(const LibraryRefreshed());
+    await until(
+      () => controller.model.sourceFiles.any(
+        (file) => file.entry.name == 'second.pdf' && file.preview != null,
+      ),
+    );
+    expect(opened, isEmpty);
+    expect(controller.model.error, isNull);
+  });
+
+  test(
+    'shared annotation provenance survives removal of its original file',
+    () async {
+      final epub = await import(_epubFixture);
+      final pdf = await import(_pdfFixture);
+      final shelf = LibraryEditions(core.store);
+      final entries = (await shelf.page(sources: [])).editions;
+      await shelf.group(entries.first.id, entries.last.id, sources: []);
+      final original = await bridge.openLibraryBook(
+        bookId: epub.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      const chapter = 'The lead Café text tail.';
+      const path = 'OEBPS/chapter.xhtml';
+      final originalText = EpubReaderText(
+        unitCount: 3,
+        text: (_) async => chapter,
+        resourcePath: (_) async => path,
+      );
+      final highlight = await bridge.records.createAnnotation(
+        document: original,
+        surface: _surface(chapter, resourcePath: path),
+        unit: BigInt.one,
+        start: BigInt.from(9),
+        end: BigInt.from(13),
+        displayScale: 1,
+        color: FlutterHighlightColor.green,
+        cancellationId: bridge.createCancellation(),
+      );
+      final note = await bridge.records.createNote(
+        document: original,
+        text: originalText,
+        unit: BigInt.one,
+        offset: BigInt.from(4),
+        body: 'Original page thought',
+        cancellationId: bridge.createCancellation(),
+      );
+      bridge.releaseDocument(handle: original.handle);
+      await core.library.remove(epub.bookId);
+      final target = await bridge.openLibraryBook(
+        bookId: pdf.bookId,
+        cancellationId: bridge.createCancellation(),
+      );
+      final text = PdfReaderText(_PdfDocument());
+      final [listed] = await bridge.records.listAnnotations(
+        document: target,
+        text: text,
+        scale: 1,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(listed.id, highlight.id);
+      expect(listed.fromOtherContent, isTrue);
+      expect(listed.originalBook, isNull);
+      expect(listed.resolution, FlutterAnnotationResolution.orphaned);
+      final [listedNote] = await bridge.records.listNotes(
+        document: target,
+        text: text,
+        cancellationId: bridge.createCancellation(),
+      );
+      expect(listedNote.id, note.id);
+      expect(listedNote.fromOtherContent, isTrue);
+      expect(listedNote.originalBook, isNull);
+      expect(listedNote.resolution, FlutterAnnotationResolution.orphaned);
+      bridge.releaseDocument(handle: target.handle);
+    },
+  );
 
   test('page notes and book notes are listed apart from highlights', () async {
     final book = await import(_epubFixture);

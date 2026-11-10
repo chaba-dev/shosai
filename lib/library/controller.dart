@@ -6,10 +6,14 @@ import 'package:shosai_core/shosai_core.dart'
     show
         maxSelectedImportPaths,
         BookLocator,
+        BookEdition,
+        BookFormat,
+        LibrarySort,
         CancellationToken,
         CancellationCheck;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/library_editions.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
@@ -29,6 +33,8 @@ class LibraryController implements Listenable {
     required LibraryImportPicker pickImport,
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
+    LibraryEditionPicker? pickEdition,
+    LibraryEditionGrouper? groupEdition,
     LibraryConnectionsManager? manageConnections,
     LibraryProviderCleanupRetrier retryProviderCleanup =
         _ignoreProviderCleanupRetry,
@@ -46,6 +52,8 @@ class LibraryController implements Listenable {
        _pickImport = pickImport,
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
+       _pickEdition = pickEdition,
+       _groupEdition = groupEdition,
        _manageConnections = manageConnections,
        _retryProviderCleanup = retryProviderCleanup,
        _cancelImportAdapter = cancelImportAdapter,
@@ -70,6 +78,8 @@ class LibraryController implements Listenable {
   final LibraryImportPicker _pickImport;
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
+  final LibraryEditionPicker? _pickEdition;
+  final LibraryEditionGrouper? _groupEdition;
   final LibraryConnectionsManager? _manageConnections;
   final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
@@ -220,7 +230,7 @@ class LibraryController implements Listenable {
         if (_model.hasMore &&
             !_model.loading &&
             _model.loadError == null &&
-            _stalledAppendOffset != _model.books.length &&
+            _stalledAppendOffset != _model.shelfLength &&
             _displayedQuery == _model.query &&
             _displayedFormat == _model.format &&
             _displayedSort == _model.sort) {
@@ -368,6 +378,8 @@ class LibraryController implements Listenable {
         _emit(_model.copyWith(discoveryProgress: null));
       case LibraryBookOpened():
         _open(message.book);
+      case LibraryEditionOpened():
+        _openEdition(message.edition, choose: message.choose);
       case LibrarySourceFileOpened():
         _openSource(message.file);
       case _LibrarySourceFileAdmitted():
@@ -414,13 +426,15 @@ class LibraryController implements Listenable {
             // A replacement load is a new collection: whatever offset stalled
             // before it is not this collection's.
             _stalledAppendOffset = null;
-          } else if (message.page.books.isEmpty && message.page.hasMore) {
+          } else if ((message.editions?.isEmpty ??
+                  message.page.books.isEmpty) &&
+              message.page.hasMore) {
             // The page claimed another page but added nothing, so the next
             // request would repeat this offset and return the same empty page.
             // The Rust producer derives `has_more` from a `limit + 1` fetch and
             // cannot report this shape; refusing the repeat bounds a malformed
             // response instead of looping on it.
-            _stalledAppendOffset = _model.books.length;
+            _stalledAppendOffset = _model.shelfLength;
           }
           _emit(
             _model.copyWith(
@@ -433,6 +447,13 @@ class LibraryController implements Listenable {
                     : message.page.books.map(_withoutCover).toList(),
               ),
               sourceFiles: message.sourceFiles,
+              editions: message.editions == null
+                  ? null
+                  : List<BookEdition>.unmodifiable(
+                      message.append
+                          ? [...?_model.editions, ...message.editions!]
+                          : message.editions!,
+                    ),
               // An order chosen while the settings loaded is the one kept.
               settings: (_model.settings ?? message.settings)?.copyWith(
                 librarySort: message.sort,
@@ -440,7 +461,10 @@ class LibraryController implements Listenable {
               sort: message.sort,
               bookCount: message.page.bookCount == null
                   ? null
-                  : message.page.bookCount! + message.sourceFiles.length,
+                  : message.page.bookCount! +
+                        (message.editions == null
+                            ? message.sourceFiles.length
+                            : 0),
               continueReading: switch (message.page.continueReading) {
                 final book? => _withoutCover(book),
                 null => null,
@@ -514,6 +538,9 @@ class LibraryController implements Listenable {
               message.failure == LibraryFailure.removal) {
             _load();
           }
+          // Hand off before the import releases its busy effect, as a source
+          // admission does, so queued intake cannot take the reader first.
+          if (message.open case final book?) _openReader(book);
         }
       case _LibraryImportEnded():
         if (_closing) break;
@@ -522,11 +549,21 @@ class LibraryController implements Listenable {
         _emit(_model.copyWith(managedFileDeletionPending: false));
       case _LibraryReaderClosed():
         _readerActive = false;
+        if (message.finishAdmission) {
+          _activeEffects -= 1;
+          _activeBusyEffects -= 1;
+          if (!_closing) _emit(_model.copyWith(busy: _activeBusyEffects > 0));
+          _disposeBridgeIfIdle();
+        }
         if (_closing) break;
         if (message.error case final error?) {
           _emit(_model.copyWith(error: error));
         }
-        _load();
+        if (message.next case final next?) {
+          dispatch(next);
+        } else {
+          _load();
+        }
       case _LibraryEffectFinished():
         _activeEffects -= 1;
         _activeBusyEffects -= 1;
@@ -579,6 +616,14 @@ class LibraryController implements Listenable {
         );
       case _LibrarySourcePreviewsFinished():
         _activeEffects -= 1;
+        if (!_closing &&
+            message.pass == _previewPass &&
+            message.changed &&
+            _bridge is LibraryEditionsHost &&
+            !_readerActive &&
+            !_model.busy) {
+          _load();
+        }
         _disposeBridgeIfIdle();
       case _LibraryCleanupStatusChanged():
         if (_closing) break;
@@ -604,6 +649,7 @@ class LibraryController implements Listenable {
         paths: paths,
         managed: true,
         cleanup: () => _openedDocuments!.discard(paths),
+        openSingleBook: true,
       ),
     );
   }
@@ -742,18 +788,22 @@ class LibraryController implements Listenable {
     }
     final folders = (host as LibraryFoldersHost).folders;
     final cancellation = _previewCancellation = CancellationToken();
+    var changed = false;
     _activeEffects += 1;
     unawaited(() async {
       try {
         await folders.previewSourceFiles(
           files,
           cancellation: cancellation,
-          onPreviewed: (file) => dispatch(_LibrarySourcePreviewed(pass, file)),
+          onPreviewed: (file) {
+            changed = true;
+            dispatch(_LibrarySourcePreviewed(pass, file));
+          },
         );
       } catch (_) {
         // A preview is optional: the shelf keeps the generated covers.
       } finally {
-        dispatch(const _LibrarySourcePreviewsFinished());
+        dispatch(_LibrarySourcePreviewsFinished(pass, changed));
       }
     }());
   }
@@ -785,7 +835,7 @@ class LibraryController implements Listenable {
     final format = _model.format;
     final sort = _model.sort;
     final sortChosen = _sortChosen;
-    final offset = append ? _model.books.length : 0;
+    final offset = append ? _model.shelfLength : 0;
     late final BigInt cancellation;
     try {
       cancellation = _bridge.createCancellation();
@@ -852,18 +902,19 @@ class LibraryController implements Listenable {
                     ))
                     .where(
                       (file) =>
+                          host is LibraryEditionsHost ||
                           (format == null ||
-                              file.entry.name.toLowerCase().endsWith(
-                                '.${format.name}',
-                              )) &&
-                          (query.isEmpty ||
-                              file.title.toLowerCase().contains(
-                                query.toLowerCase(),
-                              ) ||
-                              (file.author?.toLowerCase().contains(
+                                  file.entry.name.toLowerCase().endsWith(
+                                    '.${format.name}',
+                                  )) &&
+                              (query.isEmpty ||
+                                  file.title.toLowerCase().contains(
                                     query.toLowerCase(),
-                                  ) ??
-                                  false)),
+                                  ) ||
+                                  (file.author?.toLowerCase().contains(
+                                        query.toLowerCase(),
+                                      ) ??
+                                      false)),
                     )
                     .toList()
               : <LibrarySourceFile>[];
@@ -882,7 +933,7 @@ class LibraryController implements Listenable {
         sourceFiles.sort(
           (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
         );
-        final page = await _records.libraryPage(
+        var page = await _records.libraryPage(
           query: query,
           format: format,
           sort: pageSort,
@@ -890,6 +941,34 @@ class LibraryController implements Listenable {
           offset: offset,
           cancellationId: cancellation,
         );
+        List<BookEdition>? editions;
+        if (host is LibraryEditionsHost) {
+          discovery.throwIfCancelled();
+          final grouped = await (host as LibraryEditionsHost).editions.page(
+            sources: [for (final file in sourceFiles) file.locator],
+            query: query,
+            format: format == null
+                ? null
+                : BookFormat.values.byName(format.name),
+            sort: LibrarySort.values.byName(pageSort.name),
+            limit: libraryPageSize,
+            offset: offset,
+          );
+          discovery.throwIfCancelled();
+          editions = grouped.editions;
+          page = FlutterLibraryPage(
+            books: [
+              for (final e in editions)
+                for (final f in e.files)
+                  if (f.book case final book?)
+                    (host as LibraryEditionsHost).editionBook(book),
+            ],
+            hasMore: grouped.hasMore,
+            bookCount: grouped.bookCount,
+            continueReading: page.continueReading,
+            continueReadingNotes: page.continueReadingNotes,
+          );
+        }
         dispatch(
           _LibraryLoaded(
             revision,
@@ -899,6 +978,7 @@ class LibraryController implements Listenable {
             cancellation,
             pageSort,
             List.unmodifiable(sourceFiles),
+            editions: editions,
             discoveryError: discoveryError,
             sourceWarning: sourceWarning,
           ),
@@ -976,6 +1056,12 @@ class LibraryController implements Listenable {
           successNotice = _importSuccessNotice(report);
         }
         final failure = items.where((item) => item.error != null).firstOrNull;
+        // The book an opened document landed, whether it is new or was already
+        // in the library: the report lists the existing book for a duplicate.
+        final landed = items
+            .map((item) => item.book)
+            .whereType<FlutterLibraryBook>()
+            .toList(growable: false);
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.import,
@@ -987,6 +1073,14 @@ class LibraryController implements Listenable {
             cancellation: cancellation,
             refresh: refresh,
             notice: successNotice,
+            open:
+                selection.openSingleBook &&
+                    terminalStatus == null &&
+                    failure == null &&
+                    items.length == 1 &&
+                    landed.length == 1
+                ? landed.single
+                : null,
           ),
         );
         cancellation = null;
@@ -1118,6 +1212,121 @@ class LibraryController implements Listenable {
   void _open(FlutterLibraryBook book) {
     if (_closing || _model.busy) return;
     _openReader(book);
+  }
+
+  void _openEdition(BookEdition edition, {required bool choose}) {
+    final host = _bridge;
+    if (_closing || _model.busy || host is! LibraryEditionsHost) return;
+    final editions = (host as LibraryEditionsHost).editions;
+    final revision = ++_adapterRevision;
+    final filter = _model.format;
+    final candidates = edition.files
+        .where((f) => filter == null || f.format.name == filter.name)
+        .toList();
+    final selected = edition.preferred;
+    final resume =
+        selected != null &&
+            !selected.unavailable &&
+            candidates.any((f) => f.key == selected.key)
+        ? selected
+        : candidates.length == 1 &&
+              !candidates.single.unavailable &&
+              edition.possibleMatches.isEmpty
+        ? candidates.single
+        : null;
+    final cancellation = _sourceCancellation = CancellationToken();
+    _readerActive = true;
+    _previewSources(const []);
+    _beginEffect();
+    unawaited(() async {
+      var opening = false;
+      String? error;
+      LibraryMessage? next;
+      try {
+        final choice = !choose && resume != null
+            ? EditionChoice(EditionAction.read, resume.key)
+            : await _pickEdition?.call(edition, filter);
+        if (!_ownsAdapter(revision) || choice == null) return;
+        cancellation.throwIfCancelled();
+        final file = edition.files
+            .where((f) => f.key == choice.fileKey)
+            .firstOrNull;
+        switch (choice.action) {
+          case EditionAction.read:
+            if (file == null) return;
+            await editions.prefer(edition.id, file.key);
+            cancellation.throwIfCancelled();
+            FlutterLibraryBook book;
+            if (file.book case final admitted?) {
+              book = (host as LibraryEditionsHost).editionBook(admitted);
+            } else {
+              final source = _model.sourceFiles
+                  .where((f) => f.locator == file.locator)
+                  .firstOrNull;
+              if (source == null || host is! LibraryFoldersHost) return;
+              book = await (host as LibraryFoldersHost).admitSourceFile(
+                source,
+                cancellation: cancellation,
+              );
+            }
+            cancellation.throwIfCancelled();
+            if (!_ownsAdapter(revision)) return;
+            opening = true;
+            dispatch(_LibrarySourceFileAdmitted(book, revision));
+          case EditionAction.separate:
+            if (file != null) await editions.separate(edition.id, file.key);
+          case EditionAction.group:
+            final sources = [
+              for (final source in _model.sourceFiles) source.locator,
+            ];
+            final choices = await editions.all(sources: sources);
+            if (!_ownsAdapter(revision)) return;
+            final target = await _groupEdition?.call(
+              edition,
+              choices.where(edition.canGroupWith).toList(),
+            );
+            if (!_ownsAdapter(revision) || target == null) return;
+            cancellation.throwIfCancelled();
+            await editions.group(edition.id, target, sources: sources);
+          case EditionAction.remove:
+            if (file?.book case final admitted?) {
+              next = LibraryBookRemovalRequested(
+                (host as LibraryEditionsHost).editionBook(admitted),
+              );
+            }
+          case EditionAction.keep:
+            if (file?.book case final admitted?) {
+              next = LibraryBookKeepRequested(
+                (host as LibraryEditionsHost).editionBook(admitted),
+              );
+            }
+        }
+      } catch (failure) {
+        if (_ownsAdapter(revision) && !cancellation.isCancelled) {
+          error = safeError(failure, _localizations());
+        }
+      } finally {
+        if (identical(_sourceCancellation, cancellation)) {
+          _sourceCancellation = null;
+        }
+        // Until this busy effect is released no newer reader can own the
+        // shelf. Cancellation must relinquish ownership and reload any
+        // committed admission before queued platform intake starts.
+        if (!opening) {
+          dispatch(
+            _LibraryReaderClosed(
+              _ownsAdapter(revision) ? error : null,
+              finishAdmission: true,
+              next: _ownsAdapter(revision) && !cancellation.isCancelled
+                  ? next
+                  : null,
+            ),
+          );
+        } else {
+          dispatch(const _LibraryEffectFinished());
+        }
+      }
+    }());
   }
 
   void _openReader(FlutterLibraryBook book) {
