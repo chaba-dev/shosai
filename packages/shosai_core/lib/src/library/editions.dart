@@ -741,6 +741,14 @@ String _filenameKey(EditionFile file) {
   while (suffix.hasMatch(name)) {
     name = name.replaceFirst(suffix, '');
   }
+  // A duplicate may arrive before its unsuffixed original. Treat the export
+  // suffix as cosmetic, but retain "Copy" when it belongs to the book's title.
+  if (_titleKey(name) != _titleKey(file.publication.title ?? file.title)) {
+    name = name.replaceFirst(
+      RegExp(r'\s+(?:-\s+)?(?:copy|\(copy\))$', caseSensitive: false),
+      '',
+    );
+  }
   final separator = name.lastIndexOf(' - ');
   if (separator > 0 &&
       _authorKey(
