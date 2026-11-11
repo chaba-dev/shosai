@@ -185,6 +185,30 @@ void main() {
     },
   );
 
+  for (final title in ['Agent workflows', 'Working Copy']) {
+    test(
+      'copy-named imports corroborate $title without erasing its title',
+      () async {
+        await book(
+          title: title,
+          edition: null,
+          language: null,
+          name: '$title.epub',
+        );
+        await book(
+          title: title,
+          format: 'pdf',
+          edition: null,
+          language: null,
+          name: '${title}_copy',
+        );
+        final grouped = (await shelf.page(sources: [])).editions.single;
+        expect(grouped.files, hasLength(2));
+        expect(grouped.possibleMatches, isEmpty);
+      },
+    );
+  }
+
   test('coauthor punctuation does not split publisher exports', () async {
     final epub = await book(
       title: 'Amazon Web Services in Action',

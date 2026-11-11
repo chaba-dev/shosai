@@ -54,6 +54,10 @@ class SelectionNameTest {
             "notes_v2.epub",
             selectionName(resolver, Uri.parse("content://names/document/msf%3A7?name=notes%2Fv2.epub"), 0),
         )
+        assertEquals(
+            "Agent workflows (1).pdf",
+            selectionName(resolver, Uri.parse("content://names/document/msf%3A8?name=Agent%20workflows%20%281%29.pdf"), 0),
+        )
     }
 
     @Test

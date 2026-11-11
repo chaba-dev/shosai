@@ -816,6 +816,10 @@ class _ReaderScreenState extends State<ReaderScreen>
         // may sit under no app theme at all.
         child: Builder(
           builder: (context) => Scaffold(
+            // The modal editor handles the keyboard itself. Resizing the page
+            // behind it would reflow EPUB text and invalidate its selection.
+            resizeToAvoidBottomInset:
+                model.modalEffect != ReaderModalEffect.selectionNote,
             backgroundColor: ShellPalette.of(context).chrome,
             body: SafeArea(
               top: false,
