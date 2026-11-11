@@ -134,6 +134,7 @@ All notable changes to this project will be documented in this file.
 - *(dropbox)* Replace mobile SDK sign-in with browser OAuth (#308)
 - *(android)* Add an adaptive launcher icon with the 書 mark (#307)
 - *(library)* Group book editions and share annotations (#311)
+- *(library)* Reconnect Google Drive and check book access (#315)
 
 ### 🐛 Bug Fixes
 
