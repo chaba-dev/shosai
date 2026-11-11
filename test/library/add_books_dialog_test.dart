@@ -53,11 +53,18 @@ const _choices = [
 ];
 
 class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
-  _Bridge({this.failImport = false, this.cancelImport = false, this.loadGate});
+  _Bridge({
+    this.failImport = false,
+    this.cancelImport = false,
+    this.loadGate,
+    this.captureImportBytes = false,
+  });
 
   final bool failImport;
   final bool cancelImport;
   final Completer<FlutterLibraryPage>? loadGate;
+  final bool captureImportBytes;
+  final importedBytes = <List<int>>[];
 
   /// The path imports the library asked for, in order.
   final imports = <({List<String> paths, bool managed})>[];
@@ -70,6 +77,11 @@ class _Bridge with BridgePdfEngine, BridgeRecords implements FlutterBridge {
     required bool managed,
     required BigInt cancellationId,
   }) async {
+    if (captureImportBytes) {
+      for (final path in pathKeys) {
+        importedBytes.add(await File(path).readAsBytes());
+      }
+    }
     imports.add((paths: pathKeys, managed: managed));
     return FlutterImportReport(
       imported: failImport || cancelImport
@@ -496,61 +508,152 @@ void main() {
     });
   }
 
-  testWidgets(
-    'iOS picks books in the document picker and keeps copies',
-    (tester) async {
-      // The picker copies each book into the app's inbox; stand-ins for those
-      // copies show that the library removes them after its own copy.
-      final inbox = await tester.runAsync(
-        () => Directory.systemTemp.createTemp('shosai-inbox'),
-      );
-      addTearDown(() => inbox!.delete(recursive: true));
-      final picked = [
-        for (final name in ['origin.epub', 'paper.pdf'])
-          (await tester.runAsync(
-            () => File('${inbox!.path}/$name').writeAsString(name),
-          ))!.path,
-      ];
-      final picker = _PickerStub(tester, picked: picked);
-      final bridge = _Bridge();
+  for (final cancel in [false, true]) {
+    testWidgets(
+      'iOS owns picker copies through Review and cleans up (cancel: $cancel)',
+      (tester) async {
+        // The picker copies each book into the app's inbox; stand-ins for those
+        // copies show that the library removes them after its own copy.
+        final inbox = await tester.runAsync(
+          () => Directory.systemTemp.createTemp('shosai-inbox'),
+        );
+        addTearDown(() => inbox!.delete(recursive: true));
+        final picked = [
+          for (final name in ['origin.epub', 'paper.pdf'])
+            (await tester.runAsync(
+              () => File('${inbox!.path}/$name').writeAsString(name),
+            ))!.path,
+        ];
+        final picker = _PickerStub(tester, picked: picked);
+        final support = Directory('${inbox!.path}/support');
+        const provider = MethodChannel('plugins.flutter.io/path_provider');
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          provider,
+          (call) async => support.path,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            provider,
+            null,
+          ),
+        );
+        final bridge = _Bridge(captureImportBytes: true);
 
+        await _pumpShell(tester, bridge: bridge);
+        await _openAddBooks(tester);
+
+        // No two-choice dialog: the system picker opens at once, offering books
+        // by their uniform type identifiers.
+        expect(find.text('Choose files'), findsNothing);
+        expect(picker.calls, ['openFile']);
+        final request = picker.arguments.single! as Map<Object?, Object?>;
+        expect(request['multiple'], isTrue);
+        final types = (request['acceptedTypeGroups']! as List).single as Map;
+        expect(types['uniformTypeIdentifiers'], [
+          'com.adobe.pdf',
+          'org.idpf.epub-container',
+        ]);
+
+        // The review keeps managed storage on: the inbox copies are temporary.
+        for (
+          var attempt = 0;
+          find.text('Review books').evaluate().isEmpty && attempt < 100;
+          attempt++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+        expect(find.text('Review books'), findsOneWidget);
+        expect(
+          tester.widget<ShadSwitch>(find.byType(ShadSwitch)).onChanged,
+          isNull,
+        );
+        // iOS may remove its Inbox copies while Review remains visible.
+        await tester.runAsync(() async {
+          for (final path in picked) {
+            if (await File(path).exists()) await File(path).delete();
+          }
+        });
+        await tester.pump(const Duration(seconds: 102));
+        await tester.tap(
+          find.widgetWithText(ShadButton, cancel ? 'Cancel' : 'Import').last,
+        );
+
+        // The inbox copies are deleted on real file I/O, which the fake clock
+        // does not advance; wait for it outside the test zone.
+        var left = true;
+        for (var attempt = 0; left && attempt < 100; attempt += 1) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+          left =
+              (!cancel && bridge.imports.isEmpty) ||
+              (support.existsSync() &&
+                  support
+                      .listSync(recursive: true)
+                      .whereType<File>()
+                      .isNotEmpty);
+        }
+        expect(
+          left,
+          isFalse,
+          reason: 'all temporary copies and locks are released',
+        );
+        if (cancel) {
+          expect(bridge.imports, isEmpty);
+        } else {
+          expect(bridge.imports.single.paths, isNot(picked));
+          expect(bridge.imports.single.managed, isTrue);
+          expect(bridge.importedBytes, [
+            'origin.epub'.codeUnits,
+            'paper.pdf'.codeUnits,
+          ]);
+        }
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    );
+  }
+
+  testWidgets(
+    'iOS cancelling pending staging never opens Review or imports',
+    (tester) async {
+      final root = Directory.systemTemp.createTempSync('picker-cancel');
+      addTearDown(() => root.delete(recursive: true));
+      final picked = File('${root.path}/book.epub')..writeAsStringSync('book');
+      _PickerStub(tester, picked: [picked.path]);
+      final support = Directory('${root.path}/support');
+      final gate = Completer<String>();
+      const provider = MethodChannel('plugins.flutter.io/path_provider');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        provider,
+        (_) => gate.future,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          provider,
+          null,
+        ),
+      );
+      final bridge = _Bridge(captureImportBytes: true);
       await _pumpShell(tester, bridge: bridge);
       await _openAddBooks(tester);
-
-      // No two-choice dialog: the system picker opens at once, offering books
-      // by their uniform type identifiers.
-      expect(find.text('Choose files'), findsNothing);
-      expect(picker.calls, ['openFile']);
-      final request = picker.arguments.single! as Map<Object?, Object?>;
-      expect(request['multiple'], isTrue);
-      final types = (request['acceptedTypeGroups']! as List).single as Map;
-      expect(types['uniformTypeIdentifiers'], [
-        'com.adobe.pdf',
-        'org.idpf.epub-container',
-      ]);
-
-      // The review keeps managed storage on: the inbox copies are temporary.
-      expect(find.text('Review books'), findsOneWidget);
-      expect(
-        tester.widget<ShadSwitch>(find.byType(ShadSwitch)).onChanged,
-        isNull,
-      );
-      await tester.tap(find.widgetWithText(ShadButton, 'Import'));
-      await tester.pump();
-      expect(bridge.imports.single.paths, picked);
-      expect(bridge.imports.single.managed, isTrue);
-
-      // The inbox copies are deleted on real file I/O, which the fake clock
-      // does not advance; wait for it outside the test zone.
-      var left = picked.length;
-      for (var attempt = 0; left > 0 && attempt < 50; attempt += 1) {
+      expect(find.text('Review books'), findsNothing);
+      await tester.tap(find.byTooltip('Cancel operation'));
+      gate.complete(support.path);
+      for (var n = 0; n < 100 && picked.existsSync(); n++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 20)),
         );
         await tester.pump();
-        left = picked.where((path) => File(path).existsSync()).length;
       }
-      expect(left, 0, reason: 'the picker copies are removed');
+      expect(picked.existsSync(), isFalse);
+      expect(support.existsSync(), isFalse);
+      expect(find.text('Review books'), findsNothing);
+      expect(bridge.imports, isEmpty);
+      expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
@@ -716,6 +819,18 @@ void main() {
         addTearDown(() => inbox.delete(recursive: true));
         final file = File('${inbox.path}/book.epub');
         await tester.runAsync(() => file.writeAsString('book'));
+        final support = Directory('${inbox.path}/support');
+        const provider = MethodChannel('plugins.flutter.io/path_provider');
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          provider,
+          (_) async => support.path,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            provider,
+            null,
+          ),
+        );
         _PickerStub(tester, picked: [file.path]);
         final bridge = _Bridge(
           failImport: outcome == 'failure',
@@ -726,6 +841,16 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         await tester.pump(const Duration(milliseconds: 400));
+        for (
+          var attempt = 0;
+          find.text('追加する本を確認').evaluate().isEmpty && attempt < 100;
+          attempt++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
         expect(find.text('追加する本を確認'), findsOneWidget);
         expect(find.text('アプリ内にコピーを保存'), findsOneWidget);
         expect(find.text('選択した本のコピーをShōsai内に保存します。'), findsOneWidget);
@@ -735,13 +860,19 @@ void main() {
               .widgetWithText(ShadButton, outcome == 'decline' ? 'キャンセル' : '追加')
               .last,
         );
-        for (var attempt = 0; file.existsSync() && attempt < 50; attempt++) {
+        for (
+          var attempt = 0;
+          support.listSync(recursive: true).whereType<File>().isNotEmpty &&
+              attempt < 100;
+          attempt++
+        ) {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 20)),
           );
           await tester.pump();
         }
         expect(file.existsSync(), isFalse);
+        expect(support.listSync(recursive: true).whereType<File>(), isEmpty);
         expect(bridge.imports, hasLength(outcome == 'decline' ? 0 : 1));
         for (var attempt = 0; attempt < 5; attempt++) {
           await tester.runAsync(

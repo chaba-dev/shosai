@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_core/shosai_core.dart'
+    show CoreException, CoreErrorKind, maxSelectedImportPaths;
 import 'package:shosai_flutter/opened_documents.dart';
 
 const _channel = MethodChannel('dev.shosai/opened_documents');
@@ -11,6 +13,86 @@ const _channel = MethodChannel('dev.shosai/opened_documents');
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   final messenger = binding.defaultBinaryMessenger;
+
+  test('picker staging rejects oversized selections before copying', () async {
+    await expectLater(
+      OpenedDocuments().stagePickerCopies(
+        List.filled(maxSelectedImportPaths + 1, '/unread/book.pdf'),
+      ),
+      throwsA(
+        isA<CoreException>().having(
+          (error) => error.kind,
+          'kind',
+          CoreErrorKind.limitExceeded,
+        ),
+      ),
+    );
+  });
+
+  for (final failure in [false, true]) {
+    test(
+      'picker staging owns bytes and releases partial work (failure: $failure)',
+      () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final root = await Directory.systemTemp.createTemp('picker-staging');
+        addTearDown(() => root.delete(recursive: true));
+        final support = Directory('${root.path}/support');
+        const provider = MethodChannel('plugins.flutter.io/path_provider');
+        messenger.setMockMethodCallHandler(provider, (_) async => support.path);
+        addTearDown(() => messenger.setMockMethodCallHandler(provider, null));
+        final originals = <File>[];
+        for (final (index, bytes) in [
+          [1, 2, 3],
+          [9, 8, 7, 6],
+        ].indexed) {
+          final folder = await Directory('${root.path}/$index').create();
+          originals.add(
+            await File('${folder.path}/same.pdf').writeAsBytes(bytes),
+          );
+        }
+        final documents = OpenedDocuments();
+        if (failure) {
+          await expectLater(
+            documents.stagePickerCopies([
+              originals.first.path,
+              '${root.path}/missing.pdf',
+            ]),
+            throwsException,
+          );
+        } else {
+          final staged = await documents.stagePickerCopies(
+            originals.map((file) => file.path).toList(),
+          );
+          expect(staged.toSet().length, 2);
+          expect(staged.map((path) => File(path).uri.pathSegments.last), [
+            'same.pdf',
+            'same.pdf',
+          ]);
+          for (final file in originals) {
+            expect(await file.exists(), isTrue);
+            await file.delete();
+          }
+          expect(await File(staged.first).readAsBytes(), [1, 2, 3]);
+          expect(await File(staged.last).readAsBytes(), [9, 8, 7, 6]);
+          await documents.discard([staged.first]);
+          expect(await File(staged.last).readAsBytes(), [9, 8, 7, 6]);
+          await documents.discard([staged.last]);
+        }
+        expect(
+          await support
+              .list(recursive: true)
+              .where((entry) => entry is File)
+              .toList(),
+          isEmpty,
+        );
+        if (failure) {
+          expect(await originals.first.readAsBytes(), [1, 2, 3]);
+          expect(await originals.last.readAsBytes(), [9, 8, 7, 6]);
+        }
+      },
+    );
+  }
 
   test('an iOS response after cancellation releases Inbox copies', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
