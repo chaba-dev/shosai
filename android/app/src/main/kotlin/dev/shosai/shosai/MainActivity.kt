@@ -592,7 +592,7 @@ private fun documentFileName(candidate: String): String? {
     val stem = candidate.dropLast(extension.length + 1)
         .take(60)
         .map { character ->
-            if (character.isLetterOrDigit() || character in " _-") character else '_'
+            if (character.isLetterOrDigit() || character in " _-()") character else '_'
         }
         .joinToString("")
         .trim(' ', '_')

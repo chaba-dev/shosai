@@ -1041,6 +1041,51 @@ void main() {
   });
 
   group('selection notes', () {
+    testWidgets('EPUB Note saves its passage with the keyboard open', (
+      tester,
+    ) async {
+      _setView(tester, const Size(390, 844));
+      final bridge = _SelectionBridge();
+      await renderHarnessState(
+        tester,
+        _reader(bridge: bridge, initialPath: '/books/atlas.epub'),
+        ready: () => harnessReaderPageReady(tester),
+        maxRounds: 16,
+      );
+      await pumpHarnessFrames(tester, frames: 16);
+      await dragReaderSelectionBetween(
+        tester,
+        renderedEndpointCenter(tester, 0),
+        renderedEndpointCenter(tester, 8),
+      );
+      await settleReaderSelection(tester);
+      await tester.tap(_action('selection-note'));
+      await tester.pumpAndSettle();
+
+      // The modal keyboard must not reflow the selected EPUB passage.
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('reader-note-editor-field')),
+        'Remember this passage',
+      );
+      await tester.tap(find.widgetWithText(ShadButton, 'Save'));
+      await tester.pumpAndSettle();
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+
+      final saved = bridge.annotations.single;
+      expect(saved.body, 'Remember this passage');
+      expect(saved.textRange!.start, BigInt.zero);
+      expect(saved.textRange!.end, BigInt.from(8));
+      expect(
+        find.textContaining('selection or reader layout changed'),
+        findsNothing,
+      );
+      await _openNotes(tester);
+      expect(find.text('Remember this passage'), findsOneWidget);
+    });
+
     testWidgets(
       'Add note opens the editor and commits the note with the range',
       (tester) async {
