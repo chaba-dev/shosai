@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-10
+## [0.1.0] - 2026-11-11
 
 ### 🚀 Features
 
@@ -206,6 +206,8 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Preserve column overflow and restored screen boundaries (#306)
 - *(library)* Prioritize the reader over source previews (#309)
 - Resolve the Android release audit findings for v0.1.0 (#310)
+- Preserve publisher grouping and keyboard note saves (#312)
+- *(ios)* Stage selected books before review (#313)
 
 ### 🚜 Refactor
 
