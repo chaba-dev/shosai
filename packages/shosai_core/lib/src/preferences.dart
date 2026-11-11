@@ -36,10 +36,14 @@ final class Preferences {
   /// Store every entry of [values] atomically.
   Future<void> setAll(Map<String, String> values) async {
     values.forEach(_validate);
-    final entries = [
-      for (final entry in values.entries) (entry.key, entry.value),
-    ];
-    return _store.transaction((db) => _setAll(db, entries));
+    return _store.transaction((db) => setAllInTransaction(db, values));
+  }
+
+  /// Apply the same bounds and writes inside an application-core transaction
+  /// that also adopts dependent records. The caller must roll back on failure.
+  static void setAllInTransaction(Database db, Map<String, String> values) {
+    values.forEach(_validate);
+    _setAll(db, [for (final entry in values.entries) (entry.key, entry.value)]);
   }
 }
 

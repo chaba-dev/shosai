@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:shosai_core/shosai_core.dart';
 import 'package:test/test.dart';
@@ -6,6 +7,156 @@ import 'package:test/test.dart';
 import 'support/library_fixtures.dart';
 
 void main() {
+  test(
+    'revalidation clears only failed links with identical full contents',
+    () async {
+      final t = await TempLibrary.create();
+      final path = t.copyFixture('sample.epub', 'book.epub');
+      final bytes = File(path).readAsBytesSync();
+      final book = await t.importBook(path);
+      final locations = LibraryLocations(t.store);
+      var generation = await locations.connect('remote', 'Remote books');
+      const keys = [
+        'a-match',
+        'b-changed',
+        'c-short',
+        'd-long',
+        'e-missing',
+        'f-offline',
+        'g-denied',
+      ];
+      for (final key in keys) {
+        await locations.locate(book.contentHash, (
+          locationId: 'remote',
+          key: key,
+        ), generation: generation);
+      }
+      await locations.remove('remote');
+      generation = await locations.connect('remote', 'Remote books');
+      await locations.locate(book.contentHash, (
+        locationId: 'remote',
+        key: 'healthy',
+      ), generation: generation);
+      final otherGeneration = await locations.connect('other', 'Other books');
+      await locations.locate(book.contentHash, (
+        locationId: 'other',
+        key: 'other',
+      ), generation: otherGeneration);
+      await locations.failed(
+        book.contentHash,
+        (locationId: 'other', key: 'other'),
+        generation: otherGeneration,
+        failure: LocationFailure.missing,
+      );
+      final changed = List<int>.of(bytes);
+      changed[bytes.length ~/ 2] ^= 1;
+      final adapter = _Location()
+        ..contents.addAll({
+          'a-match': bytes,
+          'b-changed': changed,
+          'c-short': bytes.sublist(0, bytes.length - 1),
+          'd-long': [...bytes, 91],
+        })
+        ..failures.addAll({
+          'e-missing': LocationFailure.missing,
+          'f-offline': LocationFailure.offline,
+          'g-denied': LocationFailure.revoked,
+        });
+      expect(await locations.revalidate(adapter, generation), (
+        verified: 1,
+        unavailable: 6,
+      ));
+      expect(
+        {
+          for (final copy in await locations.copies(book.contentHash))
+            copy.locator: copy.failure,
+        },
+        {
+          for (final key in keys)
+            (locationId: 'remote', key: key): key == 'a-match'
+                ? null
+                : LocationFailure.revoked,
+          (locationId: 'remote', key: 'healthy'): null,
+          (locationId: 'other', key: 'other'): LocationFailure.missing,
+        },
+      );
+      // A denied file must not invalidate the working connection, and a retry
+      // must exclude the links already verified or healthy.
+      adapter.failures.clear();
+      for (final key in keys) {
+        adapter.contents[key] = bytes;
+      }
+      expect(await locations.revalidate(adapter, generation), (
+        verified: 6,
+        unavailable: 0,
+      ));
+      expect(await locations.revalidate(adapter, generation), (
+        verified: 0,
+        unavailable: 0,
+      ));
+    },
+  );
+
+  for (final interruption in ['cancel', 'reconnect', 'remove']) {
+    test(
+      'revalidation cannot publish after $interruption during a read',
+      () async {
+        final t = await TempLibrary.create();
+        final path = t.copyFixture('sample.epub', 'book.epub');
+        final book = await t.importBook(path);
+        final locations = LibraryLocations(t.store);
+        final generation = await locations.connect('remote', 'Remote books');
+        await locations.locate(book.contentHash, (
+          locationId: 'remote',
+          key: 'book',
+        ), generation: generation);
+        await locations.unavailable(
+          'remote',
+          generation,
+          LocationFailure.offline,
+        );
+        final cancellation = CancellationToken();
+        final adapter = _Location()
+          ..contents['book'] = File(path).readAsBytesSync()
+          ..started = Completer<void>()
+          ..gate = Completer<void>();
+        final pending = locations.revalidate(
+          adapter,
+          generation,
+          cancellation: cancellation,
+        );
+        await adapter.started!.future;
+        expect(
+          (await locations.copies(book.contentHash)).single.failure,
+          LocationFailure.offline,
+        );
+        if (interruption == 'cancel') cancellation.cancel();
+        if (interruption == 'reconnect') {
+          await locations.connect('remote', 'Remote books');
+        }
+        if (interruption == 'remove') await locations.remove('remote');
+        final rejected = expectLater(
+          pending,
+          throwsA(
+            isA<CoreException>().having(
+              (e) => e.kind,
+              'kind',
+              CoreErrorKind.cancelled,
+            ),
+          ),
+        );
+        adapter.gate!.complete();
+        await rejected;
+        expect(
+          (await locations.copies(book.contentHash)).single.failure,
+          interruption == 'remove'
+              ? LocationFailure.revoked
+              : LocationFailure.offline,
+        );
+      },
+    );
+  }
+
   test(
     'removal keeps the content, reading state and notes across restart',
     () async {
@@ -469,6 +620,8 @@ void main() {
 
 final class _Location implements LibraryLocation {
   LocationFailure? failure;
+  final contents = <String, List<int>>{};
+  final failures = <String, LocationFailure>{};
   Completer<void>? gate;
   Completer<void>? started;
 
@@ -482,10 +635,12 @@ final class _Location implements LibraryLocation {
     int? end,
     CancellationToken? cancellation,
   }) async* {
-    if (failure case final failure?) throw LocationException(failure);
+    if (failures[key] ?? failure case final failure?) {
+      throw LocationException(failure);
+    }
     if (started?.isCompleted == false) started!.complete();
     await gate?.future;
-    yield [3, 7, 11, 19, 23].sublist(start, end);
+    yield (contents[key] ?? [3, 7, 11, 19, 23]).sublist(start, end);
   }
 
   @override
