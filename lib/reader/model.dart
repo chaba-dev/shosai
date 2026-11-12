@@ -616,9 +616,11 @@ final class ReaderModel {
   /// Whether the document area presents a continuous page the view scrolls.
   ///
   /// Follows the installed EPUB page, so a page laid out for the paginated
-  /// reader is never presented as a continuous one.
+  /// reader is never presented as a continuous one. Columns follows the chosen
+  /// mode (except in detail) so the destination stage is measured before its
+  /// raster lands, without saving a point from the old stage's dimensions.
   bool get continuousPresentation => columnsPresentation
-      ? (pdfColumns?.continuous ?? typography.continuous)
+      ? typography.continuous && pdfColumns?.strip == null
       : typography.continuous && (epubPage?.continuous ?? true);
   bool get columnsPresentation =>
       document?.format == FlutterBookFormat.pdf &&
