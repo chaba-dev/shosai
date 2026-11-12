@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-11
+## [0.1.0] - 2026-11-12
 
 ### 🚀 Features
 
@@ -272,6 +272,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Cover first-screen local and Drive PDF progress (#298)
 - *(reader)* Cover restored Columns long-press selection (#300)
 - *(pdf)* Align column assertions with crop guards (#303)
+- *(editions)* Select the intended fixture by identity (#317)
 
 ### ⚙️ Miscellaneous Tasks
 
