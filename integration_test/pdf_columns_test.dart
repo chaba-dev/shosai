@@ -317,6 +317,211 @@ void main() {
       .whereType<PagePainter>()
       .firstOrNull;
 
+  for (final (theme, paperColor) in [
+    ('light', [255, 255, 255]),
+    ('sepia', [245, 235, 214]),
+    ('dark', [31, 31, 36]),
+  ]) {
+    testWidgets('Thrift overflow fades track the visible edges in $theme', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(880, 1800);
+      tester.view.devicePixelRatio = 2;
+      tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
+      addTearDown(tester.view.reset);
+      final directory = await Directory.systemTemp.createTemp('overflow-fade-');
+      final path = '${directory.path}/Thrift.pdf';
+      await File('$fixtureRoot/pdf-columns/thrift.pdf').copy(path);
+      final pdf = await PdfrxPdfEngine().open(path);
+      final geometry = await pdf.pageGeometry(6);
+      final reported = geometry.lines.singleWhere(
+        (line) => line.text.contains('libevent and the TFramed'),
+      );
+      await pdf.dispose();
+      final bridge = await createApplicationBridge(
+        applicationSupportDirectory: () async => directory,
+      );
+      await tester.pumpWidget(
+        ShosaiShell(
+          locale: const Locale('ja'),
+          home: RepaintBoundary(
+            key: captureKey,
+            child: ReaderScreen(
+              bridge: bridge,
+              initialPath: path,
+              initialPlace: ReaderPlace(6, offset: reported.start),
+              initialSettings: FlutterReaderSettings(
+                continuous: false,
+                theme: theme,
+                epubFontSize: 18,
+                epubLineSpacing: 1.6,
+                pdfZoom: 0,
+                pdfFit: FlutterPdfFit.columns,
+                twoPages: false,
+                zonesHintDismissed: true,
+                animations: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await closeApplicationCores();
+        await directory.delete(recursive: true);
+      });
+      await until(tester, () => raster.evaluate().isNotEmpty);
+      final screen = painting(tester)!.columns!;
+      final piece = screen.pieces.first;
+      final origin = tester.getTopLeft(raster);
+      const right = 424.0;
+      final rowTop =
+          origin.dy + (reported.bounds.top - piece.source.top) * piece.scale;
+      final rowBottom =
+          origin.dy + (reported.bounds.bottom - piece.source.top) * piece.scale;
+
+      // Compare the same original pixels at an edge and in the interior,
+      // independent of the fade painter.
+      Future<double> contrast(Rect rect, {ui.Image? reference}) async {
+        final boundary =
+            captureKey.currentContext!.findRenderObject()
+                as RenderRepaintBoundary;
+        final image = reference ?? await boundary.toImage();
+        final bytes = (await image.toByteData())!.buffer.asUint8List();
+        var sum = 0.0;
+        for (var y = rect.top.ceil(); y < rect.bottom.floor(); y++) {
+          for (var x = rect.left.ceil(); x < rect.right.floor(); x++) {
+            for (var c = 0; c < 3; c++) {
+              sum += (bytes[(y * image.width + x) * 4 + c] - paperColor[c])
+                  .abs();
+            }
+          }
+        }
+        if (reference == null) image.dispose();
+        return sum;
+      }
+
+      // Render only the public page painter as an unfaded reference. This
+      // shares the PDF palette but not the Columns edge overlay. Comparing
+      // endpoints against it rejects an always-on fade at either scroll limit.
+      final page = painting(tester)!;
+      final unfaded = PagePainter(
+        image: tester.widget<RawImage>(raster).image,
+        surface: page.surface,
+        backgroundColor: page.backgroundColor,
+        foregroundColor: page.foregroundColor,
+        recolorImage: false,
+        anchor: null,
+        focus: null,
+        savedSelections: const [],
+        annotations: const [],
+        fit: BoxFit.fill,
+      );
+      Future<void> expectUnfaded(Rect rect) async {
+        final recorder = ui.PictureRecorder();
+        final offset = tester.getTopLeft(raster);
+        unfaded.paint(
+          Canvas(recorder)..translate(offset.dx, offset.dy),
+          Size(screen.width, screen.height),
+        );
+        final picture = recorder.endRecording();
+        final reference = await picture.toImage(440, 900);
+        picture.dispose();
+        final expected = await contrast(rect, reference: reference);
+        reference.dispose();
+        expect(
+          expected,
+          greaterThan(50),
+          reason: 'the clear-edge control contains ink',
+        );
+        expect(await contrast(rect), closeTo(expected, expected * .15));
+      }
+
+      await expectUnfaded(
+        Rect.fromLTRB(16, origin.dy + 20, 26, origin.dy + 200),
+      );
+      final narrow = screen.pieces.last;
+      // The following page overhangs by less than a pixel; it must not get
+      // the full fade of the genuinely overflowing line above it.
+      expect(narrow.width, inExclusiveRange(408, 409));
+      await expectUnfaded(
+        Rect.fromLTRB(
+          414,
+          origin.dy + narrow.top + 30,
+          424,
+          origin.dy + narrow.top + narrow.height - 20,
+        ),
+      );
+
+      final trailingPatch = Rect.fromLTRB(
+        right - 10,
+        rowTop,
+        right - 1,
+        rowBottom,
+      );
+      final leadingInterior = Rect.fromLTRB(
+        56,
+        origin.dy + 20,
+        65,
+        origin.dy + 200,
+      );
+      final fadedRight = await contrast(trailingPatch);
+      final clearLeft = await contrast(leadingInterior);
+      expect(fadedRight, greaterThan(50));
+      expect(clearLeft, greaterThan(50));
+      await capture('overflow-$theme-leading');
+      final finger = await tester.startGesture(Offset(300, origin.dy + 180));
+      // Cross touch slop in one event so the measured pan is exactly 40pt.
+      await finger.moveBy(const Offset(-40, 0));
+      await tester.pump(const Duration(milliseconds: 100));
+      await finger.up();
+      await tester.pumpAndSettle();
+      final moved = origin.dx - tester.getTopLeft(raster).dx;
+      expect(moved, closeTo(40, 1));
+      expect(painting(tester)!.columns, same(screen));
+      final clearRight = await contrast(trailingPatch.shift(Offset(-moved, 0)));
+      final fadedLeft = await contrast(
+        leadingInterior.shift(Offset(-moved, 0)),
+      );
+      expect(
+        fadedRight,
+        lessThan(clearRight * .8),
+        reason: 'hidden trailing text has a paper fade',
+      );
+      expect(
+        fadedLeft,
+        lessThan(clearLeft * .8),
+        reason: 'panning reveals a leading fade',
+      );
+      await capture('overflow-$theme-middle');
+      await tester.timedDragFrom(
+        Offset(300, origin.dy + 180),
+        const Offset(-200, 0),
+        const Duration(milliseconds: 600),
+      );
+      await tester.pumpAndSettle();
+      expect(painting(tester)!.columns, same(screen));
+      expect(tester.getRect(raster).right, closeTo(right, 1));
+      await expectUnfaded(trailingPatch);
+      await capture('overflow-$theme-trailing');
+      await tester.timedDragFrom(
+        Offset(150, origin.dy + 180),
+        const Offset(250, 0),
+        const Duration(milliseconds: 600),
+      );
+      await tester.pumpAndSettle();
+      expect(painting(tester)!.columns, same(screen));
+      expect(tester.getTopLeft(raster).dx, closeTo(origin.dx, 1));
+      expect(await contrast(trailingPatch), closeTo(fadedRight, 2));
+      expect(await contrast(leadingInterior), closeTo(clearLeft, 2));
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+      await until(tester, () => painting(tester)!.columns != screen);
+      expect(tester.getTopLeft(raster).dx, 16);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   for (final paper in [
     (
       name: 'thrift',

@@ -629,6 +629,7 @@ extension on ReaderController {
                   height: math.max(1, height - pdfStripHeaderHeight),
                   zoom: zoom,
                   columnWidth: columnWidth,
+                  locate: locate && !previous,
                   stop: previous ? position : ahead.lastOrNull,
                   // A jumped-to range must clear the overlaid toolbar and capsule.
                   // Reserve space in layout, not by hiding part of the raster.

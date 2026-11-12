@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -32,9 +34,13 @@ Future<void> until(WidgetTester tester, bool Function() ready) async {
 void main() {
   setUpAll(loadHarnessFonts);
 
+  final places = ValueVariant<int>({0, 3});
   testWidgets(
     'touch selects the painted rows before and after Columns reopen',
     (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final page = places.currentValue!;
       tester.view.physicalSize = const Size(880, 1800);
       tester.view.devicePixelRatio = 2;
       tester.view.viewPadding = const FakeViewPadding(top: 118, bottom: 68);
@@ -82,15 +88,16 @@ void main() {
       final geometry = (await tester.runAsync(() async {
         final pdf = await PdfrxPdfEngine().open(path);
         try {
-          return await pdf.pageGeometry(0);
+          return await pdf.pageGeometry(page);
         } finally {
           await pdf.dispose();
         }
       }))!;
       // Enter the right column well below its top, then reopen from the
       // persisted page point rather than injecting a second destination.
+      // Page 4 restores the first body row after the exact '5.2 Isset' heading.
       final destination = geometry.lines.firstWhere(
-        (l) => l.bounds.left > 316 && l.bounds.top >= 342,
+        (l) => l.bounds.left > 316 && l.bounds.top >= (page == 0 ? 342 : 351),
       );
       final captureKey = GlobalKey();
       Future<void> capture(String name) async {
@@ -104,7 +111,7 @@ void main() {
         image.dispose();
         await Directory(output).create(recursive: true);
         await File(
-          '$output/$name.png',
+          '$output/page-${page + 1}-$name.png',
         ).writeAsBytes(data!.buffer.asUint8List());
       }
 
@@ -120,7 +127,7 @@ void main() {
                 initialPath: path,
                 initialBookId: book.bookId,
                 initialPlace: jump
-                    ? ReaderPlace(0, offset: destination.start)
+                    ? ReaderPlace(page, offset: destination.start)
                     : null,
                 initialSettings: const FlutterReaderSettings(
                   continuous: false,
@@ -159,14 +166,27 @@ void main() {
         } else {
           savedTop = piece.source.top;
         }
+        if (page == 3) {
+          final heading = geometry.lines.singleWhere(
+            (line) => line.text == '5.2 Isset',
+          );
+          expect(
+            piece.source.contains(heading.bounds),
+            isTrue,
+            reason: 'The restored screen carries Isset with its first body row',
+          );
+          expect(piece.source.contains(destination.bounds), isTrue);
+        }
         if (restored) {
           final restoredScreen = paint.columns!;
+          await tester.runAsync(() => capture('restored-place'));
           await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
           await until(
             tester,
             () => painting(tester)!.columns != restoredScreen,
           );
           final previous = painting(tester)!.columns!;
+          await tester.runAsync(() => capture('before-restored-place'));
           expect(previous.next.page, restoredScreen.start.page);
           expect(previous.next.region, restoredScreen.start.region);
           expect(previous.next.y, restoredScreen.start.y);
@@ -258,7 +278,7 @@ void main() {
         );
         await finger.moveTo(
           point(
-            second.bounds.right - 1,
+            second.bounds.right - .1,
             (second.bounds.top + second.bounds.bottom) / 2,
           ),
         );
@@ -300,7 +320,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.runAsync(() => capture('notes-quote'));
       await close();
+      debugDefaultTargetPlatformOverride = null;
     },
-    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    variant: places,
   );
 }

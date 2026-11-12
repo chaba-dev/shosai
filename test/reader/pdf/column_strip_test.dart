@@ -237,6 +237,31 @@ void main() {
           reason: 'Repeated carries must keep each overlapping line whole once',
         );
       }
+      final heading = line(0, 8, text: '1. Heading');
+      final overlap = [line(12, 24), line(20, 32)];
+      for (final height in [28.0, 40.0]) {
+        final restored = layoutPdfColumnScreen(
+          pages: {
+            0: page([
+              PdfReadingRegion(
+                kind: PdfRegionKind.column,
+                bounds: const PdfRect(20, 0, 120, 50),
+                lines: [heading, ...overlap, line(34, 42), line(46, 50)],
+              ),
+            ]),
+          },
+          pageCount: 1,
+          start: const PdfStripPosition(0, y: 10),
+          width: 100,
+          height: height,
+          locate: true,
+        );
+        final crop = restored.pieces.single.source;
+        for (final row in overlap) {
+          expect(crop.contains(row.bounds), isTrue);
+        }
+        expect(crop.contains(heading.bounds), height == 40);
+      }
     },
   );
 
