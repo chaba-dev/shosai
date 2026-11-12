@@ -159,6 +159,8 @@ final class PdfStripScreen {
 /// Fills one screen across columns and PDF pages. The caller supplies only
 /// nearby geometry and retries after loading [PdfStripScreen.needsPage].
 /// Text breaks use gaps between physical lines, including overlapping rows.
+/// [locate] carries an anchored heading/body group onto the restored screen;
+/// ordinary turns keep their already-computed shared boundary unchanged.
 PdfStripScreen layoutPdfColumnScreen({
   required Map<int, PdfStripPage> pages,
   required int pageCount,
@@ -169,6 +171,7 @@ PdfStripScreen layoutPdfColumnScreen({
   double topInset = 0,
   double? columnWidth,
   bool continuous = false,
+  bool locate = false,
   PdfStripPosition? stop,
 }) {
   final pieces = <PdfStripPiece>[];
@@ -193,7 +196,7 @@ PdfStripScreen layoutPdfColumnScreen({
     }
     final region = regions[cursor.region];
     final bounds = region.bounds;
-    final y = cursor.y ?? bounds.top;
+    var y = cursor.y ?? bounds.top;
     final stopY = cursor.page == stop?.page && cursor.region == stop?.region
         ? stop?.y
         : null;
@@ -251,6 +254,49 @@ PdfStripScreen layoutPdfColumnScreen({
     if (!continuous && tallestLine * scale > height - topInset - gap) {
       scale = (height - topInset - gap) / tallestLine;
     }
+    if (locate &&
+        !continuous &&
+        pieces.isEmpty &&
+        cursor.y != null &&
+        region.kind != PdfRegionKind.figure) {
+      // A saved point can lie between a heading and its body. Move the shared
+      // break, not individual rows: backward reconstruction stops at start.
+      final cut = _keepPdfColumnRows(rows, bounds.top, y, keepFirst: false);
+      if (cut < y) {
+        final before = rows.where((line) => line.bounds.bottom <= cut);
+        final guarded = math.max(
+          bounds.top,
+          math.max(
+            cut - 3,
+            before.isEmpty
+                ? bounds.top
+                : (before.map((line) => line.bounds.bottom).reduce(math.max) +
+                          cut) /
+                      2,
+          ),
+        );
+        final target = rows.firstWhere((line) => line.bounds.bottom > y);
+        var admittedEnd = math.min(
+          bounds.bottom,
+          guarded + (height - top - gap) / scale,
+        );
+        if (stopY != null && admittedEnd >= stopY) {
+          admittedEnd = stopY;
+        } else if (admittedEnd < bounds.bottom) {
+          admittedEnd = _pdfColumnEnd(rows, guarded, admittedEnd);
+        }
+        // A nominal fit is insufficient: carrying the paragraph's first row
+        // at the final safe break must not remove the requested reading point.
+        if (target.bounds.bottom <= admittedEnd) {
+          y = guarded;
+          start = cursor = PdfStripPosition(
+            cursor.page,
+            region: cursor.region,
+            y: y,
+          );
+        }
+      }
+    }
     var end = math.min(bounds.bottom, y + (height - top - gap) / scale);
     final atStop = stopY != null && end >= stopY;
     if (atStop) end = stopY;
@@ -258,60 +304,13 @@ PdfStripScreen layoutPdfColumnScreen({
         !atStop &&
         end < bounds.bottom &&
         region.kind != PdfRegionKind.figure) {
-      // Moving the cut upward repeatedly handles overlapping line boxes.
-      var moved = true;
-      while (moved) {
-        moved = false;
-        for (final line in region.lines) {
-          if (line.bounds.top < end && line.bounds.bottom > end) {
-            end = line.bounds.top;
-            moved = true;
-          }
-        }
-      }
-      // Carry a paragraph's first row or a heading with its following text.
-      // Numbering supplements geometry when a heading is body-sized. Recheck
-      // the exposed row after carrying text, so its heading cannot be orphaned.
-      // Never move all rows off an otherwise empty screen.
+      end = _pdfColumnEnd(rows, y, end);
       final visible = rows
           .where((l) => l.bounds.top >= y && l.bounds.bottom <= end)
           .toList();
-      while (visible.length > 1) {
-        final last = visible.last;
-        final index = rows.indexOf(last);
-        if (index + 1 >= rows.length) break;
-        final prior = visible[visible.length - 2];
-        final next = rows[index + 1];
-        final beforeGap = last.bounds.top - prior.bounds.bottom;
-        final afterGap = next.bounds.top - last.bounds.bottom;
-        if (beforeGap >= 0 &&
-            (beforeGap > math.max(last.bounds.height * .3, afterGap * 1.5) ||
-                last.bounds.height > next.bounds.height * 1.15 ||
-                (beforeGap > last.bounds.height * .3 &&
-                    _numberedHeading.hasMatch(last.text.trimLeft())))) {
-          // An earlier tall line can span the immediately preceding line.
-          // Carrying must not undo the safe physical-row cut established above.
-          if (rows.any(
-            (line) =>
-                line.bounds.top < last.bounds.top &&
-                line.bounds.bottom > last.bounds.top,
-          )) {
-            break;
-          }
-          end = last.bounds.top;
-          visible.removeLast();
-        } else {
-          break;
-        }
-      }
       if (pieces.isNotEmpty && cursor.y == null && visible.length == 1) {
         // Also applies when carrying a body row exposed the block's heading.
         break;
-      }
-      final before = region.lines.where((line) => line.bounds.bottom <= end);
-      if (before.isNotEmpty) {
-        final bottom = before.map((l) => l.bounds.bottom).reduce(math.max);
-        if (bottom > y) end = (bottom + end) / 2;
       }
     }
     if (end <= y + .001) break;
@@ -362,6 +361,72 @@ PdfStripScreen layoutPdfColumnScreen({
     separators: separators,
     needsPage: needsPage,
   );
+}
+
+double _pdfColumnEnd(List<PdfTextLine> rows, double start, double end) {
+  // Moving the cut upward repeatedly handles overlapping physical line boxes.
+  var moved = true;
+  while (moved) {
+    moved = false;
+    for (final line in rows) {
+      if (line.bounds.top < end && line.bounds.bottom > end) {
+        end = line.bounds.top;
+        moved = true;
+      }
+    }
+  }
+  end = _keepPdfColumnRows(rows, start, end);
+  final before = rows.where((line) => line.bounds.bottom <= end);
+  if (before.isNotEmpty) {
+    final bottom = before.map((line) => line.bounds.bottom).reduce(math.max);
+    if (bottom > start) end = (bottom + end) / 2;
+  }
+  return end;
+}
+
+double _keepPdfColumnRows(
+  List<PdfTextLine> rows,
+  double start,
+  double end, {
+  bool keepFirst = true,
+}) {
+  // Carry a paragraph's first row or a heading with its following text.
+  // Recheck exposed rows so carrying body text cannot strand its heading.
+  final visible = rows
+      .where((line) => line.bounds.top >= start && line.bounds.bottom <= end)
+      .toList();
+  while (visible.length > (keepFirst ? 1 : 0)) {
+    final last = visible.last;
+    final index = rows.indexOf(last);
+    if (index + 1 >= rows.length) break;
+    final prior = visible.length > 1 ? visible[visible.length - 2] : null;
+    final next = rows[index + 1];
+    final beforeGap = prior == null
+        ? double.infinity
+        : last.bounds.top - prior.bounds.bottom;
+    final afterGap = next.bounds.top - last.bounds.bottom;
+    if (beforeGap >= 0 &&
+        (beforeGap > math.max(last.bounds.height * .3, afterGap * 1.5) ||
+            // A body row before a smaller numbered heading is not a heading.
+            (last.bounds.height > next.bounds.height * 1.15 &&
+                !_numberedHeading.hasMatch(next.text.trimLeft())) ||
+            (beforeGap > last.bounds.height * .3 &&
+                _numberedHeading.hasMatch(last.text.trimLeft())))) {
+      // Never cut an earlier overlapping physical row when carrying text.
+      if (rows.any(
+        (line) =>
+            line.bounds.top < last.bounds.top &&
+            line.bounds.bottom > last.bounds.top,
+      )) {
+        break;
+      }
+      end = last.bounds.top;
+      visible.removeLast();
+    } else {
+      break;
+    }
+  }
+  return end;
 }
 
 /// A bounded raster window in the same strip, without screen-break promises.
