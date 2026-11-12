@@ -8,6 +8,8 @@ import 'dart:typed_data';
 
 import 'package:shosai_core/shosai_core.dart';
 
+import 'google_drive_diagnostics.dart';
+
 typedef DriveAccessToken = Future<String> Function({bool renew});
 
 /// Each request owns its socket, deadline and cancellation. A 401 retries once
@@ -65,19 +67,47 @@ final class DriveTransport {
         }
         final result = await request.close();
         cancellation.throwIfCancelled();
-        if (expired) throw const LocationException(LocationFailure.offline);
-        if (result.statusCode == 401 && attempt == 0) continue;
+        if (expired) {
+          reportGoogleDriveDiagnostic(
+            GoogleDriveDiagnosticStage.driveRequest,
+            GoogleDriveDiagnosticReason.timeout,
+          );
+          throw const LocationException(LocationFailure.offline);
+        }
+        if (result.statusCode == 401 && attempt == 0) {
+          reportGoogleDriveDiagnostic(
+            GoogleDriveDiagnosticStage.driveRequest,
+            GoogleDriveDiagnosticReason.renewalRequired,
+            httpStatus: result.statusCode,
+          );
+          continue;
+        }
         if (result.statusCode == 416 && headers.containsKey('Range')) return;
         if (result.statusCode >= 300 &&
             result.statusCode < 400 &&
             result.statusCode != 308) {
+          reportGoogleDriveDiagnostic(
+            GoogleDriveDiagnosticStage.driveRequest,
+            GoogleDriveDiagnosticReason.redirected,
+            httpStatus: result.statusCode,
+          );
           throw const LocationException(LocationFailure.offline);
         }
         if (result.statusCode >= 400) {
           if (result.statusCode == 401) {
+            reportGoogleDriveDiagnostic(
+              GoogleDriveDiagnosticStage.driveRequest,
+              GoogleDriveDiagnosticReason.unauthorized,
+              httpStatus: result.statusCode,
+            );
             throw const LocationException(LocationFailure.revoked);
           }
           if (result.statusCode == 404 || result.statusCode == 410) {
+            reportGoogleDriveDiagnostic(
+              GoogleDriveDiagnosticStage.driveRequest,
+              GoogleDriveDiagnosticReason.missing,
+              httpStatus: result.statusCode,
+            );
             throw const LocationException(LocationFailure.missing);
           }
           if (result.statusCode == 403) {
@@ -85,24 +115,52 @@ final class DriveTransport {
             final text = utf8.decode(error, allowMalformed: true);
             if (!text.contains('rateLimitExceeded') &&
                 !text.contains('userRateLimitExceeded')) {
+              reportGoogleDriveDiagnostic(
+                GoogleDriveDiagnosticStage.driveRequest,
+                GoogleDriveDiagnosticReason.forbidden,
+                httpStatus: result.statusCode,
+              );
               throw const LocationException(LocationFailure.revoked);
             }
           }
+          reportGoogleDriveDiagnostic(
+            GoogleDriveDiagnosticStage.driveRequest,
+            result.statusCode == 403
+                ? GoogleDriveDiagnosticReason.rateLimited
+                : GoogleDriveDiagnosticReason.unavailable,
+            httpStatus: result.statusCode,
+          );
           throw const LocationException(LocationFailure.offline);
         }
         response?.call(result);
         await for (final bytes in result.timeout(const Duration(seconds: 30))) {
           cancellation.throwIfCancelled();
-          if (expired) throw const LocationException(LocationFailure.offline);
+          if (expired) {
+            reportGoogleDriveDiagnostic(
+              GoogleDriveDiagnosticStage.driveRequest,
+              GoogleDriveDiagnosticReason.timeout,
+            );
+            throw const LocationException(LocationFailure.offline);
+          }
           yield bytes;
         }
         cancellation.throwIfCancelled();
         return;
       } on IOException {
         cancellation.throwIfCancelled();
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.driveRequest,
+          expired
+              ? GoogleDriveDiagnosticReason.timeout
+              : GoogleDriveDiagnosticReason.network,
+        );
         throw const LocationException(LocationFailure.offline);
       } on TimeoutException {
         cancellation.throwIfCancelled();
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.driveRequest,
+          GoogleDriveDiagnosticReason.timeout,
+        );
         throw const LocationException(LocationFailure.offline);
       } finally {
         finished = true;
@@ -214,6 +272,10 @@ final class GoogleDriveLocation implements LibraryLocation {
       cancellation: cancellation,
     );
     if (result['incompleteSearch'] == true) {
+      reportGoogleDriveDiagnostic(
+        GoogleDriveDiagnosticStage.driveListing,
+        GoogleDriveDiagnosticReason.incomplete,
+      );
       throw const LocationException(LocationFailure.offline);
     }
     return LocationPage([
@@ -233,9 +295,17 @@ final class GoogleDriveLocation implements LibraryLocation {
       cancellation: cancellation,
     );
     if (file['trashed'] == true) {
+      reportGoogleDriveDiagnostic(
+        GoogleDriveDiagnosticStage.driveMetadata,
+        GoogleDriveDiagnosticReason.missing,
+      );
       throw const LocationException(LocationFailure.missing);
     }
     if (file['ownedByMe'] != true) {
+      reportGoogleDriveDiagnostic(
+        GoogleDriveDiagnosticStage.driveMetadata,
+        GoogleDriveDiagnosticReason.notOwned,
+      );
       throw const LocationException(LocationFailure.revoked);
     }
     if (!_supported(file)) {

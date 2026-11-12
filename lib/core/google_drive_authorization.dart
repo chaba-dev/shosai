@@ -15,6 +15,7 @@ import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'google_drive_diagnostics.dart';
 import 'google_drive_location.dart';
 
 const googleDriveScope = 'https://www.googleapis.com/auth/drive';
@@ -278,7 +279,13 @@ final class GoogleDriveAuthorization {
               ),
             ),
           );
-      if (auth == null) throw const LocationException(LocationFailure.revoked);
+      if (auth == null) {
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.tokenRenewal,
+          GoogleDriveDiagnosticReason.nativeAuthorization,
+        );
+        throw const LocationException(LocationFailure.revoked);
+      }
       return {...credential, 'access_token': auth.accessToken};
     }
     final desktop = Platform.isLinux || Platform.isMacOS || Platform.isWindows;
@@ -287,6 +294,10 @@ final class GoogleDriveAuthorization {
             desktopClientSecret.isEmpty ||
             credential['client_id'] != desktopClientId)) {
       // Never send a distributor's companion parameter for another client ID.
+      reportGoogleDriveDiagnostic(
+        GoogleDriveDiagnosticStage.tokenRenewal,
+        GoogleDriveDiagnosticReason.registrationMismatch,
+      );
       throw const LocationException(LocationFailure.revoked);
     }
     if (!force &&
@@ -313,10 +324,11 @@ final class GoogleDriveAuthorization {
   Future<Map<String, dynamic>> _token(Map<String, String> fields) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 30);
-    final deadline = Timer(
-      const Duration(seconds: 30),
-      () => client.close(force: true),
-    );
+    var expired = false;
+    final deadline = Timer(const Duration(seconds: 30), () {
+      expired = true;
+      client.close(force: true);
+    });
     try {
       final request = await client.postUrl(
         Uri.https('oauth2.googleapis.com', '/token'),
@@ -341,17 +353,47 @@ final class GoogleDriveAuthorization {
         } on FormatException {
           // Malformed error bodies still produce a fixed, safe diagnostic.
         }
-        throw GoogleDriveSetupException.tokenRejected(
+        final failure = GoogleDriveSetupException.tokenRejected(
           error,
           description: description,
         );
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.tokenEndpoint,
+          GoogleDriveDiagnosticReason.rejected,
+          httpStatus: response.statusCode,
+          oauthError: failure.oauthError,
+        );
+        throw failure;
       }
       if (response.statusCode != 200) {
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.tokenEndpoint,
+          GoogleDriveDiagnosticReason.unavailable,
+          httpStatus: response.statusCode,
+        );
         throw const LocationException(LocationFailure.offline);
       }
-      final value = (jsonDecode(utf8.decode(bytes)) as Map)
-          .cast<String, dynamic>();
+      final Map<String, dynamic> value;
+      try {
+        value = (jsonDecode(utf8.decode(bytes)) as Map).cast<String, dynamic>();
+      } on FormatException {
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.tokenEndpoint,
+          GoogleDriveDiagnosticReason.malformed,
+        );
+        rethrow;
+      } on TypeError {
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.tokenEndpoint,
+          GoogleDriveDiagnosticReason.malformed,
+        );
+        rethrow;
+      }
       if (value['access_token'] is! String || value['expires_in'] is! int) {
+        reportGoogleDriveDiagnostic(
+          GoogleDriveDiagnosticStage.tokenEndpoint,
+          GoogleDriveDiagnosticReason.malformed,
+        );
         throw const CoreException.malformed('Invalid Google token response.');
       }
       return {
@@ -361,6 +403,12 @@ final class GoogleDriveAuthorization {
             .millisecondsSinceEpoch,
       };
     } on IOException {
+      reportGoogleDriveDiagnostic(
+        GoogleDriveDiagnosticStage.tokenEndpoint,
+        expired
+            ? GoogleDriveDiagnosticReason.timeout
+            : GoogleDriveDiagnosticReason.network,
+      );
       throw const LocationException(LocationFailure.offline);
     } finally {
       deadline.cancel();
