@@ -210,6 +210,7 @@ All notable changes to this project will be documented in this file.
 - Resolve the Android release audit findings for v0.1.0 (#310)
 - Preserve publisher grouping and keyboard note saves (#312)
 - *(ios)* Stage selected books before review (#313)
+- *(pdf)* Keep Columns headings with text and hint overflow (#318)
 
 ### 🚜 Refactor
 
