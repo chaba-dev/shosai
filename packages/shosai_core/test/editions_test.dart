@@ -105,7 +105,7 @@ void main() {
   test(
     'unknown edition, authors, languages, volumes and named editions do not bridge',
     () async {
-      await book();
+      final secondBook = await book();
       await book(format: 'pdf', edition: null);
       await book(format: 'pdf', edition: '1');
       await book(format: 'pdf', author: 'Other Author');
@@ -118,8 +118,8 @@ void main() {
       );
       final result = await shelf.page(sources: []);
       expect(result.bookCount, 6);
-      final second = result.editions.firstWhere(
-        (e) => e.files.any((f) => f.publication.edition == '2'),
+      final second = result.editions.singleWhere(
+        (e) => e.files.any((f) => f.book?.id == secondBook.id),
       );
       final first = result.editions.singleWhere(
         (e) => e.files.any((f) => f.publication.edition == '1'),
