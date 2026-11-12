@@ -10,6 +10,7 @@ import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/google_drive_authorization.dart';
 import 'package:shosai_flutter/core/google_drive_connection.dart';
+import 'package:shosai_flutter/core/google_drive_diagnostics.dart';
 import 'package:shosai_flutter/core/google_drive_location.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
@@ -97,6 +98,16 @@ void _json(HttpRequest request, Object value, {int status = 200}) {
   request.response.headers.contentType = ContentType.json;
   request.response.write(jsonEncode(value));
   unawaited(request.response.close());
+}
+
+Future<void> _captureDiagnostics(Future<void> Function(List<String>) action) {
+  final messages = <String>[];
+  return runZoned(
+    () => action(messages),
+    zoneSpecification: ZoneSpecification(
+      print: (_, _, _, message) => messages.add(message),
+    ),
+  );
 }
 
 void main() {
@@ -238,7 +249,7 @@ void main() {
 
   test(
     '401 renews once, while missing, revoked and rate-limit stay distinct',
-    () async {
+    () => _captureDiagnostics((messages) async {
       handler = (request) async {
         if (request.headers.value('authorization') == 'Bearer initial') {
           _json(request, {}, status: 401);
@@ -248,14 +259,20 @@ void main() {
       };
       expect((await location.stat('book')).size, 11);
       expect(renewals, [false, true]);
+      expect(messages, [
+        '[shosai.google_drive] stage=driveRequest reason=renewalRequired status=401',
+      ]);
       for (final pair in [
-        (404, LocationFailure.missing),
-        (401, LocationFailure.revoked),
-        (403, LocationFailure.revoked),
-        (429, LocationFailure.offline),
-        (503, LocationFailure.offline),
+        (404, LocationFailure.missing, 'missing'),
+        (401, LocationFailure.revoked, 'unauthorized'),
+        (403, LocationFailure.revoked, 'forbidden'),
+        (429, LocationFailure.offline, 'unavailable'),
+        (503, LocationFailure.offline, 'unavailable'),
       ]) {
-        handler = (request) async => _json(request, {}, status: pair.$1);
+        messages.clear();
+        handler = (request) async => _json(request, {
+          'error': 'private-response-account-path-and-token',
+        }, status: pair.$1);
         await expectLater(
           location.stat('book'),
           throwsA(
@@ -266,7 +283,13 @@ void main() {
             ),
           ),
         );
+        expect(
+          messages.last,
+          '[shosai.google_drive] stage=driveRequest reason=${pair.$3} status=${pair.$1}',
+        );
+        expect(messages.join(), isNot(contains('private-response')));
       }
+      messages.clear();
       handler = (request) async => _json(request, {
         'error': {
           'errors': [
@@ -284,8 +307,139 @@ void main() {
           ),
         ),
       );
-    },
+      expect(messages, [
+        '[shosai.google_drive] stage=driveRequest reason=rateLimited status=403',
+      ]);
+      for (final (metadata, reason, failure) in [
+        ({'trashed': true}, 'missing', LocationFailure.missing),
+        ({'ownedByMe': false}, 'notOwned', LocationFailure.revoked),
+      ]) {
+        messages.clear();
+        handler = (request) async => _json(request, {
+          ..._file('private-file-key'),
+          'name': 'private-book-title',
+          ...metadata,
+        });
+        await expectLater(
+          location.stat('private-file-key'),
+          throwsA(
+            isA<LocationException>().having(
+              (e) => e.failure,
+              'failure',
+              failure,
+            ),
+          ),
+        );
+        expect(messages, [
+          '[shosai.google_drive] stage=driveMetadata reason=$reason',
+        ]);
+      }
+    }),
   );
+
+  test(
+    'credential diagnostics distinguish failures without private data',
+    () => _captureDiagnostics((messages) async {
+      for (final (scenario, stage, reason, failure) in [
+        ('missing', 'credentialRead', 'missing', LocationFailure.revoked),
+        ('malformed', 'credentialDecode', 'malformed', LocationFailure.revoked),
+        ('read', 'credentialRead', 'unavailable', LocationFailure.offline),
+        ('write', 'credentialWrite', 'unavailable', LocationFailure.offline),
+        ('timeout', 'tokenRenewal', 'timeout', LocationFailure.offline),
+      ]) {
+        final credentials = _Credentials();
+        final provider = GoogleDriveConnectionProvider(
+          credentials: credentials,
+          authorize: () async => {'access_token': 'private-bearer-value'},
+          renew: (value, {bool force = false}) async {
+            if (scenario == 'timeout') {
+              throw TimeoutException('private-message');
+            }
+            return value;
+          },
+        );
+        final grant = (await provider.setup('private-connection-id'))!;
+        final key = grant.configuration['credential']!;
+        if (scenario == 'missing') credentials.values.clear();
+        if (scenario == 'malformed') {
+          credentials.values[key] = 'private-bad-json';
+        }
+        final unavailable = PlatformException(
+          code: 'private-code',
+          message: 'private-message',
+          details: {'credential': 'private-credential'},
+        );
+        if (scenario == 'read') credentials.readFailures[key] = unavailable;
+        if (scenario == 'write') credentials.writeFailures[key] = unavailable;
+        messages.clear();
+        final source = await provider.open(grant);
+        await expectLater(
+          source.stat('private-file-key'),
+          throwsA(
+            isA<LocationException>().having(
+              (e) => e.failure,
+              'failure',
+              failure,
+            ),
+          ),
+        );
+        expect(messages, ['[shosai.google_drive] stage=$stage reason=$reason']);
+        expect(messages.join(), isNot(contains('private-')));
+      }
+      messages.clear();
+      reportGoogleDriveDiagnostic(
+        GoogleDriveDiagnosticStage.tokenEndpoint,
+        GoogleDriveDiagnosticReason.rejected,
+        httpStatus: 123456789,
+        oauthError: 'invalid_grant private-response',
+      );
+      expect(messages, [
+        '[shosai.google_drive] stage=tokenEndpoint reason=rejected oauth=unknown_error',
+      ]);
+    }),
+  );
+
+  test('diagnostic sink failures never escape or alter access', () async {
+    final escaped = <Object>[];
+    var attempts = 0;
+    void failSink(Zone self, ZoneDelegate parent, Zone zone, String message) {
+      attempts++;
+      throw StateError('private-sink');
+    }
+
+    runZonedGuarded<void>(
+      () {
+        // Exceed Flutter's 12-KiB throttle capacity: deferred output must not
+        // escape the reporter's guard on a later timer tick either.
+        for (var i = 0; i < 512; i++) {
+          reportGoogleDriveDiagnostic(
+            GoogleDriveDiagnosticStage.credentialRead,
+            GoogleDriveDiagnosticReason.unavailable,
+          );
+        }
+      },
+      (error, stack) => escaped.add(error),
+      zoneSpecification: ZoneSpecification(print: failSink),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    expect(escaped, isEmpty);
+    expect(attempts, 512);
+    await runZoned(() async {
+      final provider = GoogleDriveConnectionProvider(
+        credentials: _Credentials(),
+      );
+      await expectLater(
+        provider.refresh(LibraryConnection('id', 'label', 'google-drive', {})),
+        throwsA(
+          isA<LocationException>().having(
+            (e) => e.failure,
+            'unchanged classification',
+            LocationFailure.revoked,
+          ),
+        ),
+      );
+    }, zoneSpecification: ZoneSpecification(print: failSink));
+  });
 
   test('cancellation interrupts a stalled network response', () async {
     final entered = Completer<void>();
@@ -855,10 +1009,11 @@ void main() {
 
   test(
     'desktop code exchange and refresh use matching registration with PKCE',
-    () async {
+    () => _captureDiagnostics((messages) async {
       late String challenge;
       var calls = 0;
       String? rejection;
+      List<int>? malformed;
       var description = 'fixture-private-code-and-token';
       handler = (request) async {
         expect(request.uri.path, '/token');
@@ -872,6 +1027,11 @@ void main() {
             'error': rejection,
             'error_description': description,
           }, status: 400);
+          return;
+        }
+        if (malformed != null) {
+          request.response.add(malformed!);
+          await request.response.close();
           return;
         }
         if (calls++ == 0) {
@@ -923,6 +1083,7 @@ void main() {
           final credential = (await oauth.authorize())!;
           expect(credential.containsKey('client_secret'), false);
           final next = await oauth.renew(credential, force: true);
+          expect(messages, isEmpty, reason: 'successful access stays quiet');
           expect(next['access_token'], 'next-token');
           expect(next['refresh_token'], 'refresh-only');
           expect(next.containsKey('client_secret'), false);
@@ -948,6 +1109,7 @@ void main() {
           }
           for (final (error, detail, expected) in [
             ('invalid_client', 'fixture-private-code', 'invalid_client'),
+            ('invalid_grant', 'fixture-private-refresh-token', 'invalid_grant'),
             ('fixture-private-code', 'fixture-private-token', 'unknown_error'),
             (
               'invalid_request',
@@ -962,6 +1124,7 @@ void main() {
           ]) {
             rejection = error;
             description = detail;
+            messages.clear();
             await expectLater(
               oauth.authorize(),
               throwsA(
@@ -974,7 +1137,12 @@ void main() {
                     .having((e) => e.oauthError, 'safe OAuth code', expected),
               ),
             );
+            expect(messages, [
+              '[shosai.google_drive] stage=tokenEndpoint reason=rejected status=400 oauth=$expected',
+            ]);
+            expect(messages.join(), isNot(contains('fixture-private')));
           }
+          messages.clear();
           await expectLater(
             oauth.renew(credential, force: true),
             throwsA(
@@ -985,12 +1153,55 @@ void main() {
               ),
             ),
           );
+          expect(messages, [
+            '[shosai.google_drive] stage=tokenEndpoint reason=rejected status=400 oauth=invalid_request',
+          ]);
+          rejection = null;
+          final provider = GoogleDriveConnectionProvider(
+            credentials: _Credentials(),
+            authorize: () async => {...credential, 'expires': 0},
+            renew: oauth.renew,
+          );
+          final grant = (await provider.setup('private-connection'))!;
+          final source = await provider.open(grant);
+          for (final (body, error) in [
+            (utf8.encode('private-invalid-json'), isA<FormatException>()),
+            (utf8.encode('["private-non-map"]'), isA<TypeError>()),
+            ([0xff], isA<FormatException>()),
+          ]) {
+            malformed = body;
+            for (final operation in [
+              () => oauth.authorize(),
+              () => oauth.renew(credential, force: true),
+            ]) {
+              messages.clear();
+              await expectLater(operation(), throwsA(error));
+              expect(messages, [
+                '[shosai.google_drive] stage=tokenEndpoint reason=malformed',
+              ]);
+            }
+            messages.clear();
+            await expectLater(
+              source.stat('private-file-key'),
+              throwsA(
+                isA<LocationException>().having(
+                  (e) => e.failure,
+                  'unchanged provider classification',
+                  LocationFailure.revoked,
+                ),
+              ),
+            );
+            expect(messages, [
+              '[shosai.google_drive] stage=tokenEndpoint reason=malformed',
+              '[shosai.google_drive] stage=tokenRenewal reason=malformed',
+            ]);
+          }
         },
         createHttpClient: (context) =>
             _RedirectClient(native.createHttpClient(context), server.port),
       );
       expect(calls, 2);
-    },
+    }),
   );
 
   test('desktop setup requires complete distributor configuration', () async {
