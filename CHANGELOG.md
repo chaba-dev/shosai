@@ -135,6 +135,7 @@ All notable changes to this project will be documented in this file.
 - *(android)* Add an adaptive launcher icon with the 書 mark (#307)
 - *(library)* Group book editions and share annotations (#311)
 - *(library)* Reconnect Google Drive and check book access (#315)
+- *(diagnostics)* Log privacy-safe Google Drive failures (#316)
 
 ### 🐛 Bug Fixes
 
