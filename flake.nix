@@ -91,9 +91,8 @@
           # PDFium for `flutter test` (see SHOSAI_PDFIUM_LIBRARY below)
           pdfium-binaries
 
-          # Portable build configuration and the real-encryption helper tests
-          sops
-          age
+          # Identity-based build configuration, without exported cloud keys
+          google-cloud-sdk
           python3
         ];
 

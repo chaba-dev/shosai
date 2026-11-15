@@ -30,9 +30,10 @@ __pycache__/
 .swiftpm/
 migrate_working_dir/
 
-# Only SOPS ciphertext belongs in the build-credential directory.
-/secrets/*
-!/secrets/*.enc.yaml
+# Build secrets are fetched from Secret Manager, never versioned here.
+/secrets/
+# Temporary credentials created by google-github-actions/auth.
+gha-creds-*.json
 
 # Hugo output
 /website/public/

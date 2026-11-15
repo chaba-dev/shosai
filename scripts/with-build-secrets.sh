@@ -13,18 +13,11 @@ esac
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 
-# Orbs/Actions receive their own identity through SOPS_AGE_KEY. Local runners
-# select a per-environment file. SOPS may also load its default age keyring.
-if [[ -z "${SOPS_AGE_KEY:-}" && -z "${SOPS_AGE_KEY_FILE:-}" && -z "${SOPS_AGE_KEY_CMD:-}" ]]; then
-  export SOPS_AGE_KEY_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/sops/age/shosai/$environment.txt"
-  if [[ ! -r "$SOPS_AGE_KEY_FILE" ]]; then
-    echo "error: provision a $environment age identity or set SOPS_AGE_KEY_FILE" >&2
-    exit 1
-  fi
-fi
+# Never silently use the developer's unrelated default gcloud project.
+: "${SHOSAI_SECRETS_PROJECT:?Set SHOSAI_SECRETS_PROJECT to the Secret Manager project ID}"
 
-# Own SOPS's temporary directory too: SOPS alone leaves plaintext behind when
-# interrupted. Keep a supervising shell alive to stop the build and clean up.
+# Keep a supervising shell alive during authentication, fetching and the build
+# so cancellation stops the whole process group before removing plaintext.
 temporary=
 child=
 cancelled=
@@ -40,7 +33,7 @@ cleanup() {
   trap '' INT TERM
   if [[ -n "$child" ]]; then
     kill -TERM -- "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
-    # Do not wait indefinitely for a stopped or TERM-resistant SOPS leader.
+    # Do not wait indefinitely for a stopped or TERM-resistant group leader.
     for _ in {1..10}; do
       if ! kill -0 "$child" 2>/dev/null; then break; fi
       sleep 0.1
@@ -60,13 +53,62 @@ temporary="$(mktemp -d "${TMPDIR:-/tmp}/shosai-build.XXXXXXXX")"
 
 # A separate session lets cancellation stop descendants without signalling the
 # caller. Preserve stdin and reset the SIGINT disposition of background jobs.
-TMPDIR="$temporary" python3 -c '
-import os, signal, sys
+# The defines-path variable expands in the child Bash, not in this shell.
+# shellcheck disable=SC2016
+python3 -c '
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+
 os.setsid()
 signal.signal(signal.SIGINT, signal.SIG_DFL)
-os.execvp(sys.argv[1], sys.argv[1:])
-' sops exec-file --no-fifo --output-type json --filename defines.json \
-  "secrets/$environment.enc.yaml" "$2" <&0 &
+temporary, environment, command = sys.argv[1:]
+provider = os.environ.get("SHOSAI_AMP_WORKLOAD_IDENTITY_PROVIDER")
+try:
+    if provider:
+        if environment != "development":
+            sys.exit("error: Amp federation is for development only")
+        credentials = str(Path(temporary) / "federation.json")
+        # google-auth splits this command on whitespace without shell quoting.
+        # Resolve the fixed helper name through our trusted, possibly spaced PATH.
+        os.environ["PATH"] = str(Path.cwd() / "scripts") + os.pathsep + os.environ["PATH"]
+        executable = "amp-gcp-identity.py"
+        subprocess.run([
+            "gcloud", "iam", "workload-identity-pools", "create-cred-config", provider,
+            "--subject-token-type=urn:ietf:params:oauth:token-type:id_token",
+            f"--executable-command={executable}", f"--output-file={credentials}",
+            "--quiet",
+        ], check=True, stdout=subprocess.DEVNULL)
+        os.environ.update(
+            CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=credentials,
+            GOOGLE_APPLICATION_CREDENTIALS=credentials,
+            GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES="1",
+        )
+    defines = str(Path(temporary) / "defines.json")
+    project = os.environ["SHOSAI_SECRETS_PROJECT"]
+    subprocess.run([
+        "gcloud", "secrets", "versions", "access",
+        os.environ.get("SHOSAI_BUILD_SECRET_VERSION", "latest"),
+        f"--project={project}",
+        f"--secret=shosai-{environment}-build-defines", f"--out-file={defines}",
+        "--quiet",
+    ], check=True, stdout=subprocess.DEVNULL)
+    with open(defines) as source:
+        payload = json.load(source)
+    if not isinstance(payload, dict) or not payload or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in payload.items()
+    ):
+        sys.exit("error: build defines must be a nonempty JSON object of strings")
+except (subprocess.CalledProcessError, OSError, ValueError):
+    sys.exit("error: could not fetch valid build defines from Secret Manager")
+# Expand a variable rather than interpolating a pathname into shell source.
+# Callers still quote \"{}\" so paths containing spaces remain a single argument.
+os.environ["SHOSAI_BUILD_DEFINES_FILE"] = defines
+os.execvp("bash", ["bash", "-c", command.replace("{}", "${SHOSAI_BUILD_DEFINES_FILE}")])
+' "$temporary" "$environment" "$2" <&0 &
 child=$!
 if [[ -n "$cancelled" ]]; then
   exit "$cancelled"
