@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-12
+## [0.1.0] - 2026-11-15
 
 ### 🚀 Features
 
@@ -211,6 +211,7 @@ All notable changes to this project will be documented in this file.
 - Preserve publisher grouping and keyboard note saves (#312)
 - *(ios)* Stage selected books before review (#313)
 - *(pdf)* Keep Columns headings with text and hint overflow (#318)
+- *(pdf)* Preserve Columns position across reading modes (#319)
 
 ### 🚜 Refactor
 
