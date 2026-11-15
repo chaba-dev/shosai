@@ -32,7 +32,7 @@ migrate_working_dir/
 
 # Only SOPS ciphertext belongs in the build-credential directory.
 /secrets/*
-!/secrets/*.enc.json
+!/secrets/*.enc.yaml
 
 # Hugo output
 /website/public/

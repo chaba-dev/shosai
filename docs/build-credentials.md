@@ -1,7 +1,7 @@
 # Portable build credentials
 
-Shōsai keeps its Google application registrations in SOPS-encrypted JSON:
-`secrets/development.enc.json` and `secrets/release.enc.json`. Their age recipient
+Shōsai keeps its Google application registrations in SOPS-encrypted YAML:
+`secrets/development.enc.yaml` and `secrets/release.enc.yaml`. Their age recipient
 sets are disjoint. A development identity cannot decrypt the release file, or
 vice versa. `.sops.yaml` contains only public recipients and no fallback rule.
 
@@ -30,7 +30,8 @@ Run from the Nix shell, or prefix with `.agents/dev`:
 
 - Runs the command from the repository root, only after successful decryption.
 - Replaces `{}` with a temporary JSON file. Quote `"{}"` inside the command.
-- Uses SOPS's `exec-file --no-fifo` inside a private per-invocation temporary
+- Uses SOPS's `exec-file --no-fifo --output-type json` to convert the encrypted
+  YAML into Flutter-compatible JSON inside a private per-invocation temporary
   directory. The helper removes it after success, failure, `SIGINT` or `SIGTERM`.
   Cancellation during startup is deferred until the child PID is registered;
   cleanup sends TERM to the command's process group, allows up to about one
@@ -46,7 +47,7 @@ Run from the Nix shell, or prefix with `.agents/dev`:
   Separate recipients enforce access based on all identities available to SOPS,
   not solely the selected file. A process holding both sets can decrypt both.
 
-The JSON is directly usable with Flutter's `--dart-define-from-file` on Android
+The temporary JSON is usable with Flutter's `--dart-define-from-file` on Android
 and desktop. For example, substitute `flutter build linux --release` for the
 Android command above. The credential environment is independent of Flutter's
 build mode: testing an optimized build can use `development`; choosing
@@ -88,7 +89,7 @@ receive project secrets: provision their own identity instead.
 For another local machine, generate an identity there with `age-keygen`, keep
 its private key local, and add only its public recipient to the appropriate rule.
 An authorized holder of that environment's current key then runs
-`sops updatekeys secrets/<environment>.enc.json`. Never send the private key
+`sops updatekeys secrets/<environment>.enc.yaml`. Never send the private key
 through chat or copy the complete personal age keyring between machines.
 
 The individual Google variables already saved in Amp remain for compatibility;
@@ -110,9 +111,9 @@ and call:
 This command supplies OAuth registration only. Restoring the artifact workflow
 must separately supply a real signing identity and remove the debug-signing
 fallback before publishing. Do not give release keys to pull-request/test jobs.
-These JSON files are passed to Dart: never add signing passwords or keystore
-bytes to them. Future signing assets need their own encrypted file and release
-recipient rule, outside the Dart defines.
+The helper's decrypted JSON is passed to Dart: never add signing passwords or
+keystore bytes to it. Future signing assets need their own encrypted file and
+release recipient rule, outside the Dart defines.
 
 **`RELEASE` allows only the `main` branch and tags matching `v*`.** The policies
 are ref-type-specific: a branch named `v0.1.0` is not an allowed version tag.
@@ -136,10 +137,10 @@ Use the appropriate identity with the pinned SOPS editor:
 
 ```sh
 SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/shosai/development.txt" \
-  .agents/dev sops edit secrets/development.enc.json
+  .agents/dev sops edit secrets/development.enc.yaml
 ```
 
-For release edits, select `release.txt` and `release.enc.json` instead. Treat any
+For release edits, select `release.txt` and `release.enc.yaml` instead. Treat any
 editor swap/backup files as plaintext. Keep only ciphertext in version control.
 When changing recipients, use `sops updatekeys`; when rotating the file's data
 key, use `sops rotate --in-place`. Removing a recipient does not revoke access

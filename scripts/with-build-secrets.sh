@@ -65,8 +65,8 @@ import os, signal, sys
 os.setsid()
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 os.execvp(sys.argv[1], sys.argv[1:])
-' sops exec-file --no-fifo --filename defines.json \
-  "secrets/$environment.enc.json" "$2" <&0 &
+' sops exec-file --no-fifo --output-type json --filename defines.json \
+  "secrets/$environment.enc.yaml" "$2" <&0 &
 child=$!
 if [[ -n "$cancelled" ]]; then
   exit "$cancelled"

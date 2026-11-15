@@ -37,10 +37,10 @@ class BuildSecretsTests(unittest.TestCase):
                        "desktop_companion": f"synthetic-{environment}-companion"}
             encrypted = subprocess.check_output(
                 ["sops", "encrypt", "--age", recipient, "--input-type", "json",
-                 "--output-type", "json", "--filename-override", f"{environment}.json"],
+                 "--output-type", "yaml", "--filename-override", f"{environment}.yaml"],
                 input=json.dumps(payload),
                 text=True, env=self.env, cwd=self.root)
-            (self.root / "secrets" / f"{environment}.enc.json").write_text(encrypted)
+            (self.root / "secrets" / f"{environment}.enc.yaml").write_text(encrypted)
 
     def run_helper(self, environment, code, env=None, input=None):
         command = f"python3 -c {shlex.quote(code)} \"{{}}\""
