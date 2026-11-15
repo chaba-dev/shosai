@@ -685,7 +685,9 @@ void main() {
           'Refused detail keeps the continuous strip and its visible position',
       },
       (tester) async {
-        await binding.setSurfaceSize(const Size(440, 900));
+        // The one-page figure is about 802px tall at this width. Keep its
+        // fitted top away from the document end so an edge tap can advance.
+        await binding.setSurfaceSize(Size(440, mode == 'figure' ? 760 : 900));
         addTearDown(() => binding.setSurfaceSize(null));
         final directory = await Directory.systemTemp.createTemp(
           'columns-detail-',
@@ -1124,9 +1126,22 @@ void main() {
     }
 
     await tester.pumpWidget(ShosaiApp(productBridgeFactory: owner.bridge));
-    final card = find.byWidgetPredicate((widget) => widget is LibraryBookCard);
-    await until(() => card.evaluate().isNotEmpty);
-    await tester.tap(card.first);
+    final collection = find.byType(LibraryCollection);
+    await until(() {
+      if (collection.evaluate().isEmpty) return false;
+      final model = tester.widget<LibraryCollection>(collection).model;
+      return model.loaded && !model.busy && !model.loading;
+    });
+    final edition = tester
+        .widget<LibraryCollection>(collection)
+        .model
+        .editions!
+        .singleWhere(
+          (e) => e.files.any((f) => f.book?.id == book.bookId.toInt()),
+        );
+    final card = find.byKey(ValueKey('edition-${edition.id}'));
+    expect(card, findsOneWidget);
+    await tester.tap(card);
     await until(() => screen() != null);
     for (var i = 0; i < 3; i++) {
       final previous = screen();
