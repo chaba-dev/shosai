@@ -30,6 +30,11 @@ __pycache__/
 .swiftpm/
 migrate_working_dir/
 
+# Build secrets are fetched from Secret Manager, never versioned here.
+/secrets/
+# Temporary credentials created by google-github-actions/auth.
+gha-creds-*.json
+
 # Hugo output
 /website/public/
 /website/.hugo_build.lock
