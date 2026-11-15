@@ -30,6 +30,10 @@ __pycache__/
 .swiftpm/
 migrate_working_dir/
 
+# Only SOPS ciphertext belongs in the build-credential directory.
+/secrets/*
+!/secrets/*.enc.json
+
 # Hugo output
 /website/public/
 /website/.hugo_build.lock

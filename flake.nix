@@ -90,6 +90,11 @@
 
           # PDFium for `flutter test` (see SHOSAI_PDFIUM_LIBRARY below)
           pdfium-binaries
+
+          # Portable build configuration and the real-encryption helper tests
+          sops
+          age
+          python3
         ];
 
         # Android, release and editor tools for local development. CI builds no

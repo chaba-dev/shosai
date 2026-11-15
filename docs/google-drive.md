@@ -34,8 +34,10 @@ registration. Debug certificates are machine-local; do not reuse another machine
 fingerprint for a differently signed build.
 
 Client IDs are public identifiers, not credentials. No IDs are invented or checked
-in. Configure them in the approved build configuration/secret manager; never paste
-client secrets, authorization codes, access tokens or refresh tokens into a chat.
+in as plaintext. Official build registrations are stored in the separate
+[development/release SOPS configuration](build-credentials.md), which documents
+the build helper and key provisioning. Never paste client secrets, authorization
+codes, access tokens or refresh tokens into a chat.
 For an iOS archive, both the Dart define and the Xcode callback build setting must
 be supplied; neither is inferred from a different platform's client.
 

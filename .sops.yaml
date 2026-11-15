@@ -1,0 +1,11 @@
+# Public recipients only. Never put age private identities in this file.
+creation_rules:
+  - path_regex: ^secrets/development\.enc\.json$
+    age: >-
+      age1a0fladgxgz7fxtmehfhgjm6fc7f5qkc4pms758a4mmhv47l64etshrrhu4,
+      age1d86g4plv467k79ppyl0nfk8atg0jrqylra3atgvev9surfvze9vszahsv4,
+      age1feq3vycgtqcnpf99fgrax5lvt4f2svl0q2df3w0kcnh3upxnae3qdr7dpa
+  - path_regex: ^secrets/release\.enc\.json$
+    age: >-
+      age16v40hqc8zhmgdvv7mnqanxrp3m2fnt4p4c9rfgj4275kkv2cn9qsq98e0m,
+      age159yl6plhryhy5lw4dlkh5cunqee93twqjtctcksf3cldm44plyhq05ewfy
