@@ -90,6 +90,10 @@
 
           # PDFium for `flutter test` (see SHOSAI_PDFIUM_LIBRARY below)
           pdfium-binaries
+
+          # Identity-based build configuration, without exported cloud keys
+          google-cloud-sdk
+          python3
         ];
 
         # Android, release and editor tools for local development. CI builds no
