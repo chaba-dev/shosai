@@ -160,8 +160,11 @@ final class FoldersController extends ChangeNotifier {
   final Future<LibraryConnection?> Function(String id)? _setupGoogleDrive;
   bool get canAddGoogleDrive => _setupGoogleDrive != null;
 
-  bool canReconnect(LibraryConnection grant) =>
-      canAddGoogleDrive && grant.provider == 'google-drive';
+  bool canReconnect(LibraryConnection grant) => switch (grant.provider) {
+    'google-drive' => canAddGoogleDrive,
+    'dropbox' => supportsDropbox,
+    _ => false,
+  };
 
   /// Whether device folders can be connected here; phones and tablets read
   /// books only from files and storage accounts.
@@ -242,7 +245,10 @@ final class FoldersController extends ChangeNotifier {
             .firstOrNull;
         if (previous == null || !canReconnect(previous)) return;
         _effect((revision, cancellation) async {
-          final authorization = await _setupGoogleDrive!(previous.id);
+          final setup = previous.provider == 'dropbox'
+              ? _setupDropbox!
+              : _setupGoogleDrive!;
+          final authorization = await setup(previous.id);
           if (authorization != null) {
             try {
               cancellation.throwIfCancelled();

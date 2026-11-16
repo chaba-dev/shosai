@@ -113,6 +113,7 @@ final class LibraryModel {
     this.error,
     this.loadError,
     this.sourceWarning,
+    this.sourcesRequireReconnect = false,
     this.pagingFailed = false,
     this.hasMore = false,
     this.failure = LibraryFailure.none,
@@ -178,6 +179,14 @@ final class LibraryModel {
 
   /// A partial source scan failed; healthy books and paging remain available.
   final String? sourceWarning;
+  final bool sourcesRequireReconnect;
+
+  /// A source authorization failure needs Settings, not another scan. First-
+  /// page and mutation failures take precedence; paging has its own retry row.
+  bool get reconnectRequired =>
+      sourcesRequireReconnect &&
+      error == null &&
+      (loadError == null || pagingFailed);
 
   /// True when the last load failure was an appended page rather than page one.
   ///
@@ -244,6 +253,7 @@ final class LibraryModel {
     Object? error = _same,
     Object? loadError = _same,
     Object? sourceWarning = _same,
+    bool? sourcesRequireReconnect,
     bool? pagingFailed,
     bool? hasMore,
     LibraryFailure? failure,
@@ -289,6 +299,8 @@ final class LibraryModel {
     sourceWarning: identical(sourceWarning, _same)
         ? this.sourceWarning
         : sourceWarning as String?,
+    sourcesRequireReconnect:
+        sourcesRequireReconnect ?? this.sourcesRequireReconnect,
     pagingFailed: pagingFailed ?? this.pagingFailed,
     hasMore: hasMore ?? this.hasMore,
     failure: failure ?? this.failure,

@@ -134,7 +134,7 @@ class _RecursiveLocation extends _PagedLocation
 }
 
 class _SourceBridge extends HarnessBridge implements LibraryFoldersHost {
-  _SourceBridge(this.folders);
+  _SourceBridge(this.folders, {super.books});
   @override
   final LibraryFolders folders;
   @override
@@ -225,9 +225,13 @@ final class _ReplacingLocation implements LibraryLocation {
 
 void main() {
   setUpAll(loadHarnessFonts);
-  for (final locale in const [Locale('en'), Locale('ja')]) {
+  for (final (providerId, locale) in [
+    for (final id in ['google-drive', 'dropbox'])
+      for (final locale in const [Locale('en'), Locale('ja')]) (id, locale),
+  ]) {
+    final providerLabel = providerId == 'dropbox' ? 'Dropbox' : 'Google Drive';
     testWidgets(
-      'Google Reconnect retains its selected source in ${locale.languageCode}',
+      '$providerLabel Reconnect retains its selected source in ${locale.languageCode}',
       (tester) async {
         final semantics = tester.ensureSemantics();
         final data = (await tester.runAsync(() async {
@@ -239,7 +243,7 @@ void main() {
             'packages/shosai_core/test/fixtures/sample.epub',
           ).copySync('${directory.path}/Reading/book.epub');
           final store = await Store.open('${directory.path}/library.sqlite3');
-          final provider = _FixtureProvider(directory.path, id: 'google-drive');
+          final provider = _FixtureProvider(directory.path, id: providerId);
           final locations = LibraryLocations(store);
           final folders = LibraryFolders(
             Preferences(store),
@@ -256,7 +260,7 @@ void main() {
           await folders.add(
             LibraryConnection(
               'saved',
-              'Google Drive',
+              providerLabel,
               provider.id,
               {'root': directory.path, 'credential': 'old'},
               directory: 'Reading',
@@ -273,17 +277,20 @@ void main() {
         final (directory, store, folders, provider) = data;
         var offline = true;
         Completer<void>? authorizationGate;
+        Future<LibraryConnection?> authorize(String id) async {
+          await authorizationGate?.future;
+          if (offline) throw const LocationException(LocationFailure.offline);
+          return LibraryConnection(id, providerLabel, providerId, {
+            'root': directory.path,
+            'credential': 'new',
+          });
+        }
+
         final controller = FoldersController(
           folders: folders,
           setup: (_) async => null,
-          setupGoogleDrive: (id) async {
-            await authorizationGate?.future;
-            if (offline) throw const LocationException(LocationFailure.offline);
-            return LibraryConnection(id, 'Google Drive', 'google-drive', {
-              'root': directory.path,
-              'credential': 'new',
-            });
-          },
+          setupGoogleDrive: providerId == 'google-drive' ? authorize : null,
+          setupDropbox: providerId == 'dropbox' ? authorize : null,
           confirmRemoval: (_) async => false,
         )..dispatch(const FoldersStarted());
         addTearDown(() async {
@@ -331,12 +338,12 @@ void main() {
 
         await settle();
         expect(find.text(l10n.locationReconnect), findsNothing);
-        await tester.tap(find.text('Google Drive'));
+        await tester.tap(find.text(providerLabel));
         await tester.pumpAndSettle();
         expect(find.text(l10n.locationReconnectDescription), findsOneWidget);
         await captureHarnessArtifact(
           tester,
-          'google-reconnect-${locale.languageCode}-ready',
+          '$providerId-reconnect-${locale.languageCode}-ready',
         );
         await tester.tap(find.text(l10n.locationReconnect));
         await settle();
@@ -348,7 +355,7 @@ void main() {
         );
         await captureHarnessArtifact(
           tester,
-          'google-reconnect-${locale.languageCode}-error',
+          '$providerId-reconnect-${locale.languageCode}-error',
         );
         offline = false;
         authorizationGate = Completer<void>();
@@ -372,7 +379,7 @@ void main() {
         }
         await captureHarnessArtifact(
           tester,
-          'google-reconnect-${locale.languageCode}-busy',
+          '$providerId-reconnect-${locale.languageCode}-busy',
         );
         authorizationGate.complete();
         await settle();
@@ -387,7 +394,7 @@ void main() {
         );
         await captureHarnessArtifact(
           tester,
-          'google-reconnect-${locale.languageCode}-complete',
+          '$providerId-reconnect-${locale.languageCode}-complete',
         );
         Future<void> showCheck({bool busy = false}) async {
           await tester.scrollUntilVisible(
@@ -497,6 +504,162 @@ void main() {
         );
         await folders.close();
         semantics.dispose();
+      },
+    );
+  }
+
+  for (final withBooks in [false, true]) {
+    testWidgets(
+      'source authorization recovery ${withBooks ? 'with books' : 'without books'}',
+      (tester) async {
+        final (directory, store, folders, provider) = (await tester.runAsync(
+          () async {
+            final directory = await Directory.systemTemp.createTemp(
+              'source-recovery',
+            );
+            final store = await Store.open('${directory.path}/library.sqlite3');
+            final source = Directory('${directory.path}/source')..createSync();
+            final provider = _FixtureProvider(source.path, id: 'dropbox');
+            final folders = LibraryFolders(
+              Preferences(store),
+              Library(store, managedDirectory: '${directory.path}/books'),
+              LibraryLocations(store),
+              () async => '${directory.path}/unused',
+              BookFileCache(store, '${directory.path}/cache'),
+              providers: [provider],
+            );
+            await folders.add(
+              LibraryConnection('restored', 'Dropbox', 'dropbox', {
+                'root': source.path,
+                'credential': 'missing-device-key',
+              }),
+            );
+            return (directory, store, folders, provider);
+          },
+        ))!;
+        LocationFailure? failure = LocationFailure.revoked;
+        provider.beforeOpen = () async {
+          if (failure case final failure?) throw LocationException(failure);
+        };
+        var managed = 0;
+        final locale = Locale(withBooks ? 'ja' : 'en');
+        final l10n = await AppLocalizations.delegate.load(locale);
+        final controller = LibraryController(
+          bridge: _SourceBridge(
+            folders,
+            books: withBooks ? harnessLibraryBooks() : [],
+          ),
+          confirmRemoval: (_) async => false,
+          pickImport: () async => null,
+          openBook: (_) async {},
+          drainReaderSaves: (_) async {},
+          localizations: () => l10n,
+          manageConnections: (_) async {
+            managed++;
+            failure = null;
+            final previous = (await folders.list()).single;
+            await folders.reconnect(
+              previous,
+              LibraryConnection(
+                previous.id,
+                previous.label,
+                previous.provider,
+                {'root': provider.root, 'credential': 'new-device-key'},
+              ),
+            );
+          },
+        );
+        tester.view.physicalSize = withBooks
+            ? const Size(1024, 768)
+            : const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        try {
+          await tester.pumpWidget(
+            productionShell(
+              locale: locale,
+              home: Scaffold(
+                body: ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, _) => LibraryCollection(
+                    model: controller.model,
+                    openBook: (_) {},
+                    openNotes: () {},
+                    removeBook: (_) {},
+                    loadMore: () {},
+                    retryPaging: () {},
+                    loadCover: (_) => false,
+                    retry: () =>
+                        controller.dispatch(const LibraryRetryRequested()),
+                    addFirstBooks: () {},
+                    cancelImport: () {},
+                  ),
+                ),
+              ),
+            ),
+          );
+          Future<void> settle() async {
+            for (
+              var i = 0;
+              (controller.model.loading || controller.model.busy) && i < 200;
+              i++
+            ) {
+              await tester.pump(const Duration(milliseconds: 16));
+              await tester.runAsync(
+                () => Future<void>.delayed(const Duration(milliseconds: 5)),
+              );
+            }
+            expect(controller.model.loading || controller.model.busy, isFalse);
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
+          }
+
+          controller.dispatch(const LibraryStarted());
+          await settle();
+          expect(
+            find.text(l10n.locationReconnectWarning('Dropbox')),
+            findsOneWidget,
+          );
+          expect(find.text(l10n.libraryRetry), findsNothing);
+          await captureHarnessArtifact(
+            tester,
+            'restore-${withBooks ? 'shelf' : 'empty'}-reconnect',
+          );
+          await tester.tap(find.text(l10n.libraryLocations));
+          await settle();
+          expect(managed, 1);
+          expect(controller.model.displayError, isNull);
+          expect(
+            controller.model.books.length,
+            withBooks ? harnessLibraryBooks().length : 0,
+          );
+
+          failure = LocationFailure.offline;
+          controller.dispatch(const LibraryRefreshed());
+          await settle();
+          expect(
+            find.text(l10n.locationScanWarning('Dropbox')),
+            findsOneWidget,
+          );
+          expect(find.text(l10n.libraryLocations), findsNothing);
+          failure = null;
+          await tester.tap(find.text(l10n.libraryRetry));
+          await settle();
+          expect(
+            managed,
+            1,
+            reason: 'offline recovery rescans rather than signing in',
+          );
+          expect(controller.model.displayError, isNull);
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          controller.dispose();
+          await folders.close();
+          await tester.runAsync(() async {
+            await store.close();
+            await directory.delete(recursive: true);
+          });
+        }
       },
     );
   }
@@ -883,7 +1046,7 @@ void main() {
         )).map((f) => '${f.locationId}/${f.entry.key}'),
         ['recursive/book', 'recursive/pdf', 'fallback/book'],
       );
-      expect(folders.scanWarnings, ['recursive']);
+      expect(folders.scanWarnings, [(source: 'recursive', failure: null)]);
       // Cancellation after a page never publishes that source's incomplete replacement.
       final token = CancellationToken();
       recursive.failure = null;
@@ -927,7 +1090,7 @@ void main() {
       ]) {
         recursive.tree = [tree];
         await folders.discover(refresh: true);
-        expect(folders.scanWarnings, ['recursive']);
+        expect(folders.scanWarnings, [(source: 'recursive', failure: null)]);
         expect(
           (await locations.catalog()).where((f) => f.locationId == 'recursive'),
           hasLength(2),
@@ -971,19 +1134,39 @@ void main() {
         BookFileCache(store, '${directory.path}/cache'),
         providers: [provider],
       );
-      for (final failure in <Object>[
-        const LocationException(LocationFailure.offline),
-        const CoreException(CoreErrorKind.unsupported, 'Unavailable provider.'),
-        StateError('Private adapter details must not reach the warning.'),
+      for (final (failure, expectedFailure) in <(Object, LocationFailure?)>[
+        (
+          const LocationException(LocationFailure.offline),
+          LocationFailure.offline,
+        ),
+        (
+          const LocationException(LocationFailure.revoked),
+          LocationFailure.revoked,
+        ),
+        (
+          const CoreException(
+            CoreErrorKind.unsupported,
+            'Unavailable provider.',
+          ),
+          null,
+        ),
+        (
+          StateError('Private adapter details must not reach the warning.'),
+          null,
+        ),
       ]) {
         provider.refreshFailures['failing'] = failure;
         final files = await folders.discover(refresh: true);
         expect(files.map((file) => file.locationId), ['failing', 'healthy']);
-        expect(folders.scanWarnings, ['Books failing']);
+        expect(folders.scanWarnings, [
+          (source: 'Books failing', failure: expectedFailure),
+        ]);
         expect((await folders.list()).first.configuration, {
           'root': source.path,
         });
-        expect(folders.scanWarnings, ['Books failing']);
+        expect(folders.scanWarnings, [
+          (source: 'Books failing', failure: expectedFailure),
+        ]);
       }
 
       // Cancellation aborts the operation, rather than becoming a source warning.

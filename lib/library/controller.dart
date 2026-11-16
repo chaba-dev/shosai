@@ -10,7 +10,8 @@ import 'package:shosai_core/shosai_core.dart'
         BookFormat,
         LibrarySort,
         CancellationToken,
-        CancellationCheck;
+        CancellationCheck,
+        LocationFailure;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/library_editions.dart';
@@ -249,6 +250,10 @@ class LibraryController implements Listenable {
           _load(append: true);
         }
       case LibraryRetryRequested():
+        if (_model.reconnectRequired) {
+          _connections(null);
+          return;
+        }
         switch (_model.failure) {
           case LibraryFailure.load || LibraryFailure.none:
             _load(refreshSources: true);
@@ -476,6 +481,7 @@ class LibraryController implements Listenable {
               discoveryProgress: null,
               loadError: message.discoveryError,
               sourceWarning: message.sourceWarning,
+              sourcesRequireReconnect: message.sourcesRequireReconnect,
               pagingFailed: false,
               hasMore: message.page.hasMore,
             ),
@@ -891,6 +897,7 @@ class LibraryController implements Listenable {
         var sourceFiles = <LibrarySourceFile>[];
         String? discoveryError;
         String? sourceWarning;
+        var sourcesRequireReconnect = false;
         try {
           sourceFiles = host is LibraryFoldersHost
               ? (await (host as LibraryFoldersHost).folders.discover(
@@ -921,8 +928,17 @@ class LibraryController implements Listenable {
           if (host is LibraryFoldersHost) {
             final warnings = (host as LibraryFoldersHost).folders.scanWarnings;
             if (warnings.isNotEmpty) {
+              sourcesRequireReconnect = warnings.any(
+                (warning) => warning.failure == LocationFailure.revoked,
+              );
               sourceWarning = warnings
-                  .map(_localizations().locationScanWarning)
+                  .map(
+                    (warning) => warning.failure == LocationFailure.revoked
+                        ? _localizations().locationReconnectWarning(
+                            warning.source,
+                          )
+                        : _localizations().locationScanWarning(warning.source),
+                  )
                   .join('\n');
             }
           }
@@ -981,6 +997,7 @@ class LibraryController implements Listenable {
             editions: editions,
             discoveryError: discoveryError,
             sourceWarning: sourceWarning,
+            sourcesRequireReconnect: sourcesRequireReconnect,
           ),
         );
       } catch (error) {

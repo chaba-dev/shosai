@@ -1319,7 +1319,9 @@ void main() {
           final offline = (await folders.discover(refresh: true)).single;
           expect(offline.entry.key, 'before');
           expect(offline.failure, LocationFailure.offline);
-          expect(folders.scanWarnings, ['Google Drive']);
+          expect(folders.scanWarnings, [
+            (source: 'Google Drive', failure: LocationFailure.offline),
+          ]);
 
           server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
           port = server.port;
