@@ -1,0 +1,45 @@
+name: Release notes
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  release-notes:
+    name: Release notes
+    if: github.event.pull_request.head.ref == 'release/next' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Require release notes
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ ! "${PR_TITLE}" =~ ^chore\(release\):\ v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo '::error::Release PR title must be chore(release): vX.Y.Z'
+            exit 1
+          fi
+
+          version="${BASH_REMATCH[1]}"
+          app_version="$(sed -n 's/^version: \([^+]*\).*/\1/p' pubspec.yaml | head -n 1)"
+          if [ "${version}" != "${app_version}" ]; then
+            echo '::error file=pubspec.yaml::Release PR title must match the application version'
+            exit 1
+          fi
+
+          notes="docs/releases/${version}.md"
+          if [ ! -f "${notes}" ] || ! grep -q '[^[:space:]]' "${notes}"; then
+            echo "::error file=${notes}::Add nonempty release notes for v${version} before merging the release PR"
+            exit 1
+          fi
+
+          echo "Release notes found: ${notes}"

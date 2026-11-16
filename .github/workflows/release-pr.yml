@@ -119,16 +119,6 @@ jobs:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
 
-      - name: Generate release notes preview
-        if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: cliff.toml
-          args: --unreleased --tag ${{ steps.next-version.outputs.content }} --strip header
-        env:
-          OUTPUT: RELEASE_NOTES.md
-          GITHUB_REPO: ${{ github.repository }}
-
       - name: Create or update release branch
         if: steps.skip.outputs.skip == 'false' && steps.changes.outputs.ahead != '0' && steps.version-check.outputs.skip == 'false'
         id: release-branch
@@ -154,9 +144,8 @@ jobs:
 
           generated_dir="$(mktemp -d)"
           trap 'rm -rf "${generated_dir}"' EXIT
-          cp CHANGELOG.md pubspec.yaml RELEASE_NOTES.md "${generated_dir}/"
+          cp CHANGELOG.md pubspec.yaml "${generated_dir}/"
           git restore CHANGELOG.md pubspec.yaml
-          rm RELEASE_NOTES.md
 
           if git ls-remote --exit-code --heads origin "${branch}" >/dev/null; then
             git fetch origin "${branch}"
@@ -197,7 +186,7 @@ jobs:
             git commit --no-edit
           fi
 
-          cp "${generated_dir}/CHANGELOG.md" "${generated_dir}/RELEASE_NOTES.md" .
+          cp "${generated_dir}/CHANGELOG.md" CHANGELOG.md
           cp "${generated_dir}/pubspec.yaml" pubspec.yaml
           git add CHANGELOG.md pubspec.yaml
 
@@ -209,6 +198,18 @@ jobs:
 
           git push origin "${branch}"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes preview
+        if: steps.release-branch.outputs.commit != ''
+        env:
+          RELEASE_TAG: ${{ steps.next-version.outputs.content }}
+        run: |
+          notes="docs/releases/${RELEASE_TAG#v}.md"
+          if [ -f "${notes}" ] && grep -q '[^[:space:]]' "${notes}"; then
+            cp "${notes}" RELEASE_NOTES.md
+          else
+            printf 'Release notes have not been written yet. Add %s before releasing.\n' "${notes}" > RELEASE_NOTES.md
+          fi
 
       - name: Create PR body
         if: steps.release-branch.outputs.commit != ''
