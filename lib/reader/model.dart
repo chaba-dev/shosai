@@ -695,13 +695,19 @@ final class ReaderModel {
   final bool chromeHovered;
   final bool zonesHintDismissed;
 
-  bool get chromePinned =>
-      openPanel != null ||
-      searchOpen ||
-      modalEffect != null ||
-      referencePeek != null;
+  bool get _chromeSurfacePinned =>
+      openPanel != null || searchOpen || referencePeek != null;
 
-  bool get chromeShown => document == null || chromeVisible || chromePinned;
+  bool get chromePinned => _chromeSurfacePinned || modalEffect != null;
+
+  // Note dialogs block reader controls without revealing hidden chrome. Keep
+  // visible chrome and existing panels in place for the dialog's lifetime.
+  bool get chromeShown =>
+      document == null ||
+      chromeVisible ||
+      _chromeSurfacePinned ||
+      modalEffect == ReaderModalEffect.associationPicker ||
+      modalEffect == ReaderModalEffect.documentPicker;
 
   // A selection menu preserves existing chrome without revealing hidden chrome
   // during keyboard-only selection.
