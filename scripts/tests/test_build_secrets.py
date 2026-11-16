@@ -203,6 +203,19 @@ raise SystemExit(23)
         self.assertTrue(result.stdout.strip())
         self.assertFalse(Path(result.stdout.strip()).exists())
 
+    def start_cancellable_helper(self, *args, **kwargs):
+        # Bash cannot trap a signal ignored on entry. Normalize only the spawn,
+        # then immediately restore the runner's handlers, even if Popen fails.
+        previous = {signum: signal.getsignal(signum)
+                    for signum in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            for signum in previous:
+                signal.signal(signum, signal.SIG_DFL)
+            return subprocess.Popen(*args, **kwargs)
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+
     def assert_cancelled_cleanup(self, signum, scenario="running"):
         for target in ("helper", "process group"):
             with self.subTest(target=target, scenario=scenario):
@@ -234,7 +247,7 @@ fi' DEBUG
 """)
                     env.update(BASH_ENV=str(scheduler), READY_MARKER=str(marker),
                                CANCEL_SIGNAL=str(signum), CANCEL_TARGET=target)
-                process = subprocess.Popen(
+                process = self.start_cancellable_helper(
                     ["bash", str(self.root / "scripts" / HELPER.name),
                      "development", command],
                     cwd=self.root.parent, env=env, text=True,
@@ -301,6 +314,18 @@ fi' DEBUG
     def test_termination_removes_temporary_file(self):
         self.assert_cancelled_cleanup(signal.SIGTERM)
 
+    def test_cancellation_with_ignored_parent_signals(self):
+        previous = {signum: signal.signal(signum, signal.SIG_IGN)
+                    for signum in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            for signum in previous:
+                with self.subTest(signal=signum):
+                    self.assert_cancelled_cleanup(signum)
+                    self.assertEqual(signal.getsignal(signum), signal.SIG_IGN)
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+
     def test_startup_cancellation_stops_build_and_removes_plaintext(self):
         for signum in (signal.SIGINT, signal.SIGTERM):
             with self.subTest(signal=signum):
@@ -332,7 +357,7 @@ fi' DEBUG
                 marker = self.root / "fetch-ready.json"
                 marker.unlink(missing_ok=True)
                 env = dict(self.env, FETCH_MARKER=str(marker), FETCH_BLOCKED="1")
-                process = subprocess.Popen([
+                process = self.start_cancellable_helper([
                     "bash", str(self.root / "scripts" / HELPER.name), "development",
                     "echo command-ran",
                 ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
