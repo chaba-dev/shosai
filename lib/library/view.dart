@@ -762,7 +762,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         ? _shell.dispatch(ShellBookActivated(open.id))
         : controller.dispatch(LibraryBookOpened(open.book)),
     closeBook: (open) => _shell.dispatch(ShellBookClosed(open.id)),
-    moveBook: (from, to) => _shell.dispatch(ShellBookMoved(from, to)),
     addBooks: _shell.model.reading
         ? () {
             _pendingLibraryAction = const LibraryImportRequested();

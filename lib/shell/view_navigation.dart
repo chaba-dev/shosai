@@ -57,6 +57,10 @@ class ShellSidebar extends StatelessWidget {
         child: _startSafeArea(
           context,
           CustomScrollView(
+            key: ValueKey((
+              model.currentBookId,
+              model.openBooks.firstOrNull?.id,
+            )),
             slivers: [
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(14, 20, 14, 0),
@@ -109,26 +113,19 @@ class ShellSidebar extends StatelessWidget {
               if (open.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
-                  sliver: SliverReorderableList(
+                  sliver: SliverList.builder(
                     itemCount: open.length,
-                    onReorder: (from, to) =>
-                        actions.moveBook(from, to > from ? to - 1 : to),
-                    proxyDecorator: (child, _, _) =>
-                        Material(type: MaterialType.transparency, child: child),
                     itemBuilder: (context, index) {
                       final entry = open[index];
-                      return ReorderableDelayedDragStartListener(
+                      return Padding(
                         key: ValueKey(entry.id),
-                        index: index,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: _OpenBookRow(
-                            entry: entry,
-                            cover: covers[entry.id],
-                            current: entry.id == model.currentBookId,
-                            touch: layout.touch,
-                            actions: actions,
-                          ),
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: _OpenBookRow(
+                          entry: entry,
+                          cover: covers[entry.id],
+                          current: entry.id == model.currentBookId,
+                          touch: layout.touch,
+                          actions: actions,
                         ),
                       );
                     },
@@ -167,7 +164,7 @@ class ShellSidebar extends StatelessWidget {
 
 /// The sidebar while reading: the mark, the places as icon buttons, the open
 /// books' covers under a hairline and Add books. It never hides.
-class ShellRail extends StatelessWidget {
+class ShellRail extends StatefulWidget {
   const ShellRail({
     super.key,
     required this.layout,
@@ -182,7 +179,41 @@ class ShellRail extends StatelessWidget {
   final ShellActions actions;
 
   @override
+  State<ShellRail> createState() => _ShellRailState();
+}
+
+class _ShellRailState extends State<ShellRail> {
+  final _booksScroll = ScrollController();
+  final _booksKey = GlobalKey();
+
+  @override
+  void didUpdateWidget(covariant ShellRail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Reset before the lazy list builds so the promoted cover is mounted.
+    // Keyed covers retain their own focus instead of their former slot's.
+    if (widget.model.currentBookId != oldWidget.model.currentBookId ||
+        widget.model.openBooks.firstOrNull?.id !=
+            oldWidget.model.openBooks.firstOrNull?.id) {
+      if (_booksScroll.hasClients) _booksScroll.jumpTo(0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // Short rails scroll as a whole: reveal the start of the books in
+        // that outer viewport too, after their new geometry is laid out.
+        final context = _booksKey.currentContext;
+        if (context != null) Scrollable.ensureVisible(context);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _booksScroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final ShellRail(:layout, :model, :covers, :actions) = widget;
     final palette = ShellPalette.of(context);
     final l10n = AppLocalizations.of(context);
     return Semantics(
@@ -210,18 +241,21 @@ class ShellRail extends StatelessWidget {
                   constraints.maxHeight <
                   38 + 6 * (layout.touch ? 44 : 40) + 7 * 8 + 76;
               final books = Container(
+                key: _booksKey,
                 margin: const EdgeInsets.only(top: 6),
                 padding: const EdgeInsets.only(top: 10),
                 decoration: BoxDecoration(
                   border: Border(top: BorderSide(color: palette.line)),
                 ),
                 child: ListView(
+                  controller: _booksScroll,
                   padding: EdgeInsets.zero,
                   shrinkWrap: scroll,
                   physics: scroll ? const NeverScrollableScrollPhysics() : null,
                   children: [
                     for (final entry in model.openBooks)
                       Padding(
+                        key: ValueKey(entry.id),
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Center(
                           child: _RailBook(
