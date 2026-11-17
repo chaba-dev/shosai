@@ -243,9 +243,9 @@ void main() {
         'old.epub',
         'good.pdf',
       });
-      expect(core.folders.scanWarnings, ['Broken']);
+      expect(core.folders.scanWarnings, [(source: 'Broken', failure: null)]);
       expect(await core.folders.discover(), hasLength(2));
-      expect(core.folders.scanWarnings, ['Broken']);
+      expect(core.folders.scanWarnings, [(source: 'Broken', failure: null)]);
       await core.folders.remove('broken');
       expect((await core.folders.discover()).single.entry.name, 'good.pdf');
       expect(core.folders.scanWarnings, isEmpty);

@@ -175,6 +175,7 @@ final class _LibraryLoaded extends LibraryMessage {
     this.editions,
     this.discoveryError,
     this.sourceWarning,
+    this.sourcesRequireReconnect = false,
   });
   final int revision;
   final FlutterLibraryPage page;
@@ -188,6 +189,7 @@ final class _LibraryLoaded extends LibraryMessage {
   final List<BookEdition>? editions;
   final String? discoveryError;
   final String? sourceWarning;
+  final bool sourcesRequireReconnect;
 }
 
 final class _LibrarySettingsLoaded extends LibraryMessage {

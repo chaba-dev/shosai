@@ -13,6 +13,7 @@ import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/core/dropbox_location.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/library/folders_controller.dart';
 
 // The binding supplies the native-channel seam; HTTP still uses real sockets
 // against the local protocol fixture, not Flutter's blanket HTTP-400 stub.
@@ -847,13 +848,19 @@ void main() {
       expect(fixture.calls, isNot(contains('/files/download')));
       fixture.offline = true;
       expect(await folders.discover(refresh: true), isNotEmpty);
-      expect(folders.scanWarnings, ['Dropbox']);
+      expect(folders.scanWarnings, [
+        (source: 'Dropbox', failure: LocationFailure.offline),
+      ]);
       fixture.offline = false;
       expect(await folders.discover(refresh: true), hasLength(1));
       expect(folders.scanWarnings, isEmpty);
       final book = await folders.importEntry('one', found.single.entry);
       final notes = Annotations(store);
       await notes.createNote(book.id, const BookAnchor(), 'Keep these notes.');
+      final bookmarks = Bookmarks(store);
+      final bookmark = await bookmarks.toggle(book.id, 1, offset: 9);
+      const position = ReadingPosition(unit: 1, offset: 17);
+      await ReadingState(store).save(book.id, position, unitCount: 3);
       expect(book.located, true);
       expect((await locations.copies(book.contentHash)).single.locator, (
         locationId: 'one',
@@ -868,7 +875,68 @@ void main() {
       );
       expect((await library.get(book.id))!.keptOnDevice, true);
       expect(fixture.calls.where((v) => v == '/files/download'), hasLength(1));
-      await folders.remove('one');
+
+      // Model an Android restore: durable library and kept files remain, but
+      // the device-bound vault and all provider sessions start empty.
+      await folders.close();
+      fixture.credentials.values.clear();
+      final restoredProvider = fixture.provider();
+      final restored = LibraryFolders(
+        Preferences(store),
+        library,
+        locations,
+        () async => '${directory.path}/restored-stage.epub',
+        cache,
+        providers: [restoredProvider],
+      );
+      addTearDown(restored.close);
+      await restored.discover();
+      expect(restored.scanWarnings, [
+        (source: 'Dropbox', failure: LocationFailure.revoked),
+      ]);
+      expect(
+        await restored.withBookFile(book, (path) => File(path).readAsBytes()),
+        fixture.book,
+      );
+      fixture.offline = false;
+      var cancel = true;
+      final reconnect = FoldersController(
+        folders: restored,
+        setup: (_) async => null,
+        setupDropbox: (id) async => cancel ? null : restoredProvider.setup(id),
+        confirmRemoval: (_) async => false,
+      )..dispatch(const FoldersStarted());
+      addTearDown(reconnect.dispose);
+      await reconnect.drain();
+      reconnect.dispatch(const FoldersSelected('one'));
+      final saved = (await restored.list()).single;
+      reconnect.dispatch(const FoldersReconnectRequested());
+      await reconnect.drain();
+      expect((await restored.list()).single.configuration, saved.configuration);
+      expect(fixture.credentials.values, isEmpty);
+      cancel = false;
+      reconnect.dispatch(const FoldersReconnectRequested());
+      await reconnect.drain();
+      expect(reconnect.model.error, isNull);
+      final adopted = (await restored.list()).single;
+      expect(adopted.id, 'one');
+      expect(adopted.directory, 'id:folder');
+      expect(adopted.directoryLabel, 'Books');
+      expect(adopted.configuration, isNot(saved.configuration));
+      expect(await restored.discover(refresh: true), isEmpty);
+      expect(restored.scanWarnings, isEmpty);
+      expect(await bookmarks.list(book.id), [bookmark]);
+      expect(await ReadingState(store).load(book.id), position);
+      expect(
+        await notes.summary(book.id),
+        const NotesSummary(1, 'Keep these notes.'),
+      );
+      expect(
+        await restored.withBookFile(book, (path) => File(path).readAsBytes()),
+        fixture.book,
+      );
+      expect(fixture.calls.where((v) => v == '/files/download'), hasLength(1));
+      await restored.remove('one');
       expect(
         (await locations.copies(book.contentHash)).single.failure,
         LocationFailure.revoked,
