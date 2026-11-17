@@ -26,6 +26,7 @@ LibraryCollection _collection(
   ValueChanged<FlutterLibraryBook>? openBook,
   ValueChanged<FlutterLibraryBook>? removeBook,
   VoidCallback? loadMore,
+  VoidCallback? retryPaging,
   VoidCallback? retry,
   VoidCallback? addFirstBooks,
   VoidCallback? cancelImport,
@@ -35,7 +36,7 @@ LibraryCollection _collection(
   openNotes: () {},
   removeBook: removeBook ?? (_) {},
   loadMore: loadMore ?? () {},
-  retryPaging: () {},
+  retryPaging: retryPaging ?? () {},
   loadCover: (_) => false,
   retry: retry ?? () {},
   addFirstBooks: addFirstBooks ?? () {},
@@ -70,6 +71,60 @@ void main() {
       expect(retries, 2);
     },
   );
+
+  testWidgets('source recovery keeps paging and collection retries separate', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    const warning = 'Reconnect Dropbox to check for new books.';
+    for (final failure in ['none', 'paging', 'first page', 'mutation']) {
+      final paging = failure == 'paging';
+      final reconnect = failure == 'none' || paging;
+      var collectionRecoveries = 0;
+      var pagingRetries = 0;
+      await tester.pumpWidget(
+        _app(
+          _collection(
+            LibraryModel(
+              books: [_book],
+              loaded: true,
+              sourceWarning: warning,
+              sourcesRequireReconnect: true,
+              loadError: paging || failure == 'first page'
+                  ? 'Library query failed'
+                  : null,
+              error: failure == 'mutation' ? 'Import failed' : null,
+              pagingFailed: paging,
+            ),
+            retry: () => collectionRecoveries++,
+            retryPaging: () => pagingRetries++,
+          ),
+        ),
+      );
+      expect(
+        find.text('Connections'),
+        reconnect ? findsOneWidget : findsNothing,
+        reason: failure,
+      );
+      expect(find.text(warning), reconnect ? findsOneWidget : findsNothing);
+      await tester.tap(find.text(reconnect ? 'Connections' : 'Retry'));
+      expect(collectionRecoveries, 1);
+      expect(pagingRetries, 0);
+      if (paging) {
+        expect(find.text('Library query failed'), findsOneWidget);
+        await captureHarnessArtifact(
+          tester,
+          'restore-reconnect-paging-failure',
+        );
+        await tester.tap(find.text('Retry'));
+        expect(pagingRetries, 1);
+        expect(collectionRecoveries, 1);
+      }
+      expect(tester.takeException(), isNull);
+    }
+  });
 
   testWidgets('shows the reference skeleton grid while page one loads', (
     tester,

@@ -1575,7 +1575,7 @@ abstract class AppLocalizations {
   /// No description provided for @locationReconnectDescription.
   ///
   /// In en, this message translates to:
-  /// **'Sign in again with the same Google account. Your source folder, books, notes and bookmarks stay in place.'**
+  /// **'Sign in again with the same account. Your source folder, books, notes and bookmarks stay in place.'**
   String get locationReconnectDescription;
 
   /// No description provided for @locationCheckBooks.
@@ -1697,6 +1697,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not refresh “{source}”. Check its connection and permissions, or choose a smaller source folder in Settings, then retry. Other books are still available.'**
   String locationScanWarning(String source);
+
+  /// No description provided for @locationReconnectWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect “{source}” to restore access. Your books, notes and bookmarks are still here.'**
+  String locationReconnectWarning(String source);
 
   /// No description provided for @locationBack.
   ///

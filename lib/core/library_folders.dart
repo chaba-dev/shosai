@@ -129,16 +129,22 @@ final class LibraryFolders {
   final Map<String, int> _generations = {};
   List<LibraryConnection> _grants = const [];
   List<LibrarySourceFile> _catalog = const [];
-  Set<String> _scanFailures = const {};
-  Set<String> _refreshFailures = const {};
+  Map<String, LocationFailure?> _scanFailures = const {};
+  Map<String, LocationFailure?> _refreshFailures = const {};
 
   /// At most one warning per configured connection, never raw provider errors.
-  List<String> get scanWarnings => List.unmodifiable([
-    for (final grant in _grants)
-      if (_scanFailures.contains(grant.id) ||
-          _refreshFailures.contains(grant.id))
-        grant.label,
-  ]);
+  List<({String source, LocationFailure? failure})> get scanWarnings =>
+      List.unmodifiable([
+        for (final grant in _grants)
+          if (_scanFailures.containsKey(grant.id) ||
+              _refreshFailures.containsKey(grant.id))
+            (
+              source: grant.label,
+              failure: _scanFailures.containsKey(grant.id)
+                  ? _scanFailures[grant.id]
+                  : _refreshFailures[grant.id],
+            ),
+      ]);
   bool _discovered = false;
   bool _catalogLoaded = false;
   bool _loaded = false;
@@ -200,7 +206,7 @@ final class LibraryFolders {
     CancellationToken? cancellation,
   }) async {
     final next = <LibraryConnection>[];
-    final failures = <String>{};
+    final failures = <String, LocationFailure?>{};
     for (final grant in grants) {
       cancellation.throwIfCancelled();
       try {
@@ -213,7 +219,7 @@ final class LibraryFolders {
         // expose a warning instead of pretending refresh succeeded. The old
         // grant may still work; only an access attempt changes availability.
         next.add(grant);
-        failures.add(grant.id);
+        failures[grant.id] = error is LocationException ? error.failure : null;
       }
     }
     cancellation.throwIfCancelled();
@@ -221,7 +227,7 @@ final class LibraryFolders {
     // swallow it or publish configuration that was not saved successfully.
     await _save(next);
     _grants = List.unmodifiable(next);
-    _refreshFailures = Set.unmodifiable(failures);
+    _refreshFailures = Map.unmodifiable(failures);
   }
 
   Future<List<LibraryConnection>> list() => _serial(() async {
@@ -350,7 +356,7 @@ final class LibraryFolders {
     _generations[current.id] = generation;
     _cancelPreviews(current.id);
     _discovered = false;
-    _refreshFailures = Set.unmodifiable(
+    _refreshFailures = Map.unmodifiable(
       {..._refreshFailures}..remove(current.id),
     );
     try {
@@ -428,7 +434,7 @@ final class LibraryFolders {
     }
     if (_discovered && !refresh) return List.unmodifiable(_catalog);
     final next = <LibrarySourceFile>[];
-    final failures = <String>{};
+    final failures = <String, LocationFailure?>{};
     final scanned = _scanned;
     for (final grant in scanned) {
       cancellation.throwIfCancelled();
@@ -486,7 +492,7 @@ final class LibraryFolders {
               LibrarySourceFile(grant.id, grant.label, entry),
         ]);
       } on LocationException catch (error) {
-        failures.add(grant.id);
+        failures[grant.id] = error.failure;
         await _locations.unavailable(grant.id, generation, error.failure);
         next.addAll([
           for (final file in _catalog)
@@ -500,7 +506,7 @@ final class LibraryFolders {
         ]);
       } on CoreException catch (error) {
         if (error.kind == CoreErrorKind.cancelled) rethrow;
-        failures.add(grant.id);
+        failures[grant.id] = null;
         // An invalid or over-limit source must not hide other connections or
         // local books, nor reconcile unseen files as missing.
         next.addAll(_catalog.where((file) => file.locationId == grant.id));
@@ -508,7 +514,7 @@ final class LibraryFolders {
     }
     cancellation.throwIfCancelled();
     _catalog = List.unmodifiable(await _withPreviews(next));
-    _scanFailures = Set.unmodifiable(failures);
+    _scanFailures = Map.unmodifiable(failures);
     _discovered = true;
     return _catalog;
   });

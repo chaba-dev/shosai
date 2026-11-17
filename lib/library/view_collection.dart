@@ -499,10 +499,15 @@ double _textWidth(BuildContext context, String text, TextStyle style) {
 /// retained recovery path for the same failure, so it keeps the shared control
 /// height instead of shrinking to the bar.
 class _CollectionAlert extends StatelessWidget {
-  const _CollectionAlert({required this.message, required this.retry});
+  const _CollectionAlert({
+    required this.message,
+    required this.retry,
+    this.reconnectRequired = false,
+  });
 
   final String message;
   final VoidCallback retry;
+  final bool reconnectRequired;
 
   @override
   Widget build(BuildContext context) {
@@ -543,7 +548,11 @@ class _CollectionAlert extends StatelessWidget {
           ShadButton.ghost(
             height: shosaiShadButtonHeight(context),
             onPressed: retry,
-            child: Text(AppLocalizations.of(context).libraryRetry),
+            child: Text(
+              reconnectRequired
+                  ? AppLocalizations.of(context).libraryLocations
+                  : AppLocalizations.of(context).libraryRetry,
+            ),
           ),
         ],
       ),
@@ -719,6 +728,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         child: _CollectionAlert(
                           message: error,
                           retry: widget.retry,
+                          reconnectRequired: widget.model.reconnectRequired,
                         ),
                       ),
                     ),
@@ -900,7 +910,11 @@ class LibrarySkeletonGrid extends StatelessWidget {
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: EdgeInsets.only(bottom: spacing),
-                        child: _CollectionAlert(message: error, retry: retry),
+                        child: _CollectionAlert(
+                          message: error,
+                          retry: retry,
+                          reconnectRequired: model.reconnectRequired,
+                        ),
                       ),
                     ),
                   SliverToBoxAdapter(
@@ -1044,7 +1058,11 @@ class _LibraryEmptyCollection extends StatelessWidget {
                     ShadButton.ghost(
                       height: shosaiShadButtonHeight(context),
                       onPressed: retry,
-                      child: Text(l10n.libraryRetry),
+                      child: Text(
+                        model.reconnectRequired
+                            ? l10n.libraryLocations
+                            : l10n.libraryRetry,
+                      ),
                     ),
                   if (empty && model.displayError == null)
                     ShadButton(

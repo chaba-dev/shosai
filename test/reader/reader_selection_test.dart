@@ -1086,35 +1086,68 @@ void main() {
       expect(find.text('Remember this passage'), findsOneWidget);
     });
 
-    testWidgets(
-      'Add note opens the editor and commits the note with the range',
-      (tester) async {
-        _setView(tester, const Size(1280, 800));
-        final bridge = _SelectionBridge();
-        await _open(tester, _reader(bridge: bridge));
-        await dragFixtureSelection(tester, from: 4, to: 12);
-        await settleReaderSelection(tester);
-        await tester.tap(_action('selection-note'));
-        await tester.pumpAndSettle();
+    for (final chromeVisible in [false, true]) {
+      testWidgets(
+        'Note preserves ${chromeVisible ? 'visible' : 'hidden'} chrome and saves its range',
+        (tester) async {
+          _setView(tester, const Size(1024, 768));
+          final bridge = _SelectionBridge();
+          await _open(tester, _reader(bridge: bridge));
+          if (chromeVisible) await revealReaderChrome(tester);
+          await dragFixtureSelection(tester, from: 4, to: 12);
+          await settleReaderSelection(tester);
+          final header = find
+              .byKey(const ValueKey('reader-header-contents'))
+              .hitTestable();
+          expect(header, chromeVisible ? findsOneWidget : findsNothing);
+          final pageBefore = tester.getRect(
+            find.byKey(const ValueKey('reader-page-paint')),
+          );
+          await captureHarnessArtifact(
+            tester,
+            'note-${chromeVisible ? 'visible' : 'quiet'}-before',
+          );
+          await tester.tap(_action('selection-note'));
+          await tester.pumpAndSettle();
 
-        expect(find.byType(ShadDialog), findsOneWidget);
-        expect(find.text('Highlight note'), findsOneWidget);
-        await tester.enterText(
-          find.descendant(
-            of: find.byType(ShadDialog),
-            matching: find.byType(ShadInput),
-          ),
-          'the survey notes',
-        );
-        await tester.tap(find.widgetWithText(ShadButton, 'Save'));
-        await tester.pumpAndSettle();
+          expect(find.byType(ShadDialog), findsOneWidget);
+          expect(find.text('Highlight note'), findsOneWidget);
+          // The dialog's barrier hides background hit targets, so inspect the
+          // underlying chrome's opacity rather than hit-testing through it.
+          final chromeOpacity = tester.widget<AnimatedOpacity>(
+            find
+                .ancestor(
+                  of: find.byKey(const ValueKey('reader-header-contents')),
+                  matching: find.byType(AnimatedOpacity),
+                )
+                .first,
+          );
+          expect(chromeOpacity.opacity, chromeVisible ? 1 : 0);
+          expect(
+            tester.getRect(find.byKey(const ValueKey('reader-page-paint'))),
+            pageBefore,
+          );
+          await captureHarnessArtifact(
+            tester,
+            'note-${chromeVisible ? 'visible' : 'quiet'}-open',
+          );
+          await tester.enterText(
+            find.descendant(
+              of: find.byType(ShadDialog),
+              matching: find.byType(ShadInput),
+            ),
+            'the survey notes',
+          );
+          await tester.tap(find.widgetWithText(ShadButton, 'Save'));
+          await tester.pumpAndSettle();
 
-        expect(bridge.created.single.body, 'the survey notes');
-        expect(bridge.created.single.color, FlutterHighlightColor.yellow);
-        expect(bridge.created.single.textRange!.start.toInt(), 4);
-        expect(bridge.created.single.textRange!.end.toInt(), 12);
-      },
-    );
+          expect(bridge.created.single.body, 'the survey notes');
+          expect(bridge.created.single.color, FlutterHighlightColor.yellow);
+          expect(bridge.created.single.textRange!.start.toInt(), 4);
+          expect(bridge.created.single.textRange!.end.toInt(), 12);
+        },
+      );
+    }
 
     testWidgets('cancelling the note editor creates no highlight', (
       tester,

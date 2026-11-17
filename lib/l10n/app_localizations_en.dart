@@ -904,7 +904,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get locationReconnectDescription =>
-      'Sign in again with the same Google account. Your source folder, books, notes and bookmarks stay in place.';
+      'Sign in again with the same account. Your source folder, books, notes and bookmarks stay in place.';
 
   @override
   String get locationCheckBooks => 'Check book access';
@@ -980,6 +980,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String locationScanWarning(String source) {
     return 'Could not refresh “$source”. Check its connection and permissions, or choose a smaller source folder in Settings, then retry. Other books are still available.';
+  }
+
+  @override
+  String locationReconnectWarning(String source) {
+    return 'Reconnect “$source” to restore access. Your books, notes and bookmarks are still here.';
   }
 
   @override

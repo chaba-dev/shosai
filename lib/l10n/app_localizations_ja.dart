@@ -847,7 +847,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get locationReconnectDescription =>
-      '同じ Google アカウントで再度ログインしてください。読み込み元フォルダ、本、ノート、しおりはそのまま残ります。';
+      '同じアカウントで再度ログインしてください。読み込み元フォルダ、本、ノート、しおりはそのまま残ります。';
 
   @override
   String get locationCheckBooks => '本へのアクセスを確認';
@@ -919,6 +919,11 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String locationScanWarning(String source) {
     return '「$source」を更新できませんでした。接続と権限を確認するか、設定でより小さい読み込み元フォルダを選択して、再試行してください。他の本は引き続き利用できます。';
+  }
+
+  @override
+  String locationReconnectWarning(String source) {
+    return 'アクセスを復元するには「$source」を再接続してください。本、ノート、しおりはそのまま残っています。';
   }
 
   @override
