@@ -66,6 +66,7 @@ if grep -Fqx "$legacy_profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
   echo "Remove the legacy shosai Nix profile block from $HOME/.bash_profile before rerunning setup." >&2
   exit 1
 fi
+touch "$HOME/.bash_profile"
 sed -i "\|$profile_begin|,\|$profile_end|d" "$HOME/.bash_profile"
 cat >> "$HOME/.bash_profile" <<EOF
 
