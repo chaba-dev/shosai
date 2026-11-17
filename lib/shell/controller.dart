@@ -300,17 +300,19 @@ ShellModel update(ShellModel model, ShellMessage message) {
       return model.copyWith(place: place, reading: false);
     case ShellBookOpened(:final book, :final path, :final bookId):
       // Opening a book that is already open focuses it instead of opening it
-      // twice (RFD 12, outcome 4); its own place is kept.
+      // twice (RFD 12, outcome 4), keeping its locator. Reading now puts it
+      // first without disturbing the other books' relative order.
       final index = model.indexOf(book.bookId);
       final books = [...model.openBooks];
       if (index < 0) {
-        books.add(
+        books.insert(
+          0,
           path == null
               ? OpenBook(book: book, path: book.pathKey, bookId: book.bookId)
               : OpenBook(book: book, path: path, bookId: bookId),
         );
       } else {
-        books[index] = books[index].copyWith(book: book);
+        books.insert(0, books.removeAt(index).copyWith(book: book));
       }
       return model.copyWith(
         openBooks: books,
@@ -318,12 +320,23 @@ ShellModel update(ShellModel model, ShellMessage message) {
         reading: true,
       );
     case ShellBookActivated(:final id):
-      if (model.indexOf(id) < 0) return model;
-      if (model.currentBookId == id && model.reading && !model.switching) {
+      final index = model.indexOf(id);
+      if (index < 0) return model;
+      if (index == 0 &&
+          model.currentBookId == id &&
+          model.reading &&
+          !model.switching) {
         return model;
       }
       // Choosing a book in the switcher reads it.
-      return model.copyWith(currentBookId: id, reading: true, switching: false);
+      final books = [...model.openBooks];
+      books.insert(0, books.removeAt(index));
+      return model.copyWith(
+        openBooks: books,
+        currentBookId: id,
+        reading: true,
+        switching: false,
+      );
     case ShellBookClosed(:final id):
       final index = model.indexOf(id);
       if (index < 0) return model;
@@ -343,14 +356,6 @@ ShellModel update(ShellModel model, ShellMessage message) {
       }
       final next = books[index < books.length ? index : books.length - 1];
       return model.copyWith(openBooks: books, currentBookId: next.id);
-    case ShellBookMoved(:final from, :final to):
-      final count = model.openBooks.length;
-      if (from < 0 || from >= count || to < 0 || to >= count || from == to) {
-        return model;
-      }
-      final books = [...model.openBooks];
-      books.insert(to, books.removeAt(from));
-      return model.copyWith(openBooks: books);
     case ShellLocatorChanged(:final id, :final path, :final bookId):
       final index = model.indexOf(id);
       if (index < 0) return model;

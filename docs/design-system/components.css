@@ -41,7 +41,7 @@
 .sh-sidebar__foot { margin-top: auto; color: var(--ink-muted); }
 .sh-sidebar__head { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 10px 6px; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
 .sh-sidebar__head span + span { letter-spacing: 0; font-variant-numeric: tabular-nums; }
-/* Reading now: each open book keeps its place; the current one is a lifted card. */
+/* Reading now: most recently read first; the current one is a lifted card. */
 .sh-open { position: relative; display: flex; align-items: center; border-radius: 8px; color: var(--ink); }
 .sh-open:hover { background: var(--hover); }
 .sh-open[aria-current="true"] { background: var(--surface); box-shadow: var(--shadow-raised); }

@@ -111,7 +111,6 @@ Future<_Book> _open(
             selectPlace: (_) {},
             openBook: (_) {},
             closeBook: (_) {},
-            moveBook: (_, _) {},
             addBooks: null,
             loadCover: (_) => false,
           ),

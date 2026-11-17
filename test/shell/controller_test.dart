@@ -17,12 +17,14 @@ FlutterLibraryBook _book(int id, {double progress = 0, String? title}) =>
     );
 
 ShellModel _open(List<int> ids, {int? current, bool reading = true}) {
-  var model = const ShellModel();
-  for (final id in ids) {
-    model = update(model, ShellBookOpened(_book(id)));
-  }
-  if (current != null) model = update(model, ShellBookActivated(current));
-  return reading ? model : model.copyWith(reading: false);
+  return ShellModel(
+    openBooks: [
+      for (final id in ids)
+        OpenBook(book: _book(id), path: '/books/$id.epub', bookId: id),
+    ],
+    currentBookId: current ?? ids.last,
+    reading: reading,
+  );
 }
 
 List<int> _ids(ShellModel model) => [
@@ -52,9 +54,9 @@ void main() {
     });
 
     test('opening an open book focuses it instead of opening it twice', () {
-      final opened = _open([1, 2]);
+      final opened = _open([2, 1, 3]);
       final model = update(opened, ShellBookOpened(_book(1, progress: .5)));
-      expect(_ids(model), [1, 2]);
+      expect(_ids(model), [1, 2, 3]);
       expect(model.currentBookId, 1);
       expect(model.openBooks.first.book.progress, .5);
     });
@@ -115,10 +117,23 @@ void main() {
       expect(update(model, const ShellBookActivated(9)), same(model));
     });
 
-    test('rows reorder by moving', () {
-      final model = update(_open([1, 2, 3]), const ShellBookMoved(2, 0));
-      expect(_ids(model), [3, 1, 2]);
-      expect(update(model, const ShellBookMoved(0, 5)), same(model));
+    test('new books and switches lead in most-recently-read order', () {
+      var model = const ShellModel();
+      for (final id in [1, 2, 3]) {
+        model = update(model, ShellBookOpened(_book(id)));
+      }
+      expect(_ids(model), [3, 2, 1]);
+      model = update(model, const ShellBookActivated(1));
+      expect(_ids(model), [1, 3, 2]);
+      expect(model.currentBookId, 1);
+      expect(update(model, const ShellBookActivated(1)), same(model));
+      model = update(model, ShellBookOpened(_book(2)));
+      expect(_ids(model), [2, 1, 3]);
+      model = update(model, const ShellPlaceSelected(ShellPlace.library));
+      expect(_ids(model), [2, 1, 3]);
+      model = update(model, ShellBookClosed(2));
+      expect(_ids(model), [1, 3]);
+      expect(model.currentBookId, 1);
     });
 
     test('library reloads refresh the open entries they list', () {

@@ -2,7 +2,6 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart' show CustomSemanticsAction;
 import 'package:flutter/services.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
@@ -77,7 +76,6 @@ final class ShellActions {
     required this.selectPlace,
     required this.openBook,
     required this.closeBook,
-    required this.moveBook,
     required this.addBooks,
     required this.loadCover,
     this.settings,
@@ -87,7 +85,6 @@ final class ShellActions {
   final ValueChanged<ShellPlace> selectPlace;
   final ValueChanged<OpenBook> openBook;
   final ValueChanged<OpenBook> closeBook;
-  final void Function(int from, int to) moveBook;
 
   /// Opens the file picker; null while adding books is unavailable.
   final VoidCallback? addBooks;
