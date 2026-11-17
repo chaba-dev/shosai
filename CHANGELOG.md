@@ -215,6 +215,7 @@ All notable changes to this project will be documented in this file.
 - *(orb)* Create shell profile before configuring Nix (#321)
 - *(reader)* Preserve chrome visibility while editing notes (#322)
 - *(library)* Reconnect restored Dropbox libraries in place (#324)
+- *(release)* Require curated release notes (#325)
 
 ### 🚜 Refactor
 
