@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-15
+## [0.1.0] - 2026-11-17
 
 ### 🚀 Features
 
@@ -212,6 +212,9 @@ All notable changes to this project will be documented in this file.
 - *(ios)* Stage selected books before review (#313)
 - *(pdf)* Keep Columns headings with text and hint overflow (#318)
 - *(pdf)* Preserve Columns position across reading modes (#319)
+- *(orb)* Create shell profile before configuring Nix (#321)
+- *(reader)* Preserve chrome visibility while editing notes (#322)
+- *(library)* Reconnect restored Dropbox libraries in place (#324)
 
 ### 🚜 Refactor
 
@@ -276,6 +279,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Cover restored Columns long-press selection (#300)
 - *(pdf)* Align column assertions with crop guards (#303)
 - *(editions)* Select the intended fixture by identity (#317)
+- *(build)* Normalize inherited cancellation signals (#323)
 
 ### ⚙️ Miscellaneous Tasks
 
