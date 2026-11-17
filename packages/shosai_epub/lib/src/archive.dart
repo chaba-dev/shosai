@@ -585,8 +585,8 @@ class _EpubEntry {
 /// Bounded ZIP central-directory scan that rejects duplicate entry names.
 ///
 /// The `archive` package de-duplicates entries while decoding, so the
-/// admission rule must be enforced from the raw bytes, as the production Rust
-/// reader does. ZIP64 end-of-central-directory records are supported; an
+/// admission rule must be enforced from the raw bytes, as the former Rust
+/// reader did. ZIP64 end-of-central-directory records are supported; an
 /// unreadable directory is reported as a warning rather than guessed at.
 void _detectDuplicateEntries(
   Uint8List bytes,

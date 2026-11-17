@@ -3,6 +3,12 @@
 > **Repository layout (2026-10-24).** Flutter now lives at the repository root.
 > Historical `flutter/` source citations below use the old layout; drop that
 > prefix for current files. Removed Rust sources remain in repository history.
+> The Rust core and generated bridge were removed in M3.0 (2026-10-21).
+> Rust-owned parsing, persistence and bridge DTOs below describe the migration
+> contract at its recorded base. Current document and record ownership is Dart,
+> as described in [Flutter architecture](flutter-architecture.md). This record
+> preserves presentation requirements and recorded acceptance status; it does
+> not require reinstating the removed implementation.
 
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
 > on 2026-10-20 (RFD 12, "The first release"); the `crates/shosai-app` citations

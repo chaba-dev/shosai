@@ -5,8 +5,8 @@
 /// through the bridge. In the application both are one object, the
 /// application bridge over the Dart core (`core_records.dart`); the
 /// controllers find the records on any bridge that is a [RecordsHost]. The
-/// methods keep the bridge's request and result types until the Rust bridge
-/// is removed (RFD 12, M3.0).
+/// methods use the request and result types defined by the current Dart
+/// bridge contract (`bridge.dart`).
 library;
 
 import 'dart:typed_data';

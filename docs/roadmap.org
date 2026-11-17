@@ -9,13 +9,13 @@
 Shōsai (書斎, "study/reading room") is an ebook reader for EPUB and PDF, with
 comic archives planned after the first release (RFD 10). The executable is the
 Dart and Flutter application described in RFD 12: Dart document engines and a
-Dart application core under the Flutter presentation. The earlier Rust/Iced
-desktop application was removed on 2026-10-20 and the tree below records the
-structure as it was; CBZ support left the core the same day and returns as a
-format package after the first release. On 2026-10-21 the owner decided to
-replace the remaining Rust core and the Dart/Rust bridge with Dart before the
-first-release reader work builds on them (RFD 12, milestone M3.0); the same day
-M3.0's removal slice deleted the crates, the bridge and the Rust toolchain.
+Dart application core under the Flutter presentation. The Iced desktop app and
+CBZ support were removed on 2026-10-20, followed by the Rust core, generated
+bridge and Rust toolchain in RFD 12 milestone M3.0 (2026-10-21). CBZ returns as
+a format package after the first release. See [[file:flutter-architecture.md][Flutter architecture]]
+for current ownership and the root [[file:../README.md][README]] and ~Makefile~ for build commands.
+The Iced tree, completed Rust phases and research notes below are historical
+records, not current dependencies, executable instructions or release evidence.
 
 ** Goals
 
@@ -52,7 +52,7 @@ M3.0's removal slice deleted the crates, the bridge and the Rust toolchain.
 - *PDFium selected*: Apache-2.0 licensed, battle-tested (used in Chromium).
 - *EPUB parser*: Custom implementation to avoid all GPL dependencies.
 
-** Current Architecture — Iced Baseline
+** Historical Architecture — Removed Iced Baseline
 
 #+begin_src
 shosai/
@@ -85,10 +85,10 @@ shosai/
 └── LICENSE
 #+end_src
 
-This tree records the executable baseline and historical phase results. It is
-not the target frontend architecture.
+This tree records the removed executable and historical phase results. None
+of its Cargo manifests, crates or Rust sources remain in the current tree.
 
-** Target Architecture — RFD 12 (revised 2026-10-21)
+** Current Architecture — Dart and Flutter (RFD 12)
 
 #+begin_src
 Flutter desktop / mobile hosts
@@ -111,7 +111,7 @@ out; the core is the only database writer; the controller owns every native
 resource. RFD 12 tracks the replacement of the Rust core (M3.0) and the
 first-release outcomes; RFD 13 tracks independently releasable packages.
 
-* Phase 1 — Foundation & PDF Viewer (MVP)
+* Phase 1 — Foundation & PDF Viewer (historical Rust implementation)
 :PROPERTIES:
 :PHASE: 1
 :STATUS: DONE
@@ -154,7 +154,7 @@ first-release outcomes; RFD 13 tracks independently releasable packages.
 - [X] Restore position when reopening a file
 - [X] Unit tests for reading state (5 tests)
 
-* Phase 2 — EPUB Support
+* Phase 2 — EPUB Support (historical Rust implementation)
 :PROPERTIES:
 :PHASE: 2
 :STATUS: DONE
@@ -195,7 +195,7 @@ first-release outcomes; RFD 13 tracks independently releasable packages.
   - Line spacing (1.6x multiplier)
 - [X] Theme support: light, dark, sepia (cycle button)
 
-* Phase 3 — CBZ Support & Library Management
+* Phase 3 — CBZ Support & Library Management (historical Rust implementation)
 :PROPERTIES:
 :PHASE: 3
 :STATUS: DONE
@@ -232,7 +232,7 @@ first-release outcomes; RFD 13 tracks independently releasable packages.
 - [X] CBZ: use first image in archive as cover
 - [X] All covers resized to 300x400 max and stored as PNG BLOBs in SQLite
 
-* Phase 4 — Polish & Advanced Features
+* Phase 4 — Polish & Advanced Features (historical Rust implementation)
 :PROPERTIES:
 :PHASE: 4
 :STATUS: DONE
@@ -285,8 +285,10 @@ RFD: [[https://chaba-rfds.pages.dev/rfd/0009/][RFD 9: Enhanced EPUB rendering]]
 - [X] Support complex EPUB layouts (tables, embedded fonts, MathML)
 - [X] CSS ~@font-face~ support with embedded fonts
 
-Implementation is complete.  Native Linux arm64 and Wayland packaged-app
-acceptance evidence remains tracked separately in RFD 9.
+This records the completed Rust/Iced implementation, which was later removed;
+it is not acceptance evidence for the Dart reader. RFD 9 still records native
+Linux arm64 and Wayland packaged-app acceptance evidence as open; removal
+supplies no additional evidence.
 
 ** TODO Additional ebook formats
 RFD: [[https://chaba-rfds.pages.dev/rfd/0010/][RFD 10: Additional ebook formats]]
@@ -326,6 +328,10 @@ RFD: [[https://chaba-rfds.pages.dev/rfd/0012/][RFD 12: Cross-platform Flutter fr
 ** TODO Distribution & packaging
 RFD: [[https://chaba-rfds.pages.dev/rfd/0013/][RFD 13: Distribution and packaging]]
 
+The checked items below record the removed Iced distribution, not available
+Flutter packages or verified current release automation. Current distribution
+work is tracked in RFD 13; these historical completions do not satisfy it.
+
 - [X] CI/CD pipeline for automated builds and releases
 - [X] Portable Linux archives (x86_64 and aarch64)
 - [X] macOS aarch64 ~.app~ bundle (ad-hoc signed)
@@ -355,12 +361,14 @@ dev shell keeps ~pdfium-binaries~ only to name a PDFium for tests
 | PDFium binary distribution complexity       | Medium | Nix handles dev; each distro format must bundle libpdfium       |
 | EPUB Flutter rendering boundary unclear     | High   | Dart engine + Flutter layout adopted 2026-09-28; one renderer    |
 | Mobile lifecycle and memory pressure        | High   | Physical-device suspend/resume and recovery gates per platform   |
-| Iced and Flutter behavior drift in migration | Medium | Freeze Iced; replace in tested vertical slices, then remove it  |
 | PDFium thread safety                        | Medium | pdfrx serialises every PDFium call on one worker isolate         |
 | Complex PDFs rendering incorrectly          | Medium | PDFium is battle-tested (Chromium), low risk in practice         |
 | EPUB content diversity (tables, math, etc.) | Medium | Simplified renderer won't handle all content; phase 5 addresses  |
 
-* Research Notes
+* Historical Rust/Iced Research Notes
+
+These explain earlier choices. Package versions, crate recommendations and
+implementation details here are not the current Dart dependency list.
 
 ** MuPDF (ruled out)
 - Crate: ~mupdf~ v0.6.0 on crates.io (repo: ~mupdf-rs~ on GitHub)

@@ -3,6 +3,11 @@
 > **Repository layout (2026-10-24).** Flutter now lives at the repository root.
 > Historical `flutter/` source citations below use the old layout; drop that
 > prefix for current files. Removed Rust sources remain in repository history.
+> The Rust core, generated bridge and runtime parity/fallback path were removed
+> in M3.0 (2026-10-21). Rust-specific commands, routing gates and ownership below
+> are migration history, not instructions for the current application. See
+> [Flutter architecture](flutter-architecture.md) for current Dart ownership
+> and the root [README](../README.md) and `Makefile` for supported commands.
 
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and CBZ
 > support were removed on 2026-10-20 (RFD 12, "The first release"; RFD 10 returns
@@ -16,7 +21,7 @@ useful Flutter capabilities. This is a presentation rebuild and targeted reader
 contract work, not a frontend restart or pixel-identical port.
 
 - Opened: 2026-09-14. Restructured: 2026-09-20.
-- Status: Stages 1–5 IN PROGRESS; Stage 6 TODO; 4/30 delivery packages fully accepted (1A, 1B, 2A, 5A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A was accepted by the owner and merged at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e); the 2026-09-28 [EPUB adoption decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28) supersedes its Rust-specific EPUB portions without erasing that acceptance. 5B is **paused/superseded** by the same decision and is not dispatched. 3D integration acceptance and earlier gaps remain open.
+- Recorded migration status (not a current release checklist): Stages 1–5 IN PROGRESS; Stage 6 TODO; 4/30 delivery packages fully accepted (1A, 1B, 2A, 5A). 1C and 2B are merged with the follow-ups below still explicit. 4D is implemented and merged in [PR #133](https://github.com/chaba-dev/shosai/pull/133); explicit package acceptance remains pending. 5A was accepted by the owner and merged at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e); the 2026-09-28 [EPUB adoption decision](dart-document-stack-evaluation-plan.md#adoption-decision-2026-09-28) supersedes its Rust-specific EPUB portions without erasing that acceptance. 5B is **paused/superseded** by the same decision and is not dispatched. 3D integration acceptance and earlier gaps remain recorded below; the architecture change does not close them.
 - Governing documents: [RFD 12](https://chaba-rfds.pages.dev/rfd/0012/), its
   [implementation checklist](https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/IMPLEMENTATION.adoc),
   [performance contract](https://github.com/chaba-dev/shosai/blob/7679a615fe55bd501c89ba06e815b9d9976dceef/rfd/0004/PHASE-0.adoc), and

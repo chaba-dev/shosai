@@ -3,9 +3,9 @@
 ///
 /// This is the production engine module adopted on 2026-09-28
 /// (`docs/dart-document-stack-evaluation-plan.md`). The reader serves paginated
-/// EPUB chapters, the Contents panel and painted internal links from it behind
-/// the retained UI; PDF/CBZ and the Rust-owned stores are separate and
-/// unchanged.
+/// and continuous EPUB chapters, the Contents panel and painted internal links
+/// from it. The Dart application core owns records over this canonical stream;
+/// the Dart PDF engine handles PDF separately. There is no Rust fallback.
 library;
 
 export 'src/address.dart';

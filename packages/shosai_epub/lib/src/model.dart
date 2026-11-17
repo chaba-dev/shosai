@@ -1,9 +1,9 @@
 /// Normalized document model for the Dart EPUB engine.
 ///
-/// The block/inline shape follows the existing Rust `ContentNode`/`TextSpan`
-/// model closely enough that the canonical text stream, anchors and durable
-/// offsets can be compared with the production implementation. It is not a
-/// wire format and is not intended to be one.
+/// The block/inline shape was ported from the former Rust
+/// `ContentNode`/`TextSpan` model. The Dart application core uses this engine's
+/// canonical text, anchors and durable offsets. It is not a wire format and is
+/// not intended to be one.
 library;
 
 enum EpubDisplay { block, inline, none }
@@ -690,10 +690,9 @@ class EpubChapter {
   final String title;
   final List<EpubContentNode> blocks;
 
-  /// The canonical stream in the production `search_text()` order, including
-  /// generated separators, image alt text and math fallback. Known remaining
-  /// differences from the Rust stream are tracked in the package README; this
-  /// is not yet proven identical for every construct.
+  /// The canonical stream, including generated separators, image alt text and
+  /// math fallback. Historical comparisons with the former Rust `search_text()`
+  /// stream and known behavioral limits are tracked in the package README.
   final String canonicalText;
 
   /// Element `id`/legacy anchor name to canonical scalar offset.
