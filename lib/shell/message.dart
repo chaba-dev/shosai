@@ -33,13 +33,6 @@ final class ShellBookClosed extends ShellMessage {
   final int id;
 }
 
-/// Moves the open book at [from] to [to] in Reading now.
-final class ShellBookMoved extends ShellMessage {
-  const ShellBookMoved(this.from, this.to);
-  final int from;
-  final int to;
-}
-
 /// The reader reported a new locator for the open book with [id].
 final class ShellLocatorChanged extends ShellMessage {
   const ShellLocatorChanged(this.id, {required this.path, this.bookId});

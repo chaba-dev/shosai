@@ -69,7 +69,7 @@ final class ShellModel {
   /// The library-side place in view, and the one the reader returns to.
   final ShellPlace place;
 
-  /// Every open book, in the order opened (or as the reader rearranged them).
+  /// Every open book, most recently opened or activated first.
   final List<OpenBook> openBooks;
 
   /// The book the reader shows, and the lifted row in Reading now.

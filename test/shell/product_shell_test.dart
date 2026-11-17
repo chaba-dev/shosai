@@ -1653,6 +1653,18 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
+    final records = bridge.records as BridgeForwardingRecords;
+    List<int> savedOrder() => [
+      for (final open in records.openBooks!.books) open.book.bookId,
+    ];
+    expect(savedOrder(), [4, 1]);
+    await tester.tap(find.byTooltip(_quiet));
+    await tester.pumpAndSettle();
+    expect(savedOrder(), [1, 4]);
+    await tester.tap(find.byTooltip(_atlas));
+    await tester.pumpAndSettle();
+    expect(savedOrder(), [4, 1]);
+
     // A cold start has no platform restoration: only the saved session.
     await tester.pumpWidget(const SizedBox());
     await tester.pumpWidget(
@@ -1668,6 +1680,11 @@ void main() {
     );
     expect(find.byTooltip(_quiet), findsOneWidget);
     expect(find.byTooltip(_atlas), findsOneWidget);
+    expect(savedOrder(), [4, 1]);
+    expect(
+      tester.getTopLeft(find.byTooltip(_atlas)).dy,
+      lessThan(tester.getTopLeft(find.byTooltip(_quiet)).dy),
+    );
   });
 
   testWidgets('a slow read of the saved books keeps them until it finishes', (

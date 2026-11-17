@@ -24,19 +24,21 @@ final _shannon = _book(2, 'A Mathematical Theory of Communication');
 final _neko = _book(3, '吾輩は猫である');
 
 ShellModel _model({bool reading = false, ShellPlace? place}) {
-  var model = const ShellModel();
-  for (final book in [_origin, _shannon, _neko]) {
-    model = update(model, ShellBookOpened(book));
-  }
-  model = update(model, const ShellBookActivated(1));
-  return model.copyWith(reading: reading, place: place ?? ShellPlace.library);
+  return ShellModel(
+    openBooks: [
+      for (final book in [_origin, _shannon, _neko])
+        OpenBook(book: book, path: book.pathKey, bookId: book.bookId),
+    ],
+    currentBookId: 1,
+    reading: reading,
+    place: place ?? ShellPlace.library,
+  );
 }
 
 class _Recorder {
   final places = <ShellPlace>[];
   final opened = <int>[];
   final closed = <int>[];
-  final moves = <(int, int)>[];
   final covers = <int>[];
   var adds = 0;
   var settings = 0;
@@ -49,7 +51,6 @@ class _Recorder {
     selectPlace: places.add,
     openBook: (entry) => opened.add(entry.id),
     closeBook: (entry) => closed.add(entry.id),
-    moveBook: (from, to) => moves.add((from, to)),
     addBooks: () => adds += 1,
     settings: () => settings += 1,
     loadCover: (id) {
@@ -406,14 +407,21 @@ void main() {
     expect(recorder.opened, [3]);
   });
 
-  for (final switcher in [false, true]) {
+  for (final (switcher, current) in [
+    (false, 1),
+    (true, 1),
+    (false, 2),
+    (true, 2),
+  ]) {
     testWidgets(
-      'phone books reorder by long-press without opening (switcher: $switcher)',
+      'phone books lead after reading, not dragging (switcher: $switcher, current: $current)',
       (tester) async {
         tester.view.physicalSize = const Size(390, 844);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
-        var model = _model(reading: switcher).copyWith(switching: switcher);
+        var model = _model(
+          reading: switcher,
+        ).copyWith(switching: switcher, currentBookId: current);
         final opened = <int>[];
         await tester.pumpWidget(
           productionShell(
@@ -422,11 +430,18 @@ void main() {
                 builder: (context, setState) {
                   final actions = ShellActions(
                     selectPlace: (_) {},
-                    openBook: (entry) => opened.add(entry.id),
+                    openBook: (entry) {
+                      opened.add(entry.id);
+                      setState(
+                        () => model = update(
+                          model,
+                          switcher
+                              ? ShellBookActivated(entry.id)
+                              : ShellBookOpened(entry.book),
+                        ),
+                      );
+                    },
                     closeBook: (_) {},
-                    moveBook: (from, to) => setState(
-                      () => model = update(model, ShellBookMoved(from, to)),
-                    ),
                     addBooks: null,
                     loadCover: (_) => false,
                   );
@@ -458,10 +473,22 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
         await drag.up();
         await tester.pumpAndSettle();
-        expect(model.openBooks.map((entry) => entry.id), [2, 1, 3]);
+        expect(model.openBooks.map((entry) => entry.id), [1, 2, 3]);
         expect(opened, isEmpty);
+        await tester.ensureVisible(find.text(_shannon.title));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(_shannon.title));
+        await tester.pumpAndSettle();
+        expect(model.openBooks.map((entry) => entry.id), [2, 1, 3]);
+        expect(opened, [2]);
+        if (switcher) {
+          // The real shell dismisses the switcher after activation.
+          expect(model.switching, isFalse);
+        }
         final first = tester.getTopLeft(find.text(_shannon.title));
         final second = tester.getTopLeft(find.text(_origin.title));
+        expect(first.dx, greaterThanOrEqualTo(0));
+        expect(find.text(_shannon.title).hitTestable(), findsOneWidget);
         expect(first.dx, lessThan(second.dx));
       },
     );
@@ -575,6 +602,92 @@ void main() {
     expect(recorder.opened, [3]);
     expect(tester.takeException(), isNull);
   });
+
+  for (final (height, keyboard, current) in [
+    (900.0, false, 1),
+    (400.0, false, 1),
+    (900.0, true, 1),
+    (400.0, true, 1),
+    // A legacy session can have its current book farther down the list.
+    (900.0, false, 15),
+    (400.0, false, 15),
+  ]) {
+    testWidgets(
+      'rail promotion preserves visibility and focus (height $height, keyboard $keyboard, current $current)',
+      (tester) async {
+        tester.view.physicalSize = Size(1280, height);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        var model = ShellModel(
+          openBooks: [
+            for (var id = 1; id <= 20; id++)
+              OpenBook(book: _book(id, 'Volume $id'), path: '/books/$id.epub'),
+          ],
+          currentBookId: current,
+          reading: true,
+        );
+        await tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) => ShellFrame(
+                  layout: ShellLayout.desktop,
+                  model: model,
+                  covers: const {},
+                  actions: ShellActions(
+                    selectPlace: (_) {},
+                    openBook: (entry) => setState(
+                      () => model = update(model, ShellBookActivated(entry.id)),
+                    ),
+                    closeBook: (_) {},
+                    addBooks: null,
+                    loadCover: (_) => false,
+                  ),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final book = find.byTooltip('Volume 15');
+        final scroll = find
+            .descendant(
+              of: find.byType(ShellRail),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        await tester.scrollUntilVisible(book, 250, scrollable: scroll);
+        await tester.pumpAndSettle();
+        String? focused() => FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<Tooltip>()
+            ?.message;
+        if (keyboard) {
+          for (var i = 0; i < 35 && focused() != 'Volume 15'; i++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.pumpAndSettle();
+          }
+          expect(focused(), 'Volume 15');
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        } else {
+          await tester.tap(book);
+        }
+        await tester.pumpAndSettle();
+        expect(model.currentBookId, 15);
+        expect(model.openBooks.first.id, 15);
+        expect(book.hitTestable(), findsOneWidget);
+        if (keyboard) {
+          expect(focused(), 'Volume 15');
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pumpAndSettle();
+          expect(model.currentBookId, 15);
+          expect(model.openBooks.first.id, 15);
+          expect(book.hitTestable(), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('a phone gets the bottom bar, and nothing while reading', (
     tester,
@@ -936,15 +1049,18 @@ void main() {
         _book(id, 'Volume ${id.toString().padLeft(2, '0')}'),
     ];
 
-    /// Pumps the desktop sidebar over a model that applies its own moves, as
+    /// Pumps the desktop sidebar over a model that applies opens, as
     /// the shell controller does, and returns the model's current ids.
-    Future<List<int> Function()> pumpLive(WidgetTester tester) async {
-      var model = const ShellModel();
-      for (final book in books) {
-        model = update(model, ShellBookOpened(book));
-      }
-      model = update(model, const ShellBookActivated(1));
-      model = model.copyWith(reading: false, place: ShellPlace.library);
+    Future<List<int> Function()> pumpLive(
+      WidgetTester tester, {
+      int current = 1,
+    }) async {
+      var model = ShellModel(
+        openBooks: [
+          for (final book in books) OpenBook(book: book, path: book.pathKey),
+        ],
+        currentBookId: current,
+      );
       tester.view.physicalSize = const Size(1440, 600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -959,11 +1075,13 @@ void main() {
                 covers: const {},
                 actions: ShellActions(
                   selectPlace: recorder.places.add,
-                  openBook: (entry) => recorder.opened.add(entry.id),
-                  closeBook: (entry) => recorder.closed.add(entry.id),
-                  moveBook: (from, to) => setState(
-                    () => model = update(model, ShellBookMoved(from, to)),
+                  openBook: (entry) => setState(
+                    () => model = update(
+                      model,
+                      ShellBookOpened(entry.book),
+                    ).copyWith(reading: false),
                   ),
+                  closeBook: (entry) => recorder.closed.add(entry.id),
                   addBooks: () => recorder.adds += 1,
                   loadCover: (_) => true,
                 ),
@@ -987,48 +1105,37 @@ void main() {
       return [for (final (title, _) in drawn) title];
     }
 
-    Future<void> drag(WidgetTester tester, String title, double dy) async {
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.text(title)),
-      );
-      // A row lifts on a long press, so a plain press still opens the book.
-      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
-      for (var i = 0; i < 10; i += 1) {
-        await gesture.moveBy(Offset(0, dy / 10));
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      await gesture.up();
-      await tester.pumpAndSettle();
-    }
-
-    testWidgets('rows reorder by dragging, down and up', (tester) async {
+    testWidgets('reading a sidebar book moves it first', (tester) async {
       final ids = await pumpLive(tester);
-      final row =
-          tester.getRect(find.text('Volume 02')).top -
-          tester.getRect(find.text('Volume 01')).top;
-
-      // Volume 01 dragged two rows down takes Volume 03's place.
-      await drag(tester, 'Volume 01', row * 2);
-      expect(ids().take(5), [2, 3, 1, 4, 5]);
-      // Four rows fit below the places and Settings in this short window.
+      await tester.tap(find.text('Volume 03'));
+      await tester.pumpAndSettle();
+      expect(ids().take(5), [3, 1, 2, 4, 5]);
       expect(drawnTitles(tester).take(4), [
-        'Volume 02',
         'Volume 03',
         'Volume 01',
-        'Volume 04',
-      ]);
-
-      // Volume 04, the last row in the window, dragged three rows up takes
-      // the first place.
-      await drag(tester, 'Volume 04', -row * 3);
-      expect(ids().take(6), [4, 2, 3, 1, 5, 6]);
-      expect(drawnTitles(tester).take(4), [
-        'Volume 04',
         'Volume 02',
-        'Volume 03',
-        'Volume 01',
+        'Volume 04',
       ]);
       expect(ids()..sort(), [for (var id = 1; id <= 20; id += 1) id]);
+    });
+
+    testWidgets('reopening the current legacy sidebar book reveals it first', (
+      tester,
+    ) async {
+      final ids = await pumpLive(tester, current: 15);
+      final book = find.text('Volume 15');
+      final scroll = find
+          .descendant(
+            of: find.byType(ShellSidebar),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(book, 250, scrollable: scroll);
+      await tester.pumpAndSettle();
+      await tester.tap(book);
+      await tester.pumpAndSettle();
+      expect(ids().take(3), [15, 1, 2]);
+      expect(book.hitTestable(), findsOneWidget);
     });
 
     testWidgets('the keyboard walks every row and close button, both ways', (
