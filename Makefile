@@ -184,9 +184,9 @@ macos-smoke: macos-debug
 linux-release:
 	flutter build linux --release
 
-## Regenerate CHANGELOG.md from conventional commits
+## Regenerate CHANGELOG.md with the permanent first-release display baseline
 changelog:
-	git cliff -o CHANGELOG.md
+	python3 scripts/generate_changelog.py
 
 ## Print the next semantic version inferred from conventional commits
 next-version:
