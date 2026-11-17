@@ -26,6 +26,7 @@ on:
       - "flake.lock"
       - ".github/workflows/ci.yml"
       - ".github/workflows/release-pr.yml"
+      - ".github/workflows/release-notes.yml"
   pull_request:
     paths:
       - "lib/**"
@@ -50,6 +51,7 @@ on:
       - "flake.lock"
       - ".github/workflows/ci.yml"
       - ".github/workflows/release-pr.yml"
+      - ".github/workflows/release-notes.yml"
 
 jobs:
   dart-format:
