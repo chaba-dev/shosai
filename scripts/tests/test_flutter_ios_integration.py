@@ -1,8 +1,11 @@
+import base64
 import json
+import os
 import pathlib
 import plistlib
 import re
 import struct
+import subprocess
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -34,7 +37,9 @@ class FlutterIosIntegrationTest(unittest.TestCase):
                         "public.mime-type": "application/epub+zip",
                     })
 
-    def test_apple_build_modes_select_complete_icon_catalogs(self):
+    def test_apple_editions_select_complete_icon_catalogs(self):
+        production = (ROOT / "darwin/Production.xcconfig").read_text()
+        self.assertRegex(production, r"(?m)^SHOSAI_APP_ICON = AppIcon$")
         for platform in ("ios", "macos"):
             with self.subTest(platform=platform):
                 project = (ROOT / platform / "Runner.xcodeproj/project.pbxproj").read_text()
@@ -42,13 +47,22 @@ class FlutterIosIntegrationTest(unittest.TestCase):
                 for mode, settings in re.findall(
                     r'/\* (Debug|Profile|Release) \*/ = \{(.*?)\n\t\t\};', project, re.S
                 ):
-                    icon = re.search(r'ASSETCATALOG_COMPILER_APPICON_NAME = (\w+);', settings)
+                    icon = re.search(r'ASSETCATALOG_COMPILER_APPICON_NAME = ([^;]+);', settings)
                     if icon:
                         icons.append((mode, icon[1]))
                 self.assertCountEqual(icons, [
-                    ("Debug", "AppIconDev"), ("Profile", "AppIconDev"),
-                    ("Release", "AppIcon"),
+                    (mode, '"$(SHOSAI_APP_ICON)"')
+                    for mode in ("Debug", "Profile", "Release")
                 ])
+                configs = (
+                    ("Flutter/Debug.xcconfig", "Flutter/Release.xcconfig")
+                    if platform == "ios" else ("Runner/Configs/AppInfo.xcconfig",)
+                )
+                for config in configs:
+                    self.assertRegex(
+                        (ROOT / platform / config).read_text(),
+                        r"(?m)^SHOSAI_APP_ICON = AppIconDev$",
+                    )
                 for name in ("AppIcon", "AppIconDev"):
                     catalog = ROOT / platform / f"Runner/Assets.xcassets/{name}.appiconset"
                     for image in json.loads((catalog / "Contents.json").read_text())["images"]:
@@ -60,6 +74,24 @@ class FlutterIosIntegrationTest(unittest.TestCase):
             (ROOT / "ios/Runner/Assets.xcassets/AppIconDev.appiconset/Icon-App-1024x1024@1x.png").read_bytes(),
             (ROOT / "assets/shosai-dev-icon.png").read_bytes(),
         )
+
+    def test_apple_build_rejects_mixed_app_editions(self):
+        for bundle_id, defines, valid in (
+            ("dev.shosai.reader", ["SHOSAI_PRODUCTION=true", "OTHER=example"], True),
+            ("dev.shosai.shosai", [], True),
+            ("dev.shosai.shosai-flutter", ["SHOSAI_PRODUCTION=true"], False),
+            ("dev.shosai.reader", ["SHOSAI_PRODUCTION=false"], False),
+            ("dev.shosai.reader", ["SHOSAI_PRODUCTION=true", "SHOSAI_PRODUCTION=false"], False),
+        ):
+            with self.subTest(bundle_id=bundle_id, defines=defines):
+                result = subprocess.run(
+                    ["/bin/sh", ROOT / "darwin/check-app-identity.sh"],
+                    env={**os.environ, "PRODUCT_BUNDLE_IDENTIFIER": bundle_id,
+                         "DART_DEFINES": ",".join(base64.b64encode(item.encode()).decode()
+                                                 for item in defines)},
+                    capture_output=True,
+                )
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
 
     def test_initial_ios_controller_enables_native_state_restoration(self):
         storyboard = ET.parse(

@@ -16,8 +16,14 @@ final class PlatformConnectionCredentialStore
     implements ConnectionCredentialStore {
   const PlatformConnectionCredentialStore();
 
+  static const _production = bool.fromEnvironment('SHOSAI_PRODUCTION');
   static const _storage = FlutterSecureStorage(
-    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+    mOptions: MacOsOptions(
+      usesDataProtectionKeychain: false,
+      accountName: _production
+          ? 'dev.shosai.reader'
+          : AppleOptions.defaultAccountName,
+    ),
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock_this_device,
     ),

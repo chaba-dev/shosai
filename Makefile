@@ -6,6 +6,7 @@
 .PHONY: epub-layout-fixtures check-epub-layout-fixtures
 .PHONY: dev linux-debug linux-release check-linux-bundle
 .PHONY: android-profile android-release check-android-apk
+.PHONY: android-production ios-device-production macos-production linux-production
 .PHONY: macos-debug macos-smoke
 .PHONY: ios-simulator-debug ios-device-profile ios-device-release
 .PHONY: changelog next-version
@@ -183,6 +184,25 @@ macos-smoke: macos-debug
 ## Build the Linux host in release mode
 linux-release:
 	flutter build linux --release
+
+# Keep routine release-mode lab builds on their existing development identity.
+SHOSAI_PRODUCTION_XCCONFIG ?= $(CURDIR)/darwin/Production.xcconfig
+production_defines = $${SHOSAI_BUILD_DEFINES_FILE:+--dart-define-from-file="$$SHOSAI_BUILD_DEFINES_FILE"} --dart-define=SHOSAI_PRODUCTION=true
+production_xcode_config = XCODE_XCCONFIG_FILE="$(SHOSAI_PRODUCTION_XCCONFIG)"
+
+## Build the Play upload bundle, signed with the provided upload keystore
+android-production:
+	flutter build appbundle --release $(production_defines)
+
+## Build the unsigned production ID for physical iOS devices
+ios-device-production:
+	$(production_xcode_config) ./scripts/build-flutter-ios.sh device release $(production_defines)
+
+macos-production:
+	$(production_xcode_config) ./scripts/build-flutter-macos.sh build macos --release $(production_defines)
+
+linux-production:
+	flutter build linux --release $(production_defines)
 
 ## Regenerate CHANGELOG.md with the permanent first-release display baseline
 changelog:

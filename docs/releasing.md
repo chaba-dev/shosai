@@ -1,16 +1,15 @@
 # Releasing Shosai
 
-Shosai releases are prepared from Conventional Commit titles and reviewed through a rolling release pull request.
+Shōsai releases are prepared from Conventional Commit titles and reviewed through a rolling release pull request. The production app ID is `dev.shosai.reader` on all platforms. Cut `v0.1.0` only after the intended production builds have been checked; a Git tag does not build or upload store packages.
 
 ## Release flow
 
 1. Each pull request title must use an allowed Conventional Commit type. The repository must use squash merges with the pull request title as the resulting commit subject.
 2. A push to `main` updates `release/next`. The workflow merges the new `main` revision into the existing release branch, then appends a release commit instead of rewriting branch history. If the branch was deleted after an earlier pull request, the workflow recovers its last pull-request head before appending. Git-cliff calculates the next semantic version, sets the application version in `pubspec.yaml` (keeping its build number), regenerates `CHANGELOG.md`, and creates or refreshes the release pull request.
-3. The exact `release/next` commit is dry-run through the full three-platform package matrix with publishing disabled. The release PR receives a `Release build dry run` commit status, so it cannot be mistaken for a releasable revision while packages are pending or failing. Ordinary feature pull requests do not run this release matrix.
-4. Merging that pull request into the default branch validates that its `chore(release): vX.Y.Z` title matches the `pubspec.yaml` version and creates the tag on the merge commit.
-5. Release jobs repeat the same builds, bundle PDFium, and attach installable packages and checksums to the GitHub release. A manually pushed `vX.Y.Z` tag runs the same publisher after validating the tag against the `pubspec.yaml` version.
+3. Review the required `docs/releases/X.Y.Z.md` and verify production builds from the release revision. The release-notes workflow checks for the notes; it does not package the app.
+4. Merging the release PR validates that its `chore(release): vX.Y.Z` title matches the `pubspec.yaml` version and creates the tag on the merge commit. Store uploads and distribution are separate, manual steps.
 
-The automatic flow is retry-safe: an existing tag is accepted only when it points to the expected release merge commit, and a missing GitHub release can be recreated on a rerun.
+The tag workflow accepts an existing tag only when it points to the expected release merge commit.
 
 ## Semantic versions and changelog groups
 
@@ -23,21 +22,24 @@ The automatic flow is retry-safe: an existing tag is accepted only when it point
 
 Run `make next-version` to inspect the inferred version and `make changelog` to regenerate the changelog locally. Both commands use `cliff.toml`.
 
-## Desktop packages
+## Build and verify the production identity
 
-Each release contains three native packages:
+| Platform | Development ID (the default, even in release mode) | Production command |
+| --- | --- | --- |
+| Android | `dev.shosai.shosai` | `make android-production` (AAB; requires an upload keystore) |
+| iOS | `dev.shosai.shosai` | `make ios-device-production` (unsigned device build) |
+| macOS | `dev.shosai.shosai-flutter` | `make macos-production` (local bundle; see ARM64 settings below) |
+| Linux | `dev.shosai.shosai_flutter` | `make linux-production` (local bundle with `shosai_flutter` executable) |
 
-- `shosai-<version>-x86_64-unknown-linux-gnu.tar.gz`
-- `shosai-<version>-aarch64-unknown-linux-gnu.tar.gz`
-- `Shosai-<version>-macos-aarch64.zip`
+Use the pinned toolchain and the production targets on the appropriate host. The targets pass `SHOSAI_PRODUCTION=true` to Flutter; on Apple they also select `darwin/Production.xcconfig`. For a signed Apple archive, carry both settings into the archive build and supply the approved signing configuration. An iOS distributor xcconfig can include `darwin/Production.xcconfig` and add `GOOGLE_DRIVE_IOS_CALLBACK_SCHEME`; pass its absolute path as `SHOSAI_PRODUCTION_XCCONFIG` to the make target. Don't put the production flag in a shared development defines file.
 
-Linux packages contain an optimized binary, PDFium, licenses, a desktop entry, and `install.sh`. Extract the archive and run `./install.sh`; it installs under `~/.local` by default. Set `SHOSAI_INSTALL_PREFIX` to choose another user-writable prefix.
+If a direct Xcode build rejects a bundle ID and Flutter edition mismatch, run the corresponding Flutter build to regenerate the settings. On Xcode 27.2, the verified macOS build is ARM64: create a local xcconfig that `#include`s the absolute path to `darwin/Production.xcconfig` and adds `ARCHS = arm64`, then run `SHOSAI_PRODUCTION_XCCONFIG=/absolute/path/to/local.xcconfig .agents/dev make macos-production`. Universal macOS builds are unverified; the two-architecture `lipo -verify_arch` check failed when tested separately on Xcode 27.2.
 
-The macOS zip contains `Shosai.app`. Extract it and move the application into `/Applications` or `~/Applications`. The bundle is ad-hoc signed but is not yet Developer ID signed or notarized, so macOS may show a Gatekeeper warning for downloaded releases.
+Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute path), `SHOSAI_ANDROID_STORE_PASSWORD`, `SHOSAI_ANDROID_KEY_ALIAS`, and `SHOSAI_ANDROID_KEY_PASSWORD` in a private build environment. The production build does not fall back to debug signing. Verify the AAB's package and upload certificate before upload, then verify the installed Play build's **app-signing** SHA-1 for Google Drive. See [build credentials](build-credentials.md), [Google Drive](google-drive.md), and [Dropbox](dropbox.md) for the separate production registrations. If supplied, `SHOSAI_BUILD_DEFINES_FILE` points to the release build's Dart configuration.
 
-macOS release builds require the Apple Command Line Tools and target macOS 13, matching the bundled PDFium binary. The Nix development shell selects the host Apple compiler and SDK so packaged binaries link only to system or bundle-relative libraries. Package validation rejects Mach-O files whose deployment target exceeds the bundle's declared minimum or whose load commands contain non-portable absolute dependencies.
+**Keep the development install to retain its data.** Production installs separately with an empty library and no copied credentials. Use different `.app` paths for dev and production on macOS. On the Pixel lab, `dev.shosai.shosai` is the owner's library, not a test slot: never uninstall it or target it with Flutter Driver. Use an audited disposable package for automated device tests instead. The device-lab package, signing, and install checks still apply to both editions.
 
-PDFium is pinned to the checksummed `chromium/7999` binaries from `bblanchon/pdfium-binaries`. Shosai resolves the bundled library relative to its executable and falls back to the system library for development builds. Release packages include the project, PDFium, and Inter font licenses alongside the corresponding runtime assets.
+Use `dev.shosai.reader` for future Linux desktop-entry, icon, AppStream, and Flatpak metadata. These packages, macOS Developer ID signing and notarization, and store upload automation are not configured by these build targets.
 
 ## Required repository settings
 
@@ -45,16 +47,10 @@ The workflows rely on these GitHub settings:
 
 - Allow only squash merges and use the pull request title as the default squash commit subject.
 - Protect `main` from direct pushes and require the `Validate title` and normal CI checks.
-- Require the `Release build dry run` commit status before merging `release/next`.
+- Require the `Release notes` check before merging `release/next`.
 - Require release pull requests to be up to date before merging, or use a merge queue, so the reviewed changelog covers every commit in the tagged merge.
-- Install the private `chaba2-bot` GitHub App on this repository with `Contents: write`, `Pull requests: write`, and `Commit statuses: write` repository permissions.
+- Install the private `chaba2-bot` GitHub App on this repository with `Contents: write` and `Pull requests: write` repository permissions.
 - Create the `RELEASE` Actions environment, store the App ID in its `RELEASE_APP_ID` variable, and store the PEM private key in its `RELEASE_APP_SECRET` secret.
 - Allow `chaba2-bot` to push updates to the `release/next` branch.
 
-Only mutation jobs enter the `RELEASE` environment and receive its credentials. Release package builds, including dry runs, remain credential-free. Mutation jobs exchange the credentials for short-lived, repository-scoped `chaba2-bot` installation tokens: release commits and branch pushes, release pull-request creation and updates, dry-run statuses, tags, and GitHub releases. The built-in `GITHUB_TOKEN` is read-only. App-authored branch and tag events are not suppressed by GitHub's recursive-workflow protection, so the normal PR checks and tag workflow can run.
-
-The release publishes no packages to a registry. Release builds use
-`assets/shosai-icon.png`: macOS bundles the generated `.icns` file in the app
-resources, while Linux installs the PNG in the hicolor icon directory. Windows
-packaging, macOS Developer ID signing and notarization, and Linux AppImage/Flatpak
-packages remain separate distribution work.
+Only mutation jobs enter the `RELEASE` environment and receive its GitHub App credentials. They exchange those credentials for short-lived, repository-scoped tokens to push release commits and tags and open or update the release PR. The built-in `GITHUB_TOKEN` is read-only.
