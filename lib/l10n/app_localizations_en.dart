@@ -1445,6 +1445,46 @@ class AppLocalizationsEn extends AppLocalizations {
       'The verified file couldn\'t be confirmed as part of this group. It was added separately; your original files and notes are unchanged.';
 
   @override
+  String get bookLocked => 'Locked';
+
+  @override
+  String get bookLockedTitle => 'This book is locked';
+
+  @override
+  String get bookDrmProtected =>
+      'This book is DRM-protected or encrypted. Shōsai can’t open it.';
+
+  @override
+  String get pdfUnlockTitle => 'Unlock PDF';
+
+  @override
+  String get pdfPasswordRequired =>
+      'This PDF is password-protected. Enter the password to open it.';
+
+  @override
+  String get pdfPasswordLabel => 'Password';
+
+  @override
+  String get pdfPasswordSavedHint =>
+      'The password will be saved securely on this device.';
+
+  @override
+  String get pdfPasswordIncorrect => 'That password didn’t work. Try again.';
+
+  @override
+  String get pdfPasswordSaveFailed =>
+      'Secure password storage is unavailable. Check your device’s password store and try again.';
+
+  @override
+  String get pdfPasswordShow => 'Show password';
+
+  @override
+  String get pdfPasswordHide => 'Hide password';
+
+  @override
+  String get pdfUnlockAction => 'Open PDF';
+
+  @override
   String editionLocations(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

@@ -31,6 +31,36 @@ final class LibraryRecords {
   Future<Book?> bookWithContent(String hash) =>
       _store.read((db) => _bookByHash(db, hash));
 
+  Future<void> updateProtection(
+    int id,
+    String hash,
+    BookProtection protection,
+  ) => _store.transaction(
+    (db) => db.execute(
+      '''UPDATE books SET protection = ?, protection_checked = 1
+           WHERE id = ? AND content_hash = ?''',
+      [protection.name, id, hash],
+    ),
+  );
+
+  Future<void> updateMetadata(int id, String hash, BookMetadata metadata) =>
+      _store.transaction(
+        (db) => db.execute(
+          '''UPDATE books SET title = ?, author = ?, cover = ?,
+             publication_metadata = ?, protection = ?, protection_checked = 1
+           WHERE id = ? AND content_hash = ?''',
+          [
+            metadata.title,
+            metadata.author,
+            metadata.cover,
+            metadata.publication.encode(),
+            metadata.protection.name,
+            id,
+            hash,
+          ],
+        ),
+      );
+
   Future<Uint8List?> cover(int id) => _store.read(
     (db) =>
         db
@@ -299,7 +329,8 @@ const bookColumns = '''id, title, author, format, file_path, storage_kind,
     WHEN 1 THEN 'offline' WHEN 2 THEN 'revoked' WHEN 3 THEN 'missing' END
    FROM book_locators WHERE content_hash = books.content_hash) END,
   EXISTS (SELECT 1 FROM book_locators WHERE content_hash = books.content_hash),
-  EXISTS (SELECT 1 FROM book_file_cache WHERE content_hash = books.content_hash AND kept = 1)''';
+  EXISTS (SELECT 1 FROM book_file_cache WHERE content_hash = books.content_hash AND kept = 1),
+  protection, protection_checked''';
 
 Book bookFromRow(Row row) => Book(
   id: row.columnAt(0) as int,
@@ -321,6 +352,8 @@ Book bookFromRow(Row row) => Book(
   },
   located: row.columnAt(14) == 1,
   keptOnDevice: row.columnAt(15) == 1,
+  protection: BookProtection.values.byName(row.columnAt(16) as String),
+  protectionChecked: row.columnAt(17) == 1,
 );
 
 Book? _bookById(Database db, int id) => db
@@ -511,8 +544,9 @@ Book _insertBook(
 ) {
   db.execute(
     '''INSERT INTO books (title, author, format, file_path, storage_kind,
-         original_path, content_hash, file_size, cover, publication_metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+         original_path, content_hash, file_size, cover, publication_metadata, protection,
+         protection_checked)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)''',
     [
       metadata.title,
       metadata.author,
@@ -524,6 +558,7 @@ Book _insertBook(
       fingerprint.size,
       metadata.cover,
       metadata.publication.encode(),
+      metadata.protection.name,
     ],
   );
   final book = _bookById(db, db.lastInsertRowId)!;

@@ -15,6 +15,7 @@ import 'limits.dart';
 import 'model.dart';
 import 'normalize.dart';
 import 'paths.dart';
+import 'protection.dart';
 
 /// Open an EPUB from bytes.
 EpubBook openEpubBytes(
@@ -23,6 +24,7 @@ EpubBook openEpubBytes(
 }) {
   final warnings = <String>[];
   final entries = _admittedEntries(bytes, limits, warnings);
+  if (_protected(entries)) throw const EpubProtectedError();
 
   final mimetype = entries['mimetype'];
   if (mimetype == null) {
@@ -266,8 +268,10 @@ class EpubInspection {
     this.language,
     this.edition,
     this.volume,
+    this.isProtected = false,
   });
 
+  final bool isProtected;
   final List<String> contributors;
   final List<String> identifiers;
   final String? language;
@@ -300,6 +304,37 @@ EpubInspection inspectEpubBytes(
   EpubLimits limits = const EpubLimits(),
 }) {
   final entries = _admittedEntries(bytes, limits, <String>[]);
+  final isProtected = _protected(entries);
+  try {
+    return _inspectEntries(entries, limits, isProtected);
+  } on EpubFormatError {
+    if (!isProtected) rethrow;
+  } on EpubProtectedError {
+    if (!isProtected) rethrow;
+  }
+  return const EpubInspection(
+    title: null,
+    author: null,
+    coverPath: null,
+    coverMediaType: null,
+    cover: null,
+    isProtected: true,
+  );
+}
+
+bool _protected(Map<String, _EpubEntry> entries) =>
+    entries.values.any((entry) => entry.file.flags & 1 != 0) ||
+    epubHasProtection(
+      encryption: entries['META-INF/encryption.xml']?.content,
+      rights: entries['META-INF/rights.xml']?.content,
+      license: entries['META-INF/license.lcpl']?.content,
+    );
+
+EpubInspection _inspectEntries(
+  Map<String, _EpubEntry> entries,
+  EpubLimits limits,
+  bool isProtected,
+) {
   final containerFile = entries['META-INF/container.xml'];
   if (containerFile == null) {
     throw const EpubFormatError('EPUB archive has no META-INF/container.xml');
@@ -318,14 +353,27 @@ EpubInspection inspectEpubBytes(
     null => null,
   };
   if (file != null &&
+      file.file.flags & 1 == 0 &&
       file.size <= limits.maxImageBytes &&
       (package.coverMediaType != 'image/svg+xml' ||
           file.size <= limits.maxMetadataBytes)) {
-    coverPath = package.coverPath;
-    coverMediaType = package.coverMediaType;
-    cover = file.read(limits.maxImageBytes, 'image bytes');
+    try {
+      if (!epubResourceIsEncrypted(
+        entries['META-INF/encryption.xml']?.content,
+        package.coverPath!,
+      )) {
+        cover = file.read(limits.maxImageBytes, 'image bytes');
+        coverPath = package.coverPath;
+        coverMediaType = package.coverMediaType;
+      }
+    } on EpubFormatError {
+      if (!isProtected) rethrow;
+    } on EpubProtectedError {
+      if (!isProtected) rethrow;
+    }
   }
   return EpubInspection(
+    isProtected: isProtected,
     title: package.title,
     author: package.author,
     contributors: package.contributors,
@@ -519,8 +567,7 @@ Map<String, _EpubEntry> _admittedEntries(
         file.uncompressedSize,
       );
     }
-    if (header.compressionMethod != 0 && header.compressionMethod != 8 ||
-        file.flags & 1 != 0) {
+    if (header.compressionMethod != 0 && header.compressionMethod != 8) {
       throw EpubFormatError('unsupported EPUB ZIP encoding: $name');
     }
     entries[name] = _EpubEntry(file, limits);
@@ -561,6 +608,7 @@ class _EpubEntry {
 
   Uint8List read(int limit, String kind) {
     if (size > limit) throw EpubLimitError(kind, limit, size);
+    if (file.flags & 1 != 0) throw const EpubProtectedError();
     final output = OutputMemoryStream(size: size);
     try {
       // archive >=4.5 bounds every output write by the declared ZIP size,

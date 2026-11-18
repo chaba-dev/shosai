@@ -115,8 +115,10 @@ final class EditionFile {
     this.unavailable = false,
     this.locations = const [],
     this.folderName,
+    this.protection = BookProtection.none,
   });
 
+  final BookProtection protection;
   final String key;
   final String title;
   final String? author;
@@ -154,6 +156,23 @@ final class BookEdition {
   EditionFile? get preferred =>
       files.where((file) => file.key == preferredKey).firstOrNull;
   Set<BookFormat> get formats => {for (final file in files) file.format};
+
+  /// The file whose lock and progress appear on the shelf card.
+  EditionFile get readingFile {
+    if (preferred case final file?) return file;
+    var selected = displayFile;
+    for (final candidate in files) {
+      if (candidate.book != null &&
+          (selected.book == null ||
+              (candidate.book!.lastRead ?? '').compareTo(
+                    selected.book!.lastRead ?? '',
+                  ) >
+                  0)) {
+        selected = candidate;
+      }
+    }
+    return selected;
+  }
 
   /// Manual confirmation can fill missing facts, never override known conflicts.
   bool canGroupWith(BookEdition other) =>
@@ -376,30 +395,33 @@ List<BookEdition> _snapshot(Database db, Set<String>? allowed) {
       EditionFile(
         key: contentEditionKey(book.contentHash),
         book: book,
+        protection: book.protection,
         title: book.title,
         author: book.author,
         format: book.format,
         name:
-            row.columnAt(17) as String? ??
+            row['display_name'] as String? ??
             book.originalPath.replaceAll('\\', '/').split('/').last,
         source: locations.isEmpty ? 'On this device' : locations.first.label,
         size: book.fileSize,
         hasCover: book.hasCover,
         unavailable: book.locationFailure != null,
         locations: List.unmodifiable(locations),
-        publication: row.columnAt(16) == null && book.author != null
+        publication: row['publication_metadata'] == null && book.author != null
             ? PublicationMetadata(
                 title: book.title,
                 contributors: [book.author!],
               )
-            : PublicationMetadata.decode(row.columnAt(16) as String?),
-        folderName: row.columnAt(18) as String?,
+            : PublicationMetadata.decode(
+                row['publication_metadata'] as String?,
+              ),
+        folderName: row['source_folder'] as String?,
       ),
     );
   }
   for (final row in db.select(
     '''SELECT f.location_id, f.locator_key, f.name, f.size, f.revision,
-      p.title, p.author, p.cover IS NOT NULL, p.publication_metadata, l.label, f.folder_name
+      p.title, p.author, p.cover IS NOT NULL, p.publication_metadata, l.label, f.folder_name, p.protection
     FROM library_source_files f JOIN library_locations l ON l.id = f.location_id
     LEFT JOIN library_source_previews p ON p.location_id = f.location_id AND p.locator_key = f.locator_key
     WHERE l.removed = 0''',
@@ -427,6 +449,9 @@ List<BookEdition> _snapshot(Database db, Set<String>? allowed) {
         hasCover: row.columnAt(7) == 1,
         publication: PublicationMetadata.decode(row.columnAt(8) as String?),
         folderName: row.columnAt(10) as String?,
+        protection: BookProtection.values.byName(
+          row.columnAt(11) as String? ?? 'none',
+        ),
       ),
     );
   }

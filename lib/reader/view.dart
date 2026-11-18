@@ -37,6 +37,8 @@ import 'package:shosai_flutter/reader/pdf/column_selection.dart';
 import 'package:shosai_flutter/reader/pdf/columns.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/document_access.dart';
+import 'package:shosai_flutter/shared/pdf_password_dialog.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 part 'geometry.dart';
@@ -242,6 +244,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   final FocusNode _panelFocus = FocusNode(debugLabel: 'reader panel');
   ReaderPanel? _lastOpenPanel;
   ShadDialogRoute<String>? _noteDialogRoute;
+  ShadDialogRoute<String>? _passwordDialogRoute;
   ShadDialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
   bool _controllerInitialized = false;
@@ -476,6 +479,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         },
         librarySearchOpener: widget.placeRequests?.openSearch,
         noteEditor: _editNote,
+        passwordPrompt: _promptPassword,
+        passwordPromptCanceller: _cancelPasswordPrompt,
         placeNoteEditor: _editPlaceNote,
         noteEditorCanceller: _cancelNoteEditor,
         annotationAssociationPicker: _pickAnnotationAssociation,
@@ -558,6 +563,34 @@ class _ReaderScreenState extends State<ReaderScreen>
         ),
       );
     }
+  }
+
+  Future<String?> _promptPassword(PdfPasswordRequest request) async {
+    if (!mounted) return null;
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final route = ShadDialogRoute<String>(
+      pageBuilder: (context) => _withReaderLocalizations(
+        context,
+        PdfPasswordDialog(request: request),
+      ),
+      barrierDismissible: true,
+    );
+    _passwordDialogRoute = route;
+    try {
+      return await navigator.push(route);
+    } finally {
+      if (identical(_passwordDialogRoute, route)) _passwordDialogRoute = null;
+    }
+  }
+
+  void _cancelPasswordPrompt() {
+    final route = _passwordDialogRoute;
+    _passwordDialogRoute = null;
+    if (route == null) return;
+    scheduleMicrotask(() {
+      final navigator = route.navigator;
+      if (route.isActive && navigator != null) navigator.removeRoute(route);
+    });
   }
 
   Future<String?> _editNote(String? initialValue) =>

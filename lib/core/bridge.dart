@@ -509,6 +509,8 @@ enum FlutterBridgeErrorKind {
   notFound,
   inaccessible,
   unsupported,
+  protected,
+  passwordRequired,
   invalidRequest,
   malformed,
   limitExceeded,
@@ -641,6 +643,8 @@ class FlutterImportReport {
           items == other.items;
 }
 
+enum FlutterBookProtection { none, drm, password }
+
 class FlutterLibraryBook {
   final int bookId;
   final String title;
@@ -655,6 +659,7 @@ class FlutterLibraryBook {
   final bool unavailable;
   final bool located;
   final bool keptOnDevice;
+  final FlutterBookProtection protection;
 
   const FlutterLibraryBook({
     required this.bookId,
@@ -670,6 +675,7 @@ class FlutterLibraryBook {
     this.unavailable = false,
     this.located = false,
     this.keptOnDevice = false,
+    this.protection = FlutterBookProtection.none,
   });
 
   @override
@@ -686,7 +692,8 @@ class FlutterLibraryBook {
       lastRead.hashCode ^
       unavailable.hashCode ^
       located.hashCode ^
-      keptOnDevice.hashCode;
+      keptOnDevice.hashCode ^
+      protection.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -705,7 +712,8 @@ class FlutterLibraryBook {
           lastRead == other.lastRead &&
           unavailable == other.unavailable &&
           located == other.located &&
-          keptOnDevice == other.keptOnDevice;
+          keptOnDevice == other.keptOnDevice &&
+          protection == other.protection;
 }
 
 /// The order a library page lists books in.

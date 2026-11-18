@@ -9,6 +9,7 @@ import 'package:archive/archive.dart';
 
 import 'archive.dart';
 import 'limits.dart';
+import 'protection.dart';
 
 /// Returns the bytes of a file from [start] up to [end] (exclusive): the
 /// whole range, or fewer only where the file ends first.
@@ -122,23 +123,48 @@ Future<EpubInspection> inspectEpubRanges(
     return header.inflate(Uint8List.sublistView(local, dataStart, dataEnd));
   }
 
-  final opfPath = epubPackagePath(
-    await entry(
-      'META-INF/container.xml',
-      limits.maxMetadataBytes,
-      'metadata bytes',
-    ),
-  );
-  final package = inspectEpubPackage(
-    await entry(opfPath, limits.maxMetadataBytes, 'metadata bytes'),
-    opfPath,
-  );
+  Future<Uint8List?> metadata(String name) async => entries.containsKey(name)
+      ? entry(name, limits.maxMetadataBytes, 'metadata bytes')
+      : null;
+  Uint8List? encryption;
+  final isProtected =
+      entries.values.any((header) => header.flags & 1 != 0) ||
+      epubHasProtection(
+        encryption: encryption = await metadata('META-INF/encryption.xml'),
+        rights: await metadata('META-INF/rights.xml'),
+        license: await metadata('META-INF/license.lcpl'),
+      );
+  final EpubPackageInspection package;
+  try {
+    final opfPath = epubPackagePath(
+      await entry(
+        'META-INF/container.xml',
+        limits.maxMetadataBytes,
+        'metadata bytes',
+      ),
+    );
+    package = inspectEpubPackage(
+      await entry(opfPath, limits.maxMetadataBytes, 'metadata bytes'),
+      opfPath,
+    );
+  } on EpubFormatError {
+    if (!isProtected) rethrow;
+    return const EpubInspection(
+      title: null,
+      author: null,
+      coverPath: null,
+      coverMediaType: null,
+      cover: null,
+      isProtected: true,
+    );
+  }
   Uint8List? cover;
   final coverHeader = switch (package.coverPath) {
     final path? => entries[path],
     null => null,
   };
   if (coverHeader != null &&
+      coverHeader.flags & 1 == 0 &&
       coverHeader.compressedSize +
               coverHeader.name.length +
               30 +
@@ -147,16 +173,24 @@ Future<EpubInspection> inspectEpubRanges(
       (package.coverMediaType != 'image/svg+xml' ||
           coverHeader.uncompressedSize <= limits.maxMetadataBytes)) {
     try {
-      cover = await entry(
+      if (!epubResourceIsEncrypted(
+        encryption ?? await metadata('META-INF/encryption.xml'),
         package.coverPath!,
-        limits.maxImageBytes,
-        'image bytes',
-      );
+      )) {
+        cover = await entry(
+          package.coverPath!,
+          limits.maxImageBytes,
+          'image bytes',
+        );
+      }
     } on EpubLimitError {
       cover = null;
+    } on EpubFormatError {
+      if (!isProtected) rethrow;
     }
   }
   return EpubInspection(
+    isProtected: isProtected,
     title: package.title,
     author: package.author,
     contributors: package.contributors,

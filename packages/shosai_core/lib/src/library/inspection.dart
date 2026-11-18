@@ -9,6 +9,7 @@ import 'package:shosai_epub/shosai_epub.dart';
 
 import '../cancellation.dart';
 import '../errors.dart';
+import 'book.dart';
 import 'editions.dart';
 import 'files.dart';
 import 'location.dart';
@@ -30,8 +31,10 @@ final class BookMetadata {
     this.author,
     this.cover,
     this.publication = const PublicationMetadata(),
+    this.protection = BookProtection.none,
   });
 
+  final BookProtection protection;
   final PublicationMetadata publication;
 
   /// The document's own title, or null to use the file name.
@@ -79,6 +82,9 @@ BookMetadata _inspectEpub(Uint8List bytes, EpubLimits limits) {
     throw CoreException.malformed('The EPUB cannot be read: $error');
   }
   return BookMetadata(
+    protection: inspection.isProtected
+        ? BookProtection.drm
+        : BookProtection.none,
     title: inspection.title,
     author: inspection.author,
     publication: _publication(inspection),
@@ -307,6 +313,9 @@ Future<BookMetadata> previewEpub(
   cancellation.throwIfCancelled();
   final cover = inspection.cover;
   return BookMetadata(
+    protection: inspection.isProtected
+        ? BookProtection.drm
+        : BookProtection.none,
     title: inspection.title,
     author: inspection.author,
     publication: _publication(inspection),

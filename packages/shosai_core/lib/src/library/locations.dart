@@ -10,6 +10,7 @@ import '../cancellation.dart';
 import '../errors.dart';
 import '../preferences.dart';
 import '../store/store.dart';
+import 'book.dart';
 import 'editions.dart';
 import 'files.dart';
 import 'inspection.dart';
@@ -21,8 +22,14 @@ typedef LocatedContent = ({BookLocator locator, LocationFailure? failure});
 /// and revision it was listed with. Its cover is read separately, by
 /// [LibraryLocations.previewCover].
 final class SourcePreview {
-  const SourcePreview({this.title, this.author, this.hasCover = false});
+  const SourcePreview({
+    this.title,
+    this.author,
+    this.hasCover = false,
+    this.protection = BookProtection.none,
+  });
 
+  final BookProtection protection;
   final String? title;
   final String? author;
   final bool hasCover;
@@ -85,7 +92,7 @@ final class LibraryLocations {
   Future<Map<BookLocator, SourcePreview>> previews() => _store.read(
     (db) => {
       for (final row in db.select(
-        '''SELECT location_id, locator_key, title, author, cover IS NOT NULL
+        '''SELECT location_id, locator_key, title, author, cover IS NOT NULL, protection
            FROM library_source_previews''',
       ))
         (
@@ -95,6 +102,7 @@ final class LibraryLocations {
           title: row.columnAt(2) as String?,
           author: row.columnAt(3) as String?,
           hasCover: row.columnAt(4) == 1,
+          protection: BookProtection.values.byName(row.columnAt(5) as String),
         ),
     },
   );
@@ -154,12 +162,13 @@ final class LibraryLocations {
       }
       db.execute(
         '''INSERT INTO library_source_previews
-             (location_id, locator_key, size, revision, title, author, cover, publication_metadata)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             (location_id, locator_key, size, revision, title, author, cover, publication_metadata, protection)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(location_id, locator_key) DO UPDATE SET
              size = excluded.size, revision = excluded.revision,
              title = excluded.title, author = excluded.author,
-             cover = excluded.cover, publication_metadata = excluded.publication_metadata''',
+             cover = excluded.cover, publication_metadata = excluded.publication_metadata,
+             protection = excluded.protection''',
         [
           id,
           entry.key,
@@ -169,12 +178,14 @@ final class LibraryLocations {
           author,
           cover,
           publication,
+          metadata.protection.name,
         ],
       );
       return SourcePreview(
         title: title,
         author: author,
         hasCover: cover != null,
+        protection: metadata.protection,
       );
     });
   }
