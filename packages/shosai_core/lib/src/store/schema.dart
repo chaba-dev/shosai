@@ -506,6 +506,16 @@ CREATE TABLE annotation_projections (
 ALTER TABLE library_source_files ADD COLUMN folder_name TEXT;
 ALTER TABLE books ADD COLUMN source_folder TEXT;
 '''),
+  Migration(19, 'book protection', '''
+ALTER TABLE books ADD COLUMN protection TEXT NOT NULL DEFAULT 'none'
+    CHECK (protection IN ('none', 'drm', 'password'));
+ALTER TABLE books ADD COLUMN protection_checked INTEGER NOT NULL DEFAULT 0
+    CHECK (protection_checked IN (0, 1));
+ALTER TABLE library_source_previews ADD COLUMN protection TEXT NOT NULL DEFAULT 'none'
+    CHECK (protection IN ('none', 'drm', 'password'));
+-- Cached previews predate DRM inspection; the bounded preview pass rereads them.
+DELETE FROM library_source_previews;
+'''),
 ];
 
 /// A random version 4 UUID, evaluated once per row.

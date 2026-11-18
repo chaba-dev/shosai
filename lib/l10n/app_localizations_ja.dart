@@ -1358,6 +1358,45 @@ class AppLocalizationsJa extends AppLocalizations {
       '確認したファイルがこのグループの本か判断できなかったため、別の本として追加しました。元のファイルとノートは変更されていません。';
 
   @override
+  String get bookLocked => 'ロック中';
+
+  @override
+  String get bookLockedTitle => 'この本はロックされています';
+
+  @override
+  String get bookDrmProtected =>
+      'この本は DRM で保護されているか、暗号化されているため、Shōsai では開けません。';
+
+  @override
+  String get pdfUnlockTitle => 'PDF のロックを解除';
+
+  @override
+  String get pdfPasswordRequired =>
+      'この PDF はパスワードで保護されています。開くにはパスワードを入力してください。';
+
+  @override
+  String get pdfPasswordLabel => 'パスワード';
+
+  @override
+  String get pdfPasswordSavedHint => 'パスワードはこの端末に安全に保存されます。';
+
+  @override
+  String get pdfPasswordIncorrect => 'パスワードが違います。もう一度お試しください。';
+
+  @override
+  String get pdfPasswordSaveFailed =>
+      'パスワードを安全に保存できません。この端末のパスワード保管機能を確認して、もう一度お試しください。';
+
+  @override
+  String get pdfPasswordShow => 'パスワードを表示';
+
+  @override
+  String get pdfPasswordHide => 'パスワードを隠す';
+
+  @override
+  String get pdfUnlockAction => 'PDF を開く';
+
+  @override
   String editionLocations(int count) {
     return '$countか所';
   }

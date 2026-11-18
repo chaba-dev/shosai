@@ -51,6 +51,7 @@ final class LibrarySourceFile {
   String get title =>
       preview?.title ?? entry.name.replaceFirst(RegExp(r'\.[^.]+$'), '');
   String? get author => preview?.author;
+  BookProtection get protection => preview?.protection ?? BookProtection.none;
 
   BookFormat? get format =>
       BookFormat.fromExtension(entry.name.split('.').last.toLowerCase());

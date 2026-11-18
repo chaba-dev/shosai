@@ -4,6 +4,9 @@ library;
 import '../errors.dart';
 import 'location.dart';
 
+/// A file's opening requirement, never its password.
+enum BookProtection { none, drm, password }
+
 /// Formats the library admits.
 enum BookFormat {
   pdf,
@@ -67,8 +70,14 @@ final class Book {
     this.locationFailure,
     this.located = false,
     this.keptOnDevice = false,
+    this.protection = BookProtection.none,
+    this.protectionChecked = true,
   });
 
+  final BookProtection protection;
+
+  /// False for migrated records whose opening requirement is not known yet.
+  final bool protectionChecked;
   final int id;
   final String title;
   final String? author;
@@ -121,7 +130,9 @@ final class Book {
       other.lastRead == lastRead &&
       other.locationFailure == locationFailure &&
       other.located == located &&
-      other.keptOnDevice == keptOnDevice;
+      other.keptOnDevice == keptOnDevice &&
+      other.protection == protection &&
+      other.protectionChecked == protectionChecked;
 
   @override
   int get hashCode => Object.hash(
@@ -141,6 +152,8 @@ final class Book {
     locationFailure,
     located,
     keptOnDevice,
+    protection,
+    protectionChecked,
   );
 
   @override

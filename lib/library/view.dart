@@ -14,10 +14,12 @@ import 'package:shosai_core/shosai_core.dart'
         BookEdition,
         EditionFile,
         BookFormat,
+        BookProtection,
         EditionMatchEvidence;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
+import 'package:shosai_flutter/shared/pdf_password_dialog.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/library_editions.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
@@ -159,6 +161,22 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     confirmRemoval: _confirmRemoval,
     pickImport: _pickImport,
     openBook: _openBook,
+    passwordPrompt: (request) =>
+        _showOwnedDialog<String>((_) => PdfPasswordDialog(request: request)),
+    showLockedBook: () async {
+      await _showOwnedDialog<void>(
+        (context) => ShadDialog(
+          title: Text(_localizations.bookLockedTitle),
+          description: Text(_localizations.bookDrmProtected),
+          actions: [
+            ShadButton.outline(
+              onPressed: () => Navigator.pop(context),
+              child: Text(_localizations.locationClose),
+            ),
+          ],
+        ),
+      );
+    },
     pickEdition: (edition, format) => _showOwnedDialog<EditionChoice>(
       (context) => LibraryQuickPicker(edition: edition, format: format),
     ),

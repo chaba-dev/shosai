@@ -401,6 +401,66 @@ final class Library {
     }
   }
 
+  /// Read previously locked metadata after a successful unlock.
+  Future<void> refreshMetadata(
+    int id,
+    String path, {
+    CancellationToken? cancellation,
+  }) async {
+    final inspected = await _inspectStoredBook(id, path, cancellation);
+    cancellation.throwIfCancelled();
+    await _records.updateMetadata(
+      id,
+      inspected.book.contentHash,
+      inspected.metadata,
+    );
+  }
+
+  /// Classify migrated books without changing publication facts or shelf order.
+  Future<void> refreshProtection(
+    int id,
+    String path, {
+    CancellationToken? cancellation,
+  }) async {
+    final inspected = await _inspectStoredBook(id, path, cancellation);
+    cancellation.throwIfCancelled();
+    await _records.updateProtection(
+      id,
+      inspected.book.contentHash,
+      inspected.metadata.protection,
+    );
+  }
+
+  Future<({Book book, BookMetadata metadata})> _inspectStoredBook(
+    int id,
+    String path,
+    CancellationToken? cancellation,
+  ) async {
+    final book = await get(id);
+    if (book == null) {
+      throw const CoreException.notFound('The book is not in the library.');
+    }
+    final fingerprint = await fingerprintFile(path, cancellation: cancellation);
+    if (fingerprint.hash != book.contentHash) {
+      throw const CoreException.conflict(
+        'The book changed before its metadata was read.',
+      );
+    }
+    final metadata = await _inspect(
+      path,
+      book.format,
+      cancellation,
+      titlePath: book.originalPath,
+    );
+    if (!await fingerprint.unchangedSince(path)) {
+      throw const CoreException.conflict(
+        'The book changed while its metadata was read.',
+      );
+    }
+    cancellation.throwIfCancelled();
+    return (book: book, metadata: metadata);
+  }
+
   Future<BookMetadata> _inspect(
     String path,
     BookFormat format,
@@ -427,6 +487,7 @@ final class Library {
     return BookMetadata(
       title: title,
       author: author,
+      protection: metadata.protection,
       publication: metadata.publication,
       cover: cover == null || cover.isEmpty || cover.length > maxCoverBytes
           ? null

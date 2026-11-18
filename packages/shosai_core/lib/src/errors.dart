@@ -18,6 +18,12 @@ enum CoreErrorKind {
   /// The format or operation is not supported.
   unsupported,
 
+  /// The book uses DRM or unsupported encryption.
+  protected,
+
+  /// A PDF needs its user password.
+  passwordRequired,
+
   /// The request is malformed or names a value outside its declared range.
   invalidRequest,
 

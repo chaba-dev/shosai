@@ -15,6 +15,7 @@ import 'package:shosai_epub/shosai_epub.dart';
 import 'package:shosai_flutter/app_theme.dart'
     show shosaiJapaneseInterfaceFontFamily;
 import 'package:shosai_flutter/core/reader_text.dart';
+import 'package:shosai_flutter/core/document_access.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/l10n/app_localizations_en.dart';
@@ -57,6 +58,8 @@ final class ReaderController implements Listenable {
     required FlutterBridge bridge,
     required PageDecoder decoder,
     PdfEngine? pdfEngine,
+    PdfPasswordPrompt? passwordPrompt,
+    VoidCallback? passwordPromptCanceller,
     double initialScale = 1,
     double initialLineSpacing = 1.5,
     NoteEditor? noteEditor,
@@ -102,6 +105,8 @@ final class ReaderController implements Listenable {
   }) : _bridge = bridge,
        _records = recordsOf(bridge),
        _decoder = decoder,
+       _passwordPrompt = passwordPrompt,
+       _passwordPromptCanceller = passwordPromptCanceller ?? (() {}),
        // The PDF engine is the reader's own; a bridge that is also an engine
        // (the test fakes) serves both so a fixture bridge keeps one seam.
        _pdfEngine =
@@ -165,6 +170,8 @@ final class ReaderController implements Listenable {
   final ShosaiRecords _records;
   final PageDecoder _decoder;
   final PdfEngine _pdfEngine;
+  final PdfPasswordPrompt? _passwordPrompt;
+  final VoidCallback _passwordPromptCanceller;
   final bool autoPdfFit;
   final ReaderRasterFit _defaultPdfFit;
   final double _defaultPdfZoom;
@@ -735,6 +742,7 @@ final class ReaderController implements Listenable {
         _hideChrome();
       case ReaderRouteLeft():
         _routeLeft = true;
+        _passwordPromptCanceller();
         _chromeTimer?.cancel();
         _systemBarsTimer?.cancel();
         _systemBars(true);
@@ -1928,7 +1936,7 @@ final class ReaderController implements Listenable {
     final returnPoints = place?.returnPoints;
     try {
       if (bookId != null) await drainBookWrites(bookId);
-      opened = bookId == null
+      Future<FlutterDocumentSummary> open() async => bookId == null
           ? await _bridge.openDocument(
               request: FlutterOpenRequest(localId: path, pathKey: path),
               cancellationId: cancellation,
@@ -1937,6 +1945,41 @@ final class ReaderController implements Listenable {
               bookId: bookId,
               cancellationId: cancellation,
             );
+      try {
+        opened = await open();
+      } on FlutterBridgeError catch (error) {
+        final host = _bridge;
+        final prompt = _passwordPrompt;
+        if (error.kind != FlutterBridgeErrorKind.passwordRequired ||
+            host is! DocumentAccessHost ||
+            prompt == null) {
+          rethrow;
+        }
+        final unlocked = await unlockPdfWithPrompt(
+          host: host as DocumentAccessHost,
+          prompt: prompt,
+          title: path.split(RegExp(r'[/\\]')).last,
+          pathKey: path,
+          bookId: bookId,
+          cancellationId: cancellation,
+          isCurrent: () => _isCurrent(generation) && !_routeLeft,
+          localizations: _localizations,
+        );
+        if (!unlocked) {
+          if (_isCurrent(generation)) {
+            dispatch(
+              _ReaderOpenFailed(
+                generation: generation,
+                document: null,
+                error: _l10n.pdfPasswordRequired,
+              ),
+            );
+            dispatch(const ReaderBackRequested());
+          }
+          return;
+        }
+        opened = await open();
+      }
       final document = opened;
       // The PDF engine serves every PDF page operation, over the verified
       // snapshot the bridge opened rather than the path, whose file may
@@ -7582,6 +7625,7 @@ final class ReaderController implements Listenable {
   void _disposeRequested() {
     if (_closing) return;
     _closing = true;
+    _passwordPromptCanceller();
     _cancelActiveNoteEditor();
     _cancelAssociationPicker();
     final cancellation = _activeCancellation;

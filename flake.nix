@@ -90,6 +90,8 @@
 
           # PDFium for `flutter test` (see SHOSAI_PDFIUM_LIBRARY below)
           pdfium-binaries
+          # Synthetic password/permission PDF fixtures for the engine tests
+          qpdf
 
           # Identity-based build configuration, without exported cloud keys
           google-cloud-sdk

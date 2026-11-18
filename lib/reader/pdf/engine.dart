@@ -36,6 +36,20 @@ abstract interface class PdfEngine {
   Future<PdfEngineDocument> open(String path);
 }
 
+/// A native engine that can verify and securely remember a PDF password.
+abstract interface class UnlockablePdfEngine implements PdfEngine {
+  Future<void> rememberPassword(
+    String path,
+    String password, {
+    void Function()? checkCancelled,
+  });
+}
+
+/// The platform credential vault could not retain a verified password.
+final class PdfPasswordStorageException implements Exception {
+  const PdfPasswordStorageException();
+}
+
 /// A [PdfEngine] that can also open a document it reads only in parts.
 abstract interface class RangedPdfEngine implements PdfEngine {
   /// Opens a [size]-byte document whose bytes come from [read]: it copies up
@@ -231,7 +245,7 @@ final class PdfEngineLimitException implements Exception {
   String toString() => message;
 }
 
-/// Thrown when a document needs a password the reader cannot supply.
+/// Thrown when the document needs a user password.
 final class PdfEnginePasswordException implements Exception {
   const PdfEnginePasswordException(this.path);
 
@@ -239,6 +253,11 @@ final class PdfEnginePasswordException implements Exception {
 
   @override
   String toString() => 'The PDF is password protected';
+}
+
+/// The PDF uses a security handler PDFium cannot open.
+final class PdfEngineProtectedException implements Exception {
+  const PdfEngineProtectedException();
 }
 
 /// Thrown when the engine cannot open or read a document.

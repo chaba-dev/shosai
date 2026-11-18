@@ -15,10 +15,12 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:ffi/ffi.dart';
 import 'package:pdfium_dart/pdfium_dart.dart' as pdfium_bindings;
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/connection_credentials.dart';
 
 import 'engine.dart';
 import 'page_geometry.dart';
@@ -32,8 +34,14 @@ const int _lcdText = pdfrx.PdfPageRenderFlags.lcdText;
 const int _reverseByteOrder = 0x10;
 
 /// The production [PdfEngine].
-final class PdfrxPdfEngine implements RangedPdfEngine {
-  PdfrxPdfEngine();
+final class PdfrxPdfEngine implements RangedPdfEngine, UnlockablePdfEngine {
+  PdfrxPdfEngine({ConnectionCredentialStore? passwords})
+    : _passwords = passwords ?? const PlatformConnectionCredentialStore();
+
+  final ConnectionCredentialStore _passwords;
+
+  String _passwordKey(Uint8List bytes) =>
+      'pdf-password:${sha256.convert(bytes)}';
 
   static Future<void>? _initialized;
 
@@ -78,7 +86,58 @@ final class PdfrxPdfEngine implements RangedPdfEngine {
         'PDF exceeds the $pdfMaxInputBytes-byte input limit',
       );
     }
-    return _adopt(() => pdfrx.PdfDocument.openFile(filePath), filePath);
+    try {
+      return await _adopt(() => pdfrx.PdfDocument.openFile(filePath), filePath);
+    } on PdfEnginePasswordException {
+      // Only password-required files reach the vault. Permission flags alone
+      // must never trigger a password prompt or require a working keychain.
+      final bytes = await file.readAsBytes();
+      String? password;
+      try {
+        password = await _passwords.read(_passwordKey(bytes));
+      } on Exception {
+        // A locked/unavailable vault still allows entering the password anew.
+      }
+      if (password == null) throw PdfEnginePasswordException(path);
+      return _openWithPassword(bytes, password, path);
+    }
+  }
+
+  Future<PdfEngineDocument> _openWithPassword(
+    Uint8List bytes,
+    String password,
+    String name,
+  ) => _adopt(
+    () => pdfrx.PdfDocument.openData(
+      bytes,
+      sourceName: name,
+      firstAttemptByEmptyPassword: false,
+      passwordProvider: pdfrx.createSimplePasswordProvider(password),
+    ),
+    name,
+  );
+
+  @override
+  Future<void> rememberPassword(
+    String path,
+    String password, {
+    void Function()? checkCancelled,
+  }) async {
+    await ensureInitialized();
+    final file = File(pdfPathFromKey(path));
+    if (await file.length() > pdfMaxInputBytes) {
+      throw const PdfEngineLimitException('PDF exceeds the input limit');
+    }
+    final bytes = await file.readAsBytes();
+    checkCancelled?.call();
+    final document = await _openWithPassword(bytes, password, path);
+    await document.dispose();
+    checkCancelled?.call();
+    try {
+      await _passwords.write(_passwordKey(bytes), password);
+    } on Exception {
+      throw const PdfPasswordStorageException();
+    }
   }
 
   @override
@@ -119,6 +178,9 @@ final class PdfrxPdfEngine implements RangedPdfEngine {
     } on pdfrx.PdfPasswordException {
       throw PdfEnginePasswordException(name);
     } on pdfrx.PdfException catch (error) {
+      if (error.errorCode == pdfium_bindings.FPDF_ERR_SECURITY) {
+        throw const PdfEngineProtectedException();
+      }
       throw PdfEngineException('Cannot open PDF: ${error.message}');
     }
     if (document.pages.isEmpty) {

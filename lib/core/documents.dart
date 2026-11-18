@@ -198,6 +198,53 @@ final class OpenDocuments {
   /// How many documents are open.
   int get length => _open.length;
 
+  /// Verify a password against an identity-checked snapshot before saving it.
+  Future<bool> unlockPdf(
+    String path,
+    String? password, {
+    ExpectedBook? expected,
+    CancellationToken? cancellation,
+  }) async {
+    _checkAdmission(cancellation);
+    final snapshot = await _snapshots.newPath();
+    try {
+      final fingerprint = await copyAndFingerprint(
+        path,
+        snapshot,
+        cancellation: cancellation,
+      );
+      _verify(fingerprint.hash, expected, path);
+      _checkAdmission(cancellation);
+      if (password == null) {
+        final document = await _pdfEngine.open(snapshot);
+        await _disposeQuietly(document);
+      } else {
+        final engine = _pdfEngine;
+        if (engine is! UnlockablePdfEngine) {
+          throw const CoreException(
+            CoreErrorKind.unsupported,
+            'PDF unlocking is unavailable.',
+          );
+        }
+        await engine.rememberPassword(
+          snapshot,
+          password,
+          checkCancelled: () => _checkAdmission(cancellation),
+        );
+      }
+      _checkAdmission(cancellation);
+      return true;
+    } on PdfEnginePasswordException {
+      return false;
+    } on PdfEngineLimitException catch (error) {
+      throw CoreException.limitExceeded(error.message);
+    } on PdfEngineException catch (error) {
+      throw CoreException.malformed(error.message);
+    } finally {
+      await _deleteQuietly(snapshot);
+    }
+  }
+
   /// Open the book at [path] as [format], or as the format its extension or
   /// content names. A library book passes the identity it must match as
   /// [expected]; the content read must have its content hash.
@@ -478,10 +525,15 @@ final class OpenDocument {
 Future<PdfEngineDocument> openPdfDocument(PdfEngine engine, String path) async {
   try {
     return await engine.open(path);
+  } on PdfEngineProtectedException {
+    throw const CoreException(
+      CoreErrorKind.protected,
+      'The PDF uses unsupported encryption.',
+    );
   } on PdfEnginePasswordException {
     throw const CoreException(
-      CoreErrorKind.unsupported,
-      'Password-protected PDFs are not supported.',
+      CoreErrorKind.passwordRequired,
+      'The PDF needs a password.',
     );
   } on PdfEngineLimitException catch (error) {
     throw CoreException.limitExceeded(error.message);
@@ -517,6 +569,11 @@ Future<void> _deleteQuietly(String path) async {
 Future<EpubBook> _parseEpub(Uint8List bytes) async {
   try {
     return await parseEpubBytes(bytes);
+  } on EpubProtectedError {
+    throw const CoreException(
+      CoreErrorKind.protected,
+      'The book is DRM-protected or encrypted.',
+    );
   } on EpubLimitError catch (error) {
     throw CoreException.limitExceeded('The EPUB exceeds a limit: $error');
   } on EpubFormatError catch (error) {

@@ -36,8 +36,9 @@ void main() {
             'AI_Agents_and_Applications${i == 3 ? '_print' : ''}.$format';
         db.execute(
           '''INSERT INTO books(title, author, format, file_path, storage_kind,
-          original_path, content_hash, file_size, publication_metadata, display_name)
-          VALUES (?, 'Ada Lee', ?, ?, 'referenced', ?, ?, ?, ?, ?)''',
+          original_path, content_hash, file_size, publication_metadata, display_name,
+          protection_checked)
+          VALUES (?, 'Ada Lee', ?, ?, 'referenced', ?, ?, ?, ?, ?, 1)''',
           [
             i == 4
                 ? 'AI Agents and Applications — Second Edition'
