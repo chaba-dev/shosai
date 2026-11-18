@@ -7,8 +7,8 @@ import 'package:test/test.dart';
 
 /// Archive-path, internal-link and table-of-contents resolution.
 ///
-/// The expected values are derived from the production implementation
-/// (`crates/shosai-core/src/epub/resource.rs`, `parser.rs`): its own tests pin
+/// The expected values were derived from the former Rust implementation
+/// (`crates/shosai-core/src/epub/resource.rs`, `parser.rs`): its tests pinned
 /// `resolve_location(0, "#same") == (0, 7)`, `resolve_location(0,
 /// "two.xhtml#cross%20target") == (1, 12)`, `resolve_location(0, "#missing") ==
 /// None`, `resolve_location(0, "../../outside.xhtml#same") == None`, the nested

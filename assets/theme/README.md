@@ -1,17 +1,16 @@
 # Design tokens
 
 `assets/theme/tokens.json` is the single tracked design-token source for the
-Flutter frontend (restoration plan decision 2: "One tracked token source
-supplies both frontends, including application and reader palettes, type scale,
-radii and gate-relevant layout metrics"). Nothing else may define a theme
-color.
+Flutter frontend, including application and reader palettes, type scale,
+radii and layout metrics. The restoration plan originally shared it between
+two frontends; only Flutter remains. Nothing else may define a theme color.
 
 Since 2026-10-21 its colors, radii, spacing and sizes are the Shōsai design
 system (`docs/design-system.md`, tokens in `docs/design-system/tokens.json`):
 the Bookshelf look, D1 paper, the 丸に書 mark colors and the Inter + Literata
-type set. The type sizes and layout metrics are still the values transcribed
-from the pinned Iced reference, until the Bookshelf composition replaces the
-screens that read them. The Iced application itself (`crates/shosai-app`) was
+type set. The source also preserves type sizes and layout metrics transcribed
+from the pinned Iced reference; their provenance does not imply a live Rust
+consumer. The Iced application itself (`crates/shosai-app`) was
 removed on 2026-10-20 (RFD 12, "The first release").
 
 | File | Role |
@@ -82,8 +81,8 @@ is the same kind of exception.
 
 Plan decision 2 also rejects the historical #109 brown accent. `app.accent` must
 stay the design system's slate `#2B3A5C` (it replaced the Iced `#4D5E86` with D1
-paper on 2026-10-20) and no token value may be `#8A6338`; the generator and both
-sides' tests enforce that.
+paper on 2026-10-20) and no token value may be `#8A6338`; the generator tests
+and Dart theme tests enforce that.
 
 ## Flutter mapping
 
@@ -119,7 +118,7 @@ grid and card metrics (`layout.library.grid*`, `layout.library.card.*`,
 Until 2026-10-20 the generator also wrote `crates/shosai-app/src/theme_tokens.rs`,
 which the Iced application's `theme`, `typography`, `app` and `widgets` modules
 read. That module went with the crate. `crates/shosai-core` never read the
-tokens: `math_layout::MATH_FONT_FAMILY` keeps its own literal, which the
+tokens: `math_layout::MATH_FONT_FAMILY` kept its own literal, which the
 removed app-side test used to compare against `type.family.math.iced`.
 
 ## Rejecting new literal theme colors
@@ -133,5 +132,5 @@ removed app-side test used to compare against `type.family.math.iced`.
 * The golden baselines under `test/goldens/` (Linux reference) and
   `test/goldens/macos/` render these tokens; a color change here is
   re-rendered on both platforms in the same change.
-* The design system's type styles and layered shadows are not in this file
-  yet; they arrive with the Bookshelf composition that reads them.
+* The design system's type styles and layered shadows have not been transcribed
+  into this file.

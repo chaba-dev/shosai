@@ -1,9 +1,11 @@
 # shosai_core
 
 The Dart application core of the Shōsai reader: the SQLite store and the
-records kept in it. It replaces the Rust core and the Flutter bridge in
-stacked slices (RFD 12, milestone M3.0) and is independent of Flutter widgets,
-so its behaviour is tested with `dart test`.
+records kept in it. It replaced the Rust core and its generated Flutter bridge
+in RFD 12 milestone M3.0 (2026-10-21). The current application reaches this
+package through the Dart adapters described in
+[the architecture](../../docs/flutter-architecture.md). It is independent of
+Flutter widgets, so its behaviour is tested with `dart test`.
 
 ## Store
 

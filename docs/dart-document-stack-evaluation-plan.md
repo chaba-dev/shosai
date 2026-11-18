@@ -5,7 +5,11 @@
 > been retired and remain available in repository history. Flutter now lives
 > at the repository root: drop the `flutter/` prefix from source paths below.
 > The prototype's reusable reader fixtures and generator moved to
-> `fixtures/epub-layout/`.
+> `fixtures/epub-layout/`. The Rust core, bridge and runtime parity/fallback
+> path were removed in M3.0 (2026-10-21). Rust ownership, comparison gates and
+> commands below describe migration stages, not the current build. Use
+> [Flutter architecture](flutter-architecture.md) for current ownership and
+> the root [README](../README.md) and `Makefile` for supported commands.
 
 Status: **EPUB adoption decision recorded 2026-09-28; PDF and SQLite
 selected 2026-10-21.** The owner adopted a Dart-owned EPUB parser/normalizer
@@ -15,8 +19,10 @@ replace the remaining Rust core and the Dart/Rust bridge with Dart (see
 [Adoption decision (2026-10-21)](#adoption-decision-2026-10-21)): a Dart-owned
 PDFium binding for PDF and a Dart SQLite binding for storage, with the records
 ported. This document does not authorize a rewrite of retained behavior or
-approve baselines. Every production gate below is still a gate, and no
-restoration package is accepted because the architecture changed.
+approve baselines. Behavioral requirements and recorded acceptance gaps are
+not waived by removing Rust; superseded Rust-specific comparison procedures
+are not current gates. No restoration package is accepted because the
+architecture changed.
 
 ## Continue the parity work; preserve the Flutter UI
 
