@@ -1,5 +1,6 @@
 #include "my_application.h"
 
+#include <errno.h>
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -15,9 +16,8 @@ struct _MyApplication {
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // The window title. The compositor or window manager shows it in the
-// decoration it provides; the application itself draws no title strip. A debug
-// build is told apart from the released app.
-#ifdef NDEBUG
+// decoration it provides; the application itself draws no title strip.
+#ifdef SHOSAI_PRODUCTION
 static const char kWindowTitle[] = "Shōsai";
 #else
 static const char kWindowTitle[] = "Shōsai Dev";
@@ -97,6 +97,20 @@ static gboolean my_application_local_command_line(GApplication* application,
     return TRUE;
   }
 
+#ifdef SHOSAI_PRODUCTION
+  // path_provider prefers the GTK ID if its directory exists; otherwise it
+  // may reuse an existing directory named for the executable. Never let the
+  // production engine start if it could fall back to a development directory.
+  const char* storage_roots[] = {g_get_user_data_dir(), g_get_user_cache_dir()};
+  for (const char* root : storage_roots) {
+    g_autofree char* path = g_build_filename(root, APPLICATION_ID, nullptr);
+    if (g_mkdir_with_parents(path, 0700) != 0) {
+      g_warning("Could not create %s: %s", path, g_strerror(errno));
+      *exit_status = 1;
+      return TRUE;
+    }
+  }
+#endif
   g_application_activate(application);
   *exit_status = 0;
 

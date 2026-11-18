@@ -5,9 +5,6 @@ project(runner LANGUAGES CXX)
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "shosai_flutter")
-# The unique GTK application identifier for this application. See:
-# https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "dev.shosai.shosai_flutter")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -49,6 +46,19 @@ endfunction()
 # Flutter library and tool build rules.
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
+
+# Flutter passes the Dart defines as a comma-separated list of base64 entries.
+get_directory_property(SHOSAI_DEFINES DIRECTORY flutter DEFINITION FLUTTER_TOOL_ENVIRONMENT)
+list(FILTER SHOSAI_DEFINES INCLUDE REGEX "^DART_DEFINES=")
+string(REGEX REPLACE "^DART_DEFINES=" "" SHOSAI_DEFINES "${SHOSAI_DEFINES}")
+string(REPLACE "," ";" SHOSAI_DEFINES "${SHOSAI_DEFINES}")
+# Base64 for SHOSAI_PRODUCTION=true. Keep the executable name fixed for Flutter.
+if("U0hPU0FJX1BST0RVQ1RJT049dHJ1ZQ==" IN_LIST SHOSAI_DEFINES)
+  set(APPLICATION_ID "dev.shosai.reader")
+  add_compile_definitions(SHOSAI_PRODUCTION)
+else()
+  set(APPLICATION_ID "dev.shosai.shosai_flutter")
+endif()
 
 # System-level dependencies.
 find_package(PkgConfig REQUIRED)

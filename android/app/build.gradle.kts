@@ -14,8 +14,13 @@ val dartDefines = (project.findProperty("dart-defines") as? String)
         val value = String(Base64.getDecoder().decode(it), Charsets.UTF_8)
         value.substringBefore("=") to value.substringAfter("=", "")
     }
-val dropboxKey = dartDefines["SHOSAI_DROPBOX_APP_KEY"] ?: "3yy8xd4pncextkh"
+val production = dartDefines["SHOSAI_PRODUCTION"] == "true"
+val devDropboxKey = "3yy8xd4pncextkh"
+val dropboxKey = dartDefines["SHOSAI_DROPBOX_APP_KEY"] ?: if (production) "" else devDropboxKey
 require(dropboxKey.matches(Regex("[a-zA-Z0-9]*"))) { "Invalid Dropbox app key" }
+require(!production || dropboxKey != devDropboxKey) {
+    "Use a separate production Dropbox app key or leave Dropbox disabled"
+}
 
 android {
     namespace = "dev.shosai.shosai"
@@ -40,29 +45,41 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "dev.shosai.shosai"
+        applicationId = if (production) "dev.shosai.reader" else "dev.shosai.shosai"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // Debug and profile builds (Flutter's profile type starts from debug)
-        // are told apart from the released app on the launcher.
-        manifestPlaceholders["appLabel"] = "Shōsai Dev"
+        manifestPlaceholders["appLabel"] = if (production) "Shōsai" else "Shōsai Dev"
         // Dropbox uses AppAuth's browser callback. Google still uses GIS.
-        manifestPlaceholders["appAuthRedirectScheme"] = "db-$dropboxKey"
+        manifestPlaceholders["appAuthRedirectScheme"] =
+            if (production && dropboxKey.isEmpty()) "dev.shosai.reader.dropbox-disabled" else "db-$dropboxKey"
+    }
+
+    signingConfigs {
+        if (production) {
+            create("production") {
+                fun required(name: String) = providers.environmentVariable(name).orNull
+                    ?.takeIf { it.isNotBlank() } ?: error("Set $name for production signing")
+                storeFile = file(required("SHOSAI_ANDROID_KEYSTORE"))
+                storePassword = required("SHOSAI_ANDROID_STORE_PASSWORD")
+                keyAlias = required("SHOSAI_ANDROID_KEY_ALIAS")
+                keyPassword = required("SHOSAI_ANDROID_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
-            manifestPlaceholders["appLabel"] = "Shōsai"
+            signingConfig = signingConfigs.getByName(if (production) "production" else "debug")
         }
     }
+}
+
+androidComponents.beforeVariants { variant ->
+    if (production && variant.buildType != "release") variant.enable = false
 }
 
 flutter {

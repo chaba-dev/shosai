@@ -1,0 +1,4 @@
+// Opt in with XCODE_XCCONFIG_FILE for an official build or archive.
+SHOSAI_APP_ID = dev.shosai.reader
+SHOSAI_APP_LABEL = Shōsai
+SHOSAI_APP_ICON = AppIcon
