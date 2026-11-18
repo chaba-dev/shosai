@@ -15,8 +15,8 @@ import '../support/production_shell_harness.dart';
 /// (`app.rs:8048-8093`), not read back from the widget, so a wrong mapping
 /// cannot agree with itself. Opening is
 /// asserted through the reader boundary: the durable saved position is
-/// Rust-owned, so the library's contract is that the reader is asked for the
-/// position of the book the card showed.
+/// owned by the Dart core, so the library's contract is that the reader is
+/// asked for the position of the book the card showed.
 FlutterLibraryBook _book({
   required int id,
   required String title,
@@ -536,7 +536,7 @@ void main() {
           _resumable(9, 'Second resumable', progress: 0.07),
         ],
         covers: harnessCovers(),
-        // The durable position Rust would report for book 7: its third unit.
+        // The durable position the core would report for book 7: its third unit.
         readingState: FlutterReadingState(unit: BigInt.from(2), zoom: 1),
       );
       const view = HarnessView(size: Size(1280, 800));
@@ -565,7 +565,7 @@ void main() {
       }
 
       // The reader was opened for the continued book — the first eligible one,
-      // not the later resumable book — asked Rust for that book's durable
+      // not the later resumable book — asked the core for that book's durable
       // position, and rendered the page that position names.
       expect(bridge.openedBooks, [7]);
       expect(bridge.openedBooks, isNot(contains(9)));

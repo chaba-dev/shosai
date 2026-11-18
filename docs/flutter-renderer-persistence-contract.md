@@ -1,16 +1,20 @@
 # 5A renderer and persistence contract
 
-> **Note (2026-10-20).** The Iced application (`crates/shosai-app`) and CBZ
-> support were removed on 2026-10-20 (RFD 12, "The first release"; RFD 10 returns
-> CBZ as a later format package). Where this contract says PDF/CBZ, only the PDF
-> portion is live code; the CBZ rules are retained as the record for that
-> package.
+> **Historical contract.** The Iced application (`crates/shosai-app`) and CBZ
+> support were removed on 2026-10-20 (RFD 12, "The first release"). The Rust core,
+> generated bridge and Rust renderer/persistence mechanisms followed in M3.0
+> (2026-10-21). Rust ownership and executable procedures below describe that
+> former stack, including its PDF path; current ownership is defined by
+> [Flutter architecture](flutter-architecture.md). Behavioral requirements and
+> recorded acceptance are preserved, but the removed implementation is not a
+> current dependency. CBZ remains outside the first release (RFD 10).
 
 Status: **accepted by the owner; merged in [PR #134](https://github.com/chaba-dev/shosai/pull/134)
 at [154088a4](https://github.com/chaba-dev/shosai/commit/154088a44ade72ffc77f18c98933f8f3e7c7824e)
 on 2026-09-28T05:17:09Z. Its Rust-specific EPUB renderer/persistence portions
-are superseded by the 2026-09-28 EPUB adoption decision (see §1); its behavioral
-rules and PDF/CBZ portions remain in force.**
+were superseded by the 2026-09-28 EPUB adoption decision (see §1), and the
+remaining Rust mechanisms by M3.0. Its applicable behavioral requirements and
+acceptance record remain; CBZ is historical, not first-release scope.**
 Base: [PR #133](https://github.com/chaba-dev/shosai/pull/133),
 [6514f5de](https://github.com/chaba-dev/shosai/commit/6514f5de62caecaf781edee0774bc3880ff95bf5).
 Owner: [5A thread](https://ampcode.com/threads/T-01a0e64e-c3e6-71fb-bb9b-1a7a40618e26).

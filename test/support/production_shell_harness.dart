@@ -20,9 +20,9 @@ import 'package:shosai_epub/shosai_epub.dart' show EpubBook, openEpubBytes;
 /// Test support for rendering and inspecting the production shell.
 ///
 /// The harness renders [ShosaiShell], the composition `main.dart` uses, and
-/// substitutes only the Rust bridge beneath it. It provides deterministic
-/// fonts, library data and reader rasters, geometry-based render detectors and
-/// artifact capture so that renders can be inspected and reproduced.
+/// substitutes deterministic document and record adapters beneath it. It
+/// provides fonts, library data and reader rasters, geometry-based render
+/// detectors and artifact capture so that renders can be inspected and reproduced.
 ///
 /// The detectors deliberately do not rely on Flutter's own overflow reporting:
 /// [findRenderDefects] measures the laid-out tree, so text that is silently
@@ -1990,7 +1990,7 @@ bool harnessImagesReady(WidgetTester tester) {
 /// palette — dark ink on light paper, or light ink on the dark palette — while
 /// a blank region measures zero. The region is the reader's own page box, so
 /// the measurement follows whichever renderer painted the document (the
-/// retained Rust raster, or the Dart EPUB page window).
+/// PDF raster painter or the Dart EPUB page window).
 int regionInk(HarnessImage image, {required Rect rect, int threshold = 8}) {
   final left = rect.left.floor().clamp(0, image.width - 1);
   final right = rect.right.ceil().clamp(left + 1, image.width);

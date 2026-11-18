@@ -36,8 +36,8 @@ const shosaiInterfaceFontFallback = [shosaiJapaneseInterfaceFontFamily];
 
 /// The bundled interface family that covers [text].
 ///
-/// Mirrors `font_for_text` in `crates/shosai-app/src/typography.rs` so both
-/// products select the same bundled face for the same string. User metadata
+/// Ported from `font_for_text` in the removed Iced application's
+/// `crates/shosai-app/src/typography.rs`. User metadata
 /// that contains Japanese is rendered with Noto Sans JP as the primary family
 /// instead of through the fallback chain, which is what `docs/typography.md`
 /// requires; it also keeps the paragraph's glyphs inside their box, because a

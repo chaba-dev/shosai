@@ -5,12 +5,12 @@ import 'package:shosai_epub/shosai_epub.dart';
 import 'package:test/test.dart';
 import 'package:xml/xml.dart';
 
-/// Ports of production Rust parser assertions
+/// Ports of former Rust parser assertions
 /// (`crates/shosai-core/src/epub/render.rs` tests) plus fixture checks.
 ///
 /// Every expectation marked "Rust:" is copied from the Rust test of the same
 /// name. A ported case that deliberately differs is marked and asserted for the
-/// prototype's documented behaviour instead.
+/// Dart engine's documented behaviour instead; no Rust code runs in this suite.
 void main() {
   NormalizedChapter parse(String xhtml) => normalizeChapter(
     xhtml: xhtml,
@@ -1642,12 +1642,11 @@ void main() {
 
     test('a truncated cell anchor walk rejects the chapter', () {
       // A textless subtree past the depth ceiling leaves the canonical text
-      // unchanged, so the routing gate cannot catch the difference; and a
+      // unchanged, so the former routing gate could not catch the difference; a
       // partial walk map cannot prove it resolved the first occurrence of
       // every name (a duplicate inside the same cell would still claim a
-      // wrong offset). The walk therefore fails admission, like the
-      // canonical ceiling, and the book stays on the retained renderer whose
-      // walkers have no such ceiling.
+      // wrong offset). The walk therefore fails admission with EpubLimitError,
+      // like the canonical ceiling. There is no retained-renderer fallback.
       var nested = '<a id="t"/>';
       for (var i = 0; i < 65; i += 1) {
         nested = '<span>$nested</span>';

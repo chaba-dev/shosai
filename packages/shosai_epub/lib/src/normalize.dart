@@ -1,15 +1,15 @@
-/// XHTML → normalized content model, ported from the production Rust
+/// XHTML → normalized content model, ported from the former Rust
 /// `epub::render` parser with bounded, documented simplifications.
 ///
-/// Known deviations from the former Rust implementation remain open parity
-/// work rather than accepted permanent differences. They affect behaviour:
-/// - nested lists flatten into their parent item (the Rust parser does the
+/// Known limits and historical comparisons are recorded in the package README.
+/// They affect behaviour:
+/// - nested lists flatten into their parent item (the Rust parser did the
 ///   same, but the whitespace-collapse unit differs slightly);
 /// - `@media`/`@import`/attribute/pseudo selectors are not applied.
 ///
 /// Display-block MathML inside a paragraph is promoted into sibling nodes with
-/// the production parser's generated separators, so the canonical stream and
-/// its anchor offsets match the retained Rust stream for that case.
+/// the former parser's generated separators. The Dart engine and application
+/// core share the resulting canonical stream and anchor offsets.
 library;
 
 import 'package:characters/characters.dart';

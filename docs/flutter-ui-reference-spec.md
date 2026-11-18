@@ -4,6 +4,11 @@
 > Historical `flutter/` source citations below use the old layout; drop that
 > prefix for current files. The Rust benchmark harness and its generated F9
 > inputs have been retired; their provenance remains in repository history.
+> The Rust core and generated bridge were also removed in M3.0 (2026-10-21).
+> Rust ownership, parity gates and reproduction commands below refer to that
+> historical stack, not the current application. Current ownership is defined
+> by [Flutter architecture](flutter-architecture.md); this record still supplies
+> historical token/capture provenance and does not grant new acceptance.
 
 > **Note (2026-10-20).** The Iced application (`crates/shosai-app`) was removed
 > on 2026-10-20 (RFD 12, "The first release"); its source citations below refer

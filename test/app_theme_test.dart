@@ -292,7 +292,7 @@ void main() {
     ) async {
       // Interface fonts are separate from document fonts: the reader chrome
       // uses the interface family and never forces a document font onto the
-      // page, which the Rust raster supplies. The chrome surfaces keep the
+      // page, which the format's renderer supplies. The chrome surfaces keep the
       // application palette in every reader theme (owner decision 2026-09-28);
       // the reader theme selects the *document* palette, which the page
       // painters read through [pageColors].

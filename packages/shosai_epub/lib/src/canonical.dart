@@ -297,9 +297,9 @@ class CanonicalTextBuilder {
 ///
 /// Checkpoint `i` stores the UTF-16 code-unit offset of canonical scalar
 /// `i * kCanonicalCheckpointScalars`, so resolving a scalar is a bounded walk
-/// of fewer than 1,024 scalars from the nearest checkpoint. Rust stores UTF-8
-/// byte offsets; Dart strings are UTF-16, so the unit differs while the bound
-/// and the algorithm are the same.
+/// of fewer than 1,024 scalars from the nearest checkpoint. The former Rust
+/// implementation indexed UTF-8 bytes; Dart strings are UTF-16, so the unit
+/// differs while the bound and the algorithm are the same.
 class CanonicalIndex {
   CanonicalIndex._(this.scalarCount, this.codeUnitLength, this._checkpoints);
 

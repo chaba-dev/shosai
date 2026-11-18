@@ -23,8 +23,8 @@ import '../support/selection_surface_fixture.dart';
 ///
 /// The fixture archive is parsed by the real engine; the bridge is the
 /// deterministic harness, so the *navigation decision* (target chapter, durable
-/// offset, fallback and refusal) is what these tests isolate. The native bridge
-/// parity suite covers the same resolution against the real Rust bridge.
+/// offset, fallback and refusal) is what these tests isolate. The Rust bridge
+/// and its native parity suite were removed in M3.0.
 ///
 /// Alternates frame pumps with real-event-loop windows so native completions
 /// (open, engine parse, layout, annotation reads) can arrive and settle.

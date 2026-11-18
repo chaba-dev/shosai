@@ -4,8 +4,8 @@
 /// Endpoints, visual lines and boundaries are derived from the same
 /// [TextPainter]s the page painter draws, so pixels, hit testing and selection
 /// geometry cannot drift apart. Offsets are *chapter-relative canonical
-/// scalars*, the same stream the retained Rust renderer, search and the
-/// annotation store use.
+/// scalars*, the same Dart engine stream that search and the annotation store
+/// use.
 library;
 
 import 'dart:math' as math;

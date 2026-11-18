@@ -436,9 +436,8 @@ class LibraryController implements Listenable {
               message.page.hasMore) {
             // The page claimed another page but added nothing, so the next
             // request would repeat this offset and return the same empty page.
-            // The Rust producer derives `has_more` from a `limit + 1` fetch and
-            // cannot report this shape; refusing the repeat bounds a malformed
-            // response instead of looping on it.
+            // Refusing the repeat bounds a malformed response instead of
+            // looping on it.
             _stalledAppendOffset = _model.shelfLength;
           }
           _emit(
