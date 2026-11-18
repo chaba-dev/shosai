@@ -1257,6 +1257,18 @@
   "editionMatchConflict": "Title or author differs — check the edition",
   "editionSourceChanged": "This file changed since it was listed. Refresh the library and try again.",
   "editionAddedSeparately": "The verified file couldn't be confirmed as part of this group. It was added separately; your original files and notes are unchanged.",
+  "bookLocked": "Locked",
+  "bookLockedTitle": "This book is locked",
+  "bookDrmProtected": "This book is DRM-protected or encrypted. Shōsai can’t open it.",
+  "pdfUnlockTitle": "Unlock PDF",
+  "pdfPasswordRequired": "This PDF is password-protected. Enter the password to open it.",
+  "pdfPasswordLabel": "Password",
+  "pdfPasswordSavedHint": "The password will be saved securely on this device.",
+  "pdfPasswordIncorrect": "That password didn’t work. Try again.",
+  "pdfPasswordSaveFailed": "Secure password storage is unavailable. Check your device’s password store and try again.",
+  "pdfPasswordShow": "Show password",
+  "pdfPasswordHide": "Hide password",
+  "pdfUnlockAction": "Open PDF",
   "editionLocations": "{count, plural, =1{1 location} other{{count} locations}}",
   "@editionLocations": {"placeholders": {"count": {"type": "int"}}}
 }

@@ -4,11 +4,16 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/document_access.dart';
 import 'package:shosai_flutter/opened_documents.dart';
 import '../support/bridge_pdf_engine.dart';
 import '../support/bridge_records.dart';
 
-FlutterLibraryBook _book(int id, String title) => FlutterLibraryBook(
+FlutterLibraryBook _book(
+  int id,
+  String title, {
+  FlutterBookProtection protection = FlutterBookProtection.none,
+}) => FlutterLibraryBook(
   bookId: id,
   title: title,
   format: FlutterBookFormat.pdf,
@@ -16,6 +21,7 @@ FlutterLibraryBook _book(int id, String title) => FlutterLibraryBook(
   managed: false,
   progress: 0,
   dateAdded: '2026-09-10',
+  protection: protection,
 );
 
 Future<void> _settle() async {
@@ -121,6 +127,24 @@ class _StubLibraryBridge
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _ProtectedLibraryBridge extends _StubLibraryBridge
+    implements DocumentAccessHost {
+  @override
+  Future<FlutterBookProtection> bookProtection({
+    required int bookId,
+    required BigInt cancellationId,
+  }) async =>
+      bookId == 2 ? FlutterBookProtection.drm : FlutterBookProtection.password;
+
+  @override
+  Future<bool> unlockPdf({
+    int? bookId,
+    required String pathKey,
+    String? password,
+    required BigInt cancellationId,
+  }) async => password == 'synthetic-correct';
+}
+
 LibraryController _controller(_StubLibraryBridge bridge) => LibraryController(
   bridge: bridge,
   confirmRemoval: (_) async => true,
@@ -159,6 +183,98 @@ class _ObservingController extends LibraryController {
 }
 
 void main() {
+  test(
+    'locked PDFs open only after successful unlock; DRM stays on the shelf',
+    () async {
+      final bridge = _ProtectedLibraryBridge();
+      final opened = <FlutterLibraryBook>[];
+      final requests = <PdfPasswordRequest>[];
+      var explanations = 0;
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => null,
+        openBook: (book) async => opened.add(book),
+        drainReaderSaves: (_) async {},
+        showLockedBook: () async {
+          explanations++;
+        },
+        passwordPrompt: (request) async {
+          requests.add(request);
+          expect(opened, isEmpty);
+          return requests.length == 1 ? 'synthetic-wrong' : 'synthetic-correct';
+        },
+      );
+      addTearDown(controller.dispose);
+      controller.dispatch(
+        LibraryBookOpened(
+          _book(1, 'Locked PDF', protection: FlutterBookProtection.password),
+        ),
+      );
+      await _settle();
+      expect(requests.map((r) => r.error), [
+        null,
+        'That password didn’t work. Try again.',
+      ]);
+      expect(opened.map((b) => b.bookId), [1]);
+      bridge.pages.last.complete(
+        const FlutterLibraryPage(books: [], hasMore: false),
+      );
+      await _settle();
+      expect(controller.model.busy, isFalse);
+      controller.dispatch(
+        LibraryBookOpened(
+          _book(2, 'DRM EPUB', protection: FlutterBookProtection.drm),
+        ),
+      );
+      await _settle();
+      expect(explanations, 1);
+      expect(opened.map((b) => b.bookId), [1]);
+      bridge.pages.last.complete(
+        const FlutterLibraryPage(books: [], hasMore: false),
+      );
+      await _settle();
+      expect(controller.model.error, isNull);
+      expect(controller.model.busy, isFalse);
+    },
+  );
+
+  test(
+    'cancelled and superseded unlocks never navigate and release the shelf',
+    () async {
+      for (final superseded in [false, true]) {
+        final bridge = _ProtectedLibraryBridge();
+        final prompt = Completer<String?>();
+        final opened = <FlutterLibraryBook>[];
+        final controller = LibraryController(
+          bridge: bridge,
+          confirmRemoval: (_) async => true,
+          pickImport: () async => null,
+          openBook: (book) async => opened.add(book),
+          drainReaderSaves: (_) async {},
+          passwordPrompt: (_) => prompt.future,
+        );
+        controller.dispatch(
+          LibraryBookOpened(
+            _book(1, 'Locked PDF', protection: FlutterBookProtection.password),
+          ),
+        );
+        await _settle();
+        if (superseded) controller.dispatch(const LibraryOperationCancelled());
+        prompt.complete(superseded ? 'synthetic-correct' : null);
+        await _settle();
+        expect(opened, isEmpty);
+        bridge.pages.last.complete(
+          const FlutterLibraryPage(books: [], hasMore: false),
+        );
+        await _settle();
+        expect(controller.model.error, isNull);
+        expect(controller.model.busy, isFalse);
+        controller.dispose();
+      }
+    },
+  );
+
   test('a completed page publishes books and reader settings', () async {
     final bridge = _StubLibraryBridge();
     final controller = _controller(bridge);

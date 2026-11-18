@@ -2418,6 +2418,78 @@ abstract class AppLocalizations {
   /// **'The verified file couldn\'t be confirmed as part of this group. It was added separately; your original files and notes are unchanged.'**
   String get editionAddedSeparately;
 
+  /// No description provided for @bookLocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Locked'**
+  String get bookLocked;
+
+  /// No description provided for @bookLockedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This book is locked'**
+  String get bookLockedTitle;
+
+  /// No description provided for @bookDrmProtected.
+  ///
+  /// In en, this message translates to:
+  /// **'This book is DRM-protected or encrypted. Shōsai can’t open it.'**
+  String get bookDrmProtected;
+
+  /// No description provided for @pdfUnlockTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock PDF'**
+  String get pdfUnlockTitle;
+
+  /// No description provided for @pdfPasswordRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'This PDF is password-protected. Enter the password to open it.'**
+  String get pdfPasswordRequired;
+
+  /// No description provided for @pdfPasswordLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get pdfPasswordLabel;
+
+  /// No description provided for @pdfPasswordSavedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The password will be saved securely on this device.'**
+  String get pdfPasswordSavedHint;
+
+  /// No description provided for @pdfPasswordIncorrect.
+  ///
+  /// In en, this message translates to:
+  /// **'That password didn’t work. Try again.'**
+  String get pdfPasswordIncorrect;
+
+  /// No description provided for @pdfPasswordSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Secure password storage is unavailable. Check your device’s password store and try again.'**
+  String get pdfPasswordSaveFailed;
+
+  /// No description provided for @pdfPasswordShow.
+  ///
+  /// In en, this message translates to:
+  /// **'Show password'**
+  String get pdfPasswordShow;
+
+  /// No description provided for @pdfPasswordHide.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide password'**
+  String get pdfPasswordHide;
+
+  /// No description provided for @pdfUnlockAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Open PDF'**
+  String get pdfUnlockAction;
+
   /// No description provided for @editionLocations.
   ///
   /// In en, this message translates to:

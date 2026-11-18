@@ -1435,14 +1435,20 @@ class _SourceFileCard extends StatelessWidget {
                 ),
               ),
               Flexible(
-                child: Text(
-                  file.failure == null
-                      ? file.source
-                      : AppLocalizations.of(context).libraryBookUnavailable,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _cardMetaStyle(context),
-                ),
+                child:
+                    file.failure == null &&
+                        file.protection != BookProtection.none
+                    ? const _LockedBookStatus()
+                    : Text(
+                        file.failure == null
+                            ? file.source
+                            : AppLocalizations.of(
+                                context,
+                              ).libraryBookUnavailable,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _cardMetaStyle(context),
+                      ),
               ),
             ],
           ),
@@ -1538,6 +1544,31 @@ class _SourceFileCoverState extends State<_SourceFileCover> {
   }
 }
 
+class _LockedBookStatus extends StatelessWidget {
+  const _LockedBookStatus();
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    spacing: 4,
+    children: [
+      Icon(
+        LucideIcons.lockKeyhole,
+        size: 12,
+        color: ShellPalette.of(context).inkMuted,
+      ),
+      Flexible(
+        child: Text(
+          AppLocalizations.of(context).bookLocked,
+          maxLines: _cardMetadataWraps(context) ? _cardMetadataWrappedLines : 1,
+          overflow: TextOverflow.ellipsis,
+          style: _cardMetaStyle(context),
+        ),
+      ),
+    ],
+  );
+}
+
 /// One identified book on the shelf, with its cover, format, reading state
 /// and actions. Discovery-only files never receive record-only actions.
 class LibraryBookCard extends StatelessWidget {
@@ -1580,6 +1611,8 @@ class LibraryBookCard extends StatelessWidget {
     final metaStyle = _cardMetaStyle(context);
     final status = book.unavailable
         ? l10n.libraryBookUnavailable
+        : book.protection != FlutterBookProtection.none
+        ? l10n.bookLocked
         : shellReadingStatus(l10n, book.progress);
     final wraps = _cardMetadataWraps(context);
     final statusLabel = removing
@@ -1603,6 +1636,8 @@ class LibraryBookCard extends StatelessWidget {
               style: shosaiInterfaceStyleForText(metaStyle, l10n.cardRemoving),
             ),
           )
+        : !book.unavailable && book.protection != FlutterBookProtection.none
+        ? const _LockedBookStatus()
         : Text(
             status,
             maxLines: wraps ? _cardMetadataWrappedLines : 1,

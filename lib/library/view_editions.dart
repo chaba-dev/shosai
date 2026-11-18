@@ -31,24 +31,14 @@ class _EditionCard extends StatelessWidget {
     final source = model.sourceFiles
         .where((s) => s.locator == coverFile.locator)
         .firstOrNull;
-    var readingFile = edition.preferred ?? file;
-    if (edition.preferred == null) {
-      for (final candidate in edition.files) {
-        if (candidate.book != null &&
-            (readingFile.book == null ||
-                (candidate.book!.lastRead ?? '').compareTo(
-                      readingFile.book!.lastRead ?? '',
-                    ) >
-                    0)) {
-          readingFile = candidate;
-        }
-      }
-    }
+    final readingFile = edition.readingFile;
     final progress = readingFile.book?.progress ?? 0.0;
     final palette = ShellPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final status = readingFile.unavailable
         ? l10n.libraryBookUnavailable
+        : readingFile.protection != BookProtection.none
+        ? l10n.bookLocked
         : readingFile.book == null
         ? readingFile.source
         : shellReadingStatus(l10n, progress);
@@ -123,17 +113,21 @@ class _EditionCard extends StatelessWidget {
                                 ),
                           ],
                         ),
-                        Text(
-                          status,
-                          maxLines: _cardMetadataWraps(context)
-                              ? _cardMetadataWrappedLines
-                              : 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: shosaiInterfaceStyleForText(
-                            _cardMetaStyle(context),
+                        if (!readingFile.unavailable &&
+                            readingFile.protection != BookProtection.none)
+                          const _LockedBookStatus()
+                        else
+                          Text(
                             status,
+                            maxLines: _cardMetadataWraps(context)
+                                ? _cardMetadataWrappedLines
+                                : 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: shosaiInterfaceStyleForText(
+                              _cardMetaStyle(context),
+                              status,
+                            ),
                           ),
-                        ),
                         if (open)
                           Text(
                             l10n.cardOpenTag,
@@ -294,6 +288,9 @@ class LibraryQuickPicker extends StatelessWidget {
                                                 _editionSize(bytes),
                                               if (file.unavailable)
                                                 l10n.libraryBookUnavailable,
+                                              if (file.protection !=
+                                                  BookProtection.none)
+                                                l10n.bookLocked,
                                               if (file.book case final book?
                                                   when book.progress > 0)
                                                 shellReadingStatus(

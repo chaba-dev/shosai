@@ -385,5 +385,17 @@
   "editionMatchConflict": "タイトルまたは著者が異なります。版を確認してください",
   "editionSourceChanged": "一覧の取得後にファイルが変更されました。ライブラリを更新して、もう一度お試しください。",
   "editionAddedSeparately": "確認したファイルがこのグループの本か判断できなかったため、別の本として追加しました。元のファイルとノートは変更されていません。",
+  "bookLocked": "ロック中",
+  "bookLockedTitle": "この本はロックされています",
+  "bookDrmProtected": "この本は DRM で保護されているか、暗号化されているため、Shōsai では開けません。",
+  "pdfUnlockTitle": "PDF のロックを解除",
+  "pdfPasswordRequired": "この PDF はパスワードで保護されています。開くにはパスワードを入力してください。",
+  "pdfPasswordLabel": "パスワード",
+  "pdfPasswordSavedHint": "パスワードはこの端末に安全に保存されます。",
+  "pdfPasswordIncorrect": "パスワードが違います。もう一度お試しください。",
+  "pdfPasswordSaveFailed": "パスワードを安全に保存できません。この端末のパスワード保管機能を確認して、もう一度お試しください。",
+  "pdfPasswordShow": "パスワードを表示",
+  "pdfPasswordHide": "パスワードを隠す",
+  "pdfUnlockAction": "PDF を開く",
   "editionLocations": "{count}か所"
 }

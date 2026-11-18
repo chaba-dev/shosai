@@ -16,6 +16,7 @@ import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/library_editions.dart';
 import 'package:shosai_flutter/core/records.dart';
+import 'package:shosai_flutter/core/document_access.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/l10n/app_localizations_en.dart';
@@ -34,6 +35,8 @@ class LibraryController implements Listenable {
     required LibraryImportPicker pickImport,
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
+    PdfPasswordPrompt? passwordPrompt,
+    Future<void> Function()? showLockedBook,
     LibraryEditionPicker? pickEdition,
     LibraryEditionGrouper? groupEdition,
     LibraryConnectionsManager? manageConnections,
@@ -53,6 +56,8 @@ class LibraryController implements Listenable {
        _pickImport = pickImport,
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
+       _passwordPrompt = passwordPrompt,
+       _showLockedBook = showLockedBook,
        _pickEdition = pickEdition,
        _groupEdition = groupEdition,
        _manageConnections = manageConnections,
@@ -79,6 +84,8 @@ class LibraryController implements Listenable {
   final LibraryImportPicker _pickImport;
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
+  final PdfPasswordPrompt? _passwordPrompt;
+  final Future<void> Function()? _showLockedBook;
   final LibraryEditionPicker? _pickEdition;
   final LibraryEditionGrouper? _groupEdition;
   final LibraryConnectionsManager? _manageConnections;
@@ -828,6 +835,7 @@ class LibraryController implements Listenable {
         unavailable: book.unavailable,
         located: book.located,
         keptOnDevice: book.keptOnDevice,
+        protection: book.protection,
       );
 
   void _load({bool append = false, bool refreshSources = false}) {
@@ -959,7 +967,7 @@ class LibraryController implements Listenable {
         List<BookEdition>? editions;
         if (host is LibraryEditionsHost) {
           discovery.throwIfCancelled();
-          final grouped = await (host as LibraryEditionsHost).editions.page(
+          final grouped = await (host as LibraryEditionsHost).editionPage(
             sources: [for (final file in sourceFiles) file.locator],
             query: query,
             format: format == null
@@ -968,6 +976,7 @@ class LibraryController implements Listenable {
             sort: LibrarySort.values.byName(pageSort.name),
             limit: libraryPageSize,
             offset: offset,
+            cancellationId: cancellation,
           );
           discovery.throwIfCancelled();
           editions = grouped.editions;
@@ -1346,17 +1355,61 @@ class LibraryController implements Listenable {
   }
 
   void _openReader(FlutterLibraryBook book) {
+    final revision = ++_adapterRevision;
     _readerActive = true;
     _previewSources(const []);
     _beginEffect();
     unawaited(() async {
+      BigInt? cancellation;
+      String? error;
       try {
+        final host = _bridge;
+        var protection = book.protection;
+        if (host is DocumentAccessHost) {
+          cancellation = _bridge.createCancellation();
+          _cancellations.add(cancellation);
+          _foregroundCancellations.add(cancellation);
+          protection = await (host as DocumentAccessHost).bookProtection(
+            bookId: book.bookId,
+            cancellationId: cancellation,
+          );
+          if (!_ownsAdapter(revision)) return;
+        }
+        if (protection == FlutterBookProtection.drm) {
+          if (_showLockedBook case final show?) {
+            await show();
+          } else {
+            error = _localizations().bookDrmProtected;
+          }
+          return;
+        }
+        if (protection == FlutterBookProtection.password &&
+            host is DocumentAccessHost &&
+            _passwordPrompt != null) {
+          final unlocked = await unlockPdfWithPrompt(
+            host: host as DocumentAccessHost,
+            prompt: _passwordPrompt,
+            title: book.title,
+            pathKey: book.pathKey,
+            bookId: book.bookId,
+            cancellationId: cancellation!,
+            isCurrent: () => _ownsAdapter(revision),
+            localizations: _localizations,
+          );
+          if (!unlocked) return;
+        }
+        if (!_ownsAdapter(revision)) return;
         await _openBook(book);
         await _drainReaderSaves(book.bookId);
-        dispatch(const _LibraryReaderClosed(null));
-      } catch (error) {
-        dispatch(_LibraryReaderClosed(safeError(error, _localizations())));
+      } catch (failure) {
+        if (_ownsAdapter(revision)) {
+          error = safeError(failure, _localizations());
+        }
       } finally {
+        if (cancellation != null) _releaseCancellation(cancellation);
+        // No other reader can start while this busy effect owns the shelf.
+        // Even a cancelled prompt must release that ownership.
+        dispatch(_LibraryReaderClosed(error));
         dispatch(const _LibraryEffectFinished());
       }
     }());

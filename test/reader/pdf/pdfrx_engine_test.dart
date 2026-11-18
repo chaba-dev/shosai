@@ -8,6 +8,7 @@ import 'package:shosai_flutter/reader/pdf/page_geometry.dart';
 import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 
 import '../../support/reference_documents.dart';
+import '../../support/protected_pdf.dart';
 
 const _fixture = 'fixtures/sample.pdf';
 
@@ -43,6 +44,103 @@ Future<String> _pdfWith(String catalogExtra) async {
 
 void main() {
   final engine = PdfrxPdfEngine();
+
+  test(
+    'PDF passwords are verified before saving and follow bytes across engine restarts',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-protected-pdf-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = await protectedPdf(directory);
+      final vault = TestPasswordStore();
+      final locked = PdfrxPdfEngine(passwords: vault);
+      await expectLater(
+        locked.open(file.path),
+        throwsA(isA<PdfEnginePasswordException>()),
+      );
+      await expectLater(
+        locked.rememberPassword(file.path, 'incorrect-fixture-password'),
+        throwsA(isA<PdfEnginePasswordException>()),
+      );
+      expect(vault.values, isEmpty);
+      await locked.rememberPassword(file.path, 'fixture-password');
+      final renamed = await file.copy('${directory.path}/renamed.pdf');
+      final reopened = await PdfrxPdfEngine(
+        passwords: vault,
+      ).open(renamed.path);
+      try {
+        expect(reopened.isEncrypted, isTrue);
+        expect(reopened.pageCount, 1);
+        expect((await reopened.info()).title, 'Unlocked fixture title');
+        expect(await reopened.pageText(0), contains('Synthetic PDF fixture'));
+        final raster = await reopened.render(0, 1);
+        expect((raster.width, raster.height), (240, 180));
+      } finally {
+        await reopened.dispose();
+      }
+      // Same path/format/password, different encrypted bytes: no credential reuse.
+      final other = await protectedPdf(directory, name: 'different-copy');
+      await expectLater(
+        locked.open(other.path),
+        throwsA(isA<PdfEnginePasswordException>()),
+      );
+    },
+  );
+
+  test(
+    'permission-only encryption opens without a vault or password',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-permissions-pdf-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = await protectedPdf(directory, password: '');
+      final vault = TestPasswordStore()..unavailable = true;
+      final document = await PdfrxPdfEngine(passwords: vault).open(file.path);
+      try {
+        expect(document.isEncrypted, isTrue);
+        expect(document.allowsCopying, isFalse);
+        expect(await document.pageText(0), contains('Synthetic PDF fixture'));
+        expect(vault.values, isEmpty);
+      } finally {
+        await document.dispose();
+      }
+    },
+  );
+
+  test(
+    'a verified password is not retained when cancellation or secure saving fails',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-vault-pdf-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = await protectedPdf(directory);
+      final vault = TestPasswordStore();
+      final engine = PdfrxPdfEngine(passwords: vault);
+      var checks = 0;
+      await expectLater(
+        engine.rememberPassword(
+          file.path,
+          'fixture-password',
+          checkCancelled: () {
+            if (++checks == 2) {
+              throw const FormatException('Cancelled test operation');
+            }
+          },
+        ),
+        throwsFormatException,
+      );
+      expect(vault.values, isEmpty);
+      vault.unavailable = true;
+      await expectLater(
+        engine.rememberPassword(file.path, 'fixture-password'),
+        throwsA(isA<PdfPasswordStorageException>()),
+      );
+      expect(vault.values, isEmpty);
+    },
+  );
 
   test('crop admission includes outward rounding at area and edge limits', () {
     final exactArea = pdfBitmapSizeFor(const PdfPageSize(5000, 8000), 1);

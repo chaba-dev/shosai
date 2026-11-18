@@ -11,6 +11,7 @@ import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/documents.dart';
+import 'package:shosai_flutter/core/document_access.dart';
 import 'package:shosai_flutter/core/dropbox_connection.dart';
 import 'package:shosai_flutter/core/google_drive_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
@@ -202,13 +203,14 @@ final class PdfEngineInspector implements BookInspector {
           // The document is unusable either way; inspection's result stands.
         }
       }
-    } on CoreException {
+    } on CoreException catch (error) {
+      if (error.kind == CoreErrorKind.passwordRequired) {
+        return const BookMetadata(protection: BookProtection.password);
+      }
+      if (error.kind == CoreErrorKind.protected) {
+        return const BookMetadata(protection: BookProtection.drm);
+      }
       rethrow;
-    } on PdfEnginePasswordException {
-      throw const CoreException(
-        CoreErrorKind.unsupported,
-        'Password-protected PDFs are not supported.',
-      );
     } on PdfEngineLimitException catch (error) {
       throw CoreException.limitExceeded(error.message);
     } on PdfEngineException catch (error) {
@@ -299,8 +301,8 @@ final class PdfEnginePreviewer implements BookPreviewer {
       throw switch (error) {
         CoreException() => error,
         PdfEnginePasswordException() => const CoreException(
-          CoreErrorKind.unsupported,
-          'Password-protected PDFs are not supported.',
+          CoreErrorKind.passwordRequired,
+          'The PDF needs a password.',
         ),
         PdfEngineLimitException(:final message) => CoreException.limitExceeded(
           message,
@@ -317,6 +319,14 @@ final class PdfEnginePreviewer implements BookPreviewer {
         ranges.read,
         sourceName: 'shosai-preview:${++_sources}',
       );
+    } on PdfEngineProtectedException catch (error) {
+      if (ranges.failure != null || ranges.exceeded) failed(error);
+      cancellation.throwIfCancelled();
+      return const BookMetadata(protection: BookProtection.drm);
+    } on PdfEnginePasswordException catch (error) {
+      if (ranges.failure != null || ranges.exceeded) failed(error);
+      cancellation.throwIfCancelled();
+      return const BookMetadata(protection: BookProtection.password);
     } catch (error) {
       failed(error);
     }
@@ -418,6 +428,42 @@ final class CoreRecords implements ShosaiRecords {
     );
   }
 
+  /// Reinspect only migrated records. Shelf pages read local files only;
+  /// opening may resolve a granted source, through its normal admission path.
+  Future<Book> _classifyBook(
+    Book book,
+    CancellationToken cancellation, {
+    bool localOnly = false,
+  }) async {
+    if (book.protectionChecked || (localOnly && book.located)) return book;
+    Future<Book> inspect(String path) async {
+      await _core.library.refreshProtection(
+        book.id,
+        path,
+        cancellation: cancellation,
+      );
+      return await _core.library.get(book.id) ??
+          (throw const CoreException.notFound(
+            'The book is not in the library.',
+          ));
+    }
+
+    if (localOnly) {
+      try {
+        return await inspect(book.path);
+      } on CoreException catch (error) {
+        if (error.kind == CoreErrorKind.cancelled) rethrow;
+        // A missing/changed file stays on the shelf and can be retried on open.
+        return book;
+      }
+    }
+    return _core.folders.withBookFile(
+      book,
+      inspect,
+      cancellation: cancellation,
+    );
+  }
+
   @override
   Future<FlutterLibraryPage> libraryPage({
     String? query,
@@ -427,7 +473,8 @@ final class CoreRecords implements ShosaiRecords {
     required int offset,
     required BigInt cancellationId,
   }) => _guard(() async {
-    _token(cancellationId).throwIfCancelled();
+    final cancellation = _token(cancellationId);
+    cancellation.throwIfCancelled();
     final page = await _core.library.page(
       query: query,
       format: format == null ? null : _bookFormat(format),
@@ -435,16 +482,25 @@ final class CoreRecords implements ShosaiRecords {
       limit: limit,
       offset: offset,
     );
-    final notes = switch (page.continueReading) {
+    final books = <Book>[];
+    for (final book in page.books) {
+      cancellation.throwIfCancelled();
+      books.add(await _classifyBook(book, cancellation, localOnly: true));
+    }
+    final continuing = switch (page.continueReading) {
+      final book? => await _classifyBook(book, cancellation, localOnly: true),
+      null => null,
+    };
+    final notes = switch (continuing) {
       final book? => await _core.annotations.summary(book.id),
       null => null,
     };
     _token(cancellationId).throwIfCancelled();
     return FlutterLibraryPage(
-      books: [for (final book in page.books) _libraryBook(book)],
+      books: [for (final book in books) _libraryBook(book)],
       hasMore: page.hasMore,
       bookCount: page.bookCount,
-      continueReading: switch (page.continueReading) {
+      continueReading: switch (continuing) {
         final book? => _libraryBook(book),
         null => null,
       },
@@ -1191,7 +1247,8 @@ final class ApplicationBridge
         FlutterBridge,
         RecordsHost,
         LibraryFoldersHost,
-        LibraryEditionsHost {
+        LibraryEditionsHost,
+        DocumentAccessHost {
   ApplicationBridge(ShosaiCore core)
     : this._(core, OpenDocuments(core.pdfEngine, core.snapshots));
 
@@ -1204,10 +1261,123 @@ final class ApplicationBridge
   final CoreRecords records;
 
   @override
+  Future<FlutterBookProtection> bookProtection({
+    required int bookId,
+    required BigInt cancellationId,
+  }) => records._guard(() async {
+    final cancellation = records._token(cancellationId);
+    cancellation.throwIfCancelled();
+    final book = await records._core.library.get(bookId);
+    if (book == null) {
+      throw const CoreException.notFound('The book is not in the library.');
+    }
+    final classified = await records._classifyBook(book, cancellation);
+    cancellation.throwIfCancelled();
+    return FlutterBookProtection.values.byName(classified.protection.name);
+  });
+
+  @override
+  Future<bool> unlockPdf({
+    int? bookId,
+    required String pathKey,
+    String? password,
+    required BigInt cancellationId,
+  }) => records._guard(() async {
+    final cancellation = records._token(cancellationId);
+    final book = bookId == null
+        ? null
+        : await records._core.library.get(bookId);
+    if (bookId != null && book == null) {
+      throw const CoreException.notFound('The book is not in the library.');
+    }
+    if (book != null && book.format != BookFormat.pdf) {
+      throw const CoreException.invalidRequest('Only PDFs accept passwords.');
+    }
+    Future<bool> unlock(String path) async {
+      final unlocked = await _documents.unlockPdf(
+        path,
+        password,
+        expected: book == null
+            ? null
+            : (
+                bookId: book.id,
+                title: book.title,
+                contentHash: book.contentHash,
+              ),
+        cancellation: cancellation,
+      );
+      if (unlocked && book != null) {
+        await records._core.library.refreshMetadata(
+          book.id,
+          path,
+          cancellation: cancellation,
+        );
+      }
+      return unlocked;
+    }
+
+    return book == null
+        ? unlock(pdfPathFromKey(pathKey))
+        : records._core.folders.withBookFile(
+            book,
+            unlock,
+            cancellation: cancellation,
+          );
+  });
+
+  @override
   LibraryFolders get folders => records._core.folders;
 
   @override
   LibraryEditions get editions => LibraryEditions(records._core.store);
+
+  @override
+  Future<EditionPage> editionPage({
+    required List<BookLocator> sources,
+    required String query,
+    required BookFormat? format,
+    required LibrarySort sort,
+    required int limit,
+    required int offset,
+    required BigInt cancellationId,
+  }) => records._guard(() async {
+    final cancellation = records._token(cancellationId);
+    Future<EditionPage> snapshot() => editions.page(
+      sources: sources,
+      query: query,
+      format: format,
+      sort: sort,
+      limit: limit,
+      offset: offset,
+    );
+    cancellation.throwIfCancelled();
+    final page = await snapshot();
+    // Prioritize each visible card's reading file, then make bounded progress
+    // through other members. Raw-book offsets do not match grouped shelves.
+    final candidates = [
+      for (final edition in page.editions) edition.readingFile,
+    ].followedBy(page.editions.expand((edition) => edition.files));
+    final seen = <int>{};
+    var remaining = limit;
+    for (final file in candidates) {
+      cancellation.throwIfCancelled();
+      final book = file.book;
+      if (book == null ||
+          book.protectionChecked ||
+          book.located ||
+          !seen.add(book.id)) {
+        continue;
+      }
+      if (remaining-- == 0) break;
+      await records._classifyBook(book, cancellation, localOnly: true);
+    }
+    cancellation.throwIfCancelled();
+    // Classification changes no publication facts, so membership/order and
+    // reading-file selection stay stable in this refreshed snapshot.
+    final refreshed = await snapshot();
+    cancellation.throwIfCancelled();
+    return refreshed;
+  });
 
   @override
   FlutterLibraryBook editionBook(Book book) => _libraryBook(book);
@@ -1722,6 +1892,9 @@ Future<T> _bridgeErrors<T>(Future<T> Function() body) async {
         CoreErrorKind.notFound => FlutterBridgeErrorKind.notFound,
         CoreErrorKind.inaccessible => FlutterBridgeErrorKind.inaccessible,
         CoreErrorKind.unsupported => FlutterBridgeErrorKind.unsupported,
+        CoreErrorKind.protected => FlutterBridgeErrorKind.protected,
+        CoreErrorKind.passwordRequired =>
+          FlutterBridgeErrorKind.passwordRequired,
         CoreErrorKind.invalidRequest ||
         CoreErrorKind.conflict => FlutterBridgeErrorKind.invalidRequest,
         CoreErrorKind.malformed => FlutterBridgeErrorKind.malformed,
@@ -1901,6 +2074,7 @@ FlutterLibraryBook _libraryBook(Book book) => FlutterLibraryBook(
   unavailable: book.locationFailure != null,
   located: book.located,
   keptOnDevice: book.keptOnDevice,
+  protection: FlutterBookProtection.values.byName(book.protection.name),
 );
 
 FlutterBookmark _bookmark(Bookmark bookmark, int bookId) => FlutterBookmark(

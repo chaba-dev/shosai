@@ -7,6 +7,104 @@ import 'package:test/test.dart';
 import 'support/large_entries_fixture.dart';
 
 void main() {
+  test(
+    'protected EPUBs retain metadata but cannot open, including ranged previews',
+    () async {
+      for (final marker in [
+        {
+          'META-INF/rights.xml':
+              '<adept:rights xmlns:adept="http://ns.adobe.com/adept"><adept:encryptedKey>sample</adept:encryptedKey></adept:rights>',
+        },
+        {
+          'META-INF/license.lcpl':
+              '{"id":"synthetic-license","encryption":{"profile":"http://readium.org/lcp/basic-profile"}}',
+        },
+        for (final algorithm in [
+          'http://www.w3.org/2001/04/xmlenc#aes128-cbc',
+          'http://itunes.apple.com/dataenc',
+          'urn:synthetic:kindle-derived-encryption',
+        ])
+          {
+            'META-INF/encryption.xml':
+                '<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><EncryptedData xmlns="http://www.w3.org/2001/04/xmlenc#"><EncryptionMethod Algorithm="$algorithm"/><CipherData><CipherReference URI="OEBPS/ch1.xhtml"/></CipherData></EncryptedData></encryption>',
+          },
+      ]) {
+        final bytes = _epub(
+          metadata:
+              '<dc:title>Protected sample</dc:title><dc:creator>Fixture author</dc:creator>',
+          files: marker.map(
+            (name, xml) => MapEntry(name, Uint8List.fromList(xml.codeUnits)),
+          ),
+        );
+        final inspection = inspectEpubBytes(bytes);
+        final preview = await inspectEpubRanges(
+          (start, end) async => Uint8List.sublistView(bytes, start, end),
+          bytes.length,
+        );
+        for (final result in [inspection, preview]) {
+          expect(result.isProtected, isTrue, reason: marker.toString());
+          expect(result.title, 'Protected sample');
+          expect(result.author, 'Fixture author');
+        }
+        expect(() => openEpubBytes(bytes), throwsA(isA<EpubProtectedError>()));
+      }
+    },
+  );
+
+  test(
+    'font obfuscation and unrelated rights metadata do not lock readable EPUBs',
+    () async {
+      for (final algorithm in [
+        'http://www.idpf.org/2008/embedding',
+        'http://ns.adobe.com/pdf/enc#RC',
+      ]) {
+        final bytes = _epub(
+          files: {
+            'META-INF/encryption.xml': Uint8List.fromList(
+              '<encryption><EncryptedData><EncryptionMethod Algorithm="$algorithm"/><CipherData><CipherReference URI="OEBPS/font.otf"/></CipherData></EncryptedData></encryption>'
+                  .codeUnits,
+            ),
+            'META-INF/rights.xml': Uint8List.fromList(
+              '<rights>Copyright fixture author</rights>'.codeUnits,
+            ),
+          },
+        );
+        expect(inspectEpubBytes(bytes).isProtected, isFalse);
+        expect(
+          (await inspectEpubRanges(
+            (start, end) async => Uint8List.sublistView(bytes, start, end),
+            bytes.length,
+          )).isProtected,
+          isFalse,
+        );
+        expect(openEpubBytes(bytes).chapters.single.canonicalText, 'Hi\n');
+      }
+    },
+  );
+
+  test(
+    'a protected package with encrypted metadata still produces a locked entry',
+    () async {
+      final bytes = _epub(
+        files: {
+          'META-INF/encryption.xml': Uint8List.fromList(
+            '<encryption><EncryptedData><EncryptionMethod Algorithm="urn:synthetic:encrypted-package"/></EncryptedData></encryption>'
+                .codeUnits,
+          ),
+          'OEBPS/content.opf': Uint8List.fromList([0, 255, 0, 255]),
+        },
+      );
+      expect(inspectEpubBytes(bytes).isProtected, isTrue);
+      expect(inspectEpubBytes(bytes).title, isNull);
+      final preview = await inspectEpubRanges(
+        (start, end) async => Uint8List.sublistView(bytes, start, end),
+        bytes.length,
+      );
+      expect(preview.isProtected, isTrue);
+      expect(preview.title, isNull);
+    },
+  );
+
   test('opens and inspects a book with image and XHTML entries over 8 MiB', () {
     final bytes = largeEntriesEpub(compressImage: true);
     final entries = ZipDecoder().decodeBytes(bytes);
@@ -153,6 +251,41 @@ void main() {
     final size = ZipDecoder().decodeBytes(bytes).find('OEBPS/ch1.xhtml')!.size;
     _declareEntrySize(bytes, 'OEBPS/ch1.xhtml', size + 1);
     expect(() => openEpubBytes(bytes), throwsA(isA<EpubFormatError>()));
+  });
+
+  test('protected EPUBs retain only unencrypted available covers', () async {
+    for (final encryptedResource in [
+      'OEBPS/ch1.xhtml',
+      'OEBPS/images/cover%20art.png',
+    ]) {
+      final bytes = _epub(
+        metadata: '<dc:title>Protected cover fixture</dc:title>',
+        manifest:
+            '<item id="c" href="images/cover%20art.png" media-type="image/png" properties="cover-image"/>',
+        files: {
+          'OEBPS/images/cover art.png': _png,
+          'META-INF/encryption.xml': Uint8List.fromList(
+            '<encryption><EncryptedData><EncryptionMethod Algorithm="urn:synthetic:encrypted"/><CipherData><CipherReference URI="$encryptedResource"/></CipherData></EncryptedData></encryption>'
+                .codeUnits,
+          ),
+        },
+      );
+      final results = [
+        inspectEpubBytes(bytes),
+        await inspectEpubRanges(
+          (start, end) async => Uint8List.sublistView(bytes, start, end),
+          bytes.length,
+        ),
+      ];
+      for (final result in results) {
+        expect(result.isProtected, isTrue);
+        expect(result.title, 'Protected cover fixture');
+        expect(
+          result.cover,
+          encryptedResource.endsWith('.xhtml') ? _png : isNull,
+        );
+      }
+    }
   });
 
   test('reads title, author and the EPUB 3 cover-image item', () {

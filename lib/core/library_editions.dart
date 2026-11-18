@@ -7,6 +7,16 @@ import 'bridge.dart';
 abstract interface class LibraryEditionsHost {
   LibraryEditions get editions;
   FlutterLibraryBook editionBook(Book book);
+
+  Future<EditionPage> editionPage({
+    required List<BookLocator> sources,
+    required String query,
+    required BookFormat? format,
+    required LibrarySort sort,
+    required int limit,
+    required int offset,
+    required BigInt cancellationId,
+  });
 }
 
 enum EditionAction { read, separate, group, remove, keep }
