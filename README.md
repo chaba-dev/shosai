@@ -44,10 +44,10 @@ nix develop
 make check
 ```
 
-Debug builds of the host keep their database, preferences and managed book
-copies in the platform application-support directory under the development
-profile (`shosai-dev`), separate from the `shosai` directory that release builds
-use.
+Ordinary builds, including Release builds, use the existing development app
+ID and library. The explicit [production build targets](docs/releasing.md#build-and-verify-the-production-identity)
+use `dev.shosai.reader` and start with a separate library and no saved cloud
+credentials.
 
 The project is a Flutter application:
 

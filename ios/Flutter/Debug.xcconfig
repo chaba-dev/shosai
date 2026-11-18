@@ -1,2 +1,5 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 #include "Generated.xcconfig"
+SHOSAI_APP_ID = dev.shosai.shosai
+SHOSAI_APP_LABEL = Shōsai Dev
+SHOSAI_APP_ICON = AppIconDev

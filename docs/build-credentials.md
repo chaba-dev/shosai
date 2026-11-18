@@ -60,9 +60,10 @@ gcloud auth login
   Commands must stay in the foreground. SIGKILL of the supervisor and power loss
   cannot run cleanup.
 
-The environment selects configuration, not Flutter build mode or signing.
-An optimized test build can use `development`. For Linux/macOS, substitute
-`flutter build linux --release` or `flutter build macos --release`.
+The environment selects configuration, not the app ID, Flutter build mode or
+signing. An optimized test build can use `development`. Build the production ID
+using the targets in [Releasing Shōsai](releasing.md); they read the defines file
+path from the environment set by the helper.
 iOS also requires the public `GOOGLE_DRIVE_IOS_CALLBACK_SCHEME` **Xcode build
 setting** described in [google-drive.md](google-drive.md); Dart JSON does not
 configure it. macOS Drive uses a desktop loopback flow and needs no iOS callback
@@ -84,6 +85,7 @@ Each secret version contains a JSON object with these string fields:
 - `GOOGLE_DRIVE_DESKTOP_CLIENT_SECRET`
 - `GOOGLE_DRIVE_IOS_CLIENT_ID`
 - `GOOGLE_DRIVE_IOS_CALLBACK_SCHEME`
+- `SHOSAI_DROPBOX_APP_KEY` (optional; must be distinct from the development app key)
 
 Keep each platform's settings consistent with its actual registration. Flutter
 embeds this material into binaries and may retain it in ignored build caches;
@@ -204,7 +206,7 @@ enter the pinned Nix shell, then call:
 
 ```sh
 ./scripts/with-build-secrets.sh release \
-  'flutter build apk --release --dart-define-from-file="{}"'
+  'make android-production'
 ```
 
 The provider resource is
@@ -214,8 +216,9 @@ fresh. Do not set `service_account` or `credentials_json` on the auth action.
 Its generated `gha-creds-*.json` is ignored and removed by the action after the
 job. Do not upload workspace-wide artifacts that include ignored files.
 
-The release owner must separately supply real signing identities and remove the
-Android debug-signing fallback before publishing production-signed artifacts.
+The release owner must separately supply real signing identities. The Android
+production target requires the upload-keystore inputs listed in [Releasing
+Shōsai](releasing.md) instead of the debug key used by development builds.
 Normal PR jobs do not request release credentials. No credentials are fetched
 merely to run the script test suite, which uses a synthetic gcloud boundary.
 

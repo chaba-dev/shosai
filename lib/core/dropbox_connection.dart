@@ -30,10 +30,12 @@ final class DropboxConnectionProvider implements ConnectionProvider {
            tokenEndpoint ?? Uri.https('api.dropboxapi.com', '/oauth2/token');
 
   /// Public identifier of Shōsai's registered App folder app, not a secret.
-  /// Forks can override it; an explicitly empty define disables new setup.
+  /// Production supplies its own app key or leaves Dropbox disabled.
   static const defaultClientId = String.fromEnvironment(
     'SHOSAI_DROPBOX_APP_KEY',
-    defaultValue: '3yy8xd4pncextkh',
+    defaultValue: bool.fromEnvironment('SHOSAI_PRODUCTION')
+        ? ''
+        : '3yy8xd4pncextkh',
   );
 
   final ConnectionCredentialStore credentials;

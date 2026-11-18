@@ -11,13 +11,14 @@ if [[ "$(uname -m)" != arm64 ]]; then
 fi
 
 usage() {
-  echo "usage: $0 <simulator|device> <debug|profile|release>" >&2
+  echo "usage: $0 <simulator|device> <debug|profile|release> [flutter build options]" >&2
   exit 2
 }
 
 target=${1:-}
 mode=${2:-}
-[[ $# -eq 2 ]] || usage
+[[ $# -ge 2 ]] || usage
+shift 2
 case "$target" in
   simulator) target_flag=--simulator ;;
   device) target_flag=--no-codesign ;;
@@ -87,4 +88,4 @@ exec env \
   -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS \
   -u NIX_CFLAGS_COMPILE -u NIX_CFLAGS_COMPILE_FOR_BUILD \
   -u NIX_LDFLAGS -u NIX_LDFLAGS_FOR_BUILD \
-  "$flutter_root/bin/flutter" build ios "$target_flag" "--$mode"
+  "$flutter_root/bin/flutter" build ios "$target_flag" "--$mode" "$@"

@@ -9,7 +9,7 @@ book server.
 
 ## App registration and builds
 
-Official builds use Shōsai's registered **Scoped access → App folder** app by
+Dev builds use Shōsai's registered **Scoped access → App folder** app by
 default (public app key `3yy8xd4pncextkh`). No build define is needed. Forks
 using their own registration must choose **App folder**, not Full Dropbox, in
 the [Dropbox App Console](https://www.dropbox.com/developers/apps).
@@ -33,6 +33,11 @@ Dart setup uses `DropboxConnectionProvider.defaultClientId`; Android derives
 its browser callback scheme from the same build define. No client secret is
 used, and none should be included in build configuration. Public app keys are
 not credentials.
+
+Production builds default to Dropbox off. Supply a separate release app key
+to enable it. Side-by-side Android installs must use different keys so only
+the app that started sign-in claims its `db-<app key>` callback. Do not reuse a
+custom development key for the production build either.
 
 The registered app was in Development status at acceptance: the owner's account
 can authorize it, but including its public key does not grant Dropbox production

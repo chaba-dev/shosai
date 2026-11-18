@@ -395,11 +395,11 @@ The mark is 丸に書 (decided 2026-10-21): the character 書, set in Noto Serif
 | `shosai-icon-macos.svg` | The macOS icon: the same on a rounded square with the system corner radius and transparent margins. |
 | `website/static/favicon.svg` | The favicon: the mark on a cream rounded square. |
 
-Android, iOS and macOS Debug/Profile builds use the supplied dark artwork in
-`assets/shosai-dev-icon.png`; Release keeps the light icon. This follows build
-mode, not system appearance. Android overlays `src/dev/res` only in Debug and
-Profile; the Apple targets select `AppIconDev` instead of `AppIcon` in those
-configurations. Resize the supplied artwork for the platform catalogs with
+On iOS and macOS, Dev uses the supplied dark artwork in `assets/shosai-dev-icon.png`
+(`AppIconDev`) even in Release mode; production uses the light `AppIcon`.
+Android uses the dark artwork from `src/dev/res` in Debug and Profile and the
+light icon in Release. Neither choice follows system appearance.
+Resize the supplied artwork for the platform catalogs with
 `.agents/dev python3 scripts/resize-dev-icons.py`. This does not redraw or
 recolor it; macOS adds its existing transparent margins and corner mask.
 
