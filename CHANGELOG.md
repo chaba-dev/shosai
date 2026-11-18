@@ -76,6 +76,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Reconnect Google Drive and check book access (#315)
 - *(diagnostics)* Log privacy-safe Google Drive failures (#316)
 - *(shell)* Show most recently read books first (#326)
+- Keep protected books in the library and unlock password PDFs (#329)
 
 ### 🐛 Bug Fixes
 
