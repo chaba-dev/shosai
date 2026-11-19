@@ -1,0 +1,142 @@
+/// Shared disk format for the catalog publisher and reader. Catalog files are
+/// replaceable and never belong to the personal library store.
+library;
+
+import 'dart:convert';
+
+const catalogFormatVersion = 1;
+const catalogDatabaseFile = 'catalog.sqlite.gz';
+
+/// Apply to a fresh catalog database with no user data. The publisher supplies
+/// work IDs and explicit edition groupings. Edition IDs are scoped to their
+/// source and include the upstream format/variant where needed.
+const catalogSchema =
+    '''
+PRAGMA foreign_keys = ON;
+BEGIN;
+CREATE TABLE sources (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  website TEXT NOT NULL,
+  catalog_credit TEXT,
+  support_url TEXT
+) STRICT;
+CREATE TABLE books (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL
+) STRICT;
+CREATE TABLE editions (
+  source_id TEXT NOT NULL REFERENCES sources(id),
+  source_edition_id TEXT NOT NULL,
+  book_id TEXT NOT NULL REFERENCES books(id),
+  title TEXT NOT NULL,
+  language TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  rights_line TEXT NOT NULL,
+  acquisition_url TEXT NOT NULL,
+  acquisition_format TEXT NOT NULL,
+  size_bytes INTEGER CHECK (size_bytes > 0),
+  cover_url TEXT,
+  PRIMARY KEY (source_id, source_edition_id)
+) STRICT;
+CREATE INDEX editions_by_book ON editions (book_id);
+CREATE TABLE authors (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sort_name TEXT NOT NULL,
+  name_reading TEXT
+) STRICT;
+CREATE TABLE book_authors (
+  book_id TEXT NOT NULL REFERENCES books(id),
+  author_id TEXT NOT NULL REFERENCES authors(id),
+  position INTEGER NOT NULL CHECK (position >= 0),
+  PRIMARY KEY (book_id, position),
+  UNIQUE (book_id, author_id)
+) STRICT;
+CREATE TABLE subjects (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL
+) STRICT;
+CREATE TABLE book_subjects (
+  book_id TEXT NOT NULL REFERENCES books(id),
+  subject_id TEXT NOT NULL REFERENCES subjects(id),
+  PRIMARY KEY (subject_id, book_id)
+) STRICT;
+CREATE TABLE categories (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL
+) STRICT;
+CREATE TABLE book_categories (
+  book_id TEXT NOT NULL REFERENCES books(id),
+  category_id TEXT NOT NULL REFERENCES categories(id),
+  PRIMARY KEY (category_id, book_id)
+) STRICT;
+PRAGMA user_version = $catalogFormatVersion;
+COMMIT;
+''';
+
+/// Metadata for a published file. Size and digest describe the served bytes
+/// (the gzip stream for [catalogDatabaseFile]), not the decompressed payload.
+typedef CatalogFile = ({int sizeBytes, String sha256});
+
+final class CatalogManifest {
+  CatalogManifest._(this.builtAt, this.sourceCounts, this.files);
+
+  static const fileName = 'manifest.json';
+
+  final DateTime builtAt;
+
+  /// Counts downloadable editions per source, not grouped works.
+  final Map<String, int> sourceCounts;
+  final Map<String, CatalogFile> files;
+
+  /// Parse and validate the manifest, not the files it describes.
+  factory CatalogManifest.parse(String text) {
+    final json = jsonDecode(text);
+    if (json case {
+      'formatVersion': int version,
+      'builtAt': String date,
+      'sourceCounts': Map<String, dynamic> counts,
+      'files': Map<String, dynamic> entries,
+    } when version == catalogFormatVersion) {
+      final builtAt = DateTime.tryParse(date);
+      if (builtAt == null ||
+          !builtAt.isUtc ||
+          builtAt.toIso8601String() != date) {
+        throw const FormatException('Invalid catalog build timestamp');
+      }
+      final sourceCounts = <String, int>{};
+      for (final entry in counts.entries) {
+        final count = entry.value;
+        if (entry.key.isEmpty || count is! int || count < 0) {
+          throw const FormatException('Invalid catalog source count');
+        }
+        sourceCounts[entry.key] = count;
+      }
+      final files = <String, CatalogFile>{};
+      for (final entry in entries.entries) {
+        if (entry.value case {'sizeBytes': int size, 'sha256': String sha256}
+            when size > 0 &&
+                sha256.length == 64 &&
+                _hex.hasMatch(sha256) &&
+                entry.key.split('/').every(_fileSegment.hasMatch)) {
+          files[entry.key] = (sizeBytes: size, sha256: sha256);
+        } else {
+          throw const FormatException('Invalid catalog file entry');
+        }
+      }
+      if (!files.containsKey(catalogDatabaseFile)) {
+        throw const FormatException('Missing catalog database entry');
+      }
+      return CatalogManifest._(
+        builtAt,
+        Map.unmodifiable(sourceCounts),
+        Map.unmodifiable(files),
+      );
+    }
+    throw const FormatException('Invalid or unsupported catalog manifest');
+  }
+
+  static final _hex = RegExp(r'^[0-9a-f]+$');
+  static final _fileSegment = RegExp(r'^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$');
+}
