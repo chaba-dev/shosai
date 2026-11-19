@@ -1,0 +1,18 @@
+name: sqlite3
+description: Dart SQLite bindings, with an iOS-only private-container build.
+version: 3.5.2
+publish_to: none
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+dependencies:
+  archive: ^4.0.0
+  collection: ^1.15.0
+  ffi: ^2.1.0
+  meta: ^1.3.0
+  path: ^1.8.0
+  web: ^1.1.0
+  typed_data: ^1.3.2
+  hooks: '>=1.0.0 <3.0.0'
+  code_assets: '>=1.0.0 <3.0.0'
+  native_toolchain_c: '>=0.17.5 <0.20.0'
+  crypto: ^3.0.6
