@@ -18,6 +18,7 @@
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		CF545B51E084E0FF05AD23E3 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B6EA1C7018AB5D3C5D0E7982 /* Pods_Runner.framework */; };
 		F01200010000000000000001 /* FolderLocations.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01200010000000000000002 /* FolderLocations.swift */; };
+		F01300010000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F01300010000000000000002 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +70,7 @@
 		B1F9E1F2AFDB5AA910E9102F /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		B6EA1C7018AB5D3C5D0E7982 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		F01200010000000000000002 /* FolderLocations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FolderLocations.swift; path = ../../darwin/FolderLocations.swift; sourceTree = "<group>"; };
+		F01300010000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = ../../darwin/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +137,7 @@
 			isa = PBXGroup;
 			children = (
 				F01200010000000000000002 /* FolderLocations.swift */,
+				F01300010000000000000002 /* PrivacyInfo.xcprivacy */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -206,6 +209,7 @@
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				FB542A16BBF3253F38CC38F9 /* [CP] Embed Pods Frameworks */,
 				4BD7E2AE366F6D29616D8C1D /* [CP] Copy Pods Resources */,
+				A8BC00012F00000100000001 /* Embed native privacy manifests */,
 			);
 			buildRules = (
 			);
@@ -267,6 +271,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F01300010000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
 				97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */,
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
@@ -277,6 +282,18 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A8BC00012F00000100000001 /* Embed native privacy manifests */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ();
+			name = "Embed native privacy manifests";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/sh \"$SRCROOT/../scripts/embed-ios-privacy.sh\"";
+		};
 		3B06AD1E1E4923F5004D2608 /* Thin Binary */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
