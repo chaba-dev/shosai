@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Shōsai
+Comment=Read EPUB and PDF books
+Exec=shosai_flutter
+Icon=dev.shosai.reader
+Terminal=false
+Categories=Office;Viewer;
+Keywords=Books;EPUB;PDF;Reader;
+StartupWMClass=dev.shosai.reader
