@@ -10,6 +10,8 @@ const catalogDatabaseFile = 'catalog.sqlite.gz';
 /// Apply to a fresh catalog database with no user data. The publisher supplies
 /// work IDs and explicit edition groupings. Edition IDs are scoped to their
 /// source and include the upstream format/variant where needed.
+/// Within a work, display editions in ascending `display_order`; the first is
+/// the default. Show `variant_label` rather than deriving it from the ID.
 const catalogSchema =
     '''
 PRAGMA foreign_keys = ON;
@@ -30,6 +32,8 @@ CREATE TABLE editions (
   source_edition_id TEXT NOT NULL,
   book_id TEXT NOT NULL REFERENCES books(id),
   title TEXT NOT NULL,
+  variant_label TEXT NOT NULL CHECK (length(trim(variant_label)) > 0),
+  display_order INTEGER NOT NULL CHECK (display_order >= 0),
   language TEXT NOT NULL,
   source_url TEXT NOT NULL,
   rights_line TEXT NOT NULL,
@@ -37,9 +41,9 @@ CREATE TABLE editions (
   acquisition_format TEXT NOT NULL,
   size_bytes INTEGER CHECK (size_bytes > 0),
   cover_url TEXT,
-  PRIMARY KEY (source_id, source_edition_id)
+  PRIMARY KEY (source_id, source_edition_id),
+  UNIQUE (book_id, display_order)
 ) STRICT;
-CREATE INDEX editions_by_book ON editions (book_id);
 CREATE TABLE authors (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

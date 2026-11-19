@@ -56,33 +56,68 @@ void main() {
     addTearDown(catalog.close);
     expect(catalog.userVersion, 1);
     expect(catalog.select('PRAGMA foreign_key_check'), isEmpty);
+    final counts = catalog.select('''
+      SELECT source_id, COUNT(*) AS edition_count FROM editions GROUP BY source_id
+    ''');
+    expect(manifest.sourceCounts, {
+      for (final row in counts) row['source_id']: row['edition_count'],
+    });
     final editions = catalog.select('''
-      SELECT b.title, a.name, e.source_edition_id, e.rights_line, e.size_bytes
+      SELECT b.title, a.name, e.source_edition_id, e.variant_label,
+             e.rights_line, e.size_bytes
       FROM book_categories AS bc
       JOIN books AS b ON b.id = bc.book_id
       JOIN book_authors AS ba ON ba.book_id = b.id
       JOIN authors AS a ON a.id = ba.author_id
       JOIN editions AS e ON e.book_id = b.id
       WHERE bc.category_id = 'classics' AND e.source_id = 'gutenberg'
-      ORDER BY e.source_edition_id
+      ORDER BY e.display_order
     ''');
-    expect(manifest.sourceCounts, {'gutenberg': editions.length});
     expect(editions.map((row) => row.values.toList()), [
       [
         'Pride and Prejudice',
         'Jane Austen',
-        '1342:images',
+        '1342:z',
+        'With images',
         'Public domain in the USA',
         123456,
       ],
       [
         'Pride and Prejudice',
         'Jane Austen',
-        '1342:noimages',
+        '1342:a',
+        'Without images',
         'Public domain in the USA',
         null,
       ],
     ]);
+  });
+
+  test('publisher connection rejects editions for a missing work', () {
+    final db = sqlite3.openInMemory();
+    addTearDown(db.close);
+    db.execute(catalogSchema);
+    db.execute(File('test/fixtures/gutenberg_catalog.sql').readAsStringSync());
+    expect(
+      () => db.execute('''
+        INSERT INTO editions (
+          source_id, source_edition_id, book_id, title, variant_label,
+          display_order, language, source_url, rights_line, acquisition_url,
+          acquisition_format
+        )
+        SELECT source_id, 'orphan', 'missing', title, variant_label,
+               display_order, language, source_url, rights_line, acquisition_url,
+               acquisition_format
+        FROM editions WHERE source_edition_id = '1342:z'
+      '''),
+      throwsA(
+        isA<SqliteException>().having(
+          (error) => error.extendedResultCode,
+          'extended result code',
+          787, // SQLITE_CONSTRAINT_FOREIGNKEY
+        ),
+      ),
+    );
   });
 
   test('rejects incompatible versions and invalid snapshot metadata', () {
