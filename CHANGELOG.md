@@ -152,6 +152,10 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Resolve named entities in linear time (#190)
 - *(dropbox)* Discover recursively with source progress (#249)
 
+### 🎨 Styling
+
+- Align protected-book dialogs with the design system (#332)
+
 ### 🧪 Testing
 
 - *(core)* List /proc/self/fd without following links (#166)
