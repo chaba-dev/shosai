@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-18
+## [0.1.0] - 2026-11-19
 
 ### 🚀 Features
 
@@ -131,6 +131,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Reconnect restored Dropbox libraries in place (#324)
 - *(release)* Require curated release notes (#325)
 - *(release)* Preserve curated notes and relevant changelog previews (#327)
+- *(privacy)* Bundle Apple privacy declarations (#331)
 
 ### 🚜 Refactor
 
