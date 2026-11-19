@@ -1,0 +1,111 @@
+import 'dart:io';
+
+import 'package:sqlite3/sqlite3.dart';
+import 'package:test/test.dart';
+
+import '../tool/import_gutenberg.dart';
+import 'support/temp_store.dart';
+
+// The excerpt contains four records from Project Gutenberg's public-domain
+// offline CSV (mirror.cs.odu.edu/gutenberg-epub/feeds/pg_catalog.csv.gz,
+// retrieved 2026-11-19), with line endings normalized to LF.
+final _excerpt = File('test/fixtures/pg_catalog_excerpt.csv');
+
+void main() {
+  test(
+    'imports an upstream CSV excerpt without guessing work identity or rights',
+    () async {
+      final dir = tempDataDirectory();
+      final input = File('${dir.path}/pg_catalog.csv.gz')
+        ..writeAsBytesSync(gzip.encode(_excerpt.readAsBytesSync()));
+      final output = File('${dir.path}/catalog.sqlite');
+      expect(await importGutenbergFile(input, output), (
+        works: 3,
+        editions: 6,
+        skipped: 1,
+      ));
+      final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+      addTearDown(db.close);
+      expect(db.select('PRAGMA foreign_key_check'), isEmpty);
+      expect(
+        db
+            .select(
+              "SELECT id FROM books WHERE title = 'Pride and Prejudice' ORDER BY id",
+            )
+            .map((row) => row['id']),
+        ['gutenberg:1342', 'gutenberg:42671'],
+      );
+      expect(
+        db
+            .select("SELECT title FROM books WHERE id = 'gutenberg:417'")
+            .single['title'],
+        "Dr. Martin Luther's Deutsche Geistliche Lieder\n"
+        'The Hymns of Martin Luther Set to Their Original Melodies, With an English Version',
+      );
+      expect(
+        db
+            .select('''
+      SELECT a.name FROM book_authors AS ba JOIN authors AS a ON a.id = ba.author_id
+      WHERE ba.book_id = 'gutenberg:417' ORDER BY ba.position
+    ''')
+            .map((row) => row['name']),
+        [
+          'Luther, Martin, 1483-1546',
+          'Allen, Nathan H. (Nathan Hale), 1848-1925 [Editor]',
+          'Bacon, Leonard Woolsey, 1830-1907 [Editor]',
+        ],
+      );
+      expect(
+        db
+            .select('''
+      SELECT c.label FROM book_categories AS bc JOIN categories AS c ON c.id = bc.category_id
+      WHERE bc.book_id = 'gutenberg:1342' ORDER BY c.label
+    ''')
+            .map((row) => row['label']),
+        ['British Literature', 'Classics of Literature', 'Novels', 'Romance'],
+      );
+      final editions = db.select('''
+      SELECT variant_label, language, acquisition_url, rights_line, size_bytes
+      FROM editions WHERE book_id = 'gutenberg:417' ORDER BY display_order
+    ''');
+      expect(editions.map((row) => row['variant_label']), [
+        'With images',
+        'Without images',
+      ]);
+      expect(editions.map((row) => row['acquisition_url']), [
+        'https://www.gutenberg.org/ebooks/417.epub3.images',
+        'https://www.gutenberg.org/ebooks/417.epub.noimages',
+      ]);
+      for (final row in editions) {
+        expect(row['language'], 'de; en');
+        expect(row['size_bytes'], isNull);
+        expect(
+          row['rights_line'],
+          'Rights not listed in the offline catalog. Check Project Gutenberg.',
+        );
+      }
+    },
+  );
+
+  test(
+    'a bad record leaves no output and an existing output is not replaced',
+    () async {
+      final dir = tempDataDirectory();
+      final input = File('${dir.path}/bad.csv')
+        ..writeAsStringSync('${_excerpt.readAsStringSync()}1,Text,invalid\n');
+      final output = File('${dir.path}/catalog.sqlite');
+      await expectLater(
+        importGutenbergFile(input, output),
+        throwsFormatException,
+      );
+      expect(output.existsSync(), isFalse);
+
+      output.writeAsStringSync('existing output');
+      await expectLater(
+        importGutenbergFile(_excerpt, output),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(output.readAsStringSync(), 'existing output');
+    },
+  );
+}
