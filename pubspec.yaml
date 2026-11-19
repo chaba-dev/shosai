@@ -103,6 +103,10 @@ flutter:
     - fonts/LICENSE-NotoSerifJP.txt
 
 dependency_overrides:
+  # Same 3.5.2 bindings and non-iOS binaries. iOS compiles SQLite 3.53.4
+  # without external-filesystem probes, retaining POSIX locks and WAL.
+  sqlite3:
+    path: third_party/sqlite3
   # pdfrx_engine 0.4.5 with upstream's worker fix (espresso3389/pdfrx@e16a956,
   # released in 0.4.7): a callback that throws on the PDFium worker isolate
   # now fails the caller instead of leaving it waiting forever. 0.4.7 needs
