@@ -141,6 +141,31 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
     expect(output.existsSync(), isFalse);
   });
 
+  test('preserves escaped quotes split across file reads', () async {
+    final dir = tempDataDirectory();
+    const header =
+        'Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves\r\n';
+    const beforePadding = '${header}1,Text,,';
+    const beforeQuote = ',en,,,,\r\n2,Text,,';
+    // Place the opening quote and the first escaped quote in one 64 KiB read,
+    // and the second escaped quote in the next one.
+    final padding = 'x' * (65534 - beforePadding.length - beforeQuote.length);
+    final input = File('${dir.path}/quoted.csv')
+      ..writeAsStringSync(
+        '$beforePadding$padding$beforeQuote"""The Raven""",en,,,,\r\n',
+      );
+    final output = File('${dir.path}/catalog.sqlite');
+    await importGutenbergFile(input, output);
+    final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+    addTearDown(db.close);
+    expect(
+      db
+          .select("SELECT title FROM books WHERE id = 'gutenberg:2'")
+          .single['title'],
+      '"The Raven"',
+    );
+  });
+
   test('preserves a journal beside the requested output', () async {
     final dir = tempDataDirectory();
     final output = File('${dir.path}/catalog.sqlite');

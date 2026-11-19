@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:csv/csv.dart';
 import 'package:shosai_core/catalog.dart';
 import 'package:sqlite3/sqlite3.dart';
 
@@ -67,10 +66,7 @@ Future<({int works, int editions, int skipped})> importGutenbergFile(
       final bytes = input.path.endsWith('.gz')
           ? _readGzip(input)
           : input.openRead();
-      return await _importRows(
-        db,
-        _validateQuotes(bytes.transform(utf8.decoder)),
-      );
+      return await _importRows(db, _readCsvRows(bytes.transform(utf8.decoder)));
     } finally {
       db.close();
     }
@@ -102,40 +98,72 @@ Stream<List<int>> _readGzip(File input) async* {
 
 enum _CsvField { start, unquoted, quoted, afterQuote }
 
-/// Keep the streaming CSV decoder, but reject inputs it silently repairs.
-Stream<String> _validateQuotes(Stream<String> chunks) async* {
+/// Parse comma-delimited records without treating a read boundary as EOF.
+/// Keep the field and row state so quote pairs and CRLF can span chunks.
+Stream<List<String>> _readCsvRows(Stream<String> chunks) async* {
+  final value = StringBuffer();
+  var row = <String>[];
   var field = _CsvField.start;
   var first = true;
+  var skipLf = false;
   await for (final chunk in chunks) {
     for (var i = 0; i < chunk.length; i++) {
       final c = chunk.codeUnitAt(i);
       if (first) {
         first = false;
-        if (c == 0xfeff) continue; // Optional UTF-8 BOM.
+        if (c == 0xfeff) continue;
       }
-      final separator = c == 0x2c || c == 0x0d || c == 0x0a;
+      if (skipLf) {
+        skipLf = false;
+        if (c == 0x0a) continue;
+      }
       final quote = c == 0x22;
-      field = switch (field) {
-        _CsvField.start when quote => _CsvField.quoted,
-        _CsvField.quoted => quote ? _CsvField.afterQuote : _CsvField.quoted,
-        _CsvField.afterQuote when quote => _CsvField.quoted,
-        _ when separator => _CsvField.start,
-        _CsvField.afterQuote => throw const FormatException(
-          'Unexpected data after quoted CSV field',
-        ),
-        _ => _CsvField.unquoted,
-      };
+      if (field == _CsvField.quoted ||
+          (field == _CsvField.afterQuote && quote)) {
+        if (field == _CsvField.quoted && quote) {
+          field = _CsvField.afterQuote;
+        } else {
+          value.writeCharCode(c);
+          field = _CsvField.quoted;
+        }
+        continue;
+      }
+      final lineEnd = c == 0x0d || c == 0x0a;
+      if (c == 0x2c || lineEnd) {
+        if (!lineEnd || row.isNotEmpty || field != _CsvField.start) {
+          row.add(value.toString());
+          value.clear();
+          if (lineEnd) {
+            yield row;
+            row = [];
+          }
+        }
+        field = _CsvField.start;
+        skipLf = c == 0x0d;
+        continue;
+      }
+      if (field == _CsvField.afterQuote) {
+        throw const FormatException('Unexpected data after quoted CSV field');
+      }
+      if (field == _CsvField.start && quote) {
+        field = _CsvField.quoted;
+      } else {
+        value.writeCharCode(c);
+        field = _CsvField.unquoted;
+      }
     }
-    yield chunk;
   }
   if (field == _CsvField.quoted) {
     throw const FormatException('Unclosed quoted CSV field');
+  }
+  if (row.isNotEmpty || field != _CsvField.start) {
+    yield row..add(value.toString());
   }
 }
 
 Future<({int works, int editions, int skipped})> _importRows(
   Database db,
-  Stream<String> csvText,
+  Stream<List<String>> rows,
 ) async {
   final statements = <String, PreparedStatement>{};
   void write(String sql, List<Object?> values) =>
@@ -153,13 +181,11 @@ Future<({int works, int editions, int skipped})> _importRows(
     var record = 0;
     var works = 0;
     var skipped = 0;
-    await for (final row in csvText.transform(
-      Csv(fieldDelimiter: ',').decoder,
-    )) {
+    await for (final row in rows) {
       record++;
       if (indexes == null) {
         width = row.length;
-        indexes = {for (var i = 0; i < width; i++) row[i].toString(): i};
+        indexes = {for (var i = 0; i < width; i++) row[i]: i};
         if (indexes.length != width || !_columns.every(indexes.containsKey)) {
           throw const FormatException('Invalid Gutenberg CSV header');
         }
@@ -168,7 +194,7 @@ Future<({int works, int editions, int skipped})> _importRows(
       if (row.length != width) {
         throw FormatException('Wrong number of fields in CSV record $record');
       }
-      String field(String name) => (row[indexes![name]!] as String).trim();
+      String field(String name) => row[indexes![name]!].trim();
       if (field('Type') != 'Text') {
         skipped++;
         continue;
