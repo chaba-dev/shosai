@@ -79,6 +79,7 @@ All notable changes to this project will be documented in this file.
 - Keep protected books in the library and unlock password PDFs (#329)
 - Separate production and development app identities (#330)
 - *(linux)* Add Flatpak and Debian packages (#333)
+- *(catalog)* Define the Gutenberg snapshot contract (#336)
 
 ### 🐛 Bug Fixes
 
