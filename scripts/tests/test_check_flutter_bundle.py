@@ -21,6 +21,8 @@ GOOD_FONT_MANIFEST = (
     '[{"family":"Inter","fonts":[{"asset":"fonts/InterVariable.ttf"}]},'
     '{"family":"Noto Sans JP","fonts":'
     '[{"asset":"fonts/NotoSansJP-Variable.ttf"}]},'
+    '{"family":"packages/lucide_icons_flutter/Lucide","fonts":'
+    '[{"asset":"packages/lucide_icons_flutter/assets/lucide.ttf"}]},'
     '{"family":"MaterialIcons","fonts":'
     '[{"asset":"fonts/MaterialIcons-Regular.otf"}]}]'
 )
@@ -147,6 +149,9 @@ class CheckFlutterBundleTest(unittest.TestCase):
             assets / "fonts" / "NotoSansJP-Variable.ttf",
         )
         (assets / "fonts" / "MaterialIcons-Regular.otf").write_bytes(b"icons")
+        icon_font = assets / "packages/lucide_icons_flutter/assets/lucide.ttf"
+        icon_font.parent.mkdir(parents=True)
+        icon_font.write_bytes(b"icons")
         # A NOTICES.Z collected from the engine's and PDFium's notices plus
         # the fonts' licenses, so a "valid bundle" fixture also satisfies the
         # notice check.
@@ -231,6 +236,15 @@ class CheckFlutterBundleTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing from the bundle's license notices", result.stderr)
 
+    def test_unused_lucide_weight_fails_even_if_not_in_manifest(self):
+        assets = self._write_bundle_with_faces(GOOD_FONT_MANIFEST)
+        extra = assets / "packages/lucide_icons_flutter/assets/build_font/LucideVariable-w600.ttf"
+        extra.parent.mkdir()
+        extra.write_bytes(b"unused icons")
+        result = self._run(str(self.root))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unused Lucide font was bundled", result.stderr)
+
     def test_missing_pdfium_notices_fail(self):
         # The engine's notices alone carry a FreeType license, but none of
         # PDFium's.
@@ -289,9 +303,7 @@ class CheckFlutterBundleTest(unittest.TestCase):
     def test_percent_encoded_keys_resolve(self):
         assets = self._write_bundle_with_faces(
             '[{"family":"Encoded","fonts":[{"asset":"fonts/a%5Bb%5D.ttf"}]},'
-            '{"family":"Inter","fonts":[{"asset":"fonts/InterVariable.ttf"}]},'
-            '{"family":"Noto Sans JP","fonts":'
-            '[{"asset":"fonts/NotoSansJP-Variable.ttf"}]}]',
+            + GOOD_FONT_MANIFEST[1:],
         )
         (assets / "fonts" / "a[b].ttf").write_bytes(b"encoded")
         result = self._run(str(assets))

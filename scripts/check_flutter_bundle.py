@@ -57,6 +57,9 @@ BUNDLED_FACES = (
 EXPECTED_FAMILY_ASSETS = {
     "Inter": "fonts/InterVariable.ttf",
     "Noto Sans JP": "fonts/NotoSansJP-Variable.ttf",
+    "packages/lucide_icons_flutter/Lucide": (
+        "packages/lucide_icons_flutter/assets/lucide.ttf"
+    ),
 }
 
 # Stable text each redistributed license contributes to the bundle's
@@ -139,7 +142,12 @@ def _check_flutter_assets(
     if not isinstance(families, list):
         return [f"FontManifest.json has an unexpected shape in {assets}"]
 
-    failures: list[str] = []
+    failures = [
+        f"unused Lucide font was bundled: {font.relative_to(assets)}"
+        for font in sorted(
+            (assets / "packages/lucide_icons_flutter").rglob("LucideVariable-*.ttf")
+        )
+    ]
     face_files: dict[str, Path] = {}
     family_assets: dict[str, list[str]] = {}
     for family in families:

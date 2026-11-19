@@ -107,6 +107,9 @@ dependency_overrides:
   # without external-filesystem probes, retaining POSIX locks and WAL.
   sqlite3:
     path: third_party/sqlite3
+  # Keep the standard Lucide icons without bundling six unused weight variants.
+  lucide_icons_flutter:
+    path: third_party/lucide_icons_flutter
   # pdfrx_engine 0.4.5 with upstream's worker fix (espresso3389/pdfrx@e16a956,
   # released in 0.4.7): a callback that throws on the PDFium worker isolate
   # now fails the caller instead of leaving it waiting forever. 0.4.7 needs
