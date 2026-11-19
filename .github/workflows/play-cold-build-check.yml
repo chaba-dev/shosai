@@ -1,0 +1,42 @@
+name: Cold Android bundle check
+
+on:
+  push:
+    branches: [ci/play-internal-cold-check]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - run: df -h "$GITHUB_WORKSPACE"
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+      - run: .agents/dev flutter pub get --enforce-lockfile
+      - name: Build and verify with a disposable upload key
+        run: |
+          .agents/dev bash -euo pipefail <<'BUILD'
+          umask 077
+          d=$(mktemp -d "$RUNNER_TEMP/play-smoke.XXXXXXXX")
+          trap 'rm -rf -- "$d"' EXIT
+          export SHOSAI_ANDROID_KEYSTORE="$d/smoke.p12"
+          export SHOSAI_ANDROID_STORE_PASSWORD=disposable-ci-key
+          export SHOSAI_ANDROID_KEY_PASSWORD="$SHOSAI_ANDROID_STORE_PASSWORD"
+          export SHOSAI_ANDROID_KEY_ALIAS=cold-build-check
+          export SHOSAI_ANDROID_BUILD_NUMBER=42
+          keytool -genkeypair -storetype PKCS12 -keystore "$SHOSAI_ANDROID_KEYSTORE" \
+            -storepass:env SHOSAI_ANDROID_STORE_PASSWORD -alias "$SHOSAI_ANDROID_KEY_ALIAS" \
+            -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable Android CI check'
+          make android-production
+          aab=build/app/outputs/bundle/release/app-release.aab
+          jarsigner -verify "$aab" > "$d/verify.log"
+          grep -F 'jar verified.' "$d/verify.log"
+          ls -lh "$aab"
+          BUILD
+      - if: always()
+        run: df -h "$GITHUB_WORKSPACE"
