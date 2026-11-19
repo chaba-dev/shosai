@@ -217,9 +217,9 @@ void main() {
         'That password didn’t work. Try again.',
       ]);
       expect(opened.map((b) => b.bookId), [1]);
-      bridge.pages.last.complete(
-        const FlutterLibraryPage(books: [], hasMore: false),
-      );
+      for (final page in bridge.pages.where((page) => !page.isCompleted)) {
+        page.complete(const FlutterLibraryPage(books: [], hasMore: false));
+      }
       await _settle();
       expect(controller.model.busy, isFalse);
       controller.dispatch(

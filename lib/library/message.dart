@@ -288,6 +288,12 @@ final class _LibraryRemovalConfirmed extends LibraryMessage {
   final FlutterLibraryBook book;
 }
 
+final class _LibraryBookUnlocked extends LibraryMessage {
+  const _LibraryBookUnlocked(this.bookId, this.revision);
+  final int bookId;
+  final int revision;
+}
+
 final class _LibraryReaderClosed extends LibraryMessage {
   const _LibraryReaderClosed(
     this.error, {
@@ -317,8 +323,9 @@ final class _LibraryCoverFailed extends LibraryMessage {
 }
 
 final class _LibraryCoverEffectFinished extends LibraryMessage {
-  const _LibraryCoverEffectFinished(this.bookId);
+  const _LibraryCoverEffectFinished(this.bookId, this.cancellation);
   final int bookId;
+  final BigInt cancellation;
 }
 
 final class _LibrarySourceCoverLoaded extends LibraryMessage {
