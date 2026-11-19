@@ -29,7 +29,9 @@ cp -a "$bundle/." "$stage/opt/shosai/"
 install -Dm644 LICENSE "$stage/usr/share/doc/shosai/copyright"
 install -Dm644 "linux/packaging/$app_id.desktop" "$stage/usr/share/applications/$app_id.desktop"
 install -Dm644 "linux/packaging/$app_id.metainfo.xml" "$stage/usr/share/metainfo/$app_id.metainfo.xml"
-install -Dm644 assets/shosai-icon.png "$stage/usr/share/icons/hicolor/1024x1024/apps/$app_id.png"
+icon_dir="$stage/usr/share/icons/hicolor/128x128/apps"
+install -d "$icon_dir"
+convert assets/shosai-icon.png -resize 128x128 "$icon_dir/$app_id.png"
 
 payload=$stage/opt/shosai
 if [[ -n $(find "$payload" -type l -print -quit) ]] ||
@@ -40,11 +42,11 @@ fi
 for lib in libpdfium.so libsqlite3.so libflutter_linux_gtk.so libflutter_secure_storage_linux_plugin.so; do
   test -s "$payload/lib/$lib"
 done
-patchelf --set-rpath '$ORIGIN/lib' "$payload/shosai_flutter"
+patchelf --set-rpath "\$ORIGIN/lib" "$payload/shosai_flutter"
 for lib in "$payload"/lib/*.so; do
   # The Flutter engine dlopens PDFium and SQLite by name. Plugins also need
   # their sibling engine, not an absolute RUNPATH back to the build tree.
-  patchelf --set-rpath '$ORIGIN' "$lib"
+  patchelf --set-rpath "\$ORIGIN" "$lib"
 done
 elfs=("$payload/shosai_flutter" "$payload"/lib/*.so)
 for elf in "${elfs[@]}"; do
@@ -69,11 +71,14 @@ Package: shosai
 Architecture: amd64
 Description: EPUB and PDF reader
 EOF
-depends=$(cd "$stage" && dpkg-shlibdeps --ignore-missing-info -O -lopt/shosai/lib \
+depends=$(cd "$stage" && dpkg-shlibdeps --ignore-missing-info --warnings=0 -O -lopt/shosai/lib \
   opt/shosai/shosai_flutter opt/shosai/lib/*.so)
 rm -r "$stage/debian"
 install -d "$stage/usr/bin"
-ln -s /opt/shosai/shosai_flutter "$stage/usr/bin/shosai_flutter"
+# glibc resolves the executable's $ORIGIN relative to the launch path. Use
+# exec rather than a symlink so it sees the adjacent bundled libraries.
+printf '%s\n' '#!/bin/sh' 'exec /opt/shosai/shosai_flutter "$@"' > "$stage/usr/bin/shosai_flutter"
+chmod 755 "$stage/usr/bin/shosai_flutter"
 cat > "$stage/DEBIAN/control" <<EOF
 Package: shosai
 Version: $version
@@ -81,15 +86,15 @@ Architecture: amd64
 Section: office
 Priority: optional
 Maintainer: Shōsai contributors
-Depends: ${depends#shlibs:Depends=}
-Recommends: gnome-keyring
+Depends: libegl1, libgl1, ${depends#shlibs:Depends=}
+Recommends: gnome-keyring, libegl-mesa0, libgl1-mesa-dri
 Installed-Size: $(du -sk "$stage" | cut -f1)
 Homepage: https://shosai.pages.dev/
 Description: EPUB and PDF reader
  A personal ebook library and reader for EPUB and PDF files.
 EOF
 dpkg-deb --root-owner-group --build "$stage" "$dist/$stem.deb"
-rm -r "$stage/DEBIAN" "$stage/usr/bin"
+rm -r "$stage/DEBIAN" "${stage:?}/usr/bin"
 
 # Build only from the staged files: no Flutter SDK, secrets or network in the
 # Flatpak sandbox. The runtime and SDK must already be installed from Flathub.
