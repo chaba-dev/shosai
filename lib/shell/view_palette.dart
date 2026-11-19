@@ -190,6 +190,22 @@ final class ShellPalette {
     ),
   ];
 
+  /// `shadow-modal`: dialogs and sheets, including their hairline.
+  List<BoxShadow> get modal => [
+    BoxShadow(
+      color: shadowBase.withValues(alpha: dark ? .8 : .4),
+      offset: const Offset(0, 24),
+      blurRadius: 60,
+      spreadRadius: -20,
+    ),
+    BoxShadow(
+      color: (dark ? ShosaiTokens.colorLightOnAccent : shadowBase).withValues(
+        alpha: .08,
+      ),
+      spreadRadius: 1,
+    ),
+  ];
+
   /// The ink of a generated cover's title and author, on every ground.
   static const Color coverInk = ShosaiTokens.colorLightOnInverse;
 

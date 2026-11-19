@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/document_access.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
+import 'package:shosai_flutter/shared/protected_book_dialog.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
-import 'package:shosai_flutter/shell/view.dart' show shellEditorialStyle;
+import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 /// Platform UI adapter only: the controller verifies and remembers passwords.
@@ -34,6 +34,8 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final controlHeight = ProtectedBookDialog.controlHeight(context);
+    final touch = controlHeight == ShosaiTokens.sizeTouchTarget;
     final contentWidth = MediaQuery.sizeOf(context).width < 512
         ? MediaQuery.sizeOf(context).width - 48
         : 392.0;
@@ -41,7 +43,7 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
         MediaQuery.sizeOf(context).width <
             ShadTheme.of(context).breakpoints.sm.value ||
         MediaQuery.textScalerOf(context).scale(1) > 1.3;
-    return ShadDialog(
+    return ProtectedBookDialog(
       title: Text(l10n.pdfUnlockTitle),
       expandActionsWhenTiny: false,
       actions: [
@@ -58,12 +60,10 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
             spacing: ShosaiTokens.space2,
             children: [
               ShadButton.outline(
-                height: shosaiShadButtonHeight(context),
                 onPressed: () => Navigator.pop(context),
                 child: Text(l10n.readerNoteCancel),
               ),
               ShadButton(
-                height: shosaiShadButtonHeight(context),
                 onPressed: _password.text.isEmpty ? null : _open,
                 child: Text(l10n.pdfUnlockAction),
               ),
@@ -76,10 +76,10 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          spacing: 12,
+          spacing: ShosaiTokens.space3,
           children: [
             Text(l10n.pdfPasswordRequired),
-            Text(widget.request.title, style: shellEditorialStyle(18, 24)),
+            Text(widget.request.title, style: shellEditorialStyle(14, 19)),
             Text(l10n.pdfPasswordLabel),
             // Share the field border, but keep the toggle outside the field's
             // merged semantics so it remains a separately named button.
@@ -92,10 +92,15 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
                     label: l10n.pdfPasswordLabel,
                     child: ShadInput(
                       controller: _password,
-                      padding: const EdgeInsets.all(ShosaiTokens.space3),
-                      inputPadding: const EdgeInsets.only(
-                        right: ShosaiTokens.sizeTouchTarget,
+                      style: ShadTheme.of(
+                        context,
+                      ).textTheme.small.copyWith(fontSize: 13, height: 18 / 13),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: ShosaiTokens.space3,
+                        // Include the field's 1 px border in its height.
+                        vertical: (controlHeight - 18) / 2 - 1,
                       ),
+                      inputPadding: EdgeInsets.only(right: controlHeight),
                       autofocus: true,
                       obscureText: _obscured,
                       autocorrect: false,
@@ -111,7 +116,10 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
                       ? l10n.pdfPasswordShow
                       : l10n.pdfPasswordHide,
                   onPressed: () => setState(() => _obscured = !_obscured),
-                  icon: Icon(_obscured ? LucideIcons.eye : LucideIcons.eyeOff),
+                  icon: Icon(
+                    _obscured ? LucideIcons.eye : LucideIcons.eyeOff,
+                    size: touch ? 20 : 16,
+                  ),
                 ),
               ],
             ),
@@ -125,7 +133,13 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
                   ),
                 ),
               ),
-            Text(l10n.pdfPasswordSavedHint),
+            Text(
+              l10n.pdfPasswordSavedHint,
+              style: shellInterfaceStyle(
+                12,
+                16,
+              ).copyWith(color: ShellPalette.of(context).inkMuted),
+            ),
           ],
         ),
       ),
