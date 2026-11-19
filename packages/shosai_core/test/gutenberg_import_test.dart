@@ -108,4 +108,49 @@ void main() {
       expect(output.readAsStringSync(), 'existing output');
     },
   );
+
+  test(
+    'rejects a missing gzip trailer even after the last complete row',
+    () async {
+      final dir = tempDataDirectory();
+      final compressed = gzip.encode(_excerpt.readAsBytesSync());
+      final input = File('${dir.path}/truncated.csv.gz')
+        ..writeAsBytesSync(compressed.sublist(0, compressed.length - 8));
+      final output = File('${dir.path}/catalog.sqlite');
+      await expectLater(
+        importGutenbergFile(input, output),
+        throwsFormatException,
+      );
+      expect(output.existsSync(), isFalse);
+    },
+  );
+
+  test('rejects an unclosed quote that would absorb the next record', () async {
+    final dir = tempDataDirectory();
+    final input = File('${dir.path}/unclosed.csv')
+      ..writeAsStringSync('''
+Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
+1,Text,,First,en,,,,"Category: Novels
+2,Text,,Second,en,,,,
+''');
+    final output = File('${dir.path}/catalog.sqlite');
+    await expectLater(
+      importGutenbergFile(input, output),
+      throwsFormatException,
+    );
+    expect(output.existsSync(), isFalse);
+  });
+
+  test('preserves a journal beside the requested output', () async {
+    final dir = tempDataDirectory();
+    final output = File('${dir.path}/catalog.sqlite');
+    final journal = File('${output.path}-journal')
+      ..writeAsStringSync('unrelated');
+    await expectLater(
+      importGutenbergFile(_excerpt, output),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(output.existsSync(), isFalse);
+    expect(journal.readAsStringSync(), 'unrelated');
+  });
 }

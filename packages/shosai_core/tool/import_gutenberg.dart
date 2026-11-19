@@ -24,6 +24,7 @@ Future<void> main(List<String> args) async {
       '<pg_catalog.csv[.gz]> <new-catalog.sqlite>',
     );
     stderr.writeln('Input: $_base/cache/epub/feeds/pg_catalog.csv.gz');
+    stderr.writeln('Compressed input requires gzip on PATH.');
     exitCode = 64;
     return;
   }
@@ -40,7 +41,8 @@ Future<void> main(List<String> args) async {
 }
 
 /// Imports a downloaded official CSV (optionally gzipped) into a new snapshot.
-/// A caller must not publish the snapshot until this function returns.
+/// Use an output directory owned by the caller, with no concurrent writer at
+/// the same path. Do not publish the snapshot until this function returns.
 Future<({int works, int editions, int skipped})> importGutenbergFile(
   File input,
   File output,
@@ -48,20 +50,86 @@ Future<({int works, int editions, int skipped})> importGutenbergFile(
   // Exclusive creation also refuses an existing catalog or the input itself.
   await output.create(exclusive: true);
   try {
+    // SQLite can consume or remove existing sidecars even for a fresh file.
+    for (final suffix in ['-journal', '-wal', '-shm']) {
+      final sidecar = '${output.path}$suffix';
+      if (await FileSystemEntity.type(sidecar, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        throw FileSystemException(
+          'Catalog output has an existing SQLite sidecar',
+          sidecar,
+        );
+      }
+    }
     final db = sqlite3.open(output.path);
     try {
       db.execute(catalogSchema);
-      final bytes = input.openRead();
-      final decoded = input.path.endsWith('.gz')
-          ? bytes.transform(gzip.decoder)
-          : bytes;
-      return await _importRows(db, decoded.transform(utf8.decoder));
+      final bytes = input.path.endsWith('.gz')
+          ? _readGzip(input)
+          : input.openRead();
+      return await _importRows(
+        db,
+        _validateQuotes(bytes.transform(utf8.decoder)),
+      );
     } finally {
       db.close();
     }
   } on Object {
     await output.delete();
     rethrow;
+  }
+}
+
+Stream<List<int>> _readGzip(File input) async* {
+  // Dart's gzip stream accepts EOF before the trailer. gzip reports an error
+  // for incomplete members or bad CRCs, even if it emitted complete CSV rows.
+  final process = await Process.start('gzip', ['-dc', input.absolute.path]);
+  final errors = process.stderr
+      .transform(const Utf8Decoder(allowMalformed: true))
+      .join();
+  final done = process.exitCode;
+  try {
+    yield* process.stdout;
+    if (await done != 0) {
+      throw FormatException('Invalid Gutenberg gzip: ${(await errors).trim()}');
+    }
+  } finally {
+    process.kill(); // Also stop decoding if the CSV consumer cancels early.
+    await done;
+    await errors;
+  }
+}
+
+enum _CsvField { start, unquoted, quoted, afterQuote }
+
+/// Keep the streaming CSV decoder, but reject inputs it silently repairs.
+Stream<String> _validateQuotes(Stream<String> chunks) async* {
+  var field = _CsvField.start;
+  var first = true;
+  await for (final chunk in chunks) {
+    for (var i = 0; i < chunk.length; i++) {
+      final c = chunk.codeUnitAt(i);
+      if (first) {
+        first = false;
+        if (c == 0xfeff) continue; // Optional UTF-8 BOM.
+      }
+      final separator = c == 0x2c || c == 0x0d || c == 0x0a;
+      final quote = c == 0x22;
+      field = switch (field) {
+        _CsvField.start when quote => _CsvField.quoted,
+        _CsvField.quoted => quote ? _CsvField.afterQuote : _CsvField.quoted,
+        _CsvField.afterQuote when quote => _CsvField.quoted,
+        _ when separator => _CsvField.start,
+        _CsvField.afterQuote => throw const FormatException(
+          'Unexpected data after quoted CSV field',
+        ),
+        _ => _CsvField.unquoted,
+      };
+    }
+    yield chunk;
+  }
+  if (field == _CsvField.quoted) {
+    throw const FormatException('Unclosed quoted CSV field');
   }
 }
 

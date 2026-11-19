@@ -93,6 +93,9 @@
           # Synthetic password/permission PDF fixtures for the engine tests
           qpdf
 
+          # Validates complete compressed Gutenberg catalog inputs.
+          gzip
+
           # Identity-based build configuration, without exported cloud keys
           google-cloud-sdk
           python3
