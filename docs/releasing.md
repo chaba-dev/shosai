@@ -43,7 +43,7 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 
 | Option | Install or build | Runtime |
 | --- | --- | --- |
-| Flatpak | `flatpak install --user ./shosai-X.Y.Z-linux-x64.flatpak`; launch with `flatpak run dev.shosai.reader` | GNOME 49 from Flathub; a desktop portal and Secret Service on the host |
+| Flatpak | `flatpak install --user ./shosai-X.Y.Z-linux-x64.flatpak`; launch with `flatpak run dev.shosai.reader` | GNOME 51 from Flathub; a desktop portal and Secret Service on the host |
 | Debian package | `sudo apt install ./shosai-X.Y.Z-linux-x64.deb`; launch Shōsai from the application menu | Ubuntu 24.04 or Debian 13 and compatible newer releases; APT resolves GTK and libsecret |
 | Nix | `nix develop .#ci --command make linux-production`; run `build/linux/x64/release/bundle/shosai_flutter` | The pinned Nix shell/store and a desktop keyring; do not redistribute this bundle as a portable download |
 

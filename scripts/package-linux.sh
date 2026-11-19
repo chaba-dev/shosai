@@ -3,6 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LC_ALL=C
+# The staging tree ships to end users; the build itself can stay private.
+umask 022
 
 app_id=dev.shosai.reader
 version=$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9]+)?$/\1/p' pubspec.yaml)
@@ -39,6 +41,9 @@ if [[ -n $(find "$payload" -type l -print -quit) ]] ||
   echo 'Use a native, non-Nix Flutter bundle without symlinks' >&2
   exit 1
 fi
+# cp -a preserves the private build's modes (the credential helper uses 077).
+# Open only the staged copy so root-owned .deb files work for ordinary users.
+chmod -R a+rX "$payload"
 for lib in libpdfium.so libsqlite3.so libflutter_linux_gtk.so libflutter_secure_storage_linux_plugin.so; do
   test -s "$payload/lib/$lib"
 done
