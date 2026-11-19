@@ -1,0 +1,76 @@
+name: Build Linux release packages
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        description: Validated release commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    if: github.repository == 'chaba-dev/shosai'
+    runs-on: ubuntu-24.04
+    environment: RELEASE
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the build ref
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ && "$(git rev-parse HEAD)" == "$COMMIT" ]]
+          git merge-base --is-ancestor "$COMMIT" origin/main
+      - name: Install native build and packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld cmake ninja-build pkg-config libgtk-3-dev \
+            libsecret-1-dev patchelf dpkg-dev flatpak flatpak-builder appstream desktop-file-utils
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive --no-related flathub org.gnome.Platform//49 org.gnome.Sdk//49
+      - name: Install Flutter and locked dependencies
+        run: |
+          curl -fsSL https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.41.5-stable.tar.xz \
+            -o "$RUNNER_TEMP/flutter.tar.xz"
+          printf '%s  %s\n' 18901d456a5e458c4c69fa7859852b64fac29da9f89476a959abfacbac7f4fdb \
+            "$RUNNER_TEMP/flutter.tar.xz" | sha256sum -c
+          tar -xJf "$RUNNER_TEMP/flutter.tar.xz" -C "$RUNNER_TEMP"
+          rm "$RUNNER_TEMP/flutter.tar.xz"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" pub get --enforce-lockfile
+      - name: Authenticate to release Secret Manager
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.SHOSAI_SECRETS_PROJECT }}
+          workload_identity_provider: ${{ vars.SHOSAI_RELEASE_WORKLOAD_IDENTITY_PROVIDER }}
+          create_credentials_file: true
+          export_environment_variables: true
+      - name: Build production bundle
+        env:
+          SHOSAI_SECRETS_PROJECT: ${{ vars.SHOSAI_SECRETS_PROJECT }}
+          SHOSAI_BUILD_SECRET_VERSION: '1'
+        run: |
+          # Avoid a JNI dependency on the runner's preinstalled JVM.
+          export CMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/shosai-linux.cmake"
+          printf '%s\n' 'set(CMAKE_DISABLE_FIND_PACKAGE_JNI TRUE)' > "$CMAKE_TOOLCHAIN_FILE"
+          ./scripts/with-build-secrets.sh release 'make linux-production'
+      - name: Build .deb and Flatpak
+        run: bash scripts/package-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-desktop
+          path: |
+            target/release-dist/*.deb
+            target/release-dist/*.flatpak
+          if-no-files-found: error
+          retention-days: 7
