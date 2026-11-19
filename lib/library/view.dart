@@ -20,6 +20,7 @@ import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/core/records.dart';
 import 'package:shosai_flutter/shared/pdf_password_dialog.dart';
+import 'package:shosai_flutter/shared/protected_book_dialog.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
 import 'package:shosai_flutter/core/library_editions.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
@@ -165,7 +166,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         _showOwnedDialog<String>((_) => PdfPasswordDialog(request: request)),
     showLockedBook: () async {
       await _showOwnedDialog<void>(
-        (context) => ShadDialog(
+        (context) => ProtectedBookDialog(
           title: Text(_localizations.bookLockedTitle),
           description: Text(_localizations.bookDrmProtected),
           actions: [
