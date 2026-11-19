@@ -56,7 +56,9 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 
 The Google Play Android Developer API and a dedicated Workload Identity pool are configured in `shosai-512821`. Only the `play-internal.yml` dispatch from `main` in `chaba-dev/shosai`, using `RELEASE`, can impersonate the uploader. GitHub requests a short-lived token for the Play Developer API; no personal Google login or service-account JSON key is needed to run the workflow.
 
-**Each subsequent upload:** In GitHub Actions, run **Publish to Play internal testing** from `main`. Use a version code greater than every uploaded code (for example, `2` after the first upload with `1`). The version name comes from `pubspec.yaml`. The workflow signs the production bundle and publishes it only to the `internal` track. If a run fails after upload, check Play Console before retrying: Play does not let you reuse a code it has already accepted. In Play Console, confirm the new code appears on the internal track and use the tester opt-in link to install it.
+**Before each upload:** Check that Play Console’s **Publishing overview** has no unrelated changes ready to send. Coordinate with other publishers so nobody edits or publishes this app in Play Console or via the API until the run ends. The workflow updates only the internal track, but Play commits edits app-wide and can submit other pending changes. The commit refuses to replace a review already in progress; it does not protect unsent changes.
+
+**Run the upload:** In GitHub Actions, run **Publish to Play internal testing** from `main`, confirm the publishing check, and enter a version code greater than every uploaded code (for example, `2` after `1`). The version name comes from `pubspec.yaml`. If a run fails after upload, check Play Console before retrying: Play does not let you reuse a code it has already accepted. Confirm the new code appears on the internal track and use the tester opt-in link to install it.
 
 ## Linux distribution (x86-64)
 
