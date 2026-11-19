@@ -199,7 +199,9 @@ final class ShellPalette {
       spreadRadius: -20,
     ),
     BoxShadow(
-      color: (dark ? Colors.white : shadowBase).withValues(alpha: .08),
+      color: (dark ? ShosaiTokens.colorLightOnAccent : shadowBase).withValues(
+        alpha: .08,
+      ),
       spreadRadius: 1,
     ),
   ];

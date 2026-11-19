@@ -105,7 +105,10 @@ class ProtectedBookDialog extends StatelessWidget {
           backgroundColor: palette.surface,
           // Dialogs have 12 px corners; keep the existing edge-to-edge phone.
           radius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.transparent, width: 0),
+          border: Border.all(
+            color: palette.surface.withValues(alpha: 0),
+            width: 0,
+          ),
           shadows: palette.modal,
           closeIcon: Builder(
             builder: (context) => Tooltip(
