@@ -17,7 +17,12 @@ static int shosaiContainerPath(const char *path) {
     if (path == NULL) return 0;
     NSString *name = [NSString stringWithUTF8String:path];
     if (name == nil || !name.isAbsolutePath) return 0;
-    NSString *home = NSHomeDirectory().stringByResolvingSymlinksInPath;
+    // The home and database must use the same canonical spelling (notably
+    // /var versus /private/var on iOS).
+    char canonicalHome[PATH_MAX];
+    if (realpath(NSHomeDirectory().fileSystemRepresentation, canonicalHome) == NULL) return 0;
+    NSString *home = [NSFileManager.defaultManager
+        stringWithFileSystemRepresentation:canonicalHome length:strlen(canonicalHome)];
     char canonical[PATH_MAX];
     BOOL creating = realpath(path, canonical) == NULL;
     if (creating) {

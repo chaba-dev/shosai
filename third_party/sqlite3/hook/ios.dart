@@ -59,12 +59,14 @@ Future<void> buildIos(BuildInput input, BuildOutputBuilder output) async {
   source = _replaceOnce(
     source,
     '''
-  unixFile *p = (unixFile *)pFile;
-  int fd = -1;''',
+  memset(p, 0, sizeof(unixFile));
+
+#ifdef SQLITE_ASSERT_NO_FILES''',
     '''
+  memset(p, 0, sizeof(unixFile));
   if( !shosaiContainerPath(zPath) ) return SQLITE_CANTOPEN;
-  unixFile *p = (unixFile *)pFile;
-  int fd = -1;''',
+
+#ifdef SQLITE_ASSERT_NO_FILES''',
   );
   final amalgamation = input.outputDirectory.resolve('sqlite3.c');
   File.fromUri(amalgamation).writeAsStringSync(source);

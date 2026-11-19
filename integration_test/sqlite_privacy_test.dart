@@ -13,7 +13,13 @@ void main() {
   ) async {
     final directory = Directory.systemTemp.createTempSync('sqlite-privacy-');
     addTearDown(() => directory.deleteSync(recursive: true));
-    final path = '${directory.path}/library.sqlite3';
+    final canonical = directory.resolveSymbolicLinksSync();
+    // On iOS the system may expose the same private directory as /var and
+    // /private/var. Exercise both spellings when that layout is present.
+    final aliased = Platform.isIOS && canonical.startsWith('/private/var/')
+        ? canonical.substring('/private'.length)
+        : directory.path;
+    final path = '$aliased/library.sqlite3';
     final old = await Store.open(
       path,
       migrations: schemaMigrations.take(1).toList(),
@@ -98,7 +104,7 @@ UPDATE preferences SET value='not committed' WHERE key='preserved';
       'ok',
     );
     await writer.close();
-    final reopened = await Store.open(path);
+    final reopened = await Store.open('$canonical/library.sqlite3');
     addTearDown(reopened.close);
     expect(await Preferences(reopened).get('preserved'), 'committed');
   });

@@ -171,9 +171,11 @@ memory, including when SQL requests file-backed temporary storage. Persistent
 databases, journals and WAL files remain on disk with normal synchronization.
 
 `hook/ios_container.m` checks each `unixOpen` path before opening or reusing a
-descriptor. Canonical paths must be inside the symlink-resolved
-`NSHomeDirectory`; this covers direct opens, `ATTACH` and journals. For a new
-file, `realpath` resolves the existing parent; dangling leaf symlinks are
+descriptor, after SQLite clears the file handle. Both the database and
+`NSHomeDirectory` are resolved by `realpath` so aliases such as `/var` and
+`/private/var` compare consistently. The database must remain under the private
+home; this covers direct opens, `ATTACH` and journals. For a new file,
+`realpath` resolves the existing parent; dangling leaf symlinks are
 rejected. Resolving the complete nonexistent path with Foundation alone did
 not reliably resolve its parent symlinks in the Mac probe. The core's public
 `Store.open` cannot bypass the native check by accepting another path.
@@ -196,9 +198,10 @@ APFS backing storage, so the query is not imposed on ordinary iPhone/iPad
 containers. Mac Catalyst remains rejected at compile time. No App Store
 availability setting was changed.
 
-The exact guard passed a native macOS Foundation harness with the Mac branch
-forced and verified: private APFS accepted; mounted private HFS+ rejected;
-missing/failed metadata rejected; existing/new files and journals accepted;
+Before the home-path and handle-initialization corrections, the guard passed a
+native macOS Foundation harness with the Mac branch forced: private APFS
+accepted; mounted private HFS+ and missing or failed metadata rejected;
+existing and new files and journals accepted;
 missing parents and symlink escapes rejected; internal symlinks accepted.
 In the Mac lab, a standalone signed probe reported an actual iOS-on-Mac
 runtime but stopped before any test writes: its test-only isolation check
@@ -233,11 +236,11 @@ and import logs are attached to this thread under
 `.amp/in/artifacts/privacy-audit/sqlite-ios-branches/evidence/`. The scratch
 guard is an experiment flag, not a production platform/admission check.
 
-The final integrated build passed both tests in
-`integration_test/sqlite_privacy_test.dart` on iOS 26.5 with Xcode 27.2. They
-covered actual core schema migration from version 1, data preservation,
-competing connections, rollback, uncommitted-write isolation, WAL snapshots
-and checkpoints, vacuum, integrity and reopen. External database paths,
+Before those corrections and the new alias coverage, the integrated build
+passed both tests in `integration_test/sqlite_privacy_test.dart` on iOS 26.5
+with Xcode 27.2. They covered actual core schema migration from version 1, data
+preservation, competing connections, rollback, uncommitted-write isolation, WAL
+snapshots and checkpoints, vacuum, integrity and reopen. External database paths,
 symlink escapes, dangling external links and external `ATTACH` attempts were
 rejected; internal symlinks allowed database creation and shared data. These
 tests use disposable data, not an installed library. File-metadata reasons remain
@@ -254,35 +257,32 @@ remains excluded by Darwin's instruction.
 
 ## Verification and remaining release checks
 
-- Before the storage-guard refinement, `.agents/dev flutter test --no-pub`
-  passed: 1,541 tests, 3 skipped. The final native and packaged checks below
-  cover the refinement; this full suite was not repeated after rebasing.
-- `.agents/dev make lint` passed app and both Dart-package analysis with no
-  issues. This target first resolves the nested packages' test dependencies.
-- On iOS 26.5 Simulator, `flutter test -d <simulator>
-  integration_test/sqlite_privacy_test.dart` passed both database tests.
-  The existing `integration_test/packaged_core_test.dart` also passed all
-  9 tests with `--dart-define=SHOSAI_FIXTURES=<repository>/fixtures`, covering
-  packaged EPUB/PDF import, rendering, reading progress and annotations.
-- On the rebased production configuration (Xcode 27.3),
+- Earlier Linux tests and lint passed, including 1,541 Flutter tests with 3
+  skipped. The pre-correction iOS 26.5 Simulator run also passed all 9
+  packaged core tests, covering EPUB/PDF import, rendering, reading progress
+  and annotations.
+- The corrected production configuration built an unsigned archive with Xcode
+  27.3 using
   `flutter build ipa --release --no-codesign --dart-define=SHOSAI_PRODUCTION=true`
-  with `XCODE_XCCONFIG_FILE` set to `darwin/Production.xcconfig` produced
-  `Runner.xcarchive` for `dev.shosai.reader`, targeting iOS 15.0. No IPA was exported.
+  and `XCODE_XCCONFIG_FILE` set to `darwin/Production.xcconfig`. It produced
+  `Runner.xcarchive` for `dev.shosai.reader`, targeting iOS 15.0, without an IPA.
 - The production archive's app and both new framework declarations match their
   source; all 14 original SDK resources remain bundled and parseable. SQLite has no
   `statfs`, `fstatfs`, `getattrlist` or `statvfs` family imports; `fcntl`, `fstat`
   and `fsync` remain.
 - `plutil -lint` passed for both Xcode projects and the app/framework manifests.
-  Strict signature verification passed for the Simulator's two modified
-  frameworks and enclosing app.
+  Strict signature verification passed for the pre-correction Simulator build's
+  two modified frameworks and enclosing app.
 - The shared app manifest's earlier macOS debug bundle verification still
   applies; the iOS-only hook does not alter macOS machine code.
 
-Final storage-guard, archive and integration evidence is retained under
+The home-path and handle-initialization corrections were reviewed statically.
+The corrected iOS archive verifies packaging, not runtime behavior. No runtime
+test exercised the corrected guard or the new alias coverage on iOS or iOS-on-Mac.
+
+Earlier storage-guard, archive and integration evidence was captured under
 `.amp/in/artifacts/privacy-audit/storage-guard/`; earlier full-suite and
 platform-control logs remain under `.amp/in/artifacts/privacy-audit/final/`.
-The iOS implementation remains local and unpublished; it has not received the
-independent review required before its PR.
 
 No distribution-signed archive, Apple upload validation, App Store privacy
 report approval, physical iPhone/iPad check or privacy-label update was performed.
