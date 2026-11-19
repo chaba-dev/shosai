@@ -192,7 +192,8 @@ production_xcode_config = XCODE_XCCONFIG_FILE="$(SHOSAI_PRODUCTION_XCCONFIG)"
 
 ## Build the Play upload bundle, signed with the provided upload keystore
 android-production:
-	flutter build appbundle --release $(production_defines)
+	flutter build appbundle --release $(production_defines) \
+		$${SHOSAI_ANDROID_BUILD_NUMBER:+--build-number="$$SHOSAI_ANDROID_BUILD_NUMBER"}
 
 ## Build the unsigned production ID for physical iOS devices
 ios-device-production:
