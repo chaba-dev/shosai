@@ -64,11 +64,38 @@ jobs:
           printf '%s' "$SHOSAI_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$SHOSAI_ANDROID_KEYSTORE"
           unset SHOSAI_ANDROID_KEYSTORE_BASE64
           .agents/dev ./scripts/with-build-secrets.sh release 'make android-production'
-      - name: Upload to the internal testing track
-        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+      - name: Get a short-lived Play Developer API token
+        id: play-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
-          serviceAccountJsonPlainText: ${{ secrets.SHOSAI_PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: dev.shosai.reader
-          releaseFiles: build/app/outputs/bundle/release/app-release.aab
-          track: internal
-          status: completed
+          workload_identity_provider: projects/394614696557/locations/global/workloadIdentityPools/shosai-play-internal/providers/github
+          service_account: shosai-play-internal@shosai-512821.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          access_token_lifetime: 900s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Upload to the internal testing track
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.play-auth.outputs.access_token }}
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          play() {
+            printf 'Authorization: Bearer %s\n' "$PLAY_ACCESS_TOKEN" |
+              curl --silent --show-error --fail-with-body --max-time 600 --header @- "$@"
+          }
+          publisher=https://androidpublisher.googleapis.com
+          api=/androidpublisher/v3/applications/dev.shosai.reader/edits
+          bundle=build/app/outputs/bundle/release/app-release.aab
+          test -s "$bundle"
+          edit=$(play -H 'Content-Type: application/json' -d '{}' "$publisher$api" | jq -er '.id | select(test("^[a-zA-Z0-9_-]+$"))')
+          uploaded=$(play -H 'Content-Type: application/octet-stream' --data-binary "@$bundle" \
+            "$publisher/upload$api/$edit/bundles?uploadType=media" | jq -er '.versionCode')
+          if [[ "$uploaded" != "$VERSION_CODE" ]]; then
+            echo "Play returned version code $uploaded, expected $VERSION_CODE; not committing the edit." >&2
+            exit 1
+          fi
+          release=$(jq -nc --arg code "$VERSION_CODE" '{track:"internal",releases:[{versionCodes:[$code],status:"completed"}]}')
+          play -X PUT -H 'Content-Type: application/json' -d "$release" "$publisher$api/$edit/tracks/internal"
+          play -X POST "$publisher$api/$edit:commit"

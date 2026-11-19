@@ -44,7 +44,7 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 **One-time setup**
 
 1. Create Shōsai in [Play Console](https://play.google.com/console/) as a **Free** **App**. Before uploading, keep an encrypted backup of the upload keystore and its passwords under your control. In **Testing → Internal testing**, create a release and manually upload the production AAB for `dev.shosai.reader`. Accept **Play App Signing** with a Google-managed app-signing key, finish any required setup, and roll out the internal release. Google keeps the app-signing key; keep using the same upload key to sign future bundles.
-2. In a Google Cloud project you control, enable the **Google Play Android Developer API** (`androidpublisher.googleapis.com`), create a dedicated service account, and download a JSON key. Back in **Play Console → Users and permissions**, invite the service account's email. Grant access to Shōsai only, with **Release apps to testing tracks** (and the app-level read access required by Play Console). Do not grant production release permission or account admin.
+2. In **Play Console → Users and permissions**, invite `shosai-play-internal@shosai-512821.iam.gserviceaccount.com`. Grant access to Shōsai only, with **Release apps to testing tracks** (and the app-level read access required by Play Console). Do not grant production release permission or account admin.
 3. In GitHub **Settings → Environments → RELEASE**, add the secrets below through GitHub's secret input or `gh secret set --env RELEASE NAME < file` on your own machine. The existing `RELEASE` variables and federation in [build credentials](build-credentials.md) are also required; the workflow reads version `1` of `shosai-release-build-defines`. Keep the environment limited to trusted refs. Never paste keys or passwords into a terminal command, commit, issue, or chat.
 
 | `RELEASE` secret | Value |
@@ -53,7 +53,8 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 | `SHOSAI_ANDROID_STORE_PASSWORD` | Keystore password |
 | `SHOSAI_ANDROID_KEY_ALIAS` | Alias of the upload key |
 | `SHOSAI_ANDROID_KEY_PASSWORD` | Key password (same as the store password for a `keytool`-generated PKCS#12 keystore) |
-| `SHOSAI_PLAY_SERVICE_ACCOUNT_JSON` | Complete service account JSON key, not Base64 |
+
+The Google Play Android Developer API and a dedicated Workload Identity pool are configured in `shosai-512821`. Only the `play-internal.yml` dispatch from `main` in `chaba-dev/shosai`, using `RELEASE`, can impersonate the uploader. GitHub requests a short-lived token for the Play Developer API; no personal Google login or service-account JSON key is needed to run the workflow.
 
 **Each subsequent upload:** In GitHub Actions, run **Publish to Play internal testing** from `main`. Use a version code greater than every uploaded code (for example, `2` after the first upload with `1`). The version name comes from `pubspec.yaml`. The workflow signs the production bundle and publishes it only to the `internal` track. If a run fails after upload, check Play Console before retrying: Play does not let you reuse a code it has already accepted. In Play Console, confirm the new code appears on the internal track and use the tester opt-in link to install it.
 
