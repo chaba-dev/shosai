@@ -1,0 +1,112 @@
+name: Publish to Play internal testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Unused Play version code greater than every previous upload
+        required: true
+        type: string
+      publishing_overview_clear:
+        description: I checked Publishing overview for unrelated changes ready to send and coordinated with other publishers
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: play-internal
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'chaba-dev/shosai' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: RELEASE
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require confirmation of Play Console publishing state
+        if: ${{ !inputs.publishing_overview_clear }}
+        run: |
+          echo 'Check Publishing overview and coordinate with other publishers before dispatching.' >&2
+          exit 1
+      - name: Validate the Play version code
+        env:
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]{0,9}$ ]] || (( VERSION_CODE > 2100000000 )); then
+            echo 'Enter a decimal version code between 1 and 2100000000.' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0 # Nix needs revCount for the Git-backed dev shell.
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      - name: Prepare the pinned Android toolchain
+        run: .agents/dev flutter pub get --enforce-lockfile
+      - name: Authenticate to release Secret Manager
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.SHOSAI_SECRETS_PROJECT }}
+          workload_identity_provider: ${{ vars.SHOSAI_RELEASE_WORKLOAD_IDENTITY_PROVIDER }}
+          create_credentials_file: true
+          export_environment_variables: true
+      - name: Build signed production AAB
+        env:
+          SHOSAI_SECRETS_PROJECT: ${{ vars.SHOSAI_SECRETS_PROJECT }}
+          SHOSAI_BUILD_SECRET_VERSION: '1'
+          SHOSAI_ANDROID_BUILD_NUMBER: ${{ inputs.version_code }}
+          SHOSAI_ANDROID_KEYSTORE_BASE64: ${{ secrets.SHOSAI_ANDROID_KEYSTORE_BASE64 }}
+          SHOSAI_ANDROID_STORE_PASSWORD: ${{ secrets.SHOSAI_ANDROID_STORE_PASSWORD }}
+          SHOSAI_ANDROID_KEY_ALIAS: ${{ secrets.SHOSAI_ANDROID_KEY_ALIAS }}
+          SHOSAI_ANDROID_KEY_PASSWORD: ${{ secrets.SHOSAI_ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${SHOSAI_ANDROID_KEYSTORE_BASE64:?Add the upload keystore to RELEASE secrets}"
+          umask 077
+          SHOSAI_ANDROID_KEYSTORE="$(mktemp "$RUNNER_TEMP/shosai-upload.XXXXXXXX")"
+          export SHOSAI_ANDROID_KEYSTORE
+          trap 'rm -f -- "$SHOSAI_ANDROID_KEYSTORE"' EXIT
+          printf '%s' "$SHOSAI_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$SHOSAI_ANDROID_KEYSTORE"
+          unset SHOSAI_ANDROID_KEYSTORE_BASE64
+          .agents/dev ./scripts/with-build-secrets.sh release 'make android-production'
+      - name: Get a short-lived Play Developer API token
+        id: play-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/394614696557/locations/global/workloadIdentityPools/shosai-play-internal/providers/github
+          service_account: shosai-play-internal@shosai-512821.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          access_token_lifetime: 900s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Upload to the internal testing track
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.play-auth.outputs.access_token }}
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          play() {
+            printf 'Authorization: Bearer %s\n' "$PLAY_ACCESS_TOKEN" |
+              curl --silent --show-error --fail-with-body --max-time 600 --header @- "$@"
+          }
+          publisher=https://androidpublisher.googleapis.com
+          api=/androidpublisher/v3/applications/dev.shosai.reader/edits
+          bundle=build/app/outputs/bundle/release/app-release.aab
+          test -s "$bundle"
+          edit=$(play -H 'Content-Type: application/json' -d '{}' "$publisher$api" | jq -er '.id | select(test("^[a-zA-Z0-9_-]+$"))')
+          uploaded=$(play -H 'Content-Type: application/octet-stream' --data-binary "@$bundle" \
+            "$publisher/upload$api/$edit/bundles?uploadType=media" | jq -er '.versionCode')
+          if [[ "$uploaded" != "$VERSION_CODE" ]]; then
+            echo "Play returned version code $uploaded, expected $VERSION_CODE; not committing the edit." >&2
+            exit 1
+          fi
+          release=$(jq -nc --arg code "$VERSION_CODE" '{track:"internal",releases:[{versionCodes:[$code],status:"completed"}]}')
+          play -X PUT -H 'Content-Type: application/json' -d "$release" "$publisher$api/$edit/tracks/internal"
+          play -X POST "$publisher$api/$edit:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW"
