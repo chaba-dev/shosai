@@ -78,6 +78,7 @@ All notable changes to this project will be documented in this file.
 - *(shell)* Show most recently read books first (#326)
 - Keep protected books in the library and unlock password PDFs (#329)
 - Separate production and development app identities (#330)
+- *(linux)* Add Flatpak and Debian packages (#333)
 
 ### 🐛 Bug Fixes
 
@@ -132,6 +133,7 @@ All notable changes to this project will be documented in this file.
 - *(release)* Require curated release notes (#325)
 - *(release)* Preserve curated notes and relevant changelog previews (#327)
 - *(privacy)* Bundle Apple privacy declarations (#331)
+- Refresh shelf after unlocking a PDF (#334)
 
 ### 🚜 Refactor
 
