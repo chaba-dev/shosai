@@ -12,6 +12,92 @@ import 'package:shosai_flutter/reader/pdf/pdfrx_engine.dart';
 import '../support/protected_pdf.dart';
 
 void main() {
+  test(
+    'unlock refreshes shelf metadata and cover while reader stays open',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-unlock-shelf-',
+      );
+      final core = await ShosaiCore.open(
+        '${directory.path}/library',
+        pdfEngine: PdfrxPdfEngine(passwords: TestPasswordStore()),
+      );
+      final owner = CoreOwner(core);
+      final bridge = owner.bridge();
+      final readerClosed = Completer<void>();
+      final readerOpened = Completer<void>();
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => null,
+        passwordPrompt: (_) async => 'fixture-password',
+        openBook: (_) async {
+          readerOpened.complete();
+          await readerClosed.future;
+        },
+        drainReaderSaves: (_) async {},
+      );
+      addTearDown(() async {
+        if (!readerClosed.isCompleted) readerClosed.complete();
+        controller.dispose();
+        await owner.close();
+        await directory.delete(recursive: true);
+      });
+      Future<void> until(bool Function() condition) async {
+        for (var attempt = 0; attempt < 500 && !condition(); attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(condition(), isTrue);
+      }
+
+      final pdf = await protectedPdf(directory);
+      final cancellation = bridge.createCancellation();
+      final imported = await bridge.importPaths(
+        pathKeys: [pdf.path],
+        managed: true,
+        cancellationId: cancellation,
+      );
+      bridge.releaseCancellation(id: cancellation);
+      final locked = imported.items.single.book!;
+      controller.dispatch(const LibraryStarted());
+      await until(() => controller.model.loaded && !controller.model.loading);
+      expect(
+        controller.model.books.single.protection,
+        FlutterBookProtection.password,
+      );
+      controller.dispatch(LibraryCoverRequested(locked.bookId));
+      await until(() => controller.model.covers.containsKey(locked.bookId));
+      expect(controller.model.covers[locked.bookId], isEmpty);
+
+      controller.dispatch(LibraryBookOpened(locked));
+      await readerOpened.future.timeout(const Duration(seconds: 5));
+      await until(
+        () => controller.model.books.single.title == 'Unlocked fixture title',
+      );
+      final book = controller.model.books.single;
+      expect(book.author, 'Fixture author');
+      expect(book.protection, FlutterBookProtection.none);
+      expect(
+        controller.model.editions!.single.displayFile.title,
+        'Unlocked fixture title',
+      );
+      controller.dispatch(LibraryCoverRequested(locked.bookId));
+      await until(
+        () => controller.model.covers[locked.bookId]?.isNotEmpty ?? false,
+      );
+      final coverCancellation = bridge.createCancellation();
+      expect(
+        controller.model.covers[locked.bookId],
+        await bridge.libraryCover(
+          bookId: locked.bookId,
+          cancellationId: coverCancellation,
+        ),
+      );
+      bridge.releaseCancellation(id: coverCancellation);
+      expect(readerClosed.isCompleted, isFalse);
+    },
+  );
+
   test('schema18 books reclassify on their page or before reader navigation', () async {
     final directory = await Directory.systemTemp.createTemp(
       'shosai-legacy-drm-',

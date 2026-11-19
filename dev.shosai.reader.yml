@@ -1,0 +1,34 @@
+id: dev.shosai.reader
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: shosai_flutter
+build-options:
+  # This manifest exports an already-built Flutter payload.
+  no-debuginfo: true
+finish-args:
+  - --share=ipc
+  # Desktop OAuth listens on loopback and opens the system browser.
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # GTK file/folder pickers use the portal, not broad host filesystem access.
+  - --env=GTK_USE_PORTAL=1
+  # flutter_secure_storage_linux uses libsecret, not the Secret portal.
+  - --env=SECRET_BACKEND=service
+  - --talk-name=org.freedesktop.secrets
+modules:
+  - name: shosai
+    buildsystem: simple
+    build-commands:
+      - cp -a opt/shosai /app/
+      - cp -a usr/share/. /app/share/
+      - install -d /app/bin
+      - >-
+        printf '%s\n' '#!/bin/sh' 'exec /app/shosai/shosai_flutter "$@"'
+        > /app/bin/shosai_flutter
+      - chmod 755 /app/bin/shosai_flutter
+    sources:
+      - type: dir
+        path: target/linux-package-root

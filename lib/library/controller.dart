@@ -559,6 +559,22 @@ class LibraryController implements Listenable {
         _emit(_model.copyWith(importing: false));
       case LibraryManagedDeletionNoticeDismissed():
         _emit(_model.copyWith(managedFileDeletionPending: false));
+      case _LibraryBookUnlocked():
+        if (!_ownsAdapter(message.revision)) break;
+        // Unlocking commits publication facts before the reader opens. The
+        // shell may keep that reader alive while showing the shelf again.
+        final id = message.bookId;
+        if (_coverRequests.remove(id) case final request?) {
+          _bridge.cancel(id: request);
+        }
+        _coverFailures.remove(id);
+        if (_coverCache.remove(id) case final cover?) {
+          _coverCacheBytes -= cover.length;
+          _evictCover(cover);
+        }
+        _publishCovers();
+        _emit(_model.copyWith(coverRevision: _model.coverRevision + 1));
+        _load();
       case _LibraryReaderClosed():
         _readerActive = false;
         if (message.finishAdmission) {
@@ -585,12 +601,19 @@ class LibraryController implements Listenable {
         _disposeBridgeIfIdle();
       case _LibraryCoverLoaded():
         _releaseCancellation(message.cancellation);
-        if (!_closing) _cacheCover(message.bookId, message.cover);
+        if (!_closing &&
+            _coverRequests[message.bookId] == message.cancellation) {
+          _cacheCover(message.bookId, message.cover);
+        }
       case _LibraryCoverFailed():
         _releaseCancellation(message.cancellation);
-        _coverFailures.add(message.bookId);
+        if (_coverRequests[message.bookId] == message.cancellation) {
+          _coverFailures.add(message.bookId);
+        }
       case _LibraryCoverEffectFinished():
-        _coverRequests.remove(message.bookId);
+        if (_coverRequests[message.bookId] == message.cancellation) {
+          _coverRequests.remove(message.bookId);
+        }
         _activeEffects -= 1;
         if (!_closing) _emit(_model);
         _disposeBridgeIfIdle();
@@ -711,7 +734,7 @@ class LibraryController implements Listenable {
       } catch (_) {
         dispatch(_LibraryCoverFailed(bookId, cancellation));
       } finally {
-        dispatch(_LibraryCoverEffectFinished(bookId));
+        dispatch(_LibraryCoverEffectFinished(bookId, cancellation));
       }
     }());
   }
@@ -1397,6 +1420,7 @@ class LibraryController implements Listenable {
             localizations: _localizations,
           );
           if (!unlocked) return;
+          dispatch(_LibraryBookUnlocked(book.bookId, revision));
         }
         if (!_ownsAdapter(revision)) return;
         await _openBook(book);

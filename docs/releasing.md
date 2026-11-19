@@ -39,7 +39,19 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 
 **Keep the development install to retain its data.** Production installs separately with an empty library and no copied credentials. Use different `.app` paths for dev and production on macOS. On the Pixel lab, `dev.shosai.shosai` is the owner's library, not a test slot: never uninstall it or target it with Flutter Driver. Use an audited disposable package for automated device tests instead. The device-lab package, signing, and install checks still apply to both editions.
 
-Use `dev.shosai.reader` for future Linux desktop-entry, icon, AppStream, and Flatpak metadata. These packages, macOS Developer ID signing and notarization, and store upload automation are not configured by these build targets.
+## Linux distribution (x86-64)
+
+| Option | Install or build | Runtime |
+| --- | --- | --- |
+| Flatpak | `flatpak install --user ./shosai-X.Y.Z-linux-x64.flatpak`; launch with `flatpak run dev.shosai.reader` | GNOME 51 from Flathub; a desktop portal and Secret Service on the host |
+| Debian package | `sudo apt install ./shosai-X.Y.Z-linux-x64.deb`; launch Shōsai from the application menu | Ubuntu 24.04 or Debian 13 and compatible newer releases; APT resolves GTK and libsecret |
+| Nix | `nix develop .#ci --command make linux-production`; run `build/linux/x64/release/bundle/shosai_flutter` | The pinned Nix shell/store and a desktop keyring; do not redistribute this bundle as a portable download |
+
+The Flatpak and `.deb` both use the `dev.shosai.reader` desktop entry, icon and AppStream ID. The Flatpak uses the desktop file chooser portal for host files, keeps app data under `~/.var/app/dev.shosai.reader`, and talks directly to the host `org.freedesktop.secrets` service via libsecret. Both bundles include PDFium, SQLite, Inter and Noto Sans JP. An unlocked Secret Service provider (for example GNOME Keyring) is required to save sign-ins. Install the Flathub remote first if it is not configured. Sideloading this bundle is not a Flathub listing; submission as `dev.shosai.reader` requires project control of `shosai.dev` and Flathub review.
+
+Build the distributable bundles in a clean **native Ubuntu 24.04** environment, not in `nix develop`. The [Linux release workflow](../.github/workflows/release-linux.yml) lists the SDK, runtime and build dependencies. Run `flutter pub get --enforce-lockfile`, `make linux-production` (with the authorized defines file for a release), then `bash scripts/package-linux.sh`. The script validates fonts, notices and ELF dependencies; it writes and measures the two assets in `target/release-dist/`. Smoke-test the installed assets in separate non-Nix desktop sessions: open the library, import and open `fixtures/sample.pdf` and `fixtures/sample.epub`, then save a test cloud sign-in and restart the app to confirm it can recover the credential from the keyring.
+
+The draft-release workflow can call `./.github/workflows/release-linux.yml` as a job after tag validation, passing `needs.validate.outputs.commit` as `commit` and granting `contents: read` and `id-token: write`. Make the draft job depend on that job, download `release-linux-desktop` alongside the other `release-*` artifacts, and add the `.deb` and `.flatpak` names above to the draft packager's expected assets and checksum list. The Linux job only builds artifacts; it does not create a tag or a release. The Nix build remains a separate source-build option.
 
 ## Required repository settings
 
