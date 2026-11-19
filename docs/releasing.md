@@ -7,7 +7,7 @@ Shōsai releases are prepared from Conventional Commit titles and reviewed throu
 1. Each pull request title must use an allowed Conventional Commit type. The repository must use squash merges with the pull request title as the resulting commit subject.
 2. A push to `main` updates `release/next`. The workflow merges the new `main` revision into the existing release branch, then appends a release commit instead of rewriting branch history. If the branch was deleted after an earlier pull request, the workflow recovers its last pull-request head before appending. Git-cliff calculates the next semantic version, sets the application version in `pubspec.yaml` (keeping its build number), regenerates `CHANGELOG.md`, and creates or refreshes the release pull request.
 3. Review the required `docs/releases/X.Y.Z.md` and verify production builds from the release revision. The release-notes workflow checks for the notes; it does not package the app.
-4. Merging the release PR validates that its `chore(release): vX.Y.Z` title matches the `pubspec.yaml` version and creates the tag on the merge commit. Store uploads and distribution are separate, manual steps.
+4. Merging the release PR validates that its `chore(release): vX.Y.Z` title matches the `pubspec.yaml` version and creates the tag on the merge commit. The [Play internal testing workflow](#publish-to-play-internal-testing) is dispatched separately; neither the tag nor the draft GitHub Release publishes to Play.
 
 The tag workflow accepts an existing tag only when it points to the expected release merge commit.
 
@@ -38,6 +38,24 @@ If a direct Xcode build rejects a bundle ID and Flutter edition mismatch, run th
 Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute path), `SHOSAI_ANDROID_STORE_PASSWORD`, `SHOSAI_ANDROID_KEY_ALIAS`, and `SHOSAI_ANDROID_KEY_PASSWORD` in a private build environment. The production build does not fall back to debug signing. Verify the AAB's package and upload certificate before upload, then verify the installed Play build's **app-signing** SHA-1 for Google Drive. See [build credentials](build-credentials.md), [Google Drive](google-drive.md), and [Dropbox](dropbox.md) for the separate production registrations. If supplied, `SHOSAI_BUILD_DEFINES_FILE` points to the release build's Dart configuration.
 
 **Keep the development install to retain its data.** Production installs separately with an empty library and no copied credentials. Use different `.app` paths for dev and production on macOS. On the Pixel lab, `dev.shosai.shosai` is the owner's library, not a test slot: never uninstall it or target it with Flutter Driver. Use an audited disposable package for automated device tests instead. The device-lab package, signing, and install checks still apply to both editions.
+
+## Publish to Play internal testing
+
+**One-time setup**
+
+1. Create Shōsai in [Play Console](https://play.google.com/console/) as a **Free** **App**. Before uploading, keep an encrypted backup of the upload keystore and its passwords under your control. In **Testing → Internal testing**, create a release and manually upload the production AAB for `dev.shosai.reader`. Accept **Play App Signing** with a Google-managed app-signing key, finish any required setup, and roll out the internal release. Google keeps the app-signing key; keep using the same upload key to sign future bundles.
+2. In a Google Cloud project you control, enable the **Google Play Android Developer API** (`androidpublisher.googleapis.com`), create a dedicated service account, and download a JSON key. Back in **Play Console → Users and permissions**, invite the service account's email. Grant access to Shōsai only, with **Release apps to testing tracks** (and the app-level read access required by Play Console). Do not grant production release permission or account admin.
+3. In GitHub **Settings → Environments → RELEASE**, add the secrets below through GitHub's secret input or `gh secret set --env RELEASE NAME < file` on your own machine. The existing `RELEASE` variables and federation in [build credentials](build-credentials.md) are also required; the workflow reads version `1` of `shosai-release-build-defines`. Keep the environment limited to trusted refs. Never paste keys or passwords into a terminal command, commit, issue, or chat.
+
+| `RELEASE` secret | Value |
+| --- | --- |
+| `SHOSAI_ANDROID_KEYSTORE_BASE64` | Base64-encoded upload keystore used for the manual upload. Pipe `base64 < upload.p12` into `gh secret set`, not to the terminal. |
+| `SHOSAI_ANDROID_STORE_PASSWORD` | Keystore password |
+| `SHOSAI_ANDROID_KEY_ALIAS` | Alias of the upload key |
+| `SHOSAI_ANDROID_KEY_PASSWORD` | Key password (same as the store password for a `keytool`-generated PKCS#12 keystore) |
+| `SHOSAI_PLAY_SERVICE_ACCOUNT_JSON` | Complete service account JSON key, not Base64 |
+
+**Each subsequent upload:** In GitHub Actions, run **Publish to Play internal testing** from `main`. Use a version code greater than every uploaded code (for example, `2` after the first upload with `1`). The version name comes from `pubspec.yaml`. The workflow signs the production bundle and publishes it only to the `internal` track. If a run fails after upload, check Play Console before retrying: Play does not let you reuse a code it has already accepted. In Play Console, confirm the new code appears on the internal track and use the tester opt-in link to install it.
 
 ## Linux distribution (x86-64)
 
