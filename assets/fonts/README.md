@@ -14,5 +14,8 @@ These files implement the typography policy in `docs/typography.md`. Do not repl
 | `ShipporiMincho-SemiBold.ttf` | Same | Japanese editorial text, weight 600 | `bc7925544894a91466449adb73c6d943f50c3e53eb1c74d0673fe2dbafcd4d2d` |
 | `ShipporiMincho-Bold.ttf` | Same | Japanese editorial text, weight 700 | `63bc4eddc74793f671c3ab827c5175e773ffbe569d0bf50ee65375ea9e3bc286` |
 | `NotoSerifJP-ShosaiMark-Black.ttf` | [Google Fonts CSS text subset](https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@900&text=%E6%9B%B8), version 34 | The brand mark’s `書` only, weight 900 | `1f30507d5c2b12380d0e13883ebf7d9958d34fdf43c47ef071d368468c0f4c61` |
+| `lucide.ttf` | [`lucide_icons_flutter` 3.1.19](https://pub.dev/packages/lucide_icons_flutter/versions/3.1.19), Lucide 1.41.0 | Standard UI icons | `b27152b2215731ec9a65a3b351b45873f912bf5d15a64e058aac4136699b804e` |
 
-Inter, Noto Sans JP, Literata and Shippori Mincho are the default type set (`docs/typography.md`); Source Serif 4 belongs to the Inter + Source Serif 4 set. All families use the SIL Open Font License 1.1, and each license is stored alongside its binaries (`LICENSE-Literata.txt`, `LICENSE-ShipporiMincho.txt`, and so on). `NotoSerifJP-ShosaiMark-Black.ttf` is intentionally limited to U+66F8 and exists only for the mark; use a full family before setting other Japanese text in Noto Serif JP.
+Inter, Noto Sans JP, Literata and Shippori Mincho are the default type set (`docs/typography.md`); Source Serif 4 belongs to the Inter + Source Serif 4 set. The text and brand families use the SIL Open Font License 1.1; each license is stored alongside its binaries. `NotoSerifJP-ShosaiMark-Black.ttf` is intentionally limited to U+66F8 and exists only for the mark; use a full family before setting other Japanese text in Noto Serif JP.
+
+The Lucide icon font and its wrapper MIT, Lucide ISC, and Feather MIT notices live in [`third_party/lucide_icons_flutter`](../../third_party/lucide_icons_flutter).
