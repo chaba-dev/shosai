@@ -7,6 +7,32 @@ package through the Dart adapters described in
 [the architecture](../../docs/flutter-architecture.md). It is independent of
 Flutter widgets, so its behaviour is tested with `dart test`.
 
+## Catalog JSON export
+
+From this package, run `dart run tool/export_catalog_json.dart INPUT.sqlite
+NEW_DIRECTORY` on a catalog database, such as the Gutenberg importer's output.
+Use a new directory in a private staging location; the exporter does not deploy
+anything. Commit the resulting snapshot as Hugo static assets, not app bundle
+assets. The weekly refresh workflow and PR automation are separate work.
+
+Pass `--previous CHECKED_IN_DIRECTORY` after the two paths when regenerating.
+The exporter compares counts, file paths, sizes and hashes, preserving the
+previous build timestamp if nothing changed. An unchanged refresh therefore
+produces byte-identical files, including the manifest. It never edits the
+previous snapshot; CI can review the staged output before replacing it.
+
+The snapshot has `manifest.json` plus 24 fixed `<table>/<part>.json` files.
+Each UTF-8 JSON array has one row per line, with rows ordered by the keys in
+`catalogTables`. Editions occupy 16 partitions chosen by the first hex digit
+of SHA-256 of their work ID; each other table occupies one file. Adding a book
+does not move existing rows to another file. An export fails if any partition
+exceeds 24 MiB rather than changing file boundaries to meet Pages' 25 MiB limit.
+
+The manifest counts editions by source and records each file's size and SHA-256
+over its JSON bytes before HTTP compression. Its format version is independent
+of the SQLite schema version. This Gutenberg exporter preserves metadata as
+imported; it does not fetch thumbnails or verify EPUB availability or rights.
+
 ## Store
 
 `Store.open(path)` starts one worker isolate that owns the database's only
