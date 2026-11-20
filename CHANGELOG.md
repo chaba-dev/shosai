@@ -80,6 +80,7 @@ All notable changes to this project will be documented in this file.
 - Separate production and development app identities (#330)
 - *(linux)* Add Flatpak and Debian packages (#333)
 - *(catalog)* Define the Gutenberg snapshot contract (#336)
+- *(catalog)* Export Git-friendly JSON snapshots (#340)
 
 ### 🐛 Bug Fixes
 
