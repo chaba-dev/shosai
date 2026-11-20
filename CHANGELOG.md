@@ -81,6 +81,7 @@ All notable changes to this project will be documented in this file.
 - *(linux)* Add Flatpak and Debian packages (#333)
 - *(catalog)* Define the Gutenberg snapshot contract (#336)
 - *(catalog)* Export Git-friendly JSON snapshots (#340)
+- *(catalog)* Check in validated Gutenberg snapshots (#341)
 
 ### 🐛 Bug Fixes
 
