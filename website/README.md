@@ -44,12 +44,19 @@ python3 website/catalog.py promote NEW_EXPORT_DIRECTORY website/static/catalog
 ```
 
 Promotion checks the format version, complete inventory, per-file size and
-SHA-256, JSON column types, SQLite keys and references, edition partitions and
-source counts before changing the current pointer. A failed validation leaves
+SHA-256 (including size limits on both metadata files), one-row-per-line layout,
+stable row ordering, JSON column types, SQLite keys and references, edition
+partitions and source counts before changing the current pointer. A failed validation leaves
 the checked-in snapshots unchanged. CI runs the same validation against both
 the source assets and Hugo's output. These checks establish structural validity,
 not the correctness of upstream metadata or the availability or legal status of
 each candidate EPUB. Feed changes still need review before merge.
+
+An interrupted promotion restores the installed snapshots when possible. Its
+backup is outside automatic staging cleanup: after a hard kill or failed
+recovery, look for a sibling `.catalog-backup-*/catalog` directory. If the
+catalog directory is missing, restore that backup before retrying. Backups are
+removed only after successful installation or restoration.
 
 The app will fetch `/catalog/revisions.json`, validate `/catalog/current/manifest.json`
 against the selected content revision, and import its JSON into a new local
@@ -87,7 +94,9 @@ Cloudflare Pages provides Hugo when using the Hugo framework preset. Once the cu
 
 Existing Pages projects must also use `bash website/build.sh` to enforce the
 catalog gate in production. Committing this documentation does not change the
-project's remote build settings.
+project's remote build settings. The configuration checked on 2026-11-20 still
+used root `website`, command `hugo --minify` and output `public`; it must adopt
+all three settings in the table above before relying on the production gate.
 
 ### Build watch paths
 

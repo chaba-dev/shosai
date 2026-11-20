@@ -6,11 +6,16 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import catalog
 
 
 SCRIPT = Path(__file__).with_name("catalog.py")
+
+
+def partition(rows):
+    return "[\n" + ",\n".join("  " + json.dumps(row) for row in rows) + "\n]\n"
 
 
 def snapshot(root, title="Pride and Prejudice"):
@@ -38,7 +43,7 @@ def snapshot(root, title="Pride and Prejudice"):
     for name, data in rows.items():
         path = root / name
         path.parent.mkdir(exist_ok=True)
-        path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+        path.write_text(partition(data), encoding="utf-8")
     manifest = {
         "formatVersion": 2, "builtAt": "2026-11-20T00:00:00.000Z",
         "sourceCounts": {"gutenberg": 1}, "files": {},
@@ -54,7 +59,7 @@ def snapshot(root, title="Pride and Prejudice"):
 
 def rewrite(root, name, data):
     path = root / name
-    path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    path.write_text(data if isinstance(data, str) else partition(data), encoding="utf-8")
     manifest = catalog.read_json(root / "manifest.json")
     raw = path.read_bytes()
     manifest["files"][name] = {
@@ -113,6 +118,71 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(contents(published), before)
         self.assertIsNotNone(catalog.validate(published))
+
+    def test_interrupted_promotion_preserves_both_installed_snapshots(self):
+        published = self.root / "published"
+        catalog.promote(snapshot(self.root / "a"), published)
+        catalog.promote(snapshot(self.root / "b", "Second"), published)
+        third = snapshot(self.root / "c", "Third")
+        before = contents(published)
+        rename = Path.rename
+
+        def interrupted_rename(path, target):
+            result = rename(path, target)
+            if path == published:
+                raise KeyboardInterrupt
+            return result
+
+        with mock.patch.object(Path, "rename", interrupted_rename):
+            with self.assertRaises(KeyboardInterrupt):
+                catalog.promote(third, published)
+        self.assertEqual(contents(published), before)
+        catalog.validate(published)
+
+    def test_ordered_single_line_rows_are_required(self):
+        exported = snapshot(self.root / "snapshot")
+        authors = [
+            {"id": key, "name": key, "sort_name": key, "name_reading": None}
+            for key in ("a", "z")
+        ]
+        rewrite(exported, "authors/0.json", authors)
+        catalog.validate_snapshot(exported)
+        for invalid in (list(reversed(authors)), json.dumps(authors) + "\n"):
+            with self.subTest(invalid=invalid):
+                rewrite(exported, "authors/0.json", invalid)
+                with self.assertRaises(ValueError):
+                    catalog.validate_snapshot(exported)
+
+    def test_ordering_of_editions_uses_numeric_display_order(self):
+        exported = snapshot(self.root / "snapshot")
+        edition = catalog.read_json(exported / "editions/7.json")[0]
+        editions = [dict(edition, source_edition_id="later-id", display_order=2),
+                    dict(edition, source_edition_id="earlier-id", display_order=10)]
+        manifest_path = exported / "manifest.json"
+        manifest = catalog.read_json(manifest_path)
+        manifest["sourceCounts"]["gutenberg"] = 2
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        rewrite(exported, "editions/7.json", editions)
+        catalog.validate_snapshot(exported)
+        rewrite(exported, "editions/7.json", list(reversed(editions)))
+        with self.assertRaises(ValueError):
+            catalog.validate_snapshot(exported)
+
+    def test_metadata_files_obey_the_same_asset_size_limit(self):
+        published = self.root / "published"
+        catalog.promote(snapshot(self.root / "a"), published)
+        for path in (published / "current/manifest.json", published / "revisions.json"):
+            with self.subTest(path=path):
+                original = path.read_bytes()
+                try:
+                    path.write_bytes(original + b" " * (catalog.MAX_FILE_BYTES - len(original)))
+                    catalog.validate(published)
+                    with path.open("ab") as output:
+                        output.write(b" ")
+                    with self.assertRaisesRegex(ValueError, "Invalid file size"):
+                        catalog.validate(published)
+                finally:
+                    path.write_bytes(original)
 
     def test_hashed_but_invalid_data_is_rejected(self):
         for problem in (

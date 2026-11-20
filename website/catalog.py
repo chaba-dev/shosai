@@ -24,6 +24,12 @@ TABLES = {
     "book_subjects": "0",
     "book_categories": "0",
 }
+ORDER_BY = {
+    "editions": ("book_id", "display_order"),
+    "book_authors": ("book_id", "position"),
+    "book_subjects": ("subject_id", "book_id"),
+    "book_categories": ("category_id", "book_id"),
+}
 # Publication format 2 restores these rows into catalog database schema 1.
 # Keep this contract aligned with packages/shosai_core/lib/catalog.dart.
 SCHEMA = """
@@ -93,6 +99,7 @@ def invalid_constant(value):
 
 
 def read_json(path):
+    require(0 < path.stat().st_size <= MAX_FILE_BYTES, f"Invalid file size: {path}")
     return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object,
                       parse_constant=invalid_constant)
 
@@ -145,13 +152,27 @@ def validate_snapshot(root):
                         f"Invalid file size: {name}")
                 require(isinstance(digest, str) and re.fullmatch("[0-9a-f]{64}", digest),
                         f"Invalid checksum: {name}")
+                require((root / name).stat().st_size == size, f"Size mismatch: {name}")
                 data = (root / name).read_bytes()
                 require(len(data) == size, f"Size mismatch: {name}")
                 require(hashlib.sha256(data).hexdigest() == digest, f"Checksum mismatch: {name}")
                 rows = json.loads(data.decode("utf-8"), object_pairs_hook=unique_object,
                                   parse_constant=invalid_constant)
                 require(type(rows) is list, f"Expected row array: {name}")
-                for row in rows:
+                lines = data.decode("utf-8").split("\n")
+                require(lines[0] == "[" and lines[-2:] == ["]", ""],
+                        f"Invalid partition layout: {name}")
+                require(len(lines) == len(rows) + 3 if rows else lines == ["[", "", "]", ""],
+                        f"Expected one row per line: {name}")
+                previous_key = None
+                for position, row in enumerate(rows):
+                    line = lines[position + 1]
+                    if position < len(rows) - 1:
+                        require(line.endswith(","), f"Missing row separator: {name}")
+                        line = line[:-1]
+                    require(json.loads(line, object_pairs_hook=unique_object,
+                                       parse_constant=invalid_constant) == row,
+                            f"Expected one row per line: {name}")
                     require(type(row) is dict and set(row) == set(columns),
                             f"Invalid row columns: {name}")
                     for field in fields:
@@ -159,6 +180,12 @@ def validate_snapshot(root):
                         expected_type = str if field[2] == "TEXT" else int
                         require(value is None or type(value) is expected_type,
                                 f"Invalid column type: {name}: {field[1]}")
+                    key = tuple(row[column] for column in ORDER_BY.get(table, ("id",)))
+                    require(all(value is not None for value in key),
+                            f"Null ordering key: {name}")
+                    require(previous_key is None or previous_key < key,
+                            f"Unsorted partition: {name}")
+                    previous_key = key
                     if table == "editions":
                         work = row["book_id"]
                         require(isinstance(work, str), "Invalid work ID")
@@ -223,15 +250,23 @@ def promote(snapshot, root):
         pointer = replacement / "revisions.json"
         pointer.write_text(json.dumps(next_index, indent=2) + "\n", encoding="utf-8")
         validate(replacement)
-        backup = staging / "old"
-        if index:
-            root.rename(backup)
+        # Never put the only backup under TemporaryDirectory: unwinding after
+        # SIGINT (or a failed recovery) must not delete the installed snapshots.
+        backup = None
         try:
+            if index:
+                backup = Path(tempfile.mkdtemp(prefix=".catalog-backup-", dir=root.parent))
+                root.rename(backup / "catalog")
             replacement.rename(root)
-        except OSError:
-            if backup.exists():
-                backup.rename(root)
+        except BaseException:
+            if backup and (backup / "catalog").exists() and not root.exists():
+                (backup / "catalog").rename(root)
             raise
+        finally:
+            if backup and not (backup / "catalog").exists():
+                backup.rmdir()
+        if backup:
+            shutil.rmtree(backup)
     return revision
 
 
