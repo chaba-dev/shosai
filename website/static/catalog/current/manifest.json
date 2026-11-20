@@ -1,0 +1,105 @@
+{
+  "formatVersion": 2,
+  "builtAt": "2026-11-20T03:19:18.175845Z",
+  "sourceCounts": {
+    "gutenberg": 157036
+  },
+  "files": {
+    "sources/0.json": {
+      "sizeBytes": 132,
+      "sha256": "f05e4dd49ac091f076fa7af9058acb403aa8fb3f387ba16041908ebba47d85b6"
+    },
+    "books/0.json": {
+      "sizeBytes": 6665898,
+      "sha256": "8acd386b2712f025fd8f94f6dfe70a456b37f9357645e2cef88689ba4c178a0c"
+    },
+    "authors/0.json": {
+      "sizeBytes": 6900653,
+      "sha256": "d3d31e1b47ce32620a8144102aadc99775f9c8aa5759f8aa499361e77d9daeab"
+    },
+    "subjects/0.json": {
+      "sizeBytes": 4127908,
+      "sha256": "fdd57b37eccdbe074bc0b87bd2c55b483720783d94e84f5f15141c572768799f"
+    },
+    "categories/0.json": {
+      "sizeBytes": 5187,
+      "sha256": "a144001a45a1fd0a05f73c6d0e0e1f25aeb031949ca92fc74837edd1e0418aec"
+    },
+    "editions/0.json": {
+      "sizeBytes": 5510569,
+      "sha256": "6b60d35097a81f1ea1b53ff58eb809857681d87386ce87189be4f12fc40cdccb"
+    },
+    "editions/1.json": {
+      "sizeBytes": 5546773,
+      "sha256": "9d07b0f116736c5ae747ab5d2fc013366de990b5488320160d92888970d2f1ac"
+    },
+    "editions/2.json": {
+      "sizeBytes": 5373149,
+      "sha256": "d7c9923dafcf4d06b65e4f28f8cda1c9cbf2d626d0a807703be162b309b4c94a"
+    },
+    "editions/3.json": {
+      "sizeBytes": 5376587,
+      "sha256": "7b51db257d3ea6b974e02bee50cbf388183a5d3893c560dc4463fea22af0eaae"
+    },
+    "editions/4.json": {
+      "sizeBytes": 5346375,
+      "sha256": "e0ebcdfe1fba24c6b0934a970d24571df2b725fcbc6d4756a2ab8f9c1d00a60a"
+    },
+    "editions/5.json": {
+      "sizeBytes": 5418581,
+      "sha256": "102b9cbe1b92ed21ba47cf7d2b4185c8334933864d5461ead559766afb253e4b"
+    },
+    "editions/6.json": {
+      "sizeBytes": 5319225,
+      "sha256": "3ff2e5c667e4fb3cd8e8878644ec38c51d63d4e38ef4eb0c318448ce8d6d33ae"
+    },
+    "editions/7.json": {
+      "sizeBytes": 5427535,
+      "sha256": "3e3a2f11007bb14c43aced785eec19affbdca18d4848b026aed4ec42eff808c5"
+    },
+    "editions/8.json": {
+      "sizeBytes": 5437323,
+      "sha256": "cb3e2bf4b33bd123bc6e034ba2bb487a3cdd088025ee0eeceaca010dae4acc25"
+    },
+    "editions/9.json": {
+      "sizeBytes": 5294151,
+      "sha256": "d1403c7a11e053c157ce7110747295fec33492c926a548885c62b55ab8f29006"
+    },
+    "editions/a.json": {
+      "sizeBytes": 5438965,
+      "sha256": "97af8cb7f47180991aaaaffab7ced36efeec0a5c915eec3caabff3e16feabb90"
+    },
+    "editions/b.json": {
+      "sizeBytes": 5512877,
+      "sha256": "cd0abf0ce733c83184eadc0f3c2b681a9823d9074b1f3ccf41e4ec3a200d381d"
+    },
+    "editions/c.json": {
+      "sizeBytes": 5464701,
+      "sha256": "021c96221263f910170e33e722e49a0c742e90b4137fb78affe31d339f30e7db"
+    },
+    "editions/d.json": {
+      "sizeBytes": 5501571,
+      "sha256": "e900698475005ed68e3312fe3d0c3d6b51c51a4082b21cbf77489947152297a4"
+    },
+    "editions/e.json": {
+      "sizeBytes": 5312519,
+      "sha256": "e912287edafb09ac7a19c4aaeb25d5b5bfdea7d780eb71f5df7f97ed091f0a68"
+    },
+    "editions/f.json": {
+      "sizeBytes": 5440383,
+      "sha256": "aa15e550a8fd13fa8d759480f826fd2bddc86e67f7e0d6a51b88cb38c96ba314"
+    },
+    "book_authors/0.json": {
+      "sizeBytes": 11265877,
+      "sha256": "83187e4f57b1572684d52af9743b84c5eb84fcdeeebd6a27bcc072f00f17432b"
+    },
+    "book_subjects/0.json": {
+      "sizeBytes": 15144929,
+      "sha256": "bbd2d3068844f263c4b706aa5c6e4f35b48fa1f5c0e81647dc44f4977b55ae6b"
+    },
+    "book_categories/0.json": {
+      "sizeBytes": 14160941,
+      "sha256": "bc7c2d105a9c9817917d401055cc513babd8a785f2e27f24c6a3320dfaea181e"
+    }
+  }
+}
