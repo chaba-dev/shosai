@@ -8,8 +8,7 @@ if ! [[ "$code" =~ ^[1-9][0-9]{0,9}$ ]] || (( code > 2100000000 )); then
   exit 1
 fi
 case "$track" in
-  internal) test -s "${3:?Specify the signed AAB}" ;;
-  production) test "$#" -eq 2 ;;
+  internal|production) test -s "${3:?Specify the signed AAB}" ;;
   *) exit 1 ;;
 esac
 : "${PLAY_ACCESS_TOKEN:?Missing Play access token}"
@@ -30,25 +29,14 @@ jq -e --arg code "$code" '
   exit 1
 }
 
-if [[ "$track" == internal ]]; then
-  uploaded=$(play -H 'Content-Type: application/octet-stream' --data-binary "@$3" \
-    "$publisher/upload$api/$edit/bundles?uploadType=media" | jq -er '.versionCode')
-  if [[ "$uploaded" != "$code" ]]; then
-    echo "Play returned version code $uploaded, expected $code; not committing the edit." >&2
-    exit 1
-  fi
-  notes='[]'
-else
-  source=$(play "$edit_url/tracks/internal")
-  notes=$(jq -ce --arg code "$code" '
-    first(.releases[]? | select(.status == "completed" and (.versionCodes | index($code))) | (.releaseNotes // []))
-  ' <<< "$source") || {
-    echo 'The requested version is not on a completed internal release; not promoting.' >&2
-    exit 1
-  }
+uploaded=$(play -H 'Content-Type: application/octet-stream' --data-binary "@$3" \
+  "$publisher/upload$api/$edit/bundles?uploadType=media" | jq -er '.versionCode')
+if [[ "$uploaded" != "$code" ]]; then
+  echo "Play returned version code $uploaded, expected $code; not committing the edit." >&2
+  exit 1
 fi
 
-release=$(jq -nc --arg track "$track" --arg code "$code" --argjson notes "$notes" \
-  '{track:$track,releases:[{versionCodes:[$code],status:"completed",releaseNotes:$notes}]}')
+release=$(jq -nc --arg track "$track" --arg code "$code" \
+  '{track:$track,releases:[{versionCodes:[$code],status:"completed"}]}')
 play -X PUT -H 'Content-Type: application/json' -d "$release" "$edit_url/tracks/$track"
 play -X POST "$edit_url:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW"
