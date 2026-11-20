@@ -6,19 +6,21 @@ import 'package:shosai_core/catalog.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 
+import '../tool/export_catalog_json.dart';
 import 'support/temp_store.dart';
 
 Map<String, Object> _manifest({Map<String, Object>? files}) => {
-  'formatVersion': 1,
+  'formatVersion': 2,
   'builtAt': '2026-10-24T12:00:00.000Z',
   'sourceCounts': {'gutenberg': 2},
-  'files': files ?? {'catalog.sqlite.gz': _file},
+  'files': files ?? _files,
 };
 
 final _file = {'sizeBytes': 4096, 'sha256': 'a' * 64};
+final _files = {for (final table in catalogTables.keys) '$table/0.json': _file};
 
 void main() {
-  test('reads the manifest for a compressed Gutenberg SQLite snapshot', () {
+  test('exports verified JSON that restores the Gutenberg catalog', () {
     final directory = tempDataDirectory();
     final snapshot = File('${directory.path}/catalog.sqlite');
     final db = sqlite3.open(snapshot.path);
@@ -30,30 +32,31 @@ void main() {
     } finally {
       db.close();
     }
-    final compressed = gzip.encode(snapshot.readAsBytesSync());
-    final digest = sha256.convert(compressed).toString();
+    final output = Directory('${directory.path}/catalog');
+    exportCatalogJson(snapshot.path, output.path);
     final manifest = CatalogManifest.parse(
-      jsonEncode(
-        _manifest(
-          files: {
-            'catalog.sqlite.gz': {
-              'sizeBytes': compressed.length,
-              'sha256': digest,
-            },
-          },
-        ),
-      ),
+      File('${output.path}/manifest.json').readAsStringSync(),
     );
-    expect(manifest.builtAt, DateTime.utc(2026, 10, 24, 12));
-    expect(manifest.files[catalogDatabaseFile], (
-      sizeBytes: compressed.length,
-      sha256: digest,
-    ));
-
-    final unpacked = File('${directory.path}/unpacked.sqlite')
-      ..writeAsBytesSync(gzip.decode(compressed));
-    final catalog = sqlite3.open(unpacked.path, mode: OpenMode.readOnly);
+    final catalog = sqlite3.openInMemory();
     addTearDown(catalog.close);
+    catalog.execute(catalogSchema);
+    for (final table in catalogTables.keys) {
+      final path = '$table/0.json';
+      final bytes = File('${output.path}/$path').readAsBytesSync();
+      expect(manifest.files[path], (
+        sizeBytes: bytes.length,
+        sha256: sha256.convert(bytes).toString(),
+      ));
+      for (final raw in jsonDecode(utf8.decode(bytes)) as List) {
+        final row = raw as Map<String, dynamic>;
+        final columns = row.keys.join(', ');
+        final placeholders = List.filled(row.length, '?').join(', ');
+        catalog.execute(
+          'INSERT INTO $table ($columns) VALUES ($placeholders)',
+          row.values.toList(),
+        );
+      }
+    }
     expect(catalog.userVersion, 1);
     expect(catalog.select('PRAGMA foreign_key_check'), isEmpty);
     final counts = catalog.select('''
@@ -93,6 +96,69 @@ void main() {
     ]);
   });
 
+  test('splits catalog rows at the UTF-8 size limit', () {
+    final directory = tempDataDirectory();
+    final snapshot = File('${directory.path}/catalog.sqlite');
+    final db = sqlite3.open(snapshot.path);
+    final title = '猫' * 750000;
+    try {
+      db.execute(catalogSchema);
+      db.execute(
+        File('test/fixtures/gutenberg_catalog.sql').readAsStringSync(),
+      );
+      db.execute('UPDATE books SET title = ?', [title]);
+      db.execute("INSERT INTO books VALUES ('gutenberg:2', ?)", [title]);
+    } finally {
+      db.close();
+    }
+
+    final output = Directory('${directory.path}/catalog');
+    exportCatalogJson(snapshot.path, output.path);
+    final manifest = CatalogManifest.parse(
+      File('${output.path}/manifest.json').readAsStringSync(),
+    );
+    final parts = manifest.files.keys.where(
+      (path) => path.startsWith('books/'),
+    );
+    expect(parts, ['books/0.json', 'books/1.json']);
+    for (final (index, path) in parts.indexed) {
+      final bytes = File('${output.path}/$path').readAsBytesSync();
+      expect(bytes.length, lessThanOrEqualTo(4 * 1024 * 1024));
+      expect(jsonDecode(utf8.decode(bytes)), [
+        {
+          'id': ['gutenberg:1342', 'gutenberg:2'][index],
+          'title': title,
+        },
+      ]);
+    }
+  });
+
+  test('a failed export leaves no partial catalog', () {
+    final directory = tempDataDirectory();
+    final snapshot = File('${directory.path}/catalog.sqlite');
+    final db = sqlite3.open(snapshot.path);
+    try {
+      db.execute(catalogSchema);
+      db.execute(
+        File('test/fixtures/gutenberg_catalog.sql').readAsStringSync(),
+      );
+      db.execute('UPDATE books SET title = ?', ['猫' * 1500000]);
+    } finally {
+      db.close();
+    }
+    expect(
+      () => exportCatalogJson(snapshot.path, '${directory.path}/out'),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('exceeds the shard limit'),
+        ),
+      ),
+    );
+    expect(directory.listSync().map((entry) => entry.path), [snapshot.path]);
+  });
+
   test('publisher connection rejects editions for a missing work', () {
     final db = sqlite3.openInMemory();
     addTearDown(db.close);
@@ -122,24 +188,24 @@ void main() {
 
   test('rejects incompatible versions and invalid snapshot metadata', () {
     final invalid = [
-      _manifest()..['formatVersion'] = 2,
+      _manifest()..['formatVersion'] = 1,
       _manifest()..['builtAt'] = '2026-02-30T12:00:00.000Z',
       _manifest()..['sourceCounts'] = {'gutenberg': -1},
       _manifest(files: {}),
       _manifest(
         files: {
-          'catalog.sqlite.gz': {..._file, 'sha256': 'oops'},
+          ..._files,
+          'books/0.json': {..._file, 'sha256': 'oops'},
         },
       ),
       _manifest(
         files: {
-          'catalog.sqlite.gz': {..._file, 'sizeBytes': 0},
+          ..._files,
+          'books/0.json': {..._file, 'sizeBytes': 0},
         },
       ),
-      _manifest(files: {'catalog.sqlite.gz': _file, '../cover.jpg': _file}),
-      _manifest(
-        files: {'catalog.sqlite.gz': _file, 'https://example.com': _file},
-      ),
+      _manifest(files: {..._files, '../cover.jpg': _file}),
+      _manifest(files: {..._files, 'https://example.com': _file}),
     ];
     for (final input in invalid) {
       expect(

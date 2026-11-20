@@ -7,6 +7,21 @@ package through the Dart adapters described in
 [the architecture](../../docs/flutter-architecture.md). It is independent of
 Flutter widgets, so its behaviour is tested with `dart test`.
 
+## Catalog JSON export
+
+From this package, run `dart run tool/export_catalog_json.dart INPUT.sqlite
+NEW_DIRECTORY` on a catalog database, such as the Gutenberg importer's output.
+Use a new directory in a private staging location; the exporter does not deploy
+anything. Generated snapshots stay out of Git and app bundles.
+
+The export contains `manifest.json` and `<table>/<part>.json` files. Each part
+is a UTF-8 JSON array of rows keyed by schema column name. Parts are numbered
+from zero, capped at 4 MiB, and ordered by the keys in `catalogTables`. The
+manifest counts editions by source and records each file's size and SHA-256 over
+the JSON bytes, before HTTP compression. Its format version is independent of
+the SQLite schema version. The exporter preserves metadata as imported; it
+does not verify EPUB availability or rights.
+
 ## Store
 
 `Store.open(path)` starts one worker isolate that owns the database's only

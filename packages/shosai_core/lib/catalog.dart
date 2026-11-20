@@ -1,11 +1,26 @@
-/// Shared disk format for the catalog publisher and reader. Catalog files are
+/// Shared catalog storage and publication formats. Catalog files are
 /// replaceable and never belong to the personal library store.
 library;
 
 import 'dart:convert';
 
-const catalogFormatVersion = 1;
-const catalogDatabaseFile = 'catalog.sqlite.gz';
+const catalogDatabaseVersion = 1;
+const catalogFormatVersion = 2;
+
+/// Published tables in foreign-key insertion order, with stable row ordering
+/// for partitioning. JSON shards at `<table>/<part>.json` are arrays of row
+/// objects keyed by the versioned schema's column names.
+const catalogTables = {
+  'sources': 'id',
+  'books': 'id',
+  'authors': 'id',
+  'subjects': 'id',
+  'categories': 'id',
+  'editions': 'book_id, display_order',
+  'book_authors': 'book_id, position',
+  'book_subjects': 'subject_id, book_id',
+  'book_categories': 'category_id, book_id',
+};
 
 /// Apply to a fresh catalog database with no user data. The publisher supplies
 /// work IDs and explicit edition groupings. Edition IDs are scoped to their
@@ -75,12 +90,12 @@ CREATE TABLE book_categories (
   category_id TEXT NOT NULL REFERENCES categories(id),
   PRIMARY KEY (category_id, book_id)
 ) STRICT;
-PRAGMA user_version = $catalogFormatVersion;
+PRAGMA user_version = $catalogDatabaseVersion;
 COMMIT;
 ''';
 
-/// Metadata for a published file. Size and digest describe the served bytes
-/// (the gzip stream for [catalogDatabaseFile]), not the decompressed payload.
+/// Metadata for a published file. Size and digest describe the file bytes
+/// before any HTTP transport compression.
 typedef CatalogFile = ({int sizeBytes, String sha256});
 
 final class CatalogManifest {
@@ -129,8 +144,10 @@ final class CatalogManifest {
           throw const FormatException('Invalid catalog file entry');
         }
       }
-      if (!files.containsKey(catalogDatabaseFile)) {
-        throw const FormatException('Missing catalog database entry');
+      for (final table in catalogTables.keys) {
+        if (!files.containsKey('$table/0.json')) {
+          throw FormatException('Missing catalog table: $table');
+        }
       }
       return CatalogManifest._(
         builtAt,
