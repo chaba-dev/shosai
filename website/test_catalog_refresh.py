@@ -169,8 +169,11 @@ raise SystemExit(result.returncode)
     def change_proposal(self, path, contents, amend=False):
         self.git("fetch", "origin", "catalog/refresh")
         self.git("checkout", "-B", "maintainer", "FETCH_HEAD")
-        (self.work / path).write_text(contents)
-        self.git("add", path)
+        if contents is None:
+            (self.work / path).unlink()
+        else:
+            (self.work / path).write_text(contents)
+        self.git("add", "--", path)
         self.git("commit", *(("--amend", "--no-edit") if amend else ("-m", "Maintainer update")))
         self.git("push", "--force", "origin", "HEAD:refs/heads/catalog/refresh")
         self.git("checkout", "main")
@@ -344,6 +347,63 @@ raise SystemExit(result.returncode)
         self.assertEqual((self.branch(), self.state.read_bytes()), before)
         self.assertFalse(self.events.exists())
 
+    def test_valid_maintainer_amendment_is_not_adopted_replaced_or_closed(self):
+        candidate = snapshot(self.root / "b", "B")
+        self.refresh(candidate)
+        self.git("fetch", "origin", "catalog/refresh")
+        self.git("checkout", "-B", "maintainer", "FETCH_HEAD")
+        row = catalog.read_json(self.catalog / "current/books/0.json")[0]
+        rewrite(self.catalog / "current", "books/0.json", [dict(row, title="Maintainer correction")])
+        index = catalog.read_json(self.catalog / "revisions.json")
+        index["current"] = catalog.validate_snapshot(self.catalog / "current")
+        (self.catalog / "revisions.json").write_text(json.dumps(index))
+        catalog.validate(self.catalog)
+        self.git("add", ".")
+        bot = self.env
+        self.env = dict(bot, GIT_COMMITTER_NAME="Maintainer", GIT_COMMITTER_EMAIL="human@example.invalid")
+        self.git("commit", "--amend", "--no-edit")
+        self.env = bot
+        self.git("push", "--force", "origin", "HEAD:refs/heads/catalog/refresh")
+        self.git("checkout", "main")
+        head, events = self.branch(), self.events.read_text()
+        feeds = (candidate, snapshot(self.root / "c", "C"), self.initial)
+        for state in (self.state.read_text(), "null"):
+            self.state.write_text(state)
+            for feed in feeds:
+                self.refresh(feed, success=False)
+                self.assertEqual((self.branch(), self.state.read_text(), self.events.read_text()),
+                                 (head, state, events))
+
+    def test_outside_to_catalog_rename_is_not_a_catalog_only_proposal(self):
+        outside = self.work / "archive/readme"
+        outside.parent.mkdir()
+        outside.write_bytes((self.initial / "books/0.json").read_bytes())
+        self.commit_main()
+        self.git("config", "diff.renames", "true")
+        candidate = snapshot(self.root / "b", "B")
+        self.refresh(candidate)
+        self.change_proposal("archive/readme", None, amend=True)
+        head = self.branch().split()[0]
+        self.assertIn("R100\tarchive/readme\twebsite/static/catalog/previous/books/0.json",
+                      self.git("diff", "--name-status", "-M", head + "^", head))
+        before = self.branch(), self.state.read_bytes(), self.events.read_text()
+        self.refresh(candidate, success=False)
+        self.assertEqual((self.branch(), self.state.read_bytes(), self.events.read_text()), before)
+
+    def test_outside_path_whitespace_cannot_be_trimmed_into_the_catalog(self):
+        name = " website/static/catalog/notes"
+        outside = self.work / name
+        outside.parent.mkdir(parents=True)
+        outside.write_text("Not a catalog asset")
+        self.commit_main()
+        self.git("config", "diff.renames", "false")
+        candidate = snapshot(self.root / "b", "B")
+        self.refresh(candidate)
+        self.change_proposal(name, None, amend=True)
+        before = self.branch(), self.state.read_bytes(), self.events.read_text()
+        self.refresh(candidate, success=False)
+        self.assertEqual((self.branch(), self.state.read_bytes(), self.events.read_text()), before)
+
     def test_lost_push_and_api_responses_are_reconciled_without_duplicate_writes(self):
         candidate = snapshot(self.root / "b", "B")
         self.faults(fail_push="after", fail_create="after")
@@ -368,6 +428,20 @@ raise SystemExit(result.returncode)
         self.refresh(candidate)
         self.assertEqual(self.branch(), before)
         self.assertIn(catalog.validate_snapshot(candidate), json.loads(self.state.read_text())["body"])
+
+    def test_recovery_branch_change_is_reported_even_when_the_body_already_matches(self):
+        candidate = snapshot(self.root / "b", "B")
+        self.refresh(candidate)
+        body = self.state.read_bytes()
+        self.faults(fail_edit="before", read_error_after_failure=True)
+        self.refresh(snapshot(self.root / "c", "C"), success=False)
+        before = self.branch()
+        self.faults(read_error=False)
+        result = self.refresh(candidate)
+        self.assertNotEqual(self.branch(), before)
+        self.assertEqual(self.state.read_bytes(), body)
+        self.assertNotIn("untouched", result.stdout)
+        self.assertIn("branch", result.stdout.lower())
 
     def test_delayed_successful_edit_readback_is_not_rolled_back(self):
         self.refresh(snapshot(self.root / "b", "B"))

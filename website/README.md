@@ -54,7 +54,7 @@ credentials in the `RELEASE` environment so proposed updates trigger normal CI.
 | Main's current or retained previous revision changes | Regenerate the proposal with main's latest current snapshot as previous |
 | Same content as main | Open nothing; close an obsolete generated PR if present |
 | Invalid, failed import, or more than 5% fewer editions for any existing source | Fail; leave the existing branch and PR untouched |
-| Existing proposal contains independent work or an invalid snapshot | Fail without adopting, replacing or closing it |
+| Unexpected proposal committer, commit layout, paths or snapshot | Fail without adopting, replacing or closing it |
 
 Record ordering in the feed and build timestamps do not count as changes.
 The exporter sorts rows by stable keys; comparison uses the format, inventory
@@ -62,11 +62,14 @@ paths, sizes and hashes. Unrelated main changes alone do not bump an open PR.
 The workflow checks main again after pushing. If it observes catalog drift,
 it attempts a lease-protected restoration of its previous branch head and
 fails; rerun on the latest main. This includes a return to the same current
-revision when main now retains different history. Before reusing or replacing
-an existing branch, the workflow verifies a single generated, catalog-only
-commit from a main ancestor, an exact copy of that ancestor's current snapshot
-as previous, and the complete proposed snapshot inventory and contents.
-Independent work and competing branch updates are never overwritten.
+revision when main now retains different history. Before reusing, replacing or
+closing a proposal, the workflow requires the configured bot's committer
+identity and commit message, one catalog-only commit from a main ancestor,
+an exact copy of that ancestor's current snapshot as previous, and a valid
+complete proposed snapshot. The committer check guards accidental edits; it
+is not authenticated provenance because Git identities can be forged. Enforced
+bot-only branch writes would require separate repository protection settings;
+this workflow does not configure them. Push leases protect competing updates.
 
 Branch publication and GitHub PR edits are separate operations. After a failed
 command, the workflow reads both back instead of assuming nothing happened.
@@ -79,10 +82,14 @@ If readback fails, the run fails without a blind retry or rollback; the next run
 reconciles the branch and PR. Only same-repository PRs are eligible. Maintainer
 prose outside the generated markers is reread immediately before editing,
 although GitHub offers no atomic compare-and-swap for description edits.
-The workflow never merges or deploys: a person reviews each proposal, including
-legitimate large deletions. GitHub scheduling and environment approvals still apply.
+The workflow never merges or deploys: a person reviews each generated proposal.
+GitHub scheduling and environment approvals still apply.
 
-To validate a new export and prepare it for a catalog refresh PR, run:
+A source edition-count drop above 5% stops before any generated PR, with no
+automatic override. If the deletion is legitimate, verify the upstream change
+and prepare a separate manual catalog PR. For that path or another manual
+refresh, promote the export with the command below; it runs structural
+validation without the automated count-drop guard:
 
 ```sh
 python3 website/catalog.py promote NEW_EXPORT_DIRECTORY website/static/catalog

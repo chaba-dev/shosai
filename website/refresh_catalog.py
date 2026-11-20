@@ -47,15 +47,26 @@ def pointer(commit):
 
 
 def validate_proposal(commit, baseline):
-    parents, message = run("git", "show", "-s", "--format=%P%x00%B", commit).split("\0", 1)
+    parents, committer, message = run(
+        "git", "show", "-s", "--format=%P%x00%cn <%ce>%x00%B", commit
+    ).split("\0", 2)
+    # An accidental-edit guard, not authenticated provenance: Git identities
+    # can be forged. Enforced bot-only writes would require branch protection.
+    bot = run("git", "var", "GIT_COMMITTER_IDENT").rsplit(" ", 2)[0]
+    catalog.require(committer == bot,
+                    "Catalog branch committer differs from the configured bot; leaving it untouched")
     catalog.require(len(parents.split()) == 1 and message.strip() == TITLE,
                     "Catalog branch is not a single generated commit; leaving it untouched")
     parent = parents.strip()
     catalog.require(run("git", "merge-base", parent, baseline) == parent,
                     "Catalog branch contains work outside main; leaving it untouched")
-    changed = run("git", "diff", "--name-only", "-z", parent, commit).split("\0")[:-1]
-    catalog.require(changed and all(path.startswith(CATALOG + "/") for path in changed),
+    outside = subprocess.run(
+        ["git", "diff", "--quiet", "--no-renames", parent, commit,
+         "--", ":/", f":(top,exclude){CATALOG}/"], capture_output=True, text=True,
+    )
+    catalog.require(outside.returncode != 1,
                     "Catalog branch contains non-catalog changes; leaving it untouched")
+    outside.check_returncode()
     parent_index = pointer(parent)
     catalog.require(run("git", "rev-parse", f"{parent}:{CATALOG}/current")
                     == run("git", "rev-parse", f"{commit}:{CATALOG}/previous"),
@@ -292,8 +303,10 @@ def refresh(snapshot, base_branch):
         catalog.require(publication_complete(remote_head(BRANCH), pull),
                         "Catalog PR publication could not be confirmed; retry to reconcile it")
         print(f"Published catalog proposal: {pull['html_url']}")
-    else:
+    elif matching:
         print("Catalog PR already proposes this content; branch and PR untouched")
+    else:
+        print("Updated catalog proposal branch; PR description already current")
 
 
 def main():
