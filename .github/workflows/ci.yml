@@ -27,6 +27,7 @@ on:
       - ".github/workflows/ci.yml"
       - ".github/workflows/release-pr.yml"
       - ".github/workflows/release-notes.yml"
+      - ".github/workflows/play-internal.yml"
   pull_request:
     paths:
       - "lib/**"
@@ -144,3 +145,11 @@ jobs:
         run: |
           nix develop .#ci --command python3 scripts/check_flutter_bundle.py \
             "build/macos/Build/Products/Debug/shosai_flutter.app"
+
+  play-internal:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'chaba-dev/shosai'
+    needs: [dart-format, flutter-analyze, generated-sources, flutter-test, script-test, flutter-linux-host, flutter-packaged-linux, flutter-packaged-macos, flutter-macos-host]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/play-internal.yml

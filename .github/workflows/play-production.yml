@@ -1,0 +1,42 @@
+name: Promote Shosai to Play production
+run-name: Promote Shosai to Play production (version ${{ inputs.version_code }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Exact completed Play internal version code to promote
+        required: true
+        type: string
+
+jobs:
+  promote:
+    if: github.repository == 'chaba-dev/shosai' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: PLAY_PRODUCTION
+    concurrency:
+      group: shosai-play-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: play
+        with:
+          workload_identity_provider: ${{ vars.SHOSAI_PLAY_PRODUCTION_PROVIDER }}
+          service_account: ${{ vars.SHOSAI_PLAY_PRODUCTION_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          access_token_lifetime: 900s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Promote the approved internal build
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.play.outputs.access_token }}
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: bash scripts/play-publish.sh production "$VERSION_CODE"
