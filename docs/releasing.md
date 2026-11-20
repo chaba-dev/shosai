@@ -39,14 +39,16 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 
 **Keep the development install to retain its data.** Production installs separately with an empty library and no copied credentials. Use different `.app` paths for dev and production on macOS. On the Pixel lab, `dev.shosai.shosai` is the owner's library, not a test slot: never uninstall it or target it with Flutter Driver. Use an audited disposable package for automated device tests instead. The device-lab package, signing, and install checks still apply to both editions.
 
-## Release on Google Play from Amp
+## Release on Google Play from GitHub Actions
 
-| Track | What GitHub prepares | What you approve in Amp |
+| Track | What GitHub prepares | What you approve in GitHub |
 | --- | --- | --- |
-| Internal testing | After CI passes on a `main` push, GitHub signs the AAB and retains it as an Actions artifact for 7 days. The version code is `10000 +` the CI run number; the version name comes from `pubspec.yaml`. | “Approve the latest Shōsai internal upload.” Amp finds the newest pending deployment and shows the version code, commit, and run attempt. |
-| Production | “Queue Shōsai production promotion for version 10042.” GitHub queues that exact version, with no rebuild, and Amp retains the run link in the conversation. | “Approve that promotion” in the same thread, or “Approve the latest Shōsai production promotion.” The job verifies the approved code is still on a completed Internal release and won't replace a newer, equal, or unfinished Production release. A successful commit submits a full rollout, subject to Play review and publishing settings. |
+| Internal testing | After CI passes on a `main` push, GitHub signs the AAB and retains it as an Actions artifact for 7 days. The version code is `10000 +` the CI run number; the version name comes from `pubspec.yaml`. | Open the deployment review request and approve `PLAY_INTERNAL` for the displayed version code. |
+| Production | Run **Promote Shosai to Play production** from `main` and enter the tested Internal version code. GitHub queues that exact version, with no rebuild. | Approve `PLAY_PRODUCTION` for that run. The job verifies the code is still on a completed Internal release and won't replace a newer, equal, or unfinished Production release. A successful commit submits a full rollout, subject to Play review and publishing settings. |
 
 **Before either approval:** In Play Console’s **Publishing overview**, check that no unrelated changes are ready to send and coordinate with other publishers until the job finishes. Play commits edits app-wide. The job refuses to cancel an existing review but cannot detect unrelated unsent Console changes. Check the run and Play Console for the result; approval isn't proof of publication. If the upload fails after Play accepted the bundle, check its version code in Play Console before retrying. A rerun uses the same code; a later CI run allocates a new one.
+
+On the GitHub run, select [**Review deployments**](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments), select the target environment, and choose **Approve and deploy** or **Reject**. To get a push alert instead of checking Actions for pending runs, enable **Requests to approve a deployment** in [GitHub Mobile notifications](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications#managing-your-notification-settings-with-github-mobile).
 
 ### One-time setup
 
@@ -55,7 +57,6 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 3. Create GitHub environments `PLAY_INTERNAL` and `PLAY_PRODUCTION`, restrict both to `main`, configure the owner as a required reviewer, and disable administrator bypass **before** granting either environment access to Play. If the same maintainer queues and approves production, leave prevention of self-review off; to require two people, enable it and use a separate eligible reviewer.
 4. In Google Cloud, enable the Android Publisher API and use separate keyless workload identity providers and upload identities. Restrict both providers to the immutable repository ID `1194321001`, owner ID `44737549`, and `refs/heads/main`. For Internal require `PLAY_INTERNAL`, `push`, caller `workflow_ref` `.github/workflows/ci.yml`, and `job_workflow_ref` `.github/workflows/play-internal.yml`. For Production require `PLAY_PRODUCTION`, `workflow_dispatch`, and `workflow_ref` `.github/workflows/play-production.yml`. Match full workflow ref claims including `chaba-dev/shosai/` and `@refs/heads/main`. Set `SHOSAI_PLAY_PRODUCTION_PROVIDER` and `SHOSAI_PLAY_PRODUCTION_SERVICE_ACCOUNT` on `PLAY_PRODUCTION`.
 5. Invite each service account in **Play Console → Users and permissions**, with access to Shōsai only. Give `shosai-play-internal@shosai-512821.iam.gserviceaccount.com` **Release apps to testing tracks**, not production. Give the separate production service account the app-scoped production release permission and enough access to read its Internal track. Do not give either account Play account admin access or issue a JSON key.
-6. Use the project-local Amp plugin from a trusted checkout. In Amp’s private dialog, enter a fine-grained GitHub token belonging to a required reviewer and restricted to `chaba-dev/shosai`. Grant **Deployments: write** for approval and **Actions: read** to check the run, or **Actions: write** if the token also queues production. The plugin does not save the token or use it for Play. You can also approve the same deployment through GitHub Actions.
 
 ## Linux distribution (x86-64)
 
