@@ -5,8 +5,8 @@ export const description = 'Queue Shosai production promotions and approve exact
 const repo = '/repos/chaba-dev/shosai'
 const actions = `${repo}/actions`
 const workflow = {
-  internal: { path: '.github/workflows/ci.yml', event: 'push', environment: 'PLAY_INTERNAL' },
-  production: { path: '.github/workflows/play-production.yml', event: 'workflow_dispatch', environment: 'PLAY_PRODUCTION' },
+  internal: { file: 'ci.yml', event: 'push', environment: 'PLAY_INTERNAL' },
+  production: { file: 'play-production.yml', event: 'workflow_dispatch', environment: 'PLAY_PRODUCTION' },
 } as const
 type Track = keyof typeof workflow
 
@@ -38,7 +38,7 @@ async function pendingDeployment(runId: number, track: Track, token: string | un
   const base = `${actions}/runs/${runId}`
   const policy = workflow[track]
   const run = await github(base, signal, token)
-  if (run.id !== runId || run.path !== policy.path || run.event !== policy.event || run.head_branch !== 'main'
+  if (run.id !== runId || run.path !== `.github/workflows/${policy.file}` || run.event !== policy.event || run.head_branch !== 'main'
     || run.head_repository?.id !== 1194321001 || !/^[0-9a-f]{40}$/.test(run.head_sha)
     || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
     throw new Error('This is not an eligible Shosai main-branch release run.')
@@ -69,6 +69,19 @@ async function pendingDeployment(runId: number, track: Track, token: string | un
   return { code, sha: run.head_sha, attempt: run.run_attempt, environmentId }
 }
 
+async function latestPendingRun(track: Track, signal: AbortSignal): Promise<number | undefined> {
+  const { file, event, environment } = workflow[track]
+  const runs = await github(`${actions}/workflows/${file}/runs?branch=main&event=${event}&status=waiting&per_page=100`, signal)
+  // The workflow can also be waiting on another environment, such as RELEASE.
+  const candidates = runs.workflow_runs
+    .filter((run: { id: number; head_repository?: { id: number } }) => Number.isSafeInteger(run.id) && run.id > 0 && run.head_repository?.id === 1194321001)
+    .sort((a: { run_number: number }, b: { run_number: number }) => b.run_number - a.run_number)
+  for (const { id } of candidates) {
+    const pending = await github(`${actions}/runs/${id}/pending_deployments`, signal)
+    if (pending.some((item: { environment: { name: string } }) => item.environment.name === environment)) return id
+  }
+}
+
 const tokenField = {
   name: 'github_token', label: 'GitHub token for your reviewer account (private input)', value: '', secret: true,
 }
@@ -95,21 +108,30 @@ export default function (amp: PluginAPI) {
       if (!Number.isSafeInteger(result?.workflow_run_id)) {
         return 'GitHub accepted the dispatch but did not identify its run. Find it in GitHub Actions before retrying.'
       }
-      return `Queued production version ${code} in run ${result.workflow_run_id}. Wait for PLAY_PRODUCTION to request approval: https://github.com/chaba-dev/shosai/actions/runs/${result.workflow_run_id}`
+      return `Queued production version ${code}. To approve this exact promotion, call shosai_approve_play_deployment with track production and run_id ${result.workflow_run_id} once it is waiting. No need for the user to look up the run. https://github.com/chaba-dev/shosai/actions/runs/${result.workflow_run_id}`
     },
   })
 
   amp.registerTool({
     name: 'shosai_approve_play_deployment',
-    description: 'Show an owner-only confirmation for one waiting Shosai GitHub Actions run, then submit its GitHub deployment approval. Does not upload directly.',
+    description: 'Find the newest Shosai Play deployment waiting on the selected track and show its owner-only approval. Pass a run ID only to approve a specific run, such as one just queued for production.',
     inputSchema: {
-      type: 'object', required: ['track', 'run_id'], additionalProperties: false,
+      type: 'object', required: ['track'], additionalProperties: false,
       properties: { track: { type: 'string', enum: ['internal', 'production'] }, run_id: { type: 'integer', minimum: 1 } },
     },
     async execute(input, { ui, signal }) {
-      const { track, run_id: runId } = input
-      if ((track !== 'internal' && track !== 'production') || typeof runId !== 'number' || !Number.isSafeInteger(runId) || runId < 1) {
-        throw new Error('Specify a Play track and a GitHub Actions run ID.')
+      const { track, run_id: requestedRun } = input
+      if (track !== 'internal' && track !== 'production') throw new Error('Specify a Play track.')
+      if (requestedRun !== undefined && (typeof requestedRun !== 'number' || !Number.isSafeInteger(requestedRun) || requestedRun < 1)) {
+        throw new Error('The run ID must be a positive integer if provided.')
+      }
+      const runId = requestedRun ?? await latestPendingRun(track, signal)
+      if (runId === undefined) return `No ${track} deployment is waiting for approval on main.`
+      if (requestedRun !== undefined) {
+        const pending = await github(`${actions}/runs/${runId}/pending_deployments`, signal)
+        if (!pending.some((item: { environment: { name: string } }) => item.environment.name === workflow[track].environment)) {
+          return `Run ${runId} is not waiting for ${track} approval.`
+        }
       }
       const candidate = await pendingDeployment(runId, track, undefined, signal)
       const title = track === 'internal' ? 'Upload to Play Internal testing' : 'Promote to Play Production'
