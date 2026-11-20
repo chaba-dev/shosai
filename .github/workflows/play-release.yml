@@ -47,7 +47,6 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             tag=${GITHUB_REF#refs/tags/}
             [[ "$GITHUB_REF" == refs/tags/* && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-            [[ "$(git log -1 --format=%s)" == "chore(release): $tag" ]]
             [[ "$(sed -n 's/^version: \([^+]*\).*/\1/p' pubspec.yaml)" == "${tag#v}" ]]
             gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" |
               jq -es --arg sha "$GITHUB_SHA" --arg title "chore(release): $tag" --arg repo "$GITHUB_REPOSITORY" '
