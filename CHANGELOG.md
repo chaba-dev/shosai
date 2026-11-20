@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-19
+## [0.1.0] - 2026-11-20
 
 ### 🚀 Features
 
@@ -179,6 +179,7 @@ All notable changes to this project will be documented in this file.
 - *(mobile)* Use dev.shosai.shosai application identifiers (#251)
 - *(assets)* Update development app icon (#252)
 - *(ios)* Raise the minimum to iOS 15 for Xcode 27 (#285)
+- *(android)* Automate Play publishing on release merges (#339)
 
 ### 🛡️ Security
 
