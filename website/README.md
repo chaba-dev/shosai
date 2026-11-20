@@ -49,23 +49,32 @@ credentials in the `RELEASE` environment so proposed updates trigger normal CI.
 | Candidate compared with main / the open update | Result |
 | --- | --- |
 | New valid content | Open or update one catalog-only PR, with added/removed/updated record counts |
-| Same content and previous snapshot as a complete open PR | Leave its branch, commits and description untouched |
+| Same content, unchanged main catalog index, and complete open PR | Leave its branch, commits and description untouched |
 | Matching branch, but missing or stale PR metadata | Repair the PR without replacing the branch commit |
-| Main has a different current catalog | Regenerate the proposal with main's latest current snapshot as previous |
+| Main's current or retained previous revision changes | Regenerate the proposal with main's latest current snapshot as previous |
 | Same content as main | Open nothing; close an obsolete generated PR if present |
 | Invalid, failed import, or more than 5% fewer editions for any existing source | Fail; leave the existing branch and PR untouched |
+| Existing proposal contains independent work or an invalid snapshot | Fail without adopting, replacing or closing it |
 
 Record ordering in the feed and build timestamps do not count as changes.
 The exporter sorts rows by stable keys; comparison uses the format, inventory
 paths, sizes and hashes. Unrelated main changes alone do not bump an open PR.
 The workflow checks main again after pushing. If it observes catalog drift,
 it attempts a lease-protected restoration of its previous branch head and
-fails; rerun on the latest main. A competing branch update is never overwritten.
+fails; rerun on the latest main. This includes a return to the same current
+revision when main now retains different history. Before reusing or replacing
+an existing branch, the workflow verifies a single generated, catalog-only
+commit from a main ancestor, an exact copy of that ancestor's current snapshot
+as previous, and the complete proposed snapshot inventory and contents.
+Independent work and competing branch updates are never overwritten.
 
 Branch publication and GitHub PR edits are separate operations. After a failed
 command, the workflow reads both back instead of assuming nothing happened.
 A confirmed failed PR update restores the prior branch head when still owned
 by this run; a failed create retains the matching branch for the next run.
+Immediately before rollback, matching desired branch and summary readbacks
+instead count as success. Restoration is allowed only while the original
+generated summary remains; a third summary state is left for reconciliation.
 If readback fails, the run fails without a blind retry or rollback; the next run
 reconciles the branch and PR. Only same-repository PRs are eligible. Maintainer
 prose outside the generated markers is reread immediately before editing,

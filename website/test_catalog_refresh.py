@@ -60,6 +60,9 @@ if command == "list":
     if control.get("read_error"):
         raise SystemExit("simulated API read failure")
     pulls = ([expanded(pull)] if pull else []) + control.get("forks", [])
+    if pulls and control.get("read_bodies"):
+        pulls[0]["body"] = control["read_bodies"].pop(0)
+        control_path.write_text(json.dumps(control))
     print(json.dumps([pulls] if "--slurp" in args else pulls))
 else:
     failure = control.pop("fail_" + command, None)
@@ -72,7 +75,12 @@ else:
         control_path.write_text(json.dumps(control))
         raise SystemExit("simulated API failure before mutation")
     if command in ("create", "edit"):
+        if command == "edit" and control.pop("stale_readback", False):
+            control["read_bodies"] = [pull["body"]]
         pull = dict(number=number, body=data["body"])
+        if "third_body" in control:
+            pull["body"] = control.pop("third_body")
+        control_path.write_text(json.dumps(control))
         path.write_text(json.dumps(pull))
         print(json.dumps(expanded(pull)))
     elif command == "close":
@@ -157,6 +165,21 @@ raise SystemExit(result.returncode)
 
     def faults(self, **changes):
         self.control.write_text(json.dumps(dict(json.loads(self.control.read_text()), **changes)))
+
+    def change_proposal(self, path, contents, amend=False):
+        self.git("fetch", "origin", "catalog/refresh")
+        self.git("checkout", "-B", "maintainer", "FETCH_HEAD")
+        (self.work / path).write_text(contents)
+        self.git("add", path)
+        self.git("commit", *(("--amend", "--no-edit") if amend else ("-m", "Maintainer update")))
+        self.git("push", "--force", "origin", "HEAD:refs/heads/catalog/refresh")
+        self.git("checkout", "main")
+
+    def round_trip_catalog(self):
+        for candidate in (snapshot(self.root / "round-trip", "C"), self.initial):
+            catalog.promote(candidate, self.catalog)
+            self.git("add", ".")
+            self.git("commit", "-m", "Main catalog change")
 
     def test_only_new_content_opens_or_updates_a_pr(self):
         self.refresh(self.initial)
@@ -261,6 +284,22 @@ raise SystemExit(result.returncode)
         self.assertNotEqual(self.branch(), before[1])
         self.assertIn(catalog.validate_snapshot(candidate), json.loads(self.state.read_text())["body"])
 
+    def test_depth_one_checkout_reuses_and_restores_an_older_main_proposal(self):
+        candidate = snapshot(self.root / "b", "B")
+        self.refresh(candidate)
+        before = self.state.read_bytes(), self.branch()
+        (self.work / "unrelated.txt").write_text("A newer main commit")
+        self.commit_main()
+        shallow = self.root / "shallow"
+        self.git("clone", "--depth=1", "--branch=main", (self.root / "origin.git").as_uri(), str(shallow))
+        self.work = shallow
+        self.faults(fail_edit="before")
+        self.refresh(snapshot(self.root / "c", "C"), success=False)
+        self.assertEqual((self.state.read_bytes(), self.branch()), before)
+        self.refresh(candidate)
+        self.assertEqual((self.state.read_bytes(), self.branch()), before)
+        self.assertEqual(self.events.read_text(), "create\n")
+
     def test_failed_create_reuses_the_pushed_commit_despite_timestamp_change(self):
         candidate = snapshot(self.root / "b", "B")
         self.faults(fail_create="before")
@@ -275,6 +314,35 @@ raise SystemExit(result.returncode)
         self.refresh(candidate)
         self.assertEqual(self.branch(), before)
         self.assertIn(catalog.validate_snapshot(candidate), json.loads(self.state.read_text())["body"])
+
+    def test_maintainer_commit_after_failed_create_is_not_adopted_or_replaced(self):
+        candidate = snapshot(self.root / "b", "B")
+        self.faults(fail_create="before")
+        self.refresh(candidate, success=False)
+        self.change_proposal("maintainer.txt", "Do not publish or discard this work")
+        before = self.branch(), self.state.read_bytes()
+        for next_candidate in (candidate, snapshot(self.root / "c", "C"), self.initial):
+            self.refresh(next_candidate, success=False)
+            self.assertEqual((self.branch(), self.state.read_bytes()), before)
+            self.assertFalse(self.events.exists())
+
+    def test_maintainer_commit_on_open_proposal_is_not_replaced_or_closed(self):
+        self.refresh(snapshot(self.root / "b", "B"))
+        self.change_proposal("maintainer.txt", "Keep this work")
+        before = self.branch(), self.state.read_bytes(), self.events.read_text()
+        for candidate in (snapshot(self.root / "c", "C"), self.initial):
+            self.refresh(candidate, success=False)
+            self.assertEqual((self.branch(), self.state.read_bytes(), self.events.read_text()), before)
+
+    def test_matching_pointer_does_not_allow_a_corrupt_proposal_tree(self):
+        candidate = snapshot(self.root / "b", "B")
+        self.faults(fail_create="before")
+        self.refresh(candidate, success=False)
+        self.change_proposal("website/static/catalog/current/books/0.json", "corrupt", amend=True)
+        before = self.branch(), self.state.read_bytes()
+        self.refresh(candidate, success=False)
+        self.assertEqual((self.branch(), self.state.read_bytes()), before)
+        self.assertFalse(self.events.exists())
 
     def test_lost_push_and_api_responses_are_reconciled_without_duplicate_writes(self):
         candidate = snapshot(self.root / "b", "B")
@@ -301,6 +369,27 @@ raise SystemExit(result.returncode)
         self.assertEqual(self.branch(), before)
         self.assertIn(catalog.validate_snapshot(candidate), json.loads(self.state.read_text())["body"])
 
+    def test_delayed_successful_edit_readback_is_not_rolled_back(self):
+        self.refresh(snapshot(self.root / "b", "B"))
+        before = self.branch()
+        candidate = snapshot(self.root / "c", "C")
+        self.faults(fail_edit="after", stale_readback=True)
+        self.refresh(candidate)
+        self.assertNotEqual(self.branch(), before)
+        self.git("fetch", "origin", "catalog/refresh")
+        proposed = json.loads(self.git("show", "FETCH_HEAD:website/static/catalog/revisions.json"))
+        self.assertEqual(proposed["current"], catalog.validate_snapshot(candidate))
+        self.assertIn(proposed["current"], json.loads(self.state.read_text())["body"])
+
+    def test_third_metadata_state_is_left_for_reconciliation_not_rolled_back(self):
+        self.refresh(snapshot(self.root / "b", "B"))
+        before = self.branch()
+        third = "<!-- catalog-refresh:start -->A maintainer changed the summary<!-- catalog-refresh:end -->"
+        self.faults(fail_edit="after", stale_readback=True, third_body=third)
+        self.refresh(snapshot(self.root / "c", "C"), success=False)
+        self.assertNotEqual(self.branch(), before)
+        self.assertEqual(json.loads(self.state.read_text())["body"], third)
+
     def test_catalog_change_on_main_rebuilds_the_previous_snapshot(self):
         candidate = snapshot(self.root / "b", "B")
         self.refresh(candidate)
@@ -326,6 +415,29 @@ raise SystemExit(result.returncode)
         self.git("checkout", "main")
         self.faults(advance_main=advanced)
         self.refresh(candidate, success=False)
+        self.assertEqual(self.branch(), "")
+        self.assertEqual(self.state.read_text(), "null")
+
+    def test_return_to_the_same_main_current_rebuilds_for_changed_retained_history(self):
+        candidate = snapshot(self.root / "b", "B")
+        self.refresh(candidate)
+        before = self.branch()
+        self.round_trip_catalog()
+        self.git("push", "origin", "main")
+        main = self.git("rev-parse", "HEAD")
+        self.refresh(candidate)
+        self.git("fetch", "origin", "catalog/refresh")
+        self.assertTrue(self.git("merge-tree", "--write-tree", main, "FETCH_HEAD"))
+        self.assertNotEqual(self.branch(), before)
+        self.assertEqual(self.git("rev-parse", "FETCH_HEAD^"), main)
+
+    def test_retained_history_drift_during_push_rolls_back(self):
+        self.git("checkout", "-b", "maintainer")
+        self.round_trip_catalog()
+        advanced = self.git("rev-parse", "HEAD")
+        self.git("checkout", "main")
+        self.faults(advance_main=advanced)
+        self.refresh(snapshot(self.root / "b", "B"), success=False)
         self.assertEqual(self.branch(), "")
         self.assertEqual(self.state.read_text(), "null")
 

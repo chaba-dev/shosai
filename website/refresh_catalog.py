@@ -15,6 +15,7 @@ import catalog
 
 BRANCH = "catalog/refresh"
 CATALOG = "website/static/catalog"
+TITLE = "chore(catalog): refresh Gutenberg metadata"
 START = "<!-- catalog-refresh:start -->"
 END = "<!-- catalog-refresh:end -->"
 KEYS = {
@@ -43,6 +44,41 @@ def fetch(branch):
 
 def pointer(commit):
     return json.loads(run("git", "show", f"{commit}:{CATALOG}/revisions.json"))
+
+
+def validate_proposal(commit, baseline):
+    parents, message = run("git", "show", "-s", "--format=%P%x00%B", commit).split("\0", 1)
+    catalog.require(len(parents.split()) == 1 and message.strip() == TITLE,
+                    "Catalog branch is not a single generated commit; leaving it untouched")
+    parent = parents.strip()
+    catalog.require(run("git", "merge-base", parent, baseline) == parent,
+                    "Catalog branch contains work outside main; leaving it untouched")
+    changed = run("git", "diff", "--name-only", "-z", parent, commit).split("\0")[:-1]
+    catalog.require(changed and all(path.startswith(CATALOG + "/") for path in changed),
+                    "Catalog branch contains non-catalog changes; leaving it untouched")
+    parent_index = pointer(parent)
+    catalog.require(run("git", "rev-parse", f"{parent}:{CATALOG}/current")
+                    == run("git", "rev-parse", f"{commit}:{CATALOG}/previous"),
+                    "Catalog proposal did not retain its parent's snapshot; leaving it untouched")
+    # Read actual Git blobs, not a checkout or export-filtered archive. This also
+    # rejects symlinks, submodules and hidden extra files before reusing a head.
+    with tempfile.TemporaryDirectory(prefix="catalog-proposal-") as temporary:
+        root = Path(temporary)
+        for entry in run("git", "ls-tree", "-rz", commit, "--", CATALOG).split("\0")[:-1]:
+            metadata, name = entry.split("\t", 1)
+            mode, kind, blob = metadata.split()
+            relative = Path(name).relative_to(CATALOG)
+            catalog.require(mode == "100644" and kind == "blob" and ".." not in relative.parts,
+                            "Unexpected catalog branch entry; leaving it untouched")
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("wb") as output:
+                subprocess.run(["git", "cat-file", "blob", blob], stdout=output,
+                               stderr=subprocess.PIPE, check=True)
+        proposed = catalog.validate(root)
+    catalog.require(proposed["previous"] == parent_index["current"],
+                    "Catalog proposal has an unexpected previous revision; leaving it untouched")
+    return proposed, parent_index
 
 
 def api(path, method="GET", data=None, paginate=False):
@@ -146,13 +182,22 @@ def refresh(snapshot, base_branch):
         if remote != baseline:
             catalog.require(allow_unrelated and remote,
                             "Main advanced; rerun on the latest main")
-            catalog.require(pointer(fetch(base_branch))["current"] == installed["current"],
+            catalog.require(pointer(fetch(base_branch)) == installed,
                             "Catalog on main advanced; rerun on the latest main")
 
     check_base()
     original = open_pull(repo, base_branch)
     old_head = remote_head(BRANCH)
     check_pull(original, original, old_head)
+    proposed, parent_index = {}, None
+    if old_head:
+        if run("git", "rev-parse", "--is-shallow-repository") == "true":
+            # Actions starts at depth one. Establish ancestry before deciding
+            # that an existing proposal contains only generated work.
+            run("git", "fetch", "--no-tags", "--unshallow", "origin",
+                f"refs/heads/{base_branch}", f"refs/heads/{BRANCH}")
+        catalog.require(fetch(BRANCH) == old_head, "Catalog branch changed during refresh")
+        proposed, parent_index = validate_proposal(old_head, baseline)
 
     if revision == installed["current"]:
         if original:
@@ -171,12 +216,7 @@ def refresh(snapshot, base_branch):
 
     generated = summary(root / "current", snapshot, revision)
     commit = old_head
-    if old_head:
-        catalog.require(fetch(BRANCH) == old_head, "Catalog branch changed during refresh")
-        proposed = pointer(old_head)
-    else:
-        proposed = {}
-    matching = proposed.get("current") == revision and proposed.get("previous") == installed["current"]
+    matching = proposed.get("current") == revision and parent_index == installed
 
     # Work only on an ephemeral Actions checkout. Candidate validation happens
     # before promotion, commits, pushes, edits or closure of an existing PR.
@@ -185,7 +225,7 @@ def refresh(snapshot, base_branch):
         run("git", "add", "--", CATALOG)
         tree = run("git", "write-tree")
         commit = run("git", "commit-tree", tree, "-p", baseline,
-                     "-m", "chore(catalog): refresh Gutenberg metadata")
+                     "-m", TITLE)
         check_base()
         check_pull(open_pull(repo, base_branch), original, old_head)
         try:
@@ -195,12 +235,24 @@ def refresh(snapshot, base_branch):
             if remote_head(BRANCH) != commit:
                 raise
 
-    def rollback():
+    def publication_complete(head, pull):
+        return (pull and head == commit and pull["head"]["sha"] == commit
+                and (not original or pull["number"] == original["number"])
+                and generated_section(pull) == generated)
+
+    def rollback(accept_published=False):
         # Restore only after both readbacks identify our own, still-open proposal.
         # If either read fails, leave the uncertain outcome for the next run.
-        catalog.require(remote_head(BRANCH) == commit, "Catalog branch changed; not rolling it back")
-        check_pull(open_pull(repo, base_branch), original, commit)
+        head = remote_head(BRANCH)
+        pull = open_pull(repo, base_branch)
+        if accept_published and publication_complete(head, pull):
+            return True
+        catalog.require(head == commit, "Catalog branch changed; not rolling it back")
+        check_pull(pull, original, commit)
+        catalog.require(not pull or generated_section(pull) == generated_section(original),
+                        "Catalog PR summary changed; leaving it for reconciliation")
         restore_head(commit, old_head)
+        return False
 
     try:
         check_base(allow_unrelated=True)
@@ -225,24 +277,19 @@ def refresh(snapshot, base_branch):
                 api(f"repos/{repo}/pulls/{pull['number']}", "PATCH", dict(body=body))
             else:
                 api(f"repos/{repo}/pulls", "POST", dict(base=base_branch, head=BRANCH,
-                    title="chore(catalog): refresh Gutenberg metadata", body=body))
+                    title=TITLE, body=body))
         except subprocess.CalledProcessError:
             # A failed command may have succeeded on GitHub. Read branch and PR
             # independently; revision equality alone is not publication success.
             observed_head = remote_head(BRANCH)
             observed = open_pull(repo, base_branch)
-            complete = (observed and observed_head == commit and observed["head"]["sha"] == commit
-                        and (not original or observed["number"] == original["number"])
-                        and generated_section(observed) == generated)
-            if not complete:
-                if original and not matching:
-                    rollback()
-                # A failed create keeps its matching branch for a metadata-only retry.
-                raise
+            if not publication_complete(observed_head, observed):
+                if not (original and not matching and rollback(accept_published=True)):
+                    # A failed create keeps its branch for a metadata-only retry.
+                    raise
 
         pull = open_pull(repo, base_branch)
-        catalog.require(pull and pull["head"]["sha"] == commit
-                        and remote_head(BRANCH) == commit and generated_section(pull) == generated,
+        catalog.require(publication_complete(remote_head(BRANCH), pull),
                         "Catalog PR publication could not be confirmed; retry to reconcile it")
         print(f"Published catalog proposal: {pull['html_url']}")
     else:
