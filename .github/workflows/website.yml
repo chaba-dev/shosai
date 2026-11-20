@@ -23,4 +23,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command hugo --source website --minify
+      - run: nix develop --command python3 -m unittest discover -s website -p test_catalog.py
+      - run: nix develop --command bash website/build.sh
