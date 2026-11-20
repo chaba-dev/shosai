@@ -1,11 +1,27 @@
-/// Shared disk format for the catalog publisher and reader. Catalog files are
+/// Shared catalog storage and publication formats. Catalog files are
 /// replaceable and never belong to the personal library store.
 library;
 
 import 'dart:convert';
 
-const catalogFormatVersion = 1;
-const catalogDatabaseFile = 'catalog.sqlite.gz';
+const catalogDatabaseVersion = 1;
+const catalogFormatVersion = 2;
+
+/// Published tables in foreign-key insertion order. Each `<table>/<part>.json`
+/// is an array with one row per line, ordered by `orderBy`. Editions use the
+/// first hex digit of SHA-256(book_id) for stable partitions; other tables
+/// occupy a single file. Partitions never depend on the number or size of rows.
+const catalogTables = {
+  'sources': (orderBy: 'id', parts: '0'),
+  'books': (orderBy: 'id', parts: '0'),
+  'authors': (orderBy: 'id', parts: '0'),
+  'subjects': (orderBy: 'id', parts: '0'),
+  'categories': (orderBy: 'id', parts: '0'),
+  'editions': (orderBy: 'book_id, display_order', parts: '0123456789abcdef'),
+  'book_authors': (orderBy: 'book_id, position', parts: '0'),
+  'book_subjects': (orderBy: 'subject_id, book_id', parts: '0'),
+  'book_categories': (orderBy: 'category_id, book_id', parts: '0'),
+};
 
 /// Apply to a fresh catalog database with no user data. The publisher supplies
 /// work IDs and explicit edition groupings. Edition IDs are scoped to their
@@ -75,12 +91,12 @@ CREATE TABLE book_categories (
   category_id TEXT NOT NULL REFERENCES categories(id),
   PRIMARY KEY (category_id, book_id)
 ) STRICT;
-PRAGMA user_version = $catalogFormatVersion;
+PRAGMA user_version = $catalogDatabaseVersion;
 COMMIT;
 ''';
 
-/// Metadata for a published file. Size and digest describe the served bytes
-/// (the gzip stream for [catalogDatabaseFile]), not the decompressed payload.
+/// Metadata for a published file. Size and digest describe the file bytes
+/// before any HTTP transport compression.
 typedef CatalogFile = ({int sizeBytes, String sha256});
 
 final class CatalogManifest {
@@ -129,8 +145,14 @@ final class CatalogManifest {
           throw const FormatException('Invalid catalog file entry');
         }
       }
-      if (!files.containsKey(catalogDatabaseFile)) {
-        throw const FormatException('Missing catalog database entry');
+      for (final entry in catalogTables.entries) {
+        for (final part in entry.value.parts.split('')) {
+          if (!files.containsKey('${entry.key}/$part.json')) {
+            throw FormatException(
+              'Missing catalog partition: ${entry.key}/$part',
+            );
+          }
+        }
       }
       return CatalogManifest._(
         builtAt,
