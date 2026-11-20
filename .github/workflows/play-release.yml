@@ -1,0 +1,151 @@
+name: Publish Shosai to Google Play
+
+on:
+  workflow_dispatch:
+    inputs:
+      publishing_overview_clear:
+        description: I checked Play Publishing overview and coordinated with other publishers
+        required: true
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: >-
+      github.repository == 'chaba-dev/shosai' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'push' && github.event.created && github.actor_id == '305388421'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      track: ${{ steps.target.outputs.track }}
+      code: ${{ steps.target.outputs.code }}
+    steps:
+      - name: Require confirmation for an internal upload
+        if: github.event_name == 'workflow_dispatch' && !inputs.publishing_overview_clear
+        run: |
+          echo 'Check Play Publishing overview and coordinate with other publishers before dispatching.' >&2
+          exit 1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate the release source and select the Play track
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          track=internal
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            tag=${GITHUB_REF#refs/tags/}
+            [[ "$GITHUB_REF" == refs/tags/* && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ "$(sed -n 's/^version: \([^+]*\).*/\1/p' pubspec.yaml)" == "${tag#v}" ]]
+            gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" |
+              jq -es --arg sha "$GITHUB_SHA" --arg title "chore(release): $tag" --arg repo "$GITHUB_REPOSITORY" '
+                any(.[][]; .merged_at != null and .merge_commit_sha == $sha and .title == $title and
+                  .head.ref == "release/next" and .head.repo.full_name == $repo and
+                  .base.ref == "main" and .base.repo.full_name == $repo)
+              ' > /dev/null
+            track=production
+          fi
+          code=$((10000 + GITHUB_RUN_NUMBER))
+          (( code <= 2100000000 ))
+          printf 'track=%s\ncode=%s\n' "$track" "$code" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: RELEASE
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      artifact_id: ${{ steps.bundle.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # The pinned Nix shell needs Git history.
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      - run: .agents/dev flutter pub get --enforce-lockfile
+      - name: Authenticate to release Secret Manager
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.SHOSAI_SECRETS_PROJECT }}
+          workload_identity_provider: ${{ vars.SHOSAI_RELEASE_WORKLOAD_IDENTITY_PROVIDER }}
+          create_credentials_file: true
+          export_environment_variables: true
+      - name: Build signed Android bundle
+        env:
+          SHOSAI_SECRETS_PROJECT: ${{ vars.SHOSAI_SECRETS_PROJECT }}
+          SHOSAI_BUILD_SECRET_VERSION: '1'
+          SHOSAI_ANDROID_BUILD_NUMBER: ${{ needs.validate.outputs.code }}
+          SHOSAI_ANDROID_KEYSTORE_BASE64: ${{ secrets.SHOSAI_ANDROID_KEYSTORE_BASE64 }}
+          SHOSAI_ANDROID_STORE_PASSWORD: ${{ secrets.SHOSAI_ANDROID_STORE_PASSWORD }}
+          SHOSAI_ANDROID_KEY_ALIAS: ${{ secrets.SHOSAI_ANDROID_KEY_ALIAS }}
+          SHOSAI_ANDROID_KEY_PASSWORD: ${{ secrets.SHOSAI_ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${SHOSAI_ANDROID_KEYSTORE_BASE64:?Missing RELEASE upload keystore}"
+          umask 077
+          SHOSAI_ANDROID_KEYSTORE="$(mktemp "$RUNNER_TEMP/shosai-upload.XXXXXXXX")"
+          export SHOSAI_ANDROID_KEYSTORE
+          trap 'rm -f -- "$SHOSAI_ANDROID_KEYSTORE"' EXIT
+          printf '%s' "$SHOSAI_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$SHOSAI_ANDROID_KEYSTORE"
+          unset SHOSAI_ANDROID_KEYSTORE_BASE64
+          .agents/dev ./scripts/with-build-secrets.sh release 'make android-production'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        id: bundle
+        with:
+          name: shosai-play-${{ needs.validate.outputs.track }}-${{ needs.validate.outputs.code }}-attempt-${{ github.run_attempt }}
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 7
+
+  upload:
+    name: Upload to Play ${{ needs.validate.outputs.track }} (version ${{ needs.validate.outputs.code }})
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ needs.validate.outputs.track == 'production' && 'PLAY_PRODUCTION' || 'PLAY_INTERNAL' }}
+    concurrency:
+      group: shosai-play-publish
+      queue: max
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: play-bundle
+          merge-multiple: true
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: play
+        with:
+          workload_identity_provider: ${{ vars.SHOSAI_PLAY_PROVIDER }}
+          service_account: ${{ vars.SHOSAI_PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          access_token_lifetime: 900s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Upload the signed bundle
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.play.outputs.access_token }}
+          TRACK: ${{ needs.validate.outputs.track }}
+          VERSION_CODE: ${{ needs.validate.outputs.code }}
+        run: bash scripts/play-publish.sh "$TRACK" "$VERSION_CODE" play-bundle/app-release.aab

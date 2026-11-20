@@ -1,13 +1,13 @@
 # Releasing Shosai
 
-Shōsai releases are prepared from Conventional Commit titles and reviewed through a rolling release pull request. The production app ID is `dev.shosai.reader` on all platforms. Cut `v0.1.0` only after the intended production builds have been checked; a Git tag does not build or upload store packages.
+Shōsai releases are prepared from Conventional Commit titles and reviewed through a rolling release pull request. The production app ID is `dev.shosai.reader` on all platforms. Once Play publishing is configured, merging the release PR starts the Android Production release. Check the release build and Play publishing queue before merging.
 
 ## Release flow
 
 1. Each pull request title must use an allowed Conventional Commit type. The repository must use squash merges with the pull request title as the resulting commit subject.
 2. A push to `main` updates `release/next`. The workflow merges the new `main` revision into the existing release branch, then appends a release commit instead of rewriting branch history. If the branch was deleted after an earlier pull request, the workflow recovers its last pull-request head before appending. Git-cliff calculates the next semantic version, sets the application version in `pubspec.yaml` (keeping its build number), regenerates `CHANGELOG.md`, and creates or refreshes the release pull request.
 3. Review the required `docs/releases/X.Y.Z.md` and verify production builds from the release revision. The release-notes workflow checks for the notes; it does not package the app.
-4. Merging the release PR validates that its `chore(release): vX.Y.Z` title matches the `pubspec.yaml` version and creates the tag on the merge commit. Store uploads and distribution are separate, manual steps.
+4. Merging the release PR validates that its `chore(release): vX.Y.Z` title matches the `pubspec.yaml` version and creates the tag on the merge commit. The release bot’s new tag triggers the Android Production build and Play upload. It does not publish a GitHub Release.
 
 The tag workflow accepts an existing tag only when it points to the expected release merge commit.
 
@@ -39,6 +39,29 @@ Set the production Android signing inputs `SHOSAI_ANDROID_KEYSTORE` (absolute pa
 
 **Keep the development install to retain its data.** Production installs separately with an empty library and no copied credentials. Use different `.app` paths for dev and production on macOS. On the Pixel lab, `dev.shosai.shosai` is the owner's library, not a test slot: never uninstall it or target it with Flutter Driver. Use an audited disposable package for automated device tests instead. The device-lab package, signing, and install checks still apply to both editions.
 
+## Release on Google Play from GitHub Actions
+
+| Track | What starts the release | What GitHub builds and uploads |
+| --- | --- | --- |
+| Internal testing | Manually run [**Publish Shosai to Google Play**](https://github.com/chaba-dev/shosai/actions/workflows/play-release.yml) from `main` and confirm that Publishing overview is clear. | A signed bundle from the selected `main` revision. No second approval. |
+| Production | Merge `release/next` into `main` through its release PR. The workflow accepts only a new release-bot tag matching that merged PR and its version. | A fresh signed bundle from the exact merge commit, submitted for full rollout subject to Play review and publishing settings. No dispatch or second approval. |
+
+**Before dispatching Internal or merging a release PR:** Check Play Console’s **Publishing overview** for unrelated changes ready to send, and coordinate with other publishers until the job finishes. Play commits edits app-wide. The workflow refuses to cancel an existing review but cannot detect unrelated unsent Console changes.
+
+The version name comes from `pubspec.yaml`; both tracks share one version-code sequence (`10000 +` the Play workflow run number). If the upload fails, check Play Console before retrying: a rerun uses the same code, and Play may already have accepted it. For a Production retry, rerun the original Play workflow rather than moving or recreating its tag. Verify the final state in Play Console; an accepted API commit is not proof that the release is live.
+
+### One-time setup
+
+1. Create Shōsai in Play Console as a **Free App**. Manually upload the first production AAB for `dev.shosai.reader` to **Internal testing**, accept Google-managed **Play App Signing**, and finish the initial internal rollout. Keep the upload key and passwords backed up privately. Confirm all previously uploaded version codes are below the automated range before enabling CI uploads.
+2. Before storing the upload key in `RELEASE`, verify that `main` is protected and that active GitHub rulesets cover every tag admitted by `RELEASE` (`v*`): only the release bot can create those tags, and no one, including the bot, can move or delete them. Use separate rulesets for creation and immutability so the bot bypass applies only to creation. If the key is already stored and these protections are missing, remove the four Android signing secrets until the rules are active. A workflow actor check does not protect environment secrets from another workflow on an unprotected ref.
+3. In `RELEASE`, keep the existing [release build credentials](build-credentials.md) and add `SHOSAI_ANDROID_KEYSTORE_BASE64`, `SHOSAI_ANDROID_STORE_PASSWORD`, `SHOSAI_ANDROID_KEY_ALIAS`, and `SHOSAI_ANDROID_KEY_PASSWORD` through GitHub’s secret input. Use the registered upload key; the first secret contains its base64-encoded keystore. Signed bundles are retained for seven days and are downloadable by signed-in users from this public repo’s Actions runs. Never embed confidential credentials in build defines.
+4. In Google Cloud, enable the Android Publisher API. Give each track its own workload identity **pool**, GitHub OIDC provider, and service account, separate from the `RELEASE` build-secret federation. Map `attribute.repository_id=assertion.repository_id` and grant `roles/iam.workloadIdentityUser` on each service account only to `principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/TRACK_POOL_ID/attribute.repository_id/1194321001` for its own pool. IAM principal sets are pool-scoped, not provider-scoped.
+   - Both providers must require repository ID `1194321001` and owner ID `44737549`.
+   - Internal must require `PLAY_INTERNAL`, `workflow_dispatch`, `refs/heads/main`, and `workflow_ref == 'chaba-dev/shosai/.github/workflows/play-release.yml@refs/heads/main'`.
+   - Production must require `PLAY_PRODUCTION`, `push`, release-bot actor ID `305388421`, a `refs/tags/vX.Y.Z` ref, and `workflow_ref == 'chaba-dev/shosai/.github/workflows/play-release.yml@' + assertion.ref`.
+5. Create GitHub environments `PLAY_INTERNAL` (`main` only) and `PLAY_PRODUCTION` (`v*` tags only), without required reviewers. In each, set `SHOSAI_PLAY_PROVIDER` and `SHOSAI_PLAY_SERVICE_ACCOUNT` for that track. Before enabling Play uploads, verify that each identity can impersonate its own publisher and that cross-track impersonation is denied in both directions. No Play upload is needed for this check.
+6. In **Play Console → Users and permissions**, grant the service accounts access to Shōsai only: **Release apps to testing tracks** for `shosai-play-internal@shosai-512821.iam.gserviceaccount.com`, and the app-scoped production release permission for the separate production account. Confirm the app is eligible for Production. Do not grant account admin or issue a JSON key.
+
 ## Linux distribution (x86-64)
 
 | Option | Install or build | Runtime |
@@ -65,4 +88,4 @@ The workflows rely on these GitHub settings:
 - Create the `RELEASE` Actions environment, store the App ID in its `RELEASE_APP_ID` variable, and store the PEM private key in its `RELEASE_APP_SECRET` secret.
 - Allow `chaba2-bot` to push updates to the `release/next` branch.
 
-Only mutation jobs enter the `RELEASE` environment and receive its GitHub App credentials. They exchange those credentials for short-lived, repository-scoped tokens to push release commits and tags and open or update the release PR. The built-in `GITHUB_TOKEN` is read-only.
+The release PR and tag jobs use `RELEASE` GitHub App credentials to update release branches and tags. The Android build job uses `RELEASE` for signing and build configuration; it does not request the GitHub App credentials. The built-in `GITHUB_TOKEN` is read-only.
