@@ -1,3 +1,4 @@
 fixtures/epub-conformance/SHA256SUMS text eol=lf
 fixtures/epub-conformance/*.epub binary
 third_party/pdfium_dart/NOTICES text eol=lf
+website/static/catalog/**/*.json text eol=lf
