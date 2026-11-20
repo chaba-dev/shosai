@@ -49,19 +49,29 @@ credentials in the `RELEASE` environment so proposed updates trigger normal CI.
 | Candidate compared with main / the open update | Result |
 | --- | --- |
 | New valid content | Open or update one catalog-only PR, with added/removed/updated record counts |
-| Same content as the open PR | Leave its branch, commits and description untouched |
+| Same content and previous snapshot as a complete open PR | Leave its branch, commits and description untouched |
+| Matching branch, but missing or stale PR metadata | Repair the PR without replacing the branch commit |
+| Main has a different current catalog | Regenerate the proposal with main's latest current snapshot as previous |
 | Same content as main | Open nothing; close an obsolete generated PR if present |
 | Invalid, failed import, or more than 5% fewer editions for any existing source | Fail; leave the existing branch and PR untouched |
 
 Record ordering in the feed and build timestamps do not count as changes.
 The exporter sorts rows by stable keys; comparison uses the format, inventory
 paths, sizes and hashes. Unrelated main changes alone do not bump an open PR.
-When new content does arrive, its branch is regenerated from the latest main,
-retaining main's current snapshot as previous. The workflow never merges or
-deploys: a person reviews the proposal, including legitimate large deletions.
-If main advances during generation, the run fails rather than proposing stale
-data; rerun it on the latest main. GitHub scheduling and any environment
-approval rules still apply.
+The workflow checks main again after pushing. If it observes catalog drift,
+it attempts a lease-protected restoration of its previous branch head and
+fails; rerun on the latest main. A competing branch update is never overwritten.
+
+Branch publication and GitHub PR edits are separate operations. After a failed
+command, the workflow reads both back instead of assuming nothing happened.
+A confirmed failed PR update restores the prior branch head when still owned
+by this run; a failed create retains the matching branch for the next run.
+If readback fails, the run fails without a blind retry or rollback; the next run
+reconciles the branch and PR. Only same-repository PRs are eligible. Maintainer
+prose outside the generated markers is reread immediately before editing,
+although GitHub offers no atomic compare-and-swap for description edits.
+The workflow never merges or deploys: a person reviews each proposal, including
+legitimate large deletions. GitHub scheduling and environment approvals still apply.
 
 To validate a new export and prepare it for a catalog refresh PR, run:
 
