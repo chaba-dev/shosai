@@ -50,6 +50,9 @@ void exportCatalogJson(String input, String destination, {String? previous}) {
     if (counts.isEmpty) {
       throw const FormatException('Catalog has no editions');
     }
+    if (counts.any((row) => (row['source_id'] as String).isEmpty)) {
+      throw const FormatException('Catalog has an empty source ID');
+    }
 
     final staging = Directory(p.dirname(output)).createTempSync('.catalog-');
     try {

@@ -187,6 +187,28 @@ void main() {
     expect(output.readAsStringSync(), 'keep me');
   });
 
+  test('an empty source ID fails without leaving output', () {
+    final directory = tempDataDirectory();
+    final snapshot = File('${directory.path}/catalog.sqlite');
+    final db = sqlite3.open(snapshot.path);
+    try {
+      db.execute(catalogSchema);
+      db.execute(
+        File(
+          'test/fixtures/gutenberg_catalog.sql',
+        ).readAsStringSync().replaceAll("'gutenberg'", "''"),
+      );
+      expect(db.select('PRAGMA foreign_key_check'), isEmpty);
+    } finally {
+      db.close();
+    }
+    expect(
+      () => exportCatalogJson(snapshot.path, '${directory.path}/out'),
+      throwsA(isA<FormatException>()),
+    );
+    expect(directory.listSync().map((entry) => entry.path), [snapshot.path]);
+  });
+
   test('a failed export leaves no partial catalog', () {
     final directory = tempDataDirectory();
     final snapshot = File('${directory.path}/catalog.sqlite');
