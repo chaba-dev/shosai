@@ -37,6 +37,32 @@ separator whitespace and ASCII-escaped strings. Clients must check this
 identity and file hashes, and retry the revision index if requests cross a
 deployment; the fixed URLs are not immutable.
 
+### Scheduled refresh PRs
+
+`Refresh Gutenberg catalog` runs on Mondays at 04:23 UTC and supports **Run
+workflow** in GitHub Actions. It downloads only the official offline CSV from
+Gutenberg's ODU mirror, imports it with the Dart CLI, exports sorted JSON, and
+validates the entire candidate before touching the generated `catalog/refresh`
+branch or its PR. It reuses the release automation's `chaba2-bot` GitHub App
+credentials in the `RELEASE` environment so proposed updates trigger normal CI.
+
+| Candidate compared with main / the open update | Result |
+| --- | --- |
+| New valid content | Open or update one catalog-only PR, with added/removed/updated record counts |
+| Same content as the open PR | Leave its branch, commits and description untouched |
+| Same content as main | Open nothing; close an obsolete generated PR if present |
+| Invalid, failed import, or more than 5% fewer editions for any existing source | Fail; leave the existing branch and PR untouched |
+
+Record ordering in the feed and build timestamps do not count as changes.
+The exporter sorts rows by stable keys; comparison uses the format, inventory
+paths, sizes and hashes. Unrelated main changes alone do not bump an open PR.
+When new content does arrive, its branch is regenerated from the latest main,
+retaining main's current snapshot as previous. The workflow never merges or
+deploys: a person reviews the proposal, including legitimate large deletions.
+If main advances during generation, the run fails rather than proposing stale
+data; rerun it on the latest main. GitHub scheduling and any environment
+approval rules still apply.
+
 To validate a new export and prepare it for a catalog refresh PR, run:
 
 ```sh
@@ -62,8 +88,7 @@ The app will fetch `/catalog/revisions.json`, validate `/catalog/current/manifes
 against the selected content revision, and import its JSON into a new local
 SQLite database. If that fails,
 it can try the previous published revision while retaining its installed
-catalog. The app-side consumer and scheduled refresh PR workflow are not yet
-implemented.
+catalog. The app-side consumer is not yet implemented.
 
 The initial snapshot contains 78,518 works and 157,036 candidate editions from
 the official Gutenberg offline CSV, obtained from its
