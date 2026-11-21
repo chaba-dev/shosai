@@ -96,6 +96,11 @@
           # Identity-based build configuration, without exported cloud keys
           google-cloud-sdk
           python3
+          # Offline catalog import and scheduled refresh automation
+          gzip
+          curl
+          git
+          gh
         ];
 
         # Android, release and editor tools for local development. CI builds no
