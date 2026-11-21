@@ -3,7 +3,6 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/core/document_access.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/shared/protected_book_dialog.dart';
-import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/shell/view.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
@@ -59,13 +58,17 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
             verticalDirection: VerticalDirection.up,
             spacing: ShosaiTokens.space2,
             children: [
-              ShadButton.outline(
-                onPressed: () => Navigator.pop(context),
-                child: Text(l10n.readerNoteCancel),
+              MergeSemantics(
+                child: ShadButton.outline(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(l10n.readerNoteCancel),
+                ),
               ),
-              ShadButton(
-                onPressed: _password.text.isEmpty ? null : _open,
-                child: Text(l10n.pdfUnlockAction),
+              MergeSemantics(
+                child: ShadButton(
+                  onPressed: _password.text.isEmpty ? null : _open,
+                  child: Text(l10n.pdfUnlockAction),
+                ),
               ),
             ],
           ),
@@ -80,7 +83,7 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
           children: [
             Text(l10n.pdfPasswordRequired),
             Text(widget.request.title, style: shellEditorialStyle(14, 19)),
-            Text(l10n.pdfPasswordLabel),
+            ExcludeSemantics(child: Text(l10n.pdfPasswordLabel)),
             // Share the field border, but keep the toggle outside the field's
             // merged semantics so it remains a separately named button.
             Stack(
@@ -89,6 +92,7 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
               children: [
                 MergeSemantics(
                   child: Semantics(
+                    textField: true,
                     label: l10n.pdfPasswordLabel,
                     child: ShadInput(
                       controller: _password,
@@ -111,14 +115,24 @@ class _PdfPasswordDialogState extends State<PdfPasswordDialog> {
                     ),
                   ),
                 ),
-                ShadIconAction(
-                  tooltip: _obscured
+                Tooltip(
+                  message: _obscured
                       ? l10n.pdfPasswordShow
                       : l10n.pdfPasswordHide,
-                  onPressed: () => setState(() => _obscured = !_obscured),
-                  icon: Icon(
-                    _obscured ? LucideIcons.eye : LucideIcons.eyeOff,
-                    size: touch ? 20 : 16,
+                  excludeFromSemantics: true,
+                  child: MergeSemantics(
+                    child: Semantics(
+                      label: _obscured
+                          ? l10n.pdfPasswordShow
+                          : l10n.pdfPasswordHide,
+                      child: ShadIconButton.ghost(
+                        onPressed: () => setState(() => _obscured = !_obscured),
+                        icon: Icon(
+                          _obscured ? LucideIcons.eye : LucideIcons.eyeOff,
+                          size: touch ? 20 : 16,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],
