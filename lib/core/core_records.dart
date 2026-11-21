@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/documents.dart';
 import 'package:shosai_flutter/core/document_access.dart';
@@ -34,6 +35,10 @@ const libraryTextVersions = {
 final class ShosaiCore {
   ShosaiCore._(this.store, this.library, this.pdfEngine, String dataDirectory)
     : snapshots = DocumentSnapshots('$dataDirectory/snapshots'),
+      catalog = CatalogClient(
+        '$dataDirectory/catalog',
+        userAgent: 'Shosai/0.1 (+https://github.com/chaba-dev/shosai/issues)',
+      ),
       fileCache = BookFileCache(store, '$dataDirectory/file-cache'),
       locations = LibraryLocations(store),
       readingState = ReadingState(store),
@@ -108,6 +113,10 @@ final class ShosaiCore {
   final Annotations annotations;
   final LibrarySearch search;
 
+  /// Replaceable public metadata; no requests until Search asks for a refresh.
+  /// This is never written through the personal library store or sync.
+  final CatalogClient catalog;
+
   /// The private copies open PDFs are read from, shared by every bridge.
   final DocumentSnapshots snapshots;
 
@@ -115,6 +124,7 @@ final class ShosaiCore {
   /// bridge uses the core: [CoreOwner.close] does, after its bridges drain.
   Future<void> close() async {
     try {
+      await catalog.close();
       await folders.close();
       await snapshots.close();
     } finally {
@@ -1246,6 +1256,7 @@ final class ApplicationBridge
     implements
         FlutterBridge,
         RecordsHost,
+        CatalogHost,
         LibraryFoldersHost,
         LibraryEditionsHost,
         DocumentAccessHost {
@@ -1259,6 +1270,9 @@ final class ApplicationBridge
 
   @override
   final CoreRecords records;
+
+  @override
+  CatalogClient get catalog => records._core.catalog;
 
   @override
   Future<FlutterBookProtection> bookProtection({

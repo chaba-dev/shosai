@@ -17,6 +17,7 @@ import 'package:shosai_core/shosai_core.dart'
         maxPreferenceTotalBytes;
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/library_folders.dart';
+import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/core/core_records.dart';
 import 'package:shosai_flutter/core/reader_text.dart';
 import 'package:shosai_flutter/core/records.dart';
@@ -189,6 +190,27 @@ void main() {
     expect(report.items.single.error, isNull);
     return report.items.single.book!;
   }
+
+  test(
+    'bridges share one lazy catalog separate from the personal store',
+    () async {
+      final second = ApplicationBridge(core);
+      expect(bridge, isA<CatalogHost>());
+      expect(second.catalog, same(bridge.catalog));
+      final book = await import(_epubFixture);
+      expect(await bridge.catalog.isInstalled, isFalse);
+      expect(await bridge.catalog.search(query: 'sample'), isEmpty);
+      expect(Directory('${directory.path}/catalog').existsSync(), isFalse);
+      bridge.dispose();
+      await bridge.drain();
+      // Closing a bridge doesn't own the catalog lifetime.
+      expect(await second.catalog.categories(), isEmpty);
+      expect(await second.catalog.book('gutenberg:1342'), isNull);
+      expect((await core.library.get(book.bookId))!.title, book.title);
+      second.dispose();
+      await second.drain();
+    },
+  );
 
   test(
     'large source catalogs survive restart without preference-size limits',
