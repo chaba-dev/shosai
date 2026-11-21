@@ -8,6 +8,7 @@ on:
       - "flake.nix"
       - "flake.lock"
       - ".github/workflows/website.yml"
+      - ".github/workflows/catalog-refresh.yml"
   pull_request:
     branches: [main]
     paths:
@@ -15,6 +16,7 @@ on:
       - "flake.nix"
       - "flake.lock"
       - ".github/workflows/website.yml"
+      - ".github/workflows/catalog-refresh.yml"
 
 jobs:
   build:
@@ -23,5 +25,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command python3 -m unittest discover -s website -p test_catalog.py
+      - run: nix develop --command python3 -m unittest discover -s website -p 'test_catalog*.py'
       - run: nix develop --command bash website/build.sh
