@@ -170,9 +170,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           title: Text(_localizations.bookLockedTitle),
           description: Text(_localizations.bookDrmProtected),
           actions: [
-            ShadButton.outline(
-              onPressed: () => Navigator.pop(context),
-              child: Text(_localizations.locationClose),
+            MergeSemantics(
+              child: ShadButton.outline(
+                onPressed: () => Navigator.pop(context),
+                child: Text(_localizations.locationClose),
+              ),
             ),
           ],
         ),

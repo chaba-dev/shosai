@@ -113,9 +113,15 @@ class ProtectedBookDialog extends StatelessWidget {
           closeIcon: Builder(
             builder: (context) => Tooltip(
               message: AppLocalizations.of(context).locationClose,
-              child: ShadIconButton.ghost(
-                icon: Icon(LucideIcons.x, size: touch ? 20 : 16),
-                onPressed: () => Navigator.pop(context),
+              excludeFromSemantics: true,
+              child: MergeSemantics(
+                child: Semantics(
+                  label: AppLocalizations.of(context).locationClose,
+                  child: ShadIconButton.ghost(
+                    icon: Icon(LucideIcons.x, size: touch ? 20 : 16),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
               ),
             ),
           ),

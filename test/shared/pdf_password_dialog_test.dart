@@ -1,3 +1,5 @@
+import 'dart:ui' show SemanticsAction;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
@@ -111,6 +113,12 @@ void main() {
           tester.getSemantics(find.byType(EditableText)).label,
           'Password',
         );
+        final passwordSemantics = tester
+            .getSemantics(find.byType(EditableText))
+            .getSemanticsData();
+        expect(passwordSemantics.flagsCollection.isTextField, isTrue);
+        expect(passwordSemantics.flagsCollection.isObscured, isTrue);
+        expect(passwordSemantics.hasAction(SemanticsAction.setText), isTrue);
         expect(
           tester
               .getSemantics(
@@ -119,9 +127,20 @@ void main() {
                   matching: find.byType(ShadIconButton),
                 ),
               )
-              .tooltip,
+              .label,
           'Show password',
         );
+        final closeSemantics = tester
+            .getSemantics(
+              find.descendant(
+                of: find.byTooltip('Close'),
+                matching: find.byType(ShadIconButton),
+              ),
+            )
+            .getSemanticsData();
+        expect(closeSemantics.label, 'Close');
+        expect(closeSemantics.flagsCollection.isButton, isTrue);
+        expect(closeSemantics.hasAction(SemanticsAction.tap), isTrue);
         final field = tester.getRect(find.byType(ShadInput));
         final toggle = tester.getRect(find.byTooltip('Show password'));
         expect(field.intersect(toggle), toggle);
@@ -154,6 +173,17 @@ void main() {
           expect(cancelButton.center.dy, openButton.center.dy);
         }
         expect(field.right, openButton.right);
+        final cancelSemantics = tester
+            .getSemantics(find.text('Cancel'))
+            .getSemanticsData();
+        expect(cancelSemantics.label, 'Cancel');
+        expect(cancelSemantics.flagsCollection.isButton, isTrue);
+        expect(cancelSemantics.hasAction(SemanticsAction.tap), isTrue);
+        final openSemantics = tester
+            .getSemantics(find.text('Open PDF'))
+            .getSemanticsData();
+        expect(openSemantics.label, 'Open PDF');
+        expect(openSemantics.flagsCollection.isButton, isTrue);
         expect(
           tester.getRect(find.byType(EditableText)).right,
           lessThanOrEqualTo(toggle.left),
@@ -166,9 +196,40 @@ void main() {
           tester,
           'protected-unlock-${size.width.toInt()}$suffix',
         );
-        await tester.enterText(find.byType(EditableText), 'synthetic-secret');
-        await tester.tap(find.byTooltip('Show password'));
+        final owner = tester.getSemantics(find.byType(EditableText)).owner!;
+        owner.performAction(
+          tester.getSemantics(find.byType(EditableText)).id,
+          SemanticsAction.setText,
+          'synthetic-secret',
+        );
         await tester.pump();
+        owner.performAction(
+          tester
+              .getSemantics(
+                find.descendant(
+                  of: find.byTooltip('Show password'),
+                  matching: find.byType(ShadIconButton),
+                ),
+              )
+              .id,
+          SemanticsAction.tap,
+        );
+        await tester.pump();
+        final hideSemantics = tester
+            .getSemantics(
+              find.descendant(
+                of: find.byTooltip('Hide password'),
+                matching: find.byType(ShadIconButton),
+              ),
+            )
+            .getSemanticsData();
+        expect(hideSemantics.label, 'Hide password');
+        expect(hideSemantics.flagsCollection.isButton, isTrue);
+        expect(hideSemantics.hasAction(SemanticsAction.tap), isTrue);
+        expect(
+          tester.getSemantics(find.byType(EditableText)).label,
+          'Password',
+        );
         expect(
           tester.widget<EditableText>(find.byType(EditableText)).obscureText,
           isFalse,
@@ -208,6 +269,7 @@ void main() {
         tester.view.physicalSize = scenario.size * 2;
         tester.view.devicePixelRatio = 2;
         addTearDown(tester.view.reset);
+        final semantics = tester.ensureSemantics();
         final bridge = HarnessBridge(
           books: const [
             FlutterLibraryBook(
@@ -236,6 +298,20 @@ void main() {
           ),
           findsOneWidget,
         );
+        for (final button
+            in find
+                .descendant(
+                  of: find.byType(ProtectedBookDialog),
+                  matching: find.byType(ShadButton),
+                )
+                .evaluate()) {
+          final data = tester
+              .getSemantics(find.byWidget(button.widget))
+              .getSemanticsData();
+          expect(data.label, 'Close');
+          expect(data.flagsCollection.isButton, isTrue);
+          expect(data.hasAction(SemanticsAction.tap), isTrue);
+        }
         await captureHarnessArtifact(
           tester,
           scenario.brightness == Brightness.light
@@ -247,6 +323,7 @@ void main() {
         expect(find.byType(ReaderScreen), findsNothing);
         expect(find.text('Locked'), findsOneWidget);
         expect(tester.takeException(), isNull);
+        semantics.dispose();
       },
       variant: TargetPlatformVariant.only(TargetPlatform.linux),
     );
@@ -256,6 +333,7 @@ void main() {
     testWidgets('Japanese 200% dialog title avoids close control: $password', (
       tester,
     ) async {
+      final semantics = tester.ensureSemantics();
       tester.view.physicalSize = const Size(780, 1688);
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
@@ -312,10 +390,43 @@ void main() {
       );
       expect(title.right, lessThanOrEqualTo(close.left - 8));
       expect(find.byTooltip('閉じる').hitTestable(), findsOneWidget);
+      expect(
+        tester
+            .getSemantics(
+              find.descendant(
+                of: find.byTooltip('閉じる'),
+                matching: find.byType(ShadIconButton),
+              ),
+            )
+            .label,
+        '閉じる',
+      );
+      if (password) {
+        final l10n = AppLocalizations.of(
+          tester.element(find.byType(PdfPasswordDialog)),
+        );
+        expect(
+          tester.getSemantics(find.byType(EditableText)).label,
+          l10n.pdfPasswordLabel,
+        );
+        expect(find.bySemanticsLabel(l10n.pdfPasswordLabel), findsOneWidget);
+        expect(
+          tester
+              .getSemantics(
+                find.descendant(
+                  of: find.byTooltip(l10n.pdfPasswordShow),
+                  matching: find.byType(ShadIconButton),
+                ),
+              )
+              .label,
+          l10n.pdfPasswordShow,
+        );
+      }
       await tester.tap(find.byTooltip('閉じる'));
       await tester.pumpAndSettle();
       expect(find.text('Open fixture'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      semantics.dispose();
     });
   }
 
