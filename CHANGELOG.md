@@ -138,6 +138,7 @@ All notable changes to this project will be documented in this file.
 - *(release)* Preserve curated notes and relevant changelog previews (#327)
 - *(privacy)* Bundle Apple privacy declarations (#331)
 - Refresh shelf after unlocking a PDF (#334)
+- *(a11y)* Name protected-book dialog controls (#343)
 
 ### 🚜 Refactor
 
