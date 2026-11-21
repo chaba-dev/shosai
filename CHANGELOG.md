@@ -184,6 +184,7 @@ All notable changes to this project will be documented in this file.
 - *(assets)* Update development app icon (#252)
 - *(ios)* Raise the minimum to iOS 15 for Xcode 27 (#285)
 - *(android)* Automate Play publishing on release merges (#339)
+- Use client-id for GitHub App tokens (#344)
 
 ### 🛡️ Security
 
