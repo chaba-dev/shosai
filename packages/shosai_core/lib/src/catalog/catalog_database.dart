@@ -10,7 +10,18 @@ import 'package:sqlite3/sqlite3.dart';
 import '../../catalog.dart';
 import '../search/case_fold.dart';
 
-typedef CatalogBook = ({String id, String title, List<String> authors});
+typedef CatalogBook = ({
+  String id,
+  String title,
+  List<String> authors,
+  String? coverUrl,
+  List<String> sources,
+});
+typedef CatalogAuthor = ({String id, String name, int books});
+typedef CatalogFilters = ({
+  List<String> languages,
+  List<({String id, String name})> sources,
+});
 typedef CatalogCategory = ({String id, String label, int books});
 typedef CatalogEdition = ({
   String sourceId,
@@ -174,6 +185,20 @@ T _read<T>(String path, T Function(Database) body) {
 CatalogBook _book(Database db, Row row) => (
   id: row['id'] as String,
   title: row['title'] as String,
+  coverUrl:
+      db.select(
+            'SELECT cover_url FROM editions WHERE book_id=? ORDER BY display_order LIMIT 1',
+            [row['id']],
+          ).single['cover_url']
+          as String?,
+  sources: List.unmodifiable(
+    db
+        .select(
+          'SELECT DISTINCT s.name FROM editions e JOIN sources s ON s.id=e.source_id WHERE e.book_id=? ORDER BY s.name',
+          [row['id']],
+        )
+        .map((r) => r['name'] as String),
+  ),
   authors: List.unmodifiable(
     db
         .select(
@@ -191,6 +216,7 @@ List<CatalogBook> searchCatalog(
   String? category,
   String? language,
   String? source,
+  String? author,
   int limit,
   int offset,
 ) {
@@ -215,6 +241,12 @@ List<CatalogBook> searchCatalog(
         'EXISTS (SELECT 1 FROM book_categories bc WHERE bc.book_id=b.id AND bc.category_id=?)',
       );
       values.add(category);
+    }
+    if (author != null) {
+      where.add(
+        'EXISTS (SELECT 1 FROM book_authors ba WHERE ba.book_id=b.id AND ba.author_id=?)',
+      );
+      values.add(author);
     }
     if (language != null || source != null) {
       where.add('''EXISTS (SELECT 1 FROM editions e WHERE e.book_id=b.id
@@ -250,6 +282,55 @@ List<CatalogCategory> catalogCategories(String path) {
               books: row['n'] as int,
             ),
           ),
+    ),
+  );
+}
+
+List<CatalogAuthor> catalogAuthors(
+  String path,
+  String query,
+  int limit,
+  int offset,
+) {
+  if (!File(path).existsSync()) return const [];
+  return _read(path, (db) {
+    // Author names are small enough to filter outside FTS, using the same
+    // Unicode case folding as title search rather than SQLite's ASCII lower().
+    final folded = caseFold(query.trim());
+    final rows = db.select('''SELECT a.id, a.name, COUNT(*) AS n FROM authors a
+      JOIN book_authors ba ON ba.author_id=a.id GROUP BY a.id
+      ORDER BY a.sort_name COLLATE NOCASE, a.id''');
+    return List.unmodifiable(
+      rows
+          .where((r) => caseFold(r['name'] as String).contains(folded))
+          .skip(offset)
+          .take(limit)
+          .map(
+            (r) => (
+              id: r['id'] as String,
+              name: r['name'] as String,
+              books: r['n'] as int,
+            ),
+          ),
+    );
+  });
+}
+
+CatalogFilters catalogFilters(String path) {
+  if (!File(path).existsSync()) return (languages: const [], sources: const []);
+  return _read(
+    path,
+    (db) => (
+      languages: List.unmodifiable(
+        db
+            .select('SELECT DISTINCT language FROM editions ORDER BY language')
+            .map((r) => r['language'] as String),
+      ),
+      sources: List.unmodifiable(
+        db
+            .select('SELECT id, name FROM sources ORDER BY name')
+            .map((r) => (id: r['id'] as String, name: r['name'] as String)),
+      ),
     ),
   );
 }

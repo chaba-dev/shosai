@@ -10,11 +10,14 @@ import 'package:shosai_flutter/shell/controller.dart';
 import 'package:shosai_flutter/shell/notes_controller.dart';
 import 'package:shosai_flutter/shell/search_controller.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/catalog.dart';
+import 'package:shosai_flutter/shell/browse_controller.dart';
 import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/shell/controller.dart';
 export 'package:shosai_flutter/shell/notes_controller.dart';
 export 'package:shosai_flutter/shell/search_controller.dart';
+export 'package:shosai_flutter/shell/browse_controller.dart';
 
 part 'view_controls.dart';
 part 'view_cover.dart';
@@ -24,6 +27,7 @@ part 'view_palette.dart';
 part 'view_phone.dart';
 part 'view_places.dart';
 part 'view_search.dart';
+part 'view_browse.dart';
 
 // The Bookshelf shell (RFD 12 outcome 1; `docs/design-system.md`, Navigation):
 // the frame around the library-side places and the reader.

@@ -1485,6 +1485,98 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pdfUnlockAction => 'Open PDF';
 
   @override
+  String get catalogSearchPlaceholder =>
+      'Search your books, notes and free books';
+
+  @override
+  String get catalogClearSearch => 'Clear search';
+
+  @override
+  String get catalogAll => 'All';
+
+  @override
+  String get catalogYourBooks => 'Your books';
+
+  @override
+  String get catalogYourNotes => 'Your notes';
+
+  @override
+  String get catalogFreeBooks => 'Free books';
+
+  @override
+  String get catalogAuthors => 'Authors';
+
+  @override
+  String get catalogBrowse => 'Browse by category';
+
+  @override
+  String get catalogLanguage => 'Language';
+
+  @override
+  String get catalogCategory => 'Category';
+
+  @override
+  String get catalogSource => 'Source';
+
+  @override
+  String get catalogUpdating =>
+      'Updating the free-book catalog… You can keep searching.';
+
+  @override
+  String get catalogOffline =>
+      'The catalog could not be updated. Any previously saved catalog remains available offline.';
+
+  @override
+  String get catalogReadFailed =>
+      'The catalog could not be read. Leave Search and try again.';
+
+  @override
+  String get catalogFirstDownload =>
+      'Connect to the internet to get the free-book catalog on this device.';
+
+  @override
+  String get catalogShowMore => 'Show more';
+
+  @override
+  String catalogBookCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count books',
+      one: '1 book',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get catalogChooseEdition => 'Choose an edition';
+
+  @override
+  String catalogBytes(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString bytes';
+  }
+
+  @override
+  String get catalogViewSource => 'View at source';
+
+  @override
+  String get catalogSupportSource => 'Support this source';
+
+  @override
+  String get catalogLinkFailed => 'The source could not be opened. Try again.';
+
+  @override
+  String get catalogDownloadPending =>
+      'Adding catalog books to your library is not available yet.';
+
+  @override
+  String get catalogBackToSearch => 'Back to Search';
+
+  @override
   String editionLocations(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

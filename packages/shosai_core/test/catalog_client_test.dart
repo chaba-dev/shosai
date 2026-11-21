@@ -101,10 +101,28 @@ void main() {
       expect(await client.categories(), [
         (id: 'fiction', label: 'Fiction', books: 2),
       ]);
+      expect(await client.authors(query: 'AUSTEN'), [
+        (id: 'austen', name: 'Austen, Jane', books: 1),
+      ]);
+      expect(await client.authors(query: '漱石'), [
+        (id: 'soseki', name: '夏目漱石', books: 1),
+      ]);
+      expect(await client.authors(query: '%'), isEmpty);
+      expect((await client.authors(limit: 1, offset: 1)).single.id, 'soseki');
+      expect((await client.search(author: 'soseki')).map((b) => b.id), ['cat']);
+      expect(await client.search(author: 'austen', language: 'de'), isEmpty);
+      final filters = await client.filters();
+      expect(filters.languages, ['de', 'en', 'ja']);
+      expect(filters.sources, [
+        (id: 'gutenberg', name: 'Project Gutenberg'),
+        (id: 'aozora', name: '青空文庫'),
+      ]);
       final book = (await client.book('pride'))!;
       expect(book.book.id, 'pride');
       expect(book.book.title, 'Pride and Prejudice');
       expect(book.book.authors, ['Austen, Jane']);
+      expect(book.book.sources, ['Project Gutenberg', '青空文庫']);
+      expect(book.book.coverUrl, isNull);
       expect(book.subjects, ['Love stories']);
       expect(
         book.editions.map(

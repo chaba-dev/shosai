@@ -40,6 +40,8 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  # Catalog UI tests exercise an installed SQLite snapshot, not mocked queries.
+  sqlite3: ^3.5.2
   # The opt-in real-book corpus pass reads Dart retained heap through the VM
   # service (`getAllocationProfile`); the version is pinned by pubspec.lock.
   vm_service: ^15.3.0

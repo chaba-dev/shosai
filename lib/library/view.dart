@@ -139,6 +139,17 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   );
   Route<ShellSearchChoice>? _searchRoute;
 
+  final _browseSearchFocus = FocusNode();
+  late final BrowseController _browse = BrowseController(
+    bridge: widget.bridgeFactory(),
+    openLink: (uri) async {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw StateError('The source could not be opened');
+      }
+    },
+  );
+  bool _browseShowing = false;
+
   /// The book a note or search hit was opened in and its place: the reader
   /// built next for that book opens there instead of where it was left.
   (int, ReaderPlace)? _openAt;
@@ -230,6 +241,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       _notes.dispatch(const ShellNotesRequested());
     }
     _notesShowing = notesShowing;
+    final browseShowing = model.place == ShellPlace.search && !model.reading;
+    if (browseShowing && !_browseShowing) {
+      _browse.dispatch(const BrowseOpened());
+      if (MediaQuery.sizeOf(context).width >= ShellLayout.tabletMinWidth) {
+        _browseSearchFocus.requestFocus();
+      }
+    }
+    _browseShowing = browseShowing;
   }
 
   void _notesChanged() => setState(() {});
@@ -277,15 +296,36 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     );
   }
 
-  /// Opens the search palette over whatever shows, on the book being read
-  /// when there is one, and reads the hit chosen in it.
+  /// Focuses unified Search outside reading; the reader keeps its scoped
+  /// search palette and opens a chosen hit at its passage or note.
   Future<void> _openSearch({String? query}) async {
     if (!mounted || _searchRoute != null) return;
     final shell = _shell.model;
+    if (!shell.reading) {
+      if (query != null) {
+        final c = _browse.model.criteria;
+        _browse.dispatch(
+          BrowseChanged((
+            query: query,
+            filter: c.filter,
+            category: c.category,
+            language: c.language,
+            source: c.source,
+            author: c.author,
+          )),
+        );
+      }
+      _browse.dispatch(const BrowseBackRequested());
+      _shell.dispatch(const ShellPlaceSelected(ShellPlace.search));
+      _browseSearchFocus.requestFocus();
+      return;
+    }
     _search.dispatch(
       ShellSearchOpened(
         book: shell.reading ? shell.currentBook?.book : null,
-        query: query,
+        query:
+            query ??
+            (_search.model.query.isEmpty ? _browse.model.criteria.query : null),
       ),
     );
     final navigator = Navigator.of(context);
@@ -575,6 +615,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     _notes.removeListener(_notesChanged);
     _notes.dispose();
     _search.dispose();
+    _browse.dispose();
+    _browseSearchFocus.dispose();
     _session.dispose();
     super.dispose();
   }
@@ -775,10 +817,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   ShellActions get _shellActions => ShellActions(
-    // Search is a palette over the screen, not a place of its own.
-    selectPlace: (place) => place == ShellPlace.search
-        ? unawaited(_openSearch())
-        : _shell.dispatch(ShellPlaceSelected(place)),
+    selectPlace: (place) => _shell.dispatch(ShellPlaceSelected(place)),
     openBook: (open) => _shell.model.reading
         ? _shell.dispatch(ShellBookActivated(open.id))
         : controller.dispatch(LibraryBookOpened(open.book)),
@@ -1330,6 +1369,32 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                             _notes.dispatch(const ShellNotesRequested()),
                         onMore: () =>
                             _notes.dispatch(const ShellNotesMoreRequested()),
+                      ),
+                    )
+                  : shell.place == ShellPlace.search
+                  ? ListenableBuilder(
+                      listenable: _browse,
+                      builder: (context, _) => ShellBrowsePage(
+                        layout: layout,
+                        model: _browse.model,
+                        local: _browse.local.model,
+                        dispatch: _browse.dispatch,
+                        searchFocus: _browseSearchFocus,
+                        onChosen: (choice) {
+                          final (book, place) = choice;
+                          _openBookAt(
+                            book,
+                            place == null
+                                ? null
+                                : ReaderPlace(
+                                    place.unit,
+                                    offset: place.offset,
+                                    length: place.length,
+                                    annotationId: place.annotationId,
+                                    note: place.note,
+                                  ),
+                          );
+                        },
                       ),
                     )
                   : shell.place == ShellPlace.settings

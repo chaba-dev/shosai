@@ -2,7 +2,7 @@
 .PHONY: test test-app test-scripts
 .PHONY: test-packaged-linux test-packaged-macos test-packaged-android
 .PHONY: theme-tokens check-theme-tokens check-l10n-codegen
-.PHONY: design-system design-system-css check-design-system-css
+.PHONY: design-system design-system-css check-design-system-css design-system-catalog
 .PHONY: epub-layout-fixtures check-epub-layout-fixtures
 .PHONY: dev linux-debug linux-release check-linux-bundle
 .PHONY: android-profile android-release check-android-apk
@@ -46,6 +46,11 @@ DESIGN_SYSTEM_PORT ?= 8765
 design-system:
 	@echo "Shōsai design system: http://127.0.0.1:$(DESIGN_SYSTEM_PORT)/docs/design-system/"
 	python3 -m http.server --bind 127.0.0.1 --directory "$(CURDIR)" $(DESIGN_SYSTEM_PORT)
+
+## Render real Flutter catalog specimens for the design-system viewer
+design-system-catalog:
+	SHOSAI_HARNESS_ARTIFACTS="$(CURDIR)/build/design-system-catalog" \
+		flutter test test/shell/browse_test.dart --reporter expanded
 
 ## Regenerate docs/design-system/tokens.css from docs/design-system/tokens.json
 design-system-css:

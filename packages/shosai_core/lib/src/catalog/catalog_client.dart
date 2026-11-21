@@ -12,7 +12,13 @@ import '../worker.dart';
 import 'catalog_database.dart';
 
 export 'catalog_database.dart'
-    show CatalogBook, CatalogCategory, CatalogEdition, CatalogBookDetails;
+    show
+        CatalogBook,
+        CatalogCategory,
+        CatalogEdition,
+        CatalogBookDetails,
+        CatalogAuthor,
+        CatalogFilters;
 
 enum CatalogRefresh { notDue, unchanged, installed }
 
@@ -147,6 +153,7 @@ final class CatalogClient {
     String? category,
     String? language,
     String? source,
+    String? author,
     int limit = 30,
     int offset = 0,
     CancellationToken? cancellation,
@@ -163,6 +170,7 @@ final class CatalogClient {
         category,
         language,
         source,
+        author,
         limit,
         offset,
       ),
@@ -175,6 +183,32 @@ final class CatalogClient {
     final database = _database;
     return runCancellable(
       () => catalogCategories(database),
+      cancellation: cancellation,
+    );
+  }
+
+  Future<List<CatalogAuthor>> authors({
+    String query = '',
+    int limit = 30,
+    int offset = 0,
+    CancellationToken? cancellation,
+  }) {
+    _checkOpen();
+    if (limit < 1 || limit > 100 || offset < 0) {
+      throw ArgumentError('Invalid catalog page');
+    }
+    final database = _database;
+    return runCancellable(
+      () => catalogAuthors(database, query, limit, offset),
+      cancellation: cancellation,
+    );
+  }
+
+  Future<CatalogFilters> filters({CancellationToken? cancellation}) {
+    _checkOpen();
+    final database = _database;
+    return runCancellable(
+      () => catalogFilters(database),
       cancellation: cancellation,
     );
   }

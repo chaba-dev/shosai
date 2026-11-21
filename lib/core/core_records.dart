@@ -37,7 +37,7 @@ final class ShosaiCore {
     : snapshots = DocumentSnapshots('$dataDirectory/snapshots'),
       catalog = CatalogClient(
         '$dataDirectory/catalog',
-        userAgent: 'Shosai/0.1 (+https://github.com/chaba-dev/shosai/issues)',
+        userAgent: catalogUserAgent,
       ),
       fileCache = BookFileCache(store, '$dataDirectory/file-cache'),
       locations = LibraryLocations(store),

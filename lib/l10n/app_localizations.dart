@@ -2490,6 +2490,150 @@ abstract class AppLocalizations {
   /// **'Open PDF'**
   String get pdfUnlockAction;
 
+  /// No description provided for @catalogSearchPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Search your books, notes and free books'**
+  String get catalogSearchPlaceholder;
+
+  /// No description provided for @catalogClearSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear search'**
+  String get catalogClearSearch;
+
+  /// No description provided for @catalogAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get catalogAll;
+
+  /// No description provided for @catalogYourBooks.
+  ///
+  /// In en, this message translates to:
+  /// **'Your books'**
+  String get catalogYourBooks;
+
+  /// No description provided for @catalogYourNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Your notes'**
+  String get catalogYourNotes;
+
+  /// No description provided for @catalogFreeBooks.
+  ///
+  /// In en, this message translates to:
+  /// **'Free books'**
+  String get catalogFreeBooks;
+
+  /// No description provided for @catalogAuthors.
+  ///
+  /// In en, this message translates to:
+  /// **'Authors'**
+  String get catalogAuthors;
+
+  /// No description provided for @catalogBrowse.
+  ///
+  /// In en, this message translates to:
+  /// **'Browse by category'**
+  String get catalogBrowse;
+
+  /// No description provided for @catalogLanguage.
+  ///
+  /// In en, this message translates to:
+  /// **'Language'**
+  String get catalogLanguage;
+
+  /// No description provided for @catalogCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get catalogCategory;
+
+  /// No description provided for @catalogSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Source'**
+  String get catalogSource;
+
+  /// No description provided for @catalogUpdating.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating the free-book catalog… You can keep searching.'**
+  String get catalogUpdating;
+
+  /// No description provided for @catalogOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'The catalog could not be updated. Any previously saved catalog remains available offline.'**
+  String get catalogOffline;
+
+  /// No description provided for @catalogReadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The catalog could not be read. Leave Search and try again.'**
+  String get catalogReadFailed;
+
+  /// No description provided for @catalogFirstDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to the internet to get the free-book catalog on this device.'**
+  String get catalogFirstDownload;
+
+  /// No description provided for @catalogShowMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Show more'**
+  String get catalogShowMore;
+
+  /// No description provided for @catalogBookCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 book} other{{count} books}}'**
+  String catalogBookCount(int count);
+
+  /// No description provided for @catalogChooseEdition.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose an edition'**
+  String get catalogChooseEdition;
+
+  /// No description provided for @catalogBytes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} bytes'**
+  String catalogBytes(int count);
+
+  /// No description provided for @catalogViewSource.
+  ///
+  /// In en, this message translates to:
+  /// **'View at source'**
+  String get catalogViewSource;
+
+  /// No description provided for @catalogSupportSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Support this source'**
+  String get catalogSupportSource;
+
+  /// No description provided for @catalogLinkFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The source could not be opened. Try again.'**
+  String get catalogLinkFailed;
+
+  /// No description provided for @catalogDownloadPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Adding catalog books to your library is not available yet.'**
+  String get catalogDownloadPending;
+
+  /// No description provided for @catalogBackToSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to Search'**
+  String get catalogBackToSearch;
+
   /// No description provided for @editionLocations.
   ///
   /// In en, this message translates to:
