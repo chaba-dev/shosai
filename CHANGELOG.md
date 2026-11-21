@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-20
+## [0.1.0] - 2026-11-21
 
 ### 🚀 Features
 
@@ -82,6 +82,7 @@ All notable changes to this project will be documented in this file.
 - *(catalog)* Define the Gutenberg snapshot contract (#336)
 - *(catalog)* Export Git-friendly JSON snapshots (#340)
 - *(catalog)* Check in validated Gutenberg snapshots (#341)
+- *(catalog)* Schedule Gutenberg catalog refresh PRs (#342)
 
 ### 🐛 Bug Fixes
 
