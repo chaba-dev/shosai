@@ -42,7 +42,7 @@ Only the default set is bundled (`assets/fonts/`). The other sets are added thro
 
 - Self-host the same families; do not depend on visitors having them installed.
 - Use `--font-ui` and `--font-editorial` rather than literal stacks in individual selectors.
-- Keep font files under `assets/fonts` as the source of truth and expose them to Hugo through its static mount.
+- The standalone [website repository](https://github.com/chaba-dev/shosai-website) keeps its own copy under `assets/fonts` and exposes it through Hugo's static mount. Coordinate font upgrades across both repositories; application builds use this repository's fonts.
 - Subsetting is allowed for a static, known character set, but the subset, source, generation method, and covered characters must be documented. Regenerate it when relevant content changes.
 - Preserve `font-display: swap` and avoid loading Japanese fonts on pages that do not render Japanese glyphs.
 

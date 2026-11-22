@@ -79,13 +79,7 @@ published at https://chaba-rfds.pages.dev. The
 
 ## Website
 
-The public site is a dependency-free Hugo site in [`website`](website). Run it locally with:
-
-```sh
-hugo server --source website
-```
-
-See [`website/README.md`](website/README.md) for the Cloudflare Pages build configuration.
+The public site and checked-in catalog live in [chaba-dev/shosai-website](https://github.com/chaba-dev/shosai-website). See that repository for local development, catalog refresh and Cloudflare Pages configuration. The Dart catalog importer and exporter remain in this repository.
 
 ## License
 

@@ -35,10 +35,6 @@ migrate_working_dir/
 # Temporary credentials created by google-github-actions/auth.
 gha-creds-*.json
 
-# Hugo output
-/website/public/
-/website/.hugo_build.lock
-
 # Golden-test failures
 /test/failures/
 /test/visual/failures/
