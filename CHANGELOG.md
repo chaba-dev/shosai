@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-11-21
+## [0.1.0] - 2026-11-22
 
 ### 🚀 Features
 
@@ -185,6 +185,7 @@ All notable changes to this project will be documented in this file.
 - *(ios)* Raise the minimum to iOS 15 for Xcode 27 (#285)
 - *(android)* Automate Play publishing on release merges (#339)
 - Use client-id for GitHub App tokens (#344)
+- *(website)* Remove migrated Hugo site from application repository (#345)
 
 ### 🛡️ Security
 
