@@ -57,7 +57,6 @@ The project is a Flutter application:
 - `android`, `ios`, `linux` and `macos` contain the platform hosts.
 - `third_party` contains the patched PDF bindings and their redistribution notices.
 - `fixtures` holds the test documents the packages and the app share.
-- `website` contains the Hugo source for the project website.
 
 Run Flutter and Dart commands from the repository root. Desktop bundles are
 written under `build/linux/` or `build/macos/`. The former Rust benchmarks and
@@ -79,13 +78,7 @@ published at https://chaba-rfds.pages.dev. The
 
 ## Website
 
-The public site is a dependency-free Hugo site in [`website`](website). Run it locally with:
-
-```sh
-hugo server --source website
-```
-
-See [`website/README.md`](website/README.md) for the Cloudflare Pages build configuration.
+Visit the [public website](https://www.readshosai.com/) or read its [catalog revision index](https://www.readshosai.com/catalog/revisions.json). The Hugo source, checked-in catalog and publication workflows live in the [maintainer-only website repository](https://github.com/chaba-dev/shosai-website), which documents local development, catalog refresh and Cloudflare Pages configuration. The Dart catalog importer and exporter remain in this repository.
 
 ## License
 
