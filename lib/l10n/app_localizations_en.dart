@@ -1570,8 +1570,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get catalogLinkFailed => 'The source could not be opened. Try again.';
 
   @override
-  String get catalogDownloadPending =>
-      'Adding catalog books to your library is not available yet.';
+  String get catalogSaveTo => 'Save to';
+
+  @override
+  String get catalogPrivateLibrary => 'Private library on this device';
+
+  @override
+  String get catalogAdd => 'Add to library';
+
+  @override
+  String get catalogAdding => 'Downloading and adding…';
+
+  @override
+  String get catalogCancelling => 'Cancelling…';
+
+  @override
+  String get catalogCancelled => 'Download cancelled.';
+
+  @override
+  String get catalogAddFailed =>
+      'The book could not be added. Check your connection and save location, then try again.';
+
+  @override
+  String get catalogLocationsFailed => 'Save locations could not be loaded.';
+
+  @override
+  String get catalogLocationsLoading => 'Loading save locations…';
+
+  @override
+  String get catalogAdded => 'Added to your library';
+
+  @override
+  String get catalogAlreadyAdded => 'Already in your library';
+
+  @override
+  String get catalogRead => 'Read';
 
   @override
   String get catalogBackToSearch => 'Back to Search';

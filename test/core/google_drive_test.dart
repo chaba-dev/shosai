@@ -527,6 +527,52 @@ void main() {
   }
 
   test(
+    'create-only publication assigns a new ID and never replaces a namesake',
+    () async {
+      final input = [19, 41, 83];
+      handler = (request) async {
+        switch (request.uri.path) {
+          case '/drive/v3/files/generateIds':
+            _json(request, {
+              'ids': ['fresh-id'],
+            });
+          case '/upload/drive/v3/files':
+            expect(request.method, 'POST');
+            expect(jsonDecode(await utf8.decoder.bind(request).join()), {
+              'id': 'fresh-id',
+              'name': 'existing.epub',
+              'parents': ['root'],
+            });
+            request.response.headers.set(
+              'location',
+              'https://www.googleapis.com/session',
+            );
+            await request.response.close();
+          case '/session':
+            expect(
+              await request.fold<List<int>>([], (a, b) => a..addAll(b)),
+              input,
+            );
+            _json(request, {
+              ..._file('fresh-id', size: 3),
+              'sha256Checksum': 'verified-digest',
+            });
+          default:
+            fail(
+              'Unexpected lookup or replacement: ${request.method} ${request.uri}',
+            );
+        }
+      };
+      final result = await location.createFile(
+        'existing.epub',
+        Stream.value(input),
+      );
+      expect(result.key, 'fresh-id');
+      expect(result.sha256, 'verified-digest');
+    },
+  );
+
+  test(
     'PKCE desktop authorization validates state and handles denial without a token',
     () async {
       final oauth = GoogleDriveAuthorization(

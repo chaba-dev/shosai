@@ -793,6 +793,18 @@ void main() {
       await location.write('Root.epub', Stream.value([17, 31, 63]));
       expect(fixture.commit!['path'], '/Root.epub');
       expect(fixture.uploaded.takeBytes(), [17, 31, 63]);
+      final saving = location as LibrarySaveLocation;
+      await saving.createFile(
+        'New.epub',
+        Stream.value([19, 37]),
+        directory: 'id:folder',
+      );
+      expect(fixture.commit, {
+        'path': '/books/New.epub',
+        'mode': 'add',
+        'autorename': true,
+      });
+      expect(fixture.uploaded.takeBytes(), [19, 37]);
       fixture.commit = null;
       final token = CancellationToken();
       final source = StreamController<List<int>>();

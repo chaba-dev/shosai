@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -45,6 +46,117 @@ void main() {
     }
     expectOnlyKnownDefects(await findRenderDefects(tester), const []);
     expect(tester.takeException(), isNull);
+  }
+
+  for (final dark in [false, true]) {
+    testWidgets(
+      'Add stays in details; only Read opens an identical existing book (dark: $dark)',
+      (tester) async {
+        const HarnessView(size: Size(390, 844)).apply(tester);
+        tester.platformDispatcher.platformBrightnessTestValue = dark
+            ? Brightness.dark
+            : Brightness.light;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final bridge = _AcquiringBridge(catalog);
+        FlutterLibraryBook? opened;
+        var changes = 0;
+        final controller = BrowseController(
+          bridge: bridge,
+          openLink: (_) async {},
+          openBook: (book) => opened = book,
+          libraryChanged: () => changes++,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: ListenableBuilder(
+                listenable: controller,
+                builder: (_, _) => ShellBrowsePage(
+                  layout: ShellLayout.phone,
+                  model: controller.model,
+                  local: controller.local.model,
+                  dispatch: controller.dispatch,
+                  onChosen: (_) {},
+                ),
+              ),
+            ),
+          ),
+        );
+        controller.dispatch(const BrowseBookRequested('0'));
+        await until(
+          tester,
+          () =>
+              controller.model.details != null &&
+              controller.model.saveOptions != null,
+        );
+        await tester.ensureVisible(find.text('Add to library'));
+        await tester.pumpAndSettle();
+        await capture(
+          tester,
+          'catalog-acquire-${dark ? 'dark' : 'light'}-ready',
+        );
+        await tester.tap(find.text('Add to library'));
+        await until(tester, () => controller.model.acquisition.busy);
+        await tester.ensureVisible(find.text('Cancel'));
+        await tester.pump();
+        await capture(
+          tester,
+          'catalog-acquire-${dark ? 'dark' : 'light'}-progress',
+        );
+        expect(opened, isNull);
+        // Cancellation after publication must still report the committed book,
+        // rather than pretend that a committed save was undone.
+        await tester.tap(find.text('Cancel'));
+        await tester.pump();
+        expect(controller.model.acquisition.cancelling, true);
+        bridge.pending.complete((
+          book: harnessLibraryBooks().first,
+          existing: true,
+        ));
+        await until(tester, () => controller.model.acquisition.result != null);
+        expect(find.text('Already in your library'), findsOneWidget);
+        expect(opened, isNull);
+        expect(changes, 1);
+        await tester.ensureVisible(find.text('Read'));
+        await tester.pumpAndSettle();
+        await capture(
+          tester,
+          'catalog-acquire-${dark ? 'dark' : 'light'}-existing',
+        );
+        await tester.tap(find.text('Read'));
+        await tester.pump();
+        expect(opened?.bookId, harnessLibraryBooks().first.bookId);
+        controller.dispatch(const BrowseEditionSelected(1));
+        bridge.pending = Completer<CatalogAddedBook>();
+        await tester.pump();
+        await tester.ensureVisible(find.text('Add to library'));
+        await tester.tap(find.text('Add to library'));
+        await tester.pump();
+        bridge.pending.completeError(StateError('offline'));
+        await until(tester, () => controller.model.acquisition.failed);
+        await tester.ensureVisible(find.text('Add to library'));
+        await tester.pumpAndSettle();
+        await capture(
+          tester,
+          'catalog-acquire-${dark ? 'dark' : 'light'}-failed',
+        );
+        // An old completion cannot replace the new book's acquisition state.
+        bridge.pending = Completer<CatalogAddedBook>();
+        controller.dispatch(const BrowseAddRequested());
+        controller.dispatch(const BrowseBookRequested('1'));
+        bridge.pending.complete((
+          book: harnessLibraryBooks().first,
+          existing: false,
+        ));
+        await until(
+          tester,
+          () => controller.model.details?.book.id == '1' && changes == 2,
+        );
+        expect(controller.model.acquisition.result, isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
   }
 
   testWidgets(
@@ -427,5 +539,22 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
     });
+  }
+}
+
+class _AcquiringBridge extends CatalogHarnessBridge {
+  _AcquiringBridge(super.catalog);
+  Completer<CatalogAddedBook> pending = Completer<CatalogAddedBook>();
+  @override
+  Future<CatalogAddedBook> addCatalogBook({
+    required String bookId,
+    required String sourceId,
+    required String editionId,
+    required String? locationId,
+    required BigInt cancellationId,
+    void Function(int, int?)? progress,
+  }) {
+    progress?.call(4096, 8192);
+    return pending.future;
   }
 }

@@ -142,6 +142,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   final _browseSearchFocus = FocusNode();
   late final BrowseController _browse = BrowseController(
     bridge: widget.bridgeFactory(),
+    openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
+    libraryChanged: () => controller.dispatch(const LibraryRefreshed()),
     openLink: (uri) async {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         throw StateError('The source could not be opened');

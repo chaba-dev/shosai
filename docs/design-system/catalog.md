@@ -1,6 +1,6 @@
 # Catalog extension inventory
 
-The recovered Search/Browse and book-detail designs need three composition patterns, not new foundation tokens. The implementation reuses the paper palette, type roles, covers, buttons and shell. This is a targeted extension inventory, not a re-audit of unrelated components.
+The recovered Search/Browse and book-detail designs, including acquisition, need four composition patterns, not new foundation tokens. The implementation reuses the paper palette, type roles, covers, buttons and shell. This is a targeted extension inventory, not a re-audit of unrelated components.
 
 | Item | Status | Source and variants | Specimen |
 | --- | --- | --- | --- |
@@ -8,7 +8,7 @@ The recovered Search/Browse and book-detail designs need three composition patte
 | P2: CatalogResult | Implemented in this branch; not yet shipped | `ShellBrowsePage`, `_CatalogCover`: shelf and row; fetched thumbnail and generated fallback | `catalog-desktop-browse`, `catalog-phone-results` |
 | P3: CatalogEditionChoice | Implemented in this branch; not yet shipped | `_CatalogBookPage`: wide and stacked; default/alternate radio selection, rights, missing size, source actions | `catalog-*-book`, `catalog-*-edition` |
 | C1: SearchPalette entry points | Changed in this branch | Outside reading, Search and its shortcuts now open SearchBrowse; inside reading, the existing palette remains | Shell navigation tests in `test/shell/product_shell_test.dart` |
-| L1: Catalog acquisition | Planned | RFD 12 save-location and naming contract; Add to library, progress, cancellation, destination failure and verified ownership identity | Not rendered as a working action |
+| L1: CatalogAcquisition | Implemented in this branch; not yet shipped | `_CatalogAcquisitionControls`: destination, Add, progress/Cancel, failure/retry, existing-content status and explicit Read | `catalog-acquire-{light,dark}-{ready,progress,existing,failed}` |
 
 ## Render the product components
 
@@ -26,13 +26,16 @@ The fixtures cover light/dark desktop, tablet, light/dark phone and Japanese pho
 | CatalogEditionChoice | Loading / unavailable | Inline status with Back to Search available |
 | CatalogEditionChoice | Initial / alternate edition | Native radio group with indicator and accent border; rights, credit and source actions track the selected edition |
 | CatalogEditionChoice | Missing metadata / link failure | Omit absent metadata; a failed platform link reports an inline error |
+| CatalogAcquisition | Ready / saving | Device-local destination menu; Add stays on details, disables edition/destination changes and exposes progress/Cancel |
+| CatalogAcquisition | Added / already in library | A separate Read action opens the book; a known identical content hash never creates a second file |
+| CatalogAcquisition | Cancelled / failed | Inline result and retry; a save already committed finishes its association and reports success |
 
 ## Coverage and remaining states
 
-All three patterns are documented and rendered. Foundation token changes: zero. Their colors use `ShellPalette` from `ShosaiTokens`; typography uses the existing `shellEditorialStyle` and `shellInterfaceStyle` roles. Spacing and shape use `ShosaiTokens.space*`, `radiusSm`, `radiusMd` and `sizeTouchTarget`. Literal geometry is confined to composition: the 2:3 cover ratio, 40 px row covers, 136 px shelf cards and 152/200 px detail covers.
+All four patterns are documented and rendered. Foundation token changes: zero. Their colors use `ShellPalette` from `ShosaiTokens`; typography uses the existing `shellEditorialStyle` and `shellInterfaceStyle` roles. Spacing and shape use `ShosaiTokens.space*`, `radiusSm`, `radiusMd` and `sizeTouchTarget`. Literal geometry is confined to composition: the 2:3 cover ratio, 40 px row covers, 136 px shelf cards and 152/200 px detail covers.
 
-The catalog path was searched for repeated inline UI, near-duplicate controls, recurring literal values, missing states and future needs. Existing covers, buttons, shell and search-hit rendering are reused; no additional foundations are proposed. Missing-download states are L1. The viewer uses generated covers, not a live fetched-cover failure specimen; detail loading/unavailable, link failure and keyboard focus are not separate viewer specimens. No reading-length filter, summary, publication year or ownership badge is fabricated from absent metadata. Recents, illustrated category artwork and the more-by-author shelf in the recovered exploration are not implemented in this slice.
+The catalog path was searched for repeated inline UI, near-duplicate controls, recurring literal values, missing states and future needs. Existing covers, buttons, shell and search-hit rendering are reused; no additional foundations are proposed. Acquisition specimens exercise Add, progress, cancellation after publication, existing-content success, explicit Read and failed-download retry in light and dark themes through the controller bridge seam; they are not live provider downloads. New-book success, cancellation before publication, destination loading/failure, link failure and keyboard focus are not separate viewer specimens. Storage tests exercise real local downloads and files, with protocol fixtures for provider uploads. The viewer uses generated covers, not a live fetched-cover failure specimen. No reading-length filter, summary, publication year or ownership badge is fabricated from absent metadata. Recents, illustrated category artwork and the more-by-author shelf in the recovered exploration are not implemented in this slice.
 
 ## Sync record
 
-2026-11-21, from the app-catalog implementation based on `fc4f1e6e`. Scope: `lib/shell/browse_controller.dart`, `view_browse.dart`, `search_controller.dart`, `view_search.dart`, `lib/library/view.dart`, and the catalog read API. Inventory method: enumerate the named patterns introduced by this change and their rendered branches; count changes to `docs/design-system/tokens.json` and `assets/theme/tokens.json` with `jj diff --stat` through `.agents/dev`. Both token sources remain unchanged. No unrelated design-system inventory was regenerated.
+2026-11-22, from the app-catalog implementation based on `fc4f1e6e`. Scope: `lib/shell/browse_controller.dart`, `view_browse.dart`, `search_controller.dart`, `view_search.dart`, `lib/library/view.dart`, and the catalog read/acquisition API. Inventory method: enumerate the named patterns introduced by this change and their rendered branches; count changes to `docs/design-system/tokens.json` and `assets/theme/tokens.json` with `jj diff --stat` through `.agents/dev`. Both token sources remain unchanged. No unrelated design-system inventory was regenerated.

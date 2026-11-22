@@ -114,7 +114,7 @@ final class FolderConnectionProvider implements ConnectionProvider {
 /// Native holds an open stream (and Apple scope) until close. Messages contain
 /// at most 64 KiB, with one outstanding read/write per operation. Neither a
 /// listing nor stat requests any file contents from the provider.
-final class PlatformFolderLocation implements LibraryLocation {
+final class PlatformFolderLocation implements LibrarySaveLocation {
   const PlatformFolderLocation(this.id, this.grant);
 
   @override
@@ -209,6 +209,43 @@ final class PlatformFolderLocation implements LibraryLocation {
     Stream<List<int>> bytes, {
     String? directory,
     CancellationToken? cancellation,
+  }) => _write(name, bytes, directory: directory, cancellation: cancellation);
+
+  @override
+  Future<LocationEntry> createFile(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) => _write(
+    name,
+    bytes,
+    directory: directory,
+    cancellation: cancellation,
+    createOnly: true,
+  );
+
+  @override
+  Future<LocationEntry> createDirectory(
+    String name, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) async {
+    cancellation.throwIfCancelled();
+    return _entry(
+      (await _call<Map>('createDirectory', {
+        'directory': directory,
+        'name': name,
+      }))!,
+    );
+  }
+
+  Future<LocationEntry> _write(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+    bool createOnly = false,
   }) async {
     if (name.isEmpty ||
         name == '.' ||
@@ -219,10 +256,12 @@ final class PlatformFolderLocation implements LibraryLocation {
       throw const CoreException.invalidRequest('Invalid destination name.');
     }
     cancellation.throwIfCancelled();
-    final token = (await _call<String>('openWrite', {
-      'directory': directory,
-      'name': name,
-    }))!;
+    // Older native adapters fail closed on openCreate; never fall back to
+    // replacement when create-only publication is unavailable.
+    final token = (await _call<String>(
+      createOnly ? 'openCreate' : 'openWrite',
+      {'directory': directory, 'name': name},
+    ))!;
     try {
       var length = 0;
       await for (final chunk in bytes) {
@@ -262,6 +301,7 @@ LocationEntry _entry(Map value) => LocationEntry(
 );
 
 Exception _folderError(PlatformException error) => switch (error.code) {
+  'conflict' => const CoreException.conflict('The destination name is taken.'),
   'offline' => const LocationException(LocationFailure.offline),
   'revoked' => const LocationException(LocationFailure.revoked),
   'missing' => const LocationException(LocationFailure.missing),

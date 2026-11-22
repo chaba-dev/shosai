@@ -2622,11 +2622,77 @@ abstract class AppLocalizations {
   /// **'The source could not be opened. Try again.'**
   String get catalogLinkFailed;
 
-  /// No description provided for @catalogDownloadPending.
+  /// No description provided for @catalogSaveTo.
   ///
   /// In en, this message translates to:
-  /// **'Adding catalog books to your library is not available yet.'**
-  String get catalogDownloadPending;
+  /// **'Save to'**
+  String get catalogSaveTo;
+
+  /// No description provided for @catalogPrivateLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Private library on this device'**
+  String get catalogPrivateLibrary;
+
+  /// No description provided for @catalogAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to library'**
+  String get catalogAdd;
+
+  /// No description provided for @catalogAdding.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading and adding…'**
+  String get catalogAdding;
+
+  /// No description provided for @catalogCancelling.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelling…'**
+  String get catalogCancelling;
+
+  /// No description provided for @catalogCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Download cancelled.'**
+  String get catalogCancelled;
+
+  /// No description provided for @catalogAddFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The book could not be added. Check your connection and save location, then try again.'**
+  String get catalogAddFailed;
+
+  /// No description provided for @catalogLocationsFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Save locations could not be loaded.'**
+  String get catalogLocationsFailed;
+
+  /// No description provided for @catalogLocationsLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading save locations…'**
+  String get catalogLocationsLoading;
+
+  /// No description provided for @catalogAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'Added to your library'**
+  String get catalogAdded;
+
+  /// No description provided for @catalogAlreadyAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'Already in your library'**
+  String get catalogAlreadyAdded;
+
+  /// No description provided for @catalogRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Read'**
+  String get catalogRead;
 
   /// No description provided for @catalogBackToSearch.
   ///

@@ -28,6 +28,9 @@ final class LocationEntry {
     this.size,
     this.revision,
     this.folderName,
+    this.sha256,
+    this.dropboxContentHash,
+    this.createdAt,
   });
 
   final String key;
@@ -41,6 +44,11 @@ final class LocationEntry {
   /// Display name of the containing folder, supplied by discovery, not parsed
   /// from an opaque provider key. Supporting evidence, never book identity.
   final String? folderName;
+
+  /// Provider-verified content digests, never a revision or an ETag.
+  final String? sha256;
+  final String? dropboxContentHash;
+  final DateTime? createdAt;
 }
 
 /// One bounded, nonrecursive directory listing.
@@ -103,6 +111,25 @@ abstract interface class LibraryLocation {
   Future<LocationEntry> write(
     String name,
     Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+  });
+}
+
+/// Saving new books requires create-only publication, not [LibraryLocation.write]
+/// (which existing adapters also use for replacement). A name collision reports
+/// [CoreErrorKind.conflict], or the provider returns its safely numbered name.
+/// Once publication commits, finish and report it even if cancellation arrives.
+abstract interface class LibrarySaveLocation implements LibraryLocation {
+  Future<LocationEntry> createFile(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+  });
+
+  Future<LocationEntry> createDirectory(
+    String name, {
     String? directory,
     CancellationToken? cancellation,
   });

@@ -1472,7 +1472,40 @@ class AppLocalizationsJa extends AppLocalizations {
   String get catalogLinkFailed => '提供元を開けませんでした。もう一度お試しください。';
 
   @override
-  String get catalogDownloadPending => 'カタログからライブラリへの追加はまだ利用できません。';
+  String get catalogSaveTo => '保存先';
+
+  @override
+  String get catalogPrivateLibrary => 'この端末のプライベートライブラリ';
+
+  @override
+  String get catalogAdd => 'ライブラリに追加';
+
+  @override
+  String get catalogAdding => 'ダウンロードして追加中…';
+
+  @override
+  String get catalogCancelling => 'キャンセル中…';
+
+  @override
+  String get catalogCancelled => 'ダウンロードをキャンセルしました。';
+
+  @override
+  String get catalogAddFailed => '本を追加できませんでした。接続と保存先を確認して、もう一度お試しください。';
+
+  @override
+  String get catalogLocationsFailed => '保存先を読み込めませんでした。';
+
+  @override
+  String get catalogLocationsLoading => '保存先を読み込み中…';
+
+  @override
+  String get catalogAdded => 'ライブラリに追加しました';
+
+  @override
+  String get catalogAlreadyAdded => 'ライブラリに追加済みです';
+
+  @override
+  String get catalogRead => '読む';
 
   @override
   String get catalogBackToSearch => '検索に戻る';

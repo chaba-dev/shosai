@@ -7,12 +7,13 @@ import 'package:path/path.dart' as p;
 
 import '../cancellation.dart';
 import '../errors.dart';
+import 'create_only.dart';
 import 'files.dart';
 import 'location.dart';
 
 /// A device-local ordinary folder. Sandboxed Apple/Android providers use their
 /// platform grant adapters instead; content URIs are never filesystem paths.
-final class FolderLocation implements LibraryLocation {
+final class FolderLocation implements LibrarySaveLocation {
   FolderLocation._(this.id, this.directory, this._root);
 
   static Future<FolderLocation> open(String id, String directory) async {
@@ -170,6 +171,61 @@ final class FolderLocation implements LibraryLocation {
     Stream<List<int>> bytes, {
     String? directory,
     CancellationToken? cancellation,
+  }) => _write(name, bytes, directory: directory, cancellation: cancellation);
+
+  @override
+  Future<LocationEntry> createFile(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) => _write(
+    name,
+    bytes,
+    directory: directory,
+    cancellation: cancellation,
+    createOnly: true,
+  );
+
+  @override
+  Future<LocationEntry> createDirectory(
+    String name, {
+    String? directory,
+    CancellationToken? cancellation,
+  }) async {
+    if (name.isEmpty ||
+        name == '.' ||
+        name == '..' ||
+        name.contains('/') ||
+        name.contains('\\') ||
+        name.contains('\u0000')) {
+      throw const CoreException.invalidRequest('Invalid folder name.');
+    }
+    cancellation.throwIfCancelled();
+    try {
+      final parent = await _path(directory);
+      final target = p.join(parent, name);
+      // Directory.create accepts an existing directory, but never a file.
+      await Directory(target).create();
+      final resolved = await _path(
+        p.relative(target, from: _root).split(p.separator).join('/'),
+      );
+      return _entry(resolved, await FileStat.stat(resolved));
+    } on FileSystemException catch (error) {
+      if (error.osError?.errorCode == 17 ||
+          (Platform.isWindows && error.osError?.errorCode == 183)) {
+        throw const CoreException.conflict('The folder name is taken.');
+      }
+      throw _failure(error);
+    }
+  }
+
+  Future<LocationEntry> _write(
+    String name,
+    Stream<List<int>> bytes, {
+    String? directory,
+    CancellationToken? cancellation,
+    bool createOnly = false,
   }) async {
     if (name.isEmpty ||
         name == '.' ||
@@ -211,7 +267,11 @@ final class FolderLocation implements LibraryLocation {
       }
       cancellation.throwIfCancelled();
       final destination = p.join(parent, name);
-      await file.rename(destination);
+      if (createOnly) {
+        publishNewFile(file.path, destination);
+      } else {
+        await file.rename(destination);
+      }
       return _entry(destination, await FileStat.stat(destination));
     } on FileSystemException catch (error) {
       throw _failure(error);

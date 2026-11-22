@@ -2,6 +2,7 @@
 library;
 
 import 'package:shosai_core/catalog.dart';
+import 'bridge.dart';
 
 export 'package:shosai_core/catalog.dart';
 
@@ -11,4 +12,24 @@ const catalogUserAgent =
 
 abstract interface class CatalogHost {
   CatalogClient get catalog;
+}
+
+typedef CatalogSaveOptions = ({
+  List<({String id, String label})> locations,
+  String? selected,
+});
+typedef CatalogAddedBook = ({FlutterLibraryBook book, bool existing});
+
+/// Acquisition is separate from reading: Add never opens a document.
+abstract interface class CatalogAcquisitionHost {
+  Future<CatalogSaveOptions> catalogSaveOptions();
+  Future<void> selectCatalogSaveLocation(String? id);
+  Future<CatalogAddedBook> addCatalogBook({
+    required String bookId,
+    required String sourceId,
+    required String editionId,
+    required String? locationId,
+    required BigInt cancellationId,
+    void Function(int received, int? total)? progress,
+  });
 }

@@ -76,9 +76,28 @@ CatalogClient createCatalogFixture(Directory root) {
   );
 }
 
-class CatalogHarnessBridge extends HarnessBridge implements CatalogHost {
+class CatalogHarnessBridge extends HarnessBridge
+    implements CatalogHost, CatalogAcquisitionHost {
   CatalogHarnessBridge(this.catalog, {List<FlutterLibraryBook>? books})
     : super(books: books ?? harnessLibraryBooks());
   @override
   final CatalogClient catalog;
+
+  @override
+  Future<CatalogSaveOptions> catalogSaveOptions() async => (
+    locations: [(id: 'drive', label: 'Google Drive · Books')],
+    selected: null,
+  );
+  @override
+  Future<void> selectCatalogSaveLocation(String? id) async {}
+  @override
+  Future<CatalogAddedBook> addCatalogBook({
+    required String bookId,
+    required String sourceId,
+    required String editionId,
+    required String? locationId,
+    required BigInt cancellationId,
+    void Function(int, int?)? progress,
+  }) async =>
+      throw UnsupportedError('This browsing fixture does not download books.');
 }

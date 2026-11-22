@@ -585,6 +585,7 @@ class _CatalogBookPage extends StatelessWidget {
                           ),
                           child: RadioListTile<int>(
                             value: index,
+                            enabled: !model.acquisition.busy,
                             title: Text(
                               '${edition.sourceName} · ${edition.variant}',
                               style: shellInterfaceStyle(14, 20),
@@ -655,13 +656,8 @@ class _CatalogBookPage extends StatelessWidget {
                 if (model.linkFailed) Text(l10n.catalogLinkFailed),
               ],
               const SizedBox(height: ShosaiTokens.space5),
-              Text(
-                l10n.catalogDownloadPending,
-                style: shellInterfaceStyle(
-                  13,
-                  20,
-                ).copyWith(color: palette.inkMuted),
-              ),
+              if (details.editions.isNotEmpty)
+                _CatalogAcquisitionControls(model: model, dispatch: dispatch),
             ],
           );
     return PopScope(
@@ -719,6 +715,162 @@ class _CatalogBookPage extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CatalogAcquisitionControls extends StatelessWidget {
+  const _CatalogAcquisitionControls({
+    required this.model,
+    required this.dispatch,
+  });
+  final BrowseModel model;
+  final ValueChanged<BrowseMessage> dispatch;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final state = model.acquisition;
+    final options = model.saveOptions;
+    final selected = options?.locations
+        .where((g) => g.id == options.selected)
+        .firstOrNull;
+    final height = math.max(
+      ShosaiTokens.sizeTouchTarget,
+      shosaiShadButtonHeight(context),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (state.result case final result?) ...[
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              result.existing ? l10n.catalogAlreadyAdded : l10n.catalogAdded,
+              style: shellInterfaceStyle(14, 20),
+            ),
+          ),
+          const SizedBox(height: ShosaiTokens.space3),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: ShadButton(
+              height: height,
+              onPressed: () => dispatch(const BrowseReadRequested()),
+              child: Text(l10n.catalogRead),
+            ),
+          ),
+        ] else ...[
+          Text(l10n.catalogSaveTo, style: shellInterfaceStyle(13, 20)),
+          const SizedBox(height: ShosaiTokens.space2),
+          if (options == null) ...[
+            Text(
+              model.optionsBusy
+                  ? l10n.catalogLocationsLoading
+                  : l10n.catalogLocationsFailed,
+            ),
+            if (!model.optionsBusy)
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: ShadButton.outline(
+                  height: height,
+                  onPressed: () => dispatch(const BrowseSaveOptionsRequested()),
+                  child: Text(l10n.readerRetry),
+                ),
+              ),
+          ] else ...[
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: PopupMenuButton<String>(
+                tooltip: l10n.catalogSaveTo,
+                enabled: !state.busy && !model.locationBusy,
+                initialValue: options.selected ?? 'private',
+                onSelected: (value) => dispatch(
+                  BrowseSaveLocationSelected(value == 'private' ? null : value),
+                ),
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'private',
+                    child: Text(l10n.catalogPrivateLibrary),
+                  ),
+                  for (final g in options.locations)
+                    PopupMenuItem(value: g.id, child: Text(g.label)),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: ShosaiTokens.space3,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          selected?.label ?? l10n.catalogPrivateLibrary,
+                          style: shellInterfaceStyle(14, 20),
+                        ),
+                      ),
+                      const SizedBox(width: ShosaiTokens.space2),
+                      const Icon(LucideIcons.chevronDown, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: ShosaiTokens.space3),
+            if (state.busy) ...[
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  state.cancelling
+                      ? l10n.catalogCancelling
+                      : l10n.catalogAdding,
+                ),
+              ),
+              const SizedBox(height: ShosaiTokens.space3),
+              LinearProgressIndicator(
+                value:
+                    state.total != null &&
+                        state.total! > 0 &&
+                        state.received < state.total!
+                    ? state.received / state.total!
+                    : null,
+              ),
+              const SizedBox(height: ShosaiTokens.space3),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: ShadButton.outline(
+                  height: height,
+                  onPressed: state.cancelling
+                      ? null
+                      : () => dispatch(const BrowseAddCancelled()),
+                  child: Text(l10n.readerNoteCancel),
+                ),
+              ),
+            ] else ...[
+              if (state.failed || state.cancelled) ...[
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    state.cancelled
+                        ? l10n.catalogCancelled
+                        : l10n.catalogAddFailed,
+                  ),
+                ),
+                const SizedBox(height: ShosaiTokens.space3),
+              ],
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: ShadButton(
+                  height: height,
+                  onPressed: model.locationBusy
+                      ? null
+                      : () => dispatch(const BrowseAddRequested()),
+                  child: Text(l10n.catalogAdd),
+                ),
+              ),
+            ],
+          ],
+        ],
+      ],
     );
   }
 }

@@ -10,6 +10,7 @@ import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_epub/shosai_epub.dart' show EpubBook;
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/catalog.dart';
+import 'package:shosai_flutter/core/catalog_downloads.dart';
 import 'package:shosai_flutter/core/connection_credentials.dart';
 import 'package:shosai_flutter/core/documents.dart';
 import 'package:shosai_flutter/core/document_access.dart';
@@ -81,6 +82,11 @@ final class ShosaiCore {
   final Library library;
   final LibraryLocations locations;
   final BookFileCache fileCache;
+  late final CatalogDownloads downloads = CatalogDownloads(
+    catalog,
+    folders,
+    snapshots.newPath,
+  );
   late final LibraryFolders folders = LibraryFolders(
     Preferences(store),
     library,
@@ -1257,6 +1263,7 @@ final class ApplicationBridge
         FlutterBridge,
         RecordsHost,
         CatalogHost,
+        CatalogAcquisitionHost,
         LibraryFoldersHost,
         LibraryEditionsHost,
         DocumentAccessHost {
@@ -1273,6 +1280,47 @@ final class ApplicationBridge
 
   @override
   CatalogClient get catalog => records._core.catalog;
+
+  @override
+  Future<CatalogSaveOptions> catalogSaveOptions() => records._guard(() async {
+    if (records._closed) throw const CoreException.cancelled();
+    final options = await folders.saveOptions();
+    return (
+      locations: [
+        for (final g in options.locations) (id: g.id, label: g.label),
+      ],
+      selected: options.selected,
+    );
+  });
+
+  @override
+  Future<void> selectCatalogSaveLocation(String? id) =>
+      records._guard(() async {
+        if (records._closed) throw const CoreException.cancelled();
+        await folders.selectSaveLocation(id);
+      });
+
+  @override
+  Future<CatalogAddedBook> addCatalogBook({
+    required String bookId,
+    required String sourceId,
+    required String editionId,
+    required String? locationId,
+    required BigInt cancellationId,
+    void Function(int received, int? total)? progress,
+  }) => records._guard(() async {
+    final token = records._token(cancellationId);
+    token.throwIfCancelled();
+    final result = await records._core.downloads.add(
+      bookId: bookId,
+      sourceId: sourceId,
+      editionId: editionId,
+      locationId: locationId,
+      cancellation: token,
+      progress: progress,
+    );
+    return (book: _libraryBook(result.book), existing: result.existing);
+  });
 
   @override
   Future<FlutterBookProtection> bookProtection({

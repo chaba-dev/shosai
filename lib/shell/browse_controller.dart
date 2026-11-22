@@ -25,7 +25,15 @@ class BrowseController extends ChangeNotifier {
   BrowseController({
     required FlutterBridge bridge,
     required Future<void> Function(Uri) openLink,
+    void Function(FlutterLibraryBook)? openBook,
+    VoidCallback? libraryChanged,
   }) : catalog = bridge is CatalogHost ? (bridge as CatalogHost).catalog : null,
+       _bridge = bridge,
+       _acquisition = bridge is CatalogAcquisitionHost
+           ? bridge as CatalogAcquisitionHost
+           : null,
+       _openBook = openBook,
+       _libraryChanged = libraryChanged,
        local = ShellSearchController(
          bridge: bridge,
          includeLibraryTitles: true,
@@ -37,6 +45,12 @@ class BrowseController extends ChangeNotifier {
   final CatalogClient? catalog;
   final ShellSearchController local;
   final Future<void> Function(Uri) _openLink;
+  final FlutterBridge _bridge;
+  final CatalogAcquisitionHost? _acquisition;
+  final void Function(FlutterLibraryBook)? _openBook;
+  final VoidCallback? _libraryChanged;
+  BigInt? _addCancellation;
+  int _locationRevision = 0;
   BrowseModel _model = const BrowseModel();
   BrowseModel get model => _model;
   Timer? _timer;
@@ -77,6 +91,7 @@ class BrowseController extends ChangeNotifier {
         }
       case BrowseChanged(:final criteria):
         if (criteria == _model.criteria) return;
+        _cancelAdd();
         final queryChanged = criteria.query != _model.criteria.query;
         _detailRevision++;
         _detailCancellation?.cancel();
@@ -128,6 +143,7 @@ class BrowseController extends ChangeNotifier {
         // Failed and unchanged refreshes leave the current results in place.
         if (installed) _load();
       case BrowseBookRequested(:final id):
+        _cancelAdd();
         _detailCancellation?.cancel();
         final revision = ++_detailRevision;
         final cancellation = _detailCancellation = CancellationToken();
@@ -136,8 +152,12 @@ class BrowseController extends ChangeNotifier {
             details: () => null,
             detailBusy: true,
             detailFailed: false,
+            acquisition: const BrowseAcquisition(),
+            saveOptions: () => null,
+            locationBusy: false,
           ),
         );
+        _loadSaveOptions(revision);
         unawaited(() async {
           try {
             final details = await catalog?.book(id, cancellation: cancellation);
@@ -157,6 +177,7 @@ class BrowseController extends ChangeNotifier {
           ),
         );
       case BrowseBackRequested():
+        _cancelAdd();
         _detailRevision++;
         _detailCancellation?.cancel();
         _emit(
@@ -167,8 +188,159 @@ class BrowseController extends ChangeNotifier {
           ),
         );
       case BrowseEditionSelected(:final index):
-        if (index >= 0 && index < (_model.details?.editions.length ?? 0)) {
-          _emit(_model.copyWith(edition: index));
+        if (!_model.acquisition.busy &&
+            index >= 0 &&
+            index < (_model.details?.editions.length ?? 0)) {
+          _emit(
+            _model.copyWith(
+              edition: index,
+              acquisition: const BrowseAcquisition(),
+            ),
+          );
+        }
+      case BrowseSaveOptionsRequested():
+        _loadSaveOptions(_detailRevision);
+      case _BrowseSaveOptionsLoaded(:final revision, :final options):
+        if (revision == _detailRevision) {
+          _emit(
+            _model.copyWith(saveOptions: () => options, optionsBusy: false),
+          );
+        }
+      case BrowseSaveLocationSelected(:final id):
+        if (_model.acquisition.busy ||
+            _model.locationBusy ||
+            _acquisition == null) {
+          return;
+        }
+        final revision = _detailRevision;
+        final locationRevision = ++_locationRevision;
+        _emit(_model.copyWith(locationBusy: true));
+        unawaited(() async {
+          try {
+            await _acquisition.selectCatalogSaveLocation(id);
+            dispatch(
+              _BrowseSaveLocationSaved(revision, locationRevision, id, false),
+            );
+          } catch (_) {
+            dispatch(
+              _BrowseSaveLocationSaved(revision, locationRevision, id, true),
+            );
+          }
+        }());
+      case _BrowseSaveLocationSaved(
+        :final revision,
+        :final locationRevision,
+        :final id,
+        :final failed,
+      ):
+        if (revision != _detailRevision ||
+            locationRevision != _locationRevision) {
+          return;
+        }
+        final options = _model.saveOptions;
+        _emit(
+          _model.copyWith(
+            locationBusy: false,
+            saveOptions: () => failed || options == null
+                ? options
+                : (locations: options.locations, selected: id),
+            acquisition: failed
+                ? const BrowseAcquisition(failed: true)
+                : const BrowseAcquisition(),
+          ),
+        );
+      case BrowseAddRequested():
+        final details = _model.details;
+        if (_acquisition == null ||
+            details == null ||
+            details.editions.isEmpty ||
+            _model.saveOptions == null ||
+            _model.acquisition.busy ||
+            _model.locationBusy) {
+          return;
+        }
+        final edition = details.editions[_model.edition];
+        final locationId = _model.saveOptions!.selected;
+        final revision = _detailRevision;
+        final id = _addCancellation = _bridge.createCancellation();
+        _emit(
+          _model.copyWith(acquisition: const BrowseAcquisition(busy: true)),
+        );
+        unawaited(() async {
+          try {
+            final result = await _acquisition.addCatalogBook(
+              bookId: details.book.id,
+              sourceId: edition.sourceId,
+              editionId: edition.editionId,
+              locationId: locationId,
+              cancellationId: id,
+              progress: (received, total) =>
+                  dispatch(_BrowseAddProgress(revision, id, received, total)),
+            );
+            dispatch(_BrowseAdded(revision, id, result));
+          } catch (_) {
+            dispatch(_BrowseAddFailed(revision, id));
+          } finally {
+            _bridge.releaseCancellation(id: id);
+          }
+        }());
+      case _BrowseAddProgress(
+        :final revision,
+        :final id,
+        :final received,
+        :final total,
+      ):
+        if (revision == _detailRevision && id == _addCancellation) {
+          _emit(
+            _model.copyWith(
+              acquisition: BrowseAcquisition(
+                busy: true,
+                cancelling: _model.acquisition.cancelling,
+                received: received,
+                total: total,
+              ),
+            ),
+          );
+        }
+      case BrowseAddCancelled():
+        final id = _addCancellation;
+        if (id != null) {
+          _bridge.cancel(id: id);
+          _emit(
+            _model.copyWith(
+              acquisition: const BrowseAcquisition(
+                busy: true,
+                cancelling: true,
+              ),
+            ),
+          );
+        }
+      case _BrowseAdded(:final revision, :final id, :final result):
+        // A committed save still belongs on the shelf after leaving details.
+        _libraryChanged?.call();
+        if (revision == _detailRevision && id == _addCancellation) {
+          _addCancellation = null;
+          _emit(
+            _model.copyWith(acquisition: BrowseAcquisition(result: result)),
+          );
+          _searchLocal();
+        }
+      case _BrowseAddFailed(:final revision, :final id):
+        if (revision == _detailRevision && id == _addCancellation) {
+          _addCancellation = null;
+          _emit(
+            _model.copyWith(
+              acquisition: BrowseAcquisition(
+                cancelled: _model.acquisition.cancelling,
+                failed: !_model.acquisition.cancelling,
+              ),
+            ),
+          );
+        }
+      case BrowseReadRequested():
+        final result = _model.acquisition.result;
+        if (result != null && !_model.acquisition.busy) {
+          _openBook?.call(result.book);
         }
       case BrowseLinkRequested(:final url):
         final uri = Uri.tryParse(url);
@@ -186,6 +358,25 @@ class BrowseController extends ChangeNotifier {
           _emit(_model.copyWith(linkFailed: true));
         }
     }
+  }
+
+  void _cancelAdd() {
+    final id = _addCancellation;
+    if (id != null) _bridge.cancel(id: id);
+    _addCancellation = null;
+  }
+
+  void _loadSaveOptions(int revision) {
+    if (_acquisition == null) return;
+    _emit(_model.copyWith(optionsBusy: true));
+    unawaited(() async {
+      try {
+        final options = await _acquisition.catalogSaveOptions();
+        dispatch(_BrowseSaveOptionsLoaded(revision, options));
+      } catch (_) {
+        dispatch(_BrowseSaveOptionsLoaded(revision, null));
+      }
+    }());
   }
 
   void _searchLocal() {
@@ -306,6 +497,7 @@ class BrowseController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _cancelAdd();
     _disposed = true;
     _revision++;
     _detailRevision++;
@@ -343,7 +535,15 @@ final class BrowseModel {
     this.detailFailed = false,
     this.edition = 0,
     this.linkFailed = false,
+    this.saveOptions,
+    this.optionsBusy = false,
+    this.locationBusy = false,
+    this.acquisition = const BrowseAcquisition(),
   });
+  final CatalogSaveOptions? saveOptions;
+  final bool optionsBusy;
+  final bool locationBusy;
+  final BrowseAcquisition acquisition;
   final BrowseCriteria criteria;
   final List<CatalogBook> books;
   final List<CatalogAuthor> authors;
@@ -377,6 +577,10 @@ final class BrowseModel {
     bool? detailFailed,
     int? edition,
     bool? linkFailed,
+    CatalogSaveOptions? Function()? saveOptions,
+    bool? optionsBusy,
+    bool? locationBusy,
+    BrowseAcquisition? acquisition,
   }) => BrowseModel(
     criteria: criteria ?? this.criteria,
     books: books == null ? this.books : List.unmodifiable(books),
@@ -396,7 +600,27 @@ final class BrowseModel {
     detailFailed: detailFailed ?? this.detailFailed,
     edition: edition ?? this.edition,
     linkFailed: linkFailed ?? false,
+    saveOptions: saveOptions == null ? this.saveOptions : saveOptions(),
+    optionsBusy: optionsBusy ?? this.optionsBusy,
+    locationBusy: locationBusy ?? this.locationBusy,
+    acquisition: acquisition ?? this.acquisition,
   );
+}
+
+final class BrowseAcquisition {
+  const BrowseAcquisition({
+    this.busy = false,
+    this.cancelling = false,
+    this.received = 0,
+    this.total,
+    this.result,
+    this.failed = false,
+    this.cancelled = false,
+  });
+  final bool busy, cancelling, failed, cancelled;
+  final int received;
+  final int? total;
+  final CatalogAddedBook? result;
 }
 
 sealed class BrowseMessage {
@@ -483,4 +707,63 @@ final class _BrowseBookLoaded extends BrowseMessage {
 final class _BrowseLinkFailed extends BrowseMessage {
   const _BrowseLinkFailed(this.revision);
   final int revision;
+}
+
+final class BrowseSaveOptionsRequested extends BrowseMessage {
+  const BrowseSaveOptionsRequested();
+}
+
+final class BrowseSaveLocationSelected extends BrowseMessage {
+  const BrowseSaveLocationSelected(this.id);
+  final String? id;
+}
+
+final class BrowseAddRequested extends BrowseMessage {
+  const BrowseAddRequested();
+}
+
+final class BrowseAddCancelled extends BrowseMessage {
+  const BrowseAddCancelled();
+}
+
+final class BrowseReadRequested extends BrowseMessage {
+  const BrowseReadRequested();
+}
+
+final class _BrowseSaveOptionsLoaded extends BrowseMessage {
+  const _BrowseSaveOptionsLoaded(this.revision, this.options);
+  final int revision;
+  final CatalogSaveOptions? options;
+}
+
+final class _BrowseSaveLocationSaved extends BrowseMessage {
+  const _BrowseSaveLocationSaved(
+    this.revision,
+    this.locationRevision,
+    this.id,
+    this.failed,
+  );
+  final int revision, locationRevision;
+  final String? id;
+  final bool failed;
+}
+
+final class _BrowseAddProgress extends BrowseMessage {
+  const _BrowseAddProgress(this.revision, this.id, this.received, this.total);
+  final int revision, received;
+  final BigInt id;
+  final int? total;
+}
+
+final class _BrowseAdded extends BrowseMessage {
+  const _BrowseAdded(this.revision, this.id, this.result);
+  final int revision;
+  final BigInt id;
+  final CatalogAddedBook result;
+}
+
+final class _BrowseAddFailed extends BrowseMessage {
+  const _BrowseAddFailed(this.revision, this.id);
+  final int revision;
+  final BigInt id;
 }
