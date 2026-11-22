@@ -12,8 +12,11 @@ Flutter widgets, so its behaviour is tested with `dart test`.
 From this package, run `dart run tool/export_catalog_json.dart INPUT.sqlite
 NEW_DIRECTORY` on a catalog database, such as the Gutenberg importer's output.
 Use a new directory in a private staging location; the exporter does not deploy
-anything. Commit the resulting snapshot as Hugo static assets, not app bundle
-assets in [chaba-dev/shosai-website](https://github.com/chaba-dev/shosai-website). The [weekly refresh workflow](https://github.com/chaba-dev/shosai-website#scheduled-refresh-prs)
+anything. Commit the resulting snapshot as Hugo static assets in the
+[maintainer-only website repository](https://github.com/chaba-dev/shosai-website),
+not as app bundle assets. Readers can fetch the published
+[catalog revision index](https://www.readshosai.com/catalog/revisions.json).
+The [maintainer-only weekly refresh workflow documentation](https://github.com/chaba-dev/shosai-website#scheduled-refresh-prs)
 uses `dart run tool/import_gutenberg.dart DOWNLOADED_CSV_OR_CSV_GZ NEW.sqlite`
 before exporting. The importer requires `gzip` from the Nix shell for compressed
 input and never fetches pages or book files.
