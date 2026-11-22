@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reduced format metadata for importer tests. Deliberately asymmetric:
+     three EPUBs, EPUB3 only, EPUB2 without images only, and HTML only.
+     Namespace prefixes differ from Gutenberg's to exercise URI resolution. -->
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:p="http://www.gutenberg.org/2009/pgterms/"
+         xmlns:d="http://purl.org/dc/terms/">
+  <p:ebook rdf:about="ebooks/417">
+    <d:rights>Public domain in the USA.</d:rights>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/417.epub.noimages">
+        <d:extent>41234</d:extent>
+        <d:format><rdf:Description><rdf:value>application/epub+zip</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/417.epub3.images">
+        <d:extent>875432</d:extent>
+        <d:format><rdf:Description><rdf:value>application/epub+zip</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/417.epub.images">
+        <d:extent>887654</d:extent>
+        <d:format><rdf:Description><rdf:value>application/epub+zip</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/417.html.images">
+        <d:format><rdf:Description><rdf:value>text/html</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+  </p:ebook>
+  <p:ebook rdf:about="ebooks/1342">
+    <d:rights>Public domain in the USA.</d:rights>
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/1342.epub3.images">
+        <d:extent>24836548</d:extent>
+        <d:format><rdf:Description><rdf:value>application/epub+zip</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+  </p:ebook>
+  <p:ebook rdf:about="ebooks/42671">
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/42671.epub.noimages">
+        <d:format><rdf:Description><rdf:value>application/epub+zip</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+  </p:ebook>
+  <p:ebook rdf:about="ebooks/99">
+    <d:hasFormat>
+      <p:file rdf:about="https://www.gutenberg.org/ebooks/99.epub3.images">
+        <d:format><rdf:Description><rdf:value>text/html</rdf:value></rdf:Description></d:format>
+      </p:file>
+    </d:hasFormat>
+  </p:ebook>
+</rdf:RDF>

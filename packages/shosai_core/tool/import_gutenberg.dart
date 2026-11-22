@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:shosai_core/catalog.dart';
 import 'package:sqlite3/sqlite3.dart';
+import 'package:xml/xml.dart';
+import 'package:xml/xml_events.dart';
 
 const _base = 'https://www.gutenberg.org';
 const _source = 'gutenberg';
@@ -17,21 +19,28 @@ const _columns = [
 ];
 
 Future<void> main(List<String> args) async {
-  if (args.length != 2) {
+  if (args.length != 3) {
     stderr.writeln(
       'Usage: dart run tool/import_gutenberg.dart '
-      '<pg_catalog.csv[.gz]> <new-catalog.sqlite>',
+      '<pg_catalog.csv[.gz]> <rdf-files.tar.bz2|catalog.rdf> <new-catalog.sqlite>',
     );
-    stderr.writeln('Input: $_base/cache/epub/feeds/pg_catalog.csv.gz');
-    stderr.writeln('Compressed input requires gzip on PATH.');
+    stderr.writeln('Inputs: $_base/cache/epub/feeds/');
+    stderr.writeln(
+      'Compressed inputs require gzip, GNU tar and bzip2 on PATH.',
+    );
     exitCode = 64;
     return;
   }
   try {
-    final result = await importGutenbergFile(File(args[0]), File(args[1]));
+    final result = await importGutenbergFile(
+      File(args[0]),
+      File(args[2]),
+      rdf: File(args[1]),
+    );
     stdout.writeln(
       'Imported ${result.works} works and ${result.editions} '
-      'candidate EPUB editions; skipped ${result.skipped} non-text records.',
+      'RDF-listed EPUB editions; skipped ${result.skipped} non-text records '
+      'or records without a listed EPUB.',
     );
   } on Exception catch (error) {
     stderr.writeln('Gutenberg import failed: $error');
@@ -39,13 +48,15 @@ Future<void> main(List<String> args) async {
   }
 }
 
-/// Imports a downloaded official CSV (optionally gzipped) into a new snapshot.
+/// Joins the official CSV's search metadata with RDF-listed EPUB downloads.
+/// [rdf] is the downloaded bulk tar.bz2 or an XML/RDF file, never a live URL.
 /// Use an output directory owned by the caller, with no concurrent writer at
 /// the same path. Do not publish the snapshot until this function returns.
 Future<({int works, int editions, int skipped})> importGutenbergFile(
   File input,
-  File output,
-) async {
+  File output, {
+  required File rdf,
+}) async {
   // Exclusive creation also refuses an existing catalog or the input itself.
   await output.create(exclusive: true);
   try {
@@ -63,6 +74,7 @@ Future<({int works, int editions, int skipped})> importGutenbergFile(
     final db = sqlite3.open(output.path);
     try {
       db.execute(catalogSchema);
+      await _importRdf(db, rdf);
       final bytes = input.path.endsWith('.gz')
           ? _readGzip(input)
           : input.openRead();
@@ -73,6 +85,168 @@ Future<({int works, int editions, int skipped})> importGutenbergFile(
   } on Object {
     await output.delete();
     rethrow;
+  }
+}
+
+const _rdfNamespace = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const _pgNamespace = 'http://www.gutenberg.org/2009/pgterms/';
+const _dcNamespace = 'http://purl.org/dc/terms/';
+
+Future<void> _importRdf(Database db, File input) async {
+  db.execute('''
+    CREATE TEMP TABLE listed_epubs (
+      ebook_id TEXT NOT NULL,
+      variant TEXT NOT NULL,
+      label TEXT NOT NULL,
+      preference INTEGER NOT NULL,
+      url TEXT NOT NULL,
+      size_bytes INTEGER,
+      rights_line TEXT NOT NULL,
+      PRIMARY KEY (ebook_id, variant)
+    ) STRICT;
+  ''');
+  final insert = db.prepare(
+    'INSERT INTO listed_epubs VALUES (?, ?, ?, ?, ?, ?, ?)',
+  );
+  db.execute('BEGIN');
+  try {
+    final bytes = input.path.endsWith('.tar.bz2')
+        ? _readRdfArchive(input)
+        : input.openRead();
+    // The archive concatenates independent RDF documents. Validate nesting and
+    // namespaces throughout, retaining only one ebook subtree at a time.
+    final nodes = bytes
+        .transform(utf8.decoder)
+        .toXmlEvents(
+          validateNesting: true,
+          validateNamespace: true,
+          withNamespace: true,
+        )
+        .selectSubtreeEvents(
+          (event) =>
+              event.localName == 'ebook' && event.namespaceUri == _pgNamespace,
+        )
+        .toXmlNodes();
+    await for (final batch in nodes) {
+      for (final ebook in batch.whereType<XmlElement>()) {
+        final about = ebook.getAttribute('about', namespaceUri: _rdfNamespace);
+        final match = RegExp(r'^ebooks/([1-9][0-9]*)$').firstMatch(about ?? '');
+        if (match == null) {
+          throw FormatException('Invalid RDF ebook ID: $about');
+        }
+        final id = match[1]!;
+        final rights = ebook
+            .getElement('rights', namespaceUri: _dcNamespace)
+            ?.innerText
+            .trim();
+        for (final format in ebook.findElements(
+          'hasFormat',
+          namespaceUri: _dcNamespace,
+        )) {
+          final file = format.getElement('file', namespaceUri: _pgNamespace);
+          if (file == null) continue;
+          final epub = file
+              .findElements('format', namespaceUri: _dcNamespace)
+              .any(
+                (format) => format.descendants.whereType<XmlElement>().any(
+                  (value) =>
+                      value.name.local == 'value' &&
+                      value.namespaceUri == _rdfNamespace &&
+                      value.innerText.trim() == 'application/epub+zip',
+                ),
+              );
+          if (!epub) continue;
+          final url = Uri.tryParse(
+            file.getAttribute('about', namespaceUri: _rdfNamespace) ?? '',
+          );
+          if (url == null ||
+              url.scheme != 'https' ||
+              url.host != 'www.gutenberg.org' ||
+              url.userInfo.isNotEmpty ||
+              url.hasPort ||
+              url.hasQuery ||
+              url.hasFragment ||
+              url.pathSegments.isEmpty) {
+            throw FormatException('Invalid RDF EPUB URL: $url');
+          }
+          final (variant, label, preference) = switch (url.path) {
+            final path when path == '/ebooks/$id.epub3.images' => (
+              'images',
+              'EPUB3 with images',
+              0,
+            ),
+            final path when path == '/ebooks/$id.epub.images' => (
+              'epub2-images',
+              'EPUB2 with images',
+              1,
+            ),
+            final path when path == '/ebooks/$id.epub.noimages' => (
+              'noimages',
+              'EPUB2 without images',
+              2,
+            ),
+            _ => (url.toString(), 'EPUB · ${url.pathSegments.last}', 3),
+          };
+          final extent = file
+              .getElement('extent', namespaceUri: _dcNamespace)
+              ?.innerText
+              .trim();
+          final size = extent == null ? null : int.tryParse(extent);
+          if (extent != null && (size == null || size <= 0)) {
+            throw FormatException('Invalid RDF EPUB size: $extent');
+          }
+          insert.execute([
+            id,
+            variant,
+            label,
+            preference,
+            url.toString(),
+            size,
+            rights == null || rights.isEmpty
+                ? 'Rights not listed in the offline catalog. Check Project Gutenberg.'
+                : rights,
+          ]);
+        }
+      }
+    }
+    if (db.select('SELECT 1 FROM listed_epubs LIMIT 1').isEmpty) {
+      throw const FormatException('No EPUB files listed in Gutenberg RDF');
+    }
+    db.execute('COMMIT');
+  } on Object {
+    db.execute('ROLLBACK');
+    rethrow;
+  } finally {
+    insert.close();
+  }
+}
+
+Stream<List<int>> _readRdfArchive(File input) async* {
+  // Stream entries to stdout: no archive-controlled paths are written to disk.
+  final process = await Process.start('tar', [
+    '--extract',
+    '--to-stdout',
+    '--bzip2',
+    '--file',
+    input.absolute.path,
+    '--wildcards',
+    '*.rdf',
+  ]);
+  final errors = process.stderr
+      .transform(const Utf8Decoder(allowMalformed: true))
+      .join();
+  final done = process.exitCode;
+  try {
+    yield* process.stdout;
+    if (await done != 0) {
+      throw FormatException(
+        'Invalid Gutenberg RDF archive: ${(await errors).trim()}',
+      );
+    }
+  } finally {
+    process.kill();
+    await done;
+    await errors;
   }
 }
 
@@ -180,6 +354,7 @@ Future<({int works, int editions, int skipped})> _importRows(
     var width = 0;
     var record = 0;
     var works = 0;
+    var editions = 0;
     var skipped = 0;
     await for (final row in rows) {
       record++;
@@ -206,6 +381,18 @@ Future<({int works, int editions, int skipped})> _importRows(
         throw FormatException(
           'Invalid ebook ID, title, or language in CSV record $record',
         );
+      }
+      final listed = statements
+          .putIfAbsent(
+            'listed',
+            () => db.prepare(
+              'SELECT * FROM listed_epubs WHERE ebook_id = ? ORDER BY preference, url',
+            ),
+          )
+          .select([id]);
+      if (listed.isEmpty) {
+        skipped++;
+        continue;
       }
       final work = '$_source:$id';
       write('INSERT INTO books (id, title) VALUES (?, ?)', [work, title]);
@@ -253,42 +440,40 @@ Future<({int works, int editions, int skipped})> _importRows(
         write('INSERT INTO book_categories VALUES (?, ?)', [work, categoryId]);
       }
       final sourceUrl = '$_base/ebooks/$id';
-      for (final (order, variant, label, suffix) in const [
-        (0, 'images', 'With images', 'epub3.images'),
-        (1, 'noimages', 'Without images', 'epub.noimages'),
-      ]) {
-        // The CSV cannot confirm rights, format availability, or file size.
+      for (final (order, edition) in listed.indexed) {
         write(
           '''
           INSERT INTO editions (
             source_id, source_edition_id, book_id, title, variant_label,
             display_order, language, source_url, rights_line, acquisition_url,
-            acquisition_format, cover_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            acquisition_format, size_bytes, cover_url
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
           [
             _source,
-            '$id:$variant',
+            '$id:${edition['variant']}',
             work,
             title,
-            label,
+            edition['label'],
             order,
             language,
             sourceUrl,
-            'Rights not listed in the offline catalog. Check Project Gutenberg.',
-            '$sourceUrl.$suffix',
+            edition['rights_line'],
+            edition['url'],
             'epub',
+            edition['size_bytes'],
             '$_base/cache/epub/$id/pg$id.cover.medium.jpg',
           ],
         );
+        editions++;
       }
       works++;
     }
     if (works == 0) {
-      throw const FormatException('No text records in Gutenberg CSV');
+      throw const FormatException('No text records with RDF-listed EPUBs');
     }
     db.execute('COMMIT');
-    return (works: works, editions: works * 2, skipped: skipped);
+    return (works: works, editions: editions, skipped: skipped);
   } on Object {
     db.execute('ROLLBACK');
     rethrow;

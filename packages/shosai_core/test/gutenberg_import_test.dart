@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
+import 'package:xml/xml.dart';
 
 import '../tool/export_catalog_json.dart';
 import '../tool/import_gutenberg.dart';
@@ -11,6 +12,7 @@ import 'support/temp_store.dart';
 // offline CSV (mirror.cs.odu.edu/gutenberg-epub/feeds/pg_catalog.csv.gz,
 // retrieved 2026-11-19), with line endings normalized to LF.
 final _excerpt = File('test/fixtures/pg_catalog_excerpt.csv');
+final _rdf = File('test/fixtures/pg_catalog_excerpt.rdf');
 
 void main() {
   test('reordered feed records export byte-identical catalog files', () async {
@@ -34,7 +36,26 @@ void main() {
           '$header${(index == 0 ? rows : rows.reversed).join('\n')}\n',
         );
       final db = File('${dir.path}/$index.sqlite');
-      await importGutenbergFile(input, db);
+      final document = XmlDocument.parse(_rdf.readAsStringSync());
+      if (index == 1) {
+        final children = document.rootElement.children.reversed
+            .map((node) => node.copy())
+            .toList();
+        document.rootElement.children
+          ..clear()
+          ..addAll(children);
+        for (final ebook in document.rootElement.childElements) {
+          final formats = ebook.children.reversed
+              .map((node) => node.copy())
+              .toList();
+          ebook.children
+            ..clear()
+            ..addAll(formats);
+        }
+      }
+      final rdf = File('${dir.path}/$index.rdf')
+        ..writeAsStringSync(document.toXmlString());
+      await importGutenbergFile(input, db, rdf: rdf);
       exportCatalogJson(
         db.path,
         '${dir.path}/export$index',
@@ -45,15 +66,15 @@ void main() {
   });
 
   test(
-    'imports an upstream CSV excerpt without guessing work identity or rights',
+    'imports search metadata and only RDF-listed EPUBs with their sizes and rights',
     () async {
       final dir = tempDataDirectory();
       final input = File('${dir.path}/pg_catalog.csv.gz')
         ..writeAsBytesSync(gzip.encode(_excerpt.readAsBytesSync()));
       final output = File('${dir.path}/catalog.sqlite');
-      expect(await importGutenbergFile(input, output), (
+      expect(await importGutenbergFile(input, output, rdf: _rdf), (
         works: 3,
-        editions: 6,
+        editions: 5,
         skipped: 1,
       ));
       final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
@@ -101,21 +122,39 @@ void main() {
       FROM editions WHERE book_id = 'gutenberg:417' ORDER BY display_order
     ''');
       expect(editions.map((row) => row['variant_label']), [
-        'With images',
-        'Without images',
+        'EPUB3 with images',
+        'EPUB2 with images',
+        'EPUB2 without images',
       ]);
       expect(editions.map((row) => row['acquisition_url']), [
         'https://www.gutenberg.org/ebooks/417.epub3.images',
+        'https://www.gutenberg.org/ebooks/417.epub.images',
         'https://www.gutenberg.org/ebooks/417.epub.noimages',
       ]);
+      expect(editions.map((row) => row['size_bytes']), [875432, 887654, 41234]);
       for (final row in editions) {
         expect(row['language'], 'de; en');
-        expect(row['size_bytes'], isNull);
-        expect(
-          row['rights_line'],
-          'Rights not listed in the offline catalog. Check Project Gutenberg.',
-        );
+        expect(row['rights_line'], 'Public domain in the USA.');
       }
+      for (final (id, variant, size) in [
+        ('1342', 'EPUB3 with images', 24836548),
+        ('42671', 'EPUB2 without images', null),
+      ]) {
+        final row = db.select('SELECT * FROM editions WHERE book_id = ?', [
+          'gutenberg:$id',
+        ]).single;
+        expect(row['variant_label'], variant);
+        expect(row['size_bytes'], size);
+        expect(row['display_order'], 0);
+      }
+      expect(
+        db
+            .select(
+              "SELECT rights_line FROM editions WHERE book_id = 'gutenberg:42671'",
+            )
+            .single['rights_line'],
+        'Rights not listed in the offline catalog. Check Project Gutenberg.',
+      );
     },
   );
 
@@ -127,14 +166,14 @@ void main() {
         ..writeAsStringSync('${_excerpt.readAsStringSync()}1,Text,invalid\n');
       final output = File('${dir.path}/catalog.sqlite');
       await expectLater(
-        importGutenbergFile(input, output),
+        importGutenbergFile(input, output, rdf: _rdf),
         throwsFormatException,
       );
       expect(output.existsSync(), isFalse);
 
       output.writeAsStringSync('existing output');
       await expectLater(
-        importGutenbergFile(_excerpt, output),
+        importGutenbergFile(_excerpt, output, rdf: _rdf),
         throwsA(isA<FileSystemException>()),
       );
       expect(output.readAsStringSync(), 'existing output');
@@ -150,7 +189,7 @@ void main() {
         ..writeAsBytesSync(compressed.sublist(0, compressed.length - 8));
       final output = File('${dir.path}/catalog.sqlite');
       await expectLater(
-        importGutenbergFile(input, output),
+        importGutenbergFile(input, output, rdf: _rdf),
         throwsFormatException,
       );
       expect(output.existsSync(), isFalse);
@@ -167,7 +206,7 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
 ''');
     final output = File('${dir.path}/catalog.sqlite');
     await expectLater(
-      importGutenbergFile(input, output),
+      importGutenbergFile(input, output, rdf: _rdf),
       throwsFormatException,
     );
     expect(output.existsSync(), isFalse);
@@ -187,7 +226,14 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
         '$beforePadding$padding$beforeQuote"""The Raven""",en,,,,\r\n',
       );
     final output = File('${dir.path}/catalog.sqlite');
-    await importGutenbergFile(input, output);
+    final rdf = File('${dir.path}/quoted.rdf')
+      ..writeAsStringSync(
+        _rdf
+            .readAsStringSync()
+            .replaceAll('1342', '1')
+            .replaceAll('42671', '2'),
+      );
+    await importGutenbergFile(input, output, rdf: rdf);
     final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
     addTearDown(db.close);
     expect(
@@ -204,10 +250,100 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
     final journal = File('${output.path}-journal')
       ..writeAsStringSync('unrelated');
     await expectLater(
-      importGutenbergFile(_excerpt, output),
+      importGutenbergFile(_excerpt, output, rdf: _rdf),
       throwsA(isA<FileSystemException>()),
     );
     expect(output.existsSync(), isFalse);
     expect(journal.readAsStringSync(), 'unrelated');
   });
+
+  test('does not invent EPUBs for missing RDF or a non-EPUB MIME type', () async {
+    final dir = tempDataDirectory();
+    final input = File('${dir.path}/catalog.csv')
+      ..writeAsStringSync(
+        '${_excerpt.readAsStringSync()}99,Text,,HTML only,en,,,,\n100,Text,,Missing RDF,en,,,,\n',
+      );
+    final output = File('${dir.path}/catalog.sqlite');
+    expect(await importGutenbergFile(input, output, rdf: _rdf), (
+      works: 3,
+      editions: 5,
+      skipped: 3,
+    ));
+    final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+    addTearDown(db.close);
+    expect(
+      db.select(
+        "SELECT id FROM books WHERE id IN ('gutenberg:99', 'gutenberg:100')",
+      ),
+      isEmpty,
+    );
+  });
+
+  test(
+    'streams independent RDF documents from an archive without extracting files',
+    () async {
+      final dir = tempDataDirectory();
+      final rdf = File('${dir.path}/one.rdf')
+        ..writeAsStringSync(_rdf.readAsStringSync());
+      final extra = File('${dir.path}/two.rdf')
+        ..writeAsStringSync('''
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+''');
+      final archive = File('${dir.path}/rdf-files.tar.bz2');
+      final tar = await Process.run('tar', [
+        '-cjf',
+        archive.path,
+        '-C',
+        dir.path,
+        'two.rdf',
+        'one.rdf',
+      ]);
+      expect(tar.exitCode, 0, reason: '${tar.stderr}');
+      rdf.deleteSync();
+      extra.deleteSync();
+      final output = File('${dir.path}/catalog.sqlite');
+      expect(await importGutenbergFile(_excerpt, output, rdf: archive), (
+        works: 3,
+        editions: 5,
+        skipped: 1,
+      ));
+      expect(rdf.existsSync(), isFalse);
+      expect(extra.existsSync(), isFalse);
+
+      // Complete XML is not sufficient when the compressed archive is truncated.
+      final bytes = archive.readAsBytesSync();
+      archive.writeAsBytesSync(bytes.sublist(0, bytes.length - 8));
+      final broken = File('${dir.path}/broken.sqlite');
+      await expectLater(
+        importGutenbergFile(_excerpt, broken, rdf: archive),
+        throwsFormatException,
+      );
+      expect(broken.existsSync(), isFalse);
+    },
+  );
+
+  test(
+    'rejects malformed RDF, invalid sizes and unsafe EPUB URLs without output',
+    () async {
+      final dir = tempDataDirectory();
+      for (final text in [
+        _rdf.readAsStringSync().replaceFirst('</rdf:RDF>', ''),
+        _rdf.readAsStringSync().replaceFirst('<d:extent>41234', '<d:extent>0'),
+        _rdf.readAsStringSync().replaceFirst(
+          'https://www.gutenberg.org/ebooks/417.epub.noimages',
+          'https://untrusted.example/417.epub',
+        ),
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>',
+      ]) {
+        final input = File('${dir.path}/bad.rdf')..writeAsStringSync(text);
+        final output = File('${dir.path}/catalog.sqlite');
+        await expectLater(
+          importGutenbergFile(_excerpt, output, rdf: input),
+          throwsA(isA<Exception>()),
+        );
+        expect(output.existsSync(), isFalse);
+      }
+    },
+  );
 }
