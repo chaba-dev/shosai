@@ -51,8 +51,8 @@ flutter:
   # AppLocalizations sources are written into lib/l10n and committed.
   generate: true
   fonts:
-    # The faces' source of truth is the repository's `assets/fonts/` (used by
-    # the website and the packaging licenses); the `fonts/`
+    # The app faces' source of truth is this repository's `assets/fonts/`, also
+    # used by the packaging licenses. The website owns a separate copy. The `fonts/`
     # symlinks keep those files *inside* this project so the bundler places
     # them in `flutter_assets/fonts/`. A path that escapes the project
     # (`../assets/fonts/...`) is recorded in the manifests but never copied

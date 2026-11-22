@@ -393,7 +393,7 @@ The mark is 丸に書 (decided 2026-10-21): the character 書, set in Noto Serif
 | `shosai-mark.svg` | The mark alone, outlined, in `currentColor` on a 100-unit box: ring radius 45 at a stroke of 5.5, the character 54 units tall. Use this everywhere the mark is drawn, at any size. |
 | `shosai-icon.svg`, `assets/shosai-icon.png` | The app icon: the mark in `brand-navy` on a full-bleed `brand-cream` square, at 72% of the side. Platforms mask it themselves (iOS, Android). |
 | `shosai-icon-macos.svg` | The macOS icon: the same on a rounded square with the system corner radius and transparent margins. |
-| `website/static/favicon.svg` | The favicon: the mark on a cream rounded square. |
+| [Website favicon](https://www.readshosai.com/favicon.svg) | The mark on a cream rounded square. |
 
 On iOS and macOS, Dev uses the supplied dark artwork in `assets/shosai-dev-icon.png`
 (`AppIconDev`) even in Release mode; production uses the light `AppIcon`.

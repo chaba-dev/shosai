@@ -111,7 +111,6 @@
           androidSdk
           git-cliff
           jujutsu
-          hugo
 
           # LSP
           nodePackages.yaml-language-server
