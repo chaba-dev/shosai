@@ -528,24 +528,34 @@ class _CatalogBookPage extends StatelessWidget {
     final palette = ShellPalette.of(context);
     final details = model.details;
     final phone = layout == ShellLayout.phone;
-    Widget editionLabel(CatalogEdition edition) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '${edition.sourceName} · ${edition.variant}',
-          style: shellInterfaceStyle(14, 20),
-        ),
-        Text(
-          [
-            edition.format.toUpperCase(),
-            edition.language,
-            if (edition.sizeBytes != null)
-              l10n.catalogBytes(edition.sizeBytes!),
-          ].join(' · '),
-          style: shellInterfaceStyle(13, 20).copyWith(color: palette.inkMuted),
-        ),
-      ],
-    );
+    final theme = ShadTheme.of(context);
+    Widget editionLabel(CatalogEdition edition, {bool selected = false}) =>
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${edition.sourceName} · ${edition.variant}',
+              style: shellInterfaceStyle(14, 20).copyWith(
+                color: selected
+                    ? theme.colorScheme.accentForeground
+                    : palette.ink,
+              ),
+            ),
+            Text(
+              [
+                edition.format.toUpperCase(),
+                edition.language,
+                if (edition.sizeBytes != null)
+                  l10n.catalogBytes(edition.sizeBytes!),
+              ].join(' · '),
+              style: shellInterfaceStyle(13, 20).copyWith(
+                color: selected
+                    ? theme.colorScheme.accentForeground
+                    : palette.inkMuted,
+              ),
+            ),
+          ],
+        );
     final metadata = details == null
         ? const SizedBox.shrink()
         : Column(
@@ -580,47 +590,100 @@ class _CatalogBookPage extends StatelessWidget {
                   alignment: AlignmentDirectional.centerStart,
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 560),
-                    child: PopupMenuButton<int>(
-                      key: const ValueKey('catalog-edition-picker'),
-                      tooltip: l10n.catalogChooseEdition,
-                      enabled: !model.acquisition.busy,
-                      initialValue: model.edition,
-                      position: PopupMenuPosition.under,
-                      constraints: const BoxConstraints(maxWidth: 560),
-                      onSelected: (value) =>
-                          dispatch(BrowseEditionSelected(value)),
-                      itemBuilder: (_) => [
-                        for (final (index, edition) in details.editions.indexed)
-                          CheckedPopupMenuItem(
-                            value: index,
-                            checked: index == model.edition,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: ShosaiTokens.space2,
-                              ),
-                              child: editionLabel(edition),
-                            ),
-                          ),
-                      ],
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: palette.surface,
-                          border: Border.all(color: palette.lineStrong),
-                          borderRadius: BorderRadius.circular(
-                            ShosaiTokens.radiusMd,
-                          ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(ShosaiTokens.space3),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: editionLabel(
-                                  details.editions[model.edition],
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => ShadTheme(
+                        data: theme.copyWith(
+                          popoverTheme: theme.popoverTheme.copyWith(
+                            decoration: ShadDecoration(
+                              color: palette.surface,
+                              border: ShadBorder.all(
+                                width: 0,
+                                radius: BorderRadius.circular(
+                                  ShosaiTokens.radiusMd,
                                 ),
                               ),
-                              const SizedBox(width: ShosaiTokens.space2),
-                              const Icon(LucideIcons.chevronDown, size: 18),
+                              disableSecondaryBorder: true,
+                            ),
+                          ),
+                          optionTheme: theme.optionTheme.copyWith(
+                            hoveredBackgroundColor: theme.colorScheme.accent,
+                          ),
+                        ),
+                        child: Semantics(
+                          button: true,
+                          enabled: !model.acquisition.busy,
+                          label: l10n.catalogChooseEdition,
+                          child: ShadSelect<int>(
+                            key: const ValueKey('catalog-edition-picker'),
+                            enabled: !model.acquisition.busy,
+                            initialValue: model.edition,
+                            minWidth: constraints.maxWidth,
+                            maxWidth: constraints.maxWidth,
+                            shadows: palette.modal,
+                            padding: const EdgeInsets.all(ShosaiTokens.space3),
+                            decoration: ShadDecoration(
+                              color: palette.surface,
+                              border: ShadBorder.all(
+                                color: palette.lineStrong,
+                                width: 1,
+                                radius: BorderRadius.circular(
+                                  ShosaiTokens.radiusSm,
+                                ),
+                              ),
+                              secondaryFocusedBorder: ShadBorder.all(
+                                color: palette.accent,
+                                width: 2,
+                                offset: 4,
+                                radius: BorderRadius.circular(
+                                  ShosaiTokens.radiusSm + 4,
+                                ),
+                              ),
+                            ),
+                            trailing: Padding(
+                              padding: const EdgeInsetsDirectional.only(
+                                start: ShosaiTokens.space2,
+                              ),
+                              child: Icon(
+                                LucideIcons.chevronDown,
+                                size: 18,
+                                color: palette.inkMuted,
+                              ),
+                            ),
+                            selectedOptionBuilder: (_, index) =>
+                                editionLabel(details.editions[index]),
+                            onChanged: (value) {
+                              if (value != null) {
+                                dispatch(BrowseEditionSelected(value));
+                              }
+                            },
+                            options: [
+                              for (final (index, edition)
+                                  in details.editions.indexed)
+                                ShadOption(
+                                  value: index,
+                                  selectedBackgroundColor:
+                                      theme.colorScheme.accent,
+                                  padding: const EdgeInsets.all(
+                                    ShosaiTokens.space3,
+                                  ),
+                                  selectedIcon: Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                      start: ShosaiTokens.space2,
+                                    ),
+                                    child: Icon(
+                                      LucideIcons.check,
+                                      size: 18,
+                                      color: theme.colorScheme.accentForeground,
+                                    ),
+                                  ),
+                                  child: Semantics(
+                                    selected: index == model.edition,
+                                    child: editionLabel(
+                                      edition,
+                                      selected: index == model.edition,
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),

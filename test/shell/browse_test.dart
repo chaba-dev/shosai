@@ -5,6 +5,7 @@ import 'dart:ui' show Tristate;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/core/bridge.dart';
 import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/library/view.dart';
@@ -99,6 +100,22 @@ void main() {
         );
         await tester.tap(find.text('Add to library'));
         await until(tester, () => controller.model.acquisition.busy);
+        final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+        await tester.ensureVisible(picker);
+        await tester.pumpAndSettle();
+        expect(tester.getSemantics(picker).flagsCollection.isButton, true);
+        expect(
+          tester.getSemantics(picker).flagsCollection.isEnabled,
+          Tristate.isFalse,
+        );
+        await tester.tap(picker);
+        await tester.pumpAndSettle();
+        expect(find.byType(ShadOption<int>), findsNothing);
+        expect(controller.model.edition, 0);
+        await capture(
+          tester,
+          'catalog-acquire-${dark ? 'dark' : 'light'}-edition-disabled',
+        );
         await tester.ensureVisible(find.text('Cancel'));
         await tester.pump();
         await capture(
@@ -264,7 +281,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(
         find.widgetWithText(
-          CheckedPopupMenuItem<int>,
+          ShadOption<int>,
           'Project Gutenberg · Without images',
         ),
       );
@@ -479,7 +496,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(
         find.widgetWithText(
-          CheckedPopupMenuItem<int>,
+          ShadOption<int>,
           'Project Gutenberg · Without images',
         ),
       );
@@ -772,9 +789,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         await capture(tester, 'catalog-phone-$count-edition-menu');
-        await tester.tap(
-          find.widgetWithText(CheckedPopupMenuItem<int>, lastLabel),
-        );
+        await tester.tap(find.widgetWithText(ShadOption<int>, lastLabel));
         await tester.pumpAndSettle();
         expect(controller.model.edition, count - 1);
         expect(find.text(lastLabel), findsOneWidget);
@@ -870,17 +885,33 @@ void main() {
       final picker = find.byKey(const ValueKey('catalog-edition-picker'));
       await tester.ensureVisible(picker);
       await tester.pumpAndSettle();
-      await tester.tap(picker);
+      if (name == 'desktop') {
+        for (var i = 0; i < 30; i++) {
+          if (tester.getSemantics(picker).flagsCollection.isFocused ==
+              Tristate.isTrue) {
+            break;
+          }
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pumpAndSettle();
+        }
+        expect(
+          tester.getSemantics(picker).flagsCollection.isFocused,
+          Tristate.isTrue,
+        );
+        await capture(tester, 'catalog-$name-edition-focus');
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      } else {
+        await tester.tap(picker);
+      }
       await tester.pumpAndSettle();
       await capture(tester, 'catalog-$name-edition-menu');
       if (name == 'desktop') {
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       } else {
         await tester.tap(
           find.widgetWithText(
-            CheckedPopupMenuItem<int>,
+            ShadOption<int>,
             'Project Gutenberg · Without images',
           ),
         );
