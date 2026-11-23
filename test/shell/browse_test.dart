@@ -50,6 +50,137 @@ void main() {
     expect(tester.takeException(), isNull);
   }
 
+  testWidgets('long published category labels fit and remain actionable', (
+    tester,
+  ) async {
+    const label = 'Research Methods/Statistics/Information Sys';
+    for (final width in [360.0, 1280.0]) {
+      for (final scale in [1.0, 2.0]) {
+        HarnessView(size: Size(width, 900), textScale: scale).apply(tester);
+        BrowseMessage? intent;
+        await tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: ShellBrowsePage(
+                layout: ShellLayout.forWidth(width),
+                model: const BrowseModel(
+                  categories: [
+                    (id: 'research', label: label, books: 1),
+                    (id: 'poetry', label: 'Poetry', books: 1234),
+                    (id: 'science', label: 'Science fiction', books: 19),
+                    (id: 'history', label: 'History', books: 8),
+                  ],
+                ),
+                local: const ShellSearchModel(),
+                dispatch: (message) => intent = message,
+                onChosen: (_) {},
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(ChoiceChip), findsNothing);
+        final first = tester.getRect(
+          find.byKey(const ValueKey('catalog-category-research')),
+        );
+        final second = tester.getRect(
+          find.byKey(const ValueKey('catalog-category-poetry')),
+        );
+        if (scale == 1 || width == 1280) {
+          expect(first.top, second.top);
+          expect(first.right, lessThan(second.left));
+        } else {
+          expect(first.left, second.left);
+          expect(first.bottom, lessThan(second.top));
+        }
+        expect(find.text('1,234 books'), findsOneWidget);
+        await tester.ensureVisible(find.text(label));
+        await capture(tester, 'catalog-long-category-$width-$scale');
+        await tester.tap(find.text(label));
+        expect((intent as BrowseChanged).criteria.category, 'research');
+      }
+    }
+  });
+
+  for (final dark in [false, true]) {
+    testWidgets(
+      'committed recent searches replay, deduplicate and survive a controller restart (dark: $dark)',
+      (tester) async {
+        const HarnessView(size: Size(430, 932)).apply(tester);
+        tester.platformDispatcher.platformBrightnessTestValue = dark
+            ? Brightness.dark
+            : Brightness.light;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final bridge = CatalogHarnessBridge(catalog);
+        var controller = BrowseController(
+          bridge: bridge,
+          openLink: (_) async {},
+        );
+        Future<void> mount() async {
+          await tester.pumpWidget(
+            productionShell(
+              home: Scaffold(
+                body: ListenableBuilder(
+                  listenable: controller,
+                  builder: (_, _) => ShellBrowsePage(
+                    layout: ShellLayout.phone,
+                    model: controller.model,
+                    local: controller.local.model,
+                    dispatch: controller.dispatch,
+                    onChosen: (_) {},
+                  ),
+                ),
+              ),
+            ),
+          );
+          controller.dispatch(const BrowseOpened());
+          await until(
+            tester,
+            () => !controller.model.busy && !controller.model.refreshing,
+          );
+        }
+
+        await mount();
+        expect(find.text('Recent searches'), findsNothing);
+        expect(controller.model.categoryBooks['fiction']!.map((b) => b.id), [
+          '0',
+          '1',
+        ]);
+        final input = find.descendant(
+          of: find.byKey(const ValueKey('browse-search-field')),
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(input, 'Pride');
+        await until(tester, () => !controller.model.busy);
+        expect(find.byType(ChoiceChip), findsNWidgets(5));
+        expect(
+          controller.model.recentSearches,
+          isEmpty,
+          reason: 'Typing alone must not save unfinished queries',
+        );
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+        expect(bridge.recentSearches, ['Pride']);
+        await tester.pumpWidget(const SizedBox());
+        controller.dispose();
+        controller = BrowseController(bridge: bridge, openLink: (_) async {});
+        addTearDown(controller.dispose);
+        await mount();
+        expect(find.text('Recent searches'), findsOneWidget);
+        await capture(tester, 'catalog-phone-${dark ? 'dark-' : ''}recents');
+        await tester.tap(find.widgetWithText(ActionChip, 'Pride'));
+        await until(tester, () => !controller.model.busy);
+        expect(controller.model.criteria.query, 'Pride');
+        expect(controller.model.books.single.title, 'Pride and Prejudice');
+        await tester.tap(find.text('Pride and Prejudice').first);
+        await until(tester, () => controller.model.details != null);
+        expect(controller.model.recentSearches, ['Pride']);
+        expect(bridge.recentSearches, ['Pride']);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
   for (final dark in [false, true]) {
     testWidgets(
       'Add stays in details; only Read opens an identical existing book (dark: $dark)',
@@ -465,7 +596,7 @@ void main() {
                 .model
                 .refreshing,
       );
-      expect(find.text('Browse by category'), findsOneWidget);
+      expect(find.text('Browse free books'), findsOneWidget);
       expect(tester.testTextInput.hasAnyClients, isTrue);
       tester.testTextInput.enterText('Pride');
       await until(

@@ -212,6 +212,20 @@ void main() {
     },
   );
 
+  test('recent catalog searches persist across application restarts', () async {
+    expect(await bridge.recentCatalogSearches(), isEmpty);
+    await bridge.saveRecentCatalogSearches(['Pride', '夏目漱石']);
+    bridge.dispose();
+    await bridge.drain();
+    await core.close();
+    core = await ShosaiCore.open(directory.path, pdfEngine: _PdfEngine());
+    bridge = ApplicationBridge(core);
+    expect(await bridge.recentCatalogSearches(), ['Pride', '夏目漱石']);
+    expect((await core.library.page()).books, isEmpty);
+    bridge.dispose();
+    await bridge.drain();
+  });
+
   test(
     'large source catalogs survive restart without preference-size limits',
     () async {

@@ -87,6 +87,15 @@ class CatalogHarnessBridge extends HarnessBridge
   @override
   final CatalogClient catalog;
 
+  List<String> recentSearches = [];
+  @override
+  Future<List<String>> recentCatalogSearches() async =>
+      List.unmodifiable(recentSearches);
+  @override
+  Future<void> saveRecentCatalogSearches(List<String> queries) async {
+    recentSearches = List.of(queries);
+  }
+
   @override
   Future<CatalogSaveOptions> catalogSaveOptions() async => (
     locations: [

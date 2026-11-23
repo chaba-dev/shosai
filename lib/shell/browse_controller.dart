@@ -60,6 +60,7 @@ class BrowseController extends ChangeNotifier {
   int _detailRevision = 0;
   bool _disposed = false;
   bool _refreshing = false;
+  bool _historyRequested = false;
 
   void _localChanged() {
     if (!_disposed) notifyListeners();
@@ -74,6 +75,20 @@ class BrowseController extends ChangeNotifier {
     if (_disposed) return;
     switch (message) {
       case BrowseOpened():
+        if (!_historyRequested && _bridge is CatalogHost) {
+          _historyRequested = true;
+          unawaited(() async {
+            try {
+              dispatch(
+                _BrowseHistoryLoaded(
+                  await (_bridge as CatalogHost).recentCatalogSearches(),
+                ),
+              );
+            } catch (_) {
+              dispatch(const _BrowseHistoryLoaded([]));
+            }
+          }());
+        }
         _load();
         if (!_refreshing && catalog != null) {
           _refreshing = true;
@@ -89,6 +104,19 @@ class BrowseController extends ChangeNotifier {
             }
           }());
         }
+      case _BrowseHistoryLoaded(:final searches):
+        _emit(
+          _model.copyWith(
+            recentSearches: {
+              ..._model.recentSearches,
+              ...searches.where(
+                (query) => query.trim().isNotEmpty && query.length <= 256,
+              ),
+            }.take(8).toList(),
+          ),
+        );
+      case BrowseSearchSubmitted():
+        _rememberSearch();
       case BrowseChanged(:final criteria):
         if (criteria == _model.criteria) return;
         _cancelAdd();
@@ -116,6 +144,7 @@ class BrowseController extends ChangeNotifier {
         :final books,
         :final authors,
         :final categories,
+        :final categoryBooks,
         :final filters,
         :final more,
         :final installed,
@@ -126,6 +155,7 @@ class BrowseController extends ChangeNotifier {
             books: books,
             authors: authors,
             categories: categories,
+            categoryBooks: categoryBooks,
             filters: filters,
             busy: false,
             more: more,
@@ -139,10 +169,17 @@ class BrowseController extends ChangeNotifier {
         }
       case _BrowseRefreshed(:final failed, :final installed):
         _refreshing = false;
-        _emit(_model.copyWith(refreshing: false, offline: failed));
+        _emit(
+          _model.copyWith(
+            refreshing: false,
+            offline: failed,
+            categoryBooks: installed ? const {} : null,
+          ),
+        );
         // Failed and unchanged refreshes leave the current results in place.
         if (installed) _load();
       case BrowseBookRequested(:final id):
+        _rememberSearch();
         _cancelAdd();
         _detailCancellation?.cancel();
         final revision = ++_detailRevision;
@@ -391,6 +428,25 @@ class BrowseController extends ChangeNotifier {
     _addCancellation = null;
   }
 
+  void _rememberSearch() {
+    final query = _model.criteria.query.trim();
+    if (query.isEmpty || query.length > 256) return;
+    final searches = [
+      query,
+      ..._model.recentSearches.where((s) => s != query),
+    ].take(8).toList();
+    _emit(_model.copyWith(recentSearches: searches));
+    if (_bridge case final CatalogHost host) {
+      unawaited(() async {
+        try {
+          await host.saveRecentCatalogSearches(searches);
+        } catch (_) {
+          // History is best-effort; personal and catalog search remain usable.
+        }
+      }());
+    }
+  }
+
   void _loadSaveOptions(int revision) {
     if (_acquisition == null) return;
     _emit(_model.copyWith(optionsBusy: true));
@@ -466,6 +522,16 @@ class BrowseController extends ChangeNotifier {
               languages: const <String>[],
               sources: const <({String id, String name})>[],
             );
+        var categoryBooks = _model.categoryBooks;
+        if (categoryBooks.isEmpty &&
+            c.filter == BrowseFilter.all &&
+            c.query.trim().isEmpty &&
+            c.category == null &&
+            c.author == null) {
+          categoryBooks =
+              await catalog?.categoryPreviews(cancellation: cancellation) ??
+              const {};
+        }
         var books = const <CatalogBook>[];
         var authors = const <CatalogAuthor>[];
         if (c.filter == BrowseFilter.authors) {
@@ -509,6 +575,7 @@ class BrowseController extends ChangeNotifier {
             [...previousBooks, ...books.take(30)],
             [...previousAuthors, ...authors.take(30)],
             categories,
+            categoryBooks,
             filters,
             books.length > 30 || authors.length > 30,
             installed,
@@ -548,6 +615,8 @@ final class BrowseModel {
     this.books = const [],
     this.authors = const [],
     this.categories = const [],
+    this.categoryBooks = const {},
+    this.recentSearches = const [],
     this.filters = (languages: const [], sources: const []),
     this.busy = false,
     this.more = false,
@@ -573,6 +642,8 @@ final class BrowseModel {
   final List<CatalogBook> books;
   final List<CatalogAuthor> authors;
   final List<CatalogCategory> categories;
+  final Map<String, List<CatalogBook>> categoryBooks;
+  final List<String> recentSearches;
   final CatalogFilters filters;
   final bool busy,
       more,
@@ -590,6 +661,8 @@ final class BrowseModel {
     List<CatalogBook>? books,
     List<CatalogAuthor>? authors,
     List<CatalogCategory>? categories,
+    Map<String, List<CatalogBook>>? categoryBooks,
+    List<String>? recentSearches,
     CatalogFilters? filters,
     bool? busy,
     bool? more,
@@ -613,6 +686,12 @@ final class BrowseModel {
     categories: categories == null
         ? this.categories
         : List.unmodifiable(categories),
+    categoryBooks: categoryBooks == null
+        ? this.categoryBooks
+        : Map.unmodifiable(categoryBooks),
+    recentSearches: recentSearches == null
+        ? this.recentSearches
+        : List.unmodifiable(recentSearches),
     filters: filters ?? this.filters,
     busy: busy ?? this.busy,
     more: more ?? this.more,
@@ -655,6 +734,15 @@ sealed class BrowseMessage {
 
 final class BrowseOpened extends BrowseMessage {
   const BrowseOpened();
+}
+
+final class BrowseSearchSubmitted extends BrowseMessage {
+  const BrowseSearchSubmitted();
+}
+
+final class _BrowseHistoryLoaded extends BrowseMessage {
+  const _BrowseHistoryLoaded(this.searches);
+  final List<String> searches;
 }
 
 final class BrowseChanged extends BrowseMessage {
@@ -711,6 +799,7 @@ final class _BrowseLoaded extends BrowseMessage {
     this.books,
     this.authors,
     this.categories,
+    this.categoryBooks,
     this.filters,
     this.more,
     this.installed,
@@ -719,6 +808,7 @@ final class _BrowseLoaded extends BrowseMessage {
   final List<CatalogBook> books;
   final List<CatalogAuthor> authors;
   final List<CatalogCategory> categories;
+  final Map<String, List<CatalogBook>> categoryBooks;
   final CatalogFilters filters;
   final bool more;
   final bool installed;

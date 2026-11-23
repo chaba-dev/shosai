@@ -300,6 +300,26 @@ List<CatalogCategory> catalogCategories(String path) {
   );
 }
 
+/// Two real members of each category for its decorative cover artwork. One
+/// read-only snapshot keeps the artwork consistent without a worker per card.
+Map<String, List<CatalogBook>> catalogCategoryPreviews(String path) {
+  if (!File(path).existsSync()) return const {};
+  return _read(path, (db) {
+    final previews = <String, List<CatalogBook>>{};
+    for (final row in db.select('''SELECT id, title, category_id FROM (
+      SELECT b.id, b.title, bc.category_id,
+        ROW_NUMBER() OVER (PARTITION BY bc.category_id ORDER BY b.id) AS position
+      FROM books b JOIN book_categories bc ON bc.book_id=b.id
+    ) WHERE position <= 2 ORDER BY category_id, position''')) {
+      (previews[row['category_id'] as String] ??= []).add(_book(db, row));
+    }
+    return Map.unmodifiable({
+      for (final entry in previews.entries)
+        entry.key: List<CatalogBook>.unmodifiable(entry.value),
+    });
+  });
+}
+
 List<CatalogAuthor> catalogAuthors(
   String path,
   String query,

@@ -72,6 +72,8 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
     final c = model.criteria;
     final gutter = widget.layout == ShellLayout.phone
         ? ShosaiTokens.space4
+        : widget.layout == ShellLayout.tablet
+        ? ShosaiTokens.space5
         : ShosaiTokens.space6;
     if (model.details != null || model.detailBusy || model.detailFailed) {
       return _CatalogBookPage(
@@ -84,6 +86,12 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
         c.filter == BrowseFilter.all || c.filter == BrowseFilter.freeBooks;
     final browse =
         c.query.trim().isEmpty && c.category == null && c.author == null;
+    final discovery = browse && c.filter == BrowseFilter.all;
+    void chooseLocal(ShellSearchChoice choice) {
+      widget.dispatch(const BrowseSearchSubmitted());
+      widget.onChosen(choice);
+    }
+
     return ColoredBox(
       color: palette.canvas,
       child: SafeArea(
@@ -92,11 +100,24 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
           key: const PageStorageKey('catalog-search-scroll'),
           padding: EdgeInsets.all(gutter),
           children: [
+            if (widget.layout == ShellLayout.phone) ...[
+              Semantics(
+                header: true,
+                child: Text(
+                  l10n.shellPlaceSearch,
+                  style: shellEditorialStyle(30, 34),
+                ),
+              ),
+              const SizedBox(height: ShosaiTokens.space4),
+            ],
             ShadInput(
               key: const ValueKey('browse-search-field'),
               controller: _query,
               focusNode: widget.searchFocus,
               autofocus: widget.layout != ShellLayout.phone,
+              padding: const EdgeInsets.all(ShosaiTokens.space3),
+              style: shellInterfaceStyle(16, 24),
+              decoration: ShadDecoration(color: palette.surface),
               leading: const Icon(LucideIcons.search, size: 20),
               placeholder: Text(
                 l10n.catalogSearchPlaceholder,
@@ -115,32 +136,77 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                       ),
                     ),
               onChanged: (value) => _change(query: value, author: () => null),
+              onSubmitted: (_) =>
+                  widget.dispatch(const BrowseSearchSubmitted()),
             ),
-            const SizedBox(height: ShosaiTokens.space3),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
+            if (!discovery) ...[
+              const SizedBox(height: ShosaiTokens.space3),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  spacing: ShosaiTokens.space2,
+                  children: [
+                    for (final filter in BrowseFilter.values)
+                      ChoiceChip(
+                        label: Text(_filterLabel(l10n, filter)),
+                        selected: c.filter == filter,
+                        onSelected: (_) => _change(
+                          filter: filter,
+                          category: () => null,
+                          language: () => null,
+                          source: () => null,
+                          author: () => null,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: ShosaiTokens.space5),
+            if (discovery && model.recentSearches.isNotEmpty) ...[
+              Text(
+                l10n.catalogRecentSearches,
+                style: shellInterfaceStyle(
+                  12,
+                  16,
+                  weight: FontWeight.w600,
+                ).copyWith(color: palette.inkMuted),
+              ),
+              const SizedBox(height: ShosaiTokens.space2),
+              Wrap(
                 spacing: ShosaiTokens.space2,
+                runSpacing: ShosaiTokens.space2,
                 children: [
-                  for (final filter in BrowseFilter.values)
-                    ChoiceChip(
-                      label: Text(_filterLabel(l10n, filter)),
-                      selected: c.filter == filter,
-                      onSelected: (_) => _change(
-                        filter: filter,
-                        category: () => null,
-                        language: () => null,
-                        source: () => null,
-                        author: () => null,
+                  for (final query in model.recentSearches)
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: ShosaiTokens.sizeTouchTarget,
+                        maxWidth: math.min(
+                          300,
+                          MediaQuery.sizeOf(context).width - 2 * gutter,
+                        ),
+                      ),
+                      child: ActionChip(
+                        avatar: const Icon(LucideIcons.search, size: 16),
+                        label: Text(
+                          query,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        backgroundColor: palette.surface,
+                        shape: StadiumBorder(
+                          side: BorderSide(color: palette.lineStrong),
+                        ),
+                        onPressed: () => _change(query: query),
                       ),
                     ),
                 ],
               ),
-            ),
-            const SizedBox(height: ShosaiTokens.space5),
+              const SizedBox(height: ShosaiTokens.space5),
+            ],
             if (model.refreshing) _status(l10n.catalogUpdating),
             if (model.offline) _status(l10n.catalogOffline),
-            if (catalog) ...[
+            if (c.filter == BrowseFilter.freeBooks) ...[
               Wrap(
                 spacing: ShosaiTokens.space2,
                 runSpacing: ShosaiTokens.space2,
@@ -196,7 +262,7 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                           notes: const [],
                           notesBusy: false,
                         ),
-                        onChosen: widget.onChosen,
+                        onChosen: chooseLocal,
                         embedded: true,
                       ),
                     ),
@@ -210,7 +276,7 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                           textBusy: false,
                           titlesBusy: false,
                         ),
-                        onChosen: widget.onChosen,
+                        onChosen: chooseLocal,
                         embedded: true,
                       ),
                     ),
@@ -219,7 +285,7 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
               else
                 ShellSearchResults(
                   model: widget.local,
-                  onChosen: widget.onChosen,
+                  onChosen: chooseLocal,
                   embedded: true,
                 ),
               if (widget.local.titlesMore)
@@ -239,30 +305,73 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                 ),
               const SizedBox(height: ShosaiTokens.space6),
             ],
-            if (catalog && browse && model.categories.isNotEmpty) ...[
-              _heading(l10n.catalogBrowse),
-              Wrap(
-                spacing: ShosaiTokens.space3,
-                runSpacing: ShosaiTokens.space3,
-                children: [
-                  for (final category in model.categories)
-                    SizedBox(
-                      width: widget.layout == ShellLayout.phone ? 160 : 200,
-                      child: ShadButton.outline(
-                        height: 72,
-                        onPressed: () => _change(
-                          filter: BrowseFilter.freeBooks,
-                          category: () => category.id,
-                        ),
-                        leading: const Icon(LucideIcons.book, size: 20),
+            if (discovery && model.categories.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: ShosaiTokens.space4),
+                child: Row(
+                  children: [
+                    Flexible(
+                      flex: 5,
+                      child: Semantics(
+                        header: true,
                         child: Text(
-                          category.label,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                          l10n.catalogBrowse,
+                          style: shellEditorialStyle(22, 28),
                         ),
                       ),
                     ),
-                ],
+                    const SizedBox(width: ShosaiTokens.space3),
+                    Expanded(child: Divider(color: palette.line)),
+                  ],
+                ),
+              ),
+              if (model.filters.sources.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: ShosaiTokens.space4),
+                  child: Text(
+                    l10n.catalogFromSources(
+                      model.filters.sources.map((s) => s.name).join(', '),
+                    ),
+                    style: shellInterfaceStyle(
+                      12,
+                      16,
+                    ).copyWith(color: palette.inkMuted),
+                  ),
+                ),
+              LayoutBuilder(
+                builder: (_, constraints) {
+                  final phone = widget.layout == ShellLayout.phone;
+                  final gap = phone ? ShosaiTokens.space3 : ShosaiTokens.space4;
+                  final scale = MediaQuery.textScalerOf(context).scale(1);
+                  final columns = math.max(
+                    1,
+                    ((constraints.maxWidth + gap) /
+                            ((phone ? 152 : 220) * scale + gap))
+                        .floor(),
+                  );
+                  final width =
+                      (constraints.maxWidth - gap * (columns - 1)) / columns;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      for (final category in model.categories)
+                        SizedBox(
+                          key: ValueKey('catalog-category-${category.id}'),
+                          width: width,
+                          child: _CatalogCategoryCard(
+                            category: category,
+                            books: model.categoryBooks[category.id] ?? const [],
+                            phone: phone,
+                            onPressed: () => _change(
+                              filter: BrowseFilter.freeBooks,
+                              category: () => category.id,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: ShosaiTokens.space6),
             ],
@@ -281,7 +390,7 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
                   ),
                 ),
             ],
-            if (catalog) ...[
+            if (catalog && !discovery) ...[
               _heading(
                 c.author?.name ??
                     _categoryLabel(c.category) ??
@@ -371,14 +480,16 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
               _status(l10n.shellSearchSearching)
             else if (model.failed)
               _status(l10n.catalogReadFailed)
-            else if ((catalog && model.books.isEmpty) ||
+            else if ((catalog &&
+                    model.books.isEmpty &&
+                    (!discovery || !model.installed)) ||
                 (c.filter == BrowseFilter.authors && model.authors.isEmpty))
               _status(
                 !model.installed
                     ? l10n.catalogFirstDownload
                     : l10n.shellSearchNoMatches(c.query),
               ),
-            if (model.more)
+            if (model.more && !discovery)
               Align(
                 alignment: AlignmentDirectional.centerStart,
                 child: ShadButton.outline(
@@ -468,6 +579,100 @@ class _ShellBrowsePageState extends State<ShellBrowsePage> {
   );
 }
 
+/// Category artwork uses the existing generated-cover grounds, not new chrome
+/// colours. Its covers are actual members of the installed category.
+class _CatalogCategoryCard extends StatelessWidget {
+  const _CatalogCategoryCard({
+    required this.category,
+    required this.books,
+    required this.phone,
+    required this.onPressed,
+  });
+  final CatalogCategory category;
+  final List<CatalogBook> books;
+  final bool phone;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ShellPalette.of(context);
+    final count = AppLocalizations.of(context).catalogBookCount(category.books);
+    final scale = MediaQuery.textScalerOf(context).scale(1);
+    return _ShellPressable(
+      onPressed: onPressed,
+      semanticLabel: '${category.label}, $count',
+      radius: ShosaiTokens.radiusMd,
+      color: palette.coverGround(category.id),
+      shadow: palette.raised,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(ShosaiTokens.radiusMd),
+        child: SizedBox(
+          height: 136 * scale,
+          child: LayoutBuilder(
+            builder: (_, constraints) {
+              final width = constraints.maxWidth;
+              return Stack(
+                children: [
+                  for (var i = 0; i < books.length; i++)
+                    Positioned(
+                      left: width * (i == 0 ? .68 : .80),
+                      bottom: ShosaiTokens.space3,
+                      width: width * (i == 0 ? .24 : .17),
+                      child: Transform.rotate(
+                        angle: i == 0 ? -.20 : .18,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(boxShadow: palette.raised),
+                          child: _CatalogCover(book: books[i]),
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.all(ShosaiTokens.space3),
+                    child: SizedBox(
+                      width: books.isEmpty || phone
+                          ? null
+                          : width * .68 - ShosaiTokens.space3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              category.label,
+                              maxLines: phone ? 2 : 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: shellEditorialStyle(
+                                phone ? 18 : 20,
+                                phone ? 26 : 28,
+                              ).copyWith(color: ShellPalette.coverInk),
+                            ),
+                          ),
+                          const SizedBox(height: ShosaiTokens.space1),
+                          SizedBox(
+                            width: books.isEmpty
+                                ? null
+                                : width * .64 - ShosaiTokens.space3,
+                            child: Text(
+                              count,
+                              style: shellInterfaceStyle(
+                                12,
+                                16,
+                              ).copyWith(color: ShellPalette.coverInk),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 String _filterLabel(AppLocalizations l10n, BrowseFilter filter) =>
     switch (filter) {
       BrowseFilter.all => l10n.catalogAll,
@@ -483,13 +688,16 @@ class _CatalogCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fallback = LayoutBuilder(
-      builder: (_, constraints) => ShellGeneratedCover(
-        title: book.title,
-        author: book.authors.firstOrNull,
-        type: constraints.maxWidth < 60
-            ? ShellCoverType.heroCompact
-            : ShellCoverType.shelf,
-      ),
+      builder: (_, constraints) {
+        final cover = ShellGeneratedCover(
+          title: book.title,
+          author: book.authors.firstOrNull,
+          type: ShellCoverType.shelf,
+        );
+        return constraints.maxWidth < 60
+            ? FittedBox(child: SizedBox(width: 120, height: 180, child: cover))
+            : cover;
+      },
     );
     final url = Uri.tryParse(book.coverUrl ?? '');
     return ExcludeSemantics(
@@ -678,8 +886,12 @@ class _CatalogBookPage extends StatelessWidget {
                                 ),
                                 child: Theme(
                                   data: Theme.of(context).copyWith(
-                                    focusColor: Colors.transparent,
-                                    highlightColor: Colors.transparent,
+                                    focusColor: palette.hover.withValues(
+                                      alpha: 0,
+                                    ),
+                                    highlightColor: palette.hover.withValues(
+                                      alpha: 0,
+                                    ),
                                   ),
                                   child: PopupMenuButton<int>(
                                     enabled: !model.acquisition.busy,
@@ -695,7 +907,9 @@ class _CatalogBookPage extends StatelessWidget {
                                       width: constraints.maxWidth,
                                     ),
                                     color: palette.surface,
-                                    surfaceTintColor: Colors.transparent,
+                                    surfaceTintColor: palette.hover.withValues(
+                                      alpha: 0,
+                                    ),
                                     elevation: 0,
                                     shape: _CatalogEditionMenuShape(
                                       palette.modal,

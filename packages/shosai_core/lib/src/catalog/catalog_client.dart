@@ -187,6 +187,17 @@ final class CatalogClient {
     );
   }
 
+  Future<Map<String, List<CatalogBook>>> categoryPreviews({
+    CancellationToken? cancellation,
+  }) {
+    _checkOpen();
+    final database = _database;
+    return runCancellable(
+      () => catalogCategoryPreviews(database),
+      cancellation: cancellation,
+    );
+  }
+
   Future<List<CatalogAuthor>> authors({
     String query = '',
     int limit = 30,

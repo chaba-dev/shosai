@@ -56,6 +56,7 @@ void main() {
     () async {
       expect(await client.search(query: '猫'), isEmpty);
       expect(await client.book('cat'), isNull);
+      expect(await client.categoryPreviews(), isEmpty);
       expect(await client.isInstalled, isFalse);
       expect(await client.refresh(), CatalogRefresh.installed);
       expect(await client.isInstalled, isTrue);
@@ -101,6 +102,12 @@ void main() {
       expect(await client.categories(), [
         (id: 'fiction', label: 'Fiction', books: 2),
       ]);
+      final previews = await client.categoryPreviews();
+      expect(previews.keys, ['fiction']);
+      expect(previews['fiction']!.map((b) => b.id), ['cat', 'pride']);
+      expect(previews['fiction']!.last.title, 'Pride and Prejudice');
+      expect(previews['fiction']!.last.authors, ['Austen, Jane']);
+      expect(previews['fiction']!.last.sources, ['Project Gutenberg', '青空文庫']);
       expect(await client.authors(query: 'AUSTEN'), [
         (id: 'austen', name: 'Austen, Jane', books: 1),
       ]);

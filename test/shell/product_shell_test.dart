@@ -987,11 +987,13 @@ void main() {
     testWidgets('the filter keeps to text or notes', (tester) async {
       final bridge = withHits(await _pump(tester, const Size(1440, 900)));
       await commandK(tester);
-      await tester.tap(find.text('Notes').last);
       await tester.enterText(
         find.byKey(const ValueKey('browse-search-field')),
         'lead',
       );
+      // Search scopes appear once typing starts, before the debounce fires.
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Notes'));
       await tester.pump(const Duration(milliseconds: 250));
       await tester.pumpAndSettle();
       expect(bridge.libraryNoteSearches, hasLength(1));

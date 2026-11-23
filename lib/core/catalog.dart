@@ -12,6 +12,8 @@ const catalogUserAgent =
 
 abstract interface class CatalogHost {
   CatalogClient get catalog;
+  Future<List<String>> recentCatalogSearches();
+  Future<void> saveRecentCatalogSearches(List<String> queries);
 }
 
 typedef CatalogSaveOptions = ({

@@ -1507,7 +1507,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get catalogAuthors => 'Authors';
 
   @override
-  String get catalogBrowse => 'Browse by category';
+  String get catalogBrowse => 'Browse free books';
+
+  @override
+  String get catalogRecentSearches => 'Recent searches';
+
+  @override
+  String catalogFromSources(String sources) {
+    return 'From $sources';
+  }
 
   @override
   String get catalogLanguage => 'Language';
@@ -1539,10 +1547,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String catalogBookCount(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count books',
+      other: '$countString books',
       one: '1 book',
     );
     return '$_temp0';

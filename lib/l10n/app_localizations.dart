@@ -2535,8 +2535,20 @@ abstract class AppLocalizations {
   /// No description provided for @catalogBrowse.
   ///
   /// In en, this message translates to:
-  /// **'Browse by category'**
+  /// **'Browse free books'**
   String get catalogBrowse;
+
+  /// No description provided for @catalogRecentSearches.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent searches'**
+  String get catalogRecentSearches;
+
+  /// No description provided for @catalogFromSources.
+  ///
+  /// In en, this message translates to:
+  /// **'From {sources}'**
+  String catalogFromSources(String sources);
 
   /// No description provided for @catalogLanguage.
   ///

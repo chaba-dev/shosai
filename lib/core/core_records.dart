@@ -3,6 +3,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
@@ -1280,6 +1281,26 @@ final class ApplicationBridge
 
   @override
   CatalogClient get catalog => records._core.catalog;
+
+  @override
+  Future<List<String>> recentCatalogSearches() => records._guard(() async {
+    if (records._closed) throw const CoreException.cancelled();
+    final value = await Preferences(
+      records._core.store,
+    ).get('search.catalog.recent');
+    if (value == null) return const [];
+    final decoded = jsonDecode(value) as List<dynamic>;
+    return List<String>.unmodifiable(decoded.cast<String>());
+  });
+
+  @override
+  Future<void> saveRecentCatalogSearches(List<String> queries) =>
+      records._guard(() async {
+        if (records._closed) throw const CoreException.cancelled();
+        await Preferences(
+          records._core.store,
+        ).set('search.catalog.recent', jsonEncode(queries));
+      });
 
   @override
   Future<CatalogSaveOptions> catalogSaveOptions() => records._guard(() async {

@@ -1418,7 +1418,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get catalogAuthors => '著者';
 
   @override
-  String get catalogBrowse => 'カテゴリから探す';
+  String get catalogBrowse => '無料の本を探す';
+
+  @override
+  String get catalogRecentSearches => '最近の検索';
+
+  @override
+  String catalogFromSources(String sources) {
+    return '提供元：$sources';
+  }
 
   @override
   String get catalogLanguage => '言語';
@@ -1447,7 +1455,11 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String catalogBookCount(int count) {
-    return '$count冊';
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
+    return '$countString冊';
   }
 
   @override
