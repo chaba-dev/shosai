@@ -939,6 +939,20 @@ void main() {
         if (count == 24) {
           await tester.tap(picker);
           await tester.pumpAndSettle();
+          final selected = find.widgetWithText(PopupMenuItem<int>, lastLabel);
+          final selectedRect = tester.getRect(selected);
+          final menuRect = tester.getRect(
+            find
+                .ancestor(
+                  of: selected,
+                  matching: find.byType(SingleChildScrollView),
+                )
+                .first,
+          );
+          expect(selectedRect.top, greaterThanOrEqualTo(menuRect.top));
+          expect(selectedRect.bottom, lessThanOrEqualTo(menuRect.bottom));
+          expect(selected.hitTestable(), findsOneWidget);
+          await capture(tester, 'catalog-phone-24-reopened-edition-menu');
           await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
           await tester.sendKeyEvent(LogicalKeyboardKey.space);
           await tester.pumpAndSettle();

@@ -659,68 +659,78 @@ class _CatalogBookPage extends StatelessWidget {
                             button: true,
                             enabled: !model.acquisition.busy,
                             label: l10n.catalogChooseEdition,
-                            child: ShadDecorator(
-                              focused: Focus.of(context).hasFocus,
-                              decoration: ShadDecoration(
-                                color: palette.surface,
-                                border: ShadBorder.all(
-                                  color: palette.lineStrong,
-                                  width: 1,
-                                  radius: BorderRadius.circular(
-                                    ShosaiTokens.radiusSm,
-                                  ),
-                                ),
-                                secondaryFocusedBorder: focusBorder,
-                              ),
-                              child: Theme(
-                                data: Theme.of(
-                                  context,
-                                ).copyWith(focusColor: Colors.transparent),
-                                child: PopupMenuButton<int>(
-                                  enabled: !model.acquisition.busy,
-                                  useRootNavigator: true,
-                                  tooltip: l10n.catalogChooseEdition,
-                                  position: PopupMenuPosition.under,
-                                  offset: const Offset(0, ShosaiTokens.space1),
-                                  constraints: BoxConstraints.tightFor(
-                                    width: constraints.maxWidth,
-                                  ),
+                            child: Opacity(
+                              opacity: model.acquisition.busy
+                                  ? theme.disabledOpacity
+                                  : 1,
+                              child: ShadDecorator(
+                                focused: Focus.of(context).hasFocus,
+                                decoration: ShadDecoration(
                                   color: palette.surface,
-                                  surfaceTintColor: Colors.transparent,
-                                  elevation: 0,
-                                  shape: _CatalogEditionMenuShape(
-                                    palette.modal,
-                                  ),
-                                  menuPadding: const EdgeInsets.all(
-                                    ShosaiTokens.space1,
-                                  ),
-                                  onSelected: (value) =>
-                                      dispatch(BrowseEditionSelected(value)),
-                                  itemBuilder: (_) => [
-                                    for (final (index, edition)
-                                        in details.editions.indexed)
-                                      editionOption(index, edition),
-                                  ],
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(
-                                      ShosaiTokens.space3,
+                                  border: ShadBorder.all(
+                                    color: palette.lineStrong,
+                                    width: 1,
+                                    radius: BorderRadius.circular(
+                                      ShosaiTokens.radiusSm,
                                     ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: editionLabel(
-                                            details.editions[model.edition],
+                                  ),
+                                  secondaryFocusedBorder: focusBorder,
+                                ),
+                                child: Theme(
+                                  data: Theme.of(context).copyWith(
+                                    focusColor: Colors.transparent,
+                                    highlightColor: Colors.transparent,
+                                  ),
+                                  child: PopupMenuButton<int>(
+                                    enabled: !model.acquisition.busy,
+                                    initialValue: model.edition,
+                                    useRootNavigator: true,
+                                    tooltip: l10n.catalogChooseEdition,
+                                    position: PopupMenuPosition.under,
+                                    offset: const Offset(
+                                      0,
+                                      ShosaiTokens.space1,
+                                    ),
+                                    constraints: BoxConstraints.tightFor(
+                                      width: constraints.maxWidth,
+                                    ),
+                                    color: palette.surface,
+                                    surfaceTintColor: Colors.transparent,
+                                    elevation: 0,
+                                    shape: _CatalogEditionMenuShape(
+                                      palette.modal,
+                                    ),
+                                    menuPadding: const EdgeInsets.all(
+                                      ShosaiTokens.space1,
+                                    ),
+                                    onSelected: (value) =>
+                                        dispatch(BrowseEditionSelected(value)),
+                                    itemBuilder: (_) => [
+                                      for (final (index, edition)
+                                          in details.editions.indexed)
+                                        editionOption(index, edition),
+                                    ],
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(
+                                        ShosaiTokens.space3,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: editionLabel(
+                                              details.editions[model.edition],
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(
-                                          width: ShosaiTokens.space2,
-                                        ),
-                                        Icon(
-                                          LucideIcons.chevronDown,
-                                          size: 18,
-                                          color: palette.inkMuted,
-                                        ),
-                                      ],
+                                          const SizedBox(
+                                            width: ShosaiTokens.space2,
+                                          ),
+                                          Icon(
+                                            LucideIcons.chevronDown,
+                                            size: 18,
+                                            color: palette.inkMuted,
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
