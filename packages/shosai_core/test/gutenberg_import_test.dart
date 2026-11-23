@@ -36,7 +36,15 @@ void main() {
           '$header${(index == 0 ? rows : rows.reversed).join('\n')}\n',
         );
       final db = File('${dir.path}/$index.sqlite');
-      final document = XmlDocument.parse(_rdf.readAsStringSync());
+      final document = XmlDocument.parse(
+        _rdf.readAsStringSync().replaceFirst(
+          '<d:rights>Public domain in the USA.</d:rights>',
+          '<d:rights>Public domain in the USA.</d:rights>'
+              '<d:rights>Check rights outside the USA.</d:rights>'
+              '<d:rights> Public domain in the USA. </d:rights>'
+              '<d:rights> </d:rights>',
+        ),
+      );
       if (index == 1) {
         final children = document.rootElement.children.reversed
             .map((node) => node.copy())
@@ -56,6 +64,19 @@ void main() {
       final rdf = File('${dir.path}/$index.rdf')
         ..writeAsStringSync(document.toXmlString());
       await importGutenbergFile(input, db, rdf: rdf);
+      final imported = sqlite3.open(db.path, mode: OpenMode.readOnly);
+      try {
+        expect(
+          imported
+              .select(
+                "SELECT DISTINCT rights_line FROM editions WHERE book_id = 'gutenberg:417'",
+              )
+              .single['rights_line'],
+          'Check rights outside the USA.\nPublic domain in the USA.',
+        );
+      } finally {
+        imported.close();
+      }
       exportCatalogJson(
         db.path,
         '${dir.path}/export$index',
@@ -324,10 +345,49 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
   );
 
   test(
+    'rejects invalid RDF archive members without a partial output',
+    () async {
+      final dir = tempDataDirectory();
+      final valid = _rdf.readAsStringSync();
+      for (final (first, second) in [
+        (valid, 'temporarily unavailable'),
+        (valid, ''),
+        (valid.replaceFirst('</rdf:RDF>', ''), '</rdf:RDF>'),
+      ]) {
+        File('${dir.path}/one.rdf').writeAsStringSync(first);
+        File('${dir.path}/two.rdf').writeAsStringSync(second);
+        final archive = File('${dir.path}/rdf-files.tar.bz2');
+        final tar = await Process.run('tar', [
+          '-cjf',
+          archive.path,
+          '-C',
+          dir.path,
+          'one.rdf',
+          'two.rdf',
+        ]);
+        expect(tar.exitCode, 0, reason: '${tar.stderr}');
+        final output = File('${dir.path}/catalog.sqlite');
+        await expectLater(
+          importGutenbergFile(_excerpt, output, rdf: archive),
+          throwsA(isA<Exception>()),
+          reason: 'Every archive member must be a complete RDF document',
+        );
+        expect(output.existsSync(), isFalse);
+      }
+    },
+  );
+
+  test(
     'rejects malformed RDF, invalid sizes and unsafe EPUB URLs without output',
     () async {
       final dir = tempDataDirectory();
       for (final text in [
+        '',
+        'temporarily unavailable',
+        '${_rdf.readAsStringSync()}temporarily unavailable',
+        'temporarily unavailable${_rdf.readAsStringSync()}',
+        '${_rdf.readAsStringSync()}<![CDATA[outside root]]>',
+        '${_rdf.readAsStringSync()}${_rdf.readAsStringSync()}',
         _rdf.readAsStringSync().replaceFirst('</rdf:RDF>', ''),
         _rdf.readAsStringSync().replaceFirst('<d:extent>41234', '<d:extent>0'),
         _rdf.readAsStringSync().replaceFirst(

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:async/async.dart';
 import 'package:shosai_core/catalog.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:xml/xml.dart';
@@ -110,23 +111,55 @@ Future<void> _importRdf(Database db, File input) async {
   );
   db.execute('BEGIN');
   try {
-    final bytes = input.path.endsWith('.tar.bz2')
+    final documents = input.path.endsWith('.tar.bz2')
         ? _readRdfArchive(input)
-        : input.openRead();
-    // The archive concatenates independent RDF documents. Validate nesting and
-    // namespaces throughout, retaining only one ebook subtree at a time.
-    final nodes = bytes
-        .transform(utf8.decoder)
-        .toXmlEvents(
-          validateNesting: true,
-          validateNamespace: true,
-          withNamespace: true,
-        )
-        .selectSubtreeEvents(
-          (event) =>
-              event.localName == 'ebook' && event.namespaceUri == _pgNamespace,
-        )
-        .toXmlNodes();
+        : Stream.value(input.openRead());
+    // Validate each complete member, retaining only one ebook subtree at a time.
+    final nodes = documents.asyncExpand(
+      (bytes) => bytes
+          .transform(utf8.decoder)
+          .toXmlEvents(
+            validateDocument: true,
+            validateNesting: true,
+            validateNamespace: true,
+            withNamespace: true,
+            withParent: true,
+          )
+          .tapEachEvent(
+            onStartElement: (event) {
+              if (event.parent == null &&
+                  (event.localName != 'RDF' ||
+                      event.namespaceUri != _rdfNamespace)) {
+                throw const FormatException('Expected an RDF document root');
+              }
+            },
+            onText: (event) {
+              if (event.parent == null &&
+                  event.value.codeUnits.any(
+                    (code) =>
+                        code != 0x20 &&
+                        code != 0x09 &&
+                        code != 0x0a &&
+                        code != 0x0d,
+                  )) {
+                throw const FormatException('Unexpected text outside RDF root');
+              }
+            },
+            onCDATA: (event) {
+              if (event.parent == null) {
+                throw const FormatException(
+                  'Unexpected CDATA outside RDF root',
+                );
+              }
+            },
+          )
+          .selectSubtreeEvents(
+            (event) =>
+                event.localName == 'ebook' &&
+                event.namespaceUri == _pgNamespace,
+          )
+          .toXmlNodes(),
+    );
     await for (final batch in nodes) {
       for (final ebook in batch.whereType<XmlElement>()) {
         final about = ebook.getAttribute('about', namespaceUri: _rdfNamespace);
@@ -135,10 +168,14 @@ Future<void> _importRdf(Database db, File input) async {
           throw FormatException('Invalid RDF ebook ID: $about');
         }
         final id = match[1]!;
-        final rights = ebook
-            .getElement('rights', namespaceUri: _dcNamespace)
-            ?.innerText
-            .trim();
+        final rights = {
+          for (final statement in ebook.findElements(
+            'rights',
+            namespaceUri: _dcNamespace,
+          ))
+            if (statement.innerText.trim().isNotEmpty)
+              statement.innerText.trim(),
+        }.toList()..sort();
         for (final format in ebook.findElements(
           'hasFormat',
           namespaceUri: _dcNamespace,
@@ -202,9 +239,9 @@ Future<void> _importRdf(Database db, File input) async {
             preference,
             url.toString(),
             size,
-            rights == null || rights.isEmpty
+            rights.isEmpty
                 ? 'Rights not listed in the offline catalog. Check Project Gutenberg.'
-                : rights,
+                : rights.join('\n'),
           ]);
         }
       }
@@ -221,11 +258,12 @@ Future<void> _importRdf(Database db, File input) async {
   }
 }
 
-Stream<List<int>> _readRdfArchive(File input) async* {
-  // Stream entries to stdout: no archive-controlled paths are written to disk.
+Stream<Stream<List<int>>> _readRdfArchive(File input) async* {
+  // GNU tar prefixes each regular member with its byte length. No archive paths
+  // are written to disk, and even an invalid member cannot hide in its neighbor.
   final process = await Process.start('tar', [
     '--extract',
-    '--to-stdout',
+    r'''--to-command=printf '%020d' "$TAR_SIZE"; cat''',
     '--bzip2',
     '--file',
     input.absolute.path,
@@ -236,8 +274,17 @@ Stream<List<int>> _readRdfArchive(File input) async* {
       .transform(const Utf8Decoder(allowMalformed: true))
       .join();
   final done = process.exitCode;
+  final reader = ChunkedStreamReader(process.stdout);
   try {
-    yield* process.stdout;
+    while (true) {
+      final header = await reader.readChunk(20);
+      if (header.isEmpty) break;
+      final size = int.tryParse(ascii.decode(header));
+      if (header.length != 20 || size == null || size < 0) {
+        throw const FormatException('Invalid RDF archive member length');
+      }
+      yield reader.readStream(size);
+    }
     if (await done != 0) {
       throw FormatException(
         'Invalid Gutenberg RDF archive: ${(await errors).trim()}',
@@ -245,6 +292,7 @@ Stream<List<int>> _readRdfArchive(File input) async* {
     }
   } finally {
     process.kill();
+    await reader.cancel();
     await done;
     await errors;
   }
