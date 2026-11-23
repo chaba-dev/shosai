@@ -528,6 +528,24 @@ class _CatalogBookPage extends StatelessWidget {
     final palette = ShellPalette.of(context);
     final details = model.details;
     final phone = layout == ShellLayout.phone;
+    Widget editionLabel(CatalogEdition edition) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${edition.sourceName} · ${edition.variant}',
+          style: shellInterfaceStyle(14, 20),
+        ),
+        Text(
+          [
+            edition.format.toUpperCase(),
+            edition.language,
+            if (edition.sizeBytes != null)
+              l10n.catalogBytes(edition.sizeBytes!),
+          ].join(' · '),
+          style: shellInterfaceStyle(13, 20).copyWith(color: palette.inkMuted),
+        ),
+      ],
+    );
     final metadata = details == null
         ? const SizedBox.shrink()
         : Column(
@@ -557,57 +575,59 @@ class _CatalogBookPage extends StatelessWidget {
                 style: shellEditorialStyle(22, 28),
               ),
               const SizedBox(height: ShosaiTokens.space3),
-              RadioGroup<int>(
-                groupValue: model.edition,
-                onChanged: (value) {
-                  if (value != null) dispatch(BrowseEditionSelected(value));
-                },
-                child: Column(
-                  children: [
-                    for (final (index, edition) in details.editions.indexed)
-                      Padding(
-                        padding: const EdgeInsets.only(
-                          bottom: ShosaiTokens.space3,
-                        ),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: index == model.edition
-                                ? palette.surface
-                                : null,
-                            border: Border.all(
-                              color: index == model.edition
-                                  ? palette.accent
-                                  : palette.lineStrong,
-                            ),
-                            borderRadius: BorderRadius.circular(
-                              ShosaiTokens.radiusMd,
+              if (details.editions.isNotEmpty) ...[
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: PopupMenuButton<int>(
+                      key: const ValueKey('catalog-edition-picker'),
+                      tooltip: l10n.catalogChooseEdition,
+                      enabled: !model.acquisition.busy,
+                      initialValue: model.edition,
+                      position: PopupMenuPosition.under,
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      onSelected: (value) =>
+                          dispatch(BrowseEditionSelected(value)),
+                      itemBuilder: (_) => [
+                        for (final (index, edition) in details.editions.indexed)
+                          CheckedPopupMenuItem(
+                            value: index,
+                            checked: index == model.edition,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: ShosaiTokens.space2,
+                              ),
+                              child: editionLabel(edition),
                             ),
                           ),
-                          child: RadioListTile<int>(
-                            value: index,
-                            enabled: !model.acquisition.busy,
-                            title: Text(
-                              '${edition.sourceName} · ${edition.variant}',
-                              style: shellInterfaceStyle(14, 20),
-                            ),
-                            subtitle: Text(
-                              [
-                                edition.format.toUpperCase(),
-                                edition.language,
-                                if (edition.sizeBytes != null)
-                                  l10n.catalogBytes(edition.sizeBytes!),
-                              ].join(' · '),
-                            ),
-                            contentPadding: const EdgeInsets.all(
-                              ShosaiTokens.space2,
-                            ),
+                      ],
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: palette.surface,
+                          border: Border.all(color: palette.lineStrong),
+                          borderRadius: BorderRadius.circular(
+                            ShosaiTokens.radiusMd,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(ShosaiTokens.space3),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: editionLabel(
+                                  details.editions[model.edition],
+                                ),
+                              ),
+                              const SizedBox(width: ShosaiTokens.space2),
+                              const Icon(LucideIcons.chevronDown, size: 18),
+                            ],
                           ),
                         ),
                       ),
-                  ],
+                    ),
+                  ),
                 ),
-              ),
-              if (details.editions.isNotEmpty) ...[
                 const SizedBox(height: ShosaiTokens.space3),
                 Text(
                   details.editions[model.edition].rights,

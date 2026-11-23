@@ -258,10 +258,17 @@ void main() {
       await capture(tester, 'catalog-review-location-changed');
       // Choosing another edition must not bypass the destination confirmation.
       await tester.ensureVisible(
-        find.text('Project Gutenberg · Without images'),
+        find.byKey(const ValueKey('catalog-edition-picker')),
       );
-      await tester.tap(find.text('Project Gutenberg · Without images'));
-      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('catalog-edition-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(
+          CheckedPopupMenuItem<int>,
+          'Project Gutenberg · Without images',
+        ),
+      );
+      await tester.pumpAndSettle();
       expect(controller.model.acquisition.locationChanged, true);
       bridge.selectionFailure = StateError('preference write failed');
       await tester.ensureVisible(find.text('Google Drive · Changed'));
@@ -468,7 +475,14 @@ void main() {
         find.text('Public domain in the USA. Check the law where you live.'),
         findsOneWidget,
       );
-      await tester.tap(find.text('Project Gutenberg · Without images'));
+      await tester.tap(find.byKey(const ValueKey('catalog-edition-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(
+          CheckedPopupMenuItem<int>,
+          'Project Gutenberg · Without images',
+        ),
+      );
       await tester.pumpAndSettle();
       expect(
         find.text('Alternate edition rights — check the source.'),
@@ -702,10 +716,88 @@ void main() {
     );
   }
 
+  for (final count in [1, 24]) {
+    testWidgets(
+      'edition dropdown supports $count choices without expanding details',
+      (tester) async {
+        const HarnessView(size: Size(390, 844)).apply(tester);
+        final variants = createCatalogFixture(
+          Directory('${root.path}/variants'),
+          editionCount: count,
+        );
+        final controller = BrowseController(
+          bridge: CatalogHarnessBridge(variants),
+          openLink: (_) async {},
+        );
+        addTearDown(() async {
+          controller.dispose();
+          await variants.close();
+        });
+        await tester.pumpWidget(
+          productionShell(
+            home: Scaffold(
+              body: ListenableBuilder(
+                listenable: controller,
+                builder: (_, _) => ShellBrowsePage(
+                  layout: ShellLayout.phone,
+                  model: controller.model,
+                  local: controller.local.model,
+                  dispatch: controller.dispatch,
+                  onChosen: (_) {},
+                ),
+              ),
+            ),
+          ),
+        );
+        controller.dispatch(const BrowseBookRequested('0'));
+        await until(tester, () => controller.model.details != null);
+        final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+        await tester.ensureVisible(picker);
+        await tester.pumpAndSettle();
+        final lastLabel = count == 1
+            ? 'Project Gutenberg · With images'
+            : 'Project Gutenberg · Additional variant $count';
+        if (count > 1) expect(find.text(lastLabel), findsNothing);
+        await tester.tap(picker);
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text(lastLabel).last,
+          250,
+          scrollable: find
+              .descendant(
+                of: find.byType(SingleChildScrollView),
+                matching: find.byType(Scrollable),
+              )
+              .last,
+        );
+        await tester.pumpAndSettle();
+        await capture(tester, 'catalog-phone-$count-edition-menu');
+        await tester.tap(
+          find.widgetWithText(CheckedPopupMenuItem<int>, lastLabel),
+        );
+        await tester.pumpAndSettle();
+        expect(controller.model.edition, count - 1);
+        expect(find.text(lastLabel), findsOneWidget);
+        expect(
+          find.text(
+            count == 1
+                ? 'Public domain in the USA. Check the law where you live.'
+                : 'Alternate edition rights — check the source.',
+          ),
+          findsOneWidget,
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      },
+    );
+  }
+
   for (final (name, size, dark, scale, locale) in [
     ('desktop', const Size(1280, 900), false, 1.0, const Locale('en')),
     ('desktop-dark', const Size(1280, 900), true, 1.0, const Locale('en')),
+    ('desktop-large', const Size(1280, 900), false, 2.0, const Locale('en')),
     ('tablet', const Size(834, 1112), false, 1.0, const Locale('en')),
+    ('tablet-wide', const Size(1180, 834), false, 1.0, const Locale('en')),
     ('phone', const Size(430, 932), false, 1.0, const Locale('en')),
     ('phone-dark', const Size(430, 932), true, 1.0, const Locale('en')),
     ('phone-ja-large', const Size(430, 932), false, 2.0, const Locale('ja')),
@@ -774,12 +866,25 @@ void main() {
       await tester.tap(find.text('Pride and Prejudice').first);
       await until(tester, () => controller.model.details != null);
       await capture(tester, 'catalog-$name-book');
-      // Reach the alternate edition through the actual scrollable surface,
-      // including at large text where it falls below the initial viewport.
-      final radio = find.text('Project Gutenberg · Without images');
-      await tester.ensureVisible(radio);
+      expect(find.text('Project Gutenberg · Without images'), findsNothing);
+      final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+      await tester.ensureVisible(picker);
       await tester.pumpAndSettle();
-      await tester.tap(radio);
+      await tester.tap(picker);
+      await tester.pumpAndSettle();
+      await capture(tester, 'catalog-$name-edition-menu');
+      if (name == 'desktop') {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      } else {
+        await tester.tap(
+          find.widgetWithText(
+            CheckedPopupMenuItem<int>,
+            'Project Gutenberg · Without images',
+          ),
+        );
+      }
       await tester.pumpAndSettle();
       expect(controller.model.edition, 1);
       await capture(tester, 'catalog-$name-edition');

@@ -11,7 +11,7 @@ import 'production_shell_harness.dart';
 
 /// Real local catalog, with enough asymmetric content to exercise paging,
 /// author selection, alternate editions, filters and offline failure.
-CatalogClient createCatalogFixture(Directory root) {
+CatalogClient createCatalogFixture(Directory root, {int editionCount = 2}) {
   root.createSync(recursive: true);
   final db = sqlite3.open('${root.path}/upstream.sqlite3');
   try {
@@ -39,7 +39,7 @@ CatalogClient createCatalogFixture(Directory root) {
       ]);
       db.execute("INSERT INTO book_categories VALUES (?, 'fiction')", [id]);
       db.execute("INSERT INTO book_subjects VALUES (?, 'love')", [id]);
-      for (var e = 0; e < 2; e++) {
+      for (var e = 0; e < editionCount; e++) {
         db.execute(
           'INSERT INTO editions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
@@ -47,7 +47,11 @@ CatalogClient createCatalogFixture(Directory root) {
             '$id:$e',
             id,
             title,
-            e == 0 ? 'With images' : 'Without images',
+            switch (e) {
+              0 => 'With images',
+              1 => 'Without images',
+              _ => 'Additional variant ${e + 1}',
+            },
             e,
             i == 1 ? 'ja' : 'en',
             'https://www.gutenberg.org/ebooks/$id',
