@@ -539,8 +539,15 @@ final class LibraryLocations {
     String contentHash,
     BookLocator locator, {
     required int generation,
-  }) =>
-      _store.transaction((db) => _locate(db, contentHash, locator, generation));
+  }) async {
+    _checkText(locator.key, 16384);
+    final accepted = await _store.transaction((db) {
+      if (!_hasGeneration(db, locator.locationId, generation)) return false;
+      _locate(db, contentHash, locator, generation);
+      return true;
+    });
+    if (!accepted) throw const LocationException(LocationFailure.revoked);
+  }
 
   static void _locate(
     Database db,
