@@ -127,6 +127,17 @@ Future<void> _importRdf(Database db, File input) async {
           )
           .tapEachEvent(
             onStartElement: (event) {
+              final attributes = <(String?, String)>{};
+              for (final attribute in event.attributes) {
+                if (!attributes.add((
+                  attribute.namespacePrefix == null
+                      ? null
+                      : attribute.namespaceUri,
+                  attribute.localName,
+                ))) {
+                  throw const FormatException('Duplicate RDF attribute');
+                }
+              }
               if (event.parent == null &&
                   (event.localName != 'RDF' ||
                       event.namespaceUri != _rdfNamespace)) {
@@ -158,6 +169,7 @@ Future<void> _importRdf(Database db, File input) async {
                 event.localName == 'ebook' &&
                 event.namespaceUri == _pgNamespace,
           )
+          .normalizeEvents()
           .toXmlNodes(),
     );
     await for (final batch in nodes) {

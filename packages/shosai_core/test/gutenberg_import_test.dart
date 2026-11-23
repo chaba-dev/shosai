@@ -378,6 +378,49 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
   );
 
   test(
+    'decodes rights entities identically across plain and archived read boundaries',
+    () async {
+      final dir = tempDataDirectory();
+      final text = _rdf.readAsStringSync().replaceFirst(
+        'Public domain in the USA.',
+        'Terms &amp; conditions',
+      );
+      final padding = 65534 - text.indexOf('&amp;') - 7;
+      final rdf = File('${dir.path}/boundary.rdf')
+        ..writeAsStringSync(
+          text.replaceFirst('<p:ebook', '<!--${'x' * padding}--><p:ebook'),
+        );
+      expect(rdf.readAsStringSync().indexOf('&amp;'), 65534);
+      final archive = File('${dir.path}/boundary.tar.bz2');
+      final tar = await Process.run('tar', [
+        '-cjf',
+        archive.path,
+        '-C',
+        dir.path,
+        'boundary.rdf',
+      ]);
+      expect(tar.exitCode, 0, reason: '${tar.stderr}');
+      for (final (index, input) in [rdf, archive].indexed) {
+        final output = File('${dir.path}/$index.sqlite');
+        await importGutenbergFile(_excerpt, output, rdf: input);
+        final db = sqlite3.open(output.path, mode: OpenMode.readOnly);
+        try {
+          expect(
+            db
+                .select(
+                  "SELECT DISTINCT rights_line FROM editions WHERE book_id = 'gutenberg:417'",
+                )
+                .single['rights_line'],
+            'Terms & conditions',
+          );
+        } finally {
+          db.close();
+        }
+      }
+    },
+  );
+
+  test(
     'rejects malformed RDF, invalid sizes and unsafe EPUB URLs without output',
     () async {
       final dir = tempDataDirectory();
@@ -388,6 +431,15 @@ Text#,Type,Issued,Title,Language,Authors,Subjects,LoCC,Bookshelves
         'temporarily unavailable${_rdf.readAsStringSync()}',
         '${_rdf.readAsStringSync()}<![CDATA[outside root]]>',
         '${_rdf.readAsStringSync()}${_rdf.readAsStringSync()}',
+        _rdf.readAsStringSync().replaceFirst(
+          '<p:file rdf:about=',
+          '<p:file rdf:about="https://www.gutenberg.org/ebooks/1342.epub3.images" rdf:about=',
+        ),
+        _rdf.readAsStringSync().replaceFirst(
+          '<p:file rdf:about=',
+          '<p:file xmlns:alias="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+              'alias:about="https://www.gutenberg.org/ebooks/1342.epub3.images" rdf:about=',
+        ),
         _rdf.readAsStringSync().replaceFirst('</rdf:RDF>', ''),
         _rdf.readAsStringSync().replaceFirst('<d:extent>41234', '<d:extent>0'),
         _rdf.readAsStringSync().replaceFirst(
