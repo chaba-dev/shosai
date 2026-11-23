@@ -27,6 +27,7 @@ final class CatalogDownloads {
     required String sourceId,
     required String editionId,
     required String? locationId,
+    required ({int generation, String? directory})? destination,
     required CancellationToken cancellation,
     void Function(int received, int? total)? progress,
   }) async {
@@ -50,7 +51,6 @@ final class CatalogDownloads {
         'This catalog edition is not available for download.',
       );
     }
-    final destination = await folders.saveDestination(locationId);
     final staging = Directory(await newPath());
     cancellation.throwIfCancelled();
     await staging.create();

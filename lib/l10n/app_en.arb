@@ -1300,6 +1300,7 @@
   "catalogCancelling": "Cancelling…",
   "catalogCancelled": "Download cancelled.",
   "catalogAddFailed": "The book could not be added. Check your connection and save location, then try again.",
+  "catalogLocationChanged": "The save location changed. Choose a save location again before adding.",
   "catalogLocationsFailed": "Save locations could not be loaded.",
   "catalogLocationsLoading": "Loading save locations…",
   "catalogAdded": "Added to your library",

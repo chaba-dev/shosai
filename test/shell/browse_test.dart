@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -158,6 +159,136 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'a changed destination reloads its label and requires a fresh choice before retry',
+    (tester) async {
+      const HarnessView(size: Size(1440, 900)).apply(tester);
+      final semantics = tester.ensureSemantics();
+      final bridge = _AcquiringBridge(catalog)
+        ..options = (
+          locations: [
+            (
+              id: 'drive',
+              label: 'Google Drive · Original',
+              generation: 1,
+              directory: 'original',
+            ),
+          ],
+          selected: 'drive',
+        );
+      final controller = BrowseController(
+        bridge: bridge,
+        openLink: (_) async {},
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        productionShell(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: controller,
+              builder: (_, _) => ShellBrowsePage(
+                layout: ShellLayout.desktop,
+                model: controller.model,
+                local: controller.local.model,
+                dispatch: controller.dispatch,
+                onChosen: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      controller.dispatch(const BrowseBookRequested('0'));
+      await until(
+        tester,
+        () =>
+            controller.model.details != null &&
+            controller.model.saveOptions != null,
+      );
+      await tester.ensureVisible(find.text('Add to library'));
+      await tester.tap(find.text('Add to library'));
+      bridge.options = (
+        locations: [
+          (
+            id: 'drive',
+            label: 'Google Drive · Changed',
+            generation: 1,
+            directory: 'changed',
+          ),
+        ],
+        selected: 'drive',
+      );
+      bridge.pending.completeError(
+        const FlutterBridgeError(
+          kind: FlutterBridgeErrorKind.invalidRequest,
+          message: 'The save location changed.',
+        ),
+      );
+      await until(
+        tester,
+        () =>
+            controller.model.acquisition.locationChanged &&
+            controller.model.saveOptions?.locations.single.directory ==
+                'changed',
+      );
+      expect(find.text('Google Drive · Original'), findsNothing);
+      expect(find.text('Google Drive · Changed'), findsOneWidget);
+      expect(
+        find.text(
+          'The save location changed. Choose a save location again before adding.',
+        ),
+        findsOneWidget,
+      );
+      await tester.ensureVisible(find.text('Add to library'));
+      await tester.tapAt(tester.getCenter(find.text('Add to library')));
+      await tester.pump();
+      expect(controller.model.acquisition.busy, false);
+      expect(
+        tester
+            .getSemantics(find.text('Add to library'))
+            .flagsCollection
+            .isEnabled,
+        Tristate.isFalse,
+      );
+      await capture(tester, 'catalog-review-location-changed');
+      // Choosing another edition must not bypass the destination confirmation.
+      await tester.ensureVisible(
+        find.text('Project Gutenberg · Without images'),
+      );
+      await tester.tap(find.text('Project Gutenberg · Without images'));
+      await tester.pump();
+      expect(controller.model.acquisition.locationChanged, true);
+      await tester.ensureVisible(find.text('Google Drive · Changed'));
+      await tester.tap(find.text('Google Drive · Changed'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Google Drive · Changed').last);
+      await until(
+        tester,
+        () =>
+            !controller.model.acquisition.locationChanged &&
+            !controller.model.locationBusy,
+      );
+      expect(
+        tester
+            .getSemantics(find.text('Add to library'))
+            .flagsCollection
+            .isEnabled,
+        Tristate.isTrue,
+      );
+      bridge.pending = Completer<CatalogAddedBook>();
+      await tester.ensureVisible(find.text('Add to library'));
+      await tester.tap(find.text('Add to library'));
+      await tester.pump();
+      expect(controller.model.acquisition.busy, true);
+      bridge.pending.complete((
+        book: harnessLibraryBooks().first,
+        existing: false,
+      ));
+      await until(tester, () => controller.model.acquisition.result != null);
+      await tester.pumpWidget(const SizedBox());
+      semantics.dispose();
+    },
+  );
 
   testWidgets(
     'Add refreshes personal matches; first Read works during shelf refresh and rail Search stays in the reader',
@@ -635,6 +766,11 @@ class _AcquiringBridge extends CatalogHarnessBridge {
   _AcquiringBridge(super.catalog) : super(books: [...harnessLibraryBooks()]);
   Completer<CatalogAddedBook> pending = Completer<CatalogAddedBook>();
   Completer<void>? shelfRefresh;
+  CatalogSaveOptions? options;
+
+  @override
+  Future<CatalogSaveOptions> catalogSaveOptions() async =>
+      options ?? await super.catalogSaveOptions();
 
   @override
   Future<FlutterLibraryPage> libraryPage({
@@ -662,6 +798,7 @@ class _AcquiringBridge extends CatalogHarnessBridge {
     required String sourceId,
     required String editionId,
     required String? locationId,
+    required ({int generation, String? directory})? destination,
     required BigInt cancellationId,
     void Function(int, int?)? progress,
   }) {

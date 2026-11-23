@@ -852,6 +852,8 @@ class _CatalogAcquisitionControls extends StatelessWidget {
                   child: Text(
                     state.cancelled
                         ? l10n.catalogCancelled
+                        : state.locationChanged
+                        ? l10n.catalogLocationChanged
                         : l10n.catalogAddFailed,
                   ),
                 ),
@@ -861,9 +863,8 @@ class _CatalogAcquisitionControls extends StatelessWidget {
                 alignment: AlignmentDirectional.centerStart,
                 child: ShadButton(
                   height: height,
-                  onPressed: model.locationBusy
-                      ? null
-                      : () => dispatch(const BrowseAddRequested()),
+                  enabled: !model.locationBusy && !state.locationChanged,
+                  onPressed: () => dispatch(const BrowseAddRequested()),
                   child: Text(l10n.catalogAdd),
                 ),
               ),

@@ -239,13 +239,25 @@ final class LibraryFolders {
 
   /// The first connected location is the default until the reader chooses.
   /// An explicit private-library choice is distinct from having no preference.
-  Future<({List<LibraryConnection> locations, String? selected})>
+  Future<
+    ({
+      List<({LibraryConnection connection, int generation})> locations,
+      String? selected,
+    })
+  >
   saveOptions() => _serial(() async {
     await _load();
     final saved = await _preferences.get('device.library.save-location');
     final locations = _scanned;
     return (
-      locations: List<LibraryConnection>.unmodifiable(locations),
+      locations:
+          List<({LibraryConnection connection, int generation})>.unmodifiable([
+            for (final connection in locations)
+              (
+                connection: connection,
+                generation: _generations[connection.id]!,
+              ),
+          ]),
       selected: saved == 'private'
           ? null
           : locations.where((g) => g.id == saved).firstOrNull?.id ??
@@ -261,15 +273,6 @@ final class LibraryFolders {
     await _preferences.set('device.library.save-location', id ?? 'private');
   });
 
-  /// Bind an acquisition to the selected grant before its network download.
-  Future<({int generation, String? directory})?> saveDestination(String? id) =>
-      _serial(() async {
-        await _load();
-        if (id == null) return null;
-        final grant = _grant(id);
-        return (generation: _generations[id]!, directory: grant.directory);
-      });
-
   /// The downloaded bytes are verified before any external publication. A
   /// duplicate is an idempotent Add, not an instruction to open the reader.
   /// Grant changes and other admissions cannot interleave with publication.
@@ -280,14 +283,14 @@ final class LibraryFolders {
     required String title,
     required String? author,
     required BookFormat format,
-    ({int generation, String? directory})? destination,
+    required ({int generation, String? directory})? destination,
     CancellationToken? cancellation,
   }) => _serial(() async {
     await _load(cancellation: cancellation);
     cancellation.throwIfCancelled();
     if (locationId != null &&
-        destination != null &&
-        (_generations[locationId] != destination.generation ||
+        (destination == null ||
+            _generations[locationId] != destination.generation ||
             _grant(locationId).directory != destination.directory)) {
       throw const CoreException.conflict(
         'The save location changed. Choose it again before adding the book.',
@@ -336,15 +339,25 @@ final class LibraryFolders {
       cancellation,
     );
     final plain = bookFileName(title, author, format.name);
+    final extension = '.${format.name}';
+    final stem = bookNameKey(
+      plain.substring(0, plain.length - extension.length),
+    );
+    // A failed local admission may have already published a numbered name.
+    // Adopt identical bytes only in this generated series, not arbitrary files.
+    final names = RegExp(
+      '^${RegExp.escape(stem)}'
+      r'(?: \((?:[2-9]|[1-9][0-9]+)\))?'
+      '${RegExp.escape(extension)}'
+      r'$',
+    );
     List<LocationEntry> matches = [];
     for (var attempt = 0; attempt < 8; attempt++) {
       final entries = await _saveEntries(adapter, folder.key, cancellation);
       matches = [];
       for (final entry in entries.where(
         (e) =>
-            e.readable &&
-            !e.isDirectory &&
-            bookNameKey(e.name) == bookNameKey(plain),
+            e.readable && !e.isDirectory && names.hasMatch(bookNameKey(e.name)),
       )) {
         final current = await adapter.stat(
           entry.key,
@@ -493,19 +506,20 @@ final class LibraryFolders {
         final matches = entries
             .where((e) => bookNameKey(e.name) == bookNameKey(name))
             .toList();
-        final folders = matches.where((e) => e.isDirectory).toList()
-          ..sort((a, b) {
-            final left = utf8.encode(a.name), right = utf8.encode(b.name);
-            for (var i = 0; i < min(left.length, right.length); i++) {
-              if (left[i] != right[i]) return left[i].compareTo(right[i]);
-            }
-            final order = left.length.compareTo(right.length);
-            if (order != 0) return order;
-            final created = (a.createdAt ?? DateTime.utc(1970)).compareTo(
-              b.createdAt ?? DateTime.utc(1970),
-            );
-            return created != 0 ? created : a.key.compareTo(b.key);
-          });
+        final folders =
+            matches.where((e) => e.readable && e.isDirectory).toList()
+              ..sort((a, b) {
+                final left = utf8.encode(a.name), right = utf8.encode(b.name);
+                for (var i = 0; i < min(left.length, right.length); i++) {
+                  if (left[i] != right[i]) return left[i].compareTo(right[i]);
+                }
+                final order = left.length.compareTo(right.length);
+                if (order != 0) return order;
+                final created = (a.createdAt ?? DateTime.utc(1970)).compareTo(
+                  b.createdAt ?? DateTime.utc(1970),
+                );
+                return created != 0 ? created : a.key.compareTo(b.key);
+              });
         if (folders.isNotEmpty) return folders.first;
         if (matches.isNotEmpty) continue;
         try {

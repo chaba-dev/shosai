@@ -426,6 +426,7 @@
   "catalogCancelling": "キャンセル中…",
   "catalogCancelled": "ダウンロードをキャンセルしました。",
   "catalogAddFailed": "本を追加できませんでした。接続と保存先を確認して、もう一度お試しください。",
+  "catalogLocationChanged": "保存先が変更されました。追加する前に保存先をもう一度選んでください。",
   "catalogLocationsFailed": "保存先を読み込めませんでした。",
   "catalogLocationsLoading": "保存先を読み込み中…",
   "catalogAdded": "ライブラリに追加しました",

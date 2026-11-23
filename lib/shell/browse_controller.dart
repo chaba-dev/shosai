@@ -194,7 +194,10 @@ class BrowseController extends ChangeNotifier {
           _emit(
             _model.copyWith(
               edition: index,
-              acquisition: const BrowseAcquisition(),
+              acquisition: BrowseAcquisition(
+                failed: _model.acquisition.locationChanged,
+                locationChanged: _model.acquisition.locationChanged,
+              ),
             ),
           );
         }
@@ -256,11 +259,15 @@ class BrowseController extends ChangeNotifier {
             details.editions.isEmpty ||
             _model.saveOptions == null ||
             _model.acquisition.busy ||
+            _model.acquisition.locationChanged ||
             _model.locationBusy) {
           return;
         }
         final edition = details.editions[_model.edition];
         final locationId = _model.saveOptions!.selected;
+        final location = _model.saveOptions!.locations
+            .where((option) => option.id == locationId)
+            .firstOrNull;
         final revision = _detailRevision;
         final id = _addCancellation = _bridge.createCancellation();
         _emit(
@@ -273,13 +280,31 @@ class BrowseController extends ChangeNotifier {
               sourceId: edition.sourceId,
               editionId: edition.editionId,
               locationId: locationId,
+              destination: location == null
+                  ? null
+                  : (
+                      generation: location.generation,
+                      directory: location.directory,
+                    ),
               cancellationId: id,
               progress: (received, total) =>
                   dispatch(_BrowseAddProgress(revision, id, received, total)),
             );
             dispatch(_BrowseAdded(revision, id, result));
-          } catch (_) {
-            dispatch(_BrowseAddFailed(revision, id));
+          } catch (error) {
+            dispatch(
+              _BrowseAddFailed(
+                revision,
+                id,
+                locationChanged:
+                    error is FlutterBridgeError &&
+                    const [
+                      FlutterBridgeErrorKind.invalidRequest,
+                      FlutterBridgeErrorKind.locationRevoked,
+                      FlutterBridgeErrorKind.locationMissing,
+                    ].contains(error.kind),
+              ),
+            );
           } finally {
             _bridge.releaseCancellation(id: id);
           }
@@ -325,17 +350,20 @@ class BrowseController extends ChangeNotifier {
             _model.copyWith(acquisition: BrowseAcquisition(result: result)),
           );
         }
-      case _BrowseAddFailed(:final revision, :final id):
+      case _BrowseAddFailed(:final revision, :final id, :final locationChanged):
         if (revision == _detailRevision && id == _addCancellation) {
           _addCancellation = null;
           _emit(
             _model.copyWith(
+              saveOptions: locationChanged ? () => null : null,
               acquisition: BrowseAcquisition(
                 cancelled: _model.acquisition.cancelling,
                 failed: !_model.acquisition.cancelling,
+                locationChanged: locationChanged,
               ),
             ),
           );
+          if (locationChanged) _loadSaveOptions(revision);
         }
       case BrowseReadRequested():
         final result = _model.acquisition.result;
@@ -616,8 +644,9 @@ final class BrowseAcquisition {
     this.result,
     this.failed = false,
     this.cancelled = false,
+    this.locationChanged = false,
   });
-  final bool busy, cancelling, failed, cancelled;
+  final bool busy, cancelling, failed, cancelled, locationChanged;
   final int received;
   final int? total;
   final CatalogAddedBook? result;
@@ -763,7 +792,12 @@ final class _BrowseAdded extends BrowseMessage {
 }
 
 final class _BrowseAddFailed extends BrowseMessage {
-  const _BrowseAddFailed(this.revision, this.id);
+  const _BrowseAddFailed(
+    this.revision,
+    this.id, {
+    this.locationChanged = false,
+  });
   final int revision;
   final BigInt id;
+  final bool locationChanged;
 }

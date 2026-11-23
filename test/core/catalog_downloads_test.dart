@@ -104,13 +104,24 @@ void main() {
   Future<({Book book, bool existing})> add({
     String? location,
     CancellationToken? token,
-  }) => downloads.add(
-    bookId: '0',
-    sourceId: 'gutenberg',
-    editionId: '0:0',
-    locationId: location,
-    cancellation: token ?? CancellationToken(),
-  );
+  }) async {
+    final option = (await folders.saveOptions()).locations
+        .where((g) => g.connection.id == location)
+        .firstOrNull;
+    return downloads.add(
+      bookId: '0',
+      sourceId: 'gutenberg',
+      editionId: '0:0',
+      locationId: location,
+      destination: option == null
+          ? null
+          : (
+              generation: option.generation,
+              directory: option.connection.directory,
+            ),
+      cancellation: token ?? CancellationToken(),
+    );
+  }
 
   Future<Directory> connect() async {
     final target = Directory('${root.path}/connected')..createSync();
@@ -238,6 +249,11 @@ void main() {
           )).book!;
           await library.updateProgress(previous.id, 0.375);
           stage.deleteSync();
+          final source = Directory('${target.path}/Project Gutenberg')
+            ..createSync();
+          File(
+            '${source.path}/Pride and Prejudice - Jane Austen.epub',
+          ).writeAsStringSync('occupied');
         }
         await store.transaction(
           (db) => db.execute(
@@ -250,7 +266,7 @@ void main() {
         );
         expect((await library.page()).books, hasLength(repair ? 1 : 0));
         final published = File(
-          '${target.path}/Project Gutenberg/Pride and Prejudice - Jane Austen.epub',
+          '${target.path}/Project Gutenberg/Pride and Prejudice - Jane Austen${repair ? ' (2)' : ''}.epub',
         );
         final modified = published.statSync().modified;
         await store.transaction((db) => db.execute('DROP TRIGGER fault'));
@@ -262,7 +278,7 @@ void main() {
           expect(saved.book.progress, 0.375);
         }
         expect(published.statSync().modified, modified);
-        expect(published.parent.listSync(), hasLength(1));
+        expect(published.parent.listSync(), hasLength(repair ? 2 : 1));
         expect(
           await folders.withBookFile(
             saved.book,
@@ -273,6 +289,46 @@ void main() {
       },
     );
   }
+
+  test(
+    'Add honors the displayed destination even when it changes before catalog lookup',
+    () async {
+      final target = await connect();
+      for (final name in ['Original', 'Changed']) {
+        Directory('${target.path}/$name').createSync();
+      }
+      await folders.configure(
+        'folder',
+        directory: 'Original',
+        label: 'Original',
+      );
+      final option = (await folders.saveOptions()).locations.single;
+      await folders.configure('folder', directory: 'Changed', label: 'Changed');
+      await expectLater(
+        downloads.add(
+          bookId: '0',
+          sourceId: 'gutenberg',
+          editionId: '0:0',
+          locationId: 'folder',
+          destination: (
+            generation: option.generation,
+            directory: option.connection.directory,
+          ),
+          cancellation: CancellationToken(),
+        ),
+        throwsA(
+          isA<CoreException>().having(
+            (e) => e.kind,
+            'kind',
+            CoreErrorKind.conflict,
+          ),
+        ),
+      );
+      expect(Directory('${target.path}/Original').listSync(), isEmpty);
+      expect(Directory('${target.path}/Changed').listSync(), isEmpty);
+      expect((await library.page()).books, isEmpty);
+    },
+  );
 
   test(
     'changing the selected directory during download requires reselection and writes nowhere',
@@ -337,6 +393,12 @@ void main() {
         true,
         occupied: [
           LocationEntry(
+            key: 'unowned-folder',
+            name: 'Project Gutenberg',
+            isDirectory: true,
+            readable: false,
+          ),
+          LocationEntry(
             key: 'unsupported-item',
             name: 'PRIDE AND PREJUDICE - JANE AUSTEN.EPUB',
             isDirectory: false,
@@ -357,6 +419,10 @@ void main() {
       final result = await folders.saveDownloadedBook(
         'packages/shosai_core/test/fixtures/sample.epub',
         locationId: 'folder',
+        destination: (
+          generation: (await folders.saveOptions()).locations.single.generation,
+          directory: null,
+        ),
         source: 'Project Gutenberg',
         title: 'Pride and Prejudice',
         author: 'Jane Austen',
@@ -364,7 +430,7 @@ void main() {
       );
       expect(
         File(
-          '${target.path}/Project Gutenberg/Pride and Prejudice - Jane Austen (2).epub',
+          '${target.path}/Project Gutenberg (2)/Pride and Prejudice - Jane Austen (2).epub',
         ).readAsBytesSync(),
         bytes,
       );
@@ -400,6 +466,11 @@ void main() {
         final result = await folders.saveDownloadedBook(
           'packages/shosai_core/test/fixtures/sample.epub',
           locationId: 'folder',
+          destination: (
+            generation:
+                (await folders.saveOptions()).locations.single.generation,
+            directory: null,
+          ),
           source: 'Project Gutenberg',
           title: 'Pride and Prejudice',
           author: 'Jane Austen',

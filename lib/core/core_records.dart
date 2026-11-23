@@ -1286,20 +1286,33 @@ final class ApplicationBridge
     if (records._closed) throw const CoreException.cancelled();
     final options = await folders.saveOptions();
     final labels = [
-      for (final g in options.locations)
+      for (final (connection: connection, generation: _) in options.locations)
         [
-          g.label,
-          g.directoryLabel,
+          connection.label,
+          connection.directoryLabel,
         ].whereType<String>().where((label) => label.isNotEmpty).join(' — '),
     ];
+    final reserved = labels.toSet();
+    final uniqueLabels = <String>[];
+    for (final label in labels) {
+      if (labels.where((other) => other == label).length == 1) {
+        uniqueLabels.add(label);
+      } else {
+        var number = 1;
+        while (!reserved.add('$label ($number)')) {
+          number++;
+        }
+        uniqueLabels.add('$label ($number)');
+      }
+    }
     return (
       locations: [
         for (var i = 0; i < options.locations.length; i++)
           (
-            id: options.locations[i].id,
-            label: labels.where((label) => label == labels[i]).length == 1
-                ? labels[i]
-                : '${labels[i]} (${labels.take(i + 1).where((label) => label == labels[i]).length})',
+            id: options.locations[i].connection.id,
+            label: uniqueLabels[i],
+            generation: options.locations[i].generation,
+            directory: options.locations[i].connection.directory,
           ),
       ],
       selected: options.selected,
@@ -1319,6 +1332,7 @@ final class ApplicationBridge
     required String sourceId,
     required String editionId,
     required String? locationId,
+    required ({int generation, String? directory})? destination,
     required BigInt cancellationId,
     void Function(int received, int? total)? progress,
   }) => records._guard(() async {
@@ -1329,6 +1343,7 @@ final class ApplicationBridge
       sourceId: sourceId,
       editionId: editionId,
       locationId: locationId,
+      destination: destination,
       cancellation: token,
       progress: progress,
     );

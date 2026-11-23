@@ -139,6 +139,7 @@ void main() {
     'metadata pages preserve opaque IDs and skip Workspace/shortcuts',
     () async {
       var media = 0;
+      var saving = false;
       handler = (request) async {
         if (request.uri.queryParameters['alt'] == 'media') media++;
         if (request.uri.path.endsWith('/books')) {
@@ -148,14 +149,22 @@ void main() {
             request.uri.queryParameters['q'],
             contains("'books' in parents"),
           );
-          expect(request.uri.queryParameters['q'], contains("'me' in owners"));
-          expect(request.uri.queryParameters['pageSize'], '3');
+          expect(
+            request.uri.queryParameters['q'],
+            saving
+                ? isNot(contains("'me' in owners"))
+                : contains("'me' in owners"),
+          );
+          expect(request.uri.queryParameters['pageSize'], '5');
           if (request.uri.queryParameters['pageToken'] == null) {
             _json(request, {
               'files': [
                 _file('A'),
                 _file('folder', mime: GoogleDriveLocation.folderMime),
                 _file('shortcut', mime: 'application/vnd.google-apps.shortcut'),
+                _file('foreign')..['ownedByMe'] = false,
+                _file('foreignFolder', mime: GoogleDriveLocation.folderMime)
+                  ..['ownedByMe'] = false,
               ],
               'nextPageToken': 'opaque+/=',
             });
@@ -170,23 +179,36 @@ void main() {
           }
         }
       };
-      final page = await location.list(directory: 'books', limit: 3);
+      final page = await location.list(directory: 'books', limit: 5);
       expect(page.entries.map((e) => e.key), ['A', 'folder']);
       expect(page.entries.first.revision, '42');
       expect(page.entries.last.isDirectory, true);
       final next = await location.list(
         directory: 'books',
         cursor: page.nextCursor,
-        limit: 3,
+        limit: 5,
       );
       expect(next.entries.single.key, 'B');
-      final occupied = await location.listForSave(directory: 'books', limit: 3);
-      expect(occupied.entries.map((e) => e.key), ['A', 'folder', 'shortcut']);
-      expect(occupied.entries.map((e) => e.readable), [true, true, false]);
+      saving = true;
+      final occupied = await location.listForSave(directory: 'books', limit: 5);
+      expect(occupied.entries.map((e) => e.key), [
+        'A',
+        'folder',
+        'shortcut',
+        'foreign',
+        'foreignFolder',
+      ]);
+      expect(occupied.entries.map((e) => e.readable), [
+        true,
+        true,
+        false,
+        false,
+        false,
+      ]);
       final occupiedNext = await location.listForSave(
         directory: 'books',
         cursor: occupied.nextCursor,
-        limit: 3,
+        limit: 5,
       );
       expect(occupiedNext.entries.map((e) => e.key), ['B', 'doc']);
       expect(occupiedNext.entries.map((e) => e.readable), [true, false]);

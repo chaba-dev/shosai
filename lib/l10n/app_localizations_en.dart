@@ -1592,6 +1592,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'The book could not be added. Check your connection and save location, then try again.';
 
   @override
+  String get catalogLocationChanged =>
+      'The save location changed. Choose a save location again before adding.';
+
+  @override
   String get catalogLocationsFailed => 'Save locations could not be loaded.';
 
   @override

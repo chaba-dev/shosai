@@ -2664,6 +2664,12 @@ abstract class AppLocalizations {
   /// **'The book could not be added. Check your connection and save location, then try again.'**
   String get catalogAddFailed;
 
+  /// No description provided for @catalogLocationChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'The save location changed. Choose a save location again before adding.'**
+  String get catalogLocationChanged;
+
   /// No description provided for @catalogLocationsFailed.
   ///
   /// In en, this message translates to:

@@ -242,7 +242,7 @@ final class GoogleDriveLocation
     revision: file['version']?.toString(),
     sha256: file['sha256Checksum'] as String?,
     createdAt: DateTime.tryParse(file['createdTime'] as String? ?? ''),
-    readable: _supported(file),
+    readable: file['ownedByMe'] == true && _supported(file),
   );
 
   static bool _supported(Map<String, dynamic> file) =>
@@ -294,7 +294,8 @@ final class GoogleDriveLocation
     final result = await transport.json(
       'GET',
       _uri('files', {
-        'q': "'$parent' in parents and trashed = false and 'me' in owners",
+        'q':
+            "'$parent' in parents and trashed = false${includeUnsupported ? '' : " and 'me' in owners"}",
         'pageSize': '$limit',
         'fields': 'nextPageToken,incompleteSearch,files($_fields)',
         'spaces': 'drive',
@@ -312,7 +313,9 @@ final class GoogleDriveLocation
     }
     return LocationPage([
       for (final file in (result['files'] as List? ?? []).cast<Map>())
-        if (includeUnsupported || _supported(file.cast<String, dynamic>()))
+        if (includeUnsupported ||
+            (file['ownedByMe'] == true &&
+                _supported(file.cast<String, dynamic>())))
           _entry(file.cast<String, dynamic>()),
     ], nextCursor: result['nextPageToken'] as String?);
   }

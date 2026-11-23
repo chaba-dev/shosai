@@ -275,20 +275,42 @@ void main() {
     () async {
       await client.refresh();
       final file = File('${client.directory}/catalog.sqlite3');
-      for (final damage in ['bytes', 'version', 'metadata']) {
+      for (final damage in ['bytes', 'version', 'metadata', 'search-page']) {
         now = now.add(const Duration(days: 1));
         if (damage == 'bytes') {
           file.writeAsBytesSync([1, 2, 3, 4]);
         } else {
           final db = sqlite3.open(file.path);
+          int? searchPage;
+          final pageSize =
+              db.select('PRAGMA page_size').single.values.single as int;
           try {
-            db.execute(
-              damage == 'version'
-                  ? 'PRAGMA user_version = 999'
-                  : 'DELETE FROM catalog_metadata',
-            );
+            if (damage == 'search-page') {
+              searchPage =
+                  db
+                          .select(
+                            "SELECT rootpage FROM sqlite_schema WHERE name='catalog_search_data'",
+                          )
+                          .single['rootpage']
+                      as int;
+            } else {
+              db.execute(
+                damage == 'version'
+                    ? 'PRAGMA user_version = 999'
+                    : 'DELETE FROM catalog_metadata',
+              );
+            }
           } finally {
             db.close();
+          }
+          if (searchPage != null) {
+            final bytes = file.readAsBytesSync();
+            bytes[(searchPage - 1) * pageSize] = 0;
+            file.writeAsBytesSync(bytes);
+            await expectLater(
+              client.search(query: 'Pride'),
+              throwsA(isA<SqliteException>()),
+            );
           }
         }
         final damaged = file.readAsBytesSync();

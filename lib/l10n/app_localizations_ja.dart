@@ -1493,6 +1493,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get catalogAddFailed => '本を追加できませんでした。接続と保存先を確認して、もう一度お試しください。';
 
   @override
+  String get catalogLocationChanged => '保存先が変更されました。追加する前に保存先をもう一度選んでください。';
+
+  @override
   String get catalogLocationsFailed => '保存先を読み込めませんでした。';
 
   @override

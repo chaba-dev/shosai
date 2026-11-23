@@ -243,6 +243,7 @@ void main() {
         ('first', 'Personal'),
         ('second', 'Shared'),
         ('third', 'Shared'),
+        ('fourth', 'Shared (1)'),
       ]) {
         final account = Directory('${target.path}/$id')..createSync();
         Directory('${account.path}/$folder').createSync();
@@ -258,11 +259,19 @@ void main() {
         );
       }
       final options = await bridge.catalogSaveOptions();
-      expect(options.locations, [
+      expect(options.locations.map((g) => (id: g.id, label: g.label)), [
         (id: 'first', label: 'My books — Personal'),
-        (id: 'second', label: 'My books — Shared (1)'),
-        (id: 'third', label: 'My books — Shared (2)'),
+        (id: 'second', label: 'My books — Shared (2)'),
+        (id: 'third', label: 'My books — Shared (3)'),
+        (id: 'fourth', label: 'My books — Shared (1)'),
       ]);
+      expect(options.locations.map((g) => g.directory), [
+        'Personal',
+        'Shared',
+        'Shared',
+        'Shared (1)',
+      ]);
+      expect(options.locations.every((g) => g.generation > 0), true);
       await bridge.selectCatalogSaveLocation('third');
       expect((await bridge.catalogSaveOptions()).selected, 'third');
     },

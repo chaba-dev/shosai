@@ -15,7 +15,8 @@ abstract interface class CatalogHost {
 }
 
 typedef CatalogSaveOptions = ({
-  List<({String id, String label})> locations,
+  List<({String id, String label, int generation, String? directory})>
+  locations,
   String? selected,
 });
 typedef CatalogAddedBook = ({FlutterLibraryBook book, bool existing});
@@ -29,6 +30,7 @@ abstract interface class CatalogAcquisitionHost {
     required String sourceId,
     required String editionId,
     required String? locationId,
+    required ({int generation, String? directory})? destination,
     required BigInt cancellationId,
     void Function(int received, int? total)? progress,
   });

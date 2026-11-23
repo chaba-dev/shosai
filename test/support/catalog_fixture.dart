@@ -85,7 +85,14 @@ class CatalogHarnessBridge extends HarnessBridge
 
   @override
   Future<CatalogSaveOptions> catalogSaveOptions() async => (
-    locations: [(id: 'drive', label: 'Google Drive · Books')],
+    locations: [
+      (
+        id: 'drive',
+        label: 'Google Drive · Books',
+        generation: 1,
+        directory: 'books',
+      ),
+    ],
     selected: null,
   );
   @override
@@ -96,6 +103,7 @@ class CatalogHarnessBridge extends HarnessBridge
     required String sourceId,
     required String editionId,
     required String? locationId,
+    required ({int generation, String? directory})? destination,
     required BigInt cancellationId,
     void Function(int, int?)? progress,
   }) async =>

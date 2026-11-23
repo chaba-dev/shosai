@@ -49,6 +49,13 @@ bool catalogMatches(String path, CatalogManifest candidate) {
   if (!File(path).existsSync()) return false;
   try {
     return _read(path, (db) {
+      // An intact manifest does not establish that the search pages survived.
+      // This runs only on an eligible refresh, off the UI isolate.
+      if (db
+          .select('PRAGMA integrity_check')
+          .any((row) => row.values.single != 'ok')) {
+        return false;
+      }
       final rows = db.select('SELECT manifest FROM catalog_metadata');
       if (rows.length != 1 || rows.single['manifest'] is! String) return false;
       final installed = CatalogManifest.parse(
