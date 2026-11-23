@@ -513,7 +513,7 @@ class _CatalogCover extends StatelessWidget {
   }
 }
 
-class _CatalogBookPage extends StatefulWidget {
+class _CatalogBookPage extends StatelessWidget {
   const _CatalogBookPage({
     required this.layout,
     required this.model,
@@ -524,23 +524,7 @@ class _CatalogBookPage extends StatefulWidget {
   final ValueChanged<BrowseMessage> dispatch;
 
   @override
-  State<_CatalogBookPage> createState() => _CatalogBookPageState();
-}
-
-class _CatalogBookPageState extends State<_CatalogBookPage> {
-  final _editionMenu = ShadPopoverController();
-
-  @override
-  void dispose() {
-    _editionMenu.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final layout = widget.layout;
-    final model = widget.model;
-    final dispatch = widget.dispatch;
     final l10n = AppLocalizations.of(context);
     final palette = ShellPalette.of(context);
     final details = model.details;
@@ -581,6 +565,57 @@ class _CatalogBookPageState extends State<_CatalogBookPage> {
             ),
           ],
         );
+    PopupMenuItem<int> editionOption(int index, CatalogEdition edition) =>
+        PopupMenuItem<int>(
+          value: index,
+          padding: const EdgeInsets.all(ShosaiTokens.space1),
+          child: Builder(
+            builder: (context) => Focus(
+              autofocus: index == model.edition,
+              skipTraversal: true,
+              includeSemantics: false,
+              child: ShadDecorator(
+                focused: Focus.of(context).hasFocus,
+                decoration: ShadDecoration.none.copyWith(
+                  disableSecondaryBorder: false,
+                  secondaryFocusedBorder: focusBorder,
+                ),
+                child: Semantics(
+                  selected: index == model.edition,
+                  child: Container(
+                    padding: const EdgeInsets.all(ShosaiTokens.space3),
+                    decoration: BoxDecoration(
+                      color: index == model.edition
+                          ? theme.colorScheme.accent
+                          : null,
+                      borderRadius: BorderRadius.circular(
+                        ShosaiTokens.radiusSm,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: editionLabel(
+                            edition,
+                            selected: index == model.edition,
+                          ),
+                        ),
+                        if (index == model.edition) ...[
+                          const SizedBox(width: ShosaiTokens.space2),
+                          Icon(
+                            LucideIcons.check,
+                            size: 18,
+                            color: theme.colorScheme.accentForeground,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
     final metadata = details == null
         ? const SizedBox.shrink()
         : Column(
@@ -616,48 +651,16 @@ class _CatalogBookPageState extends State<_CatalogBookPage> {
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 560),
                     child: LayoutBuilder(
-                      builder: (context, constraints) => ShadTheme(
-                        data: theme.copyWith(
-                          popoverTheme: theme.popoverTheme.copyWith(
-                            decoration: ShadDecoration(
-                              color: palette.surface,
-                              border: ShadBorder.all(
-                                width: 0,
-                                radius: BorderRadius.circular(
-                                  ShosaiTokens.radiusMd,
-                                ),
-                              ),
-                              disableSecondaryBorder: true,
-                            ),
-                          ),
-                          optionTheme: theme.optionTheme.copyWith(
-                            hoveredBackgroundColor: theme.colorScheme.accent,
-                          ),
-                        ),
-                        child: ListenableBuilder(
-                          listenable: _editionMenu,
-                          builder: (_, child) => TapRegion(
-                            groupId: _editionMenu,
-                            enabled: _editionMenu.isOpen,
-                            consumeOutsideTaps: true,
-                            child: child!,
-                          ),
-                          child: Semantics(
+                      builder: (context, constraints) => Focus(
+                        skipTraversal: true,
+                        child: Builder(
+                          builder: (context) => Semantics(
+                            key: const ValueKey('catalog-edition-picker'),
                             button: true,
                             enabled: !model.acquisition.busy,
                             label: l10n.catalogChooseEdition,
-                            child: ShadSelect<int>(
-                              key: const ValueKey('catalog-edition-picker'),
-                              groupId: _editionMenu,
-                              popoverController: _editionMenu,
-                              enabled: !model.acquisition.busy,
-                              initialValue: model.edition,
-                              minWidth: constraints.maxWidth,
-                              maxWidth: constraints.maxWidth,
-                              shadows: palette.modal,
-                              padding: const EdgeInsets.all(
-                                ShosaiTokens.space3,
-                              ),
+                            child: ShadDecorator(
+                              focused: Focus.of(context).hasFocus,
                               decoration: ShadDecoration(
                                 color: palette.surface,
                                 border: ShadBorder.all(
@@ -669,88 +672,59 @@ class _CatalogBookPageState extends State<_CatalogBookPage> {
                                 ),
                                 secondaryFocusedBorder: focusBorder,
                               ),
-                              trailing: Padding(
-                                padding: const EdgeInsetsDirectional.only(
-                                  start: ShosaiTokens.space2,
-                                ),
-                                child: Icon(
-                                  LucideIcons.chevronDown,
-                                  size: 18,
-                                  color: palette.inkMuted,
-                                ),
-                              ),
-                              selectedOptionBuilder: (_, index) =>
-                                  editionLabel(details.editions[index]),
-                              onChanged: (value) {
-                                if (value != null) {
-                                  dispatch(BrowseEditionSelected(value));
-                                }
-                              },
-                              options: [
-                                for (final (index, edition)
-                                    in details.editions.indexed)
-                                  Focus(
-                                    skipTraversal: true,
-                                    child: Builder(
-                                      builder: (context) => Padding(
-                                        padding: const EdgeInsets.all(
-                                          ShosaiTokens.space1,
-                                        ),
-                                        child: ShadDecorator(
-                                          focused: Focus.of(context).hasFocus,
-                                          decoration: ShadDecoration.none
-                                              .copyWith(
-                                                disableSecondaryBorder: false,
-                                                secondaryFocusedBorder:
-                                                    focusBorder,
-                                              ),
-                                          child: CallbackShortcuts(
-                                            bindings: {
-                                              const SingleActivator(
-                                                LogicalKeyboardKey.space,
-                                              ): () => context
-                                                  .findAncestorStateOfType<
-                                                    ShadSelectState<int>
-                                                  >()!
-                                                  .select(index),
-                                            },
-                                            child: ShadOption(
-                                              value: index,
-                                              selectedBackgroundColor:
-                                                  theme.colorScheme.accent,
-                                              padding: const EdgeInsets.all(
-                                                ShosaiTokens.space3,
-                                              ),
-                                              selectedIcon: Padding(
-                                                padding:
-                                                    const EdgeInsetsDirectional.only(
-                                                      start:
-                                                          ShosaiTokens.space2,
-                                                    ),
-                                                child: Icon(
-                                                  LucideIcons.check,
-                                                  size: 18,
-                                                  color: theme
-                                                      .colorScheme
-                                                      .accentForeground,
-                                                ),
-                                              ),
-                                              child: Semantics(
-                                                selected:
-                                                    index == model.edition,
-                                                child: editionLabel(
-                                                  edition,
-                                                  selected:
-                                                      index == model.edition,
-                                                ),
-                                              ),
-                                            ),
+                              child: Theme(
+                                data: Theme.of(
+                                  context,
+                                ).copyWith(focusColor: Colors.transparent),
+                                child: PopupMenuButton<int>(
+                                  enabled: !model.acquisition.busy,
+                                  useRootNavigator: true,
+                                  tooltip: l10n.catalogChooseEdition,
+                                  position: PopupMenuPosition.under,
+                                  offset: const Offset(0, ShosaiTokens.space1),
+                                  constraints: BoxConstraints.tightFor(
+                                    width: constraints.maxWidth,
+                                  ),
+                                  color: palette.surface,
+                                  surfaceTintColor: Colors.transparent,
+                                  elevation: 0,
+                                  shape: _CatalogEditionMenuShape(
+                                    palette.modal,
+                                  ),
+                                  menuPadding: const EdgeInsets.all(
+                                    ShosaiTokens.space1,
+                                  ),
+                                  onSelected: (value) =>
+                                      dispatch(BrowseEditionSelected(value)),
+                                  itemBuilder: (_) => [
+                                    for (final (index, edition)
+                                        in details.editions.indexed)
+                                      editionOption(index, edition),
+                                  ],
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(
+                                      ShosaiTokens.space3,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: editionLabel(
+                                            details.editions[model.edition],
                                           ),
                                         ),
-                                      ),
+                                        const SizedBox(
+                                          width: ShosaiTokens.space2,
+                                        ),
+                                        Icon(
+                                          LucideIcons.chevronDown,
+                                          size: 18,
+                                          color: palette.inkMuted,
+                                        ),
+                                      ],
                                     ),
                                   ),
-                              ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -814,11 +788,7 @@ class _CatalogBookPageState extends State<_CatalogBookPage> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (_editionMenu.isOpen) {
-          _editionMenu.hide();
-        } else {
-          dispatch(const BrowseBackRequested());
-        }
+        dispatch(const BrowseBackRequested());
       },
       child: ColoredBox(
         color: palette.canvas,
@@ -871,6 +841,41 @@ class _CatalogBookPageState extends State<_CatalogBookPage> {
         ),
       ),
     );
+  }
+}
+
+// Paint outside the menu's scroll viewport so it cannot clip the design
+// system's layered shadow. Material's single elevation shadow stays disabled.
+class _CatalogEditionMenuShape extends RoundedRectangleBorder {
+  const _CatalogEditionMenuShape(this.shadows)
+    : super(
+        borderRadius: const BorderRadius.all(
+          Radius.circular(ShosaiTokens.radiusMd),
+        ),
+      );
+  final List<BoxShadow> shadows;
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    canvas.save();
+    canvas.clipPath(
+      ui.Path.combine(
+        ui.PathOperation.difference,
+        ui.Path()..addRect(canvas.getLocalClipBounds()),
+        getOuterPath(rect, textDirection: textDirection),
+      ),
+    );
+    final painter = BoxDecoration(
+      borderRadius: borderRadius,
+      boxShadow: shadows,
+    ).createBoxPainter();
+    painter.paint(
+      canvas,
+      rect.topLeft,
+      ImageConfiguration(size: rect.size, textDirection: textDirection),
+    );
+    painter.dispose();
+    canvas.restore();
   }
 }
 

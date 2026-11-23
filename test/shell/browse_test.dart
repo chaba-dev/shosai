@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show Tristate;
+import 'dart:ui' show SemanticsAction, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -110,7 +110,7 @@ void main() {
         );
         await tester.tap(picker);
         await tester.pumpAndSettle();
-        expect(find.byType(ShadOption<int>), findsNothing);
+        expect(find.byType(PopupMenuItem<int>), findsNothing);
         expect(controller.model.edition, 0);
         await capture(
           tester,
@@ -281,7 +281,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(
         find.widgetWithText(
-          ShadOption<int>,
+          PopupMenuItem<int>,
           'Project Gutenberg · Without images',
         ),
       );
@@ -496,7 +496,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(
         find.widgetWithText(
-          ShadOption<int>,
+          PopupMenuItem<int>,
           'Project Gutenberg · Without images',
         ),
       );
@@ -738,6 +738,7 @@ void main() {
       tester,
     ) async {
       HarnessView(size: size).apply(tester);
+      final semantics = tester.ensureSemantics();
       final controller = BrowseController(
         bridge: CatalogHarnessBridge(catalog),
         openLink: (_) async {},
@@ -749,15 +750,27 @@ void main() {
           home: Scaffold(
             body: ListenableBuilder(
               listenable: controller,
-              builder: (_, _) => ShellBrowsePage(
+              builder: (_, _) => ShellFrame(
                 layout: ShellLayout.forWidth(size.width),
-                model: controller.model,
-                local: controller.local.model,
-                dispatch: (message) {
-                  if (message is BrowseAddRequested) additions++;
-                  controller.dispatch(message);
-                },
-                onChosen: (_) {},
+                model: const ShellModel(place: ShellPlace.search),
+                covers: const {},
+                actions: ShellActions(
+                  selectPlace: (_) {},
+                  openBook: (_) {},
+                  closeBook: (_) {},
+                  addBooks: null,
+                  loadCover: (_) => false,
+                ),
+                child: ShellBrowsePage(
+                  layout: ShellLayout.forWidth(size.width),
+                  model: controller.model,
+                  local: controller.local.model,
+                  dispatch: (message) {
+                    if (message is BrowseAddRequested) additions++;
+                    controller.dispatch(message);
+                  },
+                  onChosen: (_) {},
+                ),
               ),
             ),
           ),
@@ -771,10 +784,25 @@ void main() {
       await tester.tap(picker);
       await tester.pumpAndSettle();
       final option = find.widgetWithText(
-        ShadOption<int>,
+        PopupMenuItem<int>,
         'Project Gutenberg · Without images',
       );
       expect(option, findsOneWidget);
+      expect(find.semantics.byLabel('Add to library'), findsNothing);
+      expect(find.semantics.byLabel('Library'), findsNothing);
+      expect(
+        tester.semantics
+            .simulatedAccessibilityTraversal()
+            .where(
+              (node) => node.getSemanticsData().hasAction(SemanticsAction.tap),
+            )
+            .map((node) => node.label),
+        unorderedEquals([
+          'Project Gutenberg · With images\nEPUB · en · 123,456 bytes',
+          'Project Gutenberg · Without images\nEPUB · en',
+          'Dismiss menu',
+        ]),
+      );
       // Tap the lower edge of Add, outside the popup even when it overlaps
       // the top of the button. Dismissing must not start acquisition.
       final add = tester.getRect(
@@ -804,12 +832,36 @@ void main() {
       await tester.pumpAndSettle();
       expect(option, findsNothing);
       expect(controller.model.details, isNotNull);
-      await tester.tap(find.text('Add to library'));
+      await tester.tap(picker);
+      await tester.pumpAndSettle();
+      final alternate = find.semantics.byLabel(RegExp('Without images'));
+      tester.semantics.tap(alternate);
+      await tester.pumpAndSettle();
+      expect(option, findsNothing);
+      expect(controller.model.edition, 1);
+      expect(additions, 0);
+      expect(
+        tester.semantics.simulatedAccessibilityTraversal(),
+        contains(isSemantics(label: 'Add to library')),
+      );
+      expect(find.semantics.byLabel('Library'), findsOne);
+      await tester.tap(picker);
+      await tester.pumpAndSettle();
+      tester.semantics.performAction(
+        find.semantics.byLabel('Dismiss menu'),
+        SemanticsAction.dismiss,
+      );
+      await tester.pumpAndSettle();
+      expect(option, findsNothing);
+      expect(controller.model.edition, 1);
+      expect(controller.model.details, isNotNull);
+      tester.semantics.tap(find.semantics.byLabel('Add to library'));
       await tester.pumpAndSettle();
       expect(additions, 1);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(controller.model.details, isNull);
+      semantics.dispose();
     });
   }
 
@@ -872,7 +924,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         await capture(tester, 'catalog-phone-$count-edition-menu');
-        await tester.tap(find.widgetWithText(ShadOption<int>, lastLabel));
+        await tester.tap(find.widgetWithText(PopupMenuItem<int>, lastLabel));
         await tester.pumpAndSettle();
         expect(controller.model.edition, count - 1);
         expect(find.text(lastLabel), findsOneWidget);
@@ -1008,7 +1060,7 @@ void main() {
       } else {
         await tester.tap(
           find.widgetWithText(
-            ShadOption<int>,
+            PopupMenuItem<int>,
             'Project Gutenberg · Without images',
           ),
         );
