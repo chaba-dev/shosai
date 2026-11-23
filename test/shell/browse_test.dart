@@ -134,8 +134,14 @@ void main() {
         await tester.ensureVisible(find.text('Add to library'));
         await tester.tap(find.text('Add to library'));
         await tester.pump();
-        bridge.pending.completeError(StateError('offline'));
+        bridge.pending.completeError(
+          const FlutterBridgeError(
+            kind: FlutterBridgeErrorKind.invalidRequest,
+            message: 'Book downloads require HTTPS.',
+          ),
+        );
         await until(tester, () => controller.model.acquisition.failed);
+        expect(controller.model.acquisition.locationChanged, false);
         await tester.ensureVisible(find.text('Add to library'));
         await tester.pumpAndSettle();
         await capture(
@@ -145,6 +151,7 @@ void main() {
         // An old completion cannot replace the new book's acquisition state.
         bridge.pending = Completer<CatalogAddedBook>();
         controller.dispatch(const BrowseAddRequested());
+        expect(controller.model.acquisition.busy, true);
         controller.dispatch(const BrowseBookRequested('1'));
         bridge.pending.complete((
           book: harnessLibraryBooks().first,
@@ -165,6 +172,12 @@ void main() {
     (tester) async {
       const HarnessView(size: Size(1440, 900)).apply(tester);
       final semantics = tester.ensureSemantics();
+      final addButtonSemantics = find.ancestor(
+        of: find.text('Add to library'),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Semantics && widget.properties.button == true,
+        ),
+      );
       final bridge = _AcquiringBridge(catalog)
         ..options = (
           locations: [
@@ -218,12 +231,7 @@ void main() {
         ],
         selected: 'drive',
       );
-      bridge.pending.completeError(
-        const FlutterBridgeError(
-          kind: FlutterBridgeErrorKind.invalidRequest,
-          message: 'The save location changed.',
-        ),
-      );
+      bridge.pending.completeError(const CatalogDestinationChanged());
       await until(
         tester,
         () =>
@@ -244,10 +252,7 @@ void main() {
       await tester.pump();
       expect(controller.model.acquisition.busy, false);
       expect(
-        tester
-            .getSemantics(find.text('Add to library'))
-            .flagsCollection
-            .isEnabled,
+        tester.getSemantics(addButtonSemantics).flagsCollection.isEnabled,
         Tristate.isFalse,
       );
       await capture(tester, 'catalog-review-location-changed');
@@ -258,25 +263,47 @@ void main() {
       await tester.tap(find.text('Project Gutenberg · Without images'));
       await tester.pump();
       expect(controller.model.acquisition.locationChanged, true);
+      bridge.selectionFailure = StateError('preference write failed');
+      await tester.ensureVisible(find.text('Google Drive · Changed'));
+      await tester.tap(find.text('Google Drive · Changed'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Private library on this device').last);
+      await tester.pumpAndSettle();
+      await until(
+        tester,
+        () =>
+            !controller.model.locationBusy &&
+            controller.model.acquisition.failed,
+      );
+      bridge.pending = Completer<CatalogAddedBook>();
+      await tester.ensureVisible(find.text('Add to library'));
+      await tester.tapAt(tester.getCenter(find.text('Add to library')));
+      await tester.pump();
+      expect(controller.model.acquisition.locationChanged, true);
+      expect(controller.model.acquisition.busy, false);
+      expect(
+        tester.getSemantics(addButtonSemantics).flagsCollection.isEnabled,
+        Tristate.isFalse,
+      );
+      bridge.selectionFailure = null;
       await tester.ensureVisible(find.text('Google Drive · Changed'));
       await tester.tap(find.text('Google Drive · Changed'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Google Drive · Changed').last);
+      await tester.pumpAndSettle();
       await until(
         tester,
         () =>
             !controller.model.acquisition.locationChanged &&
             !controller.model.locationBusy,
       );
+      await tester.ensureVisible(find.text('Add to library'));
+      await tester.pumpAndSettle();
       expect(
-        tester
-            .getSemantics(find.text('Add to library'))
-            .flagsCollection
-            .isEnabled,
+        tester.getSemantics(addButtonSemantics).flagsCollection.isEnabled,
         Tristate.isTrue,
       );
       bridge.pending = Completer<CatalogAddedBook>();
-      await tester.ensureVisible(find.text('Add to library'));
       await tester.tap(find.text('Add to library'));
       await tester.pump();
       expect(controller.model.acquisition.busy, true);
@@ -767,6 +794,12 @@ class _AcquiringBridge extends CatalogHarnessBridge {
   Completer<CatalogAddedBook> pending = Completer<CatalogAddedBook>();
   Completer<void>? shelfRefresh;
   CatalogSaveOptions? options;
+  Object? selectionFailure;
+
+  @override
+  Future<void> selectCatalogSaveLocation(String? id) async {
+    if (selectionFailure case final failure?) throw failure;
+  }
 
   @override
   Future<CatalogSaveOptions> catalogSaveOptions() async =>

@@ -21,6 +21,11 @@ typedef CatalogSaveOptions = ({
 });
 typedef CatalogAddedBook = ({FlutterLibraryBook book, bool existing});
 
+/// The grant shown in the save chooser no longer names the same destination.
+final class CatalogDestinationChanged implements Exception {
+  const CatalogDestinationChanged();
+}
+
 /// Acquisition is separate from reading: Add never opens a document.
 abstract interface class CatalogAcquisitionHost {
   Future<CatalogSaveOptions> catalogSaveOptions();

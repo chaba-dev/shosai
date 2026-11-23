@@ -316,13 +316,7 @@ void main() {
           ),
           cancellation: CancellationToken(),
         ),
-        throwsA(
-          isA<CoreException>().having(
-            (e) => e.kind,
-            'kind',
-            CoreErrorKind.conflict,
-          ),
-        ),
+        throwsA(isA<CatalogDestinationChanged>()),
       );
       expect(Directory('${target.path}/Original').listSync(), isEmpty);
       expect(Directory('${target.path}/Changed').listSync(), isEmpty);
@@ -346,13 +340,7 @@ void main() {
       final pending = add(location: 'folder');
       final failure = expectLater(
         pending,
-        throwsA(
-          isA<CoreException>().having(
-            (e) => e.kind,
-            'kind',
-            CoreErrorKind.conflict,
-          ),
-        ),
+        throwsA(isA<CatalogDestinationChanged>()),
       );
       await arrived.future;
       await folders.configure('folder', directory: 'Changed', label: 'Changed');

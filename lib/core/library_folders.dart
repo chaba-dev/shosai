@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:shosai_core/shosai_core.dart';
 import 'package:shosai_flutter/core/bridge.dart';
+import 'package:shosai_flutter/core/catalog.dart';
 import 'package:shosai_flutter/core/library_connection.dart';
 import 'package:shosai_flutter/core/platform_folder_location.dart';
 
@@ -292,9 +293,7 @@ final class LibraryFolders {
         (destination == null ||
             _generations[locationId] != destination.generation ||
             _grant(locationId).directory != destination.directory)) {
-      throw const CoreException.conflict(
-        'The save location changed. Choose it again before adding the book.',
-      );
+      throw const CatalogDestinationChanged();
     }
     final fingerprint = await fingerprintFile(path, cancellation: cancellation);
     final known = await _library.withContent(fingerprint.hash);

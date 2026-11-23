@@ -248,7 +248,10 @@ class BrowseController extends ChangeNotifier {
                 ? options
                 : (locations: options.locations, selected: id),
             acquisition: failed
-                ? const BrowseAcquisition(failed: true)
+                ? BrowseAcquisition(
+                    failed: true,
+                    locationChanged: _model.acquisition.locationChanged,
+                  )
                 : const BrowseAcquisition(),
           ),
         );
@@ -296,13 +299,7 @@ class BrowseController extends ChangeNotifier {
               _BrowseAddFailed(
                 revision,
                 id,
-                locationChanged:
-                    error is FlutterBridgeError &&
-                    const [
-                      FlutterBridgeErrorKind.invalidRequest,
-                      FlutterBridgeErrorKind.locationRevoked,
-                      FlutterBridgeErrorKind.locationMissing,
-                    ].contains(error.kind),
+                locationChanged: error is CatalogDestinationChanged,
               ),
             );
           } finally {
