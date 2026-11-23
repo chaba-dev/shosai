@@ -513,7 +513,7 @@ class _CatalogCover extends StatelessWidget {
   }
 }
 
-class _CatalogBookPage extends StatelessWidget {
+class _CatalogBookPage extends StatefulWidget {
   const _CatalogBookPage({
     required this.layout,
     required this.model,
@@ -522,13 +522,38 @@ class _CatalogBookPage extends StatelessWidget {
   final ShellLayout layout;
   final BrowseModel model;
   final ValueChanged<BrowseMessage> dispatch;
+
+  @override
+  State<_CatalogBookPage> createState() => _CatalogBookPageState();
+}
+
+class _CatalogBookPageState extends State<_CatalogBookPage> {
+  final _editionMenu = ShadPopoverController();
+
+  @override
+  void dispose() {
+    _editionMenu.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final layout = widget.layout;
+    final model = widget.model;
+    final dispatch = widget.dispatch;
     final l10n = AppLocalizations.of(context);
     final palette = ShellPalette.of(context);
     final details = model.details;
     final phone = layout == ShellLayout.phone;
     final theme = ShadTheme.of(context);
+    // Shad paints the 2 px border inside this outward rectangle, leaving
+    // the design system's 2 px gap between the control and the focus ring.
+    final focusBorder = ShadBorder.all(
+      color: palette.accent,
+      width: 2,
+      offset: 4,
+      radius: BorderRadius.circular(ShosaiTokens.radiusSm + 4),
+    );
     Widget editionLabel(CatalogEdition edition, {bool selected = false}) =>
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -609,82 +634,124 @@ class _CatalogBookPage extends StatelessWidget {
                             hoveredBackgroundColor: theme.colorScheme.accent,
                           ),
                         ),
-                        child: Semantics(
-                          button: true,
-                          enabled: !model.acquisition.busy,
-                          label: l10n.catalogChooseEdition,
-                          child: ShadSelect<int>(
-                            key: const ValueKey('catalog-edition-picker'),
+                        child: ListenableBuilder(
+                          listenable: _editionMenu,
+                          builder: (_, child) => TapRegion(
+                            groupId: _editionMenu,
+                            enabled: _editionMenu.isOpen,
+                            consumeOutsideTaps: true,
+                            child: child!,
+                          ),
+                          child: Semantics(
+                            button: true,
                             enabled: !model.acquisition.busy,
-                            initialValue: model.edition,
-                            minWidth: constraints.maxWidth,
-                            maxWidth: constraints.maxWidth,
-                            shadows: palette.modal,
-                            padding: const EdgeInsets.all(ShosaiTokens.space3),
-                            decoration: ShadDecoration(
-                              color: palette.surface,
-                              border: ShadBorder.all(
-                                color: palette.lineStrong,
-                                width: 1,
-                                radius: BorderRadius.circular(
-                                  ShosaiTokens.radiusSm,
+                            label: l10n.catalogChooseEdition,
+                            child: ShadSelect<int>(
+                              key: const ValueKey('catalog-edition-picker'),
+                              groupId: _editionMenu,
+                              popoverController: _editionMenu,
+                              enabled: !model.acquisition.busy,
+                              initialValue: model.edition,
+                              minWidth: constraints.maxWidth,
+                              maxWidth: constraints.maxWidth,
+                              shadows: palette.modal,
+                              padding: const EdgeInsets.all(
+                                ShosaiTokens.space3,
+                              ),
+                              decoration: ShadDecoration(
+                                color: palette.surface,
+                                border: ShadBorder.all(
+                                  color: palette.lineStrong,
+                                  width: 1,
+                                  radius: BorderRadius.circular(
+                                    ShosaiTokens.radiusSm,
+                                  ),
+                                ),
+                                secondaryFocusedBorder: focusBorder,
+                              ),
+                              trailing: Padding(
+                                padding: const EdgeInsetsDirectional.only(
+                                  start: ShosaiTokens.space2,
+                                ),
+                                child: Icon(
+                                  LucideIcons.chevronDown,
+                                  size: 18,
+                                  color: palette.inkMuted,
                                 ),
                               ),
-                              secondaryFocusedBorder: ShadBorder.all(
-                                color: palette.accent,
-                                width: 2,
-                                offset: 4,
-                                radius: BorderRadius.circular(
-                                  ShosaiTokens.radiusSm + 4,
-                                ),
-                              ),
+                              selectedOptionBuilder: (_, index) =>
+                                  editionLabel(details.editions[index]),
+                              onChanged: (value) {
+                                if (value != null) {
+                                  dispatch(BrowseEditionSelected(value));
+                                }
+                              },
+                              options: [
+                                for (final (index, edition)
+                                    in details.editions.indexed)
+                                  Focus(
+                                    skipTraversal: true,
+                                    child: Builder(
+                                      builder: (context) => Padding(
+                                        padding: const EdgeInsets.all(
+                                          ShosaiTokens.space1,
+                                        ),
+                                        child: ShadDecorator(
+                                          focused: Focus.of(context).hasFocus,
+                                          decoration: ShadDecoration.none
+                                              .copyWith(
+                                                disableSecondaryBorder: false,
+                                                secondaryFocusedBorder:
+                                                    focusBorder,
+                                              ),
+                                          child: CallbackShortcuts(
+                                            bindings: {
+                                              const SingleActivator(
+                                                LogicalKeyboardKey.space,
+                                              ): () => context
+                                                  .findAncestorStateOfType<
+                                                    ShadSelectState<int>
+                                                  >()!
+                                                  .select(index),
+                                            },
+                                            child: ShadOption(
+                                              value: index,
+                                              selectedBackgroundColor:
+                                                  theme.colorScheme.accent,
+                                              padding: const EdgeInsets.all(
+                                                ShosaiTokens.space3,
+                                              ),
+                                              selectedIcon: Padding(
+                                                padding:
+                                                    const EdgeInsetsDirectional.only(
+                                                      start:
+                                                          ShosaiTokens.space2,
+                                                    ),
+                                                child: Icon(
+                                                  LucideIcons.check,
+                                                  size: 18,
+                                                  color: theme
+                                                      .colorScheme
+                                                      .accentForeground,
+                                                ),
+                                              ),
+                                              child: Semantics(
+                                                selected:
+                                                    index == model.edition,
+                                                child: editionLabel(
+                                                  edition,
+                                                  selected:
+                                                      index == model.edition,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
-                            trailing: Padding(
-                              padding: const EdgeInsetsDirectional.only(
-                                start: ShosaiTokens.space2,
-                              ),
-                              child: Icon(
-                                LucideIcons.chevronDown,
-                                size: 18,
-                                color: palette.inkMuted,
-                              ),
-                            ),
-                            selectedOptionBuilder: (_, index) =>
-                                editionLabel(details.editions[index]),
-                            onChanged: (value) {
-                              if (value != null) {
-                                dispatch(BrowseEditionSelected(value));
-                              }
-                            },
-                            options: [
-                              for (final (index, edition)
-                                  in details.editions.indexed)
-                                ShadOption(
-                                  value: index,
-                                  selectedBackgroundColor:
-                                      theme.colorScheme.accent,
-                                  padding: const EdgeInsets.all(
-                                    ShosaiTokens.space3,
-                                  ),
-                                  selectedIcon: Padding(
-                                    padding: const EdgeInsetsDirectional.only(
-                                      start: ShosaiTokens.space2,
-                                    ),
-                                    child: Icon(
-                                      LucideIcons.check,
-                                      size: 18,
-                                      color: theme.colorScheme.accentForeground,
-                                    ),
-                                  ),
-                                  child: Semantics(
-                                    selected: index == model.edition,
-                                    child: editionLabel(
-                                      edition,
-                                      selected: index == model.edition,
-                                    ),
-                                  ),
-                                ),
-                            ],
                           ),
                         ),
                       ),
@@ -746,7 +813,12 @@ class _CatalogBookPage extends StatelessWidget {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) dispatch(const BrowseBackRequested());
+        if (didPop) return;
+        if (_editionMenu.isOpen) {
+          _editionMenu.hide();
+        } else {
+          dispatch(const BrowseBackRequested());
+        }
       },
       child: ColoredBox(
         color: palette.canvas,

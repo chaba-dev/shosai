@@ -733,11 +733,94 @@ void main() {
     );
   }
 
+  for (final size in [const Size(1280, 900), const Size(360, 740)]) {
+    testWidgets('edition picker dismisses before acting behind it at $size', (
+      tester,
+    ) async {
+      HarnessView(size: size).apply(tester);
+      final controller = BrowseController(
+        bridge: CatalogHarnessBridge(catalog),
+        openLink: (_) async {},
+      );
+      addTearDown(controller.dispose);
+      var additions = 0;
+      await tester.pumpWidget(
+        productionShell(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: controller,
+              builder: (_, _) => ShellBrowsePage(
+                layout: ShellLayout.forWidth(size.width),
+                model: controller.model,
+                local: controller.local.model,
+                dispatch: (message) {
+                  if (message is BrowseAddRequested) additions++;
+                  controller.dispatch(message);
+                },
+                onChosen: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      controller.dispatch(const BrowseBookRequested('0'));
+      await until(tester, () => controller.model.saveOptions != null);
+      final picker = find.byKey(const ValueKey('catalog-edition-picker'));
+      await tester.ensureVisible(find.text('Add to library'));
+      await tester.pumpAndSettle();
+      await tester.tap(picker);
+      await tester.pumpAndSettle();
+      final option = find.widgetWithText(
+        ShadOption<int>,
+        'Project Gutenberg · Without images',
+      );
+      expect(option, findsOneWidget);
+      // Tap the lower edge of Add, outside the popup even when it overlaps
+      // the top of the button. Dismissing must not start acquisition.
+      final add = tester.getRect(
+        find
+            .ancestor(
+              of: find.text('Add to library'),
+              matching: find.byType(ShadButton),
+            )
+            .first,
+      );
+      final outside = Offset(add.center.dx, add.bottom - 1);
+      final menu = tester.getRect(
+        find
+            .ancestor(of: option, matching: find.byType(SingleChildScrollView))
+            .first,
+      );
+      expect(menu.contains(outside), false);
+      await tester.tapAt(outside);
+      await tester.pumpAndSettle();
+      expect(option, findsNothing);
+      expect(additions, 0);
+      expect(controller.model.edition, 0);
+      expect(controller.model.details, isNotNull);
+      await tester.tap(picker);
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(option, findsNothing);
+      expect(controller.model.details, isNotNull);
+      await tester.tap(find.text('Add to library'));
+      await tester.pumpAndSettle();
+      expect(additions, 1);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(controller.model.details, isNull);
+    });
+  }
+
   for (final count in [1, 24]) {
     testWidgets(
       'edition dropdown supports $count choices without expanding details',
       (tester) async {
-        const HarnessView(size: Size(390, 844)).apply(tester);
+        HarnessView(
+          size: count == 24 ? const Size(360, 740) : const Size(390, 844),
+          textScale: count == 24 ? 2 : 1,
+        ).apply(tester);
         final variants = createCatalogFixture(
           Directory('${root.path}/variants'),
           editionCount: count,
@@ -801,6 +884,14 @@ void main() {
           ),
           findsOneWidget,
         );
+        if (count == 24) {
+          await tester.tap(picker);
+          await tester.pumpAndSettle();
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+          await tester.sendKeyEvent(LogicalKeyboardKey.space);
+          await tester.pumpAndSettle();
+          expect(controller.model.edition, 22);
+        }
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
       },
@@ -905,9 +996,15 @@ void main() {
       }
       await tester.pumpAndSettle();
       await capture(tester, 'catalog-$name-edition-menu');
-      if (name == 'desktop') {
+      if (name.startsWith('desktop')) {
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        await capture(tester, 'catalog-$name-edition-option-focus');
+        await tester.sendKeyEvent(
+          name == 'desktop'
+              ? LogicalKeyboardKey.space
+              : LogicalKeyboardKey.enter,
+        );
       } else {
         await tester.tap(
           find.widgetWithText(
